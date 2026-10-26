@@ -53,6 +53,18 @@ types:
         type: String
         naming: {wire: mountPath}
 
+  # One plain environment variable of the agent container, beside the environment of
+  # `secret_ref` (story loom-agent-spec-env): a value that is not a secret, such as a cache
+  # directory or an offline switch. The controller refuses a value holding a credential, a name
+  # that is not an environment variable name, a name given twice and a name it sets itself.
+  - name: loom.resource.EnvVar
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: value
+        type: String
+
   # The agent image, overriding the controller's default (design § 5.1).
   - name: loom.resource.ImageRef
     kind: struct
@@ -174,9 +186,10 @@ types:
   # The resource's `spec`: the `loom.agent/1` document verbatim; the llm `routes.yaml` inline, a
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
   # only as `env:` or `file:` references; the connectors-local TOML, only for `connectors`
-  # bindings; the Secret the environment comes from and the one mounted as files; an image
-  # overriding the controller's default; the program the pod runs instead of `agent serve`, and a
-  # workspace volume. Wire names are Kubernetes's.
+  # bindings; the Secret the environment comes from and the one mounted as files; plain
+  # environment values, in the order the container receives them; an image overriding the
+  # controller's default; the program the pod runs instead of `agent serve`, and a workspace
+  # volume. Wire names are Kubernetes's.
   - name: loom.resource.LoomAgentSpec
     kind: struct
     fields:
@@ -193,6 +206,8 @@ types:
       - name: secret_files
         type: Optional<loom.resource.SecretFiles>
         naming: {wire: secretFiles}
+      - name: env
+        type: Optional<List<loom.resource.EnvVar>>
       - name: image
         type: Optional<loom.resource.ImageRef>
       - name: command
