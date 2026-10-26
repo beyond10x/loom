@@ -726,14 +726,13 @@ fn survey_refusal(message: &str) -> bool {
 }
 
 /// The refusal of a resource one of whose children someone else controls: the first such child.
-fn not_owned(found: &[Surveyed], spec: &AgentSpec) -> Option<admission::Refusal> {
+fn not_owned(found: &[Surveyed], spec: Option<&AgentSpec>) -> Option<admission::Refusal> {
     let child = found
         .iter()
         .find(|child| child.holding == Holding::Foreign)?;
     let named_by_spec = child.kind == Kind::ServiceAccount
         && spec
-            .deploy
-            .as_ref()
+            .and_then(|spec| spec.deploy.as_ref())
             .and_then(|deploy| deploy.kubernetes.as_ref())
             .is_some();
     Some(admission::Refusal {
@@ -1192,7 +1191,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     Some(found) => found,
                     None => survey(&ctx.client, &namespace, &name, &owner, children).await?,
                 };
-                let refusal = not_owned(&found, &admitted.spec);
+                let refusal = not_owned(&found, admitted.spec.as_ref());
                 surveyed = Some(found);
                 refusal.map_or_else(|| Ok(admitted.message()), Err)
             }

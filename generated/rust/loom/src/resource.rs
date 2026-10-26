@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest ab3a9045b7503e022390ae7585a5f18f93fa2b65e8d482b33126c9b72b6c8557
-// contract digest 5ff5ff482ca56a9d17ca259eb07404322585c5fcfd49553a38ba3a03930af806
+// model digest f1230150b6169af223d24c70a32a80d130b8d3d19664f6e64cbae0aa37336cdf
+// contract digest 178f4fdf7cd37ea29f5348d5489ebc36fcc762874f218690bc908c5371aecf19
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -71,6 +71,15 @@ pub enum ConditionType {
     Completed,
 }
 
+/// ConfigFile — `loom.resource.ConfigFile`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigFile {
+    /// `name` — `String`.
+    pub name: String,
+    /// `content` — `String`.
+    pub content: String,
+}
+
 /// DeploymentAvailability — `loom.resource.DeploymentAvailability`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeploymentAvailability {
@@ -128,8 +137,8 @@ pub enum LoomAgentState {
 /// LoomAgentSpec — `loom.resource.LoomAgentSpec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoomAgentSpec {
-    /// `agent` — `loom.agent.AgentSpec`.
-    pub agent: crate::agent::AgentSpec,
+    /// `agent` — `Optional<loom.agent.AgentSpec>`.
+    pub agent: Option<crate::agent::AgentSpec>,
     /// `routes` — `Json`.
     pub routes: crate::json::Value,
     /// `connectors_config` — `Optional<String>`.
@@ -146,6 +155,8 @@ pub struct LoomAgentSpec {
     pub command: Option<CommandSpec>,
     /// `workspace` — `Optional<loom.resource.Workspace>`.
     pub workspace: Option<Workspace>,
+    /// `config_files` — `Optional<List<loom.resource.ConfigFile>>`.
+    pub config_files: Option<Vec<ConfigFile>>,
 }
 
 /// ResourceName — `loom.resource.ResourceName`: a distinct wrapper around `String`.

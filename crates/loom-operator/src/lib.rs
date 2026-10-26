@@ -61,7 +61,7 @@ mod tests {
             .collect();
         members.sort_unstable();
         let full = resource::LoomAgentSpec {
-            agent: serde_json::json!({}),
+            agent: Some(serde_json::json!({})),
             routes: serde_json::json!({}),
             connectors_config: Some(String::new()),
             secret_ref: Some(resource::SecretRef {
@@ -87,6 +87,10 @@ mod tests {
                 mount_path: "/w".to_owned(),
                 claim_name: Some("c".to_owned()),
             }),
+            config_files: Some(vec![resource::ConfigFile {
+                name: "n".to_owned(),
+                content: String::new(),
+            }]),
         };
         let written = serde_json::to_value(full).expect("JSON");
         let mut keys: Vec<&str> = written

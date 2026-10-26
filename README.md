@@ -328,8 +328,8 @@ kind: Deployment
 Helm installs the chart's `crds/` once and never upgrades it; `b10x-loom-operator crd` prints the
 CRD of the installed version. For each resource the controller first runs the check of
 `b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes`,
-`spec.connectorsConfig` and `spec.env`, and holds the Secret, the namespace and the egress hosts to its
-configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
+`spec.connectorsConfig`, `spec.env` and `spec.configFiles`, and holds the Secret, the namespace
+and the egress hosts to its configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
 and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
 checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
 with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
@@ -362,6 +362,26 @@ refuses a credential in any of these readings or in a name (`SecretLiteral`), a 
 `spec.secretFiles`: the walk knows credential shapes, not every secret.
 For a `Command` resource the controller checks `spec.agent` only for a credential and against
 the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential too.
+A `Command` resource may leave `spec.agent` out and give its program's own configuration as
+`spec.configFiles` (a list of `name` and `content`), each written verbatim at `/config/<name>`; the
+controller decodes nothing of them. It refuses a name that is not a plain file name
+(`[A-Za-z0-9._-]+`, not `.`, not starting with `..`: `ConfigFileInvalid`), a name given twice or one it writes
+itself (`routes.yaml`, `connectors.toml`, and `agent.yaml` beside `spec.agent`:
+`ConfigFileConflict`), a credential in a name or content (`SecretLiteral`, walked as
+`spec.connectorsConfig` is and also as YAML and TOML where a file reads as either), and a ConfigMap
+over Kubernetes's 1 MiB (`TooLarge`). An `AgentServe` resource needs `spec.agent` and takes no
+configuration files (`Malformed`).
+
+```yaml
+spec:
+  routes: {}
+  command: {args: [--iterations, '1']}
+  configFiles:
+    - name: endpoint.toml
+      content: |
+        base_url = "http://model-route.agents.svc:8080/v1"
+        token_env = "TAKT_ENDPOINT_TOKEN"
+```
 
 `b10x-loom-operator render` prints what the controller would apply for one resource and talks to no
 cluster. Install it with `cargo install --locked --path crates/loom-operator`. Here the example

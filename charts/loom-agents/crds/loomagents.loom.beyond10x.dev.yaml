@@ -522,6 +522,18 @@ spec:
                       type: string
                     type: array
                 type: object
+              configFiles:
+                items:
+                  properties:
+                    content:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - name
+                  - content
+                  type: object
+                type: array
               connectorsConfig:
                 type: string
               env:
@@ -575,7 +587,6 @@ spec:
                 - mountPath
                 type: object
             required:
-            - agent
             - routes
             type: object
           status:

@@ -460,11 +460,12 @@ fn a_document_that_is_not_a_loom_agent_is_not_rendered() {
 }
 
 /// The members a takt delivery adds after `spec.agent` (design § 9a, slice C): its own image,
-/// the image's entrypoint with arguments, a workspace on a claim, one Secret as the environment
-/// and another as files.
+/// the image's own entrypoint (`tini -- takt run --repo /workspace --config /config/agent.yaml`
+/// in takt 0.13.1) with only the arguments that follow it, since Kubernetes appends `args` to the
+/// entrypoint, a workspace on a claim, one Secret as the environment and another as files.
 const TAKT: &str = "  routes: {}
   image: {repository: registry.example/takt, tag: '0.12.0'}
-  command: {args: [run, --repo, /workspace/takt, --iterations, '1']}
+  command: {args: [--iterations, '1']}
   workspace: {mountPath: /workspace, claimName: takt-workspace}
   secretRef: {name: platform-operator-secrets}
   secretFiles: {name: takt-forge, mountPath: /var/run/secrets/takt}
@@ -495,6 +496,33 @@ fn a_command_resource_renders_as_its_golden_file() {
         expected,
         "render differs from {}",
         golden.display()
+    );
+}
+
+/// `story:takt-delivery-fixture-args`: the takt 0.13.1 image's entrypoint already runs `takt run
+/// --repo /workspace`, and Kubernetes appends `args` to it, so the fixture passes only what
+/// follows; a `run` or a second `--repo` in `args` would run `run` twice.
+#[test]
+fn the_takt_delivery_fixture_runs_takt_once() {
+    let rendered = render_document(&takt_resource(), &config()).expect("rendered");
+    let pod = pod_of(&rendered);
+    let container = &pod["containers"][0];
+    assert!(
+        container["command"].is_null(),
+        "the image's own entrypoint runs"
+    );
+    let args = strings(container, &["args"]);
+    assert_eq!(args, ["--iterations", "1"]);
+    assert!(!args.iter().any(|arg| arg == "run" || arg == "--repo"));
+
+    let golden =
+        fs::read_to_string(root().join("crates/loom-operator/tests/golden/takt-delivery.yaml"))
+            .expect("the golden file");
+    let golden_pod = pod_of(&golden);
+    assert_eq!(
+        strings(&golden_pod["containers"][0], &["args"]),
+        ["--iterations", "1"],
+        "the golden file a resource is copied from holds the same"
     );
 }
 
@@ -655,10 +683,7 @@ fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
         at(container, &["command"]).is_null(),
         "an absent entrypoint is the image's own"
     );
-    assert_eq!(
-        strings(container, &["args"]),
-        ["run", "--repo", "/workspace/takt", "--iterations", "1"]
-    );
+    assert_eq!(strings(container, &["args"]), ["--iterations", "1"]);
     assert_eq!(text(container, &["env", "0", "name"]), "HOME");
     assert_eq!(text(container, &["env", "0", "value"]), "/var/lib/agent");
     assert_eq!(
@@ -798,11 +823,11 @@ fn what_a_command_resource_may_not_mount_or_carry_is_refused_naming_the_member()
         ),
         (
             TAKT.replace("'1']", "'1', --token, xoxb-000-fake]"),
-            "refused: SecretLiteral at spec.command.args[6]",
+            "refused: SecretLiteral at spec.command.args[3]",
         ),
         (
             TAKT.replace("'1']", "'1', --token=xoxb-000-fake]"),
-            "refused: SecretLiteral at spec.command.args[5]",
+            "refused: SecretLiteral at spec.command.args[2]",
         ),
         (
             TAKT.replace(
@@ -1113,7 +1138,7 @@ fn a_credential_joined_by_variable_expansion_is_refused_without_repeating_it() {
                 &takt_agent(),
                 &format!("{joined}{}", env(&[("PART", "ghp")])),
             ),
-            "refused: SecretLiteral at spec.command.args[6]: a value with the prefix `ghp_`, \
+            "refused: SecretLiteral at spec.command.args[3]: a value with the prefix `ghp_`, \
              after `$(VAR)` expansion",
         ),
         (
@@ -1175,7 +1200,7 @@ fn an_unknown_reference_is_walked_as_a_possible_url_scheme() {
                     "--iterations, '1', '$(FORGE_SCHEME)u:not-a-real-password@forge.example']",
                 ),
             ),
-            "spec.command.args[5]: ",
+            "spec.command.args[2]: ",
         ),
         (
             serve_with(&env(&[("NOTE", "$(USER_NAME)@forge.example")])),
@@ -1224,4 +1249,373 @@ fn variable_references_expanding_beyond_the_bound_are_too_large() {
          than 2097152 bytes, more than the credential walk reads"
     );
     render_document(&serve_with(&env(&entries[..10])), &config()).expect("within the bound");
+}
+
+/// The head of a `LoomAgent` without `spec.agent`, before its other `spec` members.
+const HEAD: &str = "apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata:
+  name: platform-operator
+  namespace: agents
+  uid: 00000000-0000-4000-8000-000000000001
+  generation: 1
+spec:
+";
+
+/// A `Command` resource without `spec.agent`: the takt members, then `rest`.
+fn command_without_agent(rest: &str) -> String {
+    format!("{HEAD}{TAKT}{rest}")
+}
+
+/// `spec.configFiles` as YAML, each name and content a double-quoted scalar.
+fn config_files(files: &[(&str, &str)]) -> String {
+    let quoted = |text: &str| serde_json::to_string(text).expect("JSON text");
+    let mut out = String::from("  configFiles:\n");
+    for (name, content) in files {
+        out.push_str(&format!(
+            "  - {{name: {}, content: {}}}\n",
+            quoted(name),
+            quoted(content)
+        ));
+    }
+    out
+}
+
+/// takt's endpoint configuration: a comment, a trailing space and no final newline kept.
+const ENDPOINT_TOML: &str = "# the model route takt calls\nbase_url = \
+     \"http://model-route.agents.svc:8080/v1\" \nprotocol = \"messages\"\ntoken_env = \
+     \"TAKT_ENDPOINT_TOKEN\"";
+
+/// takt's run configuration: not TOML on its last line, which the controller does not decode.
+const RUN_TOML: &str = "iterations = 1\n\n[forge]\nremote = \"https://forge.example/agents/takt.git\"\n\
+     \t  not = = toml  \n";
+
+/// takt's own `--config` file, at the path the image's entrypoint names.
+const TAKT_CONFIG: &str = "repo: /workspace\nreview: {rounds: 2}\n";
+
+/// The data of the rendered ConfigMap, by key.
+fn config_map_data(rendered: &str) -> Vec<(String, String)> {
+    let docs = documents(rendered);
+    assert_eq!(text(&docs[1], &["kind"]), "ConfigMap");
+    docs[1]["data"]
+        .as_mapping()
+        .expect("data")
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.as_str().expect("a key").to_owned(),
+                value.as_str().expect("a value").to_owned(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn config_files_are_written_verbatim_under_config() {
+    let files = [
+        ("endpoint.toml", ENDPOINT_TOML),
+        ("run.toml", RUN_TOML),
+        ("agent.yaml", TAKT_CONFIG),
+    ];
+    let rendered =
+        render_document(&command_without_agent(&config_files(&files)), &config()).expect("ok");
+    let data = config_map_data(&rendered);
+    let keys: Vec<&str> = data.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "agent.yaml",
+            "connectors.toml",
+            "endpoint.toml",
+            "routes.yaml",
+            "run.toml"
+        ],
+        "without spec.agent, agent.yaml is the program's own file"
+    );
+    for (name, content) in files {
+        let written = data.iter().find(|(key, _)| key == name).expect("written");
+        assert_eq!(written.1, content, "{name} verbatim");
+    }
+    let routes: Value = serde_yaml_ng::from_str(
+        &data
+            .iter()
+            .find(|(key, _)| key == "routes.yaml")
+            .expect("r")
+            .1,
+    )
+    .expect("YAML");
+    assert_eq!(
+        routes["routes"]
+            .as_mapping()
+            .map(serde_yaml_ng::Mapping::len),
+        Some(0),
+        "no spec.agent names no role, so the default routes route nothing: {routes:?}"
+    );
+    assert!(routes["endpoints"]["model-route"].is_mapping());
+
+    let pod = pod_of(&rendered);
+    let container = &pod["containers"][0];
+    let mount = container["volumeMounts"]
+        .as_sequence()
+        .expect("mounts")
+        .iter()
+        .find(|mount| text(mount, &["mountPath"]) == "/config")
+        .expect("the ConfigMap at /config");
+    assert_eq!(text(mount, &["name"]), "spec");
+    assert_eq!(mount["readOnly"].as_bool(), Some(true));
+    assert!(
+        mount["subPath"].is_null(),
+        "the whole ConfigMap, each key a file"
+    );
+    let volume = pod["volumes"]
+        .as_sequence()
+        .expect("volumes")
+        .iter()
+        .find(|volume| text(volume, &["name"]) == "spec")
+        .expect("the spec volume");
+    assert_eq!(
+        text(volume, &["configMap", "name"]),
+        "platform-operator-spec"
+    );
+    assert!(
+        volume["configMap"]["items"].is_null(),
+        "every key is projected"
+    );
+
+    let beside = render_document(
+        &command_with(&config_files(&[("endpoint.toml", ENDPOINT_TOML)])),
+        &config(),
+    )
+    .expect("rendered");
+    let data = config_map_data(&beside);
+    let keys: Vec<&str> = data.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "agent.yaml",
+            "connectors.toml",
+            "endpoint.toml",
+            "routes.yaml"
+        ]
+    );
+    assert!(
+        data[0].1.contains("format: loom.agent/1"),
+        "with spec.agent, agent.yaml is spec.agent"
+    );
+
+    let none = render_document(&command_without_agent(""), &config()).expect("rendered");
+    let data = config_map_data(&none);
+    let keys: Vec<&str> = data.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(keys, ["connectors.toml", "routes.yaml"]);
+}
+
+#[test]
+fn a_credential_in_a_config_file_is_refused_without_repeating_it() {
+    let cases = [
+        (
+            vec![("endpoint.toml", "token = \"xoxb-000-fake\"\n")],
+            "refused: SecretLiteral at spec.configFiles[0].content: ",
+        ),
+        (
+            vec![
+                ("endpoint.toml", ENDPOINT_TOML),
+                (
+                    "run.toml",
+                    "iterations = 1\n\n# Authorization: Bearer 000fake\n",
+                ),
+            ],
+            "refused: SecretLiteral at spec.configFiles[1].content: a value with the prefix \
+             `Bearer ` (line 3)",
+        ),
+        (
+            vec![("run.toml", "flags = \"--verbose --token=ghp_000fake\"\n")],
+            "refused: SecretLiteral at spec.configFiles[0].content: ",
+        ),
+        (
+            vec![("endpoint.toml", "token = \"\\u0067hp_000fake\"\n")],
+            "refused: SecretLiteral at spec.configFiles[0].content: a value with the prefix \
+             `ghp_`",
+        ),
+        (
+            vec![("endpoint.json", "{\"token\": \"\\u0078oxb-000-fake\"}")],
+            "refused: SecretLiteral at spec.configFiles[0].content: a value with the prefix \
+             `xoxb-`, read as YAML",
+        ),
+        (
+            vec![(
+                "run.toml",
+                "[forge]\nremote = \"https://u:not-a-real-password@forge.example/t.git\"\n",
+            )],
+            "refused: SecretLiteral at spec.configFiles[0].content: ",
+        ),
+        (
+            vec![("ghp_000fake", "x")],
+            "refused: SecretLiteral at spec.configFiles[0].name: a value with the prefix `ghp_`",
+        ),
+    ];
+    for (files, expected) in &cases {
+        for resource in [
+            command_without_agent(&config_files(files)),
+            command_with(&config_files(files)),
+        ] {
+            let message = refusal(&resource, &config());
+            assert!(message.starts_with(expected), "{expected} <- {message}");
+            for value in ["000-fake", "000fake", "not-a-real-password", "token"] {
+                assert!(!message.contains(value), "{message}");
+            }
+        }
+    }
+
+    let braces = "{".repeat(4097);
+    assert_eq!(
+        refusal(
+            &command_without_agent(&config_files(&[("run.toml", &braces)])),
+            &config()
+        ),
+        "refused: TooLarge at spec.configFiles: it holds more than 4096 `[` or `{` bytes, more \
+         than the credential walk reads"
+    );
+}
+
+/// Kubernetes refuses a ConfigMap whose keys and values hold more than 1 MiB together; the
+/// controller refuses the resource before it applies one.
+#[test]
+fn a_config_map_beyond_kubernetes_limit_is_too_large() {
+    let bare = render_document(&command_without_agent(""), &config()).expect("rendered");
+    let held: usize = config_map_data(&bare)
+        .iter()
+        .map(|(key, value)| key.len() + value.len())
+        .sum();
+    let name = "run.toml";
+    let room = 1024 * 1024 - held - name.len();
+    let line = "iterations = 1\n";
+    let mut content = line.repeat(room / line.len());
+    content.push_str(&"x".repeat(room - content.len()));
+    render_document(
+        &command_without_agent(&config_files(&[(name, &content)])),
+        &config(),
+    )
+    .expect("exactly at the limit");
+    content.push('x');
+    assert_eq!(
+        refusal(
+            &command_without_agent(&config_files(&[(name, &content)])),
+            &config()
+        ),
+        "refused: TooLarge at spec.configFiles: the ConfigMap it makes holds more than 1048576 \
+         bytes, more than Kubernetes accepts"
+    );
+}
+
+#[test]
+fn an_agent_serve_resource_without_spec_agent_is_refused() {
+    let serve = format!("{HEAD}  routes: {{}}\n  secretRef: {{name: platform-operator-secrets}}\n");
+    assert_eq!(
+        refusal(&serve, &config()),
+        "refused: Malformed at spec.agent: `b10x-loom agent serve` needs a loom.agent/1 \
+         document; only a Command resource may leave it out"
+    );
+    assert_eq!(
+        refusal(
+            &serve_with(&config_files(&[("endpoint.toml", ENDPOINT_TOML)])),
+            &config()
+        ),
+        "refused: Malformed at spec.configFiles: `b10x-loom agent serve` reads no configuration \
+         file; only a Command resource may give them"
+    );
+    render_document(&serve_with("  configFiles: []\n"), &config()).expect("an empty list");
+}
+
+#[test]
+fn a_config_file_name_that_is_not_a_plain_file_name_is_refused_without_repeating_it() {
+    let longest = "n".repeat(253);
+    for name in [
+        "",
+        ".",
+        "..",
+        "hidden-name/x",
+        "../hidden-name",
+        "..hidden-name",
+        "hidden name",
+        "hidden-name\t",
+        "hidden-n\u{e4}me",
+        "hidden-name:x",
+        &format!("{longest}n"),
+    ] {
+        let message = refusal(
+            &command_without_agent(&config_files(&[("run.toml", RUN_TOML), (name, "x")])),
+            &config(),
+        );
+        assert_eq!(
+            message,
+            "refused: ConfigFileInvalid at spec.configFiles[1].name: it is not a plain file \
+             name, [A-Za-z0-9._-]+ other than `.` and not starting with `..`, of at most 253 bytes",
+            "{name:?}"
+        );
+        assert!(!message.contains("hidden"), "{message}");
+    }
+    render_document(
+        &command_without_agent(&config_files(&[
+            (&longest, "x"),
+            ("a-b_c.d", "y"),
+            (".hidden", "z"),
+        ])),
+        &config(),
+    )
+    .expect("plain names");
+}
+
+#[test]
+fn a_config_file_name_given_twice_or_held_by_the_controller_is_refused() {
+    let conflict = |files: &[(&str, &str)], with_agent: bool| {
+        let rest = config_files(files);
+        let resource = if with_agent {
+            command_with(&rest)
+        } else {
+            command_without_agent(&rest)
+        };
+        refusal(&resource, &config())
+    };
+    assert_eq!(
+        conflict(
+            &[("run.toml", "a"), ("endpoint.toml", "b"), ("run.toml", "c")],
+            false
+        ),
+        "refused: ConfigFileConflict at spec.configFiles[2].name: it repeats \
+         spec.configFiles[0].name"
+    );
+    for (name, with_agent) in [
+        ("routes.yaml", false),
+        ("connectors.toml", false),
+        ("routes.yaml", true),
+        ("agent.yaml", true),
+    ] {
+        assert_eq!(
+            conflict(&[(name, "x")], with_agent),
+            "refused: ConfigFileConflict at spec.configFiles[0].name: the controller writes a \
+             file of that name under /config itself",
+            "{name} with spec.agent {with_agent}"
+        );
+    }
+}
+
+/// A YAML escape inside a value of several words: the stream walk reads each value whole, so
+/// each decoded string is also walked word by word, as a TOML string is.
+#[test]
+fn an_escaped_token_inside_a_yaml_value_of_several_words_is_refused() {
+    for content in [
+        "flags: \"--verbose --token \\x67hp_000fake\"\n",
+        "kind: run\n---\nargs: [\"-H\", \"Authorization: \\x42earer 000fake\"]\n",
+    ] {
+        let message = refusal(
+            &command_without_agent(&config_files(&[("run.yaml", content)])),
+            &config(),
+        );
+        assert!(
+            message.starts_with("refused: SecretLiteral at spec.configFiles[0].content: "),
+            "{content:?}: {message}"
+        );
+        assert!(message.ends_with(", read as YAML"), "{message}");
+        assert!(!message.contains("000fake"), "{message}");
+    }
 }

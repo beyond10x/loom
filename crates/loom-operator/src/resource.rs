@@ -2,10 +2,10 @@
 //! over the CRD `loom-xtask crd-generate` projects from `ess/domains/resource.yaml`.
 //!
 //! The type carries no schema of its own (`schema = "disabled"`): the CRD's schema is the one
-//! projected from the specification, and the cluster validates against it. `spec.agent` and
-//! `spec.routes` are kept as JSON, since the controller hands both to the check and writes them
-//! into the ConfigMap as given. The status members are the row of the view `LoomAgents`, spelt
-//! as the CRD spells them.
+//! projected from the specification, and the cluster validates against it. `spec.agent` (absent
+//! for a `Command` resource that has none) and `spec.routes` are kept as JSON, since the
+//! controller hands both to the check and writes them into the ConfigMap as given. The status
+//! members are the row of the view `LoomAgents`, spelt as the CRD spells them.
 
 use b10x_loom_resource::model::AgentVariant;
 use kube::CustomResource;
@@ -25,8 +25,9 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(rename_all = "camelCase")]
 pub struct LoomAgentSpec {
-    /// The `loom.agent/1` document, verbatim.
-    pub agent: serde_json::Value,
+    /// The `loom.agent/1` document, verbatim: required for `AgentServe`, optional for `Command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<serde_json::Value>,
     /// The `llm.routes/1` document, inline; an empty object asks for the controller's model
     /// route.
     pub routes: serde_json::Value,
@@ -52,6 +53,10 @@ pub struct LoomAgentSpec {
     /// A writable volume for a repository checkout.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<Workspace>,
+    /// The program's own configuration files, each written verbatim at `/config/<name>`; only
+    /// for `Command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_files: Option<Vec<ConfigFile>>,
 }
 
 impl LoomAgentSpec {
@@ -103,6 +108,15 @@ pub struct EnvVar {
     pub name: String,
     /// Its value, never a credential.
     pub value: String,
+}
+
+/// One entry of `spec.configFiles`: a file the program reads at `/config/<name>`, verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigFile {
+    /// The file's name, a plain file name (`[A-Za-z0-9._-]+`, not `.`, not starting with `..`).
+    pub name: String,
+    /// Its text, never holding a credential.
+    pub content: String,
 }
 
 /// `spec.secretFiles`: a Secret, by name, in the resource's namespace, whose keys are files in
