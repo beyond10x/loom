@@ -38,8 +38,9 @@ arguments, a workflow's judgement step) are structured requests to a model throu
 work in a harness such as Claude Code goes through
 [Metaharness](https://beyond10x.github.io/metaharness/)
 ([GitHub](https://github.com/beyond10x/metaharness)) behind an executor the host supplies; Loom
-runs no model loop of its own (Atlas ADR 0098). It grants no authority, and it never merges,
-pushes or deploys. [Where Loom ends](https://beyond10x.github.io/loom/docs/concepts/where-loom-ends)
+runs no model loop of its own (Atlas ADR 0098). Loom is not a harness: it is the governed runtime
+above Metaharness, which drives and compares the harnesses (Atlas ADR 0096, which superseded ADR
+0071). It grants no authority, and it never merges, pushes or deploys. [Where Loom ends](https://beyond10x.github.io/loom/docs/concepts/where-loom-ends)
 draws the whole boundary.
 
 ## Status
@@ -288,7 +289,8 @@ or write.
 
 ## Deploy agents to Kubernetes
 
-A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent`, and the controller
+A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent` (Loom's deployment
+form of a spec, Atlas ADR 0108), and the controller
 `b10x-loom-operator` (`crates/loom-operator`) runs each resource as one pod. The Helm chart
 `charts/loom-agents`, versioned with Loom, installs the CustomResourceDefinition, the controller,
 its ServiceAccount and a Role limited to its namespace, which grants nothing on Secrets. The values
@@ -389,6 +391,8 @@ An agent can be written as data: a `loom.agent/1` document, YAML or JSON, which
 `loom_sdk::agent::parse` decodes into an `AgentSpec` (identity, models, session and tool policy,
 loops, states, bindings, channel, writes, capabilities, exposure, runtime and deployment),
 refusing a member the domain does not declare. `examples/agents/operator.yaml` is one.
+Loom owns this schema and serves A2A from a spec's `expose.a2a`; Agency's agent definition holds a
+document of it by value (Atlas ADR 0108).
 `b10x-loom agent check` (library `b10x-loom-agent`) says whether such a spec can be served, and
 `b10x_loom_agent::SpecPlugin` is the plugin `b10x-loom agent serve` hosts over it: `SpecAuthority`
 grants exactly `policy.capabilities`, and `admit_send` decides each `reply.send` as

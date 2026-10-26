@@ -19,7 +19,8 @@ tagged), includes the example by `#[path]` and runs it to `ApprovalRequired (rep
 fails when it no longer compiles, stops anywhere else, or resolves a second copy of a Loom or
 Canon crate. Its library, `consumers/pinned/src/agency.rs`, is a second consumer: an agent
 defined as data, a `loom.agent/1` document, run through the SDK alone until the budget and stop
-policy the document states end it. A change that breaks what this page tells you to compile against fails Loom's CI
+policy the document states end it. Loom owns that schema; an Agency agent definition holds such a
+document by value (Atlas ADR 0108). A change that breaks what this page tells you to compile against fails Loom's CI
 before a release, not your build after one.
 
 ## Depend on the SDK

@@ -3,9 +3,10 @@
 Loom is the agent runtime: it runs governed agents, and `b10x-loom-sdk` is its library for building
 on it. This file is for an agent changing the repository. How to install Loom and how to embed it
 are in [README.md](README.md) and on the site, <https://beyond10x.github.io/loom/>; neither is
-repeated here. The architecture behind it is in Atlas (private): ADRs 0066–0076, 0080, 0082, 0089
-and 0090 under `architecture/adr/`, and `docs/design/governed-autonomy/`. ADR 0090 made Loom the
-one runtime repository, with Commission, the governor and intake moved in.
+repeated here. The architecture behind it is in Atlas (private): ADRs 0066–0076, 0080, 0082, 0089,
+0090, 0096, 0098 and 0108 under `architecture/adr/`, and `docs/design/governed-autonomy/`. ADR 0090
+made Loom the one runtime repository, with Commission, the governor and intake moved in. ADR 0096
+superseded ADR 0071 (Loom as the native harness): Loom is the governed runtime above metaharness.
 
 ## Serves
 
@@ -18,14 +19,17 @@ one runtime repository, with Commission, the governor and intake moved in.
 
 Loom serves two outcomes of the governed-autonomy vision. **O1, governed reach:** the model sees
 and can execute only what the current frontier admits, and authority is rechecked before every
-effect. **O3, any harness, observed and compared:** Loom is the native executor Metaharness compares
-against other harnesses on the same case.
+effect. **O3, any harness, observed and compared:** Loom runs agent work in any harness through
+metaharness, which observes and compares the sessions; Loom is the runtime above that layer, not a
+harness metaharness compares (ADRs 0096 and 0098).
 
-Loom owns the decision path (ADR 0071, as ADR 0098 narrows it): prompt and context assembly, the
-projected action catalogue, action selection, argument generation, the budgets of its model
-requests, and model-facing approval suspension. Each decision is a structured request to an llm
-`Model`; Loom runs no model loop of its own. Since ADR 0090 it also holds Commission's contracts
-and runtime, the governor and intake (sections below).
+Loom is the governed runtime, layer L3 of the agent stack (ADR 0096, which superseded ADR 0071): it
+calls llm for its own decisions and metaharness for agent work (ADR 0098), and holds no provider
+wire and no agent loop. It owns the decision path: prompt and context assembly, the projected
+action catalogue, action selection, argument generation, the budgets of its model requests, and
+model-facing approval suspension. Each decision is a structured request to an llm `Model`; Loom
+runs no model loop of its own. Since ADR 0090 it also holds Commission's contracts and runtime, the
+governor and intake (sections below).
 
 It does not own protocol semantics (Canon), engineering protocol definitions
 (`b10x-canon-engineering`, beyond10x/engineering-protocols), case truth, organizational authority,
@@ -604,6 +608,9 @@ use it only behind `--mandate`; `b10x-loom run` does not use it. Over the closur
 only `b10x-loom-cli` and `loom-docs`, which links it for its help text, reach Mandate.
 
 ## Agent spec
+
+Loom owns the `loom.agent/1` schema and serves A2A from a spec's `expose.a2a`; Agency's agent
+definition holds a document of it by value (Atlas ADR 0108).
 
 An agent as data is the `loom.agent` domain (`ess/domains/agent.yaml`, `story:agent-domain`):
 `AgentSpec`, the typed `loom.agent/1` document, with its `ToolPolicy` (tools allowed and denied,
