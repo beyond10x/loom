@@ -32,12 +32,16 @@ types:
     of: String
 
   # The Secret the pod's environment is read from, by name; the Secret itself is created outside
-  # the resource and never read by the controller (design § 7).
+  # the resource and never read by the controller (design § 7). With `mount_path` its keys are
+  # also files, read-only, in that directory of the container (story loom-agent-command-variant).
   - name: loom.resource.SecretRef
     kind: struct
     fields:
       - name: name
         type: String
+      - name: mount_path
+        type: Optional<String>
+        naming: {wire: mountPath}
 
   # The agent image, overriding the controller's default (design § 5.1).
   - name: loom.resource.ImageRef
@@ -47,6 +51,35 @@ types:
         type: String
       - name: tag
         type: String
+
+  # The program the pod runs instead of `b10x-loom agent serve` (design § 9a, slice C): the
+  # container's entrypoint and its arguments, each left to the image when absent, so an empty
+  # command runs the image's own entrypoint.
+  - name: loom.resource.CommandSpec
+    kind: struct
+    fields:
+      - name: entrypoint
+        type: Optional<List<String>>
+      - name: args
+        type: Optional<List<String>>
+
+  # A writable volume for a repository checkout, mounted at `mount_path`: an emptyDir, or the
+  # PersistentVolumeClaim `claim_name` in the resource's namespace.
+  - name: loom.resource.Workspace
+    kind: struct
+    fields:
+      - name: mount_path
+        type: String
+        naming: {wire: mountPath}
+      - name: claim_name
+        type: Optional<String>
+        naming: {wire: claimName}
+
+  # What the pod runs: `AgentServe`, `b10x-loom agent serve` over the spec; `Command`, the
+  # program `spec.command` names, reading the spec at `/config/agent.yaml`.
+  - name: loom.resource.AgentVariant
+    kind: enum
+    variants: [AgentServe, Command]
 
   # What the controller read of the child Deployment: available, its pod is ready; unavailable, it
   # is not (design § 5.2, status from the Deployment's conditions).
@@ -103,7 +136,8 @@ types:
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
   # only as `env:` or `file:` references; the connectors-local TOML, only for `connectors`
   # bindings; the Secret the container's environment comes from; and an image overriding the
-  # controller's default. Wire names are Kubernetes's.
+  # controller's default; the program the pod runs instead of `agent serve`, and a workspace
+  # volume. Wire names are Kubernetes's.
   - name: loom.resource.LoomAgentSpec
     kind: struct
     fields:
@@ -119,6 +153,10 @@ types:
         naming: {wire: secretRef}
       - name: image
         type: Optional<loom.resource.ImageRef>
+      - name: command
+        type: Optional<loom.resource.CommandSpec>
+      - name: workspace
+        type: Optional<loom.resource.Workspace>
 
 entities:
   # One `LoomAgent` resource as the controller holds it. `observed_generation` is the
@@ -146,6 +184,10 @@ entities:
         type: Optional<loom.resource.CheckResult>
       - name: deployment
         type: Optional<loom.resource.DeploymentStatus>
+      # What the pod of the checked generation runs, recorded with the check and cleared by a new
+      # generation (story loom-agent-command-variant).
+      - name: variant
+        type: Optional<loom.resource.AgentVariant>
       # The controller's projection of `state`, `check` and `deployment` as Kubernetes conditions,
       # computed when it publishes the status. No command sets it, because a `sets:` value on ESS
       # 0.69.0 admits no list (a list is read only as the `via:` of a related read, and `[]` needs
@@ -296,15 +338,16 @@ commands:
           observed_generation: input.generation
           check: {cleared: true}
           deployment: {cleared: true}
+          variant: {cleared: true}
         emits: [loom.resource.LoomAgentApplied]
         payload:
           loom.resource.LoomAgentApplied:
             name: input.name
             generation: input.generation
 
-  # The spec check ran for a generation: exit code 0 runs the agent, any other refuses it. A
-  # result for a generation the controller has moved past is stale; a result for a resource that
-  # is not Pending is out of order and changes nothing.
+  # The spec check ran for a generation: exit code 0 runs the agent, any other refuses it; either
+  # records the variant the spec selects. A result for a generation the controller has moved past
+  # is stale; a result for a resource that is not Pending is out of order and changes nothing.
   - name: loom.resource.RecordCheck
     input:
       - name: name
@@ -315,6 +358,8 @@ commands:
         type: Integer
       - name: message
         type: String
+      - name: variant
+        type: loom.resource.AgentVariant
     outcomes:
       - name: unknown
         unknown_instance: true
@@ -337,6 +382,7 @@ commands:
         instance: name
         sets:
           check: {exit_code: input.exit_code, message: input.message}
+          variant: input.variant
         emits: [loom.resource.LoomAgentRunning]
         payload:
           loom.resource.LoomAgentRunning:
@@ -347,6 +393,7 @@ commands:
         instance: name
         sets:
           check: {exit_code: input.exit_code, message: input.message}
+          variant: input.variant
         emits: [loom.resource.LoomAgentRefused]
         payload:
           loom.resource.LoomAgentRefused:
@@ -468,6 +515,8 @@ views:
         type: Optional<loom.resource.CheckResult>
       - name: deployment
         type: Optional<loom.resource.DeploymentStatus>
+      - name: variant
+        type: Optional<loom.resource.AgentVariant>
       - name: conditions
         type: Optional<List<loom.resource.Condition>>
       - name: state
