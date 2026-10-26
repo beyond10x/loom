@@ -60,6 +60,7 @@ pub(crate) fn first(text: &str, budget: usize) -> Option<(String, String)> {
         left: Cell::new(budget),
         spent: Cell::new(false),
         found: RefCell::new(None),
+        strings: None,
     };
     let root = Node {
         walk: &walk,
@@ -71,14 +72,21 @@ pub(crate) fn first(text: &str, budget: usize) -> Option<(String, String)> {
     }
 }
 
-/// How a walk of every document of a YAML stream ended.
+/// How a walk of every document of a YAML stream ended. `Clean` and `TooLarge` carry every
+/// string the walk read (each key, value and tag, aliases replayed, in document order), so a
+/// caller can walk their words as well; the budget bounds them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamWalk {
-    /// The walk read every document it could and found no credential. A text that is not YAML
-    /// from some document on is walked up to that document.
-    Clean,
-    /// The first credential: the document it stands in (from 0), its member within that
-    /// document, spelt as `check_text` spells one, and its shape.
+    /// The walk found no credential in what it read: every document of the stream, or, after a
+    /// scan error, every piece of the text between document markers that reads as YAML up to
+    /// its own first scan error.
+    Clean {
+        /// The strings the walk read.
+        strings: Vec<String>,
+    },
+    /// The first credential: the document it stands in (from 0, counted across the pieces after
+    /// a scan error), its member within that document, spelt as `check_text` spells one, and its
+    /// shape.
     Found {
         /// The document, from 0.
         document: usize,
@@ -90,58 +98,137 @@ pub enum StreamWalk {
     /// The walk could not read the stream whole: the text is beyond the decoder's byte or flow
     /// bound, its aliases cost more than the bound allows, or the parser's own recursion or
     /// repetition limit stopped it. Nothing the walk did not read is known to be clean.
-    TooLarge,
+    TooLarge {
+        /// The strings the walk read before it stopped.
+        strings: Vec<String>,
+    },
+}
+
+/// How walking one stream ended.
+enum Pass {
+    /// Every document was walked.
+    Whole,
+    /// A scan or parse error stopped the stream; the documents before it were walked.
+    Broken,
+    /// The budget, or the parser's recursion or repetition limit, stopped it.
+    Stopped,
+}
+
+/// Walks every document of `text` with `walk`, numbering them from `*document`.
+fn pass(walk: &Walk, text: &str, document: &mut usize) -> Pass {
+    for deserializer in serde_yaml_ng::Deserializer::from_str(text) {
+        let root = Node {
+            walk,
+            at: String::new(),
+        };
+        let walked = root.deserialize(deserializer);
+        if walk.found.borrow().is_some() {
+            return Pass::Whole;
+        }
+        *document += 1;
+        match walked {
+            Ok(()) => {}
+            Err(_) if walk.spent.get() => return Pass::Stopped,
+            Err(error) => {
+                let message = error.to_string();
+                return if message.contains("recursion limit exceeded")
+                    || message.contains("repetition limit exceeded")
+                {
+                    Pass::Stopped
+                } else {
+                    Pass::Broken
+                };
+            }
+        }
+    }
+    Pass::Whole
+}
+
+/// Whether `line` is a document marker a reader that splits a stream textually splits at:
+/// exactly `---`, optionally followed by whitespace or by whitespace and a comment.
+fn marker(line: &str) -> bool {
+    let line = line.trim_end_matches(['\n', '\r']);
+    line.strip_prefix("---").is_some_and(|rest| {
+        rest.is_empty()
+            || (rest.starts_with([' ', '\t'])
+                && (rest.trim_start().is_empty() || rest.trim_start().starts_with('#')))
+    })
+}
+
+/// `text` split at its document-marker lines, the markers left out.
+fn pieces(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    for line in text.split_inclusive('\n') {
+        if marker(line) {
+            out.push(&text[start..at]);
+            start = at + line.len();
+        }
+        at += line.len();
+    }
+    out.push(&text[start..]);
+    out
 }
 
 /// Walks every document of `text`, a YAML stream, for a credential, within one budget for the
-/// whole stream: [`bound`], the decoder's alias bound. A credential found before the walk stopped
+/// whole text: [`bound`], the decoder's alias bound. A credential found before the walk stopped
 /// is the answer, whatever stopped it; a walk the budget or the parser's recursion or repetition
-/// limit stopped otherwise is [`StreamWalk::TooLarge`], never "no credential". A scan error ends
-/// the stream: the documents before it were walked, and no YAML reader reads past it.
+/// limit stopped otherwise is [`StreamWalk::TooLarge`], never "no credential". When a scan or
+/// parse error stops the stream, the text is walked again as a reader that splits a stream
+/// textually reads it: split at its document-marker lines, each piece a stream of its own, up to
+/// its own first scan error, under what is left of the same budget. Text that is not YAML at all
+/// is then walked as far as it reads and is otherwise clean: the walk reads YAML, nothing else.
 pub(crate) fn first_in_stream(text: &str) -> StreamWalk {
     let Some(budget) = bound(text) else {
-        return StreamWalk::TooLarge;
+        return StreamWalk::TooLarge {
+            strings: Vec::new(),
+        };
     };
     let walk = Walk {
         left: Cell::new(budget),
         spent: Cell::new(false),
         found: RefCell::new(None),
+        strings: Some(RefCell::new(Vec::new())),
     };
-    for (document, deserializer) in serde_yaml_ng::Deserializer::from_str(text).enumerate() {
-        let root = Node {
-            walk: &walk,
-            at: String::new(),
-        };
-        let walked = root.deserialize(deserializer);
-        if let Some((member, shape)) = walk.found.borrow_mut().take() {
-            return StreamWalk::Found {
-                document,
-                member,
-                shape,
-            };
+    let mut document = 0;
+    let mut ended = pass(&walk, text, &mut document);
+    if matches!(ended, Pass::Broken) && walk.found.borrow().is_none() {
+        document = 0;
+        if let Some(strings) = &walk.strings {
+            strings.borrow_mut().clear();
         }
-        match walked {
-            Ok(()) => {}
-            Err(_) if walk.spent.get() => return StreamWalk::TooLarge,
-            Err(error) => {
-                let message = error.to_string();
-                if message.starts_with("recursion limit exceeded")
-                    || message.starts_with("repetition limit exceeded")
-                {
-                    return StreamWalk::TooLarge;
-                }
-                return StreamWalk::Clean;
+        ended = Pass::Whole;
+        for piece in pieces(text) {
+            if let Pass::Stopped = pass(&walk, piece, &mut document) {
+                ended = Pass::Stopped;
+            }
+            if walk.found.borrow().is_some() || matches!(ended, Pass::Stopped) {
+                break;
             }
         }
     }
-    StreamWalk::Clean
+    if let Some((member, shape)) = walk.found.borrow_mut().take() {
+        return StreamWalk::Found {
+            document,
+            member,
+            shape,
+        };
+    }
+    let strings = walk.strings.map(RefCell::into_inner).unwrap_or_default();
+    match ended {
+        Pass::Stopped => StreamWalk::TooLarge { strings },
+        Pass::Whole | Pass::Broken => StreamWalk::Clean { strings },
+    }
 }
 
-/// One walk: what it may still spend, whether it ran out, and the first credential it found.
+/// One walk: what it may still spend, whether it ran out, the first credential it found and,
+/// for a stream walk, every string it read.
 struct Walk {
     left: Cell<usize>,
     spent: Cell<bool>,
     found: RefCell<Option<(String, String)>>,
+    strings: Option<RefCell<Vec<String>>>,
 }
 
 impl Walk {
@@ -158,9 +245,13 @@ impl Walk {
         Ok(())
     }
 
-    /// Charges `value` and keeps it as the credential found when it is the first.
+    /// Charges `value`, keeps it when the walk keeps strings, and keeps it as the credential found
+    /// when it is the first.
     fn text<E: de::Error>(&self, member: &str, value: &str) -> Result<(), E> {
         self.charge(value.len())?;
+        if let Some(strings) = &self.strings {
+            strings.borrow_mut().push(value.to_owned());
+        }
         let mut found = self.found.borrow_mut();
         if found.is_none()
             && let Some(shape) = credential(value)

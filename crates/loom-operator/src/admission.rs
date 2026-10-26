@@ -61,13 +61,19 @@
 //!     [`MAX_CONFIG_MAP_BYTES`] (`TooLarge`), refused rather than failing at apply.
 //! 12. Each `spec.configFiles` content, which the controller decodes nothing of, walked for a
 //!     credential (`SecretLiteral`) by every walk step 3 makes and more: the list whole, names
-//!     and contents; each content as a YAML stream, every document of it, and as a TOML table
+//!     and contents; each content as a YAML stream, every document in turn and every string the
+//!     walk reads in it (key, value or tag, aliases replayed, a duplicate key included) whole
+//!     and word by word; after a scan error, the content split at its lines that are exactly
+//!     `---` (optionally followed by whitespace or a comment), each piece walked as a stream
+//!     of its own up to its own first scan error, under the same budget; then as a TOML table
 //!     when it reads as one, whole and word by word, so a YAML or TOML escape (`\x67`,
 //!     `\u0067`) does not hide one from a program that reads the file as either; and every word
 //!     of the raw text, named by its line. An encoding neither reader undoes (base64, say) can
-//!     still hide one: the walk knows credential shapes, not every secret. A content beyond the
-//!     walk's bound, or a YAML stream it cannot read whole (its aliases or nesting cost more than
-//!     the agent decoder's bound allows), is `TooLarge`.
+//!     still hide one, as can a YAML escape after a scan error and before the next `---` line:
+//!     the walk knows credential shapes, not every secret. A content beyond the walk's bound,
+//!     or a YAML stream it cannot read whole (its aliases or nesting cost more than the agent
+//!     decoder's bound allows, or the parser's recursion or repetition limit stops it), is
+//!     `TooLarge` once the strings read before it stopped hold no credential.
 //! 13. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
 //!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
 //!     or the other one (`MountPathInvalid`).
@@ -836,37 +842,10 @@ fn config_file_names(
     Ok(())
 }
 
-/// The words of every string of every document of `text` read as a YAML stream (each key, value
-/// and tag, aliases replayed), each at `at`; the documents up to the first that does not read as
-/// YAML. Called only once the stream walk read the whole stream within its budget, so what it
-/// decodes is bounded by that budget.
-fn yaml_words(text: &str, at: &str) -> Vec<Word> {
-    fn strings(value: &Value, out: &mut Vec<String>) {
-        match value {
-            Value::String(text) => out.push(text.clone()),
-            Value::Sequence(items) => items.iter().for_each(|item| strings(item, out)),
-            Value::Mapping(map) => {
-                for (key, value) in map {
-                    strings(key, out);
-                    strings(value, out);
-                }
-            }
-            Value::Tagged(tagged) => {
-                out.push(tagged.tag.to_string());
-                strings(&tagged.value, out);
-            }
-            Value::Null | Value::Bool(_) | Value::Number(_) => {}
-        }
-    }
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    let mut found = Vec::new();
-    for document in serde_yaml_ng::Deserializer::from_str(text) {
-        let Ok(value) = <Value as serde::Deserialize>::deserialize(document) else {
-            break;
-        };
-        strings(&value, &mut found);
-    }
-    found
+/// The words of `strings`, the strings the stream walk read (each key, value and tag of every
+/// document it walked, aliases replayed), each at `at`.
+fn stream_words(strings: &[String], at: &str) -> Vec<Word> {
+    strings
         .iter()
         .flat_map(|text| words(text))
         .map(|text| Word {
@@ -878,11 +857,12 @@ fn yaml_words(text: &str, at: &str) -> Vec<Word> {
 }
 
 /// Walks `spec.configFiles` for a credential: the list whole, names and contents; then each
-/// content as a YAML stream (every document, `TooLarge` when the walk cannot read it whole) and
-/// as a TOML table when it reads as one, whole and word by word; then every word of each raw
-/// content, named by its line. Nothing decoded is kept: the walk only reads what the program may
-/// read. A refusal stands at the content, never at a member inside it, so it spells no key of
-/// the file; beyond the walk's bound it is `TooLarge`.
+/// content as a YAML stream (every document, and after a scan error each piece between `---`
+/// lines; each string it reads whole and word by word; `TooLarge` when the walk cannot read it
+/// whole and what it read holds none) and as a TOML table when it reads as one, whole and word by
+/// word; then every word of each raw content, named by its line. Nothing decoded is kept: the
+/// walk only reads what the program may read. A refusal stands at the content, never at a member
+/// inside it, so it spells no key of the file; beyond the walk's bound it is `TooLarge`.
 fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
     credential(&yaml(&files, "spec.configFiles")?, "spec.configFiles")?;
     for (index, file) in files.iter().enumerate() {
@@ -897,7 +877,7 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
                 refusal
             }
         };
-        match yaml_stream_credential(&file.content) {
+        let (strings, whole) = match yaml_stream_credential(&file.content) {
             StreamWalk::Found { shape, .. } => {
                 return Err(Refusal::new(
                     spelling(RefusalReason::SecretLiteral),
@@ -905,17 +885,10 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
                     format!("{shape}, read as YAML"),
                 ));
             }
-            StreamWalk::TooLarge => {
-                return Err(Refusal::new(
-                    "TooLarge",
-                    at,
-                    "read as YAML, it costs more than the credential walk reads (its size, `[` or \
-                     `{` bytes, aliases or nesting)",
-                ));
-            }
-            StreamWalk::Clean => {}
-        }
-        word_credential(&yaml_words(&file.content, &at), &at).map_err(|refusal| {
+            StreamWalk::TooLarge { strings } => (strings, false),
+            StreamWalk::Clean { strings } => (strings, true),
+        };
+        word_credential(&stream_words(&strings, &at), &at).map_err(|refusal| {
             if refusal.reason == spelling(RefusalReason::SecretLiteral) {
                 Refusal {
                     detail: format!("{}, read as YAML", refusal.detail),
@@ -925,6 +898,14 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
                 refusal
             }
         })?;
+        if !whole {
+            return Err(Refusal::new(
+                "TooLarge",
+                at,
+                "read as YAML, it costs more than the credential walk reads (its size, `[` or \
+                 `{` bytes, aliases or nesting)",
+            ));
+        }
         if let Ok(table) = toml::from_str::<toml::Table>(&file.content) {
             credential(&yaml(&table, &at)?, &at).map_err(inside)?;
             let mut decoded = Vec::new();

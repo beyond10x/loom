@@ -147,7 +147,9 @@ pub fn check_text(
 /// (the decoder's byte, flow and alias bounds). Where [`check_text`] leaves a text the decoder
 /// refuses to the decoder, this answers [`StreamWalk::TooLarge`] for a stream it could not read
 /// whole, so a caller that decodes nothing (an opaque configuration file) never reads "no
-/// credential" for a text it did not walk. One leading U+FEFF is dropped first.
+/// credential" for a text it did not walk. After a scan error it walks the text again split at
+/// its `---` lines, each piece a stream of its own. Without a credential it answers every string
+/// it read, for the caller to walk word by word. One leading U+FEFF is dropped first.
 #[must_use]
 pub fn yaml_stream_credential(text: &str) -> StreamWalk {
     credentials::first_in_stream(text.strip_prefix('\u{feff}').unwrap_or(text))

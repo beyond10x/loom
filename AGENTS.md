@@ -950,12 +950,16 @@ ConfigMap key; `ConfigFileInvalid`), one an earlier entry gives or one the Confi
 `ConfigFileConflict`); a ConfigMap whose keys and values hold more than 1 MiB together, Kubernetes's
 limit (`TooLarge`, before apply); a credential in a file (`SecretLiteral` at
 `spec.configFiles[<i>].content` or `.name`, never a member inside the file): the list whole, each
-content as a YAML stream (every document, `b10x_loom_agent::yaml_stream_credential`) and as a TOML
-table when it reads as one (whole and word by word, so a YAML or TOML escape hides nothing from a
-program reading the file as either; an encoding neither undoes, such as base64, still can), then
-each word of the raw text, named by line, as `spec.connectorsConfig` is walked; `TooLarge` beyond
-the bound, and for a YAML stream whose aliases or nesting the walk cannot read whole within the
-agent decoder's alias bound; a `spec.workspace.mountPath` or
+content as a YAML stream (`b10x_loom_agent::yaml_stream_credential`: every document, each string
+it reads, keys, tags and a duplicate key included, whole and word by word; after a scan error the
+content split at lines that are exactly `---`, optionally followed by whitespace or a comment, each
+piece a stream of its own up to its own first scan error, under one budget) and as a TOML table
+when it reads as one (whole and word by word, so a YAML or TOML escape hides nothing from a program
+reading the file as either; an encoding neither undoes, such as base64, still can, and so can a
+YAML escape after a scan error and before the next `---` line), then each word of the raw text,
+named by line, as `spec.connectorsConfig` is walked; `TooLarge` beyond the bound, and for a YAML
+stream whose aliases or nesting the walk cannot read whole within the agent decoder's alias bound
+or the parser's recursion limit, once the strings read hold none; a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
