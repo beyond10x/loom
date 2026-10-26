@@ -6,7 +6,10 @@
 //! It watches `LoomAgent` in one namespace and reconciles each resource into one pod: a
 //! ServiceAccount, a ConfigMap (`agent.yaml`, `routes.yaml`, `connectors.toml`), a Deployment
 //! running `b10x-loom agent serve` behind the init container `b10x-loom agent check`, a
-//! NetworkPolicy and, with `expose.a2a`, a Service, each owned by the resource. Before any child
+//! NetworkPolicy and, with `expose.a2a`, a Service, each owned by the resource. A resource with
+//! `spec.command` is the `Command` variant (design § 9a): its pod runs the image's own program,
+//! with no init container, the spec at `/config/agent.yaml`, and, on either variant, a workspace
+//! volume and the Secret as files when the resource asks for them. Before any child
 //! is rendered the spec is checked in-process (`b10x_loom_agent::check_text`, the library behind
 //! `b10x-loom agent check`), `spec.routes` is walked for a credential and read by llm's strict
 //! routes parser, and `spec.connectorsConfig` is decoded as TOML and walked, word by word and
@@ -60,10 +63,19 @@ mod tests {
             connectors_config: Some(String::new()),
             secret_ref: Some(resource::SecretRef {
                 name: "s".to_owned(),
+                mount_path: Some("/m".to_owned()),
             }),
             image: Some(resource::ImageRef {
                 repository: "r".to_owned(),
                 tag: "t".to_owned(),
+            }),
+            command: Some(resource::CommandSpec {
+                entrypoint: Some(Vec::new()),
+                args: Some(Vec::new()),
+            }),
+            workspace: Some(resource::Workspace {
+                mount_path: "/w".to_owned(),
+                claim_name: Some("c".to_owned()),
             }),
         };
         let written = serde_json::to_value(full).expect("JSON");
@@ -96,7 +108,8 @@ mod tests {
                 "conditions",
                 "deployment",
                 "observedGeneration",
-                "state"
+                "state",
+                "variant"
             ]
         );
     }

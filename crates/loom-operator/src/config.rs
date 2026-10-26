@@ -9,9 +9,10 @@
 //! modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small}
 //! allowedSecretNames: [platform-operator-secrets]
 //! allowedEgressHosts: [chat.example]
+//! allowedClaimNames: [takt-workspace]
 //! ```
 //!
-//! `modelRoute` is optional; both lists may be absent, and an empty list admits none. A member
+//! `modelRoute` is optional; the three lists may be absent, and an empty list admits none. A member
 //! the configuration does not declare is refused, so a misspelt key is never ignored.
 
 use std::fmt;
@@ -40,6 +41,10 @@ pub struct Config {
     /// The hosts a `deploy.kubernetes.egress` entry may name; empty admits none.
     #[serde(default)]
     pub allowed_egress_hosts: Vec<String>,
+    /// The PersistentVolumeClaims a resource's `spec.workspace.claimName` may name; empty admits
+    /// none.
+    #[serde(default)]
+    pub allowed_claim_names: Vec<String>,
 }
 
 /// A container image, `repository:tag`.
@@ -132,6 +137,7 @@ impl Config {
             model_route: None,
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),
+            allowed_claim_names: Vec::new(),
         }
     }
 

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b
-// contract digest c97fcdb6564b6e5dd954e22cdbe2b298eacbda14f2adefb10a318d925744ada0
+// model digest 19e06a4dab22b0745a39a51781dd29b45539baab651c06b0f7836588fe6c4ea1
+// contract digest f087de474d365d2dd4f92e367ad82b7268e63c9e03d035cc5eecb734180680f5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -9,6 +9,15 @@
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
+/// AgentVariant — `loom.resource.AgentVariant`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentVariant {
+    /// `AgentServe`.
+    AgentServe,
+    /// `Command`.
+    Command,
+}
+
 /// CheckResult — `loom.resource.CheckResult`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckResult {
@@ -16,6 +25,15 @@ pub struct CheckResult {
     pub exit_code: i64,
     /// `message` — `String`.
     pub message: String,
+}
+
+/// CommandSpec — `loom.resource.CommandSpec`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSpec {
+    /// `entrypoint` — `Optional<List<String>>`.
+    pub entrypoint: Option<Vec<String>>,
+    /// `args` — `Optional<List<String>>`.
+    pub args: Option<Vec<String>>,
 }
 
 /// Condition — `loom.resource.Condition`.
@@ -105,6 +123,10 @@ pub struct LoomAgentSpec {
     pub secret_ref: Option<SecretRef>,
     /// `image` — `Optional<loom.resource.ImageRef>`.
     pub image: Option<ImageRef>,
+    /// `command` — `Optional<loom.resource.CommandSpec>`.
+    pub command: Option<CommandSpec>,
+    /// `workspace` — `Optional<loom.resource.Workspace>`.
+    pub workspace: Option<Workspace>,
 }
 
 /// ResourceName — `loom.resource.ResourceName`: a distinct wrapper around `String`.
@@ -116,6 +138,17 @@ pub struct ResourceName(pub String);
 pub struct SecretRef {
     /// `name` — `String`.
     pub name: String,
+    /// `mount_path` — `Optional<String>`.
+    pub mount_path: Option<String>,
+}
+
+/// Workspace — `loom.resource.Workspace`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workspace {
+    /// `mount_path` — `String`.
+    pub mount_path: String,
+    /// `claim_name` — `Optional<String>`.
+    pub claim_name: Option<String>,
 }
 
 /// What LoomAgent — `loom.resource.LoomAgent` — holds, apart from where it is in its lifecycle.
@@ -132,6 +165,8 @@ pub struct LoomAgentData {
     pub check: Option<CheckResult>,
     /// `deployment` — `Optional<loom.resource.DeploymentStatus>`.
     pub deployment: Option<DeploymentStatus>,
+    /// `variant` — `Optional<loom.resource.AgentVariant>`.
+    pub variant: Option<AgentVariant>,
     /// `conditions` — `Optional<List<loom.resource.Condition>>`.
     pub conditions: Option<Vec<Condition>>,
 }
@@ -525,6 +560,8 @@ pub struct RecordCheck {
     pub exit_code: i64,
     /// `message` — `String`.
     pub message: String,
+    /// `variant` — `loom.resource.AgentVariant`.
+    pub variant: AgentVariant,
 }
 
 /// Everything `loom.resource.RecordCheck` can result in — one variant per declared outcome.
@@ -660,6 +697,8 @@ pub struct LoomAgents {
     pub check: Option<CheckResult>,
     /// `deployment` — `Optional<loom.resource.DeploymentStatus>`.
     pub deployment: Option<DeploymentStatus>,
+    /// `variant` — `Optional<loom.resource.AgentVariant>`.
+    pub variant: Option<AgentVariant>,
     /// `conditions` — `Optional<List<loom.resource.Condition>>`.
     pub conditions: Option<Vec<Condition>>,
     /// `state` — `loom.resource.LoomAgent.State`.

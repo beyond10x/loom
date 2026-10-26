@@ -760,10 +760,20 @@ An agent deployed to Kubernetes is a `LoomAgent` resource (group `loom.beyond10x
 `v1alpha1`, namespaced), the `loom.resource` domain (`ess/domains/resource.yaml`,
 `story:loom-agent-resource-domain`). Its spec, `LoomAgentSpec`, holds the `loom.agent/1` document
 verbatim as `agent` (no second agent schema), the llm `routes` document untyped, the
-connectors-local TOML, a Secret reference and an image override. The entity `LoomAgent` is the
+connectors-local TOML, a Secret reference, an image override, an optional command and an optional
+workspace volume. The entity `LoomAgent` is the
 controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
 the state Pending, Running, Refused or Degraded. `ApplyLoomAgent`, `RecordCheck`,
 `ObserveDeployment` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
+
+A resource is one of two variants (`AgentVariant`, `story:loom-agent-command-variant`, design § 9a):
+`AgentServe` when `spec.command` is absent, the pod running `b10x-loom agent serve`; `Command` when
+it is present, the pod running the image's own program (`spec.command.entrypoint` and `args`, each
+left to the image when absent) with `spec.agent` mounted at `/config/agent.yaml`. `spec.workspace`
+(`mountPath`, optional `claimName`) is a read-write volume on either variant, and
+`spec.secretRef.mountPath` mounts the Secret as files beside the environment it gives. `RecordCheck`
+records the variant the controller admitted; `respecified` clears it, and the view and
+`status.variant` carry it.
 
 The spec lives in the cluster, in the resource; the record keeps only the generation it applied
 and the check for that generation, and a controller re-reads the spec on every reconcile. A stored
@@ -804,7 +814,7 @@ the schema admitted, which `b10x-loom agent check` reads again. The decoder's ow
 specification does not declare (the `format` value, ports, non-blank text, variable names, RFC 3339
 instants) are not in the CRD.
 
-The status is `observedGeneration`, `state`, `check`, `deployment` and `conditions`.
+The status is `observedGeneration`, `state`, `check`, `deployment`, `variant` and `conditions`.
 `status.state` is the lifecycle state the design calls `phase`. `deployment` (`availability`
 Available or Unavailable) is what the controller last read of the child Deployment: every
 `ObserveDeployment` outcome that reads one sets it, and `respecified` clears it. `still-running` and
@@ -830,7 +840,8 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 
 `config.yaml` (`src/config.rs`, unknown members refused): `namespace`,
 `defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
-`modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts` (an empty list
+`modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
+`allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
 admits none). One instance watches one namespace with one replica; there is no leader election.
 
 The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
@@ -850,7 +861,13 @@ beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admi
 words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
 `secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
-would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); then
+would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
+credential in `spec.command` (`SecretLiteral`); a `spec.workspace.mountPath` or
+`spec.secretRef.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
+`/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
+(`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
+`loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
+`agent serve` does not; with no routes and no `modelRoute` it gets an empty `routes.yaml`. Then
 each child it would render is read, and one that exists without this resource as controller is
 `ChildNotOwned`, naming its kind and name. That refusal is the cluster's, not the spec's: each later
 reconcile at that generation reads the children again, and once none is someone else's the record
@@ -883,8 +900,14 @@ user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests eq
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
 default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
 with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service.
-`deploy.kubernetes.image_repository` is not read. The golden file
-`tests/golden/platform-operator.yaml` is rewritten by
+`deploy.kubernetes.image_repository` is not read. A `Command` resource's Deployment has no init
+container, runs `spec.command`, mounts the ConfigMap at `/config` (the contract with the image:
+`spec.agent` is `/config/agent.yaml`, the document the resource holds, keys in the order the API
+server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`), sets `HOME=/var/lib/agent`
+and adds an emptyDir at `/tmp`; `status.conditions` `Checked` then reads `SpecAdmitted` instead of
+`SpecServeable`. `spec.workspace` adds the claim or an emptyDir, `spec.secretRef.mountPath` a
+read-only Secret volume (mode 0440), and either sets `fsGroup` 10001. The golden files
+`tests/golden/platform-operator.yaml` and `tests/golden/takt-delivery.yaml` are rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
 
 The chart `charts/loom-agents` (Helm 3) installs `crds/` (§ Generated files), the controller

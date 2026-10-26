@@ -312,8 +312,18 @@ configuration. A refusal is the resource's status (`state: Refused`, `check` nam
 and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
 checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
 with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
-(Pending, Running, Degraded or Refused), `check`, `deployment` and the conditions `Checked` and
-`Available`.
+(Pending, Running, Degraded or Refused), `check`, `deployment`, `variant` and the conditions
+`Checked` and `Available`.
+
+A resource with `spec.command` is the `Command` variant: its pod runs the image's own program
+(`spec.command.entrypoint` and `args`, each left to the image when absent) instead of
+`b10x-loom agent serve`, with no init container, and reads `spec.agent` at `/config/agent.yaml`.
+That is how a takt delivery runs as a `LoomAgent`. `spec.workspace` (`mountPath`, optional
+`claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
+`allowedClaimNames` or else an emptyDir, and `spec.secretRef.mountPath` mounts the Secret as files
+beside the environment it gives. For this variant the controller checks `spec.agent` only for a
+credential and against the `loom.agent/1` decoder, not the plugin catalog, and walks
+`spec.command` for a credential too.
 
 `b10x-loom-operator render` prints what the controller would apply for one resource and talks to no
 cluster. Install it with `cargo install --locked --path crates/loom-operator`. Here the example

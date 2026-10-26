@@ -4,7 +4,9 @@
 //! 1. `spec.agent`, as YAML, through `b10x_loom_agent::check_text` against the plugin catalog:
 //!    the check `b10x-loom agent check` runs, in-process (`Malformed`, `SecretLiteral`,
 //!    `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
-//!    `EmptyChannelAllow`).
+//!    `EmptyChannelAllow`). For the `Command` variant (`spec.command` present), whose
+//!    document the image's program reads and `agent serve` does not, only the credential walk
+//!    of that library (`SecretLiteral`) and the `loom.agent/1` decoder (`Malformed`).
 //! 2. `spec.routes` walked for a credential by the same library (`SecretLiteral`); a routes
 //!    document that is not a mapping is `Malformed`, and so is one llm's strict `llm.routes/1`
 //!    parser (`llm_models::routes::Routes::parse`, the reader of the pod's `routes.yaml`)
@@ -17,12 +19,20 @@
 //!    text, comments included, named by its line. A word is what whitespace and `=`, `"`, `'`,
 //!    `,`, `[`, `]`, `{`, `}` separate, its leading `#` dropped; a word that is a token prefix
 //!    ending in a space (`Bearer`) is walked with the word after it.
-//! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`).
+//! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`);
+//!    a `Command` resource then gets an empty `routes.yaml`.
 //! 5. A `spec.secretRef` outside the configuration's `allowedSecretNames` (`SecretNotAllowed`).
 //! 6. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
 //! 7. A `deploy.kubernetes.egress` entry naming neither a host nor a namespace, whose rule would
 //!    admit every destination on its port, or naming a host outside `allowedEgressHosts`
 //!    (`EgressHostNotAllowed`).
+//! 8. `spec.command`, each entrypoint and argument walked whole and word by word as the
+//!    connectors text is (`SecretLiteral`).
+//! 9. A `spec.workspace.mountPath` or `spec.secretRef.mountPath` that is not absolute and plain,
+//!    is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`]) or the
+//!    other one (`MountPathInvalid`).
+//! 10. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
+//!     (`ClaimNotAllowed`).
 //!
 //! The walk of steps 2 and 3 reads a text that is not a `loom.agent/1` document only within the
 //! agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and [`MAX_WALKED_BYTES`]; a
@@ -32,15 +42,18 @@
 //! A refusal reads `refused: <reason> at <member>: <detail>`, as `b10x-loom agent check` prints
 //! it, the member spelt from the resource (`spec.agent.bindings[1].base_url`); its detail never
 //! repeats a value of the resource. An admitted spec reads as the check's line, `checked <agent>:
-//! <n> states, <m> bindings, protocol <protocol>`.
+//! <n> states, <m> bindings, protocol <protocol>`; an admitted `Command` spec as `admitted <agent>
+//! for its own command: …`.
 
 use b10x_loom_agent::{Checked, RefusalReason, TOKEN_PREFIXES, check_text, spelling};
 use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
 use serde_yaml_ng::{Mapping, Value};
 
+use b10x_loom_resource::model::AgentVariant;
+
 use crate::config::{Config, ModelRoute};
-use crate::resource::LoomAgentSpec;
+use crate::resource::{CommandSpec, LoomAgentSpec};
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
@@ -100,22 +113,134 @@ pub struct Admitted {
     pub connectors: String,
     /// Whether `routes.yaml` is the default routes document, which opens the model route.
     pub default_routes: bool,
-    /// What the check found.
-    pub checked: Checked,
+    /// What the pod runs.
+    pub variant: AgentVariant,
+    /// What the serve check found; absent for the `Command` variant, whose spec is decoded and
+    /// walked for a credential but not checked against the plugin catalog.
+    pub checked: Option<Checked>,
 }
 
 impl Admitted {
     /// The line the check is recorded as in `status.check.message`.
     #[must_use]
     pub fn message(&self) -> String {
-        format!(
-            "checked {}: {} states, {} bindings, protocol {}",
-            self.checked.agent,
-            self.checked.states,
-            self.checked.bindings,
-            self.checked.protocol.as_deref().unwrap_or("none")
-        )
+        match &self.checked {
+            Some(checked) => format!(
+                "checked {}: {} states, {} bindings, protocol {}",
+                checked.agent,
+                checked.states,
+                checked.bindings,
+                checked.protocol.as_deref().unwrap_or("none")
+            ),
+            None => format!(
+                "admitted {} for its own command: a loom.agent/1 document with no credential, \
+                 at {COMMAND_SPEC_FILE}",
+                self.spec.agent.id.0
+            ),
+        }
     }
+}
+
+/// Where the `Command` variant's container reads `spec.agent`.
+pub const COMMAND_SPEC_FILE: &str = "/config/agent.yaml";
+
+/// The paths the controller mounts itself: the serve variant's spec directory, the `Command`
+/// variant's `/config`, the state directory and `/tmp`. A `spec.workspace` or
+/// `spec.secretRef.mountPath` may be none of them, nor beneath or above one.
+pub const RESERVED_MOUNTS: [&str; 4] = ["/etc/agent", "/config", "/var/lib/agent", "/tmp"];
+
+/// The longest mount path the controller accepts, in bytes.
+pub const MAX_MOUNT_PATH: usize = 1024;
+
+/// Whether one of the two absolute plain paths is the other or beneath it.
+fn overlaps(a: &str, b: &str) -> bool {
+    let beneath = |inner: &str, outer: &str| {
+        inner == outer
+            || inner
+                .strip_prefix(outer)
+                .is_some_and(|rest| rest.starts_with('/'))
+    };
+    beneath(a, b) || beneath(b, a)
+}
+
+/// Refuses `path`, the member `at`, unless it is absolute and plain: no control character, no
+/// empty, `.` or `..` component, not `/`, no trailing `/`, at most [`MAX_MOUNT_PATH`] bytes.
+fn plain_mount_path(path: &str, at: &str) -> Result<(), Refusal> {
+    let refused = |why: &str| Err(Refusal::new("MountPathInvalid", at, why));
+    if path.len() > MAX_MOUNT_PATH {
+        return refused("it is longer than the controller accepts");
+    }
+    if path.chars().any(char::is_control) {
+        return refused("it holds a control character");
+    }
+    let Some(rest) = path.strip_prefix('/') else {
+        return refused("it is not an absolute path");
+    };
+    if rest.is_empty() {
+        return refused("it is the root directory");
+    }
+    if rest
+        .split('/')
+        .any(|part| part.is_empty() || part == "." || part == "..")
+    {
+        return refused("it has an empty, `.` or `..` component");
+    }
+    Ok(())
+}
+
+/// Refuses a workspace or Secret mount path that is not plain, overlaps a mount the controller
+/// makes, or overlaps the other.
+fn mount_paths(spec: &LoomAgentSpec) -> Result<(), Refusal> {
+    let mut paths = Vec::new();
+    if let Some(workspace) = &spec.workspace {
+        paths.push((workspace.mount_path.as_str(), "spec.workspace.mountPath"));
+    }
+    if let Some(path) = spec
+        .secret_ref
+        .as_ref()
+        .and_then(|secret| secret.mount_path.as_deref())
+    {
+        paths.push((path, "spec.secretRef.mountPath"));
+    }
+    for (path, at) in &paths {
+        plain_mount_path(path, at)?;
+        if RESERVED_MOUNTS
+            .iter()
+            .any(|reserved| overlaps(path, reserved))
+        {
+            return Err(Refusal::new(
+                "MountPathInvalid",
+                *at,
+                "it is or overlaps a directory the controller mounts",
+            ));
+        }
+    }
+    if let [(first, _), (second, at)] = paths.as_slice()
+        && overlaps(first, second)
+    {
+        return Err(Refusal::new(
+            "MountPathInvalid",
+            *at,
+            "it is or overlaps spec.workspace.mountPath",
+        ));
+    }
+    Ok(())
+}
+
+/// Walks `spec.command`, each entry whole and word by word, for a credential.
+fn command_credential(command: &CommandSpec) -> Result<(), Refusal> {
+    credential(&yaml(command, "spec.command")?, "spec.command")?;
+    let mut found = Vec::new();
+    for (list, items) in [("entrypoint", &command.entrypoint), ("args", &command.args)] {
+        for (index, item) in items.iter().flatten().enumerate() {
+            found.extend(words(item).into_iter().map(|text| Word {
+                text,
+                member: format!("spec.command.{list}[{index}]"),
+                line: None,
+            }));
+        }
+    }
+    word_credential(&found, "spec.command")
 }
 
 /// `member` of a document at `at` in the resource.
@@ -267,7 +392,7 @@ fn raw_words(text: &str) -> Vec<Word> {
 
 /// The first credential among `words` as a refusal at the word's member, its line added to the
 /// detail. The words are walked as YAML sequences, each within the walk's bounds.
-fn word_credential(words: &[Word]) -> Result<(), Refusal> {
+fn word_credential(words: &[Word], at: &str) -> Result<(), Refusal> {
     let mut start = 0;
     while start < words.len() {
         let (mut end, mut bytes, mut opened) = (start, 0_usize, 0_usize);
@@ -288,7 +413,7 @@ fn word_credential(words: &[Word]) -> Result<(), Refusal> {
         let text = serde_yaml_ng::to_string(&texts).map_err(|_| {
             Refusal::new(
                 spelling(RefusalReason::Malformed),
-                "spec.connectorsConfig",
+                at,
                 "cannot be written as YAML",
             )
         })?;
@@ -307,11 +432,7 @@ fn word_credential(words: &[Word]) -> Result<(), Refusal> {
                         None => detail,
                     },
                 ),
-                None => Refusal::new(
-                    spelling(RefusalReason::SecretLiteral),
-                    "spec.connectorsConfig",
-                    detail,
-                ),
+                None => Refusal::new(spelling(RefusalReason::SecretLiteral), at, detail),
             });
         }
         start = end;
@@ -329,8 +450,8 @@ fn connectors_credential(text: &str) -> Result<(), Refusal> {
     )?;
     let mut decoded = Vec::new();
     decoded_words(&table, "spec.connectorsConfig", &mut decoded);
-    word_credential(&decoded)?;
-    word_credential(&raw_words(text))
+    word_credential(&decoded, "spec.connectorsConfig")?;
+    word_credential(&raw_words(text), "spec.connectorsConfig")
 }
 
 /// `text`, the `spec.connectorsConfig` TOML, decoded.
@@ -422,14 +543,21 @@ pub fn admit(
     config: &Config,
     actions: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Result<Admitted, Refusal> {
+    let variant = spec.variant();
     let agent = yaml(&spec.agent, "spec.agent")?;
-    let checked = check_text(&agent, actions).map_err(|refused| {
-        Refusal::new(
-            spelling(refused.reason),
-            within("spec.agent", &refused.member),
-            refused.detail,
-        )
-    })?;
+    let checked = match variant {
+        AgentVariant::AgentServe => Some(check_text(&agent, actions).map_err(|refused| {
+            Refusal::new(
+                spelling(refused.reason),
+                within("spec.agent", &refused.member),
+                refused.detail,
+            )
+        })?),
+        AgentVariant::Command => {
+            credential(&agent, "spec.agent")?;
+            None
+        }
+    };
     let decoded = parse(&agent).map_err(|error| {
         Refusal::new(
             spelling(RefusalReason::Malformed),
@@ -465,6 +593,7 @@ pub fn admit(
     let (routes, default_routes) = match (given, &config.model_route) {
         (Some(text), _) => (text, false),
         (None, Some(route)) => (default_routes(route, &decoded), true),
+        (None, None) if variant == AgentVariant::Command => (String::new(), false),
         (None, None) => {
             return Err(Refusal::new(
                 "NoModelRoute",
@@ -517,12 +646,32 @@ pub fn admit(
         }
     }
 
+    if let Some(command) = &spec.command {
+        command_credential(command)?;
+    }
+
+    mount_paths(spec)?;
+
+    if let Some(claim) = spec
+        .workspace
+        .as_ref()
+        .and_then(|workspace| workspace.claim_name.as_ref())
+        && !config.allowed_claim_names.contains(claim)
+    {
+        return Err(Refusal::new(
+            "ClaimNotAllowed",
+            "spec.workspace.claimName",
+            "the controller's allowedClaimNames does not hold it",
+        ));
+    }
+
     Ok(Admitted {
         spec: decoded,
         agent,
         routes,
         connectors,
         default_routes,
+        variant,
         checked,
     })
 }
@@ -553,6 +702,8 @@ mod tests {
             connectors_config: connectors.map(str::to_owned),
             secret_ref: None,
             image: None,
+            command: None,
+            workspace: None,
         }
     }
 

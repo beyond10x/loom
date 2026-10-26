@@ -513,6 +513,17 @@ spec:
                 - agent
                 - model
                 type: object
+              command:
+                properties:
+                  args:
+                    items:
+                      type: string
+                    type: array
+                  entrypoint:
+                    items:
+                      type: string
+                    type: array
+                type: object
               connectorsConfig:
                 type: string
               image:
@@ -529,10 +540,21 @@ spec:
                 x-kubernetes-preserve-unknown-fields: true
               secretRef:
                 properties:
+                  mountPath:
+                    type: string
                   name:
                     type: string
                 required:
                 - name
+                type: object
+              workspace:
+                properties:
+                  claimName:
+                    type: string
+                  mountPath:
+                    type: string
+                required:
+                - mountPath
                 type: object
             required:
             - agent
@@ -593,6 +615,11 @@ spec:
                 - Pending
                 - Refused
                 - Running
+                type: string
+              variant:
+                enum:
+                - AgentServe
+                - Command
                 type: string
             required:
             - observedGeneration

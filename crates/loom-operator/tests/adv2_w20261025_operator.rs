@@ -17,7 +17,8 @@ use b10x_loom_operator::reconcile::{Context, reconcile};
 use b10x_loom_operator::resource::LoomAgent;
 use b10x_loom_operator::status;
 use b10x_loom_resource::model::{
-    CheckResult, DeploymentAvailability, DeploymentStatus, LoomAgentState, LoomAgents, ResourceName,
+    AgentVariant, CheckResult, DeploymentAvailability, DeploymentStatus, LoomAgentState,
+    LoomAgents, ResourceName,
 };
 use http::{Method, Request, Response, StatusCode};
 use kube::Client;
@@ -708,16 +709,23 @@ fn adv2_every_states_status_is_admitted_by_the_crds_status_schema() {
     ] {
         for check in &checks {
             for read in reads {
-                let row = LoomAgents {
-                    name: ResourceName(NAME.to_owned()),
-                    observed_generation: 7,
-                    check: check.clone(),
-                    deployment: read.map(|availability| DeploymentStatus { availability }),
-                    conditions: None,
-                    state,
-                };
-                let value = serde_json::to_value(status::status(&row)).expect("JSON");
-                violations(schema, &value, &format!("{state:?}"), &mut out);
+                for variant in [
+                    None,
+                    Some(AgentVariant::AgentServe),
+                    Some(AgentVariant::Command),
+                ] {
+                    let row = LoomAgents {
+                        name: ResourceName(NAME.to_owned()),
+                        observed_generation: 7,
+                        check: check.clone(),
+                        deployment: read.map(|availability| DeploymentStatus { availability }),
+                        variant,
+                        conditions: None,
+                        state,
+                    };
+                    let value = serde_json::to_value(status::status(&row)).expect("JSON");
+                    violations(schema, &value, &format!("{state:?}"), &mut out);
+                }
             }
         }
     }

@@ -12,10 +12,10 @@ use std::collections::BTreeMap;
 
 use b10x_loom_resource::LoomAgentRecord;
 use b10x_loom_resource::model::{
-    ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, Condition, ConditionStatus, ConditionType,
-    DeleteLoomAgent, DeleteLoomAgentOutcome, DeploymentAvailability, DeploymentStatus,
-    LoomAgentObserved, LoomAgentState, LoomAgents, ObserveDeployment, ObserveDeploymentOutcome,
-    RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
+    AgentVariant, ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, Condition, ConditionStatus,
+    ConditionType, DeleteLoomAgent, DeleteLoomAgentOutcome, DeploymentAvailability,
+    DeploymentStatus, LoomAgentObserved, LoomAgentState, LoomAgents, ObserveDeployment,
+    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
 };
 use ess_conformance::target::{ObservedEvent, SemanticCommandResult, ViewRow};
 use ess_primitives::ids::CorrelationId;
@@ -117,6 +117,7 @@ pub(crate) fn record_check(
         name: name(input)?,
         generation: codec::integer(input, "generation")?,
         exit_code: codec::integer(input, "exit_code")?,
+        variant: variant(input, "variant")?,
         message: codec::text(input, "message")?,
     };
     Some(match live.resources.record_check(command).ok()? {
@@ -158,6 +159,23 @@ fn availability(input: &Input, name: &str) -> Option<DeploymentAvailability> {
         "Available" => DeploymentAvailability::Available,
         "Unavailable" => DeploymentAvailability::Unavailable,
         _ => return None,
+    })
+}
+
+/// The `loom.resource.AgentVariant` field `name`, by its declared name.
+fn variant(input: &Input, name: &str) -> Option<AgentVariant> {
+    Some(match input.get(name)?.as_text()? {
+        "AgentServe" => AgentVariant::AgentServe,
+        "Command" => AgentVariant::Command,
+        _ => return None,
+    })
+}
+
+/// The declared name of a `loom.resource.AgentVariant`.
+fn variant_node(variant: AgentVariant) -> Node {
+    codec::text_node(match variant {
+        AgentVariant::AgentServe => "AgentServe",
+        AgentVariant::Command => "Command",
     })
 }
 
@@ -288,6 +306,10 @@ fn row(held: &LoomAgents) -> ViewRow {
             held.conditions.as_deref().map_or(Node::Null, |held| {
                 Node::Seq(held.iter().map(condition).collect())
             }),
+        ),
+        (
+            "variant".to_owned(),
+            held.variant.map_or(Node::Null, variant_node),
         ),
         ("state".to_owned(), state(held.state)),
     ])

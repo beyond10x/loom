@@ -1,0 +1,372 @@
+apiVersion: v1
+kind: ServiceAccount
+automountServiceAccountToken: false
+metadata:
+  labels:
+    app.kubernetes.io/instance: platform-operator
+    app.kubernetes.io/managed-by: b10x-loom-operator
+    app.kubernetes.io/name: loom-agent
+  name: platform-operator
+  namespace: agents
+  ownerReferences:
+  - apiVersion: loom.beyond10x.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: LoomAgent
+    name: platform-operator
+    uid: 00000000-0000-4000-8000-000000000001
+---
+apiVersion: v1
+kind: ConfigMap
+data:
+  agent.yaml: |
+    agent:
+      brief: You watch one chat channel for questions about the platform. Read logs and metrics before you answer; say what you read. Never claim a fix you did not observe.
+      id: platform-operator
+      name: Platform operator
+    bindings:
+    - adapter: chat
+      connection: ops
+      get: conversations.history
+      kind: connectors
+      list: conversations.list
+      name: chat
+      search: conversations.replies
+      write: chat.postMessage
+    - allow_paths:
+      - /api/v1/query_range
+      - /api/v1/labels
+      base_url: http://logs.monitoring.svc:3100
+      kind: http
+      max_bytes: 262144
+      method: GET
+      name: logs
+    - allow_paths:
+      - /api/v1/query
+      - /api/v1/alerts
+      base_url: http://metrics.monitoring.svc:9090
+      kind: http
+      max_bytes: 262144
+      method: GET
+      name: metrics
+    channel:
+      allow:
+      - C0000000001
+      binding: chat
+      bot_user_id: U0000000001
+    deploy:
+      kubernetes:
+        egress:
+        - host: chat.example
+          name: chat-api
+          port: 443
+        - host: models.example
+          name: model-api
+          port: 443
+        - name: logs
+          namespace: monitoring
+          port: 3100
+          selector:
+          - name: app
+            value: logs
+        - name: metrics
+          namespace: monitoring
+          port: 9090
+          selector:
+          - name: app
+            value: metrics
+        image_repository: registry.example/agents/platform-operator
+        ingress:
+        - from_namespace: operator-clients
+          name: a2a
+          port: 8080
+        namespace: agents
+        resources:
+          cpu: 250m
+          memory: 256Mi
+        service_account: platform-operator
+    format: loom.agent/1
+    loops:
+      inner:
+        classify_threshold: 0.5
+        model_budget: 16
+        protocol: takt-delivery@1
+        step_budget: 8
+      outer:
+        lookback_minutes: 120
+        min_age_minutes: 0
+        poll_interval_seconds: 60
+        sources:
+        - chat
+    model:
+      roles:
+      - model: small
+        role: agent
+      - model: small
+        role: classifier
+      routes: routes.yaml
+    policy:
+      capabilities:
+      - datasource.read
+      - reply.propose
+      - reply.send
+    runtime:
+      confinement: none
+      connectors:
+        config: /etc/agent/connectors.toml
+        program: /usr/local/bin/connectors
+        state_dir: /var/lib/agent/connectors
+        timeout_seconds: 30
+      state_dir: /var/lib/agent
+    session:
+      budget:
+        max_steps: 20
+        max_tokens: 400000
+      confinement: none
+      kind: ClaudeCode
+      stop:
+        approval_gate: true
+        idle_bound: 2
+        on_breach: DiscardStep
+      tools:
+        allow:
+        - Read
+        - Grep
+        decisions: ask
+        deny:
+        - Bash
+        egress:
+        - host: logs.example
+          max_bytes: 262144
+          name: logs
+          port: 3100
+    states:
+    - actions:
+      - source.read
+      - reply.propose
+      - reply.send
+      - reply.decline
+      name: answer
+      sources:
+      - logs
+      - metrics
+      - chat
+      when:
+        intent: Ask
+    - actions:
+      - source.read
+      - reply.propose
+      - reply.send
+      - reply.decline
+      name: look-up
+      sources:
+      - logs
+      - metrics
+      when:
+        intent: Find
+    - actions:
+      - reply.decline
+      name: hand-off
+      sources: []
+      when:
+        intent: Task
+    writes:
+      max_per_hour: 30
+      mode: auto
+  connectors.toml: ''
+  routes.yaml: |
+    format: llm.routes/1
+    endpoints:
+      model-route:
+        base_url: http://model-route.agents.svc:8080/v1
+        protocol: messages
+        auth:
+          kind: anonymous
+    routes:
+      small: model-route/small-model
+metadata:
+  labels:
+    app.kubernetes.io/instance: platform-operator
+    app.kubernetes.io/managed-by: b10x-loom-operator
+    app.kubernetes.io/name: loom-agent
+  name: platform-operator-spec
+  namespace: agents
+  ownerReferences:
+  - apiVersion: loom.beyond10x.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: LoomAgent
+    name: platform-operator
+    uid: 00000000-0000-4000-8000-000000000001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: platform-operator
+    app.kubernetes.io/managed-by: b10x-loom-operator
+    app.kubernetes.io/name: loom-agent
+  name: platform-operator
+  namespace: agents
+  ownerReferences:
+  - apiVersion: loom.beyond10x.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: LoomAgent
+    name: platform-operator
+    uid: 00000000-0000-4000-8000-000000000001
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: platform-operator
+      app.kubernetes.io/name: loom-agent
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations:
+        loom.beyond10x.dev/generation: '1'
+      labels:
+        app.kubernetes.io/instance: platform-operator
+        app.kubernetes.io/managed-by: b10x-loom-operator
+        app.kubernetes.io/name: loom-agent
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - run
+        - --repo
+        - /workspace/takt
+        - --iterations
+        - '1'
+        env:
+        - name: HOME
+          value: /var/lib/agent
+        envFrom:
+        - secretRef:
+            name: platform-operator-secrets
+        image: registry.example/takt:0.12.0
+        name: loom-agent
+        resources:
+          limits:
+            cpu: 250m
+            memory: 256Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+        volumeMounts:
+        - mountPath: /config
+          name: spec
+          readOnly: true
+        - mountPath: /var/lib/agent
+          name: state
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /workspace
+          name: workspace
+        - mountPath: /var/run/secrets/takt
+          name: credentials
+          readOnly: true
+      securityContext:
+        fsGroup: 10001
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: platform-operator
+      volumes:
+      - configMap:
+          name: platform-operator-spec
+        name: spec
+      - emptyDir: {}
+        name: state
+      - emptyDir: {}
+        name: tmp
+      - name: workspace
+        persistentVolumeClaim:
+          claimName: takt-workspace
+      - name: credentials
+        secret:
+          defaultMode: 288
+          secretName: platform-operator-secrets
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/instance: platform-operator
+    app.kubernetes.io/managed-by: b10x-loom-operator
+    app.kubernetes.io/name: loom-agent
+  name: platform-operator
+  namespace: agents
+  ownerReferences:
+  - apiVersion: loom.beyond10x.dev/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: LoomAgent
+    name: platform-operator
+    uid: 00000000-0000-4000-8000-000000000001
+spec:
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+  - ports:
+    - port: 443
+      protocol: TCP
+  - ports:
+    - port: 443
+      protocol: TCP
+  - ports:
+    - port: 3100
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: logs
+  - ports:
+    - port: 9090
+      protocol: TCP
+    to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+      podSelector:
+        matchLabels:
+          app: metrics
+  - ports:
+    - port: 8080
+      protocol: TCP
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: operator-clients
+    ports:
+    - port: 8080
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: platform-operator
+      app.kubernetes.io/name: loom-agent
+  policyTypes:
+  - Ingress
+  - Egress

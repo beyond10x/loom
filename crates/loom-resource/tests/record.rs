@@ -4,11 +4,12 @@
 //! as a literal.
 
 use b10x_loom_resource::model::{
-    ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, DeleteLoomAgent, DeleteLoomAgentOutcome,
-    DeploymentAvailability, DeploymentStatus, LoomAgentApplied, LoomAgentDegraded,
-    LoomAgentDeleted, LoomAgentNotFound, LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused,
-    LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents, ObserveDeployment,
-    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
+    AgentVariant, ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, DeleteLoomAgent,
+    DeleteLoomAgentOutcome, DeploymentAvailability, DeploymentStatus, LoomAgentApplied,
+    LoomAgentDegraded, LoomAgentDeleted, LoomAgentNotFound, LoomAgentObserved, LoomAgentRecovered,
+    LoomAgentRefused, LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents,
+    ObserveDeployment, ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName,
+    StaleGeneration,
 };
 use b10x_loom_resource::{LoomAgentRecord, ResourceEvent};
 
@@ -37,6 +38,7 @@ fn check(
             generation,
             exit_code,
             message: message.to_owned(),
+            variant: AgentVariant::AgentServe,
         })
         .expect("the generated behaviour answers every check")
 }
@@ -89,6 +91,7 @@ fn observed(
             message: message.to_owned(),
         }),
         deployment: availability.map(|availability| DeploymentStatus { availability }),
+        variant: check.map(|_| AgentVariant::AgentServe),
         conditions: None,
         state,
     })
@@ -431,6 +434,7 @@ fn two_resources_are_held_apart() {
                     message: String::new()
                 }),
                 deployment: None,
+                variant: Some(AgentVariant::AgentServe),
                 conditions: None,
                 state: LoomAgentState::Running,
             },
@@ -439,6 +443,7 @@ fn two_resources_are_held_apart() {
                 observed_generation: 1,
                 check: None,
                 deployment: None,
+                variant: None,
                 conditions: None,
                 state: LoomAgentState::Pending,
             },

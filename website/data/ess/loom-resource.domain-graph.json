@@ -22,6 +22,10 @@
           "type": "Optional<DeploymentStatus>"
         },
         {
+          "name": "variant",
+          "type": "Optional<AgentVariant>"
+        },
+        {
           "name": "conditions",
           "type": "Optional<List<Condition>>"
         }

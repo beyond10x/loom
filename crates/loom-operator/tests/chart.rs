@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_yaml_ng::Value;
 
 /// The overrides `task chart-check` renders the chart with, as `--set` arguments.
-const OVERRIDES: [&str; 7] = [
+const OVERRIDES: [&str; 8] = [
     "image.tag=0.0.1-test",
     "agentImage.repository=registry.example/other-agent",
     "modelRoute.url=http://model-route.agents.svc:8080/v1",
@@ -23,6 +23,7 @@ const OVERRIDES: [&str; 7] = [
     "modelRoute.model=small-model",
     "allowedSecretNames={platform-operator-secrets}",
     "allowedEgressHosts={chat.example,models.example}",
+    "allowedClaimNames={takt-workspace}",
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -240,6 +241,7 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
             model_route: None,
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),
+            allowed_claim_names: Vec::new(),
         }
     );
 }
@@ -271,6 +273,7 @@ fn overrides_reach_the_controller_image_and_config() {
             }),
             allowed_secret_names: vec!["platform-operator-secrets".to_owned()],
             allowed_egress_hosts: vec!["chat.example".to_owned(), "models.example".to_owned()],
+            allowed_claim_names: vec!["takt-workspace".to_owned()],
         }
     );
 }

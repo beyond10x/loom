@@ -24,3 +24,4 @@ data:
     {{- end }}
     allowedSecretNames: {{ .Values.allowedSecretNames | toJson }}
     allowedEgressHosts: {{ .Values.allowedEgressHosts | toJson }}
+    allowedClaimNames: {{ .Values.allowedClaimNames | toJson }}

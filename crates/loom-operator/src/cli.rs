@@ -65,7 +65,7 @@ pub enum Command {
 #[derive(Debug, Args)]
 pub struct RunArgs {
     /// The controller's configuration, YAML: namespace, defaultImage, defaultResources,
-    /// modelRoute, allowedSecretNames, allowedEgressHosts.
+    /// modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames.
     #[arg(long, value_name = "FILE")]
     pub config: PathBuf,
 }

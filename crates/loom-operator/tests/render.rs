@@ -20,6 +20,7 @@ defaultResources: {cpu: 100m, memory: 128Mi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: [platform-operator-secrets]
 allowedEgressHosts: [chat.example, models.example]
+allowedClaimNames: [takt-workspace]
 ";
 
 /// A routes document holding a token: a clearly fake one, never a real credential.
@@ -456,4 +457,230 @@ fn a_document_that_is_not_a_loom_agent_is_not_rendered() {
         Err(RenderError::NotALoomAgent(why)) => assert!(!why.is_empty()),
         other => panic!("expected NotALoomAgent, got {other:?}"),
     }
+}
+
+/// The members a takt delivery adds after `spec.agent` (design § 9a, slice C): its own image,
+/// the image's entrypoint with arguments, a workspace on a claim and the Secret as files too.
+const TAKT: &str = "  routes: {}
+  image: {repository: registry.example/takt, tag: '0.12.0'}
+  command: {args: [run, --repo, /workspace/takt, --iterations, '1']}
+  workspace: {mountPath: /workspace, claimName: takt-workspace}
+  secretRef: {name: platform-operator-secrets, mountPath: /var/run/secrets/takt}
+";
+
+/// The example without `expose`, naming a protocol only the image's program knows: the serve
+/// check against the plugin catalog would refuse it.
+fn takt_agent() -> String {
+    let agent = without_a2a().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
+    assert!(agent.contains("takt-delivery@1"));
+    agent
+}
+
+fn takt_resource() -> String {
+    wrapped(&takt_agent(), TAKT)
+}
+
+#[test]
+fn a_command_resource_renders_as_its_golden_file() {
+    let rendered = render_document(&takt_resource(), &config()).expect("rendered");
+    let golden = root().join("crates/loom-operator/tests/golden/takt-delivery.yaml");
+    if std::env::var_os("LOOM_OPERATOR_BLESS").is_some() {
+        fs::write(&golden, &rendered).expect("the golden file is written");
+    }
+    let expected = fs::read_to_string(&golden).expect("the golden file");
+    assert_eq!(
+        rendered,
+        expected,
+        "render differs from {}",
+        golden.display()
+    );
+}
+
+#[test]
+fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
+    let rendered = render_document(&takt_resource(), &config()).expect("rendered");
+    let docs = documents(&rendered);
+    let config_map = &docs[1];
+    let deployment = &docs[2];
+    let pod = at(deployment, &["spec", "template", "spec"]);
+    assert!(
+        at(pod, &["initContainers"]).is_null(),
+        "the image holds no b10x-loom to check with: {pod:?}"
+    );
+    let container = at(pod, &["containers", "0"]);
+    assert_eq!(text(container, &["image"]), "registry.example/takt:0.12.0");
+    assert!(
+        at(container, &["command"]).is_null(),
+        "an absent entrypoint is the image's own"
+    );
+    assert_eq!(
+        strings(container, &["args"]),
+        ["run", "--repo", "/workspace/takt", "--iterations", "1"]
+    );
+    assert_eq!(text(container, &["env", "0", "name"]), "HOME");
+    assert_eq!(text(container, &["env", "0", "value"]), "/var/lib/agent");
+    assert_eq!(
+        text(container, &["envFrom", "0", "secretRef", "name"]),
+        "platform-operator-secrets"
+    );
+    let mounts: Vec<(String, String, bool)> = at(container, &["volumeMounts"])
+        .as_sequence()
+        .expect("mounts")
+        .iter()
+        .map(|mount| {
+            (
+                text(mount, &["name"]).to_owned(),
+                text(mount, &["mountPath"]).to_owned(),
+                at(mount, &["readOnly"]).as_bool().unwrap_or(false),
+            )
+        })
+        .collect();
+    assert_eq!(
+        mounts,
+        [
+            ("spec".to_owned(), "/config".to_owned(), true),
+            ("state".to_owned(), "/var/lib/agent".to_owned(), false),
+            ("tmp".to_owned(), "/tmp".to_owned(), false),
+            ("workspace".to_owned(), "/workspace".to_owned(), false),
+            (
+                "credentials".to_owned(),
+                "/var/run/secrets/takt".to_owned(),
+                true
+            ),
+        ]
+    );
+    assert_eq!(
+        text(pod, &["volumes", "3", "persistentVolumeClaim", "claimName"]),
+        "takt-workspace"
+    );
+    assert_eq!(
+        text(pod, &["volumes", "4", "secret", "secretName"]),
+        "platform-operator-secrets"
+    );
+    assert_eq!(
+        at(pod, &["volumes", "4", "secret", "defaultMode"]).as_i64(),
+        Some(0o440)
+    );
+    assert_eq!(
+        at(pod, &["securityContext", "fsGroup"]).as_i64(),
+        Some(10001)
+    );
+    assert_eq!(
+        at(container, &["securityContext", "readOnlyRootFilesystem"]).as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        serde_yaml_ng::from_str::<Value>(text(config_map, &["data", "agent.yaml"]))
+            .expect("agent.yaml is YAML"),
+        serde_yaml_ng::from_str::<Value>(&takt_agent()).expect("the agent document"),
+        "/config/agent.yaml is the spec.agent document, its keys in the order the API server keeps"
+    );
+}
+
+#[test]
+fn a_workspace_without_a_claim_is_an_empty_dir_on_either_variant() {
+    let serve = wrapped(
+        &example(),
+        "  routes: {}\n  workspace: {mountPath: /workspace}\n",
+    );
+    let docs = documents(&render_document(&serve, &config()).expect("rendered"));
+    let pod = at(&docs[2], &["spec", "template", "spec"]);
+    assert!(at(pod, &["volumes", "2", "emptyDir"]).is_mapping());
+    assert!(at(pod, &["volumes", "2", "persistentVolumeClaim"]).is_null());
+    assert_eq!(text(pod, &["initContainers", "0", "name"]), "check");
+    assert_eq!(
+        text(pod, &["containers", "0", "volumeMounts", "0", "mountPath"]),
+        "/etc/agent",
+        "the serve variant keeps its spec directory"
+    );
+    assert_eq!(
+        at(pod, &["securityContext", "fsGroup"]).as_i64(),
+        Some(10001)
+    );
+}
+
+#[test]
+fn a_command_resource_without_routes_or_a_model_route_gets_empty_routes() {
+    let mut no_route = config();
+    no_route.model_route = None;
+    let rendered = render_document(&takt_resource(), &no_route).expect("rendered");
+    let docs = documents(&rendered);
+    assert_eq!(text(&docs[1], &["data", "routes.yaml"]), "");
+}
+
+#[test]
+fn what_a_command_resource_may_not_mount_or_carry_is_refused_naming_the_member() {
+    let cases = [
+        (
+            TAKT.replace("mountPath: /workspace,", "mountPath: workspace,"),
+            "refused: MountPathInvalid at spec.workspace.mountPath: ",
+        ),
+        (
+            TAKT.replace("mountPath: /workspace,", "mountPath: /tmp/w,"),
+            "refused: MountPathInvalid at spec.workspace.mountPath: ",
+        ),
+        (
+            TAKT.replace("mountPath: /workspace,", "mountPath: /,"),
+            "refused: MountPathInvalid at spec.workspace.mountPath: ",
+        ),
+        (
+            TAKT.replace("mountPath: /workspace,", "mountPath: /work/../config,"),
+            "refused: MountPathInvalid at spec.workspace.mountPath: ",
+        ),
+        (
+            TAKT.replace(
+                "mountPath: /var/run/secrets/takt",
+                "mountPath: /workspace/keys",
+            ),
+            "refused: MountPathInvalid at spec.secretRef.mountPath: ",
+        ),
+        (
+            TAKT.replace("mountPath: /var/run/secrets/takt", "mountPath: /var"),
+            "refused: MountPathInvalid at spec.secretRef.mountPath: ",
+        ),
+        (
+            TAKT.replace("claimName: takt-workspace", "claimName: other-claim"),
+            "refused: ClaimNotAllowed at spec.workspace.claimName: ",
+        ),
+        (
+            TAKT.replace("'1']", "'1', --token, xoxb-000-fake]"),
+            "refused: SecretLiteral at spec.command.args[6]",
+        ),
+        (
+            TAKT.replace("'1']", "'1', --token=xoxb-000-fake]"),
+            "refused: SecretLiteral at spec.command.args[5]",
+        ),
+        (
+            TAKT.replace(
+                "command: {args:",
+                "command: {entrypoint: ['https://u:not-a-real-password@forge.example'], args:",
+            ),
+            "refused: SecretLiteral at spec.command",
+        ),
+    ];
+    for (rest, expected) in cases {
+        let message = refusal(&wrapped(&takt_agent(), &rest), &config());
+        assert!(message.starts_with(expected), "{expected} <- {message}");
+        for value in ["xoxb-000-fake", "not-a-real-password", "other-claim"] {
+            assert!(!message.contains(value), "{message}");
+        }
+    }
+    let agent = takt_agent().replace(
+        "http://logs.monitoring.svc:3100",
+        "http://ops:not-a-real-password@logs.monitoring.svc:3100",
+    );
+    let message = refusal(&wrapped(&agent, TAKT), &config());
+    assert!(
+        message.starts_with("refused: SecretLiteral at spec.agent.bindings[1].base_url"),
+        "a Command spec is still walked for a credential: {message}"
+    );
+}
+
+#[test]
+fn the_serve_variant_still_refuses_a_protocol_outside_the_catalog() {
+    let message = refusal(&wrapped(&takt_agent(), "  routes: {}\n"), &config());
+    assert!(
+        message.starts_with("refused: UnknownProtocol at spec.agent."),
+        "{message}"
+    );
 }

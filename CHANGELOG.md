@@ -12,6 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- A second `LoomAgent` variant, `Command` (design § 9a, slice C): a resource with `spec.command {entrypoint?, args?}` runs the image's own program instead of `b10x-loom agent serve`, with no init container, `HOME=/var/lib/agent`, an emptyDir at `/tmp`, and the ConfigMap at `/config`, so the `spec.agent` document is `/config/agent.yaml`; the controller admits its `spec.agent` by the credential walk and the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential (story:loom-agent-command-variant)
+- `spec.workspace {mountPath, claimName?}`, a read-write volume on either variant (the claim, which the controller's new `allowedClaimNames` must list, else an emptyDir), and `spec.secretRef.mountPath`, the Secret mounted read-only as files (mode 0440) beside the environment it gives; a mount path that is not absolute and plain or overlaps a directory the controller mounts is refused `MountPathInvalid`, a claim not allowed `ClaimNotAllowed` (story:loom-agent-command-variant)
+- `status.variant` (`AgentServe` or `Command`) and the `Checked` reason `SpecAdmitted` for a `Command` resource; the chart's `allowedClaimNames` value (story:loom-agent-command-variant)
+
+### Changed
+
+- `loom.resource`: `RecordCheck` takes the admitted `variant`, which its `running` and `refused` outcomes set on the entity and `respecified` clears; the entity and the view `LoomAgents` gain `variant`, and the enums `AgentVariant`, the structs `CommandSpec` and `Workspace` are generated (story:loom-agent-command-variant)
+
 ## [0.41.0] - 2026-10-25
 
 No breaking changes.
