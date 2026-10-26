@@ -1,0 +1,15 @@
+# story http-binding-cluster-ca: a `LOOM_HTTP_CA_FILE` naming a file that cannot be read (missing,
+# a directory, no permission) stops `agent serve` before anything runs.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-unreadable-ca-file-is-refused
+summary: A `LOOM_HTTP_CA_FILE` naming a file that cannot be read is refused `Unreadable`.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: true, read: false, bytes: 0, certificates: 0}
+    outcome: unreadable
+    error:
+      name: loom.agent.HttpTrustRefused
+      fields: {reason: Unreadable}

@@ -47,3 +47,8 @@ scenarios:
   - scenarios/agent-a2a/a-spec-exposing-a2a-without-a-channel-is-served.yaml
   - scenarios/agent-a2a/a-spec-with-nothing-to-serve-is-refused.yaml
   - scenarios/agent-a2a/a-spec-with-a-channel-is-polled.yaml
+  - scenarios/http-binding-cluster-ca/an-unset-ca-file-keeps-the-webpki-roots.yaml
+  - scenarios/http-binding-cluster-ca/an-unreadable-ca-file-is-refused.yaml
+  - scenarios/http-binding-cluster-ca/a-ca-file-over-one-mebibyte-is-refused.yaml
+  - scenarios/http-binding-cluster-ca/a-ca-file-with-no-certificate-is-refused.yaml
+  - scenarios/http-binding-cluster-ca/a-ca-file-with-a-certificate-extends-the-roots.yaml

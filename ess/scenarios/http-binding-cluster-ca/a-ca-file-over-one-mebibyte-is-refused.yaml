@@ -1,0 +1,15 @@
+# story http-binding-cluster-ca: the host reads at most one byte past 1048576 of the file
+# `LOOM_HTTP_CA_FILE` names; a file past the bound is refused whatever it holds.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-ca-file-over-one-mebibyte-is-refused
+summary: A `LOOM_HTTP_CA_FILE` past 1048576 bytes is refused `TooLarge`, even holding certificates.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: true, read: true, bytes: 1048577, certificates: 3}
+    outcome: too-large
+    error:
+      name: loom.agent.HttpTrustRefused
+      fields: {reason: TooLarge}

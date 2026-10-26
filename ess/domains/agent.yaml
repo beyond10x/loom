@@ -513,6 +513,14 @@ types:
     kind: enum
     variants: [NothingToServe]
 
+  # Why `b10x-loom agent serve` does not start with the host setting `LOOM_HTTP_CA_FILE` (story
+  # http-binding-cluster-ca), one reason per refusal of `AdmitHttpTrust`: the file it names cannot
+  # be read as a regular file (`Unreadable`); it holds more than 1048576 bytes (`TooLarge`); it
+  # holds no PEM certificate, or one a TLS client does not take as a root (`NoCertificate`).
+  - name: loom.agent.HttpTrustRefusalReason
+    kind: enum
+    variants: [Unreadable, TooLarge, NoCertificate]
+
 errors:
   # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
   # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
@@ -555,6 +563,13 @@ errors:
     fields:
       - name: reason
         type: loom.agent.ServeRefusalReason
+
+  # The refusal of `AdmitHttpTrust`: why. The host exits 1 naming the variable and the reason
+  # before it reads, calls a model or records; the file's content is never printed.
+  - name: loom.agent.HttpTrustRefused
+    fields:
+      - name: reason
+        type: loom.agent.HttpTrustRefusalReason
 
 commands:
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
@@ -808,4 +823,58 @@ commands:
         when: channel == true
         accepts: nothing
       - name: answers
+        accepts: nothing
+
+  # Which roots an `http` binding read trusts (story http-binding-cluster-ca): `b10x-loom agent
+  # serve` decides it once, before anything is read, a model called or a record written, over the
+  # host setting `LOOM_HTTP_CA_FILE`, the path of a PEM file. `named` is whether the variable is
+  # set to text that is not blank; `read` whether the file it names was read as a regular file;
+  # `bytes` how many bytes of it were read (at most one past 1048576); `certificates` how many PEM
+  # certificates it holds when a TLS client takes every one of them as a root, else 0. Not named,
+  # the answer is `webpki-only`: every read trusts the webpki roots alone, as without the setting,
+  # whatever the other inputs say. Named, the first refusal in the order `unreadable`,
+  # `too-large`, `no-certificate` is the answer, else `extended`: every `http` binding read trusts
+  # the file's certificates beside the webpki roots. A refusal stops the host with exit 1 naming
+  # the variable and the reason, never the file's content. The roots reach the `http` binding
+  # reader only: no model call, no Connectors child and no A2A listener. Nothing is held between
+  # two decisions.
+  - name: loom.agent.AdmitHttpTrust
+    input:
+      - name: named
+        type: Boolean
+      - name: read
+        type: Boolean
+      - name: bytes
+        type: Integer
+      - name: certificates
+        type: Integer
+    outcomes:
+      - name: unreadable
+        when:
+          all:
+            - named == true
+            - read == false
+        error: loom.agent.HttpTrustRefused
+        payload:
+          loom.agent.HttpTrustRefused: {reason: Unreadable}
+      - name: too-large
+        when:
+          all:
+            - named == true
+            - bytes > 1048576
+        error: loom.agent.HttpTrustRefused
+        payload:
+          loom.agent.HttpTrustRefused: {reason: TooLarge}
+      - name: no-certificate
+        when:
+          all:
+            - named == true
+            - certificates <= 0
+        error: loom.agent.HttpTrustRefused
+        payload:
+          loom.agent.HttpTrustRefused: {reason: NoCertificate}
+      - name: webpki-only
+        when: named == false
+        accepts: nothing
+      - name: extended
         accepts: nothing

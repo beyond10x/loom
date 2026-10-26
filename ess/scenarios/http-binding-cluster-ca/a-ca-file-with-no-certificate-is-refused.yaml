@@ -1,0 +1,22 @@
+# story http-binding-cluster-ca: an empty `LOOM_HTTP_CA_FILE`, or one holding no PEM certificate a
+# TLS client takes as a root, is refused: a setting that trusts nothing is a mistake, not a default.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-ca-file-with-no-certificate-is-refused
+summary: An empty `LOOM_HTTP_CA_FILE`, or one holding no certificate, is refused `NoCertificate`.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: true, read: true, bytes: 0, certificates: 0}
+    outcome: no-certificate
+    error:
+      name: loom.agent.HttpTrustRefused
+      fields: {reason: NoCertificate}
+  - at: 2026-10-26T00:01:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: true, read: true, bytes: 120, certificates: 0}
+    outcome: no-certificate
+    error:
+      name: loom.agent.HttpTrustRefused
+      fields: {reason: NoCertificate}

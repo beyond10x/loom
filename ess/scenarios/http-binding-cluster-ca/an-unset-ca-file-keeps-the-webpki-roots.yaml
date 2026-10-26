@@ -1,0 +1,12 @@
+# story http-binding-cluster-ca: without `LOOM_HTTP_CA_FILE` (unset, empty or blank) every
+# `http` binding read trusts the webpki roots alone, as before the setting existed.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-unset-ca-file-keeps-the-webpki-roots
+summary: With no `LOOM_HTTP_CA_FILE` named, an `http` binding read trusts the webpki roots alone.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.AdmitHttpTrust
+    input: {named: false, read: false, bytes: 0, certificates: 0}
+    outcome: webpki-only
