@@ -857,13 +857,13 @@ which refuses an `auth.secret` that is a value and not an `env:`, `file:` or `ke
 refuses them; `spec.connectorsConfig`, which the ConfigMap receives verbatim, decoded as TOML
 (`Malformed` otherwise) with each decoded key and string walked whole, then each word of them, then
 each word of the raw text, comments included (named by line), a word holding `:` or `;` also in
-its pieces; a routes or connectors document
+its pieces, shell punctuation (`<>|&()$` and backtick) separating words too; a routes or connectors document
 beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admitted unwalked, and
 words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
 `secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
 would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
-credential in `spec.command` (`SecretLiteral`); a `spec.workspace.mountPath` or
+credential in `spec.command` (`SecretLiteral`; `TooLarge` beyond the bound); a `spec.workspace.mountPath` or
 `spec.secretRef.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the

@@ -17,9 +17,10 @@
 //!    decoded as TOML (`Malformed` when it is not TOML) with every key and string of the decoded
 //!    table walked whole; every word of each decoded key and string; and every word of the raw
 //!    text, comments included, named by its line. A word is what whitespace and `=`, `"`, `'`,
-//!    `,`, `[`, `]`, `{`, `}` separate, its leading `#` dropped; a word that is a token prefix
-//!    ending in a space (`Bearer`) is walked with the word after it, and a word holding `:` or
-//!    `;` is walked whole and then each piece between them (`user:ghp_…`, `x-api-key:sk-…`).
+//!    `,`, `[`, `]`, `{`, `}` and the shell's `<`, `>`, `|`, `&`, `(`, `)`, `$` and backtick
+//!    separate, its leading `#` dropped; a word holding `:` or `;` is followed by each piece
+//!    between them (`user:ghp_…`, `x-api-key:sk-…`); a word or piece that is a token prefix
+//!    ending in a space (`Bearer`, also in `Authorization:Bearer`) is walked with the one after.
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`);
 //!    a `Command` resource then gets an empty `routes.yaml`.
 //! 5. A `spec.secretRef` outside the configuration's `allowedSecretNames` (`SecretNotAllowed`).
@@ -28,7 +29,7 @@
 //!    admit every destination on its port, or naming a host outside `allowedEgressHosts`
 //!    (`EgressHostNotAllowed`).
 //! 8. `spec.command`, each entrypoint and argument walked whole and word by word as the
-//!    connectors text is (`SecretLiteral`).
+//!    connectors text is (`SecretLiteral`); one beyond the walk's bound is `TooLarge`.
 //! 9. A `spec.workspace.mountPath` or `spec.secretRef.mountPath` that is not absolute and plain,
 //!    is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`]) or the
 //!    other one (`MountPathInvalid`).
@@ -323,33 +324,32 @@ fn cost(word: &str) -> usize {
 }
 
 /// The words of `text`, as the module documentation separates them; a token prefix ending in a
-/// space (`Bearer `) is joined with the word after it.
+/// space (`Bearer `) is joined with the word or piece after it.
 fn words(text: &str) -> Vec<String> {
-    let parts: Vec<&str> = text
-        .split(|c: char| c.is_whitespace() || "=\"',[]{}".contains(c))
+    let mut parts: Vec<&str> = Vec::new();
+    for part in text
+        .split(|c: char| c.is_whitespace() || "=\"',[]{}<>|&()$`".contains(c))
         .map(|part| part.trim_start_matches('#'))
         .filter(|part| !part.is_empty())
-        .collect();
+    {
+        parts.push(part);
+        if part.contains([':', ';']) {
+            parts.extend(part.split([':', ';']).filter(|piece| !piece.is_empty()));
+        }
+    }
     let spaced = |part: &str| {
         TOKEN_PREFIXES
             .iter()
             .any(|prefix| prefix.strip_suffix(' ') == Some(part))
     };
-    let mut found: Vec<String> = Vec::with_capacity(parts.len());
-    for (index, part) in parts.iter().enumerate() {
-        found.push(match parts.get(index + 1) {
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, part)| match parts.get(index + 1) {
             Some(next) if spaced(part) => format!("{part} {next}"),
             _ => (*part).to_owned(),
-        });
-        if part.contains([':', ';']) {
-            found.extend(
-                part.split([':', ';'])
-                    .filter(|piece| !piece.is_empty())
-                    .map(ToOwned::to_owned),
-            );
-        }
-    }
-    found
+        })
+        .collect()
 }
 
 /// The words of each key and string of `table`, the table at `member`, in document order: a
