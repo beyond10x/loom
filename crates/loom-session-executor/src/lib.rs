@@ -175,8 +175,9 @@ pub enum SpecError {
     /// The spec names a decision mode its session kind does not run under a policy Loom
     /// enforces: Claude Code and Codex only under `ask`, where this executor decides every call
     /// (under `frame` Loom supplies no frame, so every call is abstained on; under `observe`
-    /// none is decided), and b10x-harness only under `observe`, the one mode metaharness runs it
-    /// in.
+    /// none is decided), and b10x-harness only under `observe`. metaharness 0.19.0 also runs
+    /// b10x under `frame` and `ask` (ADR 0104 point 3), but Loom decides b10x calls with no
+    /// rules of its own yet, so a spec that asks for either is refused here.
     DecisionModeUnenforced {
         /// The spec's `agent.id`.
         agent: String,
