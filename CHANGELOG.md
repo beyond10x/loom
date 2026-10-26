@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-26
+
 ### Added
 
 - A second `LoomAgent` variant, `Command` (design § 9a, slice C): a resource with `spec.command {entrypoint?, args?}` runs the image's own program instead of `b10x-loom agent serve`, with no init container, `HOME=/var/lib/agent`, an emptyDir at `/tmp`, and the ConfigMap at `/config`, so the `spec.agent` document is `/config/agent.yaml`; the controller admits its `spec.agent` by the credential walk and the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential (story:loom-agent-command-variant)
@@ -21,6 +23,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - `loom.resource`: `RecordCheck` takes the admitted `variant`, which its `running` and `refused` outcomes set on the entity and `respecified` clears; the entity and the view `LoomAgents` gain `variant`, and the enums `AgentVariant`, the structs `CommandSpec` and `Workspace` are generated (story:loom-agent-command-variant)
+- **Breaking:** `b10x_loom_resource::model::RecordCheck` takes a required `variant`, and `LoomAgents`, `SecretRef` and `LoomAgentSpec` gain members, so a consumer building them by struct literal adds them (story:loom-agent-command-variant)
+- **Breaking:** `b10x_loom_operator::resource::LoomAgentSpec`, `SecretRef` and `LoomAgentStatus` and `config::Config` gain members (`command`, `workspace`, `mountPath`, `variant`, `allowedClaimNames`), so a struct literal of them adds them (story:loom-agent-command-variant)
 
 ## [0.41.0] - 2026-10-25
 
@@ -1098,7 +1102,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.41.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.42.0...HEAD
+[0.42.0]: https://github.com/beyond10x/loom/releases/tag/0.42.0
 [0.41.0]: https://github.com/beyond10x/loom/releases/tag/0.41.0
 [0.40.0]: https://github.com/beyond10x/loom/releases/tag/0.40.0
 [0.39.1]: https://github.com/beyond10x/loom/releases/tag/0.39.1
