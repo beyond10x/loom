@@ -929,11 +929,13 @@ variant, a credential in a name or value (the list whole, then each value word b
 then a name that is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for
 the same rule), a name in `render::CONTROLLER_ENV` (`HOME`, refused on both variants) or one an
 earlier entry gives (`EnvNameConflict`); then each `spec.env` value and each `spec.command`
-entry again as the kubelet expands it (`$$` is `$`; `$(NAME)` from `render::controller_env`
-and the entries before for a value, the whole environment for a command; an unknown name, a
-`secretRef` key among them, stays as written), whole and word by word (`SecretLiteral`, its detail
-saying it was found after expansion; `TooLarge` when references add more than
-`MAX_EXPANDED_BYTES`, 2 MiB); a `spec.workspace.mountPath` or
+entry again as the kubelet may expand it (`$$` is `$`). The walk knows only
+`render::controller_env` and the `spec.env` entries (before it for a value, all of them for a
+command); a name it does not know (a `secretRef` key, the service environment such as
+`KUBERNETES_PORT`) is read twice, left as written and as `UNKNOWN_REFERENCE` (`a://`), since it
+may supply a URL scheme. Each reading is walked whole and word by word (`SecretLiteral`, its
+detail saying it was found after expansion; `TooLarge` when references add more than
+`MAX_EXPANDED_BYTES`, 2 MiB, to a reading); a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the

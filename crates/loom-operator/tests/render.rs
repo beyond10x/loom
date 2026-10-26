@@ -1144,6 +1144,68 @@ fn a_credential_joined_by_variable_expansion_is_refused_without_repeating_it() {
     }
 }
 
+/// A name the controller does not know (the service environment, a `secretRef` key) may supply
+/// a `scheme://` at run time, so the walk reads such a reference as a scheme too: a URL it
+/// completes with user information is refused, directly, through another entry or in the
+/// command, even one standing just before `@` (the safe side: it may be `scheme://user`), and a
+/// reference that completes nothing is admitted.
+#[test]
+fn an_unknown_reference_is_walked_as_a_possible_url_scheme() {
+    let expected = "refused: SecretLiteral at ";
+    for (resource, member) in [
+        (
+            serve_with(&env(&[(
+                "FORGE_URL",
+                "$(KUBERNETES_PORT)x:not-a-real-password@forge.example/repo",
+            )])),
+            "spec.env[0].value: ",
+        ),
+        (
+            serve_with(&env(&[
+                ("BASE", "$(FORGE_SCHEME)"),
+                ("FORGE_URL", "$(BASE)u:not-a-real-password@forge.example"),
+            ])),
+            "spec.env[1].value: ",
+        ),
+        (
+            wrapped(
+                &takt_agent(),
+                &TAKT.replace(
+                    "--iterations, '1']",
+                    "--iterations, '1', '$(FORGE_SCHEME)u:not-a-real-password@forge.example']",
+                ),
+            ),
+            "spec.command.args[5]: ",
+        ),
+        (
+            serve_with(&env(&[("NOTE", "$(USER_NAME)@forge.example")])),
+            "spec.env[0].value: ",
+        ),
+    ] {
+        let message = refusal(&resource, &config());
+        assert!(
+            message.starts_with(&format!("{expected}{member}")),
+            "{member} <- {message}"
+        );
+        assert!(message.ends_with(", after `$(VAR)` expansion"), "{message}");
+        for hidden in [
+            "not-a-real-password",
+            "KUBERNETES_PORT",
+            "FORGE_SCHEME",
+            "USER_NAME",
+        ] {
+            assert!(!message.contains(hidden), "{message}");
+        }
+    }
+    for admitted in [
+        env(&[("API", "$(KUBERNETES_PORT)/healthz")]),
+        env(&[("PATHS", "$(HOME)/bin:$(CARGO_HOME)/bin")]),
+    ] {
+        render_document(&command_with(&admitted), &config())
+            .unwrap_or_else(|error| panic!("{admitted}: {error}"));
+    }
+}
+
 /// References that double a value at each step would expand beyond any memory; past the bound
 /// the expanded text is refused unwalked.
 #[test]
