@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b
-  contract digest c97fcdb6564b6e5dd954e22cdbe2b298eacbda14f2adefb10a318d925744ada0
+  model digest 19e06a4dab22b0745a39a51781dd29b45539baab651c06b0f7836588fe6c4ea1
+  contract digest f087de474d365d2dd4f92e367ad82b7268e63c9e03d035cc5eecb734180680f5
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-243 capabilities: **241 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+246 capabilities: **244 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -122,7 +122,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.plugin.RecordOutcome` |
 | domain type | `loom.plugin.SourceRead` |
 | domain type | `loom.plugin.TurnResult` |
+| domain type | `loom.resource.AgentVariant` |
 | domain type | `loom.resource.CheckResult` |
+| domain type | `loom.resource.CommandSpec` |
 | domain type | `loom.resource.Condition` |
 | domain type | `loom.resource.ConditionStatus` |
 | domain type | `loom.resource.ConditionType` |
@@ -133,6 +135,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.LoomAgentSpec` |
 | domain type | `loom.resource.ResourceName` |
 | domain type | `loom.resource.SecretRef` |
+| domain type | `loom.resource.Workspace` |
 | domain type | `loom.run.ActionCatalogue.State` |
 | domain type | `loom.run.ArgumentRequest.State` |
 | domain type | `loom.run.ArgumentRequestId` |

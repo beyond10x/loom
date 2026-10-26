@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b
-// contract digest c97fcdb6564b6e5dd954e22cdbe2b298eacbda14f2adefb10a318d925744ada0
+// model digest 19e06a4dab22b0745a39a51781dd29b45539baab651c06b0f7836588fe6c4ea1
+// contract digest f087de474d365d2dd4f92e367ad82b7268e63c9e03d035cc5eecb734180680f5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -325,6 +325,7 @@ where
                 observed_generation: input.generation.clone(),
                 check: None,
                 deployment: None,
+                variant: None,
                 conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -345,6 +346,7 @@ where
                     observed_generation: input.generation.clone(),
                     check: None,
                     deployment: None,
+                    variant: None,
                     conditions: None,
                 };
                 let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -363,6 +365,7 @@ where
                 observed_generation: input.generation.clone(),
                 check: None,
                 deployment: None,
+                variant: None,
                 conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -380,6 +383,7 @@ where
         next.data.observed_generation = input.generation.clone();
         next.data.check = None;
         next.data.deployment = None;
+        next.data.variant = None;
         let answer = crate::resource::ApplyLoomAgentOutcome::Respecified { loom_agent_applied: crate::resource::LoomAgentApplied { name: input.name.clone(), generation: input.generation.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
@@ -513,6 +517,7 @@ where
             };
             let mut next = moved.snapshot();
             next.data.check = Some(crate::resource::CheckResult { exit_code: input.exit_code.clone(), message: input.message.clone() });
+            next.data.variant = Some(input.variant.clone());
             let answer = crate::resource::RecordCheckOutcome::Running { loom_agent_running: crate::resource::LoomAgentRunning { name: input.name.clone(), generation: input.generation.clone() } };
             LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
@@ -528,6 +533,7 @@ where
         };
         let mut next = moved.snapshot();
         next.data.check = Some(crate::resource::CheckResult { exit_code: input.exit_code.clone(), message: input.message.clone() });
+        next.data.variant = Some(input.variant.clone());
         let answer = crate::resource::RecordCheckOutcome::Refused { loom_agent_refused: crate::resource::LoomAgentRefused { name: input.name.clone(), generation: input.generation.clone(), message: input.message.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
@@ -768,6 +774,7 @@ where
                 observed_generation: held.data.observed_generation,
                 check: held.data.check,
                 deployment: held.data.deployment,
+                variant: held.data.variant,
                 conditions: held.data.conditions,
                 state: held.state,
             })

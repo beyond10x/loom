@@ -479,6 +479,7 @@ async fn a_created_resource_is_checked_its_children_applied_and_its_status_runni
         status["check"]["message"],
         "checked platform-operator: 3 states, 3 bindings, protocol operator-reply@1"
     );
+    assert_eq!(status["variant"], "AgentServe");
     assert!(status.get("deployment").is_none());
     assert_eq!(
         conditions(&status),
@@ -1071,4 +1072,61 @@ async fn a_refusal_of_the_spec_reads_no_child_again() {
         "only the lists of what it controls: {seen:?}"
     );
     assert_eq!(ctx.events().len(), events);
+}
+
+#[tokio::test]
+async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_container() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    let spec = example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
+    let rest = format!(
+        "{DEFAULT_ROUTES}  image: {{repository: registry.example/takt, tag: '0.12.0'}}\n  \
+         command: {{}}\n"
+    );
+    reconciled(agent(1, &spec, &rest), &ctx).await;
+
+    let seen = fake.take();
+    assert_eq!(applies(&seen), CHILDREN);
+    let deployment = seen
+        .iter()
+        .find(|seen| seen.method == Method::PATCH && seen.path == CHILDREN[2])
+        .expect("the Deployment is applied");
+    let pod = &deployment.body["spec"]["template"]["spec"];
+    assert!(pod.get("initContainers").is_none(), "{pod}");
+    assert!(pod["containers"][0].get("command").is_none(), "{pod}");
+    assert!(pod["containers"][0].get("args").is_none(), "{pod}");
+
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(status["variant"], "Command");
+    assert_eq!(status["check"]["exitCode"], 0);
+    assert_eq!(
+        status["check"]["message"],
+        "admitted platform-operator for its own command: a loom.agent/1 document with no \
+         credential, at /config/agent.yaml"
+    );
+    assert_eq!(
+        conditions(&status),
+        [
+            triple("Checked", "True", "SpecAdmitted"),
+            triple("Available", "Unknown", "DeploymentNotObserved"),
+        ]
+    );
+
+    let refused = example().replace(
+        "http://logs.monitoring.svc:3100",
+        "http://ops:not-a-real-password@logs.monitoring.svc:3100",
+    );
+    reconciled(agent(2, &refused, &rest), &ctx).await;
+    let seen = fake.take();
+    assert!(applies(&seen).is_empty(), "no child: {seen:?}");
+    let status = published(&seen);
+    assert_eq!(status["state"], "Refused");
+    assert_eq!(status["variant"], "Command");
+    assert!(
+        status["check"]["message"]
+            .as_str()
+            .is_some_and(|message| message.starts_with("refused: SecretLiteral at spec.agent.")),
+        "{status}"
+    );
 }

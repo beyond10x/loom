@@ -108,6 +108,7 @@ tasks:
         --set 'modelRoute.model=small-model'
         --set 'allowedSecretNames={platform-operator-secrets}'
         --set 'allowedEgressHosts={chat.example,models.example}'
+        --set 'allowedClaimNames={takt-workspace}'
         > /dev/null
 
   no-hand-model:

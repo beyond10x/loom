@@ -864,7 +864,15 @@ fn spec_agent_is_the_agent_document_and_required() {
     assert_eq!(names(&spec["required"]), ["agent", "routes"]);
     assert_eq!(
         keys(&spec["properties"]),
-        ["agent", "connectorsConfig", "image", "routes", "secretRef"]
+        [
+            "agent",
+            "command",
+            "connectorsConfig",
+            "image",
+            "routes",
+            "secretRef",
+            "workspace"
+        ]
     );
     let agent = &spec["properties"]["agent"];
     assert_eq!(agent["type"], "object");
@@ -990,6 +998,39 @@ fn an_agent_list_may_be_absent_a_models_list_may_not_and_a_decimal_is_a_number()
 }
 
 #[test]
+fn the_command_variant_members_are_declared_and_only_the_workspace_path_is_required() {
+    let document = projected();
+    let schema = open_api(&document);
+    let spec = &schema["properties"]["spec"]["properties"];
+    let strings = json!({"type": "array", "items": {"type": "string"}});
+    assert_eq!(
+        spec["command"],
+        json!({"type": "object", "properties": {"args": strings, "entrypoint": strings}}),
+        "an absent entrypoint or args is left to the image"
+    );
+    assert_eq!(
+        spec["workspace"],
+        json!({
+            "type": "object",
+            "properties": {"claimName": {"type": "string"}, "mountPath": {"type": "string"}},
+            "required": ["mountPath"],
+        })
+    );
+    assert_eq!(
+        spec["secretRef"],
+        json!({
+            "type": "object",
+            "properties": {"mountPath": {"type": "string"}, "name": {"type": "string"}},
+            "required": ["name"],
+        })
+    );
+    assert_eq!(
+        schema["properties"]["status"]["properties"]["variant"],
+        json!({"type": "string", "enum": ["AgentServe", "Command"]})
+    );
+}
+
+#[test]
 fn spec_routes_is_untyped_and_preserves_unknown_fields() {
     let document = projected();
     assert_eq!(
@@ -1020,7 +1061,8 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
             "conditions",
             "deployment",
             "observedGeneration",
-            "state"
+            "state",
+            "variant"
         ]
     );
     assert_eq!(names(&status["required"]), ["observedGeneration", "state"]);

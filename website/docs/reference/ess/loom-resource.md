@@ -16,12 +16,23 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ## Types
 
+### `AgentVariant`
+
+`loom.resource.AgentVariant` is one of `AgentServe` and `Command`.
+
 ### `CheckResult`
 
 `loom.resource.CheckResult` is a record of two fields:
 
 - `exit_code` — `Integer`, called `exitCode` on the wire
 - `message` — `String`
+
+### `CommandSpec`
+
+`loom.resource.CommandSpec` is a record of two fields:
+
+- `entrypoint` — `Optional<List<String>>`, which may be absent
+- `args` — `Optional<List<String>>`, which may be absent
 
 ### `Condition`
 
@@ -59,13 +70,15 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ### `LoomAgentSpec`
 
-`loom.resource.LoomAgentSpec` is a record of five fields:
+`loom.resource.LoomAgentSpec` is a record of seven fields:
 
 - `agent` — `loom.agent.AgentSpec`
 - `routes` — `Json`
 - `connectors_config` — `Optional<String>`, which may be absent, called `connectorsConfig` on the wire
 - `secret_ref` — `Optional<loom.resource.SecretRef>`, which may be absent, called `secretRef` on the wire
 - `image` — `Optional<loom.resource.ImageRef>`, which may be absent
+- `command` — `Optional<loom.resource.CommandSpec>`, which may be absent
+- `workspace` — `Optional<loom.resource.Workspace>`, which may be absent
 
 ### `ResourceName`
 
@@ -73,9 +86,17 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ### `SecretRef`
 
-`loom.resource.SecretRef` is a record of one field:
+`loom.resource.SecretRef` is a record of two fields:
 
 - `name` — `String`
+- `mount_path` — `Optional<String>`, which may be absent, called `mountPath` on the wire
+
+### `Workspace`
+
+`loom.resource.Workspace` is a record of two fields:
+
+- `mount_path` — `String`, called `mountPath` on the wire
+- `claim_name` — `Optional<String>`, which may be absent, called `claimName` on the wire
 
 One of the types above is reached by nothing else in this system: `loom.resource.LoomAgentSpec`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
@@ -94,6 +115,7 @@ It holds:
 - `observed_generation` — `Integer`, called `observedGeneration` on the wire
 - `check` — `Optional<loom.resource.CheckResult>`, which may be absent
 - `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
+- `variant` — `Optional<loom.resource.AgentVariant>`, which may be absent
 - `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 
 It declares no relation to another entity, and no other entity names it.
@@ -159,6 +181,7 @@ It exposes:
 - `observed_generation` — `Integer`
 - `check` — `Optional<loom.resource.CheckResult>`, which may be absent
 - `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
+- `variant` — `Optional<loom.resource.AgentVariant>`, which may be absent
 - `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 - `state` — `loom.resource.LoomAgent.State`
 
@@ -187,7 +210,7 @@ It has four outcomes.
 
 **`unchanged`** — Taken when the existing subject's stored fields satisfy `observed_generation == input.generation`. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Degraded`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared and `deployment` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Degraded`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared and `variant` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `DeleteLoomAgent`
 
@@ -236,6 +259,7 @@ It takes:
 - `generation` — `Integer`
 - `exit_code` — `Integer`
 - `message` — `String`
+- `variant` — `loom.resource.AgentVariant`
 
 It has five outcomes.
 
@@ -243,9 +267,9 @@ It has five outcomes.
 
 **`stale`** — Taken when the existing subject's stored fields satisfy `observed_generation != input.generation`. No entity in this specification changes. It reports `loom.resource.StaleGeneration`, carrying `name`, `generation` and `observed_generation`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`running`** — Taken when `exit_code == 0` holds of the input. It moves a `loom.resource.LoomAgent` from `Pending` to `Running`, along the declared move `run`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRunning`. It sets `check` from `{exit_code: input.exit_code, message: input.message}`. A test reaches it by constructing an input that satisfies that condition.
+**`running`** — Taken when `exit_code == 0` holds of the input. It moves a `loom.resource.LoomAgent` from `Pending` to `Running`, along the declared move `run`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRunning`. It sets `check` from `{exit_code: input.exit_code, message: input.message}` and `variant` from `input.variant`. A test reaches it by constructing an input that satisfies that condition.
 
-**`refused`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Pending` to `Refused`, along the declared move `refuse`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRefused`. It sets `check` from `{exit_code: input.exit_code, message: input.message}`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`refused`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Pending` to `Refused`, along the declared move `refuse`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRefused`. It sets `check` from `{exit_code: input.exit_code, message: input.message}` and `variant` from `input.variant`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 **`out-of-order`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.resource.LoomAgent` in `Degraded`, `Refused` and `Running`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
@@ -379,4 +403,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · model digest `b69befdd806b9d978ce35adaeb5e7178ae55a9e9cf9cbe285f99ea07bf08b31b` · contract digest `slice-sha256/2:ac65e59462d238f439642f9e737ba8522187ef70e907f51a6073117e0885b4ee`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `19e06a4dab22b0745a39a51781dd29b45539baab651c06b0f7836588fe6c4ea1` · contract digest `slice-sha256/2:ec82c2278d8fe778d9b40c738e4be11ef8be1ed716e23c3a5008eb7564cf8c54`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

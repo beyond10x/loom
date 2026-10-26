@@ -198,7 +198,7 @@ not read back.
 |---|---|
 | Code | `crates/loom-operator` (package and binary `b10x-loom-operator`) in this repository; `kube` 4.2 (runtime, derive, client, rustls-tls) and `k8s-openapi` 0.28 (`v1_34`) as its dependencies (D9) |
 | Image | its own image `<registry>/loom-operator:<loom tag>`, built in the deployment repository from the Loom tag beside the agent image (§ 6); the platform's backend image is untouched |
-| Config | `/etc/loom-operator/config.yaml` from a ConfigMap: `namespace`, `defaultImage`, `defaultResources`, `modelRoute` (`url`, `protocol`, `model`; § 10 row 5 A), `allowedSecretNames`, `allowedEgressHosts` |
+| Config | `/etc/loom-operator/config.yaml` from a ConfigMap: `namespace`, `defaultImage`, `defaultResources`, `modelRoute` (`url`, `protocol`, `model`; § 10 row 5 A), `allowedSecretNames`, `allowedEgressHosts`, `allowedClaimNames` (slice C) |
 | Loop | watch `LoomAgent` in one namespace; reconcile = check the spec in-process, then render the children (ConfigMap, ServiceAccount, Deployment, NetworkPolicy, Service) as server-side apply with the resource as owner; status from the controller's check and the child Deployment's `Available` condition; delete = garbage collection through owner references |
 | RBAC | namespaced Role: `loomagents` + `loomagents/status` (get, list, watch, update, patch), `loomagents/finalizers` (update), `configmaps`, `serviceaccounts`, `deployments`, `services`, `networkpolicies` (create, update, patch, get, list, watch, delete). No ClusterRole; the CRD itself is installed from the chart's `crds/` (§ 10 row 3 B), not by the controller |
 | Replicas | 1, `Recreate`; no leader election |
@@ -321,6 +321,8 @@ step 10 waits on 1-4 and 9. Days: I don't know; the Loom stories carry no estima
 
 takt (story delivery: branches, pull requests, releases, trials) is an agent of the same stack. It is not part of slice A or B. A later slice C runs a takt delivery as a second `LoomAgent` variant: `spec.image` names a takt image (built in the deployment repository from the takt tag beside `loom-agent`), the pod runs takt's own entrypoint instead of `b10x-loom agent serve`, and `spec.agent` carries takt's run configuration as its `loom.agent/1` document. The controller renders the same children (§ 5.2); what differs is the image, the command and the egress list (a forge over the bot route, a harness session under Substrate). Blocked until takt's `dependency-blocker:loom-child-confinement` clears; until then takt is out of scope here (decision 7).
 
+Built (2026-10-26, `story:loom-agent-command-variant`, decision 7 option A): the variant is `Command`, chosen by the presence of `spec.command` (`entrypoint`, `args`, each left to the image when absent). For the local trial the confinement is the pod itself (user 10001, read-only root, no capability, the NetworkPolicy); Substrate confinement comes later. The contract with the image is that the `spec.agent` document is written verbatim to `/config/agent.yaml` (the ConfigMap mounted at `/config`; keys in the order the API server keeps them, as for `/etc/agent/agent.yaml`). `spec.workspace` adds a read-write volume (a claim in `allowedClaimNames`, else an emptyDir) and `spec.secretRef.mountPath` the Secret as files beside its environment. The controller admits a `Command` spec by the credential walk and the `loom.agent/1` decoder, not the plugin catalog, and `status.variant` with the `Checked` reason `SpecAdmitted` reports it.
+
 ## 10. Decisions for Timo
 
 | # | Question | Options | Default on silence |
@@ -340,4 +342,4 @@ takt (story delivery: branches, pull requests, releases, trials) is an agent of 
   cluster-operator-owned resource, not a customer-owned agent.
 - MCP read proxy (`loom-kubernetes.md` M6), Agency registration (M7), Substrate confinement (Q6).
 - Multi-tenancy of `LoomAgent` resources across namespaces: one namespace per controller instance.
-- takt deliveries: slice C at the earliest (§ 9a, decision 7); nothing in slices A or B runs takt.
+- takt deliveries: slice C, built as the `Command` variant (§ 9a, decision 7); nothing in slices A or B runs takt.

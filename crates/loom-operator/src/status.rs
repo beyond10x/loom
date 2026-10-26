@@ -7,14 +7,14 @@
 //! | state | `Checked` | `Available` |
 //! |---|---|---|
 //! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` |
-//! | Running | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read |
-//! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` |
+//! | Running | True, `SpecServeable` (`SpecAdmitted` for the `Command` variant) | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read |
+//! | Degraded | True, `SpecServeable` (`SpecAdmitted` for the `Command` variant) | False, `DeploymentUnavailable` |
 //! | Refused | False, `SpecRefused` | False, `SpecRefused` |
 //!
 //! A row that carries conditions is published with its own.
 
 use b10x_loom_resource::model::{
-    CheckResult, Condition, ConditionStatus, ConditionType, DeploymentAvailability,
+    AgentVariant, CheckResult, Condition, ConditionStatus, ConditionType, DeploymentAvailability,
     DeploymentStatus, LoomAgentState, LoomAgents,
 };
 
@@ -37,6 +37,15 @@ pub fn availability(availability: DeploymentAvailability) -> &'static str {
     match availability {
         DeploymentAvailability::Available => "Available",
         DeploymentAvailability::Unavailable => "Unavailable",
+    }
+}
+
+/// The variant as the CRD's `status.variant` spells it.
+#[must_use]
+pub fn variant_name(variant: AgentVariant) -> &'static str {
+    match variant {
+        AgentVariant::AgentServe => "AgentServe",
+        AgentVariant::Command => "Command",
     }
 }
 
@@ -70,12 +79,13 @@ fn condition(
 }
 
 /// The conditions `Checked` and `Available` of a resource in `state`, from its check and what
-/// was last read of its Deployment.
+/// was last read of its Deployment and the variant its check recorded.
 #[must_use]
 pub fn conditions(
     state: LoomAgentState,
     check: Option<&CheckResult>,
     deployment: Option<&DeploymentStatus>,
+    variant: Option<AgentVariant>,
 ) -> Vec<Condition> {
     let message = check.map(|check| check.message.clone()).unwrap_or_default();
     match state {
@@ -132,7 +142,10 @@ pub fn conditions(
                 condition(
                     ConditionType::Checked,
                     ConditionStatus::True,
-                    "SpecServeable",
+                    match variant {
+                        Some(AgentVariant::Command) => "SpecAdmitted",
+                        _ => "SpecServeable",
+                    },
                     message,
                 ),
                 available,
@@ -144,10 +157,14 @@ pub fn conditions(
 /// The status a row of `LoomAgents` publishes.
 #[must_use]
 pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
-    let conditions = row
-        .conditions
-        .clone()
-        .unwrap_or_else(|| conditions(row.state, row.check.as_ref(), row.deployment.as_ref()));
+    let conditions = row.conditions.clone().unwrap_or_else(|| {
+        conditions(
+            row.state,
+            row.check.as_ref(),
+            row.deployment.as_ref(),
+            row.variant,
+        )
+    });
     resource::LoomAgentStatus {
         observed_generation: row.observed_generation,
         state: state(row.state).to_owned(),
@@ -161,6 +178,7 @@ pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
             .map(|read| resource::DeploymentStatus {
                 availability: availability(read.availability).to_owned(),
             }),
+        variant: row.variant.map(|variant| variant_name(variant).to_owned()),
         conditions: Some(
             conditions
                 .into_iter()
@@ -208,7 +226,7 @@ mod tests {
     #[test]
     fn pending_is_unknown_on_both_conditions() {
         assert_eq!(
-            triples(&conditions(LoomAgentState::Pending, None, None)),
+            triples(&conditions(LoomAgentState::Pending, None, None, None)),
             [
                 (
                     ConditionType::Checked,
@@ -227,7 +245,12 @@ mod tests {
     #[test]
     fn running_is_checked_and_available_as_the_deployment_was_read() {
         let check = checked(0, "checked a: 1 states, 1 bindings, protocol none");
-        let unread = conditions(LoomAgentState::Running, Some(&check), None);
+        let unread = conditions(
+            LoomAgentState::Running,
+            Some(&check),
+            None,
+            Some(AgentVariant::AgentServe),
+        );
         assert_eq!(
             triples(&unread),
             [
@@ -248,7 +271,8 @@ mod tests {
             triples(&conditions(
                 LoomAgentState::Running,
                 Some(&check),
-                Some(&read(DeploymentAvailability::Available))
+                Some(&read(DeploymentAvailability::Available)),
+                Some(AgentVariant::AgentServe),
             )),
             [
                 (
@@ -272,7 +296,8 @@ mod tests {
             triples(&conditions(
                 LoomAgentState::Degraded,
                 Some(&check),
-                Some(&read(DeploymentAvailability::Unavailable))
+                Some(&read(DeploymentAvailability::Unavailable)),
+                Some(AgentVariant::AgentServe),
             )),
             [
                 (
@@ -292,7 +317,12 @@ mod tests {
     #[test]
     fn refused_is_neither_checked_nor_available_and_carries_the_refusal() {
         let check = checked(3, "refused: SecretLiteral at spec.agent.x: a token prefix");
-        let refused = conditions(LoomAgentState::Refused, Some(&check), None);
+        let refused = conditions(
+            LoomAgentState::Refused,
+            Some(&check),
+            None,
+            Some(AgentVariant::AgentServe),
+        );
         assert_eq!(
             triples(&refused),
             [
@@ -318,6 +348,7 @@ mod tests {
             observed_generation: 4,
             check: Some(checked(0, "checked")),
             deployment: Some(read(DeploymentAvailability::Unavailable)),
+            variant: Some(AgentVariant::Command),
             conditions: None,
             state: LoomAgentState::Degraded,
         };

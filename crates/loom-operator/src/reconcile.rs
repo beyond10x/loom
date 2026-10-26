@@ -764,6 +764,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
             generation,
             exit_code,
             message,
+            variant: agent.spec.variant(),
         })?;
     }
 

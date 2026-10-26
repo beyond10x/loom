@@ -33,7 +33,7 @@ Usage: b10x-loom-operator run --config <FILE>
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
-| `--config <FILE>` | yes | none | The controller's configuration, YAML: namespace, defaultImage, defaultResources, modelRoute, allowedSecretNames, allowedEgressHosts |
+| `--config <FILE>` | yes | none | The controller's configuration, YAML: namespace, defaultImage, defaultResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames |
 
 ```text
 The configuration names the one namespace watched, the default agent image and resources, the

@@ -18,6 +18,17 @@
 //!   the port `a2a` and the probes `GET /ready` and `GET /live`; both run as user 10001 on a
 //!   read-only root, no privilege escalation, no capability, the runtime's default seccomp
 //!   profile. The pod template names the resource's generation, so a new spec replaces the pod.
+//!
+//!   The `Command` variant (`spec.command` present, design § 9a) differs only in its Deployment:
+//!   no init container, since the image need hold no `b10x-loom`; the container runs `spec.image`
+//!   (else the default) with `command` = `spec.command.entrypoint` and `args` =
+//!   `spec.command.args`, each left to the image when absent; the ConfigMap is read-only at
+//!   `/config`, so `spec.agent` is `/config/agent.yaml`; `HOME` is `/var/lib/agent`, and an
+//!   emptyDir is at `/tmp`, the root staying read-only.
+//!
+//!   On either variant `spec.workspace` adds a read-write volume at its `mountPath`: the claim
+//!   `claimName`, else an emptyDir; `spec.secretRef.mountPath` adds the Secret read-only as files
+//!   there, mode 0440, beside the environment it gives; with either the pod's `fsGroup` is 10001.
 //! * NetworkPolicy `<resource>`: deny by default; egress to DNS in `kube-system`, to each
 //!   `deploy.kubernetes.egress` entry (a namespace entry as a namespace and pod selector peer, a
 //!   host entry by its port only, since a NetworkPolicy names no host) and, with the default
@@ -27,12 +38,14 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use b10x_loom_resource::model::AgentVariant;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, DeploymentStrategy};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort, EmptyDirVolumeSource,
-    EnvFromSource, HTTPGetAction, PodSecurityContext, PodSpec, PodTemplateSpec, Probe,
-    ResourceRequirements, SeccompProfile, SecretEnvSource, SecurityContext, Service,
-    ServiceAccount, ServicePort, ServiceSpec, Volume, VolumeMount,
+    EnvFromSource, EnvVar, HTTPGetAction, PersistentVolumeClaimVolumeSource, PodSecurityContext,
+    PodSpec, PodTemplateSpec, Probe, ResourceRequirements, SeccompProfile, SecretEnvSource,
+    SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Volume,
+    VolumeMount,
 };
 use k8s_openapi::api::networking::v1::{
     NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
@@ -49,7 +62,7 @@ use serde::Serialize;
 use crate::FIELD_MANAGER;
 use crate::admission::{self, Admitted, Refusal};
 use crate::config::Config;
-use crate::resource::LoomAgent;
+use crate::resource::{CommandSpec, LoomAgent};
 
 /// The user every container runs as.
 pub const USER: i64 = 10001;
@@ -59,6 +72,12 @@ pub const SPEC_DIR: &str = "/etc/agent";
 pub const SPEC_FILE: &str = "/etc/agent/agent.yaml";
 /// The agent's state directory.
 pub const STATE_DIR: &str = "/var/lib/agent";
+/// Where the `Command` variant's container reads the ConfigMap: `/config/agent.yaml` is `spec.agent`.
+pub const CONFIG_DIR: &str = "/config";
+/// The `Command` variant's writable temporary directory, an emptyDir.
+pub const TMP_DIR: &str = "/tmp";
+/// The mode of the Secret's files: read by the owner and by `fsGroup`.
+pub const SECRET_FILE_MODE: i32 = 0o440;
 /// The name of the a2a port.
 pub const A2A_PORT: &str = "a2a";
 /// The annotation of the pod template naming the resource's generation.
@@ -233,13 +252,92 @@ impl Renderer<'_> {
         }
     }
 
-    fn spec_mount() -> VolumeMount {
+    fn command(&self) -> Option<&CommandSpec> {
+        self.agent.spec.command.as_ref()
+    }
+
+    fn spec_mount(&self) -> VolumeMount {
         VolumeMount {
             name: "spec".to_owned(),
-            mount_path: SPEC_DIR.to_owned(),
+            mount_path: match self.admitted.variant {
+                AgentVariant::AgentServe => SPEC_DIR,
+                AgentVariant::Command => CONFIG_DIR,
+            }
+            .to_owned(),
             read_only: Some(true),
             ..VolumeMount::default()
         }
+    }
+
+    /// The mounts and volumes both variants may add: the workspace and the Secret's files.
+    fn extra_mounts(&self) -> (Vec<VolumeMount>, Vec<Volume>) {
+        let mut mounts = Vec::new();
+        let mut volumes = Vec::new();
+        if self.admitted.variant == AgentVariant::Command {
+            mounts.push(VolumeMount {
+                name: "tmp".to_owned(),
+                mount_path: TMP_DIR.to_owned(),
+                ..VolumeMount::default()
+            });
+            volumes.push(Volume {
+                name: "tmp".to_owned(),
+                empty_dir: Some(EmptyDirVolumeSource::default()),
+                ..Volume::default()
+            });
+        }
+        if let Some(workspace) = &self.agent.spec.workspace {
+            mounts.push(VolumeMount {
+                name: "workspace".to_owned(),
+                mount_path: workspace.mount_path.clone(),
+                ..VolumeMount::default()
+            });
+            volumes.push(Volume {
+                name: "workspace".to_owned(),
+                persistent_volume_claim: workspace.claim_name.as_ref().map(|claim| {
+                    PersistentVolumeClaimVolumeSource {
+                        claim_name: claim.clone(),
+                        read_only: None,
+                    }
+                }),
+                empty_dir: workspace
+                    .claim_name
+                    .is_none()
+                    .then(EmptyDirVolumeSource::default),
+                ..Volume::default()
+            });
+        }
+        if let Some(secret) = &self.agent.spec.secret_ref
+            && let Some(path) = &secret.mount_path
+        {
+            mounts.push(VolumeMount {
+                name: "credentials".to_owned(),
+                mount_path: path.clone(),
+                read_only: Some(true),
+                ..VolumeMount::default()
+            });
+            volumes.push(Volume {
+                name: "credentials".to_owned(),
+                secret: Some(SecretVolumeSource {
+                    secret_name: Some(secret.name.clone()),
+                    default_mode: Some(SECRET_FILE_MODE),
+                    ..SecretVolumeSource::default()
+                }),
+                ..Volume::default()
+            });
+        }
+        (mounts, volumes)
+    }
+
+    /// Whether the pod mounts a workspace or the Secret's files, which `fsGroup` makes the
+    /// container's user able to write and read.
+    fn needs_fs_group(&self) -> bool {
+        self.agent.spec.workspace.is_some()
+            || self
+                .agent
+                .spec
+                .secret_ref
+                .as_ref()
+                .is_some_and(|secret| secret.mount_path.is_some())
     }
 
     fn probe(path: &str) -> Probe {
@@ -270,25 +368,50 @@ impl Renderer<'_> {
             ),
             resources: Some(self.resources()),
             security_context: Some(self.security()),
-            volume_mounts: Some(vec![Self::spec_mount()]),
+            volume_mounts: Some(vec![self.spec_mount()]),
             ..Container::default()
         };
+        let (extra_mounts, extra_volumes) = self.extra_mounts();
+        let (command, args) = match self.command() {
+            None => (
+                Some(
+                    [
+                        "b10x-loom",
+                        "agent",
+                        "serve",
+                        "--spec",
+                        SPEC_FILE,
+                        "--state",
+                        STATE_DIR,
+                    ]
+                    .map(str::to_owned)
+                    .to_vec(),
+                ),
+                None,
+            ),
+            Some(command) => (command.entrypoint.clone(), command.args.clone()),
+        };
+        let mut mounts = vec![
+            self.spec_mount(),
+            VolumeMount {
+                name: "state".to_owned(),
+                mount_path: STATE_DIR.to_owned(),
+                ..VolumeMount::default()
+            },
+        ];
+        mounts.extend(extra_mounts);
         let serve = Container {
             name: "loom-agent".to_owned(),
             image: Some(self.image()),
-            command: Some(
-                [
-                    "b10x-loom",
-                    "agent",
-                    "serve",
-                    "--spec",
-                    SPEC_FILE,
-                    "--state",
-                    STATE_DIR,
-                ]
-                .map(str::to_owned)
-                .to_vec(),
-            ),
+            command,
+            args,
+            env: (self.admitted.variant == AgentVariant::Command).then(|| {
+                vec![EnvVar {
+                    name: "HOME".to_owned(),
+                    value: Some(STATE_DIR.to_owned()),
+                    value_from: None,
+                }]
+            }),
             env_from: self.agent.spec.secret_ref.as_ref().map(|secret| {
                 vec![EnvFromSource {
                     secret_ref: Some(SecretEnvSource {
@@ -310,14 +433,7 @@ impl Renderer<'_> {
             liveness_probe: a2a.map(|_| Self::probe("/live")),
             resources: Some(self.resources()),
             security_context: Some(self.security()),
-            volume_mounts: Some(vec![
-                Self::spec_mount(),
-                VolumeMount {
-                    name: "state".to_owned(),
-                    mount_path: STATE_DIR.to_owned(),
-                    ..VolumeMount::default()
-                },
-            ]),
+            volume_mounts: Some(mounts),
             ..Container::default()
         };
         let annotations = self.agent.metadata.generation.map(|generation| {
@@ -354,25 +470,32 @@ impl Renderer<'_> {
                                 type_: "RuntimeDefault".to_owned(),
                                 localhost_profile: None,
                             }),
+                            fs_group: self.needs_fs_group().then_some(USER),
                             ..PodSecurityContext::default()
                         }),
-                        init_containers: Some(vec![check]),
+                        init_containers: (self.admitted.variant == AgentVariant::AgentServe)
+                            .then(|| vec![check]),
                         containers: vec![serve],
-                        volumes: Some(vec![
-                            Volume {
-                                name: "spec".to_owned(),
-                                config_map: Some(ConfigMapVolumeSource {
-                                    name: config_map_name(self.name),
-                                    ..ConfigMapVolumeSource::default()
-                                }),
-                                ..Volume::default()
-                            },
-                            Volume {
-                                name: "state".to_owned(),
-                                empty_dir: Some(EmptyDirVolumeSource::default()),
-                                ..Volume::default()
-                            },
-                        ]),
+                        volumes: Some(
+                            [
+                                Volume {
+                                    name: "spec".to_owned(),
+                                    config_map: Some(ConfigMapVolumeSource {
+                                        name: config_map_name(self.name),
+                                        ..ConfigMapVolumeSource::default()
+                                    }),
+                                    ..Volume::default()
+                                },
+                                Volume {
+                                    name: "state".to_owned(),
+                                    empty_dir: Some(EmptyDirVolumeSource::default()),
+                                    ..Volume::default()
+                                },
+                            ]
+                            .into_iter()
+                            .chain(extra_volumes)
+                            .collect(),
+                        ),
                         ..PodSpec::default()
                     }),
                 },
