@@ -26,7 +26,7 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 2
+revision: 3
 ---
 ## Outcome
 
@@ -60,3 +60,10 @@ Derived 2026-10-26 by the coordinator from `b6e35835`.
 - `ess/domains/resource.yaml` — cited
 - `generated/rust/loom/`, `deploy/crd/`, `charts/loom-agents/` (values for the allow list) — cited
 - AGENTS.md § Resource, design § 7 (Security) and § 9a, CHANGELOG.md — cited
+
+## Also reported (S7)
+
+The orchestrator, 2026-10-26, from the takt one-hour pod trial (S7): "still: no seccomp or
+AppArmor field (a probe under the default profile got EPERM on `unshare`; the trial needed a hand
+patch to Unconfined)". Trial record: "probe pod under RuntimeDefault, `unshare -U -m true` =
+EPERM".

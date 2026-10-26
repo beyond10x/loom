@@ -12,7 +12,7 @@ scope:
   path: crates/loom-sdk/src/agent.rs
 - confidence: inferred
   path: ess/domains/agent.yaml
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -47,3 +47,13 @@ Derived 2026-10-26 by the coordinator from the release note quoted above; not re
 - `generated/rust/loom/`, `deploy/crd/`, `charts/loom-agents/crds/` — inferred
 - Related: `story:command-opaque-config-files` gives a `Command` resource files beside or instead
   of `spec.agent`; this story keeps the single-document contract takt 0.13.1 uses.
+
+## Also reported (S7)
+
+The orchestrator, 2026-10-26, from the takt one-hour pod trial (S7): "loom 0.42.0's LoomAgent
+schema rejects a `takt` member in `spec.agent`, so an application's own settings cannot ride in
+the loom.agent/1 document and every setting went in as command arguments". Trial record: "strict
+decoding refuses `spec.agent.takt`; `--validate=warn` drops it". Wave 2026-10-26-cmdv's
+`spec.configFiles` (story:command-opaque-config-files) gives a `Command` resource a way around it
+(the program's configuration as an opaque file); this story stays for the loom.agent/1 document
+itself.

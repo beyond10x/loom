@@ -18,7 +18,7 @@ scope:
   path: crates/loom-operator/src/render.rs
 - confidence: cited
   path: crates/loom-operator/tests
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T19:11:31Z", actor: "human:timo", revision: 5}
 - {from: "proposed", to: "active", at: "2026-10-26T19:11:31Z", actor: "human:timo", revision: 6}
@@ -59,3 +59,8 @@ Derived 2026-10-26 by the coordinator from `b6e35835`.
 The orchestrator, 2026-10-26, from the takt 0.13.1 release: "emptyDir modes
 (story:writable-dirs-mode-0700 may already cover it, link it)". This story is that gap; takt
 0.13.1 reports it again from its own image.
+
+The orchestrator, 2026-10-26, from the takt one-hour pod trial (S7): "still: /tmp and HOME are
+mode 2777 without the sticky bit, which fails 3 takt tests". Trial record: `cargo test -p
+b10x-takt --lib` "127 passed, 3 failed with the pod's /tmp (2777); 130 passed with `TMPDIR` a 0700
+dir".
