@@ -6,8 +6,11 @@
 //! `--from` whose name does not start with `..` and that resolves to a regular file inside
 //! `--from` is copied, in name order, to `--to/<name>` with mode 0600; `--to` is created when
 //! absent and set to mode 0700. A destination file left by an earlier run is replaced, never
-//! followed: the copy is a new file. `--to` must be a directory, not a link to one.
+//! followed: the copy is a new file, and a file there that no current key names is removed, so a
+//! key dropped from the Secret is not left readable. `--to` must be a directory, not a link to
+//! one, and a directory inside it is refused.
 
+use std::collections::BTreeSet;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::Write as _;
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
@@ -53,6 +56,7 @@ pub fn stage(from: &Path, to: &Path) -> Result<usize, String> {
     names.sort();
 
     let mut staged = 0;
+    let mut kept = BTreeSet::new();
     for name in names {
         let source = root.join(&name);
         let resolved = fs::canonicalize(&source).map_err(|why| named(&source, &why))?;
@@ -83,7 +87,25 @@ pub fn stage(from: &Path, to: &Path) -> Result<usize, String> {
         file.write_all(&bytes)
             .and_then(|()| file.sync_all())
             .map_err(|why| named(&target, &why))?;
+        kept.insert(name);
         staged += 1;
+    }
+
+    for entry in fs::read_dir(to).map_err(|why| named(to, &why))? {
+        let entry = entry.map_err(|why| named(to, &why))?;
+        let stale = entry.path();
+        let current = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| kept.contains(name));
+        if current {
+            continue;
+        }
+        let kind = entry.file_type().map_err(|why| named(&stale, &why))?;
+        if kind.is_dir() {
+            return Err(named(&stale, &"is a directory no key of the Secret names"));
+        }
+        fs::remove_file(&stale).map_err(|why| named(&stale, &why))?;
     }
     Ok(staged)
 }

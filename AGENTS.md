@@ -855,7 +855,8 @@ under its name) is forgotten with `DeleteLoomAgent` first and applied as created
 (`src/reconcile.rs`) runs `ApplyLoomAgent`; a Pending resource is admitted (`src/admission.rs`) and
 the answer recorded by `RecordCheck` (exit 0, or 3 with `refused: <reason> at <member>: <detail>`).
 Admission, first refusal wins: `b10x_loom_agent::check_text` over `spec.agent` (members prefixed
-`spec.agent.`); the same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed`
+`spec.agent.`), then, for `AgentServe`, a `runtime` without `connectors`, which `agent serve` needs
+(`Malformed` at `spec.agent.runtime.connectors`); the same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed`
 when the routes are not a mapping or llm's strict parser (`llm_models::routes::Routes::parse`,
 which refuses an `auth.secret` that is a value and not an `env:`, `file:` or `keychain:` reference)
 refuses them; `spec.connectorsConfig`, which the ConfigMap receives verbatim, decoded as TOML
@@ -917,7 +918,9 @@ stage-files --from /var/run/loom/secret-files-source --to /var/run/loom/secret-f
 copies each key to a file of mode 0600 in a directory of mode 0700, both owned by user 10001, and
 the agent container mounts that subdirectory (`subPath: files`) read-only at `mountPath`. The
 reason: a reader such as `b10x-gates` refuses a file another user owns or that group or others
-may read, and the kubelet owns a Secret volume's files. Either sets `fsGroup` 10001. The golden files
+may read, and the kubelet owns a Secret volume's files. The copy is taken when the pod starts, so
+a changed Secret reaches the agent only in a new pod, and `stage-files` removes a staged file no
+current key names. Either sets `fsGroup` 10001. The golden files
 `tests/golden/platform-operator.yaml` and `tests/golden/takt-delivery.yaml` are rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
 

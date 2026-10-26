@@ -281,8 +281,10 @@ or blank, a redirect or a failing status is a refused read the model reads as da
 
 `b10x-loom agent stage-files --from <DIR> --to <DIR>` copies each key of a mounted Kubernetes
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run
-left replaced, never followed). The controller runs it in an init container for
-`spec.secretFiles`; exit 1 names the path it could not read or write.
+left replaced, never followed, a file no current key names removed). The controller runs it in
+an init container for `spec.secretFiles`, so the files are those of the Secret when the pod
+started; a changed Secret reaches the agent in a new pod. Exit 1 names the path it could not read
+or write.
 
 ## Deploy agents to Kubernetes
 
