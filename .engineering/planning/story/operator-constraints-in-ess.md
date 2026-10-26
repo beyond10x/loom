@@ -7,7 +7,7 @@ title: The LoomAgent controller's admission and rendering rules and agent stage-
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 2
+revision: 3
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 2}
 ---
@@ -51,3 +51,8 @@ Derived 2026-10-26 by the coordinator; the trial agent's own list was not availa
 - **Generated:** `generated/rust/loom/`, `website/docs/reference/ess/`; `deploy/crd/` only if status changes — inferred
 - **Documents:** AGENTS.md § Resource, `docs/design/loom-agent-crd-deployment.md` § 9a, CHANGELOG.md — cited
 - **Confidence:** low (which rules the trial agent meant is not established)
+
+## Carried from wave 2026-10-26-q13
+
+- The u2 adversary (`review-result:agent-spec-constraints-adversary-q13`) wrote an operator test, `adv_q13_the_serve_variant_answers_the_new_reason_at_the_member`, green at `96f0e6ae`: an `AgentServe` resource answers `PortOutOfRange at spec.agent.expose.a2a.port`, `NotAnInstant at spec.agent.session.budget.deadline` and `NotAVariableName at spec.agent.bindings[2].bearer_env`, while a `Command` resource answers `Malformed at spec.agent`. It was not committed because the operator was frozen for the cluster trial; write it again here, and make the `Command` case answer the named reason.
+- `crates/loom-operator/src/admission.rs:5`: the module doc lists the serve variant's reasons without the six new ones.
