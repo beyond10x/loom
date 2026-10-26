@@ -10,7 +10,9 @@
 //!
 //! * ServiceAccount `deploy.kubernetes.service_account` (else the resource's name), with no
 //!   token mounted.
-//! * ConfigMap `<resource>-spec`: `agent.yaml`, `routes.yaml` and `connectors.toml`.
+//! * ConfigMap `<resource>-spec`: `agent.yaml` (absent for a `Command` resource without
+//!   `spec.agent`), `routes.yaml`, `connectors.toml` and, for a `Command` resource, each of
+//!   `spec.configFiles` by its name, its content verbatim.
 //! * Deployment `<resource>`: replicas 1, `Recreate`; the init container `check` runs
 //!   `b10x-loom agent check --spec /etc/agent/agent.yaml`, the container `loom-agent` runs
 //!   `b10x-loom agent serve --spec /etc/agent/agent.yaml --state /var/lib/agent` from
@@ -27,8 +29,9 @@
 //!   no `check` init container, since the image need hold no `b10x-loom`; the container runs
 //!   `spec.image` (else the default) with `command` = `spec.command.entrypoint` and `args` =
 //!   `spec.command.args`, each left to the image when absent; the ConfigMap is read-only at
-//!   `/config`, so `spec.agent` is `/config/agent.yaml`; `HOME` is `/var/lib/agent`, and an
-//!   emptyDir is at `/tmp`, the root staying read-only.
+//!   `/config`, so `spec.agent` is `/config/agent.yaml` and each of `spec.configFiles` is
+//!   `/config/<name>`; `HOME` is `/var/lib/agent`, and an emptyDir is at `/tmp`, the root
+//!   staying read-only.
 //!
 //!   On either variant `spec.env` is the agent container's `env` after the controller's own
 //!   ([`CONTROLLER_ENV`]), in declaration order, beside the `spec.secretRef` environment; no init
@@ -86,7 +89,8 @@ pub const SPEC_DIR: &str = "/etc/agent";
 pub const SPEC_FILE: &str = "/etc/agent/agent.yaml";
 /// The agent's state directory.
 pub const STATE_DIR: &str = "/var/lib/agent";
-/// Where the `Command` variant's container reads the ConfigMap: `/config/agent.yaml` is `spec.agent`.
+/// Where the `Command` variant's container reads the ConfigMap: `/config/agent.yaml` is
+/// `spec.agent`, `/config/<name>` each of `spec.configFiles`.
 pub const CONFIG_DIR: &str = "/config";
 /// The `Command` variant's writable temporary directory, an emptyDir.
 pub const TMP_DIR: &str = "/tmp";
@@ -246,12 +250,12 @@ impl Renderer<'_> {
     }
 
     fn kubernetes(&self) -> Option<&KubernetesDeploy> {
-        kubernetes(&self.admitted.spec)
+        self.admitted.spec.as_ref().and_then(kubernetes)
     }
 
     fn service_account(&self) -> ServiceAccount {
         ServiceAccount {
-            metadata: self.meta(service_account_name(self.name, Some(&self.admitted.spec))),
+            metadata: self.meta(service_account_name(self.name, self.admitted.spec.as_ref())),
             automount_service_account_token: Some(false),
             ..ServiceAccount::default()
         }
@@ -260,14 +264,7 @@ impl Renderer<'_> {
     fn config_map(&self) -> ConfigMap {
         ConfigMap {
             metadata: self.meta(config_map_name(self.name)),
-            data: Some(BTreeMap::from([
-                ("agent.yaml".to_owned(), self.admitted.agent.clone()),
-                (
-                    "connectors.toml".to_owned(),
-                    self.admitted.connectors.clone(),
-                ),
-                ("routes.yaml".to_owned(), self.admitted.routes.clone()),
-            ])),
+            data: Some(self.admitted.config_map_data()),
             ..ConfigMap::default()
         }
     }
@@ -480,8 +477,8 @@ impl Renderer<'_> {
         let a2a = self
             .admitted
             .spec
-            .expose
             .as_ref()
+            .and_then(|spec| spec.expose.as_ref())
             .and_then(|expose| expose.a2a.as_ref());
         let check = Container {
             name: "check".to_owned(),
@@ -568,7 +565,7 @@ impl Renderer<'_> {
                 automount_service_account_token: Some(false),
                 service_account_name: Some(service_account_name(
                     self.name,
-                    Some(&self.admitted.spec),
+                    self.admitted.spec.as_ref(),
                 )),
                 security_context: Some(PodSecurityContext {
                     run_as_non_root: Some(true),
@@ -731,7 +728,7 @@ impl Renderer<'_> {
     }
 
     fn service(&self) -> Option<Service> {
-        let a2a = self.admitted.spec.expose.as_ref()?.a2a.as_ref()?;
+        let a2a = self.admitted.spec.as_ref()?.expose.as_ref()?.a2a.as_ref()?;
         Some(Service {
             metadata: self.meta(self.name.to_owned()),
             spec: Some(ServiceSpec {

@@ -15,7 +15,9 @@
 //!   the `loom.agent` document declares (its decoder reads an absent one as empty), compared node
 //!   by node with the documents `ess` writes; a list another document declares, such as
 //!   `model.roles`, stays required;
-//! * `spec.agent` is required; `spec.agent.bindings.items` carries `kind` with
+//! * `spec.agent` is optional, since a `Command` resource may leave it out (the controller refuses
+//!   an `AgentServe` resource without it), and `spec.configFiles` is an optional list of a name
+//!   and a content; `spec.agent.bindings.items` carries `kind` with
 //!   `enum: [connectors, http]` and the fields of both variants beside it, and each variant's entry
 //!   refuses a member only another variant declares; `spec.routes`, an ESS `Json`, is untyped and
 //!   preserves unknown fields;
@@ -857,16 +859,17 @@ fn a_map_beside_properties_or_keyed_by_other_than_text_is_refused_naming_it() {
 }
 
 #[test]
-fn spec_agent_is_the_agent_document_and_required() {
+fn spec_agent_is_the_agent_document_and_optional() {
     let document = projected();
     let spec = &open_api(&document)["properties"]["spec"];
     assert_eq!(spec["type"], "object");
-    assert_eq!(names(&spec["required"]), ["agent", "routes"]);
+    assert_eq!(names(&spec["required"]), ["routes"]);
     assert_eq!(
         keys(&spec["properties"]),
         [
             "agent",
             "command",
+            "configFiles",
             "connectorsConfig",
             "env",
             "image",
@@ -1075,6 +1078,25 @@ fn spec_env_is_an_optional_list_of_names_and_values() {
 }
 
 #[test]
+fn spec_config_files_is_an_optional_list_of_names_and_contents() {
+    let document = projected();
+    let spec = &open_api(&document)["properties"]["spec"];
+    assert!(!names(&spec["required"]).contains(&"configFiles".to_owned()));
+    assert_eq!(
+        spec["properties"]["configFiles"],
+        json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["name", "content"],
+            },
+        }),
+        "a file name and its text; the controller checks the name and walks the text"
+    );
+}
+
+#[test]
 fn spec_routes_is_untyped_and_preserves_unknown_fields() {
     let document = projected();
     assert_eq!(
@@ -1233,11 +1255,23 @@ fn the_operator_example_validates_as_a_loom_agent_and_refusals_do_not() {
             "{why}: the projected schema must refuse it"
         );
     };
+    // A `Command` resource may leave `spec.agent` out and give its program's own files instead;
+    // the controller, not the schema, refuses an `AgentServe` resource without it.
+    let mut agentless = resource.clone();
+    agentless["spec"]
+        .as_object_mut()
+        .expect("spec")
+        .remove("agent");
+    agentless["spec"]["command"] = json!({"args": ["--iterations", "1"]});
+    agentless["spec"]["configFiles"] = json!([{"name": "endpoint.toml", "content": "model = 1\n"}]);
+    assert_eq!(errors(&validator, &agentless), Vec::<String>::new());
     refused(
-        &|r| {
-            r["spec"].as_object_mut().expect("spec").remove("agent");
-        },
-        "a resource without spec.agent",
+        &|r| r["spec"]["configFiles"] = json!([{"name": "endpoint.toml"}]),
+        "a configuration file without its content",
+    );
+    refused(
+        &|r| r["spec"]["configFiles"] = json!({"endpoint.toml": ""}),
+        "configuration files that are not a list",
     );
     refused(
         &|r| {

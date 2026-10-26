@@ -5,10 +5,12 @@
 //!    the check `b10x-loom agent check` runs, in-process (`Malformed`, `SecretLiteral`,
 //!    `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
 //!    `EmptyChannelAllow`), then a `runtime` without `connectors`, which `agent serve` needs and
-//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0. For the
+//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0; an
+//!    `AgentServe` resource without `spec.agent` is `Malformed` at `spec.agent`. For the
 //!    `Command` variant (`spec.command` present), whose
 //!    document the image's program reads and `agent serve` does not, only the credential walk
-//!    of that library (`SecretLiteral`) and the `loom.agent/1` decoder (`Malformed`).
+//!    of that library (`SecretLiteral`) and the `loom.agent/1` decoder (`Malformed`), and only
+//!    when the resource has one: a `Command` resource may leave `spec.agent` out.
 //! 2. `spec.routes` walked for a credential by the same library (`SecretLiteral`); a routes
 //!    document that is not a mapping is `Malformed`, and so is one llm's strict `llm.routes/1`
 //!    parser (`llm_models::routes::Routes::parse`, the reader of the pod's `routes.yaml`)
@@ -24,7 +26,9 @@
 //!    between them (`user:ghp_…`, `x-api-key:sk-…`); a word or piece that is a token prefix
 //!    ending in a space (`Bearer`, also in `Authorization:Bearer`) is walked with the one after.
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`);
-//!    a `Command` resource then gets an empty `routes.yaml`.
+//!    a `Command` resource then gets an empty `routes.yaml`. With a model route, the default
+//!    routes document routes each model a role of `spec.agent` names; a `Command` resource
+//!    without `spec.agent` names none, so its document declares the endpoint and no route.
 //! 5. A `spec.secretRef` or `spec.secretFiles` outside the configuration's `allowedSecretNames`
 //!    (`SecretNotAllowed`).
 //! 6. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
@@ -47,24 +51,37 @@
 //!    [`UNKNOWN_REFERENCE`], a scheme, since such a reference may supply one. Each reading is
 //!    walked whole and word by word (`SecretLiteral`, its detail saying it was found after
 //!    expansion; `TooLarge` when the references add more than [`MAX_EXPANDED_BYTES`]).
-//! 10. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
+//! 10. A non-empty `spec.configFiles`, only for `Command`: on an `AgentServe` resource, whose
+//!     program reads none, it is `Malformed`. Then entry by entry, a name that is not a plain
+//!     file name (`[A-Za-z0-9._-]+`, not `.` or `..`, at most [`MAX_CONFIG_FILE_NAME`] bytes:
+//!     `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap already holds
+//!     (`routes.yaml`, `connectors.toml`, and `agent.yaml` when `spec.agent` is present:
+//!     `ConfigFileConflict`).
+//! 11. The ConfigMap, its keys and values together, over Kubernetes's limit of
+//!     [`MAX_CONFIG_MAP_BYTES`] (`TooLarge`), refused rather than failing at apply.
+//! 12. Each `spec.configFiles` content, which the controller decodes nothing of, walked for a
+//!     credential (`SecretLiteral`) by every walk step 3 makes and more: the list whole, names
+//!     and contents; each content as a YAML document and as a TOML table, when it reads as one,
+//!     whole and word by word, so an escape does not hide one; and every word of the raw text,
+//!     named by its line. A content beyond the walk's bound is `TooLarge`.
+//! 13. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
 //!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
 //!     or the other one (`MountPathInvalid`).
-//! 11. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
+//! 14. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
 //!     (`ClaimNotAllowed`).
 //!
-//! The walk of steps 2 and 3 reads a text that is not a `loom.agent/1` document only within the
-//! agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and [`MAX_WALKED_BYTES`]; a
-//! document beyond either is refused `TooLarge` rather than admitted unread. Words are walked in
-//! sequences that each stay within both bounds.
+//! The walk of steps 2, 3 and 12 reads a text that is not a `loom.agent/1` document only within
+//! the agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and [`MAX_WALKED_BYTES`];
+//! a document beyond either is refused `TooLarge` rather than admitted unread. Words are walked
+//! in sequences that each stay within both bounds.
 //!
 //! A refusal reads `refused: <reason> at <member>: <detail>`, as `b10x-loom agent check` prints
 //! it, the member spelt from the resource (`spec.agent.bindings[1].base_url`); its detail never
 //! repeats a value of the resource. An admitted spec reads as the check's line, `checked <agent>:
 //! <n> states, <m> bindings, protocol <protocol>`; an admitted `Command` spec as `admitted <agent>
-//! for its own command: …`.
+//! for its own command: …`, or `admitted for its own command: …` without `spec.agent`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use b10x_loom_agent::{Checked, RefusalReason, TOKEN_PREFIXES, check_text, spelling};
 use llm_models::routes::Routes;
@@ -74,8 +91,8 @@ use serde_yaml_ng::{Mapping, Value};
 use b10x_loom_resource::model::AgentVariant;
 
 use crate::config::{Config, ModelRoute};
-use crate::render::{CONTROLLER_ENV, controller_env};
-use crate::resource::{CommandSpec, EnvVar, LoomAgentSpec};
+use crate::render::{CONFIG_DIR, CONTROLLER_ENV, controller_env};
+use crate::resource::{CommandSpec, ConfigFile, EnvVar, LoomAgentSpec};
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
@@ -121,14 +138,13 @@ impl Refusal {
     }
 }
 
-/// An admitted resource: its decoded spec, the three files of its ConfigMap and the check's
-/// answer.
+/// An admitted resource: its decoded spec, the files of its ConfigMap and the check's answer.
 #[derive(Debug, Clone)]
 pub struct Admitted {
-    /// The decoded `loom.agent/1` document.
-    pub spec: AgentSpec,
-    /// `agent.yaml`: `spec.agent` as YAML.
-    pub agent: String,
+    /// The decoded `loom.agent/1` document; absent for a `Command` resource without one.
+    pub spec: Option<AgentSpec>,
+    /// `agent.yaml`: `spec.agent` as YAML; absent, and no such key, without `spec.agent`.
+    pub agent: Option<String>,
     /// `routes.yaml`: `spec.routes` as YAML, or the default routes document.
     pub routes: String,
     /// `connectors.toml`: `spec.connectorsConfig`, empty when absent.
@@ -140,9 +156,28 @@ pub struct Admitted {
     /// What the serve check found; absent for the `Command` variant, whose spec is decoded and
     /// walked for a credential but not checked against the plugin catalog.
     pub checked: Option<Checked>,
+    /// `spec.configFiles`, each a key of the ConfigMap by its name, its content verbatim.
+    pub config_files: Vec<ConfigFile>,
 }
 
 impl Admitted {
+    /// The data of the `<name>-spec` ConfigMap: `routes.yaml`, `connectors.toml`, `agent.yaml`
+    /// when the resource has `spec.agent`, and each of `spec.configFiles`.
+    #[must_use]
+    pub fn config_map_data(&self) -> BTreeMap<String, String> {
+        let mut data = BTreeMap::from([
+            ("connectors.toml".to_owned(), self.connectors.clone()),
+            ("routes.yaml".to_owned(), self.routes.clone()),
+        ]);
+        if let Some(agent) = &self.agent {
+            data.insert("agent.yaml".to_owned(), agent.clone());
+        }
+        for file in &self.config_files {
+            data.insert(file.name.clone(), file.content.clone());
+        }
+        data
+    }
+
     /// The line the check is recorded as in `status.check.message`.
     #[must_use]
     pub fn message(&self) -> String {
@@ -154,11 +189,31 @@ impl Admitted {
                 checked.bindings,
                 checked.protocol.as_deref().unwrap_or("none")
             ),
-            None => format!(
-                "admitted {} for its own command: a loom.agent/1 document with no credential, \
-                 at {COMMAND_SPEC_FILE}",
-                self.spec.agent.id.0
-            ),
+            None => {
+                let files = match self.config_files.len() {
+                    0 => String::new(),
+                    1 => format!("1 configuration file with no credential, at {CONFIG_DIR}"),
+                    n => format!("{n} configuration files with no credential, at {CONFIG_DIR}"),
+                };
+                match (&self.spec, files.is_empty()) {
+                    (Some(spec), true) => format!(
+                        "admitted {} for its own command: a loom.agent/1 document with no \
+                         credential, at {COMMAND_SPEC_FILE}",
+                        spec.agent.id.0
+                    ),
+                    (Some(spec), false) => format!(
+                        "admitted {} for its own command: a loom.agent/1 document with no \
+                         credential, at {COMMAND_SPEC_FILE}; {files}",
+                        spec.agent.id.0
+                    ),
+                    (None, true) => {
+                        "admitted for its own command: no loom.agent/1 document and no \
+                         configuration file"
+                            .to_owned()
+                    }
+                    (None, false) => format!("admitted for its own command: {files}"),
+                }
+            }
         }
     }
 }
@@ -622,14 +677,14 @@ fn value_words(value: &toml::Value, member: &str, out: &mut Vec<Word>) {
     }
 }
 
-/// The words of `text`, the raw `spec.connectorsConfig`, each with its line.
-fn raw_words(text: &str) -> Vec<Word> {
+/// The words of `text`, a raw text at `member`, each with its line.
+fn raw_words(text: &str, member: &str) -> Vec<Word> {
     text.lines()
         .enumerate()
         .flat_map(|(index, line)| {
             words(line).into_iter().map(move |text| Word {
                 text,
-                member: "spec.connectorsConfig".to_owned(),
+                member: member.to_owned(),
                 line: Some(index + 1),
             })
         })
@@ -697,7 +752,121 @@ fn connectors_credential(text: &str) -> Result<(), Refusal> {
     let mut decoded = Vec::new();
     decoded_words(&table, "spec.connectorsConfig", &mut decoded);
     word_credential(&decoded, "spec.connectorsConfig")?;
-    word_credential(&raw_words(text), "spec.connectorsConfig")
+    word_credential(
+        &raw_words(text, "spec.connectorsConfig"),
+        "spec.connectorsConfig",
+    )
+}
+
+/// The longest `spec.configFiles` name, in bytes: Kubernetes's bound on a ConfigMap key.
+pub const MAX_CONFIG_FILE_NAME: usize = 253;
+
+/// The most bytes a ConfigMap's keys and values may hold together: Kubernetes's limit, beyond
+/// which the API server refuses the ConfigMap at apply.
+pub const MAX_CONFIG_MAP_BYTES: usize = 1024 * 1024;
+
+/// Whether `name` is a plain file name: `[A-Za-z0-9._-]+`, not `.` or `..`, at most
+/// [`MAX_CONFIG_FILE_NAME`] bytes, so it is a ConfigMap key and a file directly under `/config`.
+fn plain_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_CONFIG_FILE_NAME
+        && name != "."
+        && name != ".."
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+/// Refuses `spec.configFiles` on an `AgentServe` resource (`Malformed`), a name that is not a
+/// plain file name (`ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap holds
+/// already (`ConfigFileConflict`), never repeating the name.
+fn config_file_names(
+    files: &[ConfigFile],
+    variant: AgentVariant,
+    has_agent: bool,
+) -> Result<(), Refusal> {
+    if variant == AgentVariant::AgentServe {
+        return Err(Refusal::new(
+            spelling(RefusalReason::Malformed),
+            "spec.configFiles",
+            "`b10x-loom agent serve` reads no configuration file; only a Command resource may \
+             give them",
+        ));
+    }
+    let mut seen: HashMap<&str, usize> = HashMap::with_capacity(files.len());
+    for (index, file) in files.iter().enumerate() {
+        let at = format!("spec.configFiles[{index}].name");
+        if !plain_file_name(&file.name) {
+            return Err(Refusal::new(
+                "ConfigFileInvalid",
+                at,
+                format!(
+                    "it is not a plain file name, [A-Za-z0-9._-]+ other than `.` and `..`, of at \
+                     most {MAX_CONFIG_FILE_NAME} bytes"
+                ),
+            ));
+        }
+        let held = match file.name.as_str() {
+            "routes.yaml" | "connectors.toml" => true,
+            "agent.yaml" => has_agent,
+            _ => false,
+        };
+        if held {
+            return Err(Refusal::new(
+                "ConfigFileConflict",
+                at,
+                "the controller writes a file of that name under /config itself",
+            ));
+        }
+        if let Some(first) = seen.insert(file.name.as_str(), index) {
+            return Err(Refusal::new(
+                "ConfigFileConflict",
+                at,
+                format!("it repeats spec.configFiles[{first}].name"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Walks `spec.configFiles` for a credential: the list whole, names and contents; then each
+/// content as a YAML document and as a TOML table when it reads as one, whole and word by word;
+/// then every word of each raw content, named by its line. Nothing decoded is kept: the walk
+/// only reads what the program may read. A refusal stands at the content, never at a member
+/// inside it, so it spells no key of the file; beyond the walk's bound it is `TooLarge`.
+fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
+    credential(&yaml(&files, "spec.configFiles")?, "spec.configFiles")?;
+    for (index, file) in files.iter().enumerate() {
+        let at = format!("spec.configFiles[{index}].content");
+        let inside = |refusal: Refusal| {
+            if refusal.reason == spelling(RefusalReason::SecretLiteral) {
+                Refusal {
+                    member: at.clone(),
+                    ..refusal
+                }
+            } else {
+                refusal
+            }
+        };
+        if let Some((_, detail)) = first_credential(&file.content, &at)? {
+            return Err(Refusal::new(
+                spelling(RefusalReason::SecretLiteral),
+                at,
+                format!("{detail}, read as YAML"),
+            ));
+        }
+        if let Ok(table) = toml::from_str::<toml::Table>(&file.content) {
+            credential(&yaml(&table, &at)?, &at).map_err(inside)?;
+            let mut decoded = Vec::new();
+            decoded_words(&table, &at, &mut decoded);
+            for word in &mut decoded {
+                word.member.clone_from(&at);
+            }
+            word_credential(&decoded, &at).map_err(inside)?;
+        }
+        word_credential(&raw_words(&file.content, &at), &at)?;
+    }
+    Ok(())
 }
 
 /// `text`, the `spec.connectorsConfig` TOML, decoded.
@@ -752,10 +921,10 @@ fn empty(routes: &serde_json::Value) -> bool {
 }
 
 /// The routes document a resource with an empty `spec.routes` is given: `llm.routes/1`, one
-/// anonymous endpoint at the model route, and one route per model a role names, to the model
-/// route's model.
+/// anonymous endpoint at the model route, and one route per model a role of `spec` names, to the
+/// model route's model; without a spec, no route.
 #[must_use]
-pub fn default_routes(route: &ModelRoute, spec: &AgentSpec) -> String {
+pub fn default_routes(route: &ModelRoute, spec: Option<&AgentSpec>) -> String {
     let mut auth = Mapping::new();
     auth.insert("kind".into(), "anonymous".into());
     let mut endpoint = Mapping::new();
@@ -765,7 +934,7 @@ pub fn default_routes(route: &ModelRoute, spec: &AgentSpec) -> String {
     let mut endpoints = Mapping::new();
     endpoints.insert(MODEL_ROUTE_ENDPOINT.into(), Value::Mapping(endpoint));
     let mut routes = Mapping::new();
-    for role in &spec.model.roles {
+    for role in spec.iter().flat_map(|spec| &spec.model.roles) {
         routes.insert(
             role.model.clone().into(),
             format!("{MODEL_ROUTE_ENDPOINT}/{}", route.model).into(),
@@ -790,17 +959,30 @@ pub fn admit(
     actions: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Result<Admitted, Refusal> {
     let variant = spec.variant();
-    let agent = yaml(&spec.agent, "spec.agent")?;
-    let checked = match variant {
-        AgentVariant::AgentServe => Some(check_text(&agent, actions).map_err(|refused| {
-            Refusal::new(
-                spelling(refused.reason),
-                within("spec.agent", &refused.member),
-                refused.detail,
-            )
-        })?),
-        AgentVariant::Command => {
-            credential(&agent, "spec.agent").map_err(|refusal| {
+    let agent = match (&spec.agent, variant) {
+        (Some(agent), _) => Some(yaml(agent, "spec.agent")?),
+        (None, AgentVariant::Command) => None,
+        (None, AgentVariant::AgentServe) => {
+            return Err(Refusal::new(
+                spelling(RefusalReason::Malformed),
+                "spec.agent",
+                "`b10x-loom agent serve` needs a loom.agent/1 document; only a Command resource \
+                 may leave it out",
+            ));
+        }
+    };
+    let checked = match (variant, &agent) {
+        (AgentVariant::AgentServe, Some(agent)) => {
+            Some(check_text(agent, actions).map_err(|refused| {
+                Refusal::new(
+                    spelling(refused.reason),
+                    within("spec.agent", &refused.member),
+                    refused.detail,
+                )
+            })?)
+        }
+        (_, Some(agent)) => {
+            credential(agent, "spec.agent").map_err(|refusal| {
                 if refusal.reason == "TooLarge" {
                     Refusal::new(
                         spelling(RefusalReason::Malformed),
@@ -813,18 +995,24 @@ pub fn admit(
             })?;
             None
         }
+        (_, None) => None,
     };
-    let decoded = parse(&agent).map_err(|error| {
-        Refusal::new(
-            spelling(RefusalReason::Malformed),
-            "spec.agent",
-            error.to_string(),
-        )
-    })?;
+    let decoded = agent
+        .as_deref()
+        .map(|agent| {
+            parse(agent).map_err(|error| {
+                Refusal::new(
+                    spelling(RefusalReason::Malformed),
+                    "spec.agent",
+                    error.to_string(),
+                )
+            })
+        })
+        .transpose()?;
     if variant == AgentVariant::AgentServe
         && decoded
-            .runtime
             .as_ref()
+            .and_then(|decoded| decoded.runtime.as_ref())
             .is_some_and(|runtime| runtime.connectors.is_none())
     {
         return Err(Refusal::new(
@@ -861,7 +1049,7 @@ pub fn admit(
 
     let (routes, default_routes) = match (given, &config.model_route) {
         (Some(text), _) => (text, false),
-        (None, Some(route)) => (default_routes(route, &decoded), true),
+        (None, Some(route)) => (default_routes(route, decoded.as_ref()), true),
         (None, None) if variant == AgentVariant::Command => (String::new(), false),
         (None, None) => {
             return Err(Refusal::new(
@@ -892,8 +1080,8 @@ pub fn admit(
     }
 
     if let Some(kubernetes) = decoded
-        .deploy
         .as_ref()
+        .and_then(|decoded| decoded.deploy.as_ref())
         .and_then(|deploy| deploy.kubernetes.as_ref())
     {
         if kubernetes.namespace != namespace {
@@ -934,6 +1122,41 @@ pub fn admit(
     }
     expanded_credential(spec, variant)?;
 
+    let config_files = spec.config_files.clone().unwrap_or_default();
+    if !config_files.is_empty() {
+        config_file_names(&config_files, variant, agent.is_some())?;
+    }
+    let admitted = Admitted {
+        spec: decoded,
+        agent,
+        routes,
+        connectors,
+        default_routes,
+        variant,
+        checked,
+        config_files,
+    };
+    let bytes: usize = admitted
+        .config_map_data()
+        .iter()
+        .map(|(key, value)| key.len().saturating_add(value.len()))
+        .fold(0, usize::saturating_add);
+    if bytes > MAX_CONFIG_MAP_BYTES {
+        return Err(Refusal::new(
+            "TooLarge",
+            if admitted.config_files.is_empty() {
+                "spec"
+            } else {
+                "spec.configFiles"
+            },
+            format!(
+                "the ConfigMap it makes holds more than {MAX_CONFIG_MAP_BYTES} bytes, more than \
+                 Kubernetes accepts"
+            ),
+        ));
+    }
+    config_files_credential(&admitted.config_files)?;
+
     mount_paths(spec)?;
 
     if let Some(claim) = spec
@@ -949,15 +1172,7 @@ pub fn admit(
         ));
     }
 
-    Ok(Admitted {
-        spec: decoded,
-        agent,
-        routes,
-        connectors,
-        default_routes,
-        variant,
-        checked,
-    })
+    Ok(admitted)
 }
 
 #[cfg(test)]
@@ -972,11 +1187,11 @@ mod tests {
 
     fn spec(connectors: Option<&str>) -> LoomAgentSpec {
         LoomAgentSpec {
-            agent: serde_json::json!({
+            agent: Some(serde_json::json!({
                 "format": "loom.agent/1",
                 "agent": {"id": "a", "name": "A", "brief": "answers"},
                 "model": {"routes": "routes.yaml", "roles": [{"role": "agent", "model": "small"}]},
-            }),
+            })),
             routes: serde_json::json!({
                 "format": "llm.routes/1",
                 "endpoints": {"lab": {"base_url": "http://lab.example/v1", "protocol": "messages",
@@ -990,6 +1205,7 @@ mod tests {
             image: None,
             command: None,
             workspace: None,
+            config_files: None,
         }
     }
 
@@ -1011,7 +1227,7 @@ mod tests {
     #[test]
     fn a_runtime_without_connectors_is_refused_for_serve_and_admitted_for_a_command() {
         let mut serve = spec(None);
-        serve.agent["runtime"] =
+        serve.agent.as_mut().expect("an agent")["runtime"] =
             serde_json::json!({"state_dir": "/var/lib/agent", "confinement": "none"});
         let refusal = admitted(&serve).expect_err("agent serve needs connectors");
         assert_eq!(refusal.reason, "Malformed");
@@ -1161,7 +1377,7 @@ mod tests {
     fn an_egress_entry_naming_neither_host_nor_namespace_is_refused_naming_it() {
         let deployed = |egress: serde_json::Value| {
             let mut deployed = spec(None);
-            deployed.agent["deploy"] = serde_json::json!({"kubernetes": {
+            deployed.agent.as_mut().expect("an agent")["deploy"] = serde_json::json!({"kubernetes": {
                 "namespace": "agents", "service_account": "a",
                 "image_repository": "registry.example/a",
                 "resources": {"cpu": "100m", "memory": "128Mi"},
@@ -1257,7 +1473,8 @@ mod tests {
              roles: [{role: agent, model: small}]}\n",
         )
         .expect("a spec");
-        Routes::parse(&default_routes(&route, &decoded)).expect("llm reads the default routes");
+        Routes::parse(&default_routes(&route, Some(&decoded)))
+            .expect("llm reads the default routes");
     }
 
     #[test]
@@ -1284,10 +1501,79 @@ mod tests {
         )
         .expect("a spec");
         assert_eq!(
-            default_routes(&route, &decoded),
+            default_routes(&route, Some(&decoded)),
             "format: llm.routes/1\nendpoints:\n  model-route:\n    base_url: \
              http://model-route.agents.svc:8080/v1\n    protocol: messages\n    auth:\n      \
              kind: anonymous\nroutes:\n  small: model-route/small-model\n"
         );
+    }
+
+    fn command(agent: bool, files: &[(&str, &str)]) -> LoomAgentSpec {
+        let base = spec(None);
+        LoomAgentSpec {
+            agent: if agent { base.agent.clone() } else { None },
+            routes: serde_json::json!({}),
+            command: Some(CommandSpec {
+                entrypoint: Some(vec!["takt".to_owned()]),
+                args: None,
+            }),
+            config_files: Some(
+                files
+                    .iter()
+                    .map(|(name, content)| ConfigFile {
+                        name: (*name).to_owned(),
+                        content: (*content).to_owned(),
+                    })
+                    .collect(),
+            ),
+            ..base
+        }
+    }
+
+    #[test]
+    fn a_command_resource_without_spec_agent_says_what_it_admitted() {
+        let files = [("endpoint.toml", "model = \"small\"\n"), ("run.toml", "")];
+        let both = admitted(&command(true, &files)).expect("admitted");
+        assert_eq!(
+            both.message(),
+            "admitted a for its own command: a loom.agent/1 document with no credential, at \
+             /config/agent.yaml; 2 configuration files with no credential, at /config"
+        );
+        let only = admitted(&command(false, &files[..1])).expect("admitted");
+        assert_eq!(
+            only.message(),
+            "admitted for its own command: 1 configuration file with no credential, at /config"
+        );
+        assert!(only.spec.is_none() && only.agent.is_none());
+        assert_eq!(
+            only.config_map_data().keys().collect::<Vec<_>>(),
+            ["connectors.toml", "endpoint.toml", "routes.yaml"]
+        );
+        let neither = admitted(&command(false, &[])).expect("admitted");
+        assert_eq!(
+            neither.message(),
+            "admitted for its own command: no loom.agent/1 document and no configuration file"
+        );
+    }
+
+    #[test]
+    fn the_default_routes_of_a_command_resource_without_spec_agent_route_nothing() {
+        let route = ModelRoute {
+            url: "http://model-route.agents.svc:8080/v1".to_owned(),
+            protocol: "messages".to_owned(),
+            model: "small-model".to_owned(),
+        };
+        let mut with_route = config();
+        with_route.model_route = Some(route.clone());
+        let admitted =
+            admit(&command(false, &[]), "agents", &with_route, &|_| None).expect("admitted");
+        assert!(admitted.default_routes, "the model route stays open");
+        assert_eq!(admitted.routes, default_routes(&route, None));
+        assert!(
+            admitted.routes.ends_with("routes: {}\n"),
+            "{}",
+            admitted.routes
+        );
+        Routes::parse(&admitted.routes).expect("llm reads it");
     }
 }

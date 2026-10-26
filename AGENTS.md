@@ -796,9 +796,11 @@ done: A2A turns in `record.jsonl`, streaming, push and multi-turn tasks.
 An agent deployed to Kubernetes is a `LoomAgent` resource (group `loom.beyond10x.dev`, version
 `v1alpha1`, namespaced), the `loom.resource` domain (`ess/domains/resource.yaml`,
 `story:loom-agent-resource-domain`). Its spec, `LoomAgentSpec`, holds the `loom.agent/1` document
-verbatim as `agent` (no second agent schema), the llm `routes` document untyped, the
+verbatim as `agent` (no second agent schema; required for `AgentServe`, optional for `Command`),
+the llm `routes` document untyped, the
 connectors-local TOML, a Secret reference for the environment, an optional Secret for files,
-plain environment values, an image override, an optional command and an optional workspace volume. The entity `LoomAgent` is the
+plain environment values, an image override, an optional command, an optional workspace volume
+and, for `Command`, the program's own configuration files. The entity `LoomAgent` is the
 controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
 the state Pending, Running, Refused, Degraded, Completed or Failed. `ApplyLoomAgent`, `RecordCheck`,
 `ObserveDeployment`, `ObserveRun` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
@@ -824,7 +826,11 @@ as files the pod user owns (`story:loom-agent-trial-fixes`), so a pod can hold a
 environment variable and a forge key as files. `spec.env` (a list of `EnvVar`: `name`, `value`,
 `story:loom-agent-spec-env`) gives values to the agent container on either variant, which the
 kubelet expands (`$(NAME)`) as it does any `env` value; its
-refusals are the controller's (§ Operator, wave decision D5), not the domain's. `runtime.connectors` and
+refusals are the controller's (§ Operator, wave decision D5), not the domain's. `spec.configFiles`
+(a list of `ConfigFile`: `name`, `content`, `story:command-opaque-config-files`) gives a `Command`
+resource its program's own configuration, each file written verbatim at `/config/<name>`, which
+the controller decodes nothing of; so takt reads its `endpoint.toml` and `run.toml` with no
+placeholder `spec.agent`. Its refusals are the controller's too. `runtime.connectors` and
 `deploy.kubernetes.image_repository` in `loom.agent/1` are optional; `agent serve` still refuses a
 spec without `runtime.connectors`. `RecordCheck`
 records the variant the controller admitted; `respecified` clears it, and the view and
@@ -909,7 +915,8 @@ controller holds each name's uid beside it: a resource whose uid differs (delete
 under its name) is forgotten with `DeleteLoomAgent` first and applied as created. A reconcile
 (`src/reconcile.rs`) runs `ApplyLoomAgent`; a Pending resource is admitted (`src/admission.rs`) and
 the answer recorded by `RecordCheck` (exit 0, or 3 with `refused: <reason> at <member>: <detail>`).
-Admission, first refusal wins: `b10x_loom_agent::check_text` over `spec.agent` (members prefixed
+Admission, first refusal wins: an `AgentServe` resource without `spec.agent` (`Malformed` at
+`spec.agent`); `b10x_loom_agent::check_text` over `spec.agent` (members prefixed
 `spec.agent.`), then, for `AgentServe`, a `runtime` without `connectors`, which `agent serve` needs
 (`Malformed` at `spec.agent.runtime.connectors`); the same over `spec.routes`, taking only `SecretLiteral` from it, then `Malformed`
 when the routes are not a mapping or llm's strict parser (`llm_models::routes::Routes::parse`,
@@ -935,12 +942,22 @@ command); a name it does not know (a `secretRef` key, the service environment su
 `KUBERNETES_PORT`) is read twice, left as written and as `UNKNOWN_REFERENCE` (`a://`), since it
 may supply a URL scheme. Each reading is walked whole and word by word (`SecretLiteral`, its
 detail saying it was found after expansion; `TooLarge` when references add more than
-`MAX_EXPANDED_BYTES`, 2 MiB, to a reading); a `spec.workspace.mountPath` or
+`MAX_EXPANDED_BYTES`, 2 MiB, to a reading); a non-empty `spec.configFiles` on `AgentServe`
+(`Malformed`), then a name that is not a plain file name (`[A-Za-z0-9._-]+`, not `.` or `..`, at
+most 253 bytes: `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap holds already
+(`routes.yaml`, `connectors.toml`, and `agent.yaml` when `spec.agent` is present:
+`ConfigFileConflict`); a ConfigMap whose keys and values hold more than 1 MiB together, Kubernetes's
+limit (`TooLarge`, before apply); a credential in a file (`SecretLiteral` at
+`spec.configFiles[<i>].content` or `.name`, never a member inside the file): the list whole, each
+content as a YAML document and as a TOML table when it reads as one (whole and word by word, so an
+escape hides nothing), then each word of the raw text, named by line, as `spec.connectorsConfig`
+is walked; `TooLarge` beyond the bound; a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
-`agent serve` does not; with no routes and no `modelRoute` it gets an empty `routes.yaml`. Then
+`agent serve` does not; with no routes and no `modelRoute` it gets an empty `routes.yaml`, and
+without `spec.agent` the default routes document routes no model (no role names one). Then
 each child it would render is read, and one that exists without this resource as controller is
 `ChildNotOwned`, naming its kind and name. That refusal is the cluster's, not the spec's: each later
 reconcile at that generation reads the children again, and once none is someone else's the record
@@ -997,9 +1014,10 @@ serde_json's `arbitrary_precision`, on in this workspace, breaks a `Value` numbe
 directly.
 
 The children (`src/render.rs`): a ServiceAccount (`deploy.kubernetes.service_account`, else the
-resource name); a ConfigMap `<name>-spec` with `agent.yaml`, `routes.yaml` (a non-empty
-`spec.routes` as given, else one anonymous endpoint at the model route, a route per declared role)
-and `connectors.toml`; a Deployment (one replica, `Recreate`, init container
+resource name); a ConfigMap `<name>-spec` with `agent.yaml` (only with `spec.agent`),
+`routes.yaml` (a non-empty `spec.routes` as given, else one anonymous endpoint at the model route,
+a route per declared role), `connectors.toml` and each of `spec.configFiles` by its name; a
+Deployment (one replica, `Recreate`, init container
 `b10x-loom agent check`, container `b10x-loom agent serve`, image `spec.image` else `defaultImage`,
 user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests equal to limits,
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
@@ -1010,7 +1028,8 @@ Deployment's place, named like it: `backoffLimit` 0, no `ttlSecondsAfterFinished
 template with `restartPolicy: Never`, so its program runs once. Its pod has no `check`
 init container, runs `spec.command`, mounts the ConfigMap at `/config` (the contract with the image:
 `spec.agent` is `/config/agent.yaml`, the document the resource holds, keys in the order the API
-server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`), sets `HOME=/var/lib/agent`
+server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`; each of `spec.configFiles` is
+`/config/<name>`, verbatim), sets `HOME=/var/lib/agent`
 and adds an emptyDir at `/tmp`; `status.conditions` `Checked` then reads `SpecAdmitted` instead of
 `SpecServeable`. On either variant `spec.env` follows the controller's own `env`
 (`render::CONTROLLER_ENV`, which `tests/render.rs` holds to every name the renderer sets) on the
