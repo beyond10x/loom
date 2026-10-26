@@ -856,7 +856,8 @@ when the routes are not a mapping or llm's strict parser (`llm_models::routes::R
 which refuses an `auth.secret` that is a value and not an `env:`, `file:` or `keychain:` reference)
 refuses them; `spec.connectorsConfig`, which the ConfigMap receives verbatim, decoded as TOML
 (`Malformed` otherwise) with each decoded key and string walked whole, then each word of them, then
-each word of the raw text, comments included (named by line); a routes or connectors document
+each word of the raw text, comments included (named by line), a word holding `:` or `;` also in
+its pieces; a routes or connectors document
 beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admitted unwalked, and
 words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
 `secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the

@@ -18,7 +18,8 @@
 //!    table walked whole; every word of each decoded key and string; and every word of the raw
 //!    text, comments included, named by its line. A word is what whitespace and `=`, `"`, `'`,
 //!    `,`, `[`, `]`, `{`, `}` separate, its leading `#` dropped; a word that is a token prefix
-//!    ending in a space (`Bearer`) is walked with the word after it.
+//!    ending in a space (`Bearer`) is walked with the word after it, and a word holding `:` or
+//!    `;` is walked whole and then each piece between them (`user:ghp_…`, `x-api-key:sk-…`).
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`);
 //!    a `Command` resource then gets an empty `routes.yaml`.
 //! 5. A `spec.secretRef` outside the configuration's `allowedSecretNames` (`SecretNotAllowed`).
@@ -334,14 +335,21 @@ fn words(text: &str) -> Vec<String> {
             .iter()
             .any(|prefix| prefix.strip_suffix(' ') == Some(part))
     };
-    parts
-        .iter()
-        .enumerate()
-        .map(|(index, part)| match parts.get(index + 1) {
+    let mut found: Vec<String> = Vec::with_capacity(parts.len());
+    for (index, part) in parts.iter().enumerate() {
+        found.push(match parts.get(index + 1) {
             Some(next) if spaced(part) => format!("{part} {next}"),
             _ => (*part).to_owned(),
-        })
-        .collect()
+        });
+        if part.contains([':', ';']) {
+            found.extend(
+                part.split([':', ';'])
+                    .filter(|piece| !piece.is_empty())
+                    .map(ToOwned::to_owned),
+            );
+        }
+    }
+    found
 }
 
 /// The words of each key and string of `table`, the table at `member`, in document order: a
@@ -554,7 +562,17 @@ pub fn admit(
             )
         })?),
         AgentVariant::Command => {
-            credential(&agent, "spec.agent")?;
+            credential(&agent, "spec.agent").map_err(|refusal| {
+                if refusal.reason == "TooLarge" {
+                    Refusal::new(
+                        spelling(RefusalReason::Malformed),
+                        "spec.agent",
+                        "it is beyond the loom.agent/1 decoder's bound",
+                    )
+                } else {
+                    refusal
+                }
+            })?;
             None
         }
     };
