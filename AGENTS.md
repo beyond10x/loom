@@ -808,9 +808,12 @@ A resource is one of two variants (`AgentVariant`, `story:loom-agent-command-var
 it is present, the pod running the image's own program (`spec.command.entrypoint` and `args`, each
 left to the image when absent) with `spec.agent` mounted at `/config/agent.yaml`, once
 (`story:command-variant-runs-once`). `ObserveRun` (input `name`, `phase` of `RunPhase`: Active,
-Succeeded, Failed) reads that run: `still-active` keeps a Running resource (`observe-running`,
-`LoomAgentRunObserved`), `completed` and `failed` move it to Completed or Failed
-(`LoomAgentCompleted`, `LoomAgentFailed`), `finished` preserves a Completed or Failed one, `no-run`
+Succeeded, Failed, and the optional `exit_code`, `finished_at` and `reason` of a run that ended,
+`story:command-run-exit-status`) reads that run: `still-active` keeps a Running resource
+(`observe-running`, `LoomAgentRunObserved`), `completed` and `failed` move it to Completed or
+Failed (`LoomAgentCompleted`, `LoomAgentFailed`, each naming `exit_code`) and record `run`
+(`RunEnd`: `exit_code`, `finished_at`, `reason`, each optional), `finished` preserves a Completed
+or Failed one, `no-run`
 is a `StateConflict` from any other state, and `unknown` is `NotFound`. A Completed or Failed
 resource leaves only by `respecified` at a new generation. The command takes no generation: on
 ess/25 a subject-fact guard (a stale generation) cannot combine with the subject-state guards the
@@ -863,14 +866,18 @@ the schema admitted, which `b10x-loom agent check` reads again. The decoder's ow
 specification does not declare (the `format` value, ports, non-blank text, variable names, RFC 3339
 instants) are not in the CRD.
 
-The status is `observedGeneration`, `state`, `check`, `deployment`, `variant` and `conditions`.
+The status is `observedGeneration`, `state`, `check`, `deployment`, `variant`, `run` and
+`conditions`. `run` (`exitCode`, `finishedAt`, `reason`) is how a Command resource's run ended,
+set by `completed` and `failed` and cleared by `respecified`; a run that ended with no exit code
+read holds the Job's reason alone, or nothing.
 `status.state` is the lifecycle state the design calls `phase`. `deployment` (`availability`
 Available or Unavailable) is what the controller last read of the child Deployment: every
 `ObserveDeployment` outcome that reads one sets it, and `respecified` clears it. `still-running` and
 `still-degraded` are moves over the self-transitions `observe-running` and `observe-degraded`,
 emitting `LoomAgentObserved`, because on ESS 0.69.0 an `updates:` outcome beside `moves:` under one
 subject predicate makes the whole command a hand-written obligation. `conditions` (`Checked`,
-`Available`) is declared for the CRD's schema and the view, but no command sets it: a `sets:` value
+`Available` and, for a Command resource, `Completed`) is declared for the CRD's schema and the
+view, but no command sets it: a `sets:` value
 on ESS 0.69.0 admits no list (marked in `resource.yaml`), so the controller computes the list when
 it publishes (§ Operator). `b10x-loom-resource` talks to no cluster; `crates/loom-operator` is the
 only crate that does.
@@ -947,11 +954,19 @@ still active has the other children applied and its run, as read, is `ObserveRun
 reads Active). A Completed or Failed resource has no child applied, read or deleted. Every delete
 propagates in the foreground: a Job's pod, a Deployment's ReplicaSets and pods go before it does.
 An AgentServe resource does not wait for a Job a `Command` generation left: it is deleted by the
-sweep after the Deployment is applied. The run is read from the Job, never from a Pod. After a controller restart a finished Job still
-there is observed, not run again; a Job deleted while the controller was down runs once more. The
+sweep after the Deployment is applied. The run's phase is read from the Job. Once it has ended,
+its exit code, end time and reason are read from the Job's own pod (`observation` in
+`src/reconcile.rs`): the pods the Job's label selector names whose controlling owner reference is
+the Job's uid, so a pod of another Job never speaks for it, the program container `loom-agent`
+(`render::CONTAINER`), the latest `finishedAt`. With no such pod, or a pod list answered 403 or
+404, the exit code and end time are absent and the reason is that of the Job's `Failed` or
+`Complete` condition. No pod is watched, and an active run reads none. After a controller restart
+a finished Job still there is observed, not run again; a Job deleted while the controller was down runs once more. The
 status goes out by server-side apply on `/status`, only when it changed; conditions follow
 `src/status.rs` (a table per state in its module doc; a Command resource's `Available` reads
-`RunNotFinished`, `RunSucceeded` or `RunFailed`, and only an AgentServe resource is ever Degraded).
+`RunNotFinished`, `RunSucceeded` or `RunFailed`, its `Completed` reads Unknown `RunNotFinished`,
+True `RunSucceeded` or False `RunFailed` with the exit code and end time in its message, and only
+an AgentServe resource is ever Degraded).
 Requeue after 300 s, retry after 30 s; `.owns(Deployment)` and `.owns(Job)` wake it on a change to
 either. Deletion is the
 garbage collector's (owner references with `controller` and `blockOwnerDeletion`); the controller
@@ -994,8 +1009,8 @@ its ServiceAccount, a namespaced Role and RoleBinding, and the ConfigMap holding
 the values. The Role grants `get`, `list`, `watch`, `update`, `patch` on `loomagents` and
 `loomagents/status`, `update` on `loomagents/finalizers` (which `blockOwnerDeletion` needs), and
 `create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the six child kinds (Job among
-them); nothing on
-Secrets, Pods or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
+them), and `get` and `list` on `pods` (a finished run's exit code; no watch); nothing on Secrets
+or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
 and the values' `image.tag` and `agentImage.tag` are the workspace version, so a release bumps all
 four (`tests/chart.rs` fails otherwise). `task chart-check` compares the CRD copy, then runs
 `helm lint` and `helm template` with the defaults and with the overrides `tests/chart.rs` asserts.

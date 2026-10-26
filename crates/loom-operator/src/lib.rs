@@ -9,7 +9,9 @@
 //! NetworkPolicy and, with `expose.a2a`, a Service, each owned by the resource. A resource with
 //! `spec.command` is the `Command` variant (design § 9a): its pod is a `batch/v1` Job, run once,
 //! running the image's own program with no init container and the spec at `/config/agent.yaml`;
-//! a finished Job is not started again before a new generation. On either variant the pod has a
+//! a finished Job is not started again before a new generation, and its status reports how the
+//! run ended (`status.run`: the program's exit code and end time, read from the Job's pod, and
+//! the condition `Completed`). On either variant the pod has a
 //! workspace volume and the Secret as files when the resource asks for them. Before any child
 //! is rendered the spec is checked in-process (`b10x_loom_agent::check_text`, the library behind
 //! `b10x-loom agent check`), `spec.routes` is walked for a credential and read by llm's strict
@@ -112,6 +114,7 @@ mod tests {
                 "conditions",
                 "deployment",
                 "observedGeneration",
+                "run",
                 "state",
                 "variant"
             ]

@@ -76,6 +76,8 @@ use crate::resource::{CommandSpec, LoomAgent};
 
 /// The user every container runs as.
 pub const USER: i64 = 10001;
+/// The name of the container that runs the agent or, for a `Command` resource, its program.
+pub const CONTAINER: &str = "loom-agent";
 /// Where the ConfigMap is mounted.
 pub const SPEC_DIR: &str = "/etc/agent";
 /// The spec file the containers read.
@@ -486,7 +488,7 @@ impl Renderer<'_> {
         ];
         mounts.extend(extra_mounts);
         let serve = Container {
-            name: "loom-agent".to_owned(),
+            name: CONTAINER.to_owned(),
             image: Some(self.image()),
             command,
             args,

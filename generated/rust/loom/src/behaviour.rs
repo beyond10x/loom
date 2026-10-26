@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest d9155034aef9f4b4212f9b6a3ffc88316cd8ab2a572b6ef5cecf23eba5d95f3f
-// contract digest af385912b2000394d6b4bb57552f401a93a9cf2bea3600aa333fdba397fdf1aa
+// model digest 9ae2c9527af772aefdac8e5f0ed3e249fa61378afce19d33e99b5df30cab38c3
+// contract digest ffc963a189f2a35f008d4a5896fbac5abf5a6e082000da4c37354932f6d557f3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -352,6 +352,7 @@ where
                 check: None,
                 deployment: None,
                 variant: None,
+                run: None,
                 conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -373,6 +374,7 @@ where
                     check: None,
                     deployment: None,
                     variant: None,
+                    run: None,
                     conditions: None,
                 };
                 let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -392,6 +394,7 @@ where
                 check: None,
                 deployment: None,
                 variant: None,
+                run: None,
                 conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -412,6 +415,7 @@ where
         next.data.check = None;
         next.data.deployment = None;
         next.data.variant = None;
+        next.data.run = None;
         let answer = crate::resource::ApplyLoomAgentOutcome::Respecified { loom_agent_applied: crate::resource::LoomAgentApplied { name: input.name.clone(), generation: input.generation.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
@@ -556,8 +560,9 @@ where
                 crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Completed(instance.complete()),
                 _ => return Err(undeclared("loom.resource.ObserveRun")),
             };
-            let next = moved.snapshot();
-            let answer = crate::resource::ObserveRunOutcome::Completed { loom_agent_completed: crate::resource::LoomAgentCompleted { name: input.name.clone(), generation: before.observed_generation.clone() } };
+            let mut next = moved.snapshot();
+            next.data.run = Some(crate::resource::RunEnd { exit_code: input.exit_code.clone(), finished_at: input.finished_at.clone(), reason: input.reason.clone() });
+            let answer = crate::resource::ObserveRunOutcome::Completed { loom_agent_completed: crate::resource::LoomAgentCompleted { name: input.name.clone(), generation: before.observed_generation.clone(), exit_code: input.exit_code.clone() } };
             LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
         }
@@ -572,8 +577,9 @@ where
                 crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Failed(instance.fail()),
                 _ => return Err(undeclared("loom.resource.ObserveRun")),
             };
-            let next = moved.snapshot();
-            let answer = crate::resource::ObserveRunOutcome::Failed { loom_agent_failed: crate::resource::LoomAgentFailed { name: input.name.clone(), generation: before.observed_generation.clone() } };
+            let mut next = moved.snapshot();
+            next.data.run = Some(crate::resource::RunEnd { exit_code: input.exit_code.clone(), finished_at: input.finished_at.clone(), reason: input.reason.clone() });
+            let answer = crate::resource::ObserveRunOutcome::Failed { loom_agent_failed: crate::resource::LoomAgentFailed { name: input.name.clone(), generation: before.observed_generation.clone(), exit_code: input.exit_code.clone() } };
             LoomAgentStorage::put(&mut self.ports, next);
             return Ok(answer);
         }
@@ -877,6 +883,7 @@ where
                 check: held.data.check,
                 deployment: held.data.deployment,
                 variant: held.data.variant,
+                run: held.data.run,
                 conditions: held.data.conditions,
                 state: held.state,
             })

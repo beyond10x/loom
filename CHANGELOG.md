@@ -16,12 +16,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - `loom.resource`: the states `Completed` and `Failed`, the command `ObserveRun` (`RunPhase` Active, Succeeded, Failed; outcomes `still-active`, `completed`, `failed`, `finished`, `no-run`, `unknown`) and the events `LoomAgentRunObserved`, `LoomAgentCompleted`, `LoomAgentFailed`; `LoomAgentRecord::observe_run` (story:command-variant-runs-once)
 - `b10x-loom-operator`: a finished Job is not started again and a Job of the current generation is never sent again; a new generation deletes the older Job, and a Command Deployment an earlier release made, in the foreground and creates the Job only once both are gone; every child delete now propagates in the foreground; the status of a `Command` resource reads `Available` `RunNotFinished`, `RunSucceeded` or `RunFailed` (story:command-variant-runs-once)
+- `loom.resource`: `RunEnd` (`exit_code`, `finished_at`, `reason`, each optional) as the entity's and the view's `run`, the condition type `Completed`, and `ObserveRun` inputs `exit_code`, `finished_at` and `reason`; `completed` and `failed` record `run` and `respecified` clears it; `b10x_loom_resource::Timestamp` is re-exported (story:command-run-exit-status)
+- `b10x-loom-operator`: once a `Command` resource's Job has ended, its `status.run` holds the program's exit code, end time and reason, read from the Job's own pod (its selector, controlled by the Job's uid), and the condition `Completed` (Unknown `RunNotFinished`, True `RunSucceeded`, False `RunFailed`) names them; a run with no terminated container reports the Job's reason and no exit code (story:command-run-exit-status)
 
 ### Changed
 
 - **Breaking:** a `Command` `LoomAgent` runs its program once as a `batch/v1` Job (`backoffLimit` 0, `restartPolicy: Never`), not as a Deployment; whoever reads that Deployment reads the Job, and an existing Command Deployment is deleted as a child this generation does not render (story:command-variant-runs-once)
 - **Breaking:** `loom.resource.LoomAgentState` gains `Completed` and `Failed`, `ResourceEvent` gains `RunObserved`, `Completed` and `Failed`, and `b10x_loom_operator::render::Children.deployment` is now `workload: Workload` (a Deployment or a Job); an exhaustive match or a reader of `deployment` no longer compiles (story:command-variant-runs-once)
-- The `loom-agents` chart's Role grants `batch` `jobs` the verbs of the other child kinds; still nothing on Secrets, Pods or Events (story:command-variant-runs-once)
+- The `loom-agents` chart's Role grants `batch` `jobs` the verbs of the other child kinds (story:command-variant-runs-once)
+- **Breaking:** `ObserveRun`, `LoomAgents`, `LoomAgentCompleted` and `LoomAgentFailed` gain fields (`exit_code`, `finished_at`, `reason`; `run`; `exit_code`), `ConditionType` gains `Completed`, and `b10x_loom_operator::status::conditions` takes the row's `run`; a struct literal or an exhaustive match no longer compiles (story:command-run-exit-status)
+- The `loom-agents` chart's Role grants `get` and `list` on `pods`, no `watch`, for a finished run's exit code; still nothing on Secrets or Events (story:command-run-exit-status)
 
 ## [0.43.0] - 2026-10-26
 

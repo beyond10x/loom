@@ -33,10 +33,12 @@
 //!    applied and its run, as read, is `ObserveRun`. Otherwise the children are applied by
 //!    server-side apply, field manager `b10x-loom-operator`, forced; the Deployment's `Available`
 //!    condition in the apply's answer, when its status has observed the applied generation, is
-//!    `ObserveDeployment`, and the created Job's run is `ObserveRun`. Then each child it controls
-//!    that this generation does not render (a Service once `expose.a2a` is gone, the
-//!    ServiceAccount an earlier generation named) is deleted. Every delete propagates in the
-//!    foreground: what the child owns, a Job's pod included, goes before it does.
+//!    `ObserveDeployment`, and the created Job's run is `ObserveRun`. A finished run's `ObserveRun`
+//!    carries its exit code, end time and reason, read from the Job's own pod (`observation`):
+//!    one its label selector names whose controlling owner reference is the Job's uid. Then each
+//!    child it controls that this generation does not render (a Service once `expose.a2a` is
+//!    gone, the ServiceAccount an earlier generation named) is deleted. Every delete propagates
+//!    in the foreground: what the child owns, a Job's pod included, goes before it does.
 //! 6. A `Completed` or `Failed` resource has no child applied, read or deleted: its run is over
 //!    until a new generation respecifies it.
 //! 7. The record's row is published as the status by server-side apply on the status
@@ -53,7 +55,8 @@
 //! resource is created again at its cluster generation, checked again, and its status rewritten.
 //! A `Command` resource whose finished Job is still there reads its run from it and does not run
 //! again; one whose Job was deleted while the controller was down runs once more.
-//! The controller reads and writes no Secret and reads no Pod.
+//! The controller reads and writes no Secret, and reads a Pod only to learn how a finished run
+//! ended; it watches none.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
@@ -65,14 +68,16 @@ use b10x_loom_resource::model::{
     ApplyLoomAgent, ApplyLoomAgentOutcome, DeleteLoomAgent, DeploymentAvailability, LoomAgentState,
     LoomAgents, ObserveDeployment, ObserveRun, RecordCheck, ResourceName, RunPhase,
 };
-use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, UnmetObligation};
+use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, Timestamp, UnmetObligation};
 use futures::StreamExt;
 use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{ConfigMap, Service, ServiceAccount};
+use k8s_openapi::api::core::v1::{
+    ConfigMap, ContainerStateTerminated, Pod, Service, ServiceAccount,
+};
 use k8s_openapi::api::networking::v1::NetworkPolicy;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, Time};
 use kube::api::{
     Api, DeleteParams, ListParams, Patch, PatchParams, Preconditions, PropagationPolicy,
 };
@@ -595,11 +600,12 @@ fn wanted(children: &Children) -> Vec<(Kind, String)> {
 }
 
 /// What a Job the resource controls says of its run: the generation its pod template names and
-/// the run's phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// the run's phase, and the Job as read, whose pod says how a finished run ended.
+#[derive(Debug, Clone)]
 struct JobRun {
     generation: Option<i64>,
     phase: RunPhase,
+    job: Job,
 }
 
 /// One child a resource renders, and who controls it now; for a Job the resource controls, what
@@ -631,6 +637,7 @@ async fn survey(
                     let run = matches!(holding, Holding::Ours(_)).then(|| JobRun {
                         generation: job_generation(&job),
                         phase: run_phase(&job),
+                        job: job.clone(),
                     });
                     (holding, run)
                 }
@@ -748,11 +755,128 @@ fn run_phase(job: &Job) -> RunPhase {
     }
 }
 
+/// The run of the resource `resource` as `ObserveRun` takes it: the Job's phase and, once the
+/// run is over, how it ended. An active run says nothing more. A finished one reads the exit
+/// code and end time from the Job's pod: the pods its label selector names (the resource's
+/// instance label when it has none) and whose controlling owner reference is the Job's uid, so a
+/// pod of another Job never speaks for it. Of those, the one whose program container
+/// ([`render::CONTAINER`]) terminated last answers; its `reason` comes along. With no such pod
+/// (deleted, not yet written, or not readable: a list answered 403 or 404) the exit code and end
+/// time are absent and the reason is the Job's own, from its `Failed` or `Complete` condition.
+async fn observation(
+    client: &Client,
+    namespace: &str,
+    resource: &ResourceName,
+    job: Option<&Job>,
+    phase: RunPhase,
+) -> Result<ObserveRun, kube::Error> {
+    let mut observed = ObserveRun {
+        name: resource.clone(),
+        phase,
+        exit_code: None,
+        finished_at: None,
+        reason: None,
+    };
+    let Some(job) = job.filter(|_| phase != RunPhase::Active) else {
+        return Ok(observed);
+    };
+    match terminated(client, namespace, &resource.0, job).await? {
+        Some(end) => {
+            observed.exit_code = Some(i64::from(end.exit_code));
+            observed.finished_at = end.finished_at.as_ref().and_then(wire_time);
+            observed.reason = end.reason;
+        }
+        None => observed.reason = job_reason(job, phase),
+    }
+    Ok(observed)
+}
+
+/// How the program container of the Job's own pod terminated, the latest when there are more.
+async fn terminated(
+    client: &Client,
+    namespace: &str,
+    resource: &str,
+    job: &Job,
+) -> Result<Option<ContainerStateTerminated>, kube::Error> {
+    let Some(uid) = job.metadata.uid.as_deref() else {
+        return Ok(None);
+    };
+    let selector = job
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.selector.as_ref())
+        .and_then(|selector| selector.match_labels.as_ref())
+        .filter(|labels| !labels.is_empty())
+        .map_or_else(
+            || instance(resource),
+            |labels| {
+                labels
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            },
+        );
+    let api: Api<Pod> = Api::namespaced(client.clone(), namespace);
+    let pods = match api.list(&ListParams::default().labels(&selector)).await {
+        Ok(list) => list.items,
+        Err(kube::Error::Api(status)) if matches!(status.code, 403 | 404) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(pods
+        .into_iter()
+        .filter(|pod| {
+            pod.metadata
+                .owner_references
+                .iter()
+                .flatten()
+                .any(|reference| reference.controller == Some(true) && reference.uid == uid)
+        })
+        .filter_map(|pod| {
+            pod.status?
+                .container_statuses?
+                .into_iter()
+                .find(|container| container.name == render::CONTAINER)?
+                .state?
+                .terminated
+        })
+        .max_by(|left, right| {
+            let at = |end: &ContainerStateTerminated| end.finished_at.as_ref().map(|time| time.0);
+            at(left).cmp(&at(right))
+        }))
+}
+
+/// A Kubernetes time as the API server writes it.
+fn wire_time(time: &Time) -> Option<Timestamp> {
+    match serde_json::to_value(time) {
+        Ok(serde_json::Value::String(text)) => Some(Timestamp(text)),
+        _ => None,
+    }
+}
+
+/// The reason of the Job's condition that says how its run ended: `Failed` for a failed run,
+/// `Complete` for a succeeded one, when it holds and names one.
+fn job_reason(job: &Job, phase: RunPhase) -> Option<String> {
+    let kind = match phase {
+        RunPhase::Failed => "Failed",
+        RunPhase::Succeeded => "Complete",
+        RunPhase::Active => return None,
+    };
+    job.status
+        .as_ref()?
+        .conditions
+        .iter()
+        .flatten()
+        .find(|condition| condition.type_ == kind && condition.status == "True")?
+        .reason
+        .clone()
+}
+
 /// What the applied workload reports: the Deployment's availability, once its status observed
 /// its generation, or the Job's run.
 enum Observed {
     Deployment(Option<DeploymentAvailability>),
-    Job(RunPhase),
+    Job(RunPhase, Option<Box<Job>>),
 }
 
 /// Before a `Command` resource's Job is created: deletes the Job of another generation `stale`
@@ -766,7 +890,7 @@ async fn workloads_gone(
     resource: &str,
     owner: &str,
     children: &Children,
-    stale: Option<(&Surveyed, &String, JobRun)>,
+    stale: Option<(&Surveyed, &String, &JobRun)>,
 ) -> Result<bool, kube::Error> {
     if !matches!(children.workload, Workload::Job(_)) {
         return Ok(true);
@@ -809,9 +933,10 @@ async fn apply_children(
         (Workload::Deployment(deployment), _) => {
             Observed::Deployment(availability(&apply(client, namespace, deployment).await?))
         }
-        (Workload::Job(_), Some(phase)) => Observed::Job(phase),
+        (Workload::Job(_), Some(phase)) => Observed::Job(phase, None),
         (Workload::Job(job), None) => {
-            Observed::Job(run_phase(&apply(client, namespace, job).await?))
+            let applied = apply(client, namespace, job).await?;
+            Observed::Job(run_phase(&applied), Some(Box::new(applied)))
         }
     };
     apply(client, namespace, &children.network_policy).await?;
@@ -953,7 +1078,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 .collect();
             let job = found
                 .iter()
-                .find_map(|child| match (&child.holding, child.run) {
+                .find_map(|child| match (&child.holding, &child.run) {
                     (Holding::Ours(uid), Some(run)) => Some((child, uid, run)),
                     _ => None,
                 });
@@ -970,7 +1095,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
             }
             let running = job
                 .filter(|(_, _, run)| run.generation == agent.metadata.generation)
-                .map(|(_, _, run)| run.phase);
+                .map(|(_, _, run)| run);
             if running.is_none()
                 && !workloads_gone(&ctx, &namespace, &name, &owner, children, job).await?
             {
@@ -980,18 +1105,19 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 return Ok(Action::requeue(RETRY));
             }
             match running {
-                Some(phase) if phase != RunPhase::Active => {
-                    ctx.record().observe_run(ObserveRun {
-                        name: key.clone(),
-                        phase,
-                    })?;
+                Some(run) if run.phase != RunPhase::Active => {
+                    let observed =
+                        observation(&ctx.client, &namespace, &key, Some(&run.job), run.phase)
+                            .await?;
+                    ctx.record().observe_run(observed)?;
                 }
                 _ => {
                     let current: BTreeSet<(Kind, String)> = wanted(children).into_iter().collect();
                     for (kind, child) in &current {
                         ctx.remember(&name, *kind, child);
                     }
-                    match apply_children(&ctx.client, &namespace, children, running).await? {
+                    let phase = running.map(|run| run.phase);
+                    match apply_children(&ctx.client, &namespace, children, phase).await? {
                         Observed::Deployment(Some(availability)) => {
                             ctx.record().observe_deployment(ObserveDeployment {
                                 name: key.clone(),
@@ -999,11 +1125,11 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                             })?;
                         }
                         Observed::Deployment(None) => {}
-                        Observed::Job(phase) => {
-                            ctx.record().observe_run(ObserveRun {
-                                name: key.clone(),
-                                phase,
-                            })?;
+                        Observed::Job(phase, applied) => {
+                            let job = applied.as_deref().or(running.map(|run| &run.job));
+                            let observed =
+                                observation(&ctx.client, &namespace, &key, job, phase).await?;
+                            ctx.record().observe_run(observed)?;
                         }
                     }
                     if !owner.is_empty() {

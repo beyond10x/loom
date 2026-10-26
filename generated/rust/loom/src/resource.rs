@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest d9155034aef9f4b4212f9b6a3ffc88316cd8ab2a572b6ef5cecf23eba5d95f3f
-// contract digest af385912b2000394d6b4bb57552f401a93a9cf2bea3600aa333fdba397fdf1aa
+// model digest 9ae2c9527af772aefdac8e5f0ed3e249fa61378afce19d33e99b5df30cab38c3
+// contract digest ffc963a189f2a35f008d4a5896fbac5abf5a6e082000da4c37354932f6d557f3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
 //!
-//! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, Pending again on a new generation, and gone on delete.
+//! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, Pending again on a new generation, and gone on delete.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -67,6 +67,8 @@ pub enum ConditionType {
     Checked,
     /// `Available`.
     Available,
+    /// `Completed`.
+    Completed,
 }
 
 /// DeploymentAvailability — `loom.resource.DeploymentAvailability`: one of a closed set of names.
@@ -139,6 +141,17 @@ pub struct LoomAgentSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceName(pub String);
 
+/// RunEnd — `loom.resource.RunEnd`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunEnd {
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
+    /// `finished_at` — `Optional<Timestamp>`.
+    pub finished_at: Option<crate::primitives::Timestamp>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
+}
+
 /// RunPhase — `loom.resource.RunPhase`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunPhase {
@@ -191,6 +204,8 @@ pub struct LoomAgentData {
     pub deployment: Option<DeploymentStatus>,
     /// `variant` — `Optional<loom.resource.AgentVariant>`.
     pub variant: Option<AgentVariant>,
+    /// `run` — `Optional<loom.resource.RunEnd>`.
+    pub run: Option<RunEnd>,
     /// `conditions` — `Optional<List<loom.resource.Condition>>`.
     pub conditions: Option<Vec<Condition>>,
 }
@@ -654,6 +669,12 @@ pub struct ObserveRun {
     pub name: ResourceName,
     /// `phase` — `loom.resource.RunPhase`.
     pub phase: RunPhase,
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
+    /// `finished_at` — `Optional<Timestamp>`.
+    pub finished_at: Option<crate::primitives::Timestamp>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
 }
 
 /// Everything `loom.resource.ObserveRun` can result in — one variant per declared outcome.
@@ -759,6 +780,8 @@ pub struct LoomAgentCompleted {
     pub name: ResourceName,
     /// `generation` — `Integer`.
     pub generation: i64,
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
 }
 
 /// LoomAgentDegraded — the event `loom.resource.LoomAgentDegraded`.
@@ -782,6 +805,8 @@ pub struct LoomAgentFailed {
     pub name: ResourceName,
     /// `generation` — `Integer`.
     pub generation: i64,
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
 }
 
 /// LoomAgentObserved — the event `loom.resource.LoomAgentObserved`.
@@ -871,6 +896,8 @@ pub struct LoomAgents {
     pub deployment: Option<DeploymentStatus>,
     /// `variant` — `Optional<loom.resource.AgentVariant>`.
     pub variant: Option<AgentVariant>,
+    /// `run` — `Optional<loom.resource.RunEnd>`.
+    pub run: Option<RunEnd>,
     /// `conditions` — `Optional<List<loom.resource.Condition>>`.
     pub conditions: Option<Vec<Condition>>,
     /// `state` — `loom.resource.LoomAgent.State`.

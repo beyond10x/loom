@@ -595,6 +595,7 @@ spec:
                       enum:
                       - Checked
                       - Available
+                      - Completed
                       type: string
                   required:
                   - type
@@ -615,6 +616,16 @@ spec:
                 type: object
               observedGeneration:
                 type: integer
+              run:
+                properties:
+                  exitCode:
+                    type: integer
+                  finishedAt:
+                    format: date-time
+                    type: string
+                  reason:
+                    type: string
+                type: object
               state:
                 enum:
                 - Completed

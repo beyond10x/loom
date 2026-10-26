@@ -2,9 +2,9 @@
 //! itself (`helm template`, which must be on `PATH`; CI installs it). The chart's CRD is the
 //! projected one byte for byte, its versions are the workspace version, its Role grants the
 //! design's verbs on the resource and the child kinds (and `update` on `loomagents/finalizers`,
-//! which `blockOwnerDeletion` needs) and nothing on Secrets, Pods or Events, and the controller's
-//! image and `config.yaml` follow the values, with the defaults and with the overrides
-//! `task chart-check` renders.
+//! which `blockOwnerDeletion` needs), `get` and `list` on Pods (a finished run's exit code) and
+//! nothing on Secrets or Events, and the controller's image and `config.yaml` follow the values,
+//! with the defaults and with the overrides `task chart-check` renders.
 
 use std::fs;
 use std::path::PathBuf;
@@ -147,6 +147,11 @@ fn the_role_grants_the_designs_verbs_and_nothing_on_secrets() {
             String::new(),
             "serviceaccounts".to_owned(),
             children.clone(),
+        ),
+        (
+            String::new(),
+            "pods".to_owned(),
+            vec!["get".to_owned(), "list".to_owned()],
         ),
         (String::new(), "services".to_owned(), children.clone()),
         (

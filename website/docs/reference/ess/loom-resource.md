@@ -10,7 +10,7 @@ custom_edit_url: null
 
 # Resource
 
-The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, Pending again on a new generation, and gone on delete.
+The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, Pending again on a new generation, and gone on delete.
 
 `loom.resource` is one of loom's bounded contexts. [All domains](./index.mdx).
 
@@ -49,7 +49,7 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ### `ConditionType`
 
-`loom.resource.ConditionType` is one of `Checked` and `Available`.
+`loom.resource.ConditionType` is one of `Checked`, `Available` and `Completed`.
 
 ### `DeploymentAvailability`
 
@@ -84,6 +84,14 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 ### `ResourceName`
 
 `loom.resource.ResourceName` wraps `String` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
+
+### `RunEnd`
+
+`loom.resource.RunEnd` is a record of three fields:
+
+- `exit_code` — `Optional<Integer>`, which may be absent, called `exitCode` on the wire
+- `finished_at` — `Optional<Timestamp>`, which may be absent, called `finishedAt` on the wire
+- `reason` — `Optional<String>`, which may be absent
 
 ### `RunPhase`
 
@@ -127,6 +135,7 @@ It holds:
 - `check` — `Optional<loom.resource.CheckResult>`, which may be absent
 - `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
 - `variant` — `Optional<loom.resource.AgentVariant>`, which may be absent
+- `run` — `Optional<loom.resource.RunEnd>`, which may be absent
 - `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 
 It declares no relation to another entity, and no other entity names it.
@@ -213,6 +222,7 @@ It exposes:
 - `check` — `Optional<loom.resource.CheckResult>`, which may be absent
 - `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
 - `variant` — `Optional<loom.resource.AgentVariant>`, which may be absent
+- `run` — `Optional<loom.resource.RunEnd>`, which may be absent
 - `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 - `state` — `loom.resource.LoomAgent.State`
 
@@ -241,7 +251,7 @@ It has four outcomes.
 
 **`unchanged`** — Taken when the existing subject's stored fields satisfy `observed_generation == input.generation`. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Completed`, `Degraded`, `Failed`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared and `variant` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Completed`, `Degraded`, `Failed`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared, `variant` cleared and `run` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `DeleteLoomAgent`
 
@@ -288,6 +298,9 @@ It takes:
 
 - `name` — `loom.resource.ResourceName`
 - `phase` — `loom.resource.RunPhase`
+- `exit_code` — `Optional<Integer>`, which may be absent
+- `finished_at` — `Optional<Timestamp>`, which may be absent
+- `reason` — `Optional<String>`, which may be absent
 
 It has six outcomes.
 
@@ -295,9 +308,9 @@ It has six outcomes.
 
 **`still-active`** — Taken when the existing subject is in Running and `phase == Active` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Running`, along the declared move `observe-running`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRunObserved`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
-**`completed`** — Taken when the existing subject is in Running and `phase == Succeeded` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Completed`, along the declared move `complete`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentCompleted`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+**`completed`** — Taken when the existing subject is in Running and `phase == Succeeded` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Completed`, along the declared move `complete`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentCompleted`. It sets `run` from `{exit_code: input.exit_code, finished_at: input.finished_at, reason: input.reason}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
-**`failed`** — Taken when the existing subject is in Running and `phase == Failed` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Failed`, along the declared move `fail`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentFailed`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+**`failed`** — Taken when the existing subject is in Running and `phase == Failed` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Failed`, along the declared move `fail`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentFailed`. It sets `run` from `{exit_code: input.exit_code, finished_at: input.finished_at, reason: input.reason}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
 **`finished`** — Taken when the existing subject is in Completed or Failed. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
@@ -350,6 +363,7 @@ It carries:
 
 - `name` — `loom.resource.ResourceName`
 - `generation` — `Integer`
+- `exit_code` — `Optional<Integer>`, which may be absent
 
 Emitted by `loom.resource.ObserveRun` on its `completed` outcome.
 
@@ -387,6 +401,7 @@ It carries:
 
 - `name` — `loom.resource.ResourceName`
 - `generation` — `Integer`
+- `exit_code` — `Optional<Integer>`, which may be absent
 
 Emitted by `loom.resource.ObserveRun` on its `failed` outcome.
 
@@ -500,4 +515,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · model digest `d9155034aef9f4b4212f9b6a3ffc88316cd8ab2a572b6ef5cecf23eba5d95f3f` · contract digest `slice-sha256/2:f6a723171ea1ab783ac09da3897288575d2b0ed0278e97af87aa968f5b98803b`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `9ae2c9527af772aefdac8e5f0ed3e249fa61378afce19d33e99b5df30cab38c3` · contract digest `slice-sha256/2:97f4dc04f2412a6491a89918e9d22bbf19e99476ddc32781291414d2d66cf1eb`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

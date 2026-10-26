@@ -12,10 +12,12 @@
 //! * [`crd`] projects the `CustomResourceDefinition` from the JSON Schema documents
 //!   `ess generate --kind schema` writes; `loom-xtask crd-generate` writes it to
 //!   `deploy/crd/loomagents.loom.beyond10x.dev.yaml`.
-//! * [`model`] is the generated `loom.resource` module, so a caller names one path for the types.
+//! * [`model`] is the generated `loom.resource` module, so a caller names one path for the types;
+//!   [`Timestamp`], the generated primitive its `run.finished_at` holds, is re-exported beside it.
 //!
 //! The record holds the generation the controller applied, the spec check's result, what it
-//! last read of the child Deployment and, by the state, whether the child Job's run ended, never
+//! last read of the child Deployment and, for a `Command` resource, whether the child Job's run
+//! ended and how (`run`: the exit code, the end time and the reason its pod gave), never
 //! the spec: the spec stays in the cluster and the
 //! controller re-reads it on every reconcile. No command sets the row's `conditions` (ESS 0.69.0
 //! admits no list under `sets:`); `b10x-loom-operator` computes them from the row when it
@@ -24,6 +26,7 @@
 pub mod crd;
 
 pub use loom::obligation::UnmetObligation;
+pub use loom::primitives::Timestamp;
 pub use loom::resource as model;
 
 use loom::behaviour::{Generated, LoomAgentStorage};

@@ -1085,6 +1085,7 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
             "conditions",
             "deployment",
             "observedGeneration",
+            "run",
             "state",
             "variant"
         ]
@@ -1108,7 +1109,7 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": ["Checked", "Available"]},
+                    "type": {"type": "string", "enum": ["Checked", "Available", "Completed"]},
                     "status": {"type": "string", "enum": ["True", "False", "Unknown"]},
                     "reason": {"type": "string"},
                     "message": {"type": "string"},
@@ -1129,6 +1130,18 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
             "properties": {"exitCode": {"type": "integer"}, "message": {"type": "string"}},
             "required": ["exitCode", "message"],
         })
+    );
+    assert_eq!(
+        status["properties"]["run"],
+        json!({
+            "type": "object",
+            "properties": {
+                "exitCode": {"type": "integer"},
+                "finishedAt": {"type": "string", "format": "date-time"},
+                "reason": {"type": "string"},
+            },
+        }),
+        "how a Command resource's run ended, each member absent when its pod did not say"
     );
 }
 

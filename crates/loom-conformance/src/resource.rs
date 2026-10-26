@@ -12,12 +12,13 @@
 use std::collections::BTreeMap;
 
 use b10x_loom_resource::LoomAgentRecord;
+use b10x_loom_resource::Timestamp;
 use b10x_loom_resource::model::{
     AgentVariant, ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, Condition, ConditionStatus,
     ConditionType, DeleteLoomAgent, DeleteLoomAgentOutcome, DeploymentAvailability,
     DeploymentStatus, LoomAgentObserved, LoomAgentState, LoomAgents, ObserveDeployment,
     ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome,
-    ResourceName, RunPhase, StaleGeneration,
+    ResourceName, RunEnd, RunPhase, StaleGeneration,
 };
 use ess_conformance::target::{ObservedEvent, SemanticCommandResult, ViewRow};
 use ess_primitives::ids::CorrelationId;
@@ -282,6 +283,9 @@ pub(crate) fn observe_run(
     let command = ObserveRun {
         name: name(input)?,
         phase: phase(input, "phase")?,
+        exit_code: optional_integer(input, "exit_code")?,
+        finished_at: codec::optional_text(input, "finished_at")?.map(Timestamp),
+        reason: codec::optional_text(input, "reason")?,
     };
     Some(match live.resources.observe_run(command).ok()? {
         ObserveRunOutcome::Unknown { error } => {
@@ -307,7 +311,8 @@ pub(crate) fn observe_run(
             let published = live.publish(
                 event(LOOM_AGENT_COMPLETED)
                     .with("name", name_node(&loom_agent_completed.name))
-                    .with("generation", codec::number(loom_agent_completed.generation)),
+                    .with("generation", codec::number(loom_agent_completed.generation))
+                    .with("exit_code", optional_number(loom_agent_completed.exit_code)),
                 correlation,
             );
             took(OBSERVE_RUN, "completed").emitting(published)
@@ -316,7 +321,8 @@ pub(crate) fn observe_run(
             let published = live.publish(
                 event(LOOM_AGENT_FAILED)
                     .with("name", name_node(&loom_agent_failed.name))
-                    .with("generation", codec::number(loom_agent_failed.generation)),
+                    .with("generation", codec::number(loom_agent_failed.generation))
+                    .with("exit_code", optional_number(loom_agent_failed.exit_code)),
                 correlation,
             );
             took(OBSERVE_RUN, "failed").emitting(published)
@@ -385,6 +391,7 @@ fn row(held: &LoomAgents) -> ViewRow {
             "variant".to_owned(),
             held.variant.map_or(Node::Null, variant_node),
         ),
+        ("run".to_owned(), held.run.as_ref().map_or(Node::Null, run)),
         ("state".to_owned(), state(held.state)),
     ])
 }
@@ -395,6 +402,37 @@ fn check(check: &CheckResult) -> Node {
         ("exit_code".to_owned(), codec::number(check.exit_code)),
         ("message".to_owned(), codec::text_node(&check.message)),
     ]))
+}
+
+/// A `loom.resource.RunEnd` as a suite value, an absent member as null.
+fn run(run: &RunEnd) -> Node {
+    Node::Map(BTreeMap::from([
+        ("exit_code".to_owned(), optional_number(run.exit_code)),
+        (
+            "finished_at".to_owned(),
+            run.finished_at
+                .as_ref()
+                .map_or(Node::Null, |at| codec::text_node(&at.0)),
+        ),
+        (
+            "reason".to_owned(),
+            run.reason.as_deref().map_or(Node::Null, codec::text_node),
+        ),
+    ]))
+}
+
+/// An `Optional<Integer>` as a suite value.
+fn optional_number(value: Option<i64>) -> Node {
+    value.map_or(Node::Null, codec::number)
+}
+
+/// The `Optional<Integer>` field `name`; `None` for a value that is neither null nor an integer.
+fn optional_integer(input: &Input, name: &str) -> Option<Option<i64>> {
+    match input.get(name) {
+        None | Some(Node::Null) => Some(None),
+        Some(Node::Number(number)) => number.as_i64().map(Some),
+        Some(_) => None,
+    }
 }
 
 /// A `loom.resource.DeploymentStatus` as a suite value.
@@ -413,6 +451,7 @@ fn condition(condition: &Condition) -> Node {
             codec::text_node(match condition.r#type {
                 ConditionType::Checked => "Checked",
                 ConditionType::Available => "Available",
+                ConditionType::Completed => "Completed",
             }),
         ),
         (

@@ -10,9 +10,9 @@ use b10x_loom_resource::model::{
     LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunObserved,
     LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents, ObserveDeployment,
     ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome,
-    ResourceName, RunPhase, StaleGeneration,
+    ResourceName, RunEnd, RunPhase, StaleGeneration,
 };
-use b10x_loom_resource::{LoomAgentRecord, ResourceEvent};
+use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, Timestamp};
 
 fn name() -> ResourceName {
     ResourceName("platform-operator".to_owned())
@@ -93,6 +93,7 @@ fn observed(
         }),
         deployment: availability.map(|availability| DeploymentStatus { availability }),
         variant: check.map(|_| AgentVariant::AgentServe),
+        run: None,
         conditions: None,
         state,
     })
@@ -436,6 +437,7 @@ fn two_resources_are_held_apart() {
                 }),
                 deployment: None,
                 variant: Some(AgentVariant::AgentServe),
+                run: None,
                 conditions: None,
                 state: LoomAgentState::Running,
             },
@@ -445,6 +447,7 @@ fn two_resources_are_held_apart() {
                 check: None,
                 deployment: None,
                 variant: None,
+                run: None,
                 conditions: None,
                 state: LoomAgentState::Pending,
             },
@@ -457,6 +460,9 @@ fn observe_run(record: &mut LoomAgentRecord, phase: RunPhase) -> ObserveRunOutco
         .observe_run(ObserveRun {
             name: name(),
             phase,
+            exit_code: None,
+            finished_at: None,
+            reason: None,
         })
         .expect("the generated behaviour answers every run observation")
 }
@@ -501,7 +507,8 @@ fn a_command_run_ends_once_and_stays_ended_until_a_new_generation() {
         ObserveRunOutcome::Completed {
             loom_agent_completed: LoomAgentCompleted {
                 name: name(),
-                generation: 1
+                generation: 1,
+                exit_code: None
             }
         }
     );
@@ -532,7 +539,8 @@ fn a_command_run_ends_once_and_stays_ended_until_a_new_generation() {
         ObserveRunOutcome::Failed {
             loom_agent_failed: LoomAgentFailed {
                 name: name(),
-                generation: 2
+                generation: 2,
+                exit_code: None
             }
         }
     );
@@ -568,16 +576,122 @@ fn a_command_run_ends_once_and_stays_ended_until_a_new_generation() {
             }),
             ResourceEvent::Completed(LoomAgentCompleted {
                 name: name(),
-                generation: 1
+                generation: 1,
+                exit_code: None
             }),
             applied(2),
             running(2),
             ResourceEvent::Failed(LoomAgentFailed {
                 name: name(),
-                generation: 2
+                generation: 2,
+                exit_code: None
             }),
             applied(3),
         ],
         "a finished resource observed again publishes nothing"
     );
+}
+
+/// How a run ended as the Job's pod said: an exit code, an end time and a reason, each absent when
+/// the pod did not say.
+fn ended(exit_code: Option<i64>, finished_at: Option<&str>, reason: Option<&str>) -> RunEnd {
+    RunEnd {
+        exit_code,
+        finished_at: finished_at.map(|at| Timestamp(at.to_owned())),
+        reason: reason.map(str::to_owned),
+    }
+}
+
+fn observe_end(record: &mut LoomAgentRecord, phase: RunPhase, end: &RunEnd) -> ObserveRunOutcome {
+    record
+        .observe_run(ObserveRun {
+            name: name(),
+            phase,
+            exit_code: end.exit_code,
+            finished_at: end.finished_at.clone(),
+            reason: end.reason.clone(),
+        })
+        .expect("the generated behaviour answers every run observation")
+}
+
+/// `story:command-run-exit-status`: the run's end is recorded as `run` when the resource moves to
+/// Completed or Failed, read back by the view, kept when the finished resource is observed again,
+/// cleared by a new generation, and never recorded by an observation of a run still active.
+#[test]
+fn a_command_run_records_how_it_ended_until_a_new_generation() {
+    let mut record = LoomAgentRecord::default();
+    apply(&mut record, 1);
+    check(&mut record, 1, 0, "admitted");
+    let active = ended(Some(9), Some("2026-10-26T09:00:00Z"), Some("Error"));
+    observe_end(&mut record, RunPhase::Active, &active);
+    assert_eq!(
+        row(&record).and_then(|row| row.run),
+        None,
+        "an active run has no end"
+    );
+
+    let succeeded = ended(Some(0), Some("2026-10-26T10:00:00Z"), Some("Completed"));
+    assert_eq!(
+        observe_end(&mut record, RunPhase::Succeeded, &succeeded),
+        ObserveRunOutcome::Completed {
+            loom_agent_completed: LoomAgentCompleted {
+                name: name(),
+                generation: 1,
+                exit_code: Some(0),
+            }
+        }
+    );
+    let completed = row(&record).expect("the row");
+    assert_eq!(completed.state, LoomAgentState::Completed);
+    assert_eq!(completed.run, Some(succeeded.clone()));
+    assert_eq!(
+        observe_end(
+            &mut record,
+            RunPhase::Failed,
+            &ended(Some(5), Some("2026-10-26T11:00:00Z"), Some("Error"))
+        ),
+        ObserveRunOutcome::Finished
+    );
+    assert_eq!(
+        row(&record).and_then(|row| row.run),
+        Some(succeeded),
+        "a finished run's end is kept"
+    );
+
+    apply(&mut record, 2);
+    assert_eq!(
+        row(&record).and_then(|row| row.run),
+        None,
+        "a new generation clears it"
+    );
+    check(&mut record, 2, 0, "admitted");
+    let exited = ended(Some(3), Some("2026-10-26T12:00:00Z"), Some("Error"));
+    assert_eq!(
+        observe_end(&mut record, RunPhase::Failed, &exited),
+        ObserveRunOutcome::Failed {
+            loom_agent_failed: LoomAgentFailed {
+                name: name(),
+                generation: 2,
+                exit_code: Some(3),
+            }
+        }
+    );
+    assert_eq!(row(&record).and_then(|row| row.run), Some(exited));
+
+    apply(&mut record, 3);
+    check(&mut record, 3, 0, "admitted");
+    let never_started = ended(None, None, Some("DeadlineExceeded"));
+    assert_eq!(
+        observe_end(&mut record, RunPhase::Failed, &never_started),
+        ObserveRunOutcome::Failed {
+            loom_agent_failed: LoomAgentFailed {
+                name: name(),
+                generation: 3,
+                exit_code: None,
+            }
+        }
+    );
+    let failed = row(&record).expect("the row");
+    assert_eq!(failed.state, LoomAgentState::Failed);
+    assert_eq!(failed.run, Some(never_started));
 }
