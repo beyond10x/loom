@@ -32,15 +32,23 @@ types:
     of: String
 
   # The Secret the pod's environment is read from, by name; the Secret itself is created outside
-  # the resource and never read by the controller (design § 7). With `mount_path` its keys are
-  # also files, read-only, in that directory of the container (story loom-agent-command-variant).
+  # the resource and never read by the controller (design § 7).
   - name: loom.resource.SecretRef
     kind: struct
     fields:
       - name: name
         type: String
+
+  # A Secret whose keys are files in the container, read-only at `mount_path`, owned by the pod's
+  # user, the directory mode 0700 and each file 0600: an init container copies them out of the
+  # Secret volume, whose files the kubelet owns (story loom-agent-trial-fixes).
+  - name: loom.resource.SecretFiles
+    kind: struct
+    fields:
+      - name: name
+        type: String
       - name: mount_path
-        type: Optional<String>
+        type: String
         naming: {wire: mountPath}
 
   # The agent image, overriding the controller's default (design § 5.1).
@@ -135,9 +143,9 @@ types:
   # The resource's `spec`: the `loom.agent/1` document verbatim; the llm `routes.yaml` inline, a
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
   # only as `env:` or `file:` references; the connectors-local TOML, only for `connectors`
-  # bindings; the Secret the container's environment comes from; and an image overriding the
-  # controller's default; the program the pod runs instead of `agent serve`, and a workspace
-  # volume. Wire names are Kubernetes's.
+  # bindings; the Secret the environment comes from and the one mounted as files; an image
+  # overriding the controller's default; the program the pod runs instead of `agent serve`, and a
+  # workspace volume. Wire names are Kubernetes's.
   - name: loom.resource.LoomAgentSpec
     kind: struct
     fields:
@@ -151,6 +159,9 @@ types:
       - name: secret_ref
         type: Optional<loom.resource.SecretRef>
         naming: {wire: secretRef}
+      - name: secret_files
+        type: Optional<loom.resource.SecretFiles>
+        naming: {wire: secretFiles}
       - name: image
         type: Optional<loom.resource.ImageRef>
       - name: command
