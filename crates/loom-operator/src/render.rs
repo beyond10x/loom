@@ -20,15 +20,20 @@
 //!   profile. The pod template names the resource's generation, so a new spec replaces the pod.
 //!
 //!   The `Command` variant (`spec.command` present, design § 9a) differs only in its Deployment:
-//!   no init container, since the image need hold no `b10x-loom`; the container runs `spec.image`
-//!   (else the default) with `command` = `spec.command.entrypoint` and `args` =
+//!   no `check` init container, since the image need hold no `b10x-loom`; the container runs
+//!   `spec.image` (else the default) with `command` = `spec.command.entrypoint` and `args` =
 //!   `spec.command.args`, each left to the image when absent; the ConfigMap is read-only at
 //!   `/config`, so `spec.agent` is `/config/agent.yaml`; `HOME` is `/var/lib/agent`, and an
 //!   emptyDir is at `/tmp`, the root staying read-only.
 //!
 //!   On either variant `spec.workspace` adds a read-write volume at its `mountPath`: the claim
-//!   `claimName`, else an emptyDir; `spec.secretRef.mountPath` adds the Secret read-only as files
-//!   there, mode 0440, beside the environment it gives; with either the pod's `fsGroup` is 10001.
+//!   `claimName`, else an emptyDir. `spec.secretFiles` adds its Secret as the read-only volume
+//!   `secret-files-source` (mode 0440) and a memory emptyDir `secret-files`; the init container
+//!   `stage-secret-files`, run first from the configured default image, runs `b10x-loom agent
+//!   stage-files` to copy each key into `secret-files/files` (directory 0700, files 0600, owned
+//!   by user 10001), and the agent container mounts that subdirectory read-only at
+//!   `spec.secretFiles.mountPath`, so a reader that refuses a file another user owns or others
+//!   may read accepts them. With either the pod's `fsGroup` is 10001.
 //! * NetworkPolicy `<resource>`: deny by default; egress to DNS in `kube-system`, to each
 //!   `deploy.kubernetes.egress` entry (a namespace entry as a namespace and pod selector peer, a
 //!   host entry by its port only, since a NetworkPolicy names no host) and, with the default
@@ -76,8 +81,20 @@ pub const STATE_DIR: &str = "/var/lib/agent";
 pub const CONFIG_DIR: &str = "/config";
 /// The `Command` variant's writable temporary directory, an emptyDir.
 pub const TMP_DIR: &str = "/tmp";
-/// The mode of the Secret's files: read by the owner and by `fsGroup`.
+/// The mode of the `spec.secretFiles` Secret volume's files: read by the owner and by `fsGroup`,
+/// so the staging init container, running as [`USER`] in that group, reads them.
 pub const SECRET_FILE_MODE: i32 = 0o440;
+/// The `spec.secretFiles` Secret volume, mounted only in the staging init container.
+pub const SOURCE_VOLUME: &str = "secret-files-source";
+/// Where the staging init container reads the Secret volume.
+pub const SOURCE_DIR: &str = "/var/run/loom/secret-files-source";
+/// The memory-backed emptyDir the Secret's keys are staged in.
+pub const STAGED_VOLUME: &str = "secret-files";
+/// Where the staging init container writes that emptyDir.
+pub const STAGED_DIR: &str = "/var/run/loom/secret-files";
+/// The directory in the emptyDir holding the staged files, mode 0700, owned by [`USER`]; the
+/// agent container mounts it at `spec.secretFiles.mountPath`.
+pub const STAGED_SUBDIR: &str = "files";
 /// The name of the a2a port.
 pub const A2A_PORT: &str = "a2a";
 /// The annotation of the pod template naming the resource's generation.
@@ -306,21 +323,28 @@ impl Renderer<'_> {
                 ..Volume::default()
             });
         }
-        if let Some(secret) = &self.agent.spec.secret_ref
-            && let Some(path) = &secret.mount_path
-        {
+        if let Some(files) = &self.agent.spec.secret_files {
             mounts.push(VolumeMount {
-                name: "credentials".to_owned(),
-                mount_path: path.clone(),
+                name: STAGED_VOLUME.to_owned(),
+                mount_path: files.mount_path.clone(),
+                sub_path: Some(STAGED_SUBDIR.to_owned()),
                 read_only: Some(true),
                 ..VolumeMount::default()
             });
             volumes.push(Volume {
-                name: "credentials".to_owned(),
+                name: SOURCE_VOLUME.to_owned(),
                 secret: Some(SecretVolumeSource {
-                    secret_name: Some(secret.name.clone()),
+                    secret_name: Some(files.name.clone()),
                     default_mode: Some(SECRET_FILE_MODE),
                     ..SecretVolumeSource::default()
+                }),
+                ..Volume::default()
+            });
+            volumes.push(Volume {
+                name: STAGED_VOLUME.to_owned(),
+                empty_dir: Some(EmptyDirVolumeSource {
+                    medium: Some("Memory".to_owned()),
+                    size_limit: None,
                 }),
                 ..Volume::default()
             });
@@ -328,16 +352,49 @@ impl Renderer<'_> {
         (mounts, volumes)
     }
 
-    /// Whether the pod mounts a workspace or the Secret's files, which `fsGroup` makes the
+    /// The init container that copies `spec.secretFiles` out of the Secret volume, whose files
+    /// the kubelet owns, into a directory the pod's user owns: `b10x-loom agent stage-files`
+    /// from the controller's default image, which carries `b10x-loom` whatever `spec.image` is.
+    fn stage_files(&self) -> Option<Container> {
+        self.agent.spec.secret_files.as_ref().map(|_| Container {
+            name: "stage-secret-files".to_owned(),
+            image: Some(self.config.default_image.to_string()),
+            command: Some(
+                [
+                    "b10x-loom",
+                    "agent",
+                    "stage-files",
+                    "--from",
+                    SOURCE_DIR,
+                    "--to",
+                    &format!("{STAGED_DIR}/{STAGED_SUBDIR}"),
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            ),
+            resources: Some(self.resources()),
+            security_context: Some(self.security()),
+            volume_mounts: Some(vec![
+                VolumeMount {
+                    name: SOURCE_VOLUME.to_owned(),
+                    mount_path: SOURCE_DIR.to_owned(),
+                    read_only: Some(true),
+                    ..VolumeMount::default()
+                },
+                VolumeMount {
+                    name: STAGED_VOLUME.to_owned(),
+                    mount_path: STAGED_DIR.to_owned(),
+                    ..VolumeMount::default()
+                },
+            ]),
+            ..Container::default()
+        })
+    }
+
+    /// Whether the pod mounts a workspace or a Secret's files, which `fsGroup` makes the
     /// container's user able to write and read.
     fn needs_fs_group(&self) -> bool {
-        self.agent.spec.workspace.is_some()
-            || self
-                .agent
-                .spec
-                .secret_ref
-                .as_ref()
-                .is_some_and(|secret| secret.mount_path.is_some())
+        self.agent.spec.workspace.is_some() || self.agent.spec.secret_files.is_some()
     }
 
     fn probe(path: &str) -> Probe {
@@ -473,8 +530,17 @@ impl Renderer<'_> {
                             fs_group: self.needs_fs_group().then_some(USER),
                             ..PodSecurityContext::default()
                         }),
-                        init_containers: (self.admitted.variant == AgentVariant::AgentServe)
-                            .then(|| vec![check]),
+                        init_containers: {
+                            let init: Vec<Container> = self
+                                .stage_files()
+                                .into_iter()
+                                .chain(
+                                    (self.admitted.variant == AgentVariant::AgentServe)
+                                        .then_some(check),
+                                )
+                                .collect();
+                            (!init.is_empty()).then_some(init)
+                        },
                         containers: vec![serve],
                         volumes: Some(
                             [

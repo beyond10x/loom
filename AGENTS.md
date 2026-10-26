@@ -760,8 +760,8 @@ An agent deployed to Kubernetes is a `LoomAgent` resource (group `loom.beyond10x
 `v1alpha1`, namespaced), the `loom.resource` domain (`ess/domains/resource.yaml`,
 `story:loom-agent-resource-domain`). Its spec, `LoomAgentSpec`, holds the `loom.agent/1` document
 verbatim as `agent` (no second agent schema), the llm `routes` document untyped, the
-connectors-local TOML, a Secret reference, an image override, an optional command and an optional
-workspace volume. The entity `LoomAgent` is the
+connectors-local TOML, a Secret reference for the environment, an optional Secret for files, an
+image override, an optional command and an optional workspace volume. The entity `LoomAgent` is the
 controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
 the state Pending, Running, Refused or Degraded. `ApplyLoomAgent`, `RecordCheck`,
 `ObserveDeployment` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
@@ -770,8 +770,12 @@ A resource is one of two variants (`AgentVariant`, `story:loom-agent-command-var
 `AgentServe` when `spec.command` is absent, the pod running `b10x-loom agent serve`; `Command` when
 it is present, the pod running the image's own program (`spec.command.entrypoint` and `args`, each
 left to the image when absent) with `spec.agent` mounted at `/config/agent.yaml`. `spec.workspace`
-(`mountPath`, optional `claimName`) is a read-write volume on either variant, and
-`spec.secretRef.mountPath` mounts the Secret as files beside the environment it gives. `RecordCheck`
+(`mountPath`, optional `claimName`) is a read-write volume on either variant. `spec.secretRef`
+(`name`) gives a Secret as the environment; `spec.secretFiles` (`name`, `mountPath`) gives another
+as files the pod user owns (`story:loom-agent-trial-fixes`), so a pod can hold a model key as an
+environment variable and a forge key as files. `runtime.connectors` and
+`deploy.kubernetes.image_repository` in `loom.agent/1` are optional; `agent serve` still refuses a
+spec without `runtime.connectors`. `RecordCheck`
 records the variant the controller admitted; `respecified` clears it, and the view and
 `status.variant` carry it.
 
@@ -860,11 +864,11 @@ each word of the raw text, comments included (named by line), a word holding `:`
 its pieces, shell punctuation (`<>|&()$` and backtick) separating words too; a routes or connectors document
 beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admitted unwalked, and
 words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
-`secretRef` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
+`secretRef` or `secretFiles` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
 would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
 credential in `spec.command` (`SecretLiteral`; `TooLarge` beyond the bound); a `spec.workspace.mountPath` or
-`spec.secretRef.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
+`spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
@@ -901,13 +905,19 @@ user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests eq
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
 default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
 with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service.
-`deploy.kubernetes.image_repository` is not read. A `Command` resource's Deployment has no init
-container, runs `spec.command`, mounts the ConfigMap at `/config` (the contract with the image:
+`deploy.kubernetes.image_repository` is not read. A `Command` resource's Deployment has no `check`
+init container, runs `spec.command`, mounts the ConfigMap at `/config` (the contract with the image:
 `spec.agent` is `/config/agent.yaml`, the document the resource holds, keys in the order the API
 server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`), sets `HOME=/var/lib/agent`
 and adds an emptyDir at `/tmp`; `status.conditions` `Checked` then reads `SpecAdmitted` instead of
-`SpecServeable`. `spec.workspace` adds the claim or an emptyDir, `spec.secretRef.mountPath` a
-read-only Secret volume (mode 0440), and either sets `fsGroup` 10001. The golden files
+`SpecServeable`. `spec.workspace` adds the claim or an emptyDir. `spec.secretFiles` adds the Secret
+volume `secret-files-source` (mode 0440) and a memory emptyDir `secret-files`; the init container
+`stage-secret-files` (image `defaultImage`, first of the init containers) runs `b10x-loom agent
+stage-files --from /var/run/loom/secret-files-source --to /var/run/loom/secret-files/files`, which
+copies each key to a file of mode 0600 in a directory of mode 0700, both owned by user 10001, and
+the agent container mounts that subdirectory (`subPath: files`) read-only at `mountPath`. The
+reason: a reader such as `b10x-gates` refuses a file another user owns or that group or others
+may read, and the kubelet owns a Secret volume's files. Either sets `fsGroup` 10001. The golden files
 `tests/golden/platform-operator.yaml` and `tests/golden/takt-delivery.yaml` are rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
 

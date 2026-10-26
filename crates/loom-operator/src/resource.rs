@@ -36,6 +36,9 @@ pub struct LoomAgentSpec {
     /// The Secret whose keys become the agent container's environment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_ref: Option<SecretRef>,
+    /// The Secret whose keys become files in the agent container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_files: Option<SecretFiles>,
     /// The agent image, overriding the controller's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<ImageRef>,
@@ -82,16 +85,23 @@ pub struct Workspace {
     pub claim_name: Option<String>,
 }
 
-/// `spec.secretRef`: a Secret, by name, in the resource's namespace; with `mountPath` its keys
-/// are also files in that directory.
+/// `spec.secretRef`: a Secret, by name, in the resource's namespace, whose keys become the
+/// container's environment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SecretRef {
     /// The Secret's name.
     pub name: String,
-    /// Where the Secret's keys are mounted as files, read-only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mount_path: Option<String>,
+}
+
+/// `spec.secretFiles`: a Secret, by name, in the resource's namespace, whose keys are files in
+/// `mountPath`, owned by the pod's user, the directory 0700 and each file 0600.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecretFiles {
+    /// The Secret's name.
+    pub name: String,
+    /// Where the Secret's keys are files, read-only.
+    pub mount_path: String,
 }
 
 /// `spec.image`: an image repository and tag.

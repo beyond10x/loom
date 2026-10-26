@@ -18,7 +18,7 @@ const CONFIG: &str = "namespace: agents
 defaultImage: {repository: registry.example/loom-agent, tag: '0.40.0'}
 defaultResources: {cpu: 100m, memory: 128Mi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
-allowedSecretNames: [platform-operator-secrets]
+allowedSecretNames: [platform-operator-secrets, takt-forge]
 allowedEgressHosts: [chat.example, models.example]
 allowedClaimNames: [takt-workspace]
 ";
@@ -460,12 +460,14 @@ fn a_document_that_is_not_a_loom_agent_is_not_rendered() {
 }
 
 /// The members a takt delivery adds after `spec.agent` (design § 9a, slice C): its own image,
-/// the image's entrypoint with arguments, a workspace on a claim and the Secret as files too.
+/// the image's entrypoint with arguments, a workspace on a claim, one Secret as the environment
+/// and another as files.
 const TAKT: &str = "  routes: {}
   image: {repository: registry.example/takt, tag: '0.12.0'}
   command: {args: [run, --repo, /workspace/takt, --iterations, '1']}
   workspace: {mountPath: /workspace, claimName: takt-workspace}
-  secretRef: {name: platform-operator-secrets, mountPath: /var/run/secrets/takt}
+  secretRef: {name: platform-operator-secrets}
+  secretFiles: {name: takt-forge, mountPath: /var/run/secrets/takt}
 ";
 
 /// The example without `expose`, naming a protocol only the image's program knows: the serve
@@ -503,9 +505,53 @@ fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
     let config_map = &docs[1];
     let deployment = &docs[2];
     let pod = at(deployment, &["spec", "template", "spec"]);
-    assert!(
-        at(pod, &["initContainers"]).is_null(),
-        "the image holds no b10x-loom to check with: {pod:?}"
+    let init = at(pod, &["initContainers"]).as_sequence().expect("init");
+    assert_eq!(
+        init.len(),
+        1,
+        "only the staging, no check: the image holds no b10x-loom to check with: {pod:?}"
+    );
+    let stage = &init[0];
+    assert_eq!(text(stage, &["name"]), "stage-secret-files");
+    assert_eq!(
+        text(stage, &["image"]),
+        "registry.example/loom-agent:0.40.0",
+        "the controller's default image, which carries b10x-loom whatever spec.image is"
+    );
+    assert_eq!(
+        strings(stage, &["command"]),
+        [
+            "b10x-loom",
+            "agent",
+            "stage-files",
+            "--from",
+            "/var/run/loom/secret-files-source",
+            "--to",
+            "/var/run/loom/secret-files/files"
+        ]
+    );
+    assert_eq!(
+        at(stage, &["securityContext", "readOnlyRootFilesystem"]).as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        (
+            text(stage, &["volumeMounts", "0", "name"]),
+            text(stage, &["volumeMounts", "0", "mountPath"]),
+            at(stage, &["volumeMounts", "0", "readOnly"]).as_bool()
+        ),
+        (
+            "secret-files-source",
+            "/var/run/loom/secret-files-source",
+            Some(true)
+        )
+    );
+    assert_eq!(
+        (
+            text(stage, &["volumeMounts", "1", "name"]),
+            text(stage, &["volumeMounts", "1", "mountPath"])
+        ),
+        ("secret-files", "/var/run/loom/secret-files")
     );
     let container = at(pod, &["containers", "0"]);
     assert_eq!(text(container, &["image"]), "registry.example/takt:0.12.0");
@@ -543,24 +589,32 @@ fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
             ("tmp".to_owned(), "/tmp".to_owned(), false),
             ("workspace".to_owned(), "/workspace".to_owned(), false),
             (
-                "credentials".to_owned(),
+                "secret-files".to_owned(),
                 "/var/run/secrets/takt".to_owned(),
                 true
             ),
         ]
     );
     assert_eq!(
+        text(container, &["volumeMounts", "4", "subPath"]),
+        "files",
+        "the directory the staging made, owned by the pod's user, mode 0700"
+    );
+    assert_eq!(
         text(pod, &["volumes", "3", "persistentVolumeClaim", "claimName"]),
         "takt-workspace"
     );
+    assert_eq!(text(pod, &["volumes", "4", "name"]), "secret-files-source");
     assert_eq!(
         text(pod, &["volumes", "4", "secret", "secretName"]),
-        "platform-operator-secrets"
+        "takt-forge"
     );
     assert_eq!(
         at(pod, &["volumes", "4", "secret", "defaultMode"]).as_i64(),
         Some(0o440)
     );
+    assert_eq!(text(pod, &["volumes", "5", "name"]), "secret-files");
+    assert_eq!(text(pod, &["volumes", "5", "emptyDir", "medium"]), "Memory");
     assert_eq!(
         at(pod, &["securityContext", "fsGroup"]).as_i64(),
         Some(10001)
@@ -632,15 +686,19 @@ fn what_a_command_resource_may_not_mount_or_carry_is_refused_naming_the_member()
                 "mountPath: /var/run/secrets/takt",
                 "mountPath: /workspace/keys",
             ),
-            "refused: MountPathInvalid at spec.secretRef.mountPath: ",
+            "refused: MountPathInvalid at spec.secretFiles.mountPath: ",
         ),
         (
             TAKT.replace("mountPath: /var/run/secrets/takt", "mountPath: /var"),
-            "refused: MountPathInvalid at spec.secretRef.mountPath: ",
+            "refused: MountPathInvalid at spec.secretFiles.mountPath: ",
         ),
         (
             TAKT.replace("claimName: takt-workspace", "claimName: other-claim"),
             "refused: ClaimNotAllowed at spec.workspace.claimName: ",
+        ),
+        (
+            TAKT.replace("name: takt-forge", "name: other-forge"),
+            "refused: SecretNotAllowed at spec.secretFiles.name: ",
         ),
         (
             TAKT.replace("'1']", "'1', --token, xoxb-000-fake]"),
@@ -661,7 +719,12 @@ fn what_a_command_resource_may_not_mount_or_carry_is_refused_naming_the_member()
     for (rest, expected) in cases {
         let message = refusal(&wrapped(&takt_agent(), &rest), &config());
         assert!(message.starts_with(expected), "{expected} <- {message}");
-        for value in ["xoxb-000-fake", "not-a-real-password", "other-claim"] {
+        for value in [
+            "xoxb-000-fake",
+            "not-a-real-password",
+            "other-claim",
+            "other-forge",
+        ] {
             assert!(!message.contains(value), "{message}");
         }
     }

@@ -1,0 +1,13 @@
+# story loom-agent-trial-fixes: `runtime.connectors` and `deploy.kubernetes.image_repository` are
+# optional, so the operator example without them still checks; `agent serve` refuses to start
+# without `runtime.connectors`, which the check does not read.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-spec-without-connectors-or-image-repository-checks
+summary: The operator example without `runtime.connectors` and `deploy.kubernetes.image_repository` is serveable to the check.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/without-connectors-or-image-repository.yaml}
+    outcome: serveable

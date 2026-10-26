@@ -206,7 +206,6 @@ spec:
                         required:
                         - namespace
                         - service_account
-                        - image_repository
                         - resources
                         type: object
                     type: object
@@ -330,7 +329,6 @@ spec:
                         type: string
                     required:
                     - state_dir
-                    - connectors
                     - confinement
                     type: object
                   session:
@@ -538,10 +536,18 @@ spec:
                 type: object
               routes:
                 x-kubernetes-preserve-unknown-fields: true
-              secretRef:
+              secretFiles:
                 properties:
                   mountPath:
                     type: string
+                  name:
+                    type: string
+                required:
+                - name
+                - mountPath
+                type: object
+              secretRef:
+                properties:
                   name:
                     type: string
                 required:

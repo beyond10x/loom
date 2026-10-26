@@ -274,8 +274,41 @@ spec:
         - mountPath: /workspace
           name: workspace
         - mountPath: /var/run/secrets/takt
-          name: credentials
+          name: secret-files
           readOnly: true
+          subPath: files
+      initContainers:
+      - command:
+        - b10x-loom
+        - agent
+        - stage-files
+        - --from
+        - /var/run/loom/secret-files-source
+        - --to
+        - /var/run/loom/secret-files/files
+        image: registry.example/loom-agent:0.40.0
+        name: stage-secret-files
+        resources:
+          limits:
+            cpu: 250m
+            memory: 256Mi
+          requests:
+            cpu: 250m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+        volumeMounts:
+        - mountPath: /var/run/loom/secret-files-source
+          name: secret-files-source
+          readOnly: true
+        - mountPath: /var/run/loom/secret-files
+          name: secret-files
       securityContext:
         fsGroup: 10001
         runAsNonRoot: true
@@ -294,10 +327,13 @@ spec:
       - name: workspace
         persistentVolumeClaim:
           claimName: takt-workspace
-      - name: credentials
+      - name: secret-files-source
         secret:
           defaultMode: 288
-          secretName: platform-operator-secrets
+          secretName: takt-forge
+      - emptyDir:
+          medium: Memory
+        name: secret-files
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

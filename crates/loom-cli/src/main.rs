@@ -13,9 +13,10 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    AgentCheckArgs, AgentCommand, AgentResumeArgs, AgentServeArgs, ApproveArgs, Cli, Command,
-    Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
-    ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
+    AgentCheckArgs, AgentCommand, AgentResumeArgs, AgentServeArgs, AgentStageFilesArgs,
+    ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand,
+    PluginName, ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status, resume_exit_status,
+    run_exit_status,
 };
 use b10x_loom_cli::{a2a, agent};
 use b10x_loom_intake_slice::bindings::ActionBindings;
@@ -73,6 +74,7 @@ fn main() -> ExitCode {
             AgentCommand::Check(arguments) => agent_check_command(&arguments),
             AgentCommand::Serve(arguments) => agent_serve_command(&arguments),
             AgentCommand::Resume(arguments) => agent_resume_command(&arguments),
+            AgentCommand::StageFiles(arguments) => agent_stage_files_command(&arguments),
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
@@ -92,6 +94,20 @@ fn agent_check_command(arguments: &AgentCheckArgs) -> ExitCode {
             ExitCode::from(agent::REFUSED)
         }
         Err(agent::CheckFailure::Unreadable(why)) => failed(&why),
+    }
+}
+
+/// `agent stage-files`: the keys of `--from` copied into `--to` as private files.
+fn agent_stage_files_command(arguments: &AgentStageFilesArgs) -> ExitCode {
+    match b10x_loom_cli::stage::stage(&arguments.from, &arguments.to) {
+        Ok(staged) => {
+            println!(
+                "staged {staged} files into {}",
+                printable(&arguments.to.display().to_string())
+            );
+            ExitCode::SUCCESS
+        }
+        Err(why) => failed(&why),
     }
 }
 

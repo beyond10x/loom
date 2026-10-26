@@ -348,14 +348,15 @@ types:
         type: Optional<loom.agent.A2aExposure>
 
   # Where the agent runs: its state directory, the Connectors command line it reads and writes
-  # through, and what confines the children it starts.
+  # through, and what confines the children it starts. Without `connectors` the spec decodes and
+  # `agent serve` refuses to start, as it does without `runtime` (story loom-agent-trial-fixes).
   - name: loom.agent.RuntimeSpec
     kind: struct
     fields:
       - name: state_dir
         type: String
       - name: connectors
-        type: loom.datasource.ConnectorsCliConfig
+        type: Optional<loom.datasource.ConnectorsCliConfig>
       - name: confinement
         type: loom.agent.ConfinementMode
 
@@ -405,6 +406,7 @@ types:
         type: Integer
 
   # A Kubernetes deployment of the agent, read only when it is projected, never when it is served.
+  # `image_repository` is read by nothing and may be absent (story loom-agent-trial-fixes).
   - name: loom.agent.KubernetesDeploy
     kind: struct
     fields:
@@ -413,7 +415,7 @@ types:
       - name: service_account
         type: String
       - name: image_repository
-        type: String
+        type: Optional<String>
       - name: resources
         type: loom.agent.KubernetesResources
       - name: egress

@@ -732,7 +732,7 @@ fn runtime(value: &Value, at: &str) -> Result<RuntimeSpec, AgentSpecError> {
     let members = Members::of(value, at, &["state_dir", "connectors", "confinement"])?;
     Ok(RuntimeSpec {
         state_dir: members.get("state_dir", text)?,
-        connectors: members.get("connectors", |value, at| {
+        connectors: members.maybe("connectors", |value, at| {
             let members = Members::of(
                 value,
                 at,
@@ -772,7 +772,7 @@ fn kubernetes(value: &Value, at: &str) -> Result<KubernetesDeploy, AgentSpecErro
     Ok(KubernetesDeploy {
         namespace: members.get("namespace", text)?,
         service_account: members.get("service_account", text)?,
-        image_repository: members.get("image_repository", text)?,
+        image_repository: members.maybe("image_repository", text)?,
         resources: members.get("resources", |value, at| {
             let members = Members::of(value, at, &["cpu", "memory"])?;
             Ok(KubernetesResources {

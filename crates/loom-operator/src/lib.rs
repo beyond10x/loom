@@ -63,7 +63,10 @@ mod tests {
             connectors_config: Some(String::new()),
             secret_ref: Some(resource::SecretRef {
                 name: "s".to_owned(),
-                mount_path: Some("/m".to_owned()),
+            }),
+            secret_files: Some(resource::SecretFiles {
+                name: "f".to_owned(),
+                mount_path: "/m".to_owned(),
             }),
             image: Some(resource::ImageRef {
                 repository: "r".to_owned(),

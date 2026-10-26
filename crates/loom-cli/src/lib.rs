@@ -189,6 +189,7 @@ pub mod mandate;
 pub mod model_catalog;
 pub mod plugin;
 pub mod regular_file;
+pub mod stage;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
 pub fn exit_status(reason: StopReason) -> u8 {
@@ -454,6 +455,34 @@ pub enum AgentCommand {
     /// Perform a held send after its approval, once.
     #[command(after_help = AGENT_RESUME_HELP)]
     Resume(AgentResumeArgs),
+    /// Copy the keys of a mounted Secret volume into a directory this user owns, the directory
+    /// mode 0700 and each file 0600.
+    #[command(after_help = AGENT_STAGE_FILES_HELP)]
+    StageFiles(AgentStageFilesArgs),
+}
+
+/// What `agent stage-files --help` says about the copy and its exit status.
+pub const AGENT_STAGE_FILES_HELP: &str = "The kubelet owns a Secret volume's files, so a reader that refuses a file another user owns or that its
+group or others may read refuses them. b10x-loom-operator runs this in the init container
+stage-secret-files for spec.secretFiles. Each entry of --from whose name does not start with `..` and
+that resolves to a regular file inside --from is copied, in name order, to --to/<name>, mode 0600, as
+a new file (one left by an earlier run is replaced, never followed); --to is created when absent and
+set to mode 0700, and must not be a link.
+
+Exit status:
+  0  the keys were staged; standard output says how many
+  1  --from cannot be read, --to is not a directory, or a key cannot be copied
+  2  the command line is not valid";
+
+/// The arguments of `b10x-loom agent stage-files`.
+#[derive(Debug, Args)]
+pub struct AgentStageFilesArgs {
+    /// The mounted Secret volume.
+    #[arg(long, value_name = "DIR")]
+    pub from: PathBuf,
+    /// The directory the keys are copied into.
+    #[arg(long, value_name = "DIR")]
+    pub to: PathBuf,
 }
 
 /// The arguments of `b10x-loom agent serve`.
