@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- `b10x-loom-session-executor` builds on metaharness `0.19.0` (b10x adapter pinned to `b10x-harness` 0.20.0); a Claude Code session still sees one `--tools`, the offered list, which replaces the native list metaharness now plans (story:metaharness-0-19-pin)
+
 ## [0.42.0] - 2026-10-26
 
 ### Added

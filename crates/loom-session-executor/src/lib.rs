@@ -1749,13 +1749,30 @@ impl ProcessRunner for Homed<'_> {
 pub const CLAUDE_ARGUMENTS: [&str; 1] = ["--restricted"];
 
 /// The runner a Claude Code session starts through: its child's arguments are the ones
-/// metaharness planned, then [`CLAUDE_ARGUMENTS`], then `--tools` naming the tools the session
-/// is offered ([`SessionExecutor::offered`]) and no other, so a tool outside them, a denied one
-/// included, is never offered and costs no schema in any call; `--tools ""` offers none. Each call
-/// of an offered tool is still decided where the policy says.
+/// metaharness planned, less the native `--tools <pinned set>` pair metaharness 0.19.0 plans
+/// (amendment a53), then [`CLAUDE_ARGUMENTS`], then `--tools` naming the tools the session is
+/// offered ([`SessionExecutor::offered`]) and no other, so the child sees one `--tools`, a tool
+/// outside them, a denied one included, is never offered and costs no schema in any call;
+/// `--tools ""` offers none. Each call of an offered tool is still decided where the policy says.
 struct Restricted<'a> {
     inner: &'a mut dyn ProcessRunner,
     offered: &'a [String],
+}
+
+/// `args` without a `--tools <list>` pair whose list is not empty. The owned surface's
+/// `--tools ""` (no built-in tool) stays.
+fn without_native_tools(args: &[String]) -> Vec<String> {
+    let mut kept = Vec::with_capacity(args.len());
+    let mut at = 0;
+    while at < args.len() {
+        if args[at] == "--tools" && args.get(at + 1).is_some_and(|list| !list.is_empty()) {
+            at += 2;
+            continue;
+        }
+        kept.push(args[at].clone());
+        at += 1;
+    }
+    kept
 }
 
 impl ProcessRunner for Restricted<'_> {
@@ -1767,7 +1784,7 @@ impl ProcessRunner for Restricted<'_> {
         &mut self,
         plan: &metaharness::LaunchPlanView,
     ) -> std::io::Result<Box<dyn metaharness::HarnessProcess>> {
-        let mut args = plan.args.to_vec();
+        let mut args = without_native_tools(plan.args);
         args.extend(CLAUDE_ARGUMENTS.iter().map(|arg| (*arg).to_owned()));
         args.extend(["--tools".to_owned(), self.offered.join(",")]);
         let restricted = metaharness::LaunchPlanView {
