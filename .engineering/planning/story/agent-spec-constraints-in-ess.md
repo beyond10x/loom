@@ -2,64 +2,112 @@
 format: aep.planning-md/3
 id: story:agent-spec-constraints-in-ess
 kind: story
-status: draft
-title: The loom.agent/1 decoder's constraints are declared in ESS so the CRD refuses what the pod refuses
+status: active
+title: Each value constraint of the loom.agent/1 decoder is a named refusal of CheckAgentSpec, held by ESS scenarios
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:loom-agent-resource-domain
-revision: 1
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: README.md
+- confidence: cited
+  path: crates/loom-agent
+- confidence: inferred
+  path: crates/loom-conformance
+- confidence: cited
+  path: crates/loom-sdk/src/agent.rs
+- confidence: cited
+  path: ess/domains/agent.yaml
+- confidence: cited
+  path: ess/ess-inputs.yaml
+- confidence: cited
+  path: ess/scenarios/agent-check
+- confidence: cited
+  path: generated/rust/loom
+- confidence: cited
+  path: website/docs/reference/ess
+revision: 16
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 15}
+- {from: "proposed", to: "active", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 16}
 ---
 ## Outcome
 
-Every constraint the `loom.agent/1` decoder enforces on a document is declared in
-`ess/domains/agent.yaml`, so the CRD projected from the specification refuses the same documents the
-pod's `agent check` refuses: the `format` value set, `port` in 1–65535, non-blank text fields, the
-`bearer_env` environment-variable name, and `deadline` as an RFC 3339 timestamp.
+Every value constraint the `loom.agent/1` decoder (`crates/loom-sdk/src/agent.rs`) enforces is a
+named refusal of `loom.agent.CheckAgentSpec`, declared in `ess/domains/agent.yaml` and held by an
+authored conformance scenario that sends a document breaking it and requires that refusal. Today
+each of them answers `Malformed` with the decoder's message, so the specification says nothing about
+which values are refused; the Rust tests alone hold them.
+
+New `loom.agent.RefusalReason` variants, one `CheckAgentSpec` outcome each:
+
+| reason | refused value | decoder today |
+|---|---|---|
+| `UnknownFormat` | `format` other than `loom.agent/1` | `spec`, `Malformed` |
+| `BlankText` | a text member that is empty or only whitespace | `text`, `Malformed` |
+| `NotAVariableName` | a `bearer_env` that is not `[A-Za-z_][A-Za-z0-9_]*` (the text never repeated) | `variable_name`, `Malformed` |
+| `PortOutOfRange` | a port outside 1 to 65535 | `port`, `Malformed` |
+| `NotAPlainPath` | an `allow_paths` entry that is not a `plain_http_path` | `allow_path`, `Malformed` |
+| `NotAnInstant` | a `Timestamp` member (`session.budget.deadline`) that is not an RFC 3339 instant | `timestamp`, **accepted** |
+
+The last row is a gap, not only a rename: the decoder accepts `deadline: 2026-12-31` although the
+specification types it `Timestamp`.
 
 ## Why
 
 The adversary pass on story:loom-agent-resource-domain
-(review-result:adversary-w20261025-resource-pass-1, findings J3 and J5, both pre-existing) found
-that `crates/loom-sdk/src/agent.rs` and `crates/loom-sdk/src/models.rs` refuse documents the
-specification admits. A CRD can only carry what the specification declares, so a `LoomAgent` the
-API server accepts can still be refused by the pod. The same constraints in ESS close the gap for
-every projection, not only the CRD.
+(review-result:adversary-w20261025-resource-pass-1, J3 and J5) found the decoder refusing documents
+the specification admits. The orchestrator (dispatch-queue #13, 2026-10-26): "the `loom.agent/1`
+constraints that are held by Rust tests and not by the ESS specification ... implement what fits in
+one unit (ESS first: domain constraints, then regenerate and drift checks); what does not fit stays
+as a follow-up story with a Scope section".
+
+The type-level form (newtype invariants and alphabets that the JSON Schema and so the CRD project)
+does not fit this unit: the same item forbids touching the CRD while a cluster trial runs, and ESS
+0.69.2 refuses value invariants a stateless domain never publishes in a view (`ESS-SYNTH-013`,
+"type loom.agent.Port has no scenario", probe 2026-10-26). It is `story:agent-spec-constraints-in-crd`.
 
 ## Acceptance
 
-Conformance scenarios in `ess/scenarios/` (domain `loom.agent`), each red until the constraint is
-declared and the decoder reads the generated type:
+Authored `ess-scenario/4` scenarios under `ess/scenarios/agent-check/`, each with a fixture under
+`specs/`, listed in `ess/ess-inputs.yaml`, run by `task conform` against `check_text`:
 
-- `a_port_outside_the_range_is_refused`: `port: 0` and `port: 65536` are refused by the
-  specification's schema, naming the field.
-- `a_blank_name_is_refused`: a whitespace-only `name`, `source`, `base_url` or `path` is refused.
-- `an_unknown_format_is_refused`: a `format` value outside the declared set is refused, with the set
-  named.
-- `a_bearer_env_that_is_not_an_environment_name_is_refused`: `bearer_env: "x y"` is refused.
-- `an_absent_list_reads_as_empty`: every `List<…>` the `loom.agent` document declares is declared
-  with an empty default (or optional), so the CRD projection no longer carries the exemption
-  `crates/loom-resource/src/crd.rs` names for `loom.agent` lists.
-- `a_deadline_that_is_not_a_timestamp_is_refused`: `deadline: 2026-12-31` is refused; a full
-  RFC 3339 instant is accepted, and `timestamp()` in `crates/loom-sdk/src/agent.rs` parses it.
-- `deploy/crd/loomagents.loom.beyond10x.dev.yaml` regenerated with the constraints
-  (`minimum`/`maximum`, `pattern`, `enum`, `format: date-time`); `task crd-drift` exits 0.
-- The decoder's own checks for these constraints are removed or reduced to reading the generated
-  type; `task check` exits 0.
+- `an-unknown-format-is-refused` (`UnknownFormat`, member `format`).
+- `a-blank-text-member-is-refused` (`BlankText`, e.g. `agent.name: "  "`).
+- `a-bearer-env-that-is-not-a-variable-name-is-refused` (`NotAVariableName`, detail never repeats the text).
+- `a-port-outside-the-range-is-refused` (`PortOutOfRange`, `0` and `65536`).
+- `an-allow-path-holding-a-dot-dot-segment-is-refused` now answers `NotAPlainPath` (was `Malformed`).
+- `a-deadline-that-is-not-an-instant-is-refused` (`NotAnInstant`); a full RFC 3339 instant checks.
+- `b10x-loom agent check` prints the new reason names; `task check` exits 0; `task crd-drift` exits 0
+  with `deploy/crd/` unchanged.
 
 ## ESS first
 
-The first commit adds the constraints and the scenarios to `ess/` only; the decoder tests go red
-where it was more lenient than the specification, then the decoder follows.
+The first commit changes only `ess/` (the reasons, the outcomes, the scenarios and their fixtures);
+`task drift` and the new scenarios are red on it, then the decoder and `check_text` follow.
 
 ## Not in scope
 
-The controller (design § 9 step 6); a Kubernetes end-to-end run; constraints the decoder does not
-enforce today.
+The CRD and every type-level declaration (`story:agent-spec-constraints-in-crd`); the controller,
+its rendering and admission and `agent stage-files` (`story:operator-constraints-in-ess`);
+structural refusals (unknown member, wrong type, YAML tag, flow bound), which stay `Malformed`.
 
 ## Scope
 
-`ess/domains/agent.yaml`, `ess/scenarios/`, `generated/rust/loom/src/agent.rs` (regenerated),
-`crates/loom-sdk/src/agent.rs`, `crates/loom-sdk/src/models.rs`, `crates/loom-sdk/tests/`,
-`deploy/crd/loomagents.loom.beyond10x.dev.yaml` (regenerated), `website/docs/reference/ess/`
-(regenerated), CHANGELOG.md.
+Derived 2026-10-26 by the coordinator from the tree at `b6e35835`. **cited** = read in the tree,
+**inferred** = a reading that could be wrong.
+
+- **Primary surface:** `ess/domains/agent.yaml` (`RefusalReason` :477-481, `CheckAgentSpec` :565-616) — cited
+- **Files:** `ess/scenarios/agent-check/` and `specs/`, `ess/ess-inputs.yaml` — cited
+- **Files:** `crates/loom-sdk/src/agent.rs` (`text` :227, `variable_name` :237, `allow_path` :277, `port` :289, `timestamp` :331, `spec` :358) — cited
+- **Files:** `crates/loom-agent/src/` (`check_text`, `spelling`), `crates/loom-agent/tests/check.rs` — cited
+- **Generated:** `generated/rust/loom/` (`task generate`), `website/docs/reference/ess/`, `website/data/ess/` (`task docs-generate`) — cited
+- **Also likely:** `crates/loom-conformance/src/` (the agent-check target) — inferred
+- **Documents:** AGENTS.md § Agent spec, README.md, CHANGELOG.md — cited
+- **Not touched:** `crates/loom-operator` (it passes `spelling(refused.reason)` through, admission.rs:556), `deploy/crd/`, `charts/` — cited
+- **Confidence:** high
