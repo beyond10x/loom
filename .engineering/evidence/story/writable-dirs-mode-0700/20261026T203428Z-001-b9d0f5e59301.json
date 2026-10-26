@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T20:34:28Z",
+  "actor": "human:timo",
+  "artifact": "story:writable-dirs-mode-0700",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "new behaviour the baseline cannot show: golden/takt-delivery.yaml at abf1eb24 mounts emptyDirs at /tmp and HOME directly; at 9f039c9f an init container runs b10x-loom agent prepare-dirs and the agent mounts subPath tmp and home (git diff tests/golden), and the_writable_dirs_are_0700_and_owned_by_the_pod_user plus the prepare_dirs tests (a 3777 root, a file at 0600 accepted by the gates reader) pass: cli 193, operator 164, 0 failed; not observed on a cluster; VERIFIED",
+    "reference": "u5/verify-golden.diff (coordinator scratch)"
+  }
+}
