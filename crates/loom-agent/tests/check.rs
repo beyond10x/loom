@@ -371,6 +371,92 @@ fn a_port_outside_the_range_is_refused() {
     }
 }
 
+/// Every port member of the operator example: the text that sets it and the member it stands at.
+const PORT_MEMBERS: [(&str, &str); 4] = [
+    ("a2a: {port: 8080", "expose.a2a.port"),
+    (
+        "host: logs.example, port: 3100",
+        "session.tools.egress[0].port",
+    ),
+    (
+        "host: chat.example, port: 443",
+        "deploy.kubernetes.egress[0].port",
+    ),
+    (
+        "from_namespace: operator-clients, port: 8080",
+        "deploy.kubernetes.ingress[0].port",
+    ),
+];
+
+/// An integer the YAML reader holds outside `i64`, up to `u64::MAX`, is a port out of range at
+/// every port member, and so is `i64::MIN`. Elsewhere an integer outside `i64` is no integer the
+/// domain holds (`Malformed`), and so is one in the models section.
+#[test]
+fn an_integer_outside_i64_is_a_port_out_of_range() {
+    for (from, member) in PORT_MEMBERS {
+        let (head, _) = from.rsplit_once(' ').expect("a port");
+        for port in [
+            "9223372036854775808",
+            "18446744073709551615",
+            "0xFFFFFFFFFFFFFFFF",
+            "-9223372036854775808",
+        ] {
+            let text = with(&operator_text(), from, &format!("{head} {port}"));
+            let found = refused_text(&text);
+            assert_eq!(
+                (found.reason, found.member.as_str()),
+                (RefusalReason::PortOutOfRange, member),
+                "{member} {port}"
+            );
+        }
+    }
+    for (from, to) in [
+        (
+            "method: GET, max_bytes: 262144}\n  - {name: metrics",
+            "method: GET, max_bytes: 9223372036854775808}\n  - {name: metrics",
+        ),
+        (
+            "method: GET, max_bytes: 262144}\n  - {name: metrics",
+            "method: GET, max_bytes: 18446744073709551616}\n  - {name: metrics",
+        ),
+        ("name: Platform operator", "name: 18446744073709551616"),
+        ("routes: routes.yaml", "routes: 18446744073709551616"),
+        (
+            "{poll_interval_seconds: 60,",
+            "{poll_interval_seconds: -9223372036854775809,",
+        ),
+    ] {
+        let found = refused_text(&with(&operator_text(), from, to));
+        assert_eq!(
+            (found.reason, found.member.as_str()),
+            (RefusalReason::Malformed, "document"),
+            "{to}"
+        );
+    }
+}
+
+/// An integer past `u64::MAX` or below `i64::MIN` is one the YAML reader does not hold: the
+/// document is refused as a whole, `Malformed` at `document`, wherever a port holds it.
+#[test]
+fn a_port_past_u64_is_malformed() {
+    for (from, _) in PORT_MEMBERS {
+        let (head, _) = from.rsplit_once(' ').expect("a port");
+        for port in [
+            "18446744073709551616",
+            "0x10000000000000000",
+            "-9223372036854775809",
+        ] {
+            let text = with(&operator_text(), from, &format!("{head} {port}"));
+            let found = refused_text(&text);
+            assert_eq!(
+                (found.reason, found.member.as_str()),
+                (RefusalReason::Malformed, "document"),
+                "{from} {port}"
+            );
+        }
+    }
+}
+
 /// `session.budget.deadline` is a `Timestamp`, an RFC 3339 instant (a date, `T`, a time and an
 /// offset), as Commission reads a run's deadline: a date alone, a time without an offset, a day
 /// the calendar lacks and a space for the `T` are refused; a full instant checks.
@@ -459,6 +545,53 @@ fn the_first_member_the_decoder_refuses_decides_its_refusal() {
 
     let text = fixture("not-a-plain-path").replace("allow: [C0000000001]", "allow: []");
     assert_eq!(refused_text(&text).reason, RefusalReason::NotAPlainPath);
+}
+
+/// A binding mapping keeps the walk's order although its `kind` decides which members it
+/// declares: a member neither kind declares answers before `kind` is read, then `kind`, then a
+/// member only the other kind declares, then the binding's members in the order its kind declares
+/// them.
+#[test]
+fn a_binding_reads_its_undeclared_members_before_its_kind() {
+    let chat = "{name: chat, kind: connectors,";
+    for (to, expected) in [
+        (
+            "{name: chat, kind: ' ', zzz: 1,",
+            (RefusalReason::Malformed, "document"),
+        ),
+        (
+            "{name: chat, zzz: 1,",
+            (RefusalReason::Malformed, "document"),
+        ),
+        (
+            "{name: chat, kind: ftp, zzz: 1,",
+            (RefusalReason::Malformed, "document"),
+        ),
+        (
+            "{name: chat, kind: ' ', base_url: ' ',",
+            (RefusalReason::BlankText, "bindings[0].kind"),
+        ),
+        (
+            "{name: ' ', kind: connectors, base_url: http://chat.example,",
+            (RefusalReason::Malformed, "document"),
+        ),
+        (
+            "{name: ' ', kind: connectors,",
+            (RefusalReason::BlankText, "bindings[0].name"),
+        ),
+    ] {
+        let found = refused_text(&with(&operator_text(), chat, to));
+        assert_eq!((found.reason, found.member.as_str()), expected, "{to}");
+    }
+    let found = refused_text(&with(
+        &operator_text(),
+        "{name: logs, kind: http,",
+        "{name: ' ', kind: http, adapter: chat,",
+    ));
+    assert_eq!(
+        (found.reason, found.member.as_str()),
+        (RefusalReason::Malformed, "document")
+    );
 }
 
 #[test]

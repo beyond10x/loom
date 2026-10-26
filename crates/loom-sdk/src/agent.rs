@@ -334,20 +334,36 @@ fn allow_path(value: &Value, at: &str) -> Result<String, AgentSpecError> {
     }
 }
 
+/// A port, 1 to 65535. An integer the YAML reader holds outside `i64` (past it up to `u64::MAX`)
+/// is outside that range too, not a value of the wrong type; one past `u64` or below `i64` the
+/// reader refuses with the whole document.
 fn port(value: &Value, at: &str) -> Result<i64, AgentSpecError> {
-    let port = integer(value, at)?;
-    if (1..=65_535).contains(&port) {
-        Ok(port)
+    let port = if beyond_i64(value) {
+        None
     } else {
-        Err(AgentSpecError::value(
+        Some(integer(value, at)?)
+    };
+    match port {
+        Some(port) if (1..=65_535).contains(&port) => Ok(port),
+        _ => Err(AgentSpecError::value(
             RefusalReason::PortOutOfRange,
             at,
             format!("`{at}` is not a port from 1 to 65535"),
-        ))
+        )),
     }
 }
 
+/// Whether `value` is an integer past `i64`, which the YAML reader holds up to `u64::MAX`.
+fn beyond_i64(value: &Value) -> bool {
+    value.as_i64().is_none() && value.as_u64().is_some()
+}
+
 fn integer(value: &Value, at: &str) -> Result<i64, AgentSpecError> {
+    if beyond_i64(value) {
+        return Err(AgentSpecError::new(format!(
+            "`{at}` is an integer outside -9223372036854775808 to 9223372036854775807"
+        )));
+    }
     value
         .as_i64()
         .ok_or_else(|| AgentSpecError::new(format!("`{at}` is not an integer")))
@@ -381,11 +397,12 @@ fn decimal(value: &Value, at: &str) -> Result<Decimal, AgentSpecError> {
 /// A `Timestamp`: an RFC 3339 `date-time`, a full date, `T` (or `t`), a full time with an
 /// optional fraction of a second and `Z` (or `z`) or a numeric offset, the instant Commission
 /// reads a run's deadline as. The space RFC 3339 lets an application put for the `T` is refused,
-/// because Commission does not read it. A refusal does not repeat the text.
+/// and so is any character outside ASCII (chrono takes U+2212 MINUS SIGN for an offset's `-`),
+/// because Commission reads neither. A refusal does not repeat the text.
 fn timestamp(value: &Value, at: &str) -> Result<Timestamp, AgentSpecError> {
     let instant = text(value, at)?;
     let separated = matches!(instant.as_bytes().get(10), Some(b'T' | b't'));
-    if separated && chrono::DateTime::parse_from_rfc3339(&instant).is_ok() {
+    if instant.is_ascii() && separated && chrono::DateTime::parse_from_rfc3339(&instant).is_ok() {
         Ok(Timestamp(instant))
     } else {
         Err(AgentSpecError::value(
@@ -684,27 +701,43 @@ fn state(value: &Value, at: &str) -> Result<AgentState, AgentSpecError> {
     })
 }
 
+/// The members a `connectors` binding declares, its tag `kind` first.
+const CONNECTORS_BINDING: [&str; 8] = [
+    "kind",
+    "name",
+    "adapter",
+    "connection",
+    "list",
+    "search",
+    "get",
+    "write",
+];
+
+/// The members an `http` binding declares, its tag `kind` first.
+const HTTP_BINDING: [&str; 7] = [
+    "kind",
+    "name",
+    "base_url",
+    "allow_paths",
+    "method",
+    "bearer_env",
+    "max_bytes",
+];
+
+/// A binding, its tag `kind` deciding which members it declares. A member neither kind declares
+/// is refused before `kind` is read, so the walk's order holds: undeclared members, then `kind`,
+/// then a member only the other kind declares (undeclared once `kind` names this one), then the
+/// members of this kind.
 fn binding(value: &Value, at: &str) -> Result<Binding, AgentSpecError> {
-    let kind = value
-        .as_mapping()
-        .and_then(|mapping| mapping.get("kind"))
-        .ok_or_else(|| AgentSpecError::new(format!("`{}` is missing", join(at, "kind"))))?;
-    match text(kind, &join(at, "kind"))?.as_str() {
+    let either: Vec<&str> = CONNECTORS_BINDING
+        .iter()
+        .chain(&HTTP_BINDING)
+        .copied()
+        .collect();
+    let kind = Members::of(value, at, &either)?.get("kind", text)?;
+    match kind.as_str() {
         "connectors" => {
-            let members = Members::of(
-                value,
-                at,
-                &[
-                    "kind",
-                    "name",
-                    "adapter",
-                    "connection",
-                    "list",
-                    "search",
-                    "get",
-                    "write",
-                ],
-            )?;
+            let members = Members::of(value, at, &CONNECTORS_BINDING)?;
             Ok(Binding::Connectors(ConnectorsBinding {
                 name: members.get("name", source)?,
                 adapter: members.get("adapter", |value, at| text(value, at).map(AdapterAlias))?,
@@ -717,19 +750,7 @@ fn binding(value: &Value, at: &str) -> Result<Binding, AgentSpecError> {
             }))
         }
         "http" => {
-            let members = Members::of(
-                value,
-                at,
-                &[
-                    "kind",
-                    "name",
-                    "base_url",
-                    "allow_paths",
-                    "method",
-                    "bearer_env",
-                    "max_bytes",
-                ],
-            )?;
+            let members = Members::of(value, at, &HTTP_BINDING)?;
             Ok(Binding::Http(HttpBinding {
                 name: members.get("name", source)?,
                 base_url: members.get("base_url", text)?,
