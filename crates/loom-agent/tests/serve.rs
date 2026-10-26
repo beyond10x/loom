@@ -795,6 +795,23 @@ fn writes_mode_auto_is_refused_before_anything_runs() {
 }
 
 #[test]
+fn a_spec_without_runtime_connectors_is_refused_before_anything_runs() {
+    let fixture = fixture("serve-no-connectors");
+    let mut spec = spec(&fixture, "approval", &[CHANNEL], 5);
+    spec.runtime
+        .as_mut()
+        .expect("the fixture names a runtime")
+        .connectors = None;
+    match SpecPlugin::new(spec, &fixture.plugin_state()) {
+        Err(PluginError::Config(why)) => {
+            assert!(why.contains("names no connectors command line"), "{why}");
+        }
+        other => panic!("serve needs connectors: {:?}", other.map(|_| ())),
+    }
+    assert!(fixture.argv().is_empty(), "nothing ran");
+}
+
+#[test]
 fn a_state_projects_its_actions_and_sources() {
     let fixture = fixture("serve-projection");
     let plugin = plugin(

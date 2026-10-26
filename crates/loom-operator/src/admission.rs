@@ -4,7 +4,9 @@
 //! 1. `spec.agent`, as YAML, through `b10x_loom_agent::check_text` against the plugin catalog:
 //!    the check `b10x-loom agent check` runs, in-process (`Malformed`, `SecretLiteral`,
 //!    `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
-//!    `EmptyChannelAllow`). For the `Command` variant (`spec.command` present), whose
+//!    `EmptyChannelAllow`), then a `runtime` without `connectors`, which `agent serve` needs and
+//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0. For the
+//!    `Command` variant (`spec.command` present), whose
 //!    document the image's program reads and `agent serve` does not, only the credential walk
 //!    of that library (`SecretLiteral`) and the `loom.agent/1` decoder (`Malformed`).
 //! 2. `spec.routes` walked for a credential by the same library (`SecretLiteral`); a routes
@@ -580,6 +582,19 @@ pub fn admit(
             error.to_string(),
         )
     })?;
+    if variant == AgentVariant::AgentServe
+        && decoded
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.connectors.is_none())
+    {
+        return Err(Refusal::new(
+            spelling(RefusalReason::Malformed),
+            "spec.agent.runtime.connectors",
+            "`b10x-loom agent serve` needs a connectors command line; only a Command resource \
+             may leave it out",
+        ));
+    }
 
     let given = (!empty(&spec.routes))
         .then(|| yaml(&spec.routes, "spec.routes"))
@@ -745,6 +760,25 @@ mod tests {
         );
         assert!(!admitted.default_routes);
         assert_eq!(admitted.connectors, "");
+    }
+
+    #[test]
+    fn a_runtime_without_connectors_is_refused_for_serve_and_admitted_for_a_command() {
+        let mut serve = spec(None);
+        serve.agent["runtime"] =
+            serde_json::json!({"state_dir": "/var/lib/agent", "confinement": "none"});
+        let refusal = admitted(&serve).expect_err("agent serve needs connectors");
+        assert_eq!(refusal.reason, "Malformed");
+        assert_eq!(refusal.member, "spec.agent.runtime.connectors");
+
+        let command = LoomAgentSpec {
+            command: Some(CommandSpec {
+                entrypoint: Some(vec!["takt".to_owned()]),
+                args: None,
+            }),
+            ..serve
+        };
+        admitted(&command).expect("a Command resource need not name connectors");
     }
 
     #[test]
