@@ -1,12 +1,13 @@
 //! The `loom.resource` domain, answered by `b10x-loom-resource`.
 //!
-//! `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment` and `DeleteLoomAgent` are answered by the
-//! scenario's [`LoomAgentRecord`], which runs the generated behaviour of `loom.resource` over
-//! itself, and the view `LoomAgents` by its generated query. This module decodes the suite's input
-//! into the generated types, publishes the event each outcome carries and encodes each answer back;
-//! it decides no outcome. The suite names members by their declared names (`observed_generation`,
-//! `exit_code`), not by their wire names. The view's `conditions` is encoded as the record holds
-//! it; no command sets it (ESS 0.69.0 admits no list under `sets:`), so every row reads it absent.
+//! `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`, `ObserveRun` and `DeleteLoomAgent` are
+//! answered by the scenario's [`LoomAgentRecord`], which runs the generated behaviour of
+//! `loom.resource` over itself, and the view `LoomAgents` by its generated query. This module
+//! decodes the suite's input into the generated types, publishes the event each outcome carries
+//! and encodes each answer back; it decides no outcome. The suite names members by their declared
+//! names (`observed_generation`, `exit_code`), not by their wire names. The view's `conditions` is
+//! encoded as the record holds it; no command sets it (ESS 0.69.0 admits no list under `sets:`),
+//! so every row reads it absent.
 
 use std::collections::BTreeMap;
 
@@ -15,7 +16,8 @@ use b10x_loom_resource::model::{
     AgentVariant, ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, Condition, ConditionStatus,
     ConditionType, DeleteLoomAgent, DeleteLoomAgentOutcome, DeploymentAvailability,
     DeploymentStatus, LoomAgentObserved, LoomAgentState, LoomAgents, ObserveDeployment,
-    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName, StaleGeneration,
+    ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome,
+    ResourceName, RunPhase, StaleGeneration,
 };
 use ess_conformance::target::{ObservedEvent, SemanticCommandResult, ViewRow};
 use ess_primitives::ids::CorrelationId;
@@ -27,6 +29,7 @@ use crate::{Live, error, event, took};
 pub(crate) const APPLY_LOOM_AGENT: &str = "loom.resource.ApplyLoomAgent";
 pub(crate) const RECORD_CHECK: &str = "loom.resource.RecordCheck";
 pub(crate) const OBSERVE_DEPLOYMENT: &str = "loom.resource.ObserveDeployment";
+pub(crate) const OBSERVE_RUN: &str = "loom.resource.ObserveRun";
 pub(crate) const DELETE_LOOM_AGENT: &str = "loom.resource.DeleteLoomAgent";
 pub(crate) const LOOM_AGENTS: &str = "loom.resource.LoomAgents";
 
@@ -36,6 +39,9 @@ const LOOM_AGENT_REFUSED: &str = "loom.resource.LoomAgentRefused";
 const LOOM_AGENT_DEGRADED: &str = "loom.resource.LoomAgentDegraded";
 const LOOM_AGENT_RECOVERED: &str = "loom.resource.LoomAgentRecovered";
 const LOOM_AGENT_OBSERVED: &str = "loom.resource.LoomAgentObserved";
+const LOOM_AGENT_RUN_OBSERVED: &str = "loom.resource.LoomAgentRunObserved";
+const LOOM_AGENT_COMPLETED: &str = "loom.resource.LoomAgentCompleted";
+const LOOM_AGENT_FAILED: &str = "loom.resource.LoomAgentFailed";
 const LOOM_AGENT_DELETED: &str = "loom.resource.LoomAgentDeleted";
 
 const STALE_GENERATION: &str = "loom.resource.StaleGeneration";
@@ -257,6 +263,74 @@ pub(crate) fn observe_deployment(
     })
 }
 
+/// The `loom.resource.RunPhase` field `name`, by its declared name.
+fn phase(input: &Input, name: &str) -> Option<RunPhase> {
+    Some(match input.get(name)?.as_text()? {
+        "Active" => RunPhase::Active,
+        "Succeeded" => RunPhase::Succeeded,
+        "Failed" => RunPhase::Failed,
+        _ => return None,
+    })
+}
+
+/// `ObserveRun`, by the record's generated behaviour.
+pub(crate) fn observe_run(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = ObserveRun {
+        name: name(input)?,
+        phase: phase(input, "phase")?,
+    };
+    Some(match live.resources.observe_run(command).ok()? {
+        ObserveRunOutcome::Unknown { error } => {
+            refused(OBSERVE_RUN, "unknown", LOOM_AGENT_NOT_FOUND, &error.name)
+        }
+        ObserveRunOutcome::StillActive {
+            loom_agent_run_observed,
+        } => {
+            let published = live.publish(
+                event(LOOM_AGENT_RUN_OBSERVED)
+                    .with("name", name_node(&loom_agent_run_observed.name))
+                    .with(
+                        "generation",
+                        codec::number(loom_agent_run_observed.generation),
+                    ),
+                correlation,
+            );
+            took(OBSERVE_RUN, "still-active").emitting(published)
+        }
+        ObserveRunOutcome::Completed {
+            loom_agent_completed,
+        } => {
+            let published = live.publish(
+                event(LOOM_AGENT_COMPLETED)
+                    .with("name", name_node(&loom_agent_completed.name))
+                    .with("generation", codec::number(loom_agent_completed.generation)),
+                correlation,
+            );
+            took(OBSERVE_RUN, "completed").emitting(published)
+        }
+        ObserveRunOutcome::Failed { loom_agent_failed } => {
+            let published = live.publish(
+                event(LOOM_AGENT_FAILED)
+                    .with("name", name_node(&loom_agent_failed.name))
+                    .with("generation", codec::number(loom_agent_failed.generation)),
+                correlation,
+            );
+            took(OBSERVE_RUN, "failed").emitting(published)
+        }
+        ObserveRunOutcome::Finished => took(OBSERVE_RUN, "finished"),
+        ObserveRunOutcome::NoRun { error } => refused(
+            OBSERVE_RUN,
+            "no-run",
+            LOOM_AGENT_STATE_CONFLICT,
+            &error.name,
+        ),
+    })
+}
+
 /// `DeleteLoomAgent`, by the record's generated behaviour.
 pub(crate) fn delete_loom_agent(
     live: &mut Live,
@@ -361,5 +435,7 @@ fn state(state: LoomAgentState) -> Node {
         LoomAgentState::Running => "Running",
         LoomAgentState::Refused => "Refused",
         LoomAgentState::Degraded => "Degraded",
+        LoomAgentState::Completed => "Completed",
+        LoomAgentState::Failed => "Failed",
     })
 }

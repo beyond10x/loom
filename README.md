@@ -332,13 +332,15 @@ configuration. A refusal is the resource's status (`state: Refused`, `check` nam
 and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
 checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
 with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
-(Pending, Running, Degraded or Refused), `check`, `deployment`, `variant` and the conditions
+(Pending, Running, Degraded, Refused, Completed or Failed), `check`, `deployment`, `variant` and the conditions
 `Checked` and `Available`.
 
 A resource with `spec.command` is the `Command` variant: its pod runs the image's own program
 (`spec.command.entrypoint` and `args`, each left to the image when absent) instead of
 `b10x-loom agent serve`, with no check before it, and reads `spec.agent` at `/config/agent.yaml`.
-That is how a takt delivery runs as a `LoomAgent`. `spec.workspace` (`mountPath`, optional
+That is how a takt delivery runs as a `LoomAgent`. Its pod is a `batch/v1` Job in the Deployment's
+place, so the program runs once: when it ends the resource reads `Completed` or `Failed` and
+nothing starts it again until `spec` changes, which replaces the Job. `spec.workspace` (`mountPath`, optional
 `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
 `allowedClaimNames` or else an emptyDir. On either variant `spec.secretRef` gives one Secret as
 the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container

@@ -19,13 +19,13 @@ Generated from the clap definition of the `b10x-loom-operator` command line in [
 
 | Command | What it does |
 |---|---|
-| [`b10x-loom-operator run`](#b10x-loom-operator-run) | Watch the LoomAgent resources of the configured namespace and reconcile each into its ServiceAccount, ConfigMap, Deployment, NetworkPolicy and Service, publishing its lifecycle as its status |
+| [`b10x-loom-operator run`](#b10x-loom-operator-run) | Watch the LoomAgent resources of the configured namespace and reconcile each into its ServiceAccount, ConfigMap, Deployment (a Job for a command), NetworkPolicy and Service, publishing its lifecycle as its status |
 | [`b10x-loom-operator render`](#b10x-loom-operator-render) | Print the children of one LoomAgent document as one multi-document YAML, after the checks the controller runs. Nothing is applied and no cluster is read |
 | [`b10x-loom-operator crd`](#b10x-loom-operator-crd) | Print the LoomAgent CustomResourceDefinition, the bytes of deploy/crd/loomagents.loom.beyond10x.dev.yaml |
 
 ## `b10x-loom-operator run`
 
-Watch the LoomAgent resources of the configured namespace and reconcile each into its ServiceAccount, ConfigMap, Deployment, NetworkPolicy and Service, publishing its lifecycle as its status
+Watch the LoomAgent resources of the configured namespace and reconcile each into its ServiceAccount, ConfigMap, Deployment (a Job for a command), NetworkPolicy and Service, publishing its lifecycle as its status
 
 ```text
 Usage: b10x-loom-operator run --config <FILE>

@@ -199,8 +199,8 @@ metadata:
     name: platform-operator
     uid: 00000000-0000-4000-8000-000000000001
 ---
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   labels:
     app.kubernetes.io/instance: platform-operator
@@ -216,13 +216,7 @@ metadata:
     name: platform-operator
     uid: 00000000-0000-4000-8000-000000000001
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/instance: platform-operator
-      app.kubernetes.io/name: loom-agent
-  strategy:
-    type: Recreate
+  backoffLimit: 0
   template:
     metadata:
       annotations:
@@ -309,6 +303,7 @@ spec:
           readOnly: true
         - mountPath: /var/run/loom/secret-files
           name: secret-files
+      restartPolicy: Never
       securityContext:
         fsGroup: 10001
         runAsNonRoot: true

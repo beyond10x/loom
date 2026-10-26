@@ -19,7 +19,8 @@ summary: >-
   The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the
   `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller
   reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by
-  the child Deployment's availability, Pending again on a new generation, and gone on delete.
+  the child Deployment's availability, Completed or Failed when the child Job's run ends, Pending
+  again on a new generation, and gone on delete.
 
 naming:
   wire: resource
@@ -94,6 +95,14 @@ types:
   - name: loom.resource.DeploymentAvailability
     kind: enum
     variants: [Available, Unavailable]
+
+  # What the controller read of the child Job of a `Command` resource, which runs its program once
+  # (story command-variant-runs-once): active, the run has not ended (its pod not yet started,
+  # or running); succeeded, it ended with exit code 0 (the Job's condition `Complete`); failed, it
+  # ended otherwise (the Job's condition `Failed`, or one failed pod, since the Job retries none).
+  - name: loom.resource.RunPhase
+    kind: enum
+    variants: [Active, Succeeded, Failed]
 
   # What the spec check said of the spec: its exit code (0, the spec is served) and its message
   # (empty on 0). The controller runs the check in-process before any child exists, with the
@@ -175,8 +184,11 @@ entities:
   # `check` is the spec check's result for that generation, absent until it ran. The state
   # is the controller's phase: Pending from apply until the check ran; Running when the check
   # passed; Refused when it failed, until a new generation is applied; Degraded while the child
-  # Deployment is unavailable, Running again when it is. A new generation returns every state to
-  # Pending with the check cleared. Nothing is terminal: a resource leaves by deletion.
+  # Deployment is unavailable, Running again when it is. A `Command` resource's pod is a Job that
+  # runs once: Completed when its run succeeded, Failed when it did not, and either stays as it is
+  # until a new generation, so the controller never starts a finished run again (story
+  # command-variant-runs-once). A new generation returns every state to Pending with the check
+  # cleared. Nothing is terminal: a resource leaves by deletion.
   # `deployment` is what the controller last read of the child Deployment, absent until it read
   # one and cleared by a new generation, whose Deployment is not yet read. An observation that
   # leaves Running or Degraded as it is moves over a self-transition (`observe-running`,
@@ -208,7 +220,7 @@ entities:
         type: Optional<List<loom.resource.Condition>>
     lifecycle:
       initial: Pending
-      states: [Pending, Running, Refused, Degraded]
+      states: [Pending, Running, Refused, Degraded, Completed, Failed]
       terminal: []
       transitions:
         - name: run
@@ -229,8 +241,14 @@ entities:
         - name: observe-degraded
           from: [Degraded]
           to: Degraded
+        - name: complete
+          from: [Running]
+          to: Completed
+        - name: fail
+          from: [Running]
+          to: Failed
         - name: respecify
-          from: [Pending, Running, Refused, Degraded]
+          from: [Pending, Running, Refused, Degraded, Completed, Failed]
           to: Pending
 
 errors:
@@ -251,7 +269,8 @@ errors:
         type: loom.resource.ResourceName
 
   # The command does not apply in the resource's state: a check result for a resource that is not
-  # Pending, or a Deployment observation for one that has no Deployment yet.
+  # Pending, a Deployment observation for one that has no Deployment, or a run observation for one
+  # that has no Job running or finished.
   - name: loom.resource.LoomAgentStateConflict
     fields:
       - name: name
@@ -303,6 +322,30 @@ events:
         type: loom.resource.ResourceName
       - name: availability
         type: loom.resource.DeploymentAvailability
+
+  # The child Job's run of a generation ended with exit code 0.
+  - name: loom.resource.LoomAgentCompleted
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+
+  # The child Job's run of a generation ended otherwise.
+  - name: loom.resource.LoomAgentFailed
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+
+  # An observation of the child Job whose run has not ended.
+  - name: loom.resource.LoomAgentRunObserved
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
 
 commands:
   # The controller saw the resource at a generation: created, or changed. A generation the
@@ -484,6 +527,70 @@ commands:
             name: input.name
             availability: input.availability
       - name: no-deployment
+        error: loom.resource.LoomAgentStateConflict
+        payload:
+          loom.resource.LoomAgentStateConflict:
+            name: input.name
+
+  # The controller read the child Job of a `Command` resource (story command-variant-runs-once). A
+  # Running resource whose run has not ended stays Running, over the self-transition
+  # `observe-running`, and records the observation as an event; one whose run succeeded is
+  # Completed, one whose run failed is Failed, each event naming the generation the record holds.
+  # A finished resource observed again stays as it is, whatever was read, so a Job someone deletes
+  # or replaces starts no second run of that generation. A resource with no Job (Pending, Refused)
+  # or whose pod is a Deployment (Degraded) answers a state conflict. The command carries no
+  # generation: on `format: ess/25` a guard on a subject field (`observed_generation !=
+  # input.generation`) and guards on the held state cannot share a command, so the controller
+  # observes only a Job whose pod template names the generation the record holds, and deletes any
+  # other.
+  - name: loom.resource.ObserveRun
+    input:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: phase
+        type: loom.resource.RunPhase
+    outcomes:
+      - name: unknown
+        unknown_instance: true
+        error: loom.resource.LoomAgentNotFound
+        payload:
+          loom.resource.LoomAgentNotFound:
+            name: input.name
+      - name: still-active
+        when_subject_state: Running
+        when: phase == Active
+        moves: loom.resource.LoomAgent.observe-running
+        instance: name
+        emits: [loom.resource.LoomAgentRunObserved]
+        payload:
+          loom.resource.LoomAgentRunObserved:
+            name: input.name
+            generation: {subject: observed_generation}
+      - name: completed
+        when_subject_state: Running
+        when: phase == Succeeded
+        moves: loom.resource.LoomAgent.complete
+        instance: name
+        emits: [loom.resource.LoomAgentCompleted]
+        payload:
+          loom.resource.LoomAgentCompleted:
+            name: input.name
+            generation: {subject: observed_generation}
+      - name: failed
+        when_subject_state: Running
+        when: phase == Failed
+        moves: loom.resource.LoomAgent.fail
+        instance: name
+        emits: [loom.resource.LoomAgentFailed]
+        payload:
+          loom.resource.LoomAgentFailed:
+            name: input.name
+            generation: {subject: observed_generation}
+      - name: finished
+        when_subject_state: [Completed, Failed]
+        preserves: loom.resource.LoomAgent
+        instance: name
+      - name: no-run
         error: loom.resource.LoomAgentStateConflict
         payload:
           loom.resource.LoomAgentStateConflict:

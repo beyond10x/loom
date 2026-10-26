@@ -5,7 +5,7 @@
 //!
 //! * [`LoomAgentRecord`] is the controller's record of the resources it reconciles: an in-memory
 //!   store behind the generated `LoomAgentStorage` port, over which the generated behaviour of
-//!   `loom.resource` answers `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment` and
+//!   `loom.resource` answers `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`, `ObserveRun` and
 //!   `DeleteLoomAgent`, and the generated query answers the view `LoomAgents`. It decides no
 //!   outcome itself: each answer is the generated one, and it keeps, in order, the event each
 //!   outcome published.
@@ -14,8 +14,9 @@
 //!   `deploy/crd/loomagents.loom.beyond10x.dev.yaml`.
 //! * [`model`] is the generated `loom.resource` module, so a caller names one path for the types.
 //!
-//! The record holds the generation the controller applied, the spec check's result and what it
-//! last read of the child Deployment, never the spec: the spec stays in the cluster and the
+//! The record holds the generation the controller applied, the spec check's result, what it
+//! last read of the child Deployment and, by the state, whether the child Job's run ended, never
+//! the spec: the spec stays in the cluster and the
 //! controller re-reads it on every reconcile. No command sets the row's `conditions` (ESS 0.69.0
 //! admits no list under `sets:`); `b10x-loom-operator` computes them from the row when it
 //! publishes the status.
@@ -28,13 +29,14 @@ pub use loom::resource as model;
 use loom::behaviour::{Generated, LoomAgentStorage};
 use loom::resource::obligations::{
     ApplyLoomAgentBehavior, DeleteLoomAgentBehavior, LoomAgentsQuery, ObserveDeploymentBehavior,
-    RecordCheckBehavior,
+    ObserveRunBehavior, RecordCheckBehavior,
 };
 use model::{
     ApplyLoomAgent, ApplyLoomAgentOutcome, DeleteLoomAgent, DeleteLoomAgentOutcome,
-    LoomAgentApplied, LoomAgentDegraded, LoomAgentDeleted, LoomAgentObserved, LoomAgentRecovered,
-    LoomAgentRefused, LoomAgentRunning, LoomAgentSnapshot, LoomAgents, ObserveDeployment,
-    ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName,
+    LoomAgentApplied, LoomAgentCompleted, LoomAgentDegraded, LoomAgentDeleted, LoomAgentFailed,
+    LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunObserved,
+    LoomAgentRunning, LoomAgentSnapshot, LoomAgents, ObserveDeployment, ObserveDeploymentOutcome,
+    ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome, ResourceName,
 };
 
 /// An event a `loom.resource` outcome published, as the record keeps it.
@@ -53,6 +55,12 @@ pub enum ResourceEvent {
     /// `loom.resource.LoomAgentObserved`, by `ObserveDeployment`'s `still-running` or
     /// `still-degraded`.
     Observed(LoomAgentObserved),
+    /// `loom.resource.LoomAgentRunObserved`, by `ObserveRun`'s `still-active`.
+    RunObserved(LoomAgentRunObserved),
+    /// `loom.resource.LoomAgentCompleted`, by `ObserveRun`'s `completed`.
+    Completed(LoomAgentCompleted),
+    /// `loom.resource.LoomAgentFailed`, by `ObserveRun`'s `failed`.
+    Failed(LoomAgentFailed),
     /// `loom.resource.LoomAgentDeleted`, by `DeleteLoomAgent`'s `deleted`.
     Deleted(LoomAgentDeleted),
 }
@@ -183,6 +191,34 @@ impl LoomAgentRecord {
                 .push(ResourceEvent::Observed(loom_agent_observed.clone())),
             ObserveDeploymentOutcome::Unknown { .. }
             | ObserveDeploymentOutcome::NoDeployment { .. } => {}
+        }
+        Ok(outcome)
+    }
+
+    /// `loom.resource.ObserveRun`, by its generated behaviour.
+    ///
+    /// # Errors
+    ///
+    /// The generated behaviour's refusal of a request the specification declares no outcome for.
+    pub fn observe_run(&mut self, input: ObserveRun) -> Result<ObserveRunOutcome, UnmetObligation> {
+        let outcome = self.generated(|generated| generated.observe_run(input))?;
+        match &outcome {
+            ObserveRunOutcome::StillActive {
+                loom_agent_run_observed,
+            } => self
+                .events
+                .push(ResourceEvent::RunObserved(loom_agent_run_observed.clone())),
+            ObserveRunOutcome::Completed {
+                loom_agent_completed,
+            } => self
+                .events
+                .push(ResourceEvent::Completed(loom_agent_completed.clone())),
+            ObserveRunOutcome::Failed { loom_agent_failed } => self
+                .events
+                .push(ResourceEvent::Failed(loom_agent_failed.clone())),
+            ObserveRunOutcome::Unknown { .. }
+            | ObserveRunOutcome::Finished
+            | ObserveRunOutcome::NoRun { .. } => {}
         }
         Ok(outcome)
     }

@@ -12,6 +12,17 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `loom.resource`: the states `Completed` and `Failed`, the command `ObserveRun` (`RunPhase` Active, Succeeded, Failed; outcomes `still-active`, `completed`, `failed`, `finished`, `no-run`, `unknown`) and the events `LoomAgentRunObserved`, `LoomAgentCompleted`, `LoomAgentFailed`; `LoomAgentRecord::observe_run` (story:command-variant-runs-once)
+- `b10x-loom-operator`: a finished Job is not started again and a Job of the current generation is never sent again; a new generation deletes the older Job, and a Command Deployment an earlier release made, in the foreground and creates the Job only once both are gone; every child delete now propagates in the foreground; the status of a `Command` resource reads `Available` `RunNotFinished`, `RunSucceeded` or `RunFailed` (story:command-variant-runs-once)
+
+### Changed
+
+- **Breaking:** a `Command` `LoomAgent` runs its program once as a `batch/v1` Job (`backoffLimit` 0, `restartPolicy: Never`), not as a Deployment; whoever reads that Deployment reads the Job, and an existing Command Deployment is deleted as a child this generation does not render (story:command-variant-runs-once)
+- **Breaking:** `loom.resource.LoomAgentState` gains `Completed` and `Failed`, `ResourceEvent` gains `RunObserved`, `Completed` and `Failed`, and `b10x_loom_operator::render::Children.deployment` is now `workload: Workload` (a Deployment or a Job); an exhaustive match or a reader of `deployment` no longer compiles (story:command-variant-runs-once)
+- The `loom-agents` chart's Role grants `batch` `jobs` the verbs of the other child kinds; still nothing on Secrets, Pods or Events (story:command-variant-runs-once)
+
 ## [0.43.0] - 2026-10-26
 
 ### Added

@@ -10,7 +10,7 @@ custom_edit_url: null
 
 # Resource
 
-The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Pending again on a new generation, and gone on delete.
+The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, Pending again on a new generation, and gone on delete.
 
 `loom.resource` is one of loom's bounded contexts. [All domains](./index.mdx).
 
@@ -85,6 +85,10 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 `loom.resource.ResourceName` wraps `String` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
 
+### `RunPhase`
+
+`loom.resource.RunPhase` is one of `Active`, `Succeeded` and `Failed`.
+
 ### `SecretFiles`
 
 `loom.resource.SecretFiles` is a record of two fields:
@@ -129,7 +133,7 @@ It declares no relation to another entity, and no other entity names it.
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
-Its state is a `loom.resource.LoomAgent.State`, one of `Degraded`, `Pending`, `Refused` and `Running`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+Its state is a `loom.resource.LoomAgent.State`, one of `Completed`, `Degraded`, `Failed`, `Pending`, `Refused` and `Running`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
 
 An instance is created in `Pending`. No state is terminal: nothing in this lifecycle says an instance may stop moving.
 
@@ -140,9 +144,13 @@ stateDiagram-v2
     Pending --> Refused: refuse (RecordCheck)
     Running --> Degraded: degrade (ObserveDeployment)
     Degraded --> Running: recover (ObserveDeployment)
-    Running --> Running: observe-running (ObserveDeployment)
+    Running --> Running: observe-running (ObserveDeployment, ObserveRun)
     Degraded --> Degraded: observe-degraded (ObserveDeployment)
+    Running --> Completed: complete (ObserveRun)
+    Running --> Failed: fail (ObserveRun)
+    Completed --> Pending: respecify (ApplyLoomAgent)
     Degraded --> Pending: respecify (ApplyLoomAgent)
+    Failed --> Pending: respecify (ApplyLoomAgent)
     Pending --> Pending: respecify (ApplyLoomAgent)
     Refused --> Pending: respecify (ApplyLoomAgent)
     Running --> Pending: respecify (ApplyLoomAgent)
@@ -154,17 +162,33 @@ Each move is taken by a declared command outcome, and a move nothing takes is re
 - `refuse` — taken by `loom.resource.RecordCheck` on its `refused` outcome
 - `degrade` — taken by `loom.resource.ObserveDeployment` on its `degraded` outcome
 - `recover` — taken by `loom.resource.ObserveDeployment` on its `recovered` outcome
-- `observe-running` — taken by `loom.resource.ObserveDeployment` on its `still-running` outcome
+- `observe-running` — taken by `loom.resource.ObserveDeployment` on its `still-running` outcome and `loom.resource.ObserveRun` on its `still-active` outcome
 - `observe-degraded` — taken by `loom.resource.ObserveDeployment` on its `still-degraded` outcome
+- `complete` — taken by `loom.resource.ObserveRun` on its `completed` outcome
+- `fail` — taken by `loom.resource.ObserveRun` on its `failed` outcome
 - `respecify` — taken by `loom.resource.ApplyLoomAgent` on its `respecified` outcome
 
 An instance is brought into existence by `loom.resource.ApplyLoomAgent` on its `created` outcome.
 
 Illegal transitions are illegal by absence: no rule forbids them, there is simply no arrow, because a rule would be a second place for the same truth to live. A diagram cannot show an absence, so the pairs it does not connect are listed here, derived from the same transitions — anything named below is a move this specification does not permit.
 
+- `Completed` may not become `Degraded`
+- `Completed` may not become `Failed`
+- `Completed` may not become `Refused`
+- `Completed` may not become `Running`
+- `Degraded` may not become `Completed`
+- `Degraded` may not become `Failed`
 - `Degraded` may not become `Refused`
+- `Failed` may not become `Completed`
+- `Failed` may not become `Degraded`
+- `Failed` may not become `Refused`
+- `Failed` may not become `Running`
+- `Pending` may not become `Completed`
 - `Pending` may not become `Degraded`
+- `Pending` may not become `Failed`
+- `Refused` may not become `Completed`
 - `Refused` may not become `Degraded`
+- `Refused` may not become `Failed`
 - `Refused` may not become `Running`
 - `Running` may not become `Refused`
 
@@ -217,7 +241,7 @@ It has four outcomes.
 
 **`unchanged`** — Taken when the existing subject's stored fields satisfy `observed_generation == input.generation`. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Degraded`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared and `variant` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Completed`, `Degraded`, `Failed`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared and `variant` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `DeleteLoomAgent`
 
@@ -256,6 +280,29 @@ It has six outcomes.
 
 **`no-deployment`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
+### `ObserveRun`
+
+`loom.resource.ObserveRun`.
+
+It takes:
+
+- `name` — `loom.resource.ResourceName`
+- `phase` — `loom.resource.RunPhase`
+
+It has six outcomes.
+
+**`unknown`** — Taken when the identity the command names is one no record carries, before any other answer for it. No entity in this specification changes. It reports `loom.resource.LoomAgentNotFound`, carrying `name`. It emits nothing. A test reaches it by sending an identity no record carries, arranging nothing.
+
+**`still-active`** — Taken when the existing subject is in Running and `phase == Active` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Running`, along the declared move `observe-running`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRunObserved`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`completed`** — Taken when the existing subject is in Running and `phase == Succeeded` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Completed`, along the declared move `complete`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentCompleted`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`failed`** — Taken when the existing subject is in Running and `phase == Failed` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Failed`, along the declared move `fail`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentFailed`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`finished`** — Taken when the existing subject is in Completed or Failed. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`no-run`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
 ### `RecordCheck`
 
 `loom.resource.RecordCheck`.
@@ -278,7 +325,7 @@ It has five outcomes.
 
 **`refused`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Pending` to `Refused`, along the declared move `refuse`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRefused`. It sets `check` from `{exit_code: input.exit_code, message: input.message}` and `variant` from `input.variant`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
-**`out-of-order`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.resource.LoomAgent` in `Degraded`, `Refused` and `Running`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+**`out-of-order`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.resource.LoomAgent` in `Completed`, `Degraded`, `Failed`, `Refused` and `Running`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ## Events
 
@@ -292,6 +339,19 @@ It carries:
 - `generation` — `Integer`
 
 Emitted by `loom.resource.ApplyLoomAgent` on its `created` and `respecified` outcomes.
+
+Nothing in this system reacts to it.
+
+### `LoomAgentCompleted`
+
+`loom.resource.LoomAgentCompleted`.
+
+It carries:
+
+- `name` — `loom.resource.ResourceName`
+- `generation` — `Integer`
+
+Emitted by `loom.resource.ObserveRun` on its `completed` outcome.
 
 Nothing in this system reacts to it.
 
@@ -316,6 +376,19 @@ It carries:
 - `name` — `loom.resource.ResourceName`
 
 Emitted by `loom.resource.DeleteLoomAgent` on its `deleted` outcome.
+
+Nothing in this system reacts to it.
+
+### `LoomAgentFailed`
+
+`loom.resource.LoomAgentFailed`.
+
+It carries:
+
+- `name` — `loom.resource.ResourceName`
+- `generation` — `Integer`
+
+Emitted by `loom.resource.ObserveRun` on its `failed` outcome.
 
 Nothing in this system reacts to it.
 
@@ -358,6 +431,19 @@ Emitted by `loom.resource.RecordCheck` on its `refused` outcome.
 
 Nothing in this system reacts to it.
 
+### `LoomAgentRunObserved`
+
+`loom.resource.LoomAgentRunObserved`.
+
+It carries:
+
+- `name` — `loom.resource.ResourceName`
+- `generation` — `Integer`
+
+Emitted by `loom.resource.ObserveRun` on its `still-active` outcome.
+
+Nothing in this system reacts to it.
+
 ### `LoomAgentRunning`
 
 `loom.resource.LoomAgentRunning`.
@@ -383,6 +469,8 @@ Reported by `loom.resource.DeleteLoomAgent` on its `unknown` outcome.
 
 Reported by `loom.resource.ObserveDeployment` on its `unknown` outcome.
 
+Reported by `loom.resource.ObserveRun` on its `unknown` outcome.
+
 Reported by `loom.resource.RecordCheck` on its `unknown` outcome.
 
 ### `LoomAgentStateConflict`
@@ -392,6 +480,8 @@ It carries:
 - `name` — `loom.resource.ResourceName`
 
 Reported by `loom.resource.ObserveDeployment` on its `no-deployment` outcome.
+
+Reported by `loom.resource.ObserveRun` on its `no-run` outcome.
 
 Reported by `loom.resource.RecordCheck` on its `out-of-order` outcome.
 
@@ -410,4 +500,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · model digest `8b29b45d6bbeb27dcbf0d6fc9d820dcd9d106f4aff9a7ce7da17f8d25ed952b3` · contract digest `slice-sha256/2:327b2d20517e16d112548dbfc80b40896970ee17fd0d94172545204daeb09d3c`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `d9155034aef9f4b4212f9b6a3ffc88316cd8ab2a572b6ef5cecf23eba5d95f3f` · contract digest `slice-sha256/2:f6a723171ea1ab783ac09da3897288575d2b0ed0278e97af87aa968f5b98803b`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

@@ -16,9 +16,9 @@ use b10x_loom_operator::reconcile::{Context, reconcile};
 use b10x_loom_operator::resource::LoomAgent;
 use b10x_loom_resource::ResourceEvent;
 use b10x_loom_resource::model::{
-    DeploymentAvailability, LoomAgentApplied, LoomAgentDegraded, LoomAgentDeleted,
-    LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunning, LoomAgentState,
-    ResourceName,
+    DeploymentAvailability, LoomAgentApplied, LoomAgentCompleted, LoomAgentDegraded,
+    LoomAgentDeleted, LoomAgentFailed, LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused,
+    LoomAgentRunObserved, LoomAgentRunning, LoomAgentState, ResourceName,
 };
 use http::{Method, Request, Response, StatusCode};
 use kube::Client;
@@ -52,10 +52,11 @@ const CHILDREN: [&str; 5] = [
 ];
 
 /// The collection of each child kind, in the order the controller lists them.
-const COLLECTIONS: [&str; 5] = [
+const COLLECTIONS: [&str; 6] = [
     "/api/v1/namespaces/agents/serviceaccounts",
     "/api/v1/namespaces/agents/configmaps",
     "/apis/apps/v1/namespaces/agents/deployments",
+    "/apis/batch/v1/namespaces/agents/jobs",
     "/apis/networking.k8s.io/v1/namespaces/agents/networkpolicies",
     "/api/v1/namespaces/agents/services",
 ];
@@ -112,13 +113,17 @@ fn decoded(text: &str) -> String {
     String::from_utf8(out).expect("UTF-8")
 }
 
-/// The fake API server's state: what it saw, the last object applied at each path, and the
-/// availability a Deployment it is applied answers with (`None`: no status yet).
+/// The fake API server's state: what it saw, the last object applied at each path, the
+/// availability a Deployment it is applied answers with (`None`: no status yet), and the status
+/// a Job it is applied answers with (`None`: none yet), and whether a `Foreground` delete leaves
+/// the object terminating, as the API server does while its dependents go, instead of removing it.
 #[derive(Debug, Default)]
 struct Server {
     seen: Vec<Seen>,
     objects: BTreeMap<String, Value>,
     available: Option<bool>,
+    run: Option<Value>,
+    lingering: bool,
 }
 
 impl Server {
@@ -182,6 +187,11 @@ impl Server {
                         "reason": "Fake",
                     }]});
                 }
+                if path.contains("/jobs/")
+                    && let Some(run) = &self.run
+                {
+                    object["status"] = run.clone();
+                }
                 self.objects.insert(path.to_owned(), object.clone());
                 (StatusCode::OK, object)
             }
@@ -196,6 +206,23 @@ impl Server {
                     }),
                 ),
             },
+            Method::DELETE if self.lingering && body["propagationPolicy"] == "Foreground" => {
+                match self.objects.get_mut(path) {
+                    Some(object) => {
+                        object["metadata"]["deletionTimestamp"] = json!("2026-10-26T00:00:00Z");
+                        object["metadata"]["finalizers"] = json!(["foregroundDeletion"]);
+                        (StatusCode::OK, object.clone())
+                    }
+                    None => (
+                        StatusCode::NOT_FOUND,
+                        json!({
+                            "kind": "Status", "apiVersion": "v1", "metadata": {},
+                            "status": "Failure", "reason": "NotFound", "code": 404,
+                            "message": "not found",
+                        }),
+                    ),
+                }
+            }
             Method::DELETE => {
                 self.objects.remove(path);
                 (
@@ -219,6 +246,21 @@ struct Fake {
 impl Fake {
     fn set_available(&self, available: Option<bool>) {
         self.server.lock().expect("the fake").available = available;
+    }
+
+    /// From now on a `Foreground` delete leaves the object terminating until [`Fake::remove`].
+    fn set_lingering(&self, lingering: bool) {
+        self.server.lock().expect("the fake").lingering = lingering;
+    }
+
+    /// The status a Job answers its apply with from now on, and the Job held at `path`, if any,
+    /// takes it too, as the Job controller would write it.
+    fn set_run(&self, path: &str, run: Option<Value>) {
+        let mut server = self.server.lock().expect("the fake");
+        if let (Some(job), Some(status)) = (server.objects.get_mut(path), &run) {
+            job["status"] = status.clone();
+        }
+        server.run = run;
     }
 
     /// Every request seen since the last call, emptied.
@@ -1086,12 +1128,12 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
     reconciled(agent(1, &spec, &rest), &ctx).await;
 
     let seen = fake.take();
-    assert_eq!(applies(&seen), CHILDREN);
-    let deployment = seen
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    let job = seen
         .iter()
-        .find(|seen| seen.method == Method::PATCH && seen.path == CHILDREN[2])
-        .expect("the Deployment is applied");
-    let pod = &deployment.body["spec"]["template"]["spec"];
+        .find(|seen| seen.method == Method::PATCH && seen.path == JOB)
+        .expect("the Job is applied");
+    let pod = &job.body["spec"]["template"]["spec"];
     assert!(pod.get("initContainers").is_none(), "{pod}");
     assert!(pod["containers"][0].get("command").is_none(), "{pod}");
     assert!(pod["containers"][0].get("args").is_none(), "{pod}");
@@ -1109,7 +1151,7 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
         conditions(&status),
         [
             triple("Checked", "True", "SpecAdmitted"),
-            triple("Available", "Unknown", "DeploymentNotObserved"),
+            triple("Available", "Unknown", "RunNotFinished"),
         ]
     );
 
@@ -1129,4 +1171,431 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
             .is_some_and(|message| message.starts_with("refused: SecretLiteral at spec.agent.")),
         "{status}"
     );
+}
+
+/// The Job of the resource `platform-operator`.
+const JOB: &str = "/apis/batch/v1/namespaces/agents/jobs/platform-operator";
+
+/// Every child a `Command` resource over the example renders, in the order they are applied.
+const COMMAND_CHILDREN: [&str; 5] = [CHILDREN[0], CHILDREN[1], JOB, CHILDREN[3], CHILDREN[4]];
+
+/// The example as a `Command` resource at `generation`, running `args`.
+fn command_agent(generation: i64, args: &str) -> LoomAgent {
+    let spec = example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
+    let rest = format!(
+        "{DEFAULT_ROUTES}  image: {{repository: registry.example/takt, tag: '0.12.0'}}\n  \
+         command: {{args: [{args}]}}\n"
+    );
+    agent(generation, &spec, &rest)
+}
+
+/// A Job's status once its one pod ended with exit code 0.
+fn succeeded() -> Value {
+    json!({"succeeded": 1, "conditions": [{"type": "Complete", "status": "True"}]})
+}
+
+/// A Job's status once its one pod ended otherwise; `backoffLimit: 0` retries none.
+fn failed() -> Value {
+    json!({"failed": 1, "conditions": [{"type": "Failed", "status": "True"}]})
+}
+
+/// `story:command-variant-runs-once`: once the Job of the current generation has ended, no
+/// reconcile applies, creates or deletes a child, and a Job someone deletes afterwards is not
+/// created again; the status reads Completed or Failed.
+#[tokio::test]
+async fn a_finished_job_is_not_restarted() {
+    for (run, state, reason) in [
+        (succeeded(), "Completed", "RunSucceeded"),
+        (failed(), "Failed", "RunFailed"),
+    ] {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let seen = fake.take();
+        assert_eq!(applies(&seen), COMMAND_CHILDREN, "{state}");
+        let job = seen
+            .iter()
+            .find(|seen| seen.method == Method::PATCH && seen.path == JOB)
+            .expect("the Job is applied");
+        assert_eq!(job.body["kind"], "Job");
+        assert_eq!(job.body["spec"]["backoffLimit"], 0);
+        assert_eq!(
+            job.body["spec"]["template"]["spec"]["restartPolicy"],
+            "Never"
+        );
+        let status = published(&seen);
+        assert_eq!(status["state"], "Running");
+        assert_eq!(
+            conditions(&status),
+            [
+                triple("Checked", "True", "SpecAdmitted"),
+                triple("Available", "Unknown", "RunNotFinished"),
+            ]
+        );
+
+        fake.set_run(JOB, Some(run));
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let seen = fake.take();
+        assert!(applies(&seen).is_empty(), "{state}: no apply: {seen:?}");
+        assert!(
+            seen.iter().all(|seen| seen.method != Method::DELETE),
+            "{state}: nothing is deleted: {seen:?}"
+        );
+        let status = published(&seen);
+        assert_eq!(status["state"], state);
+        assert_eq!(status["observedGeneration"], 1);
+        assert_eq!(
+            conditions(&status),
+            [
+                triple("Checked", "True", "SpecAdmitted"),
+                triple("Available", "False", reason),
+            ]
+        );
+
+        for _ in 0..2 {
+            let action = reconciled(command_agent(1, "run"), &ctx).await;
+            assert_eq!(action, Action::requeue(Duration::from_secs(300)));
+            let seen = fake.take();
+            assert!(
+                seen.iter()
+                    .all(|seen| seen.path == STATUS && seen.method == Method::PATCH),
+                "{state}: a finished run reads, applies and deletes no child: {seen:?}"
+            );
+            assert_eq!(published(&seen)["state"], state);
+            fake.remove(JOB);
+        }
+        assert!(
+            !fake.holds(JOB),
+            "{state}: the Job deleted by someone is not created again"
+        );
+
+        let events = ctx.events();
+        assert_eq!(events.len(), 4, "{state}: {events:?}");
+        assert_eq!(
+            events[2],
+            ResourceEvent::RunObserved(LoomAgentRunObserved {
+                name: name(),
+                generation: 1
+            })
+        );
+        assert_eq!(
+            events[3],
+            if state == "Completed" {
+                ResourceEvent::Completed(LoomAgentCompleted {
+                    name: name(),
+                    generation: 1,
+                })
+            } else {
+                ResourceEvent::Failed(LoomAgentFailed {
+                    name: name(),
+                    generation: 1,
+                })
+            }
+        );
+    }
+}
+
+/// `story:command-variant-runs-once`: a Job's pod template cannot change, so a new generation
+/// deletes the Job of the earlier one (its pod first, propagation `Foreground`) and, once the
+/// delete answers it gone, creates its own.
+#[tokio::test]
+async fn a_new_generation_replaces_the_job() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.set_run(JOB, Some(succeeded()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    assert_eq!(published(&fake.take())["state"], "Completed");
+    fake.set_run(JOB, None);
+
+    let action = reconciled(command_agent(2, "run, --again"), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(300)));
+    let seen = fake.take();
+    assert_eq!(paths(&seen, &Method::DELETE), [JOB]);
+    let delete = seen
+        .iter()
+        .position(|seen| seen.method == Method::DELETE)
+        .expect("a delete");
+    assert_eq!(seen[delete].body["propagationPolicy"], "Foreground");
+    assert_eq!(
+        seen[delete].body["preconditions"]["uid"],
+        format!("uid-of-{JOB}")
+    );
+    let created = seen
+        .iter()
+        .position(|seen| seen.method == Method::PATCH && seen.path == JOB)
+        .expect("the new Job is created");
+    assert!(
+        delete < created,
+        "the old Job is gone before the new one is created: {seen:?}"
+    );
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    let job = &fake.objects()[JOB];
+    assert_eq!(
+        job["spec"]["template"]["metadata"]["annotations"]["loom.beyond10x.dev/generation"],
+        "2"
+    );
+    assert_eq!(
+        job["spec"]["template"]["spec"]["containers"][0]["args"],
+        json!(["run", "--again"])
+    );
+    assert_eq!(published(&seen)["state"], "Running");
+    assert_eq!(
+        ctx.events()[ctx.events().len() - 3..],
+        [
+            ResourceEvent::Applied(LoomAgentApplied {
+                name: name(),
+                generation: 2
+            }),
+            ResourceEvent::Running(LoomAgentRunning {
+                name: name(),
+                generation: 2
+            }),
+            ResourceEvent::RunObserved(LoomAgentRunObserved {
+                name: name(),
+                generation: 2
+            }),
+        ]
+    );
+}
+
+/// Applies nothing while the workload at `path` terminates, asks again after 30 s, and creates the
+/// Job once it is gone: the old pod and the new run never share the workspace.
+async fn the_job_waits_for(path: &str, ctx: &Arc<Context>, fake: &Fake, generation: i64) {
+    for round in 0..2 {
+        let action = reconciled(command_agent(generation, "run"), ctx).await;
+        assert_eq!(action, Action::requeue(Duration::from_secs(30)), "{round}");
+        let seen = fake.take();
+        assert!(
+            applies(&seen).is_empty(),
+            "{round}: nothing applied: {seen:?}"
+        );
+        let deletes: Vec<&Seen> = seen
+            .iter()
+            .filter(|seen| seen.method == Method::DELETE)
+            .collect();
+        assert_eq!(deletes.len(), 1, "{round}: {seen:?}");
+        assert_eq!(deletes[0].path, path);
+        assert_eq!(deletes[0].body["propagationPolicy"], "Foreground");
+        assert!(fake.holds(path), "{round}: still terminating");
+        let status = published(&seen);
+        assert_eq!(status["state"], "Running", "{round}");
+        assert_eq!(status["observedGeneration"], generation, "{round}");
+    }
+
+    fake.remove(path);
+    let action = reconciled(command_agent(generation, "run"), ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(300)));
+    let seen = fake.take();
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
+    assert_eq!(
+        fake.objects()[JOB]["spec"]["template"]["metadata"]["annotations"]["loom.beyond10x.dev/generation"],
+        generation.to_string()
+    );
+}
+
+/// A new generation's Job is not created while the earlier generation's Job, deleted in the
+/// foreground, still terminates.
+#[tokio::test]
+async fn a_new_generation_waits_until_the_old_job_is_gone() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.take();
+    fake.set_lingering(true);
+    the_job_waits_for(JOB, &ctx, &fake, 2).await;
+}
+
+/// A `Command` resource's Job is not created while the Deployment an earlier release made for it,
+/// deleted in the foreground, still terminates.
+#[tokio::test]
+async fn a_job_waits_until_an_earlier_command_deployment_is_gone() {
+    let (client, fake) = fake();
+    let mut earlier = object(NAME, CHILDREN[2], Some(("LoomAgent", NAME, UID)));
+    earlier["metadata"]["labels"] = json!({"app.kubernetes.io/instance": NAME});
+    earlier["kind"] = json!("Deployment");
+    earlier["apiVersion"] = json!("apps/v1");
+    fake.put(CHILDREN[2], earlier);
+    fake.set_lingering(true);
+    let ctx = context(client);
+    the_job_waits_for(CHILDREN[2], &ctx, &fake, 1).await;
+}
+
+// Adversary cases for story:command-variant-runs-once (wave 2026-10-26-cmdv, unit u1).
+
+/// The test configuration with the forge Secret allowed as files and the default image at `tag`,
+/// as the chart writes it: `agentImage.tag` is the release's version, so a release changes it.
+fn adv_config(tag: &str) -> Config {
+    let text = CONFIG
+        .replace("tag: '0.40.0'", &format!("tag: '{tag}'"))
+        .replace(
+            "allowedSecretNames: [platform-operator-secrets]",
+            "allowedSecretNames: [platform-operator-secrets, takt-forge]",
+        );
+    Config::parse(&text).expect("the adversary configuration")
+}
+
+/// A `Command` resource at `generation` with its forge key as files, which an init container
+/// from the configured default image stages (design § 9a).
+fn adv_command_with_files(generation: i64) -> LoomAgent {
+    let spec = example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
+    let rest = format!(
+        "{DEFAULT_ROUTES}  image: {{repository: registry.example/takt, tag: '0.12.0'}}\n  \
+         command: {{args: [run]}}\n  \
+         secretFiles: {{name: takt-forge, mountPath: /var/run/secrets/takt}}\n"
+    );
+    agent(generation, &spec, &rest)
+}
+
+/// A Job's pod template cannot change once created: the API server answers an apply that changes
+/// it `422 spec.template: field is immutable`. A release moves the chart's `agentImage.tag`, the
+/// image of the `stage-secret-files` init container in a `Command` pod, so a controller upgraded
+/// while a run is active renders a different template for the same generation. The Job that is
+/// running must not be applied again with it, or every reconcile of that run fails until it ends,
+/// and the NetworkPolicy behind the Job is not applied meanwhile.
+#[tokio::test]
+async fn adv_an_active_job_is_not_applied_again_with_a_changed_pod_template() {
+    let (client, fake) = fake();
+    let before = Arc::new(Context::new(client, adv_config("0.40.0")).expect("the context"));
+    reconciled(adv_command_with_files(1), &before).await;
+    let seen = fake.take();
+    assert!(
+        applies(&seen).contains(&JOB),
+        "the Job is created: {seen:?}"
+    );
+    let created = fake.objects()[JOB].clone();
+    let old_init = created["spec"]["template"]["spec"]["initContainers"][0]["image"].clone();
+    assert_eq!(old_init, "registry.example/loom-agent:0.40.0");
+
+    let (upgraded_client, upgraded) = self::fake();
+    for (path, object) in fake.objects() {
+        upgraded.put(&path, object);
+    }
+    let after = Arc::new(Context::new(upgraded_client, adv_config("0.41.0")).expect("the context"));
+    reconciled(adv_command_with_files(1), &after).await;
+    let seen = upgraded.take();
+    let reapplied: Vec<&Seen> = seen
+        .iter()
+        .filter(|seen| seen.method == Method::PATCH && seen.path == JOB)
+        .collect();
+    let changed: Vec<Value> = reapplied
+        .iter()
+        .map(|seen| seen.body["spec"]["template"]["spec"]["initContainers"][0]["image"].clone())
+        .filter(|image| *image != old_init)
+        .collect();
+    assert!(
+        changed.is_empty(),
+        "an active Job of the current generation is applied again with another pod template \
+         (init image {old_init} -> {changed:?}); the API server refuses that as immutable"
+    );
+    assert!(applies(&seen).contains(&CHILDREN[3]), "{seen:?}");
+}
+
+/// CHANGELOG (Breaking): "an existing Command Deployment is deleted as a child this generation does
+/// not render". The Deployment an earlier release made for a `Command` resource is found after the
+/// upgrade's restart by its label and owner and deleted; the Job is created.
+#[tokio::test]
+async fn adv_a_command_deployment_of_an_earlier_release_is_deleted() {
+    let (client, fake) = fake();
+    let mut earlier = object(NAME, CHILDREN[2], Some(("LoomAgent", NAME, UID)));
+    earlier["metadata"]["labels"] = json!({"app.kubernetes.io/instance": NAME});
+    earlier["kind"] = json!("Deployment");
+    earlier["apiVersion"] = json!("apps/v1");
+    fake.put(CHILDREN[2], earlier);
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    assert_eq!(paths(&seen, &Method::DELETE), [CHILDREN[2]]);
+    assert!(!fake.holds(CHILDREN[2]), "the earlier Deployment is gone");
+    assert!(fake.holds(JOB));
+    assert_eq!(published(&seen)["state"], "Running");
+}
+
+/// After a restart the controller holds no name it applied, so a Job a `Command` generation left
+/// is found only by listing `jobs`: a new generation that is `AgentServe` deletes it.
+#[tokio::test]
+async fn adv_after_a_restart_an_agent_serve_generation_deletes_the_job_it_finds_by_label() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.take();
+
+    let (fresh_client, fresh) = self::fake();
+    for (path, object) in fake.objects() {
+        fresh.put(&path, object);
+    }
+    let restarted = context(fresh_client);
+    reconciled(agent(2, &example(), DEFAULT_ROUTES), &restarted).await;
+    let seen = fresh.take();
+    assert!(applies(&seen).contains(&CHILDREN[2]), "{seen:?}");
+    assert_eq!(paths(&seen, &Method::DELETE), [JOB]);
+    assert!(!fresh.holds(JOB));
+}
+
+/// A Job's run ends by its condition or by its pod count, each alone: the controller reads
+/// either (AGENTS.md § Operator: "condition `Complete` or `Failed` true, or `succeeded` or
+/// `failed` above 0"), and a condition that is not True ends nothing.
+#[tokio::test]
+async fn adv_a_run_ends_by_its_count_or_its_condition_alone() {
+    for (run, state) in [
+        (json!({"succeeded": 1}), "Completed"),
+        (
+            json!({"conditions": [{"type": "Complete", "status": "True"}]}),
+            "Completed",
+        ),
+        (json!({"failed": 1}), "Failed"),
+        (
+            json!({"conditions": [{"type": "Failed", "status": "True"}]}),
+            "Failed",
+        ),
+        (
+            json!({"active": 1, "conditions": [
+                {"type": "Complete", "status": "False"},
+                {"type": "Failed", "status": "Unknown"},
+            ]}),
+            "Running",
+        ),
+    ] {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        fake.take();
+        fake.set_run(JOB, Some(run.clone()));
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let seen = fake.take();
+        assert_eq!(published(&seen)["state"], state, "{run}");
+        assert_eq!(
+            applies(&seen).is_empty(),
+            state != "Running",
+            "{run}: a finished Job is not applied, an active one is: {seen:?}"
+        );
+    }
+}
+
+/// AGENTS.md § Operator: "After a controller restart a finished Job still there is observed, not
+/// run again". The record is empty after the restart, so the resource passes Pending and Running
+/// again; the finished Job of its generation moves it to Completed without an apply.
+#[tokio::test]
+async fn adv_after_a_restart_a_finished_job_is_observed_and_not_run_again() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.set_run(JOB, Some(succeeded()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.take();
+
+    let (fresh_client, fresh) = self::fake();
+    for (path, object) in fake.objects() {
+        fresh.put(&path, object);
+    }
+    let restarted = context(fresh_client);
+    reconciled(command_agent(1, "run"), &restarted).await;
+    let seen = fresh.take();
+    assert!(applies(&seen).is_empty(), "{seen:?}");
+    assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
+    let status = published(&seen);
+    assert_eq!(status["state"], "Completed");
+    assert_eq!(status["observedGeneration"], 1);
 }

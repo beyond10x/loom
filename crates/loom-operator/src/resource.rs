@@ -119,7 +119,7 @@ pub struct ImageRef {
 pub struct LoomAgentStatus {
     /// The generation the controller last applied.
     pub observed_generation: i64,
-    /// The lifecycle state: `Pending`, `Running`, `Refused` or `Degraded`.
+    /// The lifecycle state: `Pending`, `Running`, `Refused`, `Degraded`, `Completed` or `Failed`.
     pub state: String,
     /// The spec check's result for `observedGeneration`, once it ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]

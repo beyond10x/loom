@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 8b29b45d6bbeb27dcbf0d6fc9d820dcd9d106f4aff9a7ce7da17f8d25ed952b3
-  contract digest 61c2bd8b4c501880768d6712fec64b1f98b735bbf3365d469b00e599fb72a66a
+  model digest d9155034aef9f4b4212f9b6a3ffc88316cd8ab2a572b6ef5cecf23eba5d95f3f
+  contract digest af385912b2000394d6b4bb57552f401a93a9cf2bea3600aa333fdba397fdf1aa
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-251 capabilities: **249 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+257 capabilities: **255 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -135,6 +135,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.LoomAgent.State` |
 | domain type | `loom.resource.LoomAgentSpec` |
 | domain type | `loom.resource.ResourceName` |
+| domain type | `loom.resource.RunPhase` |
 | domain type | `loom.resource.SecretFiles` |
 | domain type | `loom.resource.SecretRef` |
 | domain type | `loom.resource.Workspace` |
@@ -204,6 +205,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.resource.DeleteLoomAgent` |
 | command contract | `loom.resource.ObserveDeployment` |
 | command behaviour | `loom.resource.ObserveDeployment` |
+| command contract | `loom.resource.ObserveRun` |
+| command behaviour | `loom.resource.ObserveRun` |
 | command contract | `loom.resource.RecordCheck` |
 | command behaviour | `loom.resource.RecordCheck` |
 | command contract | `loom.run.OverruleSelection` |
@@ -220,11 +223,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.session.ProposeSessionChange` |
 | command behaviour | `loom.session.ProposeSessionChange` |
 | event type | `loom.resource.LoomAgentApplied` |
+| event type | `loom.resource.LoomAgentCompleted` |
 | event type | `loom.resource.LoomAgentDegraded` |
 | event type | `loom.resource.LoomAgentDeleted` |
+| event type | `loom.resource.LoomAgentFailed` |
 | event type | `loom.resource.LoomAgentObserved` |
 | event type | `loom.resource.LoomAgentRecovered` |
 | event type | `loom.resource.LoomAgentRefused` |
+| event type | `loom.resource.LoomAgentRunObserved` |
 | event type | `loom.resource.LoomAgentRunning` |
 | event type | `loom.run.ActionSelected` |
 | event type | `loom.run.ArgumentsRequested` |

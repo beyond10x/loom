@@ -23,8 +23,8 @@
 //! through it, and the view `AgentSessions` reads the sessions it recorded (the `session` module
 //! says how).
 //!
-//! The `loom.resource` domain's `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment` and
-//! `DeleteLoomAgent`, and its view `LoomAgents`, are answered by `b10x-loom-resource`'s
+//! The `loom.resource` domain's `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`, `ObserveRun`
+//! and `DeleteLoomAgent`, and its view `LoomAgents`, are answered by `b10x-loom-resource`'s
 //! `LoomAgentRecord`, which runs the generated behaviour of `loom.resource` over itself (the
 //! `resource` module).
 //!
@@ -223,6 +223,7 @@ impl ConformanceTarget for LoomTarget {
             resource::OBSERVE_DEPLOYMENT => {
                 resource::observe_deployment(&mut live, input, correlation)
             }
+            resource::OBSERVE_RUN => resource::observe_run(&mut live, input, correlation),
             resource::DELETE_LOOM_AGENT => {
                 resource::delete_loom_agent(&mut live, input, correlation)
             }

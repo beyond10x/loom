@@ -1,6 +1,7 @@
 //! The children of an admitted `LoomAgent`, as design § 4 draws its pod: a ServiceAccount, a
-//! ConfigMap, a Deployment, a NetworkPolicy and, with `expose.a2a`, a Service. Rendering is
-//! deterministic: the same resource and configuration give the same bytes.
+//! ConfigMap, a Deployment (a Job for the `Command` variant), a NetworkPolicy and, with
+//! `expose.a2a`, a Service. Rendering is deterministic: the same resource and configuration give
+//! the same bytes.
 //!
 //! Every child carries the labels `app.kubernetes.io/name: loom-agent`,
 //! `app.kubernetes.io/instance: <resource>` and `app.kubernetes.io/managed-by:
@@ -19,7 +20,10 @@
 //!   read-only root, no privilege escalation, no capability, the runtime's default seccomp
 //!   profile. The pod template names the resource's generation, so a new spec replaces the pod.
 //!
-//!   The `Command` variant (`spec.command` present, design § 9a) differs only in its Deployment:
+//!   The `Command` variant (`spec.command` present, design § 9a) runs its pod once, as the Job
+//!   `<resource>` (`backoffLimit: 0`, pod `restartPolicy: Never`, no `ttlSecondsAfterFinished`,
+//!   story command-variant-runs-once) in place of the Deployment, so a run that ends is not
+//!   started again. Its pod template differs from the serve variant's only in that and in this:
 //!   no `check` init container, since the image need hold no `b10x-loom`; the container runs
 //!   `spec.image` (else the default) with `command` = `spec.command.entrypoint` and `args` =
 //!   `spec.command.args`, each left to the image when absent; the ConfigMap is read-only at
@@ -45,6 +49,7 @@ use std::fmt;
 
 use b10x_loom_resource::model::AgentVariant;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, DeploymentStrategy};
+use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::api::core::v1::{
     Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort, EmptyDirVolumeSource,
     EnvFromSource, EnvVar, HTTPGetAction, PersistentVolumeClaimVolumeSource, PodSecurityContext,
@@ -102,6 +107,27 @@ pub const GENERATION_ANNOTATION: &str = "loom.beyond10x.dev/generation";
 /// The label that names the namespace a peer stands in, which Kubernetes sets on every namespace.
 const NAMESPACE_LABEL: &str = "kubernetes.io/metadata.name";
 
+/// What runs the pod: a Deployment for `AgentServe`, a Job that runs once for `Command`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Workload {
+    /// The `AgentServe` variant's Deployment, which keeps its pod running.
+    Deployment(Deployment),
+    /// The `Command` variant's Job, which runs its pod to completion once.
+    Job(Job),
+}
+
+impl Workload {
+    /// The workload's name, the resource's.
+    #[must_use]
+    pub fn name(&self) -> String {
+        match self {
+            Self::Deployment(deployment) => deployment.metadata.name.clone(),
+            Self::Job(job) => job.metadata.name.clone(),
+        }
+        .unwrap_or_default()
+    }
+}
+
 /// The children of one resource, in the order they are applied.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Children {
@@ -109,8 +135,8 @@ pub struct Children {
     pub service_account: ServiceAccount,
     /// `<resource>-spec`.
     pub config_map: ConfigMap,
-    /// The agent's Deployment.
-    pub deployment: Deployment,
+    /// The agent's Deployment or Job.
+    pub workload: Workload,
     /// The pod's NetworkPolicy.
     pub network_policy: NetworkPolicy,
     /// The a2a Service, only with `expose.a2a`.
@@ -408,7 +434,9 @@ impl Renderer<'_> {
         }
     }
 
-    fn deployment(&self) -> Deployment {
+    /// The pod either variant runs: the Deployment's template for `AgentServe`, the Job's for
+    /// `Command`, which alone sets `restartPolicy: Never`.
+    fn pod_template(&self) -> PodTemplateSpec {
         let a2a = self
             .admitted
             .spec
@@ -496,6 +524,66 @@ impl Renderer<'_> {
         let annotations = self.agent.metadata.generation.map(|generation| {
             BTreeMap::from([(GENERATION_ANNOTATION.to_owned(), generation.to_string())])
         });
+        PodTemplateSpec {
+            metadata: Some(ObjectMeta {
+                labels: Some(labels(self.name)),
+                annotations,
+                ..ObjectMeta::default()
+            }),
+            spec: Some(PodSpec {
+                automount_service_account_token: Some(false),
+                service_account_name: Some(service_account_name(
+                    self.name,
+                    Some(&self.admitted.spec),
+                )),
+                security_context: Some(PodSecurityContext {
+                    run_as_non_root: Some(true),
+                    run_as_user: Some(USER),
+                    seccomp_profile: Some(SeccompProfile {
+                        type_: "RuntimeDefault".to_owned(),
+                        localhost_profile: None,
+                    }),
+                    fs_group: self.needs_fs_group().then_some(USER),
+                    ..PodSecurityContext::default()
+                }),
+                init_containers: {
+                    let init: Vec<Container> = self
+                        .stage_files()
+                        .into_iter()
+                        .chain((self.admitted.variant == AgentVariant::AgentServe).then_some(check))
+                        .collect();
+                    (!init.is_empty()).then_some(init)
+                },
+                containers: vec![serve],
+                restart_policy: (self.admitted.variant == AgentVariant::Command)
+                    .then(|| "Never".to_owned()),
+                volumes: Some(
+                    [
+                        Volume {
+                            name: "spec".to_owned(),
+                            config_map: Some(ConfigMapVolumeSource {
+                                name: config_map_name(self.name),
+                                ..ConfigMapVolumeSource::default()
+                            }),
+                            ..Volume::default()
+                        },
+                        Volume {
+                            name: "state".to_owned(),
+                            empty_dir: Some(EmptyDirVolumeSource::default()),
+                            ..Volume::default()
+                        },
+                    ]
+                    .into_iter()
+                    .chain(extra_volumes)
+                    .collect(),
+                ),
+                ..PodSpec::default()
+            }),
+        }
+    }
+
+    /// The `AgentServe` variant's Deployment: one replica, replaced whole on a new generation.
+    fn deployment(&self) -> Deployment {
         Deployment {
             metadata: self.meta(self.name.to_owned()),
             spec: Some(DeploymentSpec {
@@ -508,66 +596,32 @@ impl Renderer<'_> {
                     type_: Some("Recreate".to_owned()),
                     rolling_update: None,
                 }),
-                template: PodTemplateSpec {
-                    metadata: Some(ObjectMeta {
-                        labels: Some(labels(self.name)),
-                        annotations,
-                        ..ObjectMeta::default()
-                    }),
-                    spec: Some(PodSpec {
-                        automount_service_account_token: Some(false),
-                        service_account_name: Some(service_account_name(
-                            self.name,
-                            Some(&self.admitted.spec),
-                        )),
-                        security_context: Some(PodSecurityContext {
-                            run_as_non_root: Some(true),
-                            run_as_user: Some(USER),
-                            seccomp_profile: Some(SeccompProfile {
-                                type_: "RuntimeDefault".to_owned(),
-                                localhost_profile: None,
-                            }),
-                            fs_group: self.needs_fs_group().then_some(USER),
-                            ..PodSecurityContext::default()
-                        }),
-                        init_containers: {
-                            let init: Vec<Container> = self
-                                .stage_files()
-                                .into_iter()
-                                .chain(
-                                    (self.admitted.variant == AgentVariant::AgentServe)
-                                        .then_some(check),
-                                )
-                                .collect();
-                            (!init.is_empty()).then_some(init)
-                        },
-                        containers: vec![serve],
-                        volumes: Some(
-                            [
-                                Volume {
-                                    name: "spec".to_owned(),
-                                    config_map: Some(ConfigMapVolumeSource {
-                                        name: config_map_name(self.name),
-                                        ..ConfigMapVolumeSource::default()
-                                    }),
-                                    ..Volume::default()
-                                },
-                                Volume {
-                                    name: "state".to_owned(),
-                                    empty_dir: Some(EmptyDirVolumeSource::default()),
-                                    ..Volume::default()
-                                },
-                            ]
-                            .into_iter()
-                            .chain(extra_volumes)
-                            .collect(),
-                        ),
-                        ..PodSpec::default()
-                    }),
-                },
+                template: self.pod_template(),
                 ..DeploymentSpec::default()
             }),
             ..Deployment::default()
+        }
+    }
+
+    /// The `Command` variant's Job: its pod runs once, `backoffLimit: 0` retries no failed pod,
+    /// and no `ttlSecondsAfterFinished` removes it, so the run's end stays readable. Kubernetes
+    /// generates its selector.
+    fn job(&self) -> Job {
+        Job {
+            metadata: self.meta(self.name.to_owned()),
+            spec: Some(JobSpec {
+                backoff_limit: Some(0),
+                template: self.pod_template(),
+                ..JobSpec::default()
+            }),
+            ..Job::default()
+        }
+    }
+
+    fn workload(&self) -> Workload {
+        match self.admitted.variant {
+            AgentVariant::AgentServe => Workload::Deployment(self.deployment()),
+            AgentVariant::Command => Workload::Job(self.job()),
         }
     }
 
@@ -683,7 +737,7 @@ pub fn children(
     Children {
         service_account: renderer.service_account(),
         config_map: renderer.config_map(),
-        deployment: renderer.deployment(),
+        workload: renderer.workload(),
         network_policy: renderer.network_policy(),
         service: renderer.service(),
     }
@@ -702,7 +756,10 @@ pub fn to_yaml(children: &Children) -> String {
     let mut out = String::new();
     document(&mut out, &children.service_account);
     document(&mut out, &children.config_map);
-    document(&mut out, &children.deployment);
+    match &children.workload {
+        Workload::Deployment(deployment) => document(&mut out, deployment),
+        Workload::Job(job) => document(&mut out, job),
+    }
     document(&mut out, &children.network_policy);
     if let Some(service) = &children.service {
         document(&mut out, service);
