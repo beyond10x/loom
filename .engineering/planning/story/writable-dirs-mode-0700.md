@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:writable-dirs-mode-0700
 kind: story
-status: draft
+status: active
 title: The writable emptyDirs of a LoomAgent pod are mode 0700 and owned by the pod user
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -18,7 +18,10 @@ scope:
   path: crates/loom-operator/src/render.rs
 - confidence: cited
   path: crates/loom-operator/tests
-revision: 4
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-26T19:11:31Z", actor: "human:timo", revision: 5}
+- {from: "proposed", to: "active", at: "2026-10-26T19:11:31Z", actor: "human:timo", revision: 6}
 ---
 ## Outcome
 
