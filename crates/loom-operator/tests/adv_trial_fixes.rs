@@ -55,8 +55,8 @@ fn pod(rendered: &str) -> Value {
     let deployment: Value = rendered
         .split("\n---\n")
         .map(|document| serde_yaml_ng::from_str::<Value>(document).expect("YAML"))
-        .find(|document| document["kind"].as_str() == Some("Deployment"))
-        .expect("a Deployment");
+        .find(|document| matches!(document["kind"].as_str(), Some("Deployment" | "Job")))
+        .expect("a Deployment or, for the Command variant, a Job");
     deployment["spec"]["template"]["spec"].clone()
 }
 

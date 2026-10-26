@@ -154,6 +154,7 @@ fn the_role_grants_the_designs_verbs_and_nothing_on_secrets() {
             "deployments".to_owned(),
             children.clone(),
         ),
+        ("batch".to_owned(), "jobs".to_owned(), children.clone()),
         (
             "loom.beyond10x.dev".to_owned(),
             "loomagents".to_owned(),

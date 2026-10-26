@@ -2,16 +2,23 @@
 //! controller computes for it.
 //!
 //! No `loom.resource` command sets `conditions` (ESS 0.69.0 admits no list under `sets:`), so the
-//! controller projects them from the row's `state`, `check` and `deployment`:
+//! controller projects them from the row's `state`, `check`, `deployment` and `variant`:
 //!
 //! | state | `Checked` | `Available` |
 //! |---|---|---|
 //! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` |
-//! | Running | True, `SpecServeable` (`SpecAdmitted` for the `Command` variant) | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read |
-//! | Degraded | True, `SpecServeable` (`SpecAdmitted` for the `Command` variant) | False, `DeploymentUnavailable` |
+//! | Running, `AgentServe` | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read |
+//! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished` |
+//! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` |
+//! | Completed | True, `SpecAdmitted` | False, `RunSucceeded` |
+//! | Failed | True, `SpecAdmitted` | False, `RunFailed` |
 //! | Refused | False, `SpecRefused` | False, `SpecRefused` |
 //!
-//! A row that carries conditions is published with its own.
+//! A `Command` resource's pod is a Job that runs once, so its `Available` reads the Job's run:
+//! not finished while Running, False once the run ended, since nothing runs any more and nothing
+//! starts again before a new generation. Only an `AgentServe` resource reaches Degraded, since
+//! only its Deployment is observed for availability. A row that carries conditions is published
+//! with its own.
 
 use b10x_loom_resource::model::{
     AgentVariant, CheckResult, Condition, ConditionStatus, ConditionType, DeploymentAvailability,
@@ -28,6 +35,8 @@ pub fn state(state: LoomAgentState) -> &'static str {
         LoomAgentState::Running => "Running",
         LoomAgentState::Refused => "Refused",
         LoomAgentState::Degraded => "Degraded",
+        LoomAgentState::Completed => "Completed",
+        LoomAgentState::Failed => "Failed",
     }
 }
 
@@ -115,6 +124,43 @@ pub fn conditions(
                 ConditionStatus::False,
                 "SpecRefused",
                 "a refused spec has no Deployment",
+            ),
+        ],
+        LoomAgentState::Completed | LoomAgentState::Failed => {
+            let (reason, ended) = if state == LoomAgentState::Completed {
+                ("RunSucceeded", "succeeded")
+            } else {
+                ("RunFailed", "failed")
+            };
+            vec![
+                condition(
+                    ConditionType::Checked,
+                    ConditionStatus::True,
+                    "SpecAdmitted",
+                    message,
+                ),
+                condition(
+                    ConditionType::Available,
+                    ConditionStatus::False,
+                    reason,
+                    format!(
+                        "the Job's run {ended}; it is not started again before a new generation"
+                    ),
+                ),
+            ]
+        }
+        LoomAgentState::Running if variant == Some(AgentVariant::Command) => vec![
+            condition(
+                ConditionType::Checked,
+                ConditionStatus::True,
+                "SpecAdmitted",
+                message,
+            ),
+            condition(
+                ConditionType::Available,
+                ConditionStatus::Unknown,
+                "RunNotFinished",
+                "the Job's run has not finished",
             ),
         ],
         LoomAgentState::Running | LoomAgentState::Degraded => {
@@ -339,6 +385,52 @@ mod tests {
             ]
         );
         assert_eq!(refused[0].message, check.message);
+    }
+
+    #[test]
+    fn a_command_resource_reads_its_run_not_a_deployment() {
+        let check = checked(0, "admitted");
+        let command = Some(AgentVariant::Command);
+        assert_eq!(
+            triples(&conditions(
+                LoomAgentState::Running,
+                Some(&check),
+                None,
+                command
+            )),
+            [
+                (
+                    ConditionType::Checked,
+                    ConditionStatus::True,
+                    "SpecAdmitted"
+                ),
+                (
+                    ConditionType::Available,
+                    ConditionStatus::Unknown,
+                    "RunNotFinished"
+                ),
+            ]
+        );
+        for (state, reason) in [
+            (LoomAgentState::Completed, "RunSucceeded"),
+            (LoomAgentState::Failed, "RunFailed"),
+        ] {
+            let ended = conditions(state, Some(&check), None, command);
+            assert_eq!(
+                triples(&ended),
+                [
+                    (
+                        ConditionType::Checked,
+                        ConditionStatus::True,
+                        "SpecAdmitted"
+                    ),
+                    (ConditionType::Available, ConditionStatus::False, reason),
+                ]
+            );
+            assert_eq!(ended[0].message, "admitted");
+        }
+        assert_eq!(state(LoomAgentState::Completed), "Completed");
+        assert_eq!(state(LoomAgentState::Failed), "Failed");
     }
 
     #[test]

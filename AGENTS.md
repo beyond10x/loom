@@ -800,13 +800,21 @@ verbatim as `agent` (no second agent schema), the llm `routes` document untyped,
 connectors-local TOML, a Secret reference for the environment, an optional Secret for files, an
 image override, an optional command and an optional workspace volume. The entity `LoomAgent` is the
 controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
-the state Pending, Running, Refused or Degraded. `ApplyLoomAgent`, `RecordCheck`,
-`ObserveDeployment` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
+the state Pending, Running, Refused, Degraded, Completed or Failed. `ApplyLoomAgent`, `RecordCheck`,
+`ObserveDeployment`, `ObserveRun` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
 
 A resource is one of two variants (`AgentVariant`, `story:loom-agent-command-variant`, design § 9a):
 `AgentServe` when `spec.command` is absent, the pod running `b10x-loom agent serve`; `Command` when
 it is present, the pod running the image's own program (`spec.command.entrypoint` and `args`, each
-left to the image when absent) with `spec.agent` mounted at `/config/agent.yaml`. `spec.workspace`
+left to the image when absent) with `spec.agent` mounted at `/config/agent.yaml`, once
+(`story:command-variant-runs-once`). `ObserveRun` (input `name`, `phase` of `RunPhase`: Active,
+Succeeded, Failed) reads that run: `still-active` keeps a Running resource (`observe-running`,
+`LoomAgentRunObserved`), `completed` and `failed` move it to Completed or Failed
+(`LoomAgentCompleted`, `LoomAgentFailed`), `finished` preserves a Completed or Failed one, `no-run`
+is a `StateConflict` from any other state, and `unknown` is `NotFound`. A Completed or Failed
+resource leaves only by `respecified` at a new generation. The command takes no generation: on
+ess/25 a subject-fact guard (a stale generation) cannot combine with the subject-state guards the
+outcomes need, so the controller compares the Job's generation itself (§ Operator). `spec.workspace`
 (`mountPath`, optional `claimName`) is a read-write volume on either variant. `spec.secretRef`
 (`name`) gives a Secret as the environment; `spec.secretFiles` (`name`, `mountPath`) gives another
 as files the pod user owns (`story:loom-agent-trial-fixes`), so a pod can hold a model key as an
@@ -926,9 +934,20 @@ children read again, then applied by server-side apply (field manager `b10x-loom
 forced); a child someone else controls by then fails the reconcile and is not taken over. Then
 `ObserveDeployment` with what the applied Deployment reports, once its `observedGeneration` caught
 up, and each child it controls that this generation does not render (an account an earlier
-generation named, a Service once `expose.a2a` is gone) is deleted. The status goes out by
-server-side apply on `/status`, only when it changed; conditions follow `src/status.rs` (a table per state in its module doc). Requeue after
-300 s, retry after 30 s; `.owns(Deployment)` wakes it on a Deployment change. Deletion is the
+generation named, a Service once `expose.a2a` is gone) is deleted. A `Command` resource's Job is
+read first: one whose pod template annotation `loom.beyond10x.dev/generation` is not the
+resource's generation is deleted (a Job's pod template cannot change) and created at the new one on
+the next reconcile; one that has finished (condition `Complete` or `Failed` true, or `succeeded` or
+`failed` above 0) is not applied again and its run is `ObserveRun`; else it is applied and the
+answer's run is `ObserveRun` (no status yet reads Active). A Completed or Failed resource has no
+child applied, read or deleted. Every delete propagates in the background, so a Job's pod goes with
+it. The run is read from the Job, never from a Pod. After a controller restart a finished Job still
+there is observed, not run again; a Job deleted while the controller was down runs once more. The
+status goes out by server-side apply on `/status`, only when it changed; conditions follow
+`src/status.rs` (a table per state in its module doc; a Command resource's `Available` reads
+`RunNotFinished`, `RunSucceeded` or `RunFailed`, and only an AgentServe resource is ever Degraded).
+Requeue after 300 s, retry after 30 s; `.owns(Deployment)` and `.owns(Job)` wake it on a change to
+either. Deletion is the
 garbage collector's (owner references with `controller` and `blockOwnerDeletion`); the controller
 forgets the record. Each value serialized to YAML goes through JSON text (`admission::yaml`):
 serde_json's `arbitrary_precision`, on in this workspace, breaks a `Value` number written to YAML
@@ -943,7 +962,9 @@ user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests eq
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
 default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
 with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service.
-`deploy.kubernetes.image_repository` is not read. A `Command` resource's Deployment has no `check`
+`deploy.kubernetes.image_repository` is not read. A `Command` resource has a `batch/v1` Job in the
+Deployment's place, named like it: `backoffLimit` 0, no `ttlSecondsAfterFinished`, the same pod
+template with `restartPolicy: Never`, so its program runs once. Its pod has no `check`
 init container, runs `spec.command`, mounts the ConfigMap at `/config` (the contract with the image:
 `spec.agent` is `/config/agent.yaml`, the document the resource holds, keys in the order the API
 server keeps them, as `/etc/agent/agent.yaml` is for `agent serve`), sets `HOME=/var/lib/agent`
@@ -966,7 +987,8 @@ Deployment (`command: [b10x-loom-operator]`, `args: [run, --config, /etc/loom-op
 its ServiceAccount, a namespaced Role and RoleBinding, and the ConfigMap holding `config.yaml` from
 the values. The Role grants `get`, `list`, `watch`, `update`, `patch` on `loomagents` and
 `loomagents/status`, `update` on `loomagents/finalizers` (which `blockOwnerDeletion` needs), and
-`create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the five child kinds; nothing on
+`create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the six child kinds (Job among
+them); nothing on
 Secrets, Pods or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
 and the values' `image.tag` and `agentImage.tag` are the workspace version, so a release bumps all
 four (`tests/chart.rs` fails otherwise). `task chart-check` compares the CRD copy, then runs

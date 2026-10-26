@@ -48,8 +48,8 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Watch the LoomAgent resources of the configured namespace and reconcile each into its
-    /// ServiceAccount, ConfigMap, Deployment, NetworkPolicy and Service, publishing its lifecycle
-    /// as its status.
+    /// ServiceAccount, ConfigMap, Deployment (a Job for a command), NetworkPolicy and Service,
+    /// publishing its lifecycle as its status.
     #[command(after_help = RUN_HELP)]
     Run(RunArgs),
     /// Print the children of one LoomAgent document as one multi-document YAML, after the checks

@@ -16,9 +16,9 @@ use b10x_loom_operator::reconcile::{Context, reconcile};
 use b10x_loom_operator::resource::LoomAgent;
 use b10x_loom_resource::ResourceEvent;
 use b10x_loom_resource::model::{
-    DeploymentAvailability, LoomAgentApplied, LoomAgentDegraded, LoomAgentDeleted,
-    LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunning, LoomAgentState,
-    ResourceName,
+    DeploymentAvailability, LoomAgentApplied, LoomAgentCompleted, LoomAgentDegraded,
+    LoomAgentDeleted, LoomAgentFailed, LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused,
+    LoomAgentRunObserved, LoomAgentRunning, LoomAgentState, ResourceName,
 };
 use http::{Method, Request, Response, StatusCode};
 use kube::Client;
@@ -52,10 +52,11 @@ const CHILDREN: [&str; 5] = [
 ];
 
 /// The collection of each child kind, in the order the controller lists them.
-const COLLECTIONS: [&str; 5] = [
+const COLLECTIONS: [&str; 6] = [
     "/api/v1/namespaces/agents/serviceaccounts",
     "/api/v1/namespaces/agents/configmaps",
     "/apis/apps/v1/namespaces/agents/deployments",
+    "/apis/batch/v1/namespaces/agents/jobs",
     "/apis/networking.k8s.io/v1/namespaces/agents/networkpolicies",
     "/api/v1/namespaces/agents/services",
 ];
@@ -112,13 +113,15 @@ fn decoded(text: &str) -> String {
     String::from_utf8(out).expect("UTF-8")
 }
 
-/// The fake API server's state: what it saw, the last object applied at each path, and the
-/// availability a Deployment it is applied answers with (`None`: no status yet).
+/// The fake API server's state: what it saw, the last object applied at each path, the
+/// availability a Deployment it is applied answers with (`None`: no status yet), and the status
+/// a Job it is applied answers with (`None`: none yet).
 #[derive(Debug, Default)]
 struct Server {
     seen: Vec<Seen>,
     objects: BTreeMap<String, Value>,
     available: Option<bool>,
+    run: Option<Value>,
 }
 
 impl Server {
@@ -182,6 +185,11 @@ impl Server {
                         "reason": "Fake",
                     }]});
                 }
+                if path.contains("/jobs/")
+                    && let Some(run) = &self.run
+                {
+                    object["status"] = run.clone();
+                }
                 self.objects.insert(path.to_owned(), object.clone());
                 (StatusCode::OK, object)
             }
@@ -219,6 +227,16 @@ struct Fake {
 impl Fake {
     fn set_available(&self, available: Option<bool>) {
         self.server.lock().expect("the fake").available = available;
+    }
+
+    /// The status a Job answers its apply with from now on, and the Job held at `path`, if any,
+    /// takes it too, as the Job controller would write it.
+    fn set_run(&self, path: &str, run: Option<Value>) {
+        let mut server = self.server.lock().expect("the fake");
+        if let (Some(job), Some(status)) = (server.objects.get_mut(path), &run) {
+            job["status"] = status.clone();
+        }
+        server.run = run;
     }
 
     /// Every request seen since the last call, emptied.
@@ -1086,12 +1104,12 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
     reconciled(agent(1, &spec, &rest), &ctx).await;
 
     let seen = fake.take();
-    assert_eq!(applies(&seen), CHILDREN);
-    let deployment = seen
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    let job = seen
         .iter()
-        .find(|seen| seen.method == Method::PATCH && seen.path == CHILDREN[2])
-        .expect("the Deployment is applied");
-    let pod = &deployment.body["spec"]["template"]["spec"];
+        .find(|seen| seen.method == Method::PATCH && seen.path == JOB)
+        .expect("the Job is applied");
+    let pod = &job.body["spec"]["template"]["spec"];
     assert!(pod.get("initContainers").is_none(), "{pod}");
     assert!(pod["containers"][0].get("command").is_none(), "{pod}");
     assert!(pod["containers"][0].get("args").is_none(), "{pod}");
@@ -1109,7 +1127,7 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
         conditions(&status),
         [
             triple("Checked", "True", "SpecAdmitted"),
-            triple("Available", "Unknown", "DeploymentNotObserved"),
+            triple("Available", "Unknown", "RunNotFinished"),
         ]
     );
 
@@ -1128,5 +1146,191 @@ async fn a_command_resource_is_admitted_running_with_its_variant_and_no_init_con
             .as_str()
             .is_some_and(|message| message.starts_with("refused: SecretLiteral at spec.agent.")),
         "{status}"
+    );
+}
+
+/// The Job of the resource `platform-operator`.
+const JOB: &str = "/apis/batch/v1/namespaces/agents/jobs/platform-operator";
+
+/// Every child a `Command` resource over the example renders, in the order they are applied.
+const COMMAND_CHILDREN: [&str; 5] = [CHILDREN[0], CHILDREN[1], JOB, CHILDREN[3], CHILDREN[4]];
+
+/// The example as a `Command` resource at `generation`, running `args`.
+fn command_agent(generation: i64, args: &str) -> LoomAgent {
+    let spec = example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
+    let rest = format!(
+        "{DEFAULT_ROUTES}  image: {{repository: registry.example/takt, tag: '0.12.0'}}\n  \
+         command: {{args: [{args}]}}\n"
+    );
+    agent(generation, &spec, &rest)
+}
+
+/// A Job's status once its one pod ended with exit code 0.
+fn succeeded() -> Value {
+    json!({"succeeded": 1, "conditions": [{"type": "Complete", "status": "True"}]})
+}
+
+/// A Job's status once its one pod ended otherwise; `backoffLimit: 0` retries none.
+fn failed() -> Value {
+    json!({"failed": 1, "conditions": [{"type": "Failed", "status": "True"}]})
+}
+
+/// `story:command-variant-runs-once`: once the Job of the current generation has ended, no
+/// reconcile applies, creates or deletes a child, and a Job someone deletes afterwards is not
+/// created again; the status reads Completed or Failed.
+#[tokio::test]
+async fn a_finished_job_is_not_restarted() {
+    for (run, state, reason) in [
+        (succeeded(), "Completed", "RunSucceeded"),
+        (failed(), "Failed", "RunFailed"),
+    ] {
+        let (client, fake) = fake();
+        let ctx = context(client);
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let seen = fake.take();
+        assert_eq!(applies(&seen), COMMAND_CHILDREN, "{state}");
+        let job = seen
+            .iter()
+            .find(|seen| seen.method == Method::PATCH && seen.path == JOB)
+            .expect("the Job is applied");
+        assert_eq!(job.body["kind"], "Job");
+        assert_eq!(job.body["spec"]["backoffLimit"], 0);
+        assert_eq!(
+            job.body["spec"]["template"]["spec"]["restartPolicy"],
+            "Never"
+        );
+        let status = published(&seen);
+        assert_eq!(status["state"], "Running");
+        assert_eq!(
+            conditions(&status),
+            [
+                triple("Checked", "True", "SpecAdmitted"),
+                triple("Available", "Unknown", "RunNotFinished"),
+            ]
+        );
+
+        fake.set_run(JOB, Some(run));
+        reconciled(command_agent(1, "run"), &ctx).await;
+        let seen = fake.take();
+        assert!(applies(&seen).is_empty(), "{state}: no apply: {seen:?}");
+        assert!(
+            seen.iter().all(|seen| seen.method != Method::DELETE),
+            "{state}: nothing is deleted: {seen:?}"
+        );
+        let status = published(&seen);
+        assert_eq!(status["state"], state);
+        assert_eq!(status["observedGeneration"], 1);
+        assert_eq!(
+            conditions(&status),
+            [
+                triple("Checked", "True", "SpecAdmitted"),
+                triple("Available", "False", reason),
+            ]
+        );
+
+        for _ in 0..2 {
+            let action = reconciled(command_agent(1, "run"), &ctx).await;
+            assert_eq!(action, Action::requeue(Duration::from_secs(300)));
+            let seen = fake.take();
+            assert!(
+                seen.iter()
+                    .all(|seen| seen.path == STATUS && seen.method == Method::PATCH),
+                "{state}: a finished run reads, applies and deletes no child: {seen:?}"
+            );
+            assert_eq!(published(&seen)["state"], state);
+            fake.remove(JOB);
+        }
+        assert!(
+            !fake.holds(JOB),
+            "{state}: the Job deleted by someone is not created again"
+        );
+
+        let events = ctx.events();
+        assert_eq!(events.len(), 4, "{state}: {events:?}");
+        assert_eq!(
+            events[2],
+            ResourceEvent::RunObserved(LoomAgentRunObserved {
+                name: name(),
+                generation: 1
+            })
+        );
+        assert_eq!(
+            events[3],
+            if state == "Completed" {
+                ResourceEvent::Completed(LoomAgentCompleted {
+                    name: name(),
+                    generation: 1,
+                })
+            } else {
+                ResourceEvent::Failed(LoomAgentFailed {
+                    name: name(),
+                    generation: 1,
+                })
+            }
+        );
+    }
+}
+
+/// `story:command-variant-runs-once`: a Job's pod template cannot change, so a new generation
+/// deletes the Job of the earlier one (its pod with it, propagation `Background`) and creates its
+/// own on the next reconcile.
+#[tokio::test]
+async fn a_new_generation_replaces_the_job() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.set_run(JOB, Some(succeeded()));
+    reconciled(command_agent(1, "run"), &ctx).await;
+    assert_eq!(published(&fake.take())["state"], "Completed");
+    fake.set_run(JOB, None);
+
+    let action = reconciled(command_agent(2, "run, --again"), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(30)));
+    let seen = fake.take();
+    assert_eq!(paths(&seen, &Method::DELETE), [JOB]);
+    let delete = seen
+        .iter()
+        .find(|seen| seen.method == Method::DELETE)
+        .expect("a delete");
+    assert_eq!(delete.body["propagationPolicy"], "Background");
+    assert_eq!(delete.body["preconditions"]["uid"], format!("uid-of-{JOB}"));
+    assert!(
+        !applies(&seen).contains(&JOB),
+        "the old Job is gone before the new one is created: {seen:?}"
+    );
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(status["observedGeneration"], 2);
+
+    reconciled(command_agent(2, "run, --again"), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
+    let job = &fake.objects()[JOB];
+    assert_eq!(
+        job["spec"]["template"]["metadata"]["annotations"]["loom.beyond10x.dev/generation"],
+        "2"
+    );
+    assert_eq!(
+        job["spec"]["template"]["spec"]["containers"][0]["args"],
+        json!(["run", "--again"])
+    );
+    assert_eq!(published(&seen)["state"], "Running");
+    assert_eq!(
+        ctx.events()[ctx.events().len() - 3..],
+        [
+            ResourceEvent::Applied(LoomAgentApplied {
+                name: name(),
+                generation: 2
+            }),
+            ResourceEvent::Running(LoomAgentRunning {
+                name: name(),
+                generation: 2
+            }),
+            ResourceEvent::RunObserved(LoomAgentRunObserved {
+                name: name(),
+                generation: 2
+            }),
+        ]
     );
 }

@@ -7,9 +7,10 @@
 //! ServiceAccount, a ConfigMap (`agent.yaml`, `routes.yaml`, `connectors.toml`), a Deployment
 //! running `b10x-loom agent serve` behind the init container `b10x-loom agent check`, a
 //! NetworkPolicy and, with `expose.a2a`, a Service, each owned by the resource. A resource with
-//! `spec.command` is the `Command` variant (design § 9a): its pod runs the image's own program,
-//! with no init container, the spec at `/config/agent.yaml`, and, on either variant, a workspace
-//! volume and the Secret as files when the resource asks for them. Before any child
+//! `spec.command` is the `Command` variant (design § 9a): its pod is a `batch/v1` Job, run once,
+//! running the image's own program with no init container and the spec at `/config/agent.yaml`;
+//! a finished Job is not started again before a new generation. On either variant the pod has a
+//! workspace volume and the Secret as files when the resource asks for them. Before any child
 //! is rendered the spec is checked in-process (`b10x_loom_agent::check_text`, the library behind
 //! `b10x-loom agent check`), `spec.routes` is walked for a credential and read by llm's strict
 //! routes parser, and `spec.connectorsConfig` is decoded as TOML and walked, word by word and

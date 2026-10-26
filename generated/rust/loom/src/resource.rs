@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest 8b29b45d6bbeb27dcbf0d6fc9d820dcd9d106f4aff9a7ce7da17f8d25ed952b3
-// contract digest 61c2bd8b4c501880768d6712fec64b1f98b735bbf3365d469b00e599fb72a66a
+// model digest d9155034aef9f4b4212f9b6a3ffc88316cd8ab2a572b6ef5cecf23eba5d95f3f
+// contract digest af385912b2000394d6b4bb57552f401a93a9cf2bea3600aa333fdba397fdf1aa
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
 //!
-//! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Pending again on a new generation, and gone on delete.
+//! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, Pending again on a new generation, and gone on delete.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -100,8 +100,12 @@ pub struct ImageRef {
 /// carried here — it is carried by `LoomAgent<S>`, where an undeclared move does not compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoomAgentState {
+    /// `Completed`.
+    Completed,
     /// `Degraded`.
     Degraded,
+    /// `Failed`.
+    Failed,
     /// `Pending`.
     Pending,
     /// `Refused`.
@@ -134,6 +138,17 @@ pub struct LoomAgentSpec {
 /// ResourceName — `loom.resource.ResourceName`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceName(pub String);
+
+/// RunPhase — `loom.resource.RunPhase`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunPhase {
+    /// `Active`.
+    Active,
+    /// `Succeeded`.
+    Succeeded,
+    /// `Failed`.
+    Failed,
+}
 
 /// SecretFiles — `loom.resource.SecretFiles`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,7 +204,9 @@ pub mod loom_agent_state {
     mod sealed {
         /// Implemented only by the marker types beside this module.
         pub trait Sealed {}
+        impl Sealed for super::Completed {}
         impl Sealed for super::Degraded {}
+        impl Sealed for super::Failed {}
         impl Sealed for super::Pending {}
         impl Sealed for super::Refused {}
         impl Sealed for super::Running {}
@@ -201,11 +218,25 @@ pub mod loom_agent_state {
         const STATE: super::LoomAgentState;
     }
 
+    /// `Completed`.
+    pub struct Completed;
+
+    impl Marker for Completed {
+        const STATE: super::LoomAgentState = super::LoomAgentState::Completed;
+    }
+
     /// `Degraded`.
     pub struct Degraded;
 
     impl Marker for Degraded {
         const STATE: super::LoomAgentState = super::LoomAgentState::Degraded;
+    }
+
+    /// `Failed`.
+    pub struct Failed;
+
+    impl Marker for Failed {
+        const STATE: super::LoomAgentState = super::LoomAgentState::Failed;
     }
 
     /// `Pending`. Where a new instance starts.
@@ -268,6 +299,16 @@ impl LoomAgent<loom_agent_state::Pending> {
     }
 }
 
+impl LoomAgent<loom_agent_state::Completed> {
+    /// `respecify` — `Completed` → `Pending`. Taken by the `respecified` outcome of `loom.resource.ApplyLoomAgent`.
+    pub fn respecify(self) -> LoomAgent<loom_agent_state::Pending> {
+        LoomAgent {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
 impl LoomAgent<loom_agent_state::Degraded> {
     /// `recover` — `Degraded` → `Running`. Taken by the `recovered` outcome of `loom.resource.ObserveDeployment`.
     pub fn recover(self) -> LoomAgent<loom_agent_state::Running> {
@@ -286,6 +327,16 @@ impl LoomAgent<loom_agent_state::Degraded> {
     }
 
     /// `respecify` — `Degraded` → `Pending`. Taken by the `respecified` outcome of `loom.resource.ApplyLoomAgent`.
+    pub fn respecify(self) -> LoomAgent<loom_agent_state::Pending> {
+        LoomAgent {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
+impl LoomAgent<loom_agent_state::Failed> {
+    /// `respecify` — `Failed` → `Pending`. Taken by the `respecified` outcome of `loom.resource.ApplyLoomAgent`.
     pub fn respecify(self) -> LoomAgent<loom_agent_state::Pending> {
         LoomAgent {
             data: self.data,
@@ -339,8 +390,24 @@ impl LoomAgent<loom_agent_state::Running> {
         }
     }
 
-    /// `observe-running` — `Running` → `Running`. Taken by the `still-running` outcome of `loom.resource.ObserveDeployment`.
+    /// `observe-running` — `Running` → `Running`. Taken by the `still-running` outcome of `loom.resource.ObserveDeployment`, the `still-active` outcome of `loom.resource.ObserveRun`.
     pub fn observe_running(self) -> LoomAgent<loom_agent_state::Running> {
+        LoomAgent {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
+    /// `complete` — `Running` → `Completed`. Taken by the `completed` outcome of `loom.resource.ObserveRun`.
+    pub fn complete(self) -> LoomAgent<loom_agent_state::Completed> {
+        LoomAgent {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
+    /// `fail` — `Running` → `Failed`. Taken by the `failed` outcome of `loom.resource.ObserveRun`.
+    pub fn fail(self) -> LoomAgent<loom_agent_state::Failed> {
         LoomAgent {
             data: self.data,
             state: core::marker::PhantomData,
@@ -370,8 +437,12 @@ pub struct LoomAgentSnapshot {
 
 /// An `LoomAgent` in whichever declared state it was found.
 pub enum AnyLoomAgent {
+    /// Resting in `Completed`.
+    Completed(LoomAgent<loom_agent_state::Completed>),
     /// Resting in `Degraded`.
     Degraded(LoomAgent<loom_agent_state::Degraded>),
+    /// Resting in `Failed`.
+    Failed(LoomAgent<loom_agent_state::Failed>),
     /// Resting in `Pending`.
     Pending(LoomAgent<loom_agent_state::Pending>),
     /// Resting in `Refused`.
@@ -387,7 +458,15 @@ impl LoomAgentSnapshot {
     /// `LoomAgentState` cannot spell one.
     pub fn refine(self) -> AnyLoomAgent {
         match self.state {
+            LoomAgentState::Completed => AnyLoomAgent::Completed(LoomAgent {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
             LoomAgentState::Degraded => AnyLoomAgent::Degraded(LoomAgent {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+            LoomAgentState::Failed => AnyLoomAgent::Failed(LoomAgent {
                 data: self.data,
                 state: core::marker::PhantomData,
             }),
@@ -411,7 +490,9 @@ impl AnyLoomAgent {
     /// The state, as the runtime value.
     pub fn state(&self) -> LoomAgentState {
         match self {
+            Self::Completed(_) => LoomAgentState::Completed,
             Self::Degraded(_) => LoomAgentState::Degraded,
+            Self::Failed(_) => LoomAgentState::Failed,
             Self::Pending(_) => LoomAgentState::Pending,
             Self::Refused(_) => LoomAgentState::Refused,
             Self::Running(_) => LoomAgentState::Running,
@@ -421,8 +502,16 @@ impl AnyLoomAgent {
     /// Back to the boundary shape.
     pub fn snapshot(self) -> LoomAgentSnapshot {
         match self {
+            Self::Completed(instance) => LoomAgentSnapshot {
+                state: LoomAgentState::Completed,
+                data: instance.into_data(),
+            },
             Self::Degraded(instance) => LoomAgentSnapshot {
                 state: LoomAgentState::Degraded,
+                data: instance.into_data(),
+            },
+            Self::Failed(instance) => LoomAgentSnapshot {
+                state: LoomAgentState::Failed,
                 data: instance.into_data(),
             },
             Self::Pending(instance) => LoomAgentSnapshot {
@@ -556,6 +645,53 @@ pub enum ObserveDeploymentOutcome {
     },
 }
 
+/// ObserveRun — the input of `loom.resource.ObserveRun`.
+///
+/// Everything it can result in is [`ObserveRunOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObserveRun {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `phase` — `loom.resource.RunPhase`.
+    pub phase: RunPhase,
+}
+
+/// Everything `loom.resource.ObserveRun` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObserveRunOutcome {
+    /// `unknown` — for an identity no record carries.
+    Unknown {
+        /// Why it was refused: `loom.resource.LoomAgentNotFound`.
+        error: LoomAgentNotFound,
+    },
+    /// `still-active` — when the existing subject is in Running and `phase == Active`.
+    StillActive {
+        /// The `loom.resource.LoomAgentRunObserved` this outcome publishes.
+        loom_agent_run_observed: LoomAgentRunObserved,
+    },
+    /// `completed` — when the existing subject is in Running and `phase == Succeeded`.
+    Completed {
+        /// The `loom.resource.LoomAgentCompleted` this outcome publishes.
+        loom_agent_completed: LoomAgentCompleted,
+    },
+    /// `failed` — when the existing subject is in Running and `phase == Failed`.
+    Failed {
+        /// The `loom.resource.LoomAgentFailed` this outcome publishes.
+        loom_agent_failed: LoomAgentFailed,
+    },
+    /// `finished` — when the existing subject is in Completed or Failed.
+    Finished,
+    /// `no-run` — otherwise.
+    NoRun {
+        /// Why it was refused: `loom.resource.LoomAgentStateConflict`.
+        error: LoomAgentStateConflict,
+    },
+}
+
 /// RecordCheck — the input of `loom.resource.RecordCheck`.
 ///
 /// Everything it can result in is [`RecordCheckOutcome`].
@@ -616,6 +752,15 @@ pub struct LoomAgentApplied {
     pub generation: i64,
 }
 
+/// LoomAgentCompleted — the event `loom.resource.LoomAgentCompleted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoomAgentCompleted {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `generation` — `Integer`.
+    pub generation: i64,
+}
+
 /// LoomAgentDegraded — the event `loom.resource.LoomAgentDegraded`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoomAgentDegraded {
@@ -628,6 +773,15 @@ pub struct LoomAgentDegraded {
 pub struct LoomAgentDeleted {
     /// `name` — `loom.resource.ResourceName`.
     pub name: ResourceName,
+}
+
+/// LoomAgentFailed — the event `loom.resource.LoomAgentFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoomAgentFailed {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `generation` — `Integer`.
+    pub generation: i64,
 }
 
 /// LoomAgentObserved — the event `loom.resource.LoomAgentObserved`.
@@ -655,6 +809,15 @@ pub struct LoomAgentRefused {
     pub generation: i64,
     /// `message` — `String`.
     pub message: String,
+}
+
+/// LoomAgentRunObserved — the event `loom.resource.LoomAgentRunObserved`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoomAgentRunObserved {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `generation` — `Integer`.
+    pub generation: i64,
 }
 
 /// LoomAgentRunning — the event `loom.resource.LoomAgentRunning`.
@@ -750,6 +913,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn observe_deployment(&mut self, input: super::ObserveDeployment) -> Result<super::ObserveDeploymentOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.resource.ObserveRun` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait ObserveRunBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.resource.ObserveRun`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn observe_run(&mut self, input: super::ObserveRun) -> Result<super::ObserveRunOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.resource.RecordCheck` — generated.

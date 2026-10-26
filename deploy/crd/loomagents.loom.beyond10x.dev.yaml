@@ -617,7 +617,9 @@ spec:
                 type: integer
               state:
                 enum:
+                - Completed
                 - Degraded
+                - Failed
                 - Pending
                 - Refused
                 - Running

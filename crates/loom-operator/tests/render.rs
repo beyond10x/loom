@@ -498,6 +498,102 @@ fn a_command_resource_renders_as_its_golden_file() {
     );
 }
 
+/// `story:command-variant-runs-once`: a `Command` resource runs its program once, as a Job that
+/// retries nothing and is never removed by a TTL, so its end stays readable; its pod template is
+/// the one the `Command` Deployment had, under the same NetworkPolicy. An `AgentServe` resource
+/// keeps its Deployment.
+#[test]
+fn a_command_resource_renders_a_job_not_a_deployment() {
+    let docs = documents(&render_document(&takt_resource(), &config()).expect("rendered"));
+    let kinds: Vec<&str> = docs.iter().map(|doc| text(doc, &["kind"])).collect();
+    assert_eq!(
+        kinds,
+        ["ServiceAccount", "ConfigMap", "Job", "NetworkPolicy"]
+    );
+    let job = &docs[2];
+    assert_eq!(text(job, &["apiVersion"]), "batch/v1");
+    assert_eq!(text(job, &["metadata", "name"]), "platform-operator");
+    assert_eq!(
+        text(job, &["metadata", "ownerReferences", "0", "kind"]),
+        "LoomAgent"
+    );
+    assert_eq!(at(job, &["spec", "backoffLimit"]).as_i64(), Some(0));
+    assert!(at(job, &["spec", "ttlSecondsAfterFinished"]).is_null());
+    for member in ["replicas", "strategy", "selector"] {
+        assert!(
+            at(job, &["spec", member]).is_null(),
+            "a Job has no {member}"
+        );
+    }
+    let template = at(job, &["spec", "template"]);
+    assert_eq!(
+        text(
+            template,
+            &["metadata", "annotations", "loom.beyond10x.dev/generation"]
+        ),
+        "1"
+    );
+    assert_eq!(
+        text(
+            template,
+            &["metadata", "labels", "app.kubernetes.io/instance"]
+        ),
+        "platform-operator"
+    );
+    let pod = at(template, &["spec"]);
+    assert_eq!(text(pod, &["restartPolicy"]), "Never");
+    assert_eq!(
+        text(pod, &["initContainers", "0", "name"]),
+        "stage-secret-files"
+    );
+    let container = at(pod, &["containers", "0"]);
+    assert_eq!(text(container, &["image"]), "registry.example/takt:0.12.0");
+    assert_eq!(
+        text(container, &["envFrom", "0", "secretRef", "name"]),
+        "platform-operator-secrets"
+    );
+    assert_eq!(
+        text(pod, &["volumes", "3", "persistentVolumeClaim", "claimName"]),
+        "takt-workspace"
+    );
+    assert_eq!(
+        text(pod, &["volumes", "4", "secret", "secretName"]),
+        "takt-forge"
+    );
+    assert_eq!(
+        text(pod, &["securityContext", "seccompProfile", "type"]),
+        "RuntimeDefault"
+    );
+    assert_eq!(
+        text(
+            &docs[3],
+            &[
+                "spec",
+                "podSelector",
+                "matchLabels",
+                "app.kubernetes.io/instance"
+            ]
+        ),
+        "platform-operator",
+        "the NetworkPolicy selects the Job's pod by the template's labels"
+    );
+
+    let serve = documents(&render_document(&default_resource(), &config()).expect("rendered"));
+    let kinds: Vec<&str> = serve.iter().map(|doc| text(doc, &["kind"])).collect();
+    assert_eq!(
+        kinds,
+        [
+            "ServiceAccount",
+            "ConfigMap",
+            "Deployment",
+            "NetworkPolicy",
+            "Service"
+        ],
+        "an AgentServe resource still renders a Deployment"
+    );
+    assert!(at(&serve[2], &["spec", "template", "spec", "restartPolicy"]).is_null());
+}
+
 #[test]
 fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
     let rendered = render_document(&takt_resource(), &config()).expect("rendered");

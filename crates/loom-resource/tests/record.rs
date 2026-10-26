@@ -6,10 +6,11 @@
 use b10x_loom_resource::model::{
     AgentVariant, ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, DeleteLoomAgent,
     DeleteLoomAgentOutcome, DeploymentAvailability, DeploymentStatus, LoomAgentApplied,
-    LoomAgentDegraded, LoomAgentDeleted, LoomAgentNotFound, LoomAgentObserved, LoomAgentRecovered,
-    LoomAgentRefused, LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents,
-    ObserveDeployment, ObserveDeploymentOutcome, RecordCheck, RecordCheckOutcome, ResourceName,
-    StaleGeneration,
+    LoomAgentCompleted, LoomAgentDegraded, LoomAgentDeleted, LoomAgentFailed, LoomAgentNotFound,
+    LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunObserved,
+    LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents, ObserveDeployment,
+    ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome,
+    ResourceName, RunPhase, StaleGeneration,
 };
 use b10x_loom_resource::{LoomAgentRecord, ResourceEvent};
 
@@ -448,5 +449,135 @@ fn two_resources_are_held_apart() {
                 state: LoomAgentState::Pending,
             },
         ]
+    );
+}
+
+fn observe_run(record: &mut LoomAgentRecord, phase: RunPhase) -> ObserveRunOutcome {
+    record
+        .observe_run(ObserveRun {
+            name: name(),
+            phase,
+        })
+        .expect("the generated behaviour answers every run observation")
+}
+
+fn state(record: &LoomAgentRecord) -> Option<LoomAgentState> {
+    row(record).map(|row| row.state)
+}
+
+/// A `Command` resource's Job runs once (story command-variant-runs-once): an active run keeps it
+/// Running, the run's end makes it Completed or Failed, a finished resource stays as it is
+/// whatever is read later, and only a new generation returns it to Pending.
+#[test]
+fn a_command_run_ends_once_and_stays_ended_until_a_new_generation() {
+    let mut record = LoomAgentRecord::default();
+    assert_eq!(
+        observe_run(&mut record, RunPhase::Active),
+        ObserveRunOutcome::Unknown {
+            error: LoomAgentNotFound { name: name() }
+        }
+    );
+    apply(&mut record, 1);
+    assert_eq!(
+        observe_run(&mut record, RunPhase::Succeeded),
+        ObserveRunOutcome::NoRun {
+            error: LoomAgentStateConflict { name: name() }
+        },
+        "a Pending resource has no Job"
+    );
+    check(&mut record, 1, 0, "admitted");
+    assert_eq!(
+        observe_run(&mut record, RunPhase::Active),
+        ObserveRunOutcome::StillActive {
+            loom_agent_run_observed: LoomAgentRunObserved {
+                name: name(),
+                generation: 1
+            }
+        }
+    );
+    assert_eq!(state(&record), Some(LoomAgentState::Running));
+    assert_eq!(
+        observe_run(&mut record, RunPhase::Succeeded),
+        ObserveRunOutcome::Completed {
+            loom_agent_completed: LoomAgentCompleted {
+                name: name(),
+                generation: 1
+            }
+        }
+    );
+    assert_eq!(state(&record), Some(LoomAgentState::Completed));
+    for phase in [RunPhase::Active, RunPhase::Failed, RunPhase::Succeeded] {
+        assert_eq!(observe_run(&mut record, phase), ObserveRunOutcome::Finished);
+        assert_eq!(state(&record), Some(LoomAgentState::Completed));
+    }
+    assert_eq!(
+        check(&mut record, 1, 0, "admitted"),
+        RecordCheckOutcome::OutOfOrder {
+            error: LoomAgentStateConflict { name: name() }
+        }
+    );
+    assert_eq!(
+        observe(&mut record, DeploymentAvailability::Available),
+        ObserveDeploymentOutcome::NoDeployment {
+            error: LoomAgentStateConflict { name: name() }
+        },
+        "a finished run has no Deployment"
+    );
+
+    apply(&mut record, 2);
+    assert_eq!(row(&record), held(2, None, LoomAgentState::Pending));
+    check(&mut record, 2, 0, "admitted");
+    assert_eq!(
+        observe_run(&mut record, RunPhase::Failed),
+        ObserveRunOutcome::Failed {
+            loom_agent_failed: LoomAgentFailed {
+                name: name(),
+                generation: 2
+            }
+        }
+    );
+    assert_eq!(state(&record), Some(LoomAgentState::Failed));
+    assert_eq!(
+        observe_run(&mut record, RunPhase::Succeeded),
+        ObserveRunOutcome::Finished
+    );
+    assert_eq!(state(&record), Some(LoomAgentState::Failed));
+    apply(&mut record, 3);
+    assert_eq!(state(&record), Some(LoomAgentState::Pending));
+
+    let applied = |generation| {
+        ResourceEvent::Applied(LoomAgentApplied {
+            name: name(),
+            generation,
+        })
+    };
+    let running = |generation| {
+        ResourceEvent::Running(LoomAgentRunning {
+            name: name(),
+            generation,
+        })
+    };
+    assert_eq!(
+        record.events(),
+        [
+            applied(1),
+            running(1),
+            ResourceEvent::RunObserved(LoomAgentRunObserved {
+                name: name(),
+                generation: 1
+            }),
+            ResourceEvent::Completed(LoomAgentCompleted {
+                name: name(),
+                generation: 1
+            }),
+            applied(2),
+            running(2),
+            ResourceEvent::Failed(LoomAgentFailed {
+                name: name(),
+                generation: 2
+            }),
+            applied(3),
+        ],
+        "a finished resource observed again publishes nothing"
     );
 }
