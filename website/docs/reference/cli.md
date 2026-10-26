@@ -240,9 +240,14 @@ Usage: b10x-loom agent check --spec <FILE>
 
 ```text
 The spec is checked against the plugin catalog, which holds inbound-answer@1 and operator-reply@1.
-The first refusal is the answer, in this order: the document does not decode (Malformed); a string of
+The first refusal is the answer, in this order: the text is not one YAML document (Malformed); a string of
 it holds a credential, a URL with a user name or a query, or a token prefix such as xoxb- or sk-
-(SecretLiteral; the value is never repeated); the inner loop's protocol is not in the catalog, or
+(SecretLiteral; the value is never repeated); the decoder refuses a value, the first in its one walk
+of the document: format is not loom.agent/1 (UnknownFormat), a text member is empty or blank
+(BlankText), a bearer_env is not an environment variable name (NotAVariableName; never repeated), a
+port is outside 1 to 65535 (PortOutOfRange), an allow_paths entry is not a plain path
+(NotAPlainPath), a deadline is not an RFC 3339 instant (NotAnInstant), or the document does not
+decode otherwise (Malformed); the inner loop's protocol is not in the catalog, or
 states are declared with no inner loop (UnknownProtocol); a state names an action its protocol lacks
 (UnknownAction); a state, the outer loop or the channel names a source no binding declares
 (UnboundSource); an http binding's method is not GET (HttpMethod); reply.send is a capability while

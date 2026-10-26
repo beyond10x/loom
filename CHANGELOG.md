@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `loom.agent.RefusalReason` gains `UnknownFormat`, `BlankText`, `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`; `check_text` answers them at the member, not `Malformed` (story:agent-spec-constraints-in-ess)
+- **Breaking:** `loom_sdk::agent::parse` refuses a `deadline` that is not an RFC 3339 instant (`2026-12-31`); `AgentSpecError::reason` and `member` name the rule (story:agent-spec-constraints-in-ess)
+
 ## [0.42.0] - 2026-10-26
 
 ### Added

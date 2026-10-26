@@ -168,7 +168,8 @@ fn an_http_binding_whose_method_is_not_get_is_refused() {
 
 /// An allowed path no read may use (`ess/domains/agent.yaml` `HttpBinding`) is refused when the
 /// document is read, naming the entry, rather than left for `path_allowed` to refuse at every read;
-/// the ESS scenario `an-allow-path-holding-a-dot-dot-segment-is-refused` fixes the first.
+/// it answers `NotAPlainPath` at the entry, and the ESS scenario
+/// `an-allow-path-holding-a-dot-dot-segment-is-refused` fixes the first.
 #[test]
 fn an_allow_path_no_read_may_use_is_refused() {
     let detail = |at: &str| {
@@ -178,10 +179,10 @@ fn an_allow_path_no_read_may_use_is_refused() {
         )
     };
     assert_eq!(
-        refused_text(&fixture("allow-path-dot-dot")),
+        refused_text(&fixture("not-a-plain-path")),
         refusal(
-            RefusalReason::Malformed,
-            "document",
+            RefusalReason::NotAPlainPath,
+            "bindings[2].allow_paths[1]",
             &detail("bindings[2].allow_paths[1]")
         )
     );
@@ -206,8 +207,8 @@ fn an_allow_path_no_read_may_use_is_refused() {
         assert_eq!(
             refused_text(&text),
             refusal(
-                RefusalReason::Malformed,
-                "document",
+                RefusalReason::NotAPlainPath,
+                "bindings[2].allow_paths[1]",
                 &detail("bindings[2].allow_paths[1]")
             ),
             "{path}"
@@ -221,6 +222,243 @@ fn an_allow_path_no_read_may_use_is_refused() {
         );
         assert!(check_text(&text, &plugin_actions).is_ok(), "{path}");
     }
+}
+
+#[test]
+fn an_unknown_format_is_refused() {
+    assert_eq!(
+        refused_text(&fixture("unknown-format")),
+        refusal(
+            RefusalReason::UnknownFormat,
+            "format",
+            "`format` is `loom.agent/2`, not `loom.agent/1`"
+        )
+    );
+}
+
+/// Empty and only-whitespace text are both blank, wherever the text member stands: an identity,
+/// an enum spelling, a source name, a binding's kind.
+#[test]
+fn a_blank_text_member_is_refused() {
+    assert_eq!(
+        refused_text(&fixture("blank-text")),
+        refusal(
+            RefusalReason::BlankText,
+            "agent.name",
+            "`agent.name` is empty"
+        )
+    );
+    for (from, to, member) in [
+        ("name: Platform operator", "name: ''", "agent.name"),
+        (
+            "decisions: ask",
+            "decisions: \" \"",
+            "session.tools.decisions",
+        ),
+        (
+            "sources: [chat]",
+            "sources: [\"\\t\"]",
+            "loops.outer.sources[0]",
+        ),
+        (
+            "{name: chat, kind: connectors",
+            "{name: chat, kind: ' '",
+            "bindings[0].kind",
+        ),
+    ] {
+        let found = refused_text(&with(&operator_text(), from, to));
+        assert_eq!(
+            found,
+            refusal(
+                RefusalReason::BlankText,
+                member,
+                &format!("`{member}` is empty")
+            ),
+            "{to}"
+        );
+    }
+}
+
+/// The detail names the member and never the text, which may be a secret written in the wrong
+/// place.
+#[test]
+fn a_bearer_env_that_is_not_a_variable_name_is_refused() {
+    let found = refused_text(&fixture("not-a-variable-name"));
+    assert_eq!(
+        found,
+        refusal(
+            RefusalReason::NotAVariableName,
+            "bindings[2].bearer_env",
+            "`bindings[2].bearer_env` is not an environment variable name"
+        )
+    );
+    assert!(
+        !describe(&found).contains("METRICS-TOKEN"),
+        "{}",
+        describe(&found)
+    );
+    for name in ["1TOKEN", "TOKEN VALUE", "tok.en", "\"$TOKEN\""] {
+        let text = with(
+            &operator_text(),
+            "/api/v1/alerts], method: GET,",
+            &format!("/api/v1/alerts], method: GET, bearer_env: {name},"),
+        );
+        let found = refused_text(&text);
+        assert_eq!(
+            (found.reason, found.member.as_str()),
+            (RefusalReason::NotAVariableName, "bindings[2].bearer_env"),
+            "{name}"
+        );
+        assert!(
+            !describe(&found).contains(name.trim_matches('"')),
+            "{}",
+            describe(&found)
+        );
+    }
+    let text = with(
+        &operator_text(),
+        "/api/v1/alerts], method: GET,",
+        "/api/v1/alerts], method: GET, bearer_env: _METRICS_TOKEN2,",
+    );
+    assert!(check_text(&text, &plugin_actions).is_ok());
+}
+
+/// A port is 1 to 65535 wherever it stands: 0 and 65536 are refused, 1 and 65535 check.
+#[test]
+fn a_port_outside_the_range_is_refused() {
+    let detail = |member: &str| format!("`{member}` is not a port from 1 to 65535");
+    for branch in ["port-out-of-range", "port-out-of-range-65536"] {
+        assert_eq!(
+            refused_text(&fixture(branch)),
+            refusal(
+                RefusalReason::PortOutOfRange,
+                "expose.a2a.port",
+                &detail("expose.a2a.port")
+            ),
+            "{branch}"
+        );
+    }
+    for (from, member) in [
+        (
+            "host: logs.example, port: 3100",
+            "session.tools.egress[0].port",
+        ),
+        (
+            "host: chat.example, port: 443",
+            "deploy.kubernetes.egress[0].port",
+        ),
+        (
+            "from_namespace: operator-clients, port: 8080",
+            "deploy.kubernetes.ingress[0].port",
+        ),
+    ] {
+        let (head, _) = from.rsplit_once(' ').expect("a port");
+        for port in ["0", "-1", "65536"] {
+            let text = with(&operator_text(), from, &format!("{head} {port}"));
+            assert_eq!(
+                refused_text(&text),
+                refusal(RefusalReason::PortOutOfRange, member, &detail(member)),
+                "{member} {port}"
+            );
+        }
+        for port in ["1", "65535"] {
+            let text = with(&operator_text(), from, &format!("{head} {port}"));
+            assert!(
+                check_text(&text, &plugin_actions).is_ok(),
+                "{member} {port}"
+            );
+        }
+    }
+}
+
+/// `session.budget.deadline` is a `Timestamp`, an RFC 3339 instant (a date, `T`, a time and an
+/// offset), as Commission reads a run's deadline: a date alone, a time without an offset, a day
+/// the calendar lacks and a space for the `T` are refused; a full instant checks.
+#[test]
+fn a_deadline_that_is_not_an_instant_is_refused() {
+    assert_eq!(
+        refused_text(&fixture("not-an-instant")),
+        refusal(
+            RefusalReason::NotAnInstant,
+            "session.budget.deadline",
+            "`session.budget.deadline` is not an RFC 3339 instant"
+        )
+    );
+    assert!(check_text(&fixture("deadline-instant"), &plugin_actions).is_ok());
+    let budget = "budget: {max_steps: 20, max_tokens: 400000}";
+    for deadline in [
+        "2026-12-31",
+        "2026-12-31T23:59:59",
+        "2026-02-30T00:00:00Z",
+        "2026-12-31T24:00:00Z",
+        "\"2026-12-31 23:59:59Z\"",
+        "26-12-31T23:59:59Z",
+        "tomorrow",
+    ] {
+        let text = with(
+            &operator_text(),
+            budget,
+            &format!("budget: {{max_steps: 20, max_tokens: 400000, deadline: {deadline}}}"),
+        );
+        let found = refused_text(&text);
+        assert_eq!(
+            (found.reason, found.member.as_str()),
+            (RefusalReason::NotAnInstant, "session.budget.deadline"),
+            "{deadline}"
+        );
+    }
+    for deadline in [
+        "2026-12-31T23:59:59Z",
+        "2026-12-31t23:59:59z",
+        "2028-02-29T12:00:00.25+02:00",
+        "2026-12-31T23:59:59-05:30",
+    ] {
+        let text = with(
+            &operator_text(),
+            budget,
+            &format!("budget: {{max_steps: 20, max_tokens: 400000, deadline: {deadline}}}"),
+        );
+        assert!(check_text(&text, &plugin_actions).is_ok(), "{deadline}");
+    }
+}
+
+/// The decoder's refusals, `Malformed` and the value refusals, come from one walk: the first
+/// member it refuses decides which answers. A YAML tag anywhere is refused before that walk, and
+/// a credential before the decoder.
+#[test]
+fn the_first_member_the_decoder_refuses_decides_its_refusal() {
+    let text = fixture("port-out-of-range").replace("name: Platform operator", "name: ' '");
+    assert_eq!(refused_text(&text).reason, RefusalReason::BlankText);
+
+    let text = fixture("blank-text").replace("{mode: auto,", "{zzz: 1, mode: auto,");
+    assert_eq!(refused_text(&text).reason, RefusalReason::BlankText);
+
+    let text = fixture("malformed").replace("a2a: {port: 8080,", "a2a: {port: 0,");
+    assert_eq!(
+        (refused_text(&text).reason, refused_text(&text).member),
+        (RefusalReason::Malformed, "document".to_owned())
+    );
+
+    let text = fixture("unknown-format").replace("name: Platform operator", "name: ' '");
+    assert_eq!(refused_text(&text).reason, RefusalReason::UnknownFormat);
+
+    let text = fixture("not-an-instant").replace(
+        "method: GET, max_bytes",
+        "method: GET, bearer_env: A-B, max_bytes",
+    );
+    assert_eq!(refused_text(&text).reason, RefusalReason::NotAnInstant);
+
+    let text = fixture("not-a-variable-name").replace("cpu: 250m", "cpu: !Quantity 250m");
+    assert_eq!(refused_text(&text).reason, RefusalReason::Malformed);
+
+    let text = fixture("not-a-variable-name").replace(
+        "http://logs.monitoring.svc:3100",
+        "http://reader:hunter2@logs.monitoring.svc:3100",
+    );
+    assert_eq!(refused_text(&text).reason, RefusalReason::SecretLiteral);
+
+    let text = fixture("not-a-plain-path").replace("allow: [C0000000001]", "allow: []");
+    assert_eq!(refused_text(&text).reason, RefusalReason::NotAPlainPath);
 }
 
 #[test]

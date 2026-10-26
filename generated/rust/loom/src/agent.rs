@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 07ffbf64bb72f343da062e4358fa115d25faab45d924b8c2f49b08afd1505c2a
-// contract digest 24f6dfbec7944350b2c11ba13831b80eba85d7bf29c68207b9b3abb2798be2a0
+// model digest 0bc22195c8470b33ee8e63f2f72da8c7a6f0482b957baa0c1e06d31cfc92d81d
+// contract digest 00b9422cfc0323a2931c03096e0062b04192ba7327eb1e8df668fc99aa29a305
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -381,6 +381,18 @@ pub enum RefusalReason {
     Malformed,
     /// `SecretLiteral`.
     SecretLiteral,
+    /// `UnknownFormat`.
+    UnknownFormat,
+    /// `BlankText`.
+    BlankText,
+    /// `NotAVariableName`.
+    NotAVariableName,
+    /// `PortOutOfRange`.
+    PortOutOfRange,
+    /// `NotAPlainPath`.
+    NotAPlainPath,
+    /// `NotAnInstant`.
+    NotAnInstant,
     /// `UnknownProtocol`.
     UnknownProtocol,
     /// `UnknownAction`.
@@ -735,6 +747,36 @@ pub enum CheckAgentSpecOutcome {
         /// Why it was refused: `loom.agent.SpecRefused`.
         error: SpecRefused,
     },
+    /// `unknown-format` — externally decided (the document's format is not loom.agent/1).
+    UnknownFormat {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `blank-text` — externally decided (a text member of the document is empty or only whitespace).
+    BlankText {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `not-a-variable-name` — externally decided (a bearer_env of the document is not an environment variable name).
+    NotAVariableName {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `port-out-of-range` — externally decided (a port of the document is outside 1 to 65535).
+    PortOutOfRange {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `not-a-plain-path` — externally decided (an allow_paths entry of an http binding is not a plain path).
+    NotAPlainPath {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
+    /// `not-an-instant` — externally decided (a Timestamp member of the document is not an RFC 3339 instant).
+    NotAnInstant {
+        /// Why it was refused: `loom.agent.SpecRefused`.
+        error: SpecRefused,
+    },
     /// `unknown-protocol` — externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop).
     UnknownProtocol {
         /// Why it was refused: `loom.agent.SpecRefused`.
@@ -875,7 +917,7 @@ pub mod obligations {
     ///
     /// Why it is not generated: kept an obligation by the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed`.
     ///
-    /// Contract: given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise.
+    /// Contract: given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-format` externally decided (the document's format is not loom.agent/1), error `loom.agent.SpecRefused`; `blank-text` externally decided (a text member of the document is empty or only whitespace), error `loom.agent.SpecRefused`; `not-a-variable-name` externally decided (a bearer_env of the document is not an environment variable name), error `loom.agent.SpecRefused`; `port-out-of-range` externally decided (a port of the document is outside 1 to 65535), error `loom.agent.SpecRefused`; `not-a-plain-path` externally decided (an allow_paths entry of an http binding is not a plain path), error `loom.agent.SpecRefused`; `not-an-instant` externally decided (a Timestamp member of the document is not an RFC 3339 instant), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise.
     pub trait CheckAgentSpecBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.agent.CheckAgentSpec`.
         ///

@@ -86,3 +86,35 @@ fn a_directory_is_not_read() {
     let output = agent_check(&root().join("examples/agents"));
     assert_eq!(output.status.code(), Some(1), "{}", text(&output.stderr));
 }
+
+/// Each value the decoder refuses is printed under its own reason, never `Malformed`, and the
+/// variable name is not repeated.
+#[test]
+fn a_value_refusal_prints_its_own_reason() {
+    for (branch, line) in [
+        ("unknown-format", "refused: UnknownFormat at format: "),
+        ("blank-text", "refused: BlankText at agent.name: "),
+        (
+            "not-a-variable-name",
+            "refused: NotAVariableName at bindings[2].bearer_env: ",
+        ),
+        (
+            "port-out-of-range",
+            "refused: PortOutOfRange at expose.a2a.port: ",
+        ),
+        (
+            "not-a-plain-path",
+            "refused: NotAPlainPath at bindings[2].allow_paths[1]: ",
+        ),
+        (
+            "not-an-instant",
+            "refused: NotAnInstant at session.budget.deadline: ",
+        ),
+    ] {
+        let output = agent_check(&fixture(branch));
+        let stderr = text(&output.stderr);
+        assert_eq!(output.status.code(), Some(3), "{branch}: {stderr}");
+        assert!(stderr.contains(line), "{branch}: {stderr}");
+        assert!(!stderr.contains("METRICS-TOKEN"), "{stderr}");
+    }
+}
