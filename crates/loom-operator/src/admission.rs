@@ -23,14 +23,15 @@
 //!    ending in a space (`Bearer`, also in `Authorization:Bearer`) is walked with the one after.
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`);
 //!    a `Command` resource then gets an empty `routes.yaml`.
-//! 5. A `spec.secretRef` outside the configuration's `allowedSecretNames` (`SecretNotAllowed`).
+//! 5. A `spec.secretRef` or `spec.secretFiles` outside the configuration's `allowedSecretNames`
+//!    (`SecretNotAllowed`).
 //! 6. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
 //! 7. A `deploy.kubernetes.egress` entry naming neither a host nor a namespace, whose rule would
 //!    admit every destination on its port, or naming a host outside `allowedEgressHosts`
 //!    (`EgressHostNotAllowed`).
 //! 8. `spec.command`, each entrypoint and argument walked whole and word by word as the
 //!    connectors text is (`SecretLiteral`); one beyond the walk's bound is `TooLarge`.
-//! 9. A `spec.workspace.mountPath` or `spec.secretRef.mountPath` that is not absolute and plain,
+//! 9. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and plain,
 //!    is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`]) or the
 //!    other one (`MountPathInvalid`).
 //! 10. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
@@ -148,7 +149,7 @@ pub const COMMAND_SPEC_FILE: &str = "/config/agent.yaml";
 
 /// The paths the controller mounts itself: the serve variant's spec directory, the `Command`
 /// variant's `/config`, the state directory and `/tmp`. A `spec.workspace` or
-/// `spec.secretRef.mountPath` may be none of them, nor beneath or above one.
+/// `spec.secretFiles.mountPath` may be none of them, nor beneath or above one.
 pub const RESERVED_MOUNTS: [&str; 4] = ["/etc/agent", "/config", "/var/lib/agent", "/tmp"];
 
 /// The longest mount path the controller accepts, in bytes.
@@ -197,12 +198,8 @@ fn mount_paths(spec: &LoomAgentSpec) -> Result<(), Refusal> {
     if let Some(workspace) = &spec.workspace {
         paths.push((workspace.mount_path.as_str(), "spec.workspace.mountPath"));
     }
-    if let Some(path) = spec
-        .secret_ref
-        .as_ref()
-        .and_then(|secret| secret.mount_path.as_deref())
-    {
-        paths.push((path, "spec.secretRef.mountPath"));
+    if let Some(files) = &spec.secret_files {
+        paths.push((files.mount_path.as_str(), "spec.secretFiles.mountPath"));
     }
     for (path, at) in &paths {
         plain_mount_path(path, at)?;
@@ -630,6 +627,15 @@ pub fn admit(
             "the controller's allowedSecretNames does not hold it",
         ));
     }
+    if let Some(files) = &spec.secret_files
+        && !config.allowed_secret_names.contains(&files.name)
+    {
+        return Err(Refusal::new(
+            "SecretNotAllowed",
+            "spec.secretFiles.name",
+            "the controller's allowedSecretNames does not hold it",
+        ));
+    }
 
     if let Some(kubernetes) = decoded
         .deploy
@@ -719,6 +725,7 @@ mod tests {
             }),
             connectors_config: connectors.map(str::to_owned),
             secret_ref: None,
+            secret_files: None,
             image: None,
             command: None,
             workspace: None,

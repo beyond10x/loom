@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 19e06a4dab22b0745a39a51781dd29b45539baab651c06b0f7836588fe6c4ea1
-// contract digest f087de474d365d2dd4f92e367ad82b7268e63c9e03d035cc5eecb734180680f5
+// model digest 07ffbf64bb72f343da062e4358fa115d25faab45d924b8c2f49b08afd1505c2a
+// contract digest 24f6dfbec7944350b2c11ba13831b80eba85d7bf29c68207b9b3abb2798be2a0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -121,6 +121,8 @@ pub struct LoomAgentSpec {
     pub connectors_config: Option<String>,
     /// `secret_ref` — `Optional<loom.resource.SecretRef>`.
     pub secret_ref: Option<SecretRef>,
+    /// `secret_files` — `Optional<loom.resource.SecretFiles>`.
+    pub secret_files: Option<SecretFiles>,
     /// `image` — `Optional<loom.resource.ImageRef>`.
     pub image: Option<ImageRef>,
     /// `command` — `Optional<loom.resource.CommandSpec>`.
@@ -133,13 +135,20 @@ pub struct LoomAgentSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceName(pub String);
 
+/// SecretFiles — `loom.resource.SecretFiles`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SecretFiles {
+    /// `name` — `String`.
+    pub name: String,
+    /// `mount_path` — `String`.
+    pub mount_path: String,
+}
+
 /// SecretRef — `loom.resource.SecretRef`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretRef {
     /// `name` — `String`.
     pub name: String,
-    /// `mount_path` — `Optional<String>`.
-    pub mount_path: Option<String>,
 }
 
 /// Workspace — `loom.resource.Workspace`.

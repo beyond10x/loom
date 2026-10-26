@@ -32,6 +32,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom agent check`](#b10x-loom-agent-check) | Say whether a loom.agent/1 spec can be served: refuse, naming the member and the reason, a spec that cannot. It runs nothing |
 | [`b10x-loom agent serve`](#b10x-loom-agent-serve) | Host the agent a loom.agent/1 spec declares: poll its channel, answer each item in a governed turn, and send a reply only as the spec's writes admit |
 | [`b10x-loom agent resume`](#b10x-loom-agent-resume) | Perform a held send after its approval, once |
+| [`b10x-loom agent stage-files`](#b10x-loom-agent-stage-files) | Copy the keys of a mounted Secret volume into a directory this user owns, the directory mode 0700 and each file 0600 |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
 
@@ -335,6 +336,33 @@ Exit status:
   3  no send of the commission is held in the state directory
   4  the send is not granted yet; nothing was performed
   5  the resume was refused (in doubt, the case moved), or the send was refused; nothing was sent
+```
+
+## `b10x-loom agent stage-files`
+
+Copy the keys of a mounted Secret volume into a directory this user owns, the directory mode 0700 and each file 0600
+
+```text
+Usage: b10x-loom agent stage-files --from <DIR> --to <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--from <DIR>` | yes | none | The mounted Secret volume |
+| `--to <DIR>` | yes | none | The directory the keys are copied into |
+
+```text
+The kubelet owns a Secret volume's files, so a reader that refuses a file another user owns or that its
+group or others may read refuses them. b10x-loom-operator runs this in the init container
+stage-secret-files for spec.secretFiles. Each entry of --from whose name does not start with `..` and
+that resolves to a regular file inside --from is copied, in name order, to --to/<name>, mode 0600, as
+a new file (one left by an earlier run is replaced, never followed); --to is created when absent and
+set to mode 0700, and must not be a link.
+
+Exit status:
+  0  the keys were staged; standard output says how many
+  1  --from cannot be read, --to is not a directory, or a key cannot be copied
+  2  the command line is not valid
 ```
 
 ## `b10x-loom approve`

@@ -870,6 +870,7 @@ fn spec_agent_is_the_agent_document_and_required() {
             "connectorsConfig",
             "image",
             "routes",
+            "secretFiles",
             "secretRef",
             "workspace"
         ]
@@ -998,7 +999,7 @@ fn an_agent_list_may_be_absent_a_models_list_may_not_and_a_decimal_is_a_number()
 }
 
 #[test]
-fn the_command_variant_members_are_declared_and_only_the_workspace_path_is_required() {
+fn the_command_variant_members_are_declared_with_what_each_requires() {
     let document = projected();
     let schema = open_api(&document);
     let spec = &schema["properties"]["spec"]["properties"];
@@ -1020,9 +1021,32 @@ fn the_command_variant_members_are_declared_and_only_the_workspace_path_is_requi
         spec["secretRef"],
         json!({
             "type": "object",
-            "properties": {"mountPath": {"type": "string"}, "name": {"type": "string"}},
+            "properties": {"name": {"type": "string"}},
             "required": ["name"],
+        }),
+        "the environment Secret is projected one way only"
+    );
+    assert_eq!(
+        spec["secretFiles"],
+        json!({
+            "type": "object",
+            "properties": {"mountPath": {"type": "string"}, "name": {"type": "string"}},
+            "required": ["name", "mountPath"],
         })
+    );
+    let agent = &spec["agent"]["properties"];
+    assert!(
+        !names(&agent["runtime"]["required"]).contains(&"connectors".to_owned()),
+        "runtime.connectors is optional"
+    );
+    assert!(
+        !names(&agent["deploy"]["properties"]["kubernetes"]["required"])
+            .contains(&"image_repository".to_owned()),
+        "deploy.kubernetes.image_repository is optional"
+    );
+    assert!(
+        names(&agent["runtime"]["required"]).contains(&"state_dir".to_owned()),
+        "the rest of runtime stays required"
     );
     assert_eq!(
         schema["properties"]["status"]["properties"]["variant"],

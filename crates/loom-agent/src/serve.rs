@@ -125,9 +125,10 @@ impl SpecPlugin {
         let catalog = ProtocolCatalog::plugins().map_err(PluginError::Config)?;
         let actions = |name: &str| catalog.get(name).map(|entry| entry.actions());
         crate::check(&spec, &actions).map_err(|refused| config(crate::describe(&refused)))?;
-        let runtime = spec
+        let connectors = spec
             .runtime
             .as_ref()
+            .and_then(|runtime| runtime.connectors.as_ref())
             .ok_or_else(|| config("`runtime` names no connectors command line".to_owned()))?;
         let loops = spec
             .loops
@@ -150,7 +151,7 @@ impl SpecPlugin {
             _ => spec.channel.as_ref(),
         };
         let config = PluginConfig {
-            connectors: runtime.connectors.clone(),
+            connectors: connectors.clone(),
             sources: spec
                 .bindings
                 .iter()

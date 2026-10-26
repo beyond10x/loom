@@ -279,6 +279,11 @@ outside the list (or holding `\`, a `.` or `..` segment or an encoded separator,
 `agent check` also refuses in the list), a method other than GET, a bearer variable unset, empty
 or blank, a redirect or a failing status is a refused read the model reads as data.
 
+`b10x-loom agent stage-files --from <DIR> --to <DIR>` copies each key of a mounted Kubernetes
+Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run
+left replaced, never followed). The controller runs it in an init container for
+`spec.secretFiles`; exit 1 names the path it could not read or write.
+
 ## Deploy agents to Kubernetes
 
 A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent`, and the controller
@@ -317,11 +322,14 @@ with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
 
 A resource with `spec.command` is the `Command` variant: its pod runs the image's own program
 (`spec.command.entrypoint` and `args`, each left to the image when absent) instead of
-`b10x-loom agent serve`, with no init container, and reads `spec.agent` at `/config/agent.yaml`.
+`b10x-loom agent serve`, with no check before it, and reads `spec.agent` at `/config/agent.yaml`.
 That is how a takt delivery runs as a `LoomAgent`. `spec.workspace` (`mountPath`, optional
 `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
-`allowedClaimNames` or else an emptyDir, and `spec.secretRef.mountPath` mounts the Secret as files
-beside the environment it gives. For this variant the controller checks `spec.agent` only for a
+`allowedClaimNames` or else an emptyDir. On either variant `spec.secretRef` gives one Secret as
+the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container
+runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,
+files 0600), since a tool such as `b10x-gates` refuses a key file another user owns or others may
+read. The values must allow both names in `allowedSecretNames`. For this variant the controller checks `spec.agent` only for a
 credential and against the `loom.agent/1` decoder, not the plugin catalog, and walks
 `spec.command` for a credential too.
 
