@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-26
+
 ### Added
 
 - `LOOM_HTTP_CA_FILE`: an `http` binding read trusts that PEM file's certificates beside the webpki roots; `agent serve` reads it once at start-up and exits 1 naming the variable when it is unreadable, over 1048576 bytes, holds no certificate or any block not taken as a root (all or nothing) (story:http-binding-cluster-ca)
@@ -1117,7 +1119,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.42.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.43.0...HEAD
+[0.43.0]: https://github.com/beyond10x/loom/releases/tag/0.43.0
 [0.42.0]: https://github.com/beyond10x/loom/releases/tag/0.42.0
 [0.41.0]: https://github.com/beyond10x/loom/releases/tag/0.41.0
 [0.40.0]: https://github.com/beyond10x/loom/releases/tag/0.40.0
