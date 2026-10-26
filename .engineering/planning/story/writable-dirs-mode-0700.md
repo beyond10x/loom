@@ -18,7 +18,7 @@ scope:
   path: crates/loom-operator/src/render.rs
 - confidence: cited
   path: crates/loom-operator/tests
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -50,3 +50,9 @@ Derived 2026-10-26 by the coordinator from `b6e35835`.
 - `crates/loom-cli/src/stage.rs` (if an init step prepares the directories) — inferred
 - `crates/loom-operator/tests/` — cited
 - AGENTS.md § Resource, design § 9a, CHANGELOG.md — cited
+
+## Also reported
+
+The orchestrator, 2026-10-26, from the takt 0.13.1 release: "emptyDir modes
+(story:writable-dirs-mode-0700 may already cover it, link it)". This story is that gap; takt
+0.13.1 reports it again from its own image.
