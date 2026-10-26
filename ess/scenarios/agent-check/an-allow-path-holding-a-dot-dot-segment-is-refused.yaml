@@ -1,19 +1,20 @@
 # story agent-http-binding: an `http` binding's allowed path holding a `\` or a `.` or `..`
-# segment is one no read may use, so the document listing it is malformed, naming the entry. The
-# fixture is the operator example with the `metrics` binding allowing `/api/v1\..\admin`.
+# segment is one no read may use, so the document listing it is refused, naming the entry (story
+# agent-spec-constraints-in-ess: `NotAPlainPath`, before it `Malformed`). The fixture is the
+# operator example with the `metrics` binding allowing `/api/v1\..\admin`.
 type: ess-scenario/4
 domain: loom.agent
 scenario: an-allow-path-holding-a-dot-dot-segment-is-refused
-summary: An http binding allowing a path with a backslash dot-dot segment is refused as malformed.
+summary: An http binding allowing a path with a backslash dot-dot segment is refused as not a plain path.
 
 timeline:
   - at: 2026-10-25T00:00:00Z
     command: loom.agent.CheckAgentSpec
-    input: {path: ess/scenarios/agent-check/specs/allow-path-dot-dot.yaml}
-    outcome: malformed
+    input: {path: ess/scenarios/agent-check/specs/not-a-plain-path.yaml}
+    outcome: not-a-plain-path
     error:
       name: loom.agent.SpecRefused
       fields:
-        reason: Malformed
-        member: document
+        reason: NotAPlainPath
+        member: bindings[2].allow_paths[1]
         detail: "`bindings[2].allow_paths[1]` is not a plain path, one that starts with `/` and holds no `\\`, no `.` or `..` segment, no encoded separator or dot, no `?` or `#` and no whitespace"

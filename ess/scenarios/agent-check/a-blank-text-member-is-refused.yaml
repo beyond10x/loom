@@ -1,0 +1,18 @@
+# story agent-spec-constraints-in-ess: a text member that is empty or only whitespace is refused,
+# naming it. The fixture is the operator example with `agent.name: "  "`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-blank-text-member-is-refused
+summary: An agent name of only whitespace is refused as blank text, naming the member.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/blank-text.yaml}
+    outcome: blank-text
+    error:
+      name: loom.agent.SpecRefused
+      fields:
+        reason: BlankText
+        member: agent.name
+        detail: "`agent.name` is empty"

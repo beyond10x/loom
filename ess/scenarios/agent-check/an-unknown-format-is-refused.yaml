@@ -1,0 +1,18 @@
+# story agent-spec-constraints-in-ess: a document declaring another format than `loom.agent/1` is
+# refused, naming `format`. The fixture is the operator example with `format: loom.agent/2`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: an-unknown-format-is-refused
+summary: A document whose format is not loom.agent/1 is refused, naming the format member.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/unknown-format.yaml}
+    outcome: unknown-format
+    error:
+      name: loom.agent.SpecRefused
+      fields:
+        reason: UnknownFormat
+        member: format
+        detail: "`format` is `loom.agent/2`, not `loom.agent/1`"

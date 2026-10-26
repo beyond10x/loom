@@ -1,0 +1,23 @@
+# story agent-spec-constraints-in-ess: `session.budget.deadline` is a `Timestamp`, an RFC 3339
+# instant, so a date alone is refused, naming the member, and a full instant checks. The fixtures
+# are the operator example with `deadline: 2026-12-31` and `deadline: 2026-12-31T23:59:59Z`.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-deadline-that-is-not-an-instant-is-refused
+summary: A budget deadline that is a date alone is refused; a full RFC 3339 instant is serveable.
+
+timeline:
+  - at: 2026-10-26T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/not-an-instant.yaml}
+    outcome: not-an-instant
+    error:
+      name: loom.agent.SpecRefused
+      fields:
+        reason: NotAnInstant
+        member: session.budget.deadline
+        detail: "`session.budget.deadline` is not an RFC 3339 instant"
+  - at: 2026-10-26T00:00:01Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/deadline-instant.yaml}
+    outcome: serveable
