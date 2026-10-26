@@ -460,11 +460,12 @@ fn a_document_that_is_not_a_loom_agent_is_not_rendered() {
 }
 
 /// The members a takt delivery adds after `spec.agent` (design § 9a, slice C): its own image,
-/// the image's entrypoint with arguments, a workspace on a claim, one Secret as the environment
-/// and another as files.
+/// the image's own entrypoint (`tini -- takt run --repo /workspace --config /config/agent.yaml`
+/// in takt 0.13.1) with only the arguments that follow it, since Kubernetes appends `args` to the
+/// entrypoint, a workspace on a claim, one Secret as the environment and another as files.
 const TAKT: &str = "  routes: {}
   image: {repository: registry.example/takt, tag: '0.12.0'}
-  command: {args: [run, --repo, /workspace/takt, --iterations, '1']}
+  command: {args: [--iterations, '1']}
   workspace: {mountPath: /workspace, claimName: takt-workspace}
   secretRef: {name: platform-operator-secrets}
   secretFiles: {name: takt-forge, mountPath: /var/run/secrets/takt}
@@ -495,6 +496,33 @@ fn a_command_resource_renders_as_its_golden_file() {
         expected,
         "render differs from {}",
         golden.display()
+    );
+}
+
+/// `story:takt-delivery-fixture-args`: the takt 0.13.1 image's entrypoint already runs `takt run
+/// --repo /workspace`, and Kubernetes appends `args` to it, so the fixture passes only what
+/// follows; a `run` or a second `--repo` in `args` would run `run` twice.
+#[test]
+fn the_takt_delivery_fixture_runs_takt_once() {
+    let rendered = render_document(&takt_resource(), &config()).expect("rendered");
+    let pod = pod_of(&rendered);
+    let container = &pod["containers"][0];
+    assert!(
+        container["command"].is_null(),
+        "the image's own entrypoint runs"
+    );
+    let args = strings(container, &["args"]);
+    assert_eq!(args, ["--iterations", "1"]);
+    assert!(!args.iter().any(|arg| arg == "run" || arg == "--repo"));
+
+    let golden =
+        fs::read_to_string(root().join("crates/loom-operator/tests/golden/takt-delivery.yaml"))
+            .expect("the golden file");
+    let golden_pod = pod_of(&golden);
+    assert_eq!(
+        strings(&golden_pod["containers"][0], &["args"]),
+        ["--iterations", "1"],
+        "the golden file a resource is copied from holds the same"
     );
 }
 
@@ -655,10 +683,7 @@ fn a_command_resource_runs_the_image_program_over_config_with_its_volumes() {
         at(container, &["command"]).is_null(),
         "an absent entrypoint is the image's own"
     );
-    assert_eq!(
-        strings(container, &["args"]),
-        ["run", "--repo", "/workspace/takt", "--iterations", "1"]
-    );
+    assert_eq!(strings(container, &["args"]), ["--iterations", "1"]);
     assert_eq!(text(container, &["env", "0", "name"]), "HOME");
     assert_eq!(text(container, &["env", "0", "value"]), "/var/lib/agent");
     assert_eq!(
@@ -798,11 +823,11 @@ fn what_a_command_resource_may_not_mount_or_carry_is_refused_naming_the_member()
         ),
         (
             TAKT.replace("'1']", "'1', --token, xoxb-000-fake]"),
-            "refused: SecretLiteral at spec.command.args[6]",
+            "refused: SecretLiteral at spec.command.args[3]",
         ),
         (
             TAKT.replace("'1']", "'1', --token=xoxb-000-fake]"),
-            "refused: SecretLiteral at spec.command.args[5]",
+            "refused: SecretLiteral at spec.command.args[2]",
         ),
         (
             TAKT.replace(
@@ -1113,7 +1138,7 @@ fn a_credential_joined_by_variable_expansion_is_refused_without_repeating_it() {
                 &takt_agent(),
                 &format!("{joined}{}", env(&[("PART", "ghp")])),
             ),
-            "refused: SecretLiteral at spec.command.args[6]: a value with the prefix `ghp_`, \
+            "refused: SecretLiteral at spec.command.args[3]: a value with the prefix `ghp_`, \
              after `$(VAR)` expansion",
         ),
         (
@@ -1175,7 +1200,7 @@ fn an_unknown_reference_is_walked_as_a_possible_url_scheme() {
                     "--iterations, '1', '$(FORGE_SCHEME)u:not-a-real-password@forge.example']",
                 ),
             ),
-            "spec.command.args[5]: ",
+            "spec.command.args[2]: ",
         ),
         (
             serve_with(&env(&[("NOTE", "$(USER_NAME)@forge.example")])),

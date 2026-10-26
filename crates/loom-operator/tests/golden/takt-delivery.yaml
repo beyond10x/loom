@@ -229,9 +229,6 @@ spec:
       automountServiceAccountToken: false
       containers:
       - args:
-        - run
-        - --repo
-        - /workspace/takt
         - --iterations
         - '1'
         env:
