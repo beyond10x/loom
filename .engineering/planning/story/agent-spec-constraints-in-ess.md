@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-spec-constraints-in-ess
 kind: story
-status: active
+status: implemented
 title: Each value constraint of the loom.agent/1 decoder is a named refusal of CheckAgentSpec, held by ESS scenarios
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -14,11 +14,19 @@ scope:
 - confidence: cited
   path: CHANGELOG.md
 - confidence: cited
+  path: Cargo.lock
+- confidence: cited
   path: README.md
 - confidence: cited
   path: crates/loom-agent
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-cli/src/lib.rs
+- confidence: cited
+  path: crates/loom-cli/tests/agent_check.rs
+- confidence: cited
   path: crates/loom-conformance
+- confidence: cited
+  path: crates/loom-sdk/Cargo.toml
 - confidence: cited
   path: crates/loom-sdk/src/agent.rs
 - confidence: cited
@@ -30,11 +38,16 @@ scope:
 - confidence: cited
   path: generated/rust/loom
 - confidence: cited
+  path: website/docs/reference/cli.md
+- confidence: cited
   path: website/docs/reference/ess
-revision: 16
+- confidence: cited
+  path: website/docs/reference/sdk-stability.md
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 15}
 - {from: "proposed", to: "active", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 16}
+- {from: "active", to: "implemented", at: "2026-10-26T14:47:19Z", actor: "human:timo", revision: 18, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

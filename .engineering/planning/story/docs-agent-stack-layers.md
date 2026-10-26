@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:docs-agent-stack-layers
 kind: story
-status: active
+status: implemented
 title: Loom's docs place Loom as ADRs 0096 and 0098 do and cite ADR 0108 for the agent spec
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -13,13 +13,28 @@ scope:
 - confidence: cited
   path: README.md
 - confidence: cited
+  path: crates/loom-docs/tests
+- confidence: cited
+  path: docs/contracts/loom-action-selection.md
+- confidence: cited
+  path: docs/design/loom-agent-crd-deployment.md
+- confidence: cited
+  path: docs/design/loom-design.md
+- confidence: cited
+  path: docs/integrations/laya-fast-selection.md
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
   path: website/docs/concepts
-- confidence: inferred
+- confidence: cited
   path: website/docs/guides
-revision: 7
+- confidence: cited
+  path: website/docs/index.md
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:18Z", actor: "human:timo", revision: 6}
 - {from: "proposed", to: "active", at: "2026-10-26T13:20:18Z", actor: "human:timo", revision: 7}
+- {from: "active", to: "implemented", at: "2026-10-26T14:47:19Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

@@ -2,28 +2,31 @@
 format: aep.planning-md/3
 id: story:metaharness-0-19-pin
 kind: story
-status: active
+status: implemented
 title: Loom builds against metaharness 0.19.0, which admits harness 0.20.0
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
 scope:
-- confidence: inferred
+- confidence: cited
   path: AGENTS.md
-- confidence: inferred
+- confidence: cited
   path: CHANGELOG.md
 - confidence: cited
   path: Cargo.lock
-- confidence: inferred
+- confidence: cited
   path: README.md
 - confidence: cited
   path: crates/loom-session-executor/Cargo.toml
-- confidence: inferred
-  path: crates/loom-session-executor/src
-revision: 5
+- confidence: cited
+  path: crates/loom-session-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-session-executor/tests
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:55:12Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-26T13:55:12Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-26T14:47:20Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 

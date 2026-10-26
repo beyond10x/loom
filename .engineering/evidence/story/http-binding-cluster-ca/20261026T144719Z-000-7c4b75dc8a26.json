@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-26T14:47:19Z",
+  "actor": "human:timo",
+  "artifact": "story:http-binding-cluster-ca",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check",
+    "reference": "task check steps exit 0 on 40414b8e (wave head with release commit, ESS 0.69.2): 434 test-result lines, 2398 passed, 0 failed, 9 ignored; loom spec 41 scenarios valid; task plan valid; task website built"
+  }
+}

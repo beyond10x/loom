@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:http-binding-cluster-ca
 kind: story
-status: active
+status: implemented
 title: An http binding reads an https endpoint a cluster CA signs, trusting the PEM file LOOM_HTTP_CA_FILE names
 relations:
 - decomposes: epic:loom-sdk-for-products
@@ -13,28 +13,37 @@ scope:
   path: AGENTS.md
 - confidence: cited
   path: CHANGELOG.md
-- confidence: inferred
+- confidence: cited
   path: Cargo.lock
 - confidence: cited
   path: README.md
 - confidence: cited
   path: crates/loom-agent
-- confidence: inferred
+- confidence: cited
   path: crates/loom-cli
-- confidence: inferred
+- confidence: cited
   path: crates/loom-conformance
 - confidence: cited
   path: docs/qualification/2026-10-25-agent-http-binding.md
 - confidence: cited
   path: ess/domains/agent.yaml
 - confidence: cited
+  path: ess/ess-inputs.yaml
+- confidence: cited
+  path: ess/scenarios/http-binding-cluster-ca
+- confidence: cited
   path: generated/rust/loom
 - confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/reference/cli.md
+- confidence: cited
   path: website/docs/reference/ess
-revision: 14
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 13}
 - {from: "proposed", to: "active", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 14}
+- {from: "active", to: "implemented", at: "2026-10-26T14:47:20Z", actor: "human:timo", revision: 16, decided_on: {"recorded":{"test_result":1,"review_outcome":1}}}
 ---
 ## Outcome
 
