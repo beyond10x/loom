@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:loom-agent-spec-env
 kind: story
-status: draft
+status: active
 title: A LoomAgent takes plain environment values in spec.env, credential-walked
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -26,7 +26,10 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-26T15:49:09Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-26T15:49:09Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

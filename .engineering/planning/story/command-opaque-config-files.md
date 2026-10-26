@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:command-opaque-config-files
 kind: story
-status: draft
+status: active
 title: A Command LoomAgent takes opaque config files instead of a mandatory loom.agent/1 spec.agent
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -24,7 +24,10 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-26T15:49:10Z", actor: "human:timo", revision: 3}
+- {from: "proposed", to: "active", at: "2026-10-26T15:49:10Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 

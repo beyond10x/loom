@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:command-variant-runs-once
 kind: story
-status: draft
+status: active
 title: A Command LoomAgent runs its program once to completion as a Job, not a restarting Deployment
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -26,7 +26,10 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: inferred
   path: generated/rust/loom
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-26T15:49:07Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-26T15:49:08Z", actor: "human:timo", revision: 5}
 ---
 ## Outcome
 

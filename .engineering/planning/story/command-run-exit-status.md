@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:command-run-exit-status
 kind: story
-status: draft
+status: active
 title: A Command LoomAgent's status reports its run's completion and exit code
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -28,7 +28,10 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-26T15:49:08Z", actor: "human:timo", revision: 4}
+- {from: "proposed", to: "active", at: "2026-10-26T15:49:08Z", actor: "human:timo", revision: 5}
 ---
 ## Outcome
 
