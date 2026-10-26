@@ -34,18 +34,23 @@
 //! which `b10x-loom agent serve --spec --state` runs; its sends decide `loom.agent.AdmitSend`
 //! ([`admit_send`]), and its `http` bindings are read by [`http`]: [`HttpGet`], deciding
 //! `loom.agent.AdmitHttpRead` ([`admit_http_read`]) before any request and
-//! `loom.agent.BoundHttpAnswer` ([`bound_http_answer`]) over the answer.
+//! `loom.agent.BoundHttpAnswer` ([`bound_http_answer`]) over the answer. The roots an `https` read
+//! trusts beside the webpki roots are the host setting `LOOM_HTTP_CA_FILE`, decided once by
+//! `loom.agent.AdmitHttpTrust` ([`http_trust`], [`admit_http_trust`]).
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 use loom_sdk::agent::{AgentSpec, Binding};
 
 pub use http::{
-    HTTP_TIMEOUT, HttpGet, admit_http_read, bound_http_answer, http_refusal_spelling, path_allowed,
+    CA_FILE_ENV, HTTP_TIMEOUT, HttpGet, HttpTrust, HttpTrustError, admit_http_read,
+    admit_http_trust, bound_http_answer, http_refusal_spelling, http_trust,
+    http_trust_refusal_spelling, path_allowed,
 };
 pub use loom::agent::{
-    AdmitHttpRead, AdmitHttpReadOutcome, BoundHttpAnswer, BoundHttpAnswerOutcome,
-    HttpReadRefusalReason, HttpReadRefused,
+    AdmitHttpRead, AdmitHttpReadOutcome, AdmitHttpTrust, AdmitHttpTrustOutcome, BoundHttpAnswer,
+    BoundHttpAnswerOutcome, HttpReadRefusalReason, HttpReadRefused, HttpTrustRefusalReason,
+    HttpTrustRefused,
 };
 pub use loom_sdk::agent::{
     AdmitSend, AdmitSendOutcome, RefusalReason, SendRefusalReason, SendRefused, SpecRefused,

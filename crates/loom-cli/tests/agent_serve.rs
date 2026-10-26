@@ -530,7 +530,8 @@ runtime:
             .env("HOME", &home)
             .env("CODEX_HOME", &home)
             .env("XDG_DATA_HOME", &home)
-            .env_remove("RUST_LOG");
+            .env_remove("RUST_LOG")
+            .env_remove("LOOM_HTTP_CA_FILE");
         command
     }
 
@@ -813,6 +814,71 @@ fn agent_serve_refuses_to_start_without_the_a2a_bearer() {
             "nothing was recorded"
         );
     }
+}
+
+/// `LOOM_HTTP_CA_FILE` naming a missing file, an empty file, a file holding no certificate or one
+/// past 1048576 bytes stops the host with exit 1 naming the variable and the reason, before any
+/// read, model call or record, and never prints the file (`story:http-binding-cluster-ca`).
+#[test]
+fn agent_serve_refuses_to_start_on_an_unusable_http_ca_file() {
+    let scratch = Scratch::new("ca-file", 3600);
+    let catalog = scratch.catalog("http://127.0.0.1:1/v1");
+    let text = "the cluster CA is in the service account's ca.crt, not here\n";
+    let mut large = text.repeat(1_048_576 / text.len() + 1).into_bytes();
+    large.truncate(1_048_577);
+    let cases: [(&str, Option<&[u8]>, &str); 4] = [
+        ("missing.pem", None, "Unreadable"),
+        ("empty.pem", Some(b""), "NoCertificate"),
+        ("text.pem", Some(text.as_bytes()), "NoCertificate"),
+        ("large.pem", Some(&large), "TooLarge"),
+    ];
+    for (name, bytes, reason) in cases {
+        let path = scratch.root.join(name);
+        if let Some(bytes) = bytes {
+            fs::write(&path, bytes).unwrap();
+        }
+        let output = scratch
+            .serve_command(&catalog)
+            .arg("--once")
+            .env("LOOM_HTTP_CA_FILE", &path)
+            .output()
+            .expect("run b10x-loom");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{name}: {stderr}");
+        assert!(
+            stderr.contains(&format!("LOOM_HTTP_CA_FILE: {reason}")),
+            "{name}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("service account"),
+            "the file is printed: {stderr}"
+        );
+        assert!(scratch.argv().is_empty(), "{name}: nothing was read");
+        assert!(
+            !scratch.state().join("record.jsonl").exists(),
+            "{name}: nothing was recorded"
+        );
+    }
+}
+
+/// `LOOM_HTTP_CA_FILE` set to blank text is no setting: the host starts as without it, here
+/// reaching the next start-up check, the A2A bearer.
+#[test]
+fn agent_serve_takes_a_blank_http_ca_file_as_no_setting() {
+    let scratch = Scratch::new("ca-file-blank", 3600);
+    scratch.expose_a2a(free_port());
+    let catalog = scratch.catalog("http://127.0.0.1:1/v1");
+    let output = scratch
+        .serve_command(&catalog)
+        .args(["--once", "--a2a-address", "127.0.0.1"])
+        .env("LOOM_HTTP_CA_FILE", " \n")
+        .env_remove("LOOM_A2A_BEARER")
+        .output()
+        .expect("run b10x-loom");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{stderr}");
+    assert!(stderr.contains("LOOM_A2A_BEARER"), "{stderr}");
+    assert!(!stderr.contains("LOOM_HTTP_CA_FILE"), "{stderr}");
 }
 
 /// With `expose.a2a` and its bearer the served agent answers A2A beside the poll: the probes

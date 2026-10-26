@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 07ffbf64bb72f343da062e4358fa115d25faab45d924b8c2f49b08afd1505c2a
-// contract digest 24f6dfbec7944350b2c11ba13831b80eba85d7bf29c68207b9b3abb2798be2a0
+// model digest bd0680f8ac3534518a439d54a62dfd2a90bf5c733881ebeb4328aed4f2b64019
+// contract digest 686d3e50c2ac373e8881a3960e68cf840d8e87f71ccb441f5efdc3580e3c3fa1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -227,6 +227,32 @@ impl<P> crate::agent::obligations::AdmitHttpReadBehavior for Generated<P>
         }
         // `admitted`: the default.
         return Ok(crate::agent::AdmitHttpReadOutcome::Admitted);
+    }
+}
+
+/// `loom.agent.AdmitHttpTrust`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitHttpTrustBehavior for Generated<P>
+{
+    fn admit_http_trust(&mut self, input: crate::agent::AdmitHttpTrust) -> Result<crate::agent::AdmitHttpTrustOutcome, UnmetObligation> {
+        let _ = &input;
+        // `unreadable`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.named).map(|value| *value), Some(true)), equal(Some(&input.read).map(|value| *value), Some(false))]), "loom.agent.AdmitHttpTrust")? {
+            return Ok(crate::agent::AdmitHttpTrustOutcome::Unreadable { error: crate::agent::HttpTrustRefused { reason: crate::agent::HttpTrustRefusalReason::Unreadable } });
+        }
+        // `too-large`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.named).map(|value| *value), Some(true)), compare_numbers(Some(&input.bytes).map(|value| value.to_string()), Some("1048576".to_owned()), core::cmp::Ordering::is_gt)]), "loom.agent.AdmitHttpTrust")? {
+            return Ok(crate::agent::AdmitHttpTrustOutcome::TooLarge { error: crate::agent::HttpTrustRefused { reason: crate::agent::HttpTrustRefusalReason::TooLarge } });
+        }
+        // `no-certificate`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(all(&[equal(Some(&input.named).map(|value| *value), Some(true)), compare_numbers(Some(&input.certificates).map(|value| value.to_string()), Some("0".to_owned()), core::cmp::Ordering::is_le)]), "loom.agent.AdmitHttpTrust")? {
+            return Ok(crate::agent::AdmitHttpTrustOutcome::NoCertificate { error: crate::agent::HttpTrustRefused { reason: crate::agent::HttpTrustRefusalReason::NoCertificate } });
+        }
+        // `webpki-only`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.named).map(|value| *value), Some(false)), "loom.agent.AdmitHttpTrust")? {
+            return Ok(crate::agent::AdmitHttpTrustOutcome::WebpkiOnly);
+        }
+        // `extended`: the default.
+        return Ok(crate::agent::AdmitHttpTrustOutcome::Extended);
     }
 }
 

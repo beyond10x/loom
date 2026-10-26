@@ -136,6 +136,10 @@ fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
 }
 
 fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> Result<(), String> {
+    // The roots of `http` binding reads are settled first, before any model, read or record.
+    let trust =
+        b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
+            .map_err(|refused| refused.to_string())?;
     // Both models are settled here, before any model call or read.
     let (classifier, model): (Box<dyn Model>, Arc<dyn Model>) = match &arguments.catalog {
         Some(path) => {
@@ -162,7 +166,8 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
     let plugin = b10x_loom_agent::SpecPlugin::new(spec, &arguments.state)
         .map_err(|e| e.to_string())?
         .with_classifier(Box::new(a2a::SharedModel(Arc::clone(&classifier))))
-        .with_turn_models(turn_models(Arc::clone(&model)));
+        .with_turn_models(turn_models(Arc::clone(&model)))
+        .with_http_trust(trust.clone());
     let answers_only = a2a::answers_only(&a2a_spec);
     if answers_only && arguments.once {
         return Err(a2a::ONCE_WITHOUT_A_CHANNEL.to_owned());
@@ -185,6 +190,7 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
             state: &arguments.state,
             classifier,
             model,
+            trust,
         };
         let served = a2a::serve(&server, socket, agent, &stop, &stop);
         drop(held);
@@ -198,6 +204,7 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
                 state: &arguments.state,
                 classifier,
                 model,
+                trust,
             };
             let (a2a_stop, stop) = (&a2a_stop, &stop);
             scope.spawn(move || a2a::serve(&server, socket, agent, a2a_stop, stop))

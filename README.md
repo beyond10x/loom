@@ -277,7 +277,13 @@ one GET of a path exactly in its `allow_paths` under its `base_url`, carrying th
 variable `bearer_env` names, following no redirect, the body cut at `max_bytes` and marked; a path
 outside the list (or holding `\`, a `.` or `..` segment or an encoded separator, which
 `agent check` also refuses in the list), a method other than GET, a bearer variable unset, empty
-or blank, a redirect or a failing status is a refused read the model reads as data.
+or blank, a redirect or a failing status is a refused read the model reads as data. An `https`
+endpoint is trusted by the webpki roots and, when `LOOM_HTTP_CA_FILE` names a PEM file (a
+cluster CA; on Kubernetes a file `spec.secretFiles` gives, the variable from `spec.secretRef`), by
+its certificates beside them. `agent serve` reads the file once before anything runs and exits 1
+naming the variable, never printing the file, when it cannot be read, holds more than 1048576
+bytes or holds no certificate; model calls, the Connectors command line and the A2A listener are
+not given these roots.
 
 `b10x-loom agent stage-files --from <DIR> --to <DIR>` copies each key of a mounted Kubernetes
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run

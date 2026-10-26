@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 07ffbf64bb72f343da062e4358fa115d25faab45d924b8c2f49b08afd1505c2a
-  contract digest 24f6dfbec7944350b2c11ba13831b80eba85d7bf29c68207b9b3abb2798be2a0
+  model digest bd0680f8ac3534518a439d54a62dfd2a90bf5c733881ebeb4328aed4f2b64019
+  contract digest 686d3e50c2ac373e8881a3960e68cf840d8e87f71ccb441f5efdc3580e3c3fa1
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-247 capabilities: **245 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+251 capabilities: **249 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -34,6 +34,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.agent.ExposeSpec` |
 | domain type | `loom.agent.HttpBinding` |
 | domain type | `loom.agent.HttpReadRefusalReason` |
+| domain type | `loom.agent.HttpTrustRefusalReason` |
 | domain type | `loom.agent.InnerLoop` |
 | domain type | `loom.agent.KubernetesDeploy` |
 | domain type | `loom.agent.KubernetesEgress` |
@@ -188,6 +189,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.agent.AdmitA2aRequest` |
 | command contract | `loom.agent.AdmitHttpRead` |
 | command behaviour | `loom.agent.AdmitHttpRead` |
+| command contract | `loom.agent.AdmitHttpTrust` |
+| command behaviour | `loom.agent.AdmitHttpTrust` |
 | command contract | `loom.agent.AdmitSend` |
 | command behaviour | `loom.agent.AdmitSend` |
 | command contract | `loom.agent.AdmitServe` |
@@ -234,6 +237,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.session.SessionChangeProposed` |
 | error type | `loom.agent.A2aRefused` |
 | error type | `loom.agent.HttpReadRefused` |
+| error type | `loom.agent.HttpTrustRefused` |
 | error type | `loom.agent.SendRefused` |
 | error type | `loom.agent.ServeRefused` |
 | error type | `loom.agent.SpecRefused` |

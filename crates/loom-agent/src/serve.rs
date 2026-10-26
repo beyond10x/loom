@@ -26,7 +26,9 @@
 //!   nothing, as the effect port refuses every send with `WritesNone`.
 //! - An `http` binding is a source of the states that name it, read by the effect port through
 //!   [`HttpGet`] (`crate::http`, `story:agent-http-binding`): one bounded GET of an allow-listed
-//!   path, no redirect followed, the bearer from the variable `bearer_env` names.
+//!   path, no redirect followed, the bearer from the variable `bearer_env` names, an `https`
+//!   endpoint trusted by the webpki roots and the certificates [`SpecPlugin::with_http_trust`]
+//!   gives (`LOOM_HTTP_CA_FILE`, `story:http-binding-cluster-ca`).
 //!
 //! The commission of a turn is derived from the agent id, the item id and its revision, so a
 //! person names it from the record line alone.
@@ -53,7 +55,7 @@ use loom_sdk::agent::{
     WriteMode,
 };
 
-use crate::http::HttpGet;
+use crate::http::{HttpGet, HttpTrust};
 use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
@@ -221,6 +223,14 @@ impl SpecPlugin {
     #[must_use]
     pub fn with_turn_models(mut self, models: TurnModels) -> Self {
         self.turn_models = Some(models);
+        self
+    }
+
+    /// Reads the spec's `http` bindings trusting `trust`'s certificates beside the webpki roots
+    /// (`LOOM_HTTP_CA_FILE`, [`crate::http::http_trust`]); the trust reaches those reads only.
+    #[must_use]
+    pub fn with_http_trust(mut self, trust: HttpTrust) -> Self {
+        self.reader = self.reader.with_trust(trust);
         self
     }
 

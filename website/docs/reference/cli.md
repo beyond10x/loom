@@ -292,6 +292,12 @@ The models are the spec's `model` section (its routes document, relative to the 
 name. With --once it runs one cycle and prints one line per proposal it recorded; without it, it
 polls every poll_interval_seconds until SIGTERM or SIGINT (a second one exits 130 at once).
 
+An http binding reads an https endpoint trusting the webpki roots and, when LOOM_HTTP_CA_FILE names a
+PEM file, its certificates beside them (a cluster CA). The file is read once, before anything runs;
+the host refuses to start, naming the variable and never printing the file, when it cannot be read,
+holds more than 1048576 bytes or holds no certificate. Model calls, the connectors command line and
+the A2A listener are not given these roots.
+
 With expose.a2a the agent also answers A2A on --a2a-address and expose.a2a.port, beside the poll:
 the agent card at /.well-known/agent-card.json, and at expose.a2a.path JSON-RPC SendMessage, one
 turn on inbound-answer@1 answered with its record (nothing is sent through A2A), and GetTask. Every
@@ -303,7 +309,8 @@ refused.
 
 Exit status:
   0  the cycles ran
-  1  the spec, the models or the state directory cannot be used, or the last cycle's poll failed
+  1  the spec, the models, LOOM_HTTP_CA_FILE or the state directory cannot be used, or the last
+     cycle's poll failed
   2  the command line is not valid
   3  the spec cannot be served
   130  a second SIGTERM or SIGINT ended it at once

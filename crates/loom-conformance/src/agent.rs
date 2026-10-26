@@ -1,7 +1,8 @@
 //! `loom.agent.CheckAgentSpec`, answered by `b10x_loom_agent::check_text` over the plugin
-//! catalog (`ProtocolCatalog::plugins()`), and `loom.agent.AdmitSend`, `loom.agent.AdmitHttpRead`
-//! and `loom.agent.BoundHttpAnswer`, answered by `b10x_loom_agent::admit_send`,
-//! `admit_http_read` and `bound_http_answer` over their declared inputs alone.
+//! catalog (`ProtocolCatalog::plugins()`), and `loom.agent.AdmitSend`, `loom.agent.AdmitHttpRead`,
+//! `loom.agent.BoundHttpAnswer` and `loom.agent.AdmitHttpTrust`, answered by
+//! `b10x_loom_agent::admit_send`, `admit_http_read`, `bound_http_answer` and `admit_http_trust`
+//! over their declared inputs alone.
 //!
 //! The command's one input is the document's `path`, and every refusal is `external:`: the
 //! document and the catalog are outside the input. This target plays the file system, as it plays
@@ -17,9 +18,10 @@
 use std::path::{Path, PathBuf};
 
 use b10x_loom_agent::{
-    AdmitHttpRead, AdmitHttpReadOutcome, AdmitSend, AdmitSendOutcome, BoundHttpAnswer,
-    BoundHttpAnswerOutcome, HttpReadRefused, RefusalReason, SendRefused, SpecRefused, WriteMode,
-    admit_http_read, admit_send, bound_http_answer, check_text, http_refusal_spelling,
+    AdmitHttpRead, AdmitHttpReadOutcome, AdmitHttpTrust, AdmitHttpTrustOutcome, AdmitSend,
+    AdmitSendOutcome, BoundHttpAnswer, BoundHttpAnswerOutcome, HttpReadRefused, HttpTrustRefused,
+    RefusalReason, SendRefused, SpecRefused, WriteMode, admit_http_read, admit_http_trust,
+    admit_send, bound_http_answer, check_text, http_refusal_spelling, http_trust_refusal_spelling,
     send_refusal_spelling, spelling,
 };
 use ess_conformance::target::{SemanticCommandResult, TargetError};
@@ -36,6 +38,8 @@ const SEND_REFUSED: &str = "loom.agent.SendRefused";
 pub(crate) const ADMIT_HTTP_READ: &str = "loom.agent.AdmitHttpRead";
 pub(crate) const BOUND_HTTP_ANSWER: &str = "loom.agent.BoundHttpAnswer";
 const HTTP_READ_REFUSED: &str = "loom.agent.HttpReadRefused";
+pub(crate) const ADMIT_HTTP_TRUST: &str = "loom.agent.AdmitHttpTrust";
+const HTTP_TRUST_REFUSED: &str = "loom.agent.HttpTrustRefused";
 
 /// The refusal branches of `CheckAgentSpec`, each with the reason its fixture is refused for, in
 /// declaration order.
@@ -200,6 +204,31 @@ pub(crate) fn bound_http_answer_command(input: &Input) -> Option<SemanticCommand
         }
         BoundHttpAnswerOutcome::Cut => took(BOUND_HTTP_ANSWER, "cut"),
         BoundHttpAnswerOutcome::Whole => took(BOUND_HTTP_ANSWER, "whole"),
+    })
+}
+
+/// The refusal as `loom.agent.HttpTrustRefused`, `reason` in the enum's spelling.
+fn trust_refusal(branch: &str, refused: &HttpTrustRefused) -> SemanticCommandResult {
+    took(ADMIT_HTTP_TRUST, branch).with_error(error(HTTP_TRUST_REFUSED).with(
+        "reason",
+        Node::Text(http_trust_refusal_spelling(refused.reason).to_owned()),
+    ))
+}
+
+/// Answers one `AdmitHttpTrust`: `None` when an input is absent or cannot be held by its type.
+pub(crate) fn admit_http_trust_command(input: &Input) -> Option<SemanticCommandResult> {
+    let request = AdmitHttpTrust {
+        named: codec::boolean(input, "named")?,
+        read: codec::boolean(input, "read")?,
+        bytes: codec::integer(input, "bytes")?,
+        certificates: codec::integer(input, "certificates")?,
+    };
+    Some(match admit_http_trust(&request) {
+        AdmitHttpTrustOutcome::Unreadable { error } => trust_refusal("unreadable", &error),
+        AdmitHttpTrustOutcome::TooLarge { error } => trust_refusal("too-large", &error),
+        AdmitHttpTrustOutcome::NoCertificate { error } => trust_refusal("no-certificate", &error),
+        AdmitHttpTrustOutcome::WebpkiOnly => took(ADMIT_HTTP_TRUST, "webpki-only"),
+        AdmitHttpTrustOutcome::Extended => took(ADMIT_HTTP_TRUST, "extended"),
     })
 }
 

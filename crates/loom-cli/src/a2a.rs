@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use b10x_loom_a2a::A2aServer;
-use b10x_loom_agent::SpecPlugin;
 use b10x_loom_agent::serve::a2a::{
     AdmitServeOutcome, Answering, admit_serve, bearer, listener, port, serve_input,
 };
+use b10x_loom_agent::{HttpTrust, SpecPlugin};
 use llm_core::{BoxFuture, Cancel, Capabilities, Model, Provenance, StreamSink, TurnRequest};
 use loom_sdk::agent::AgentSpec;
 
@@ -89,6 +89,9 @@ pub struct Agent<'a> {
     pub classifier: Arc<dyn Model>,
     /// The turn model, shared with the host's agent.
     pub model: Arc<dyn Model>,
+    /// The roots the listener's turns read `https` bindings with, as the host's agent does
+    /// (`LOOM_HTTP_CA_FILE`); the listener itself is never given them.
+    pub trust: HttpTrust,
 }
 
 /// Answers on `socket` until `stop` is set, building the listener's agent from `agent` on this
@@ -107,7 +110,8 @@ pub fn serve(
         let plugin = SpecPlugin::new(agent.spec, agent.state)
             .map_err(|error| error.to_string())?
             .with_classifier(Box::new(SharedModel(agent.classifier)))
-            .with_turn_models(turn_models(agent.model));
+            .with_turn_models(turn_models(agent.model))
+            .with_http_trust(agent.trust);
         let at = socket
             .local_addr()
             .map_err(|error| format!("the A2A listener has no address: {error}"))?;
