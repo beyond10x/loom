@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-27T12:33:32Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-serve-state-root-from-run-file",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --workspace --locked: 2441 passed, 0 failed; cargo test -p b10x-loom-cli --test agent_serve: 15 passed"
+  }
+}

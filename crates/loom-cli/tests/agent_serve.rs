@@ -400,6 +400,134 @@ fn a_relative_state_directory_performs_the_granted_send() {
     );
 }
 
+/// `story:agent-serve-state-root-from-run-file`: without `--state`, the host's root is the spec's
+/// `runtime.state_dir`. One cycle writes its record and holds its send there, and, once approved,
+/// `agent resume`, given no `--state` either, performs the held send from the same root.
+#[test]
+fn serve_takes_its_state_root_from_the_run_file() {
+    let scratch = Scratch::new("run-file-root", 0);
+    let (base_url, server) = serve(recorded(&scratch.ts));
+    let catalog = scratch.catalog(&base_url);
+
+    let output = scratch
+        .command()
+        .args(["agent", "serve", "--spec"])
+        .arg(scratch.spec())
+        .arg("--catalog")
+        .arg(&catalog)
+        .args([
+            "--classifier-model",
+            "lab-classifier",
+            "--model",
+            "lab-agent",
+            "--once",
+        ])
+        .output()
+        .expect("run b10x-loom");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
+    assert_eq!(server.join().expect("the server finished").len(), 7);
+    assert!(scratch.state().join("record.jsonl").is_file());
+    let held = scratch.held();
+    assert_eq!(held.len(), 1, "one send is held under the run file's root");
+    let commission = &held[0];
+
+    let approved = scratch
+        .command()
+        .args(["approve", commission, "reply.send", "--state"])
+        .arg(scratch.state())
+        .output()
+        .unwrap();
+    assert_eq!(approved.status.code(), Some(0));
+    let resumed = scratch
+        .command()
+        .args(["agent", "resume", commission, "--spec"])
+        .arg(scratch.spec())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&resumed.stderr);
+    assert_eq!(resumed.status.code(), Some(0), "{stderr}");
+    assert_eq!(scratch.invoked(WRITE).len(), 1, "one write");
+}
+
+/// `--state` wins over the run file: the records land under it and the document's directory is
+/// never made.
+#[test]
+fn an_explicit_state_wins_over_the_run_file() {
+    let scratch = Scratch::new("explicit-state", 0);
+    let (base_url, server) = serve(recorded(&scratch.ts));
+    let catalog = scratch.catalog(&base_url);
+    let other = scratch.root.join("other-state");
+
+    let output = scratch
+        .command()
+        .args(["agent", "serve", "--spec"])
+        .arg(scratch.spec())
+        .arg("--state")
+        .arg(&other)
+        .arg("--catalog")
+        .arg(&catalog)
+        .args([
+            "--classifier-model",
+            "lab-classifier",
+            "--model",
+            "lab-agent",
+            "--once",
+        ])
+        .output()
+        .expect("run b10x-loom");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "{stderr}");
+    assert_eq!(server.join().expect("the server finished").len(), 7);
+    assert!(other.join("record.jsonl").is_file());
+    assert!(
+        !scratch.state().exists(),
+        "the run file's directory is not made"
+    );
+}
+
+/// A blank `runtime.state_dir` is no root: the spec check refuses it as it always has (exit 3), and
+/// nothing is read, with or without `--state`.
+#[test]
+fn a_blank_runtime_state_dir_is_refused_whether_or_not_state_is_given() {
+    let scratch = Scratch::new("blank-root", 0);
+    let spec = fs::read_to_string(scratch.spec()).unwrap();
+    let blanked = spec.replace(
+        &format!("state_dir: {}\n", scratch.state().display()),
+        "state_dir: \"  \"\n",
+    );
+    assert_ne!(spec, blanked, "the fixture names its state directory");
+    fs::write(scratch.spec(), blanked).unwrap();
+    let (base_url, _server) = serve(Vec::new());
+    let catalog = scratch.catalog(&base_url);
+
+    let output = scratch
+        .command()
+        .args(["agent", "serve", "--spec"])
+        .arg(scratch.spec())
+        .arg("--catalog")
+        .arg(&catalog)
+        .args([
+            "--classifier-model",
+            "lab-classifier",
+            "--model",
+            "lab-agent",
+            "--once",
+        ])
+        .output()
+        .expect("run b10x-loom");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(3), "{stderr}");
+    assert!(
+        stderr.contains("BlankText at runtime.state_dir"),
+        "{stderr}"
+    );
+    assert!(scratch.argv().is_empty(), "nothing was read");
+}
 // ---------------------------------------------------------------------------------------------
 // Fixtures.
 
