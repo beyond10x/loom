@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-27T03:44:31Z",
+  "actor": "human:timo",
+  "artifact": "story:metaharness-0-20-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "2026-10-27 on unit/metaharness-0-20-0: cargo test -p b10x-loom-session-executor --locked 111 passed 0 failed (a_codex_session_outside_the_pin_proposes_its_change ok); clippy, task ess-gate, task commission:ess-gate, the ess gate tests, docs and commission docs generate --check exit 0 on ESS 0.70.0; end to end: takt patched onto this tree, run --harness codex --forge none with child codex 0.164.0 (H9 gap) and 0.160.0 (H9 ok) both stop ApprovalRequired (repository.merge), exit 4, steps 4"
+  }
+}

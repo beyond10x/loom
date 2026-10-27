@@ -16,8 +16,8 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorOutcome, ExecutorStep, Frontier, FrontierAction, FrontierData,
-    FrontierId, PrincipalId, SuspensionReason, commission_state, frontier_state,
+    CommissionId, ExecutorStep, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
+    commission_state, frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_session_executor::metaharness::{
@@ -401,28 +401,40 @@ fn a_codex_session_is_decided_homed_and_charged_its_uncached_input() {
     assert_eq!(report.cache_read, Some(40));
 }
 
-/// A Codex session written by a codex other than the pinned one proposes nothing: its H9 holds
-/// the change back, the call suspends for `ExternalAvailability` naming it, and it is no record.
+/// A Codex session written by a codex other than the pinned one proposes its change and is
+/// recorded: metaharness 0.20.0 reads H9 `gap` as an advisory row, which the report keeps in its
+/// rows and which holds nothing back (story:metaharness-0-20-pin).
 #[test]
-fn a_codex_session_outside_the_pin_is_held_by_h9() {
+fn a_codex_session_outside_the_pin_proposes_its_change() {
     let scratch = Scratch::new("codex-unpinned");
     let executor = scratch.executor(Kind::Codex, Session::new(unpinned_codex));
 
     let step = step_of(&executor);
 
-    let why = match &step.outcome {
-        ExecutorOutcome::Suspended(suspended) => match &suspended.reason {
-            SuspensionReason::ExternalAvailability(Value::Text(why)) => why.clone(),
-            other => panic!("suspended for {other:?}"),
-        },
-        other => panic!("an unpinned codex was not held back: {other:?}"),
-    };
-    assert!(why.contains("H9"), "{why}");
-    assert!(
-        executor.sessions().is_empty(),
-        "a held session is no record"
+    let proposal = proposal(&step, &executor);
+    assert_eq!(proposal.action, EDIT);
+    assert_eq!(
+        proposal.files,
+        vec![ProposedFile {
+            path: "src/lib.rs".to_owned(),
+            content: Some(EDITED.to_owned()),
+        }]
     );
-    assert!(executor.proposed().is_empty());
+    let rows = executor.sessions();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].kind, SessionKind::Codex);
+    let report = executor.last_report().expect("a report");
+    assert_eq!(report.version.as_deref(), Some("0.999.0"));
+    assert!(
+        report.rows.iter().any(|row| row == "H9 gap"),
+        "{:?}",
+        report.rows
+    );
+    assert!(
+        report.floor.iter().all(|row| !row.starts_with("H9")),
+        "{:?}",
+        report.floor
+    );
 }
 
 /// A b10x-harness session is recorded as `Harness` and proposes its change; the executor decides

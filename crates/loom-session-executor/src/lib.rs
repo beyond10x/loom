@@ -13,7 +13,7 @@
 //! | kind | harness | hermetic | calls |
 //! |---|---|---|---|
 //! | `Claude` | Claude Code | `Strict` | decided here (`Ask`): the file tools of [`ToolPolicyDefaults::claude_default`] on paths inside the copy, and no other offered (`--tools`); restricted, auto-memory and the cross-session inbox off ([`CLAUDE_ARGUMENTS`]) |
-//! | `Codex` | Codex (`codex exec`) | `On`, H9 gating | decided here (`Ask`): `Bash` and `apply_patch` ([`ToolPolicyDefaults::codex_default`]) naming no path outside the copy; its own sandbox (`workspace-write` on the copy, no network) confines what a command writes; its home is its own ([`HOME_VARIABLES`]) |
+//! | `Codex` | Codex (`codex exec`) | `On`, a gap holds the proposal | decided here (`Ask`): `Bash` and `apply_patch` ([`ToolPolicyDefaults::codex_default`]) naming no path outside the copy; its own sandbox (`workspace-write` on the copy, no network) confines what a command writes; its home is its own ([`HOME_VARIABLES`]) |
 //! | `B10x` | b10x-harness | `On`, a gap holds the proposal | observed, never decided: metaharness's b10x adapter decides no call; the loop's toolset is what substrate confines to the copy |
 //!
 //! # One call, one session
@@ -1122,15 +1122,15 @@ impl SessionExecutor {
             return Err(error);
         }
         // The floor: every gating row that is not `ok` is reported, and every row's verdict is
-        // kept. Under Claude Code's `Strict` a `gap` holds the proposal back, but two facts
-        // about the program installed and not about what the session was given: the vendor's
-        // version against the adapter's pin (H9), and plugins the session loaded that
-        // metaharness did not declare (H1a) when every one of them ships inside the vendor
-        // program (`<name>@builtin`, which a version newer than the pin adds). Under Codex's
-        // and b10x-harness's `On` any `gap` holds it back, and for Codex an H9 that is not `ok`
-        // does too: a codex other than the pinned one proposes nothing. An `unk` there is
-        // recorded and holds nothing back: Codex's opening record carries no plugins, output
-        // style, credential source or MCP servers (H1a, H1b, H4, H5).
+        // kept. Under Claude Code's `Strict` a `gap` holds the proposal back, but not one about
+        // the program installed rather than what the session was given: plugins the session
+        // loaded that metaharness did not declare (H1a) when every one of them ships inside the
+        // vendor program (`<name>@builtin`). Under Codex's and b10x-harness's `On` any `gap`
+        // holds it back. An `unk` is recorded and holds nothing back: Codex's opening record
+        // carries no plugins, output style, credential source or MCP servers (H1a, H1b, H4, H5).
+        // The vendor's version against the adapter's pin (H9) is an advisory row since
+        // metaharness 0.20.0, so a version off the pin is kept in `rows` and holds nothing back
+        // (story:metaharness-0-20-pin).
         let mut held = Vec::new();
         for row in run.hermetic_floor() {
             report.rows.push(format!(
@@ -1144,11 +1144,10 @@ impl SessionExecutor {
             let said = format!("{} {:?}: {}", row.row.id(), row.verdict, row.detail);
             let holds = match self.kind {
                 Kind::Claude => {
-                    let installed =
-                        row.row == HermeticRow::H9 || (row.row == HermeticRow::H1a && builtin_only);
+                    let installed = row.row == HermeticRow::H1a && builtin_only;
                     row.verdict == Verdict::Gap && !installed
                 }
-                Kind::Codex => row.verdict == Verdict::Gap || row.row == HermeticRow::H9,
+                Kind::Codex => row.verdict == Verdict::Gap,
                 Kind::B10x => row.verdict == Verdict::Gap,
             };
             if holds {

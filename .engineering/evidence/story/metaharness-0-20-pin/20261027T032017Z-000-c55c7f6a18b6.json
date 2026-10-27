@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-27T03:20:17Z",
+  "actor": "human:timo",
+  "artifact": "story:metaharness-0-20-pin",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "D71, b10x-chef-orchestrator under the operator's grant, 2026-10-27",
+    "reference": "approval-record:metaharness-0-20-pin-d71"
+  }
+}

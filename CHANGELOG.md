@@ -12,6 +12,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `b10x-loom-session-executor`: a Codex session off metaharness's pin proposes its change; its H9 `gap` stays in `SessionReport::rows` (story:metaharness-0-20-pin)
+- `b10x-loom-session-executor` builds against metaharness `0.20.0`, whose H9 is an advisory row on every kind (story:metaharness-0-20-pin)
+- Loom requires ESS 0.70.0; the conformance crates take `ess-conformance` and `ess-primitives` at tag `0.70.0` (story:metaharness-0-20-pin)
+
 ## [0.44.0] - 2026-10-26
 
 ### Added
