@@ -57,6 +57,14 @@ pub struct LoomAgentSpec {
     /// for `Command`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_files: Option<Vec<ConfigFile>>,
+    /// The seccomp profile of the program's container; only for `Command`, and absent keeps the
+    /// pod's `RuntimeDefault`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seccomp_profile: Option<ConfinementProfile>,
+    /// The AppArmor profile of the program's container; only for `Command`, and absent keeps the
+    /// container runtime's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_armor_profile: Option<ConfinementProfile>,
 }
 
 impl LoomAgentSpec {
@@ -117,6 +125,19 @@ pub struct ConfigFile {
     pub name: String,
     /// Its text, never holding a credential.
     pub content: String,
+}
+
+/// `spec.seccompProfile` or `spec.appArmorProfile`: `RuntimeDefault`, `Localhost` with the profile's
+/// name, or `Unconfined`, as Kubernetes spells a security context's profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfinementProfile {
+    /// `RuntimeDefault`, `Localhost` or `Unconfined`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// The profile's name; present exactly for `Localhost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub localhost_profile: Option<String>,
 }
 
 /// `spec.secretFiles`: a Secret, by name, in the resource's namespace, whose keys are files in

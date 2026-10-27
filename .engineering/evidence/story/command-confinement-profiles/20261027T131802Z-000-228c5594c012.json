@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-27T13:18:02Z",
+  "actor": "human:timo",
+  "artifact": "story:command-confinement-profiles",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check exit 0, ESS 0.70.0: 443 test-result lines, 2493 passed, 0 failed, 9 ignored; targeted: command_confinement_profiles 8 passed"
+  }
+}

@@ -91,6 +91,14 @@ mod tests {
                 name: "n".to_owned(),
                 content: String::new(),
             }]),
+            seccomp_profile: Some(resource::ConfinementProfile {
+                kind: "Localhost".to_owned(),
+                localhost_profile: Some("p".to_owned()),
+            }),
+            app_armor_profile: Some(resource::ConfinementProfile {
+                kind: "RuntimeDefault".to_owned(),
+                localhost_profile: None,
+            }),
         };
         let written = serde_json::to_value(full).expect("JSON");
         let mut keys: Vec<&str> = written

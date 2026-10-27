@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_yaml_ng::Value;
 
 /// The overrides `task chart-check` renders the chart with, as `--set` arguments.
-const OVERRIDES: [&str; 8] = [
+const OVERRIDES: [&str; 11] = [
     "image.tag=0.0.1-test",
     "agentImage.repository=registry.example/other-agent",
     "modelRoute.url=http://model-route.agents.svc:8080/v1",
@@ -24,6 +24,9 @@ const OVERRIDES: [&str; 8] = [
     "allowedSecretNames={platform-operator-secrets}",
     "allowedEgressHosts={chat.example,models.example}",
     "allowedClaimNames={takt-workspace}",
+    "allowUnconfinedProfiles=true",
+    "allowedSeccompLocalhostProfiles={profiles/takt.json}",
+    "allowedAppArmorLocalhostProfiles={takt-delivery}",
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -248,6 +251,9 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),
             allowed_claim_names: Vec::new(),
+            allow_unconfined_profiles: false,
+            allowed_seccomp_localhost_profiles: Vec::new(),
+            allowed_app_armor_localhost_profiles: Vec::new(),
         }
     );
 }
@@ -280,6 +286,9 @@ fn overrides_reach_the_controller_image_and_config() {
             allowed_secret_names: vec!["platform-operator-secrets".to_owned()],
             allowed_egress_hosts: vec!["chat.example".to_owned(), "models.example".to_owned()],
             allowed_claim_names: vec!["takt-workspace".to_owned()],
+            allow_unconfined_profiles: true,
+            allowed_seccomp_localhost_profiles: vec!["profiles/takt.json".to_owned()],
+            allowed_app_armor_localhost_profiles: vec!["takt-delivery".to_owned()],
         }
     );
 }

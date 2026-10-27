@@ -11,6 +11,9 @@ modelRoute:
 allowedSecretNames: []
 allowedEgressHosts: []
 allowedClaimNames: []
+allowUnconfinedProfiles: false
+allowedSeccompLocalhostProfiles: []
+allowedAppArmorLocalhostProfiles: []
 resources:
   requests:
     cpu: 50m

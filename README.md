@@ -351,7 +351,7 @@ nothing starts it again until `spec` changes, which replaces the Job. Its `statu
 program's exit code (`exitCode`), when it ended (`finishedAt`) and the `reason`, read from the
 Job's own pod, and the condition `Completed` says the same in its message, so a caller reads how
 the run ended from the resource. `spec.workspace` (`mountPath`, optional `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
-`allowedClaimNames` or else an emptyDir. On either variant `spec.secretRef` gives one Secret as
+`allowedClaimNames` or else an emptyDir. A `Command` resource may declare `spec.seccompProfile` and `spec.appArmorProfile` (`RuntimeDefault`, `Localhost` with `localhostProfile`, or `Unconfined`), carried in its program container's `securityContext`; `Unconfined` is refused unless the values set `allowUnconfinedProfiles`, and a `Localhost` name must be in `allowedSeccompLocalhostProfiles` or `allowedAppArmorLocalhostProfiles`. On either variant `spec.secretRef` gives one Secret as
 the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container
 runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,
 files 0600), since a tool such as `b10x-gates` refuses a key file another user owns or others may

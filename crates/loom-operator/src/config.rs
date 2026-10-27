@@ -10,10 +10,14 @@
 //! allowedSecretNames: [platform-operator-secrets]
 //! allowedEgressHosts: [chat.example]
 //! allowedClaimNames: [takt-workspace]
+//! allowUnconfinedProfiles: false
+//! allowedSeccompLocalhostProfiles: [profiles/takt.json]
+//! allowedAppArmorLocalhostProfiles: [takt-delivery]
 //! ```
 //!
-//! `modelRoute` is optional; the three lists may be absent, and an empty list admits none. A member
-//! the configuration does not declare is refused, so a misspelt key is never ignored.
+//! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
+//! `allowUnconfinedProfiles` defaults to `false`. A member the configuration does not declare is
+//! refused, so a misspelt key is never ignored.
 
 use std::fmt;
 use std::fs;
@@ -45,6 +49,18 @@ pub struct Config {
     /// none.
     #[serde(default)]
     pub allowed_claim_names: Vec<String>,
+    /// Whether a `Command` resource may declare an `Unconfined` seccomp or AppArmor profile;
+    /// absent, `false`: the cluster's operator grants it, never the resource alone.
+    #[serde(default)]
+    pub allow_unconfined_profiles: bool,
+    /// The `Localhost` seccomp profiles (paths relative to the kubelet's seccomp directory) a
+    /// `spec.seccompProfile` may name; empty admits none.
+    #[serde(default)]
+    pub allowed_seccomp_localhost_profiles: Vec<String>,
+    /// The `Localhost` AppArmor profiles (names the node has loaded) a `spec.appArmorProfile` may
+    /// name; empty admits none.
+    #[serde(default)]
+    pub allowed_app_armor_localhost_profiles: Vec<String>,
 }
 
 /// A container image, `repository:tag`.
@@ -138,6 +154,9 @@ impl Config {
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),
             allowed_claim_names: Vec::new(),
+            allow_unconfined_profiles: false,
+            allowed_seccomp_localhost_profiles: Vec::new(),
+            allowed_app_armor_localhost_profiles: Vec::new(),
         }
     }
 

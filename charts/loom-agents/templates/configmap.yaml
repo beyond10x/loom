@@ -23,5 +23,8 @@ data:
     {{- end }}
     {{- end }}
     allowedSecretNames: {{ .Values.allowedSecretNames | toJson }}
+    allowUnconfinedProfiles: {{ .Values.allowUnconfinedProfiles | toJson }}
+    allowedSeccompLocalhostProfiles: {{ .Values.allowedSeccompLocalhostProfiles | toJson }}
+    allowedAppArmorLocalhostProfiles: {{ .Values.allowedAppArmorLocalhostProfiles | toJson }}
     allowedEgressHosts: {{ .Values.allowedEgressHosts | toJson }}
     allowedClaimNames: {{ .Values.allowedClaimNames | toJson }}
