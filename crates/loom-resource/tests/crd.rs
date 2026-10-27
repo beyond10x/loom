@@ -868,12 +868,14 @@ fn spec_agent_is_the_agent_document_and_optional() {
         keys(&spec["properties"]),
         [
             "agent",
+            "appArmorProfile",
             "command",
             "configFiles",
             "connectorsConfig",
             "env",
             "image",
             "routes",
+            "seccompProfile",
             "secretFiles",
             "secretRef",
             "workspace"
@@ -1409,4 +1411,24 @@ fn two_variants_declaring_one_field_differently_are_refused_naming_it() {
         "{refused:?}"
     );
     assert!(refused.to_string().contains("port"), "{refused}");
+}
+
+#[test]
+fn the_confinement_profiles_are_a_closed_type_with_an_optional_localhost_name() {
+    let document = projected();
+    let spec = &open_api(&document)["properties"]["spec"]["properties"];
+    for member in ["seccompProfile", "appArmorProfile"] {
+        let profile = &spec[member];
+        assert_eq!(profile["type"], "object", "{member}");
+        assert_eq!(names(&profile["required"]), ["type"], "{member}");
+        assert_eq!(
+            names(&profile["properties"]["type"]["enum"]),
+            ["RuntimeDefault", "Localhost", "Unconfined"],
+            "{member}"
+        );
+        assert_eq!(
+            profile["properties"]["localhostProfile"]["type"], "string",
+            "{member}"
+        );
+    }
 }

@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest f1230150b6169af223d24c70a32a80d130b8d3d19664f6e64cbae0aa37336cdf
-  contract digest 178f4fdf7cd37ea29f5348d5489ebc36fcc762874f218690bc908c5371aecf19
+  model digest 681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb
+  contract digest 3ce28af44fafd999458bb0325769aa0e54a1d4b0f1cd78c5fabe64beca214063
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-260 capabilities: **258 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+262 capabilities: **260 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -130,6 +130,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.ConditionStatus` |
 | domain type | `loom.resource.ConditionType` |
 | domain type | `loom.resource.ConfigFile` |
+| domain type | `loom.resource.ConfinementProfile` |
+| domain type | `loom.resource.ConfinementProfileKind` |
 | domain type | `loom.resource.DeploymentAvailability` |
 | domain type | `loom.resource.DeploymentStatus` |
 | domain type | `loom.resource.EnvVar` |

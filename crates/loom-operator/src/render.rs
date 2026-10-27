@@ -38,6 +38,13 @@
 //!   (setgid with `fsGroup`) and a reader that refuses a file under a directory others may write
 //!   would refuse every file there.
 //!
+//!   A `Command` resource may declare `spec.seccompProfile` and `spec.appArmorProfile`, each
+//!   `RuntimeDefault`, `Localhost` with a `localhostProfile` name, or `Unconfined`; the program's
+//!   container carries them in its own `securityContext`, overriding the pod's `RuntimeDefault`
+//!   seccomp profile, and the init containers keep the pod's. The controller's configuration
+//!   decides which it admits ([`crate::admission`] step 15); a resource that declares none renders
+//!   as before.
+//!
 //!   On either variant `spec.env` is the agent container's `env` after the controller's own
 //!   ([`CONTROLLER_ENV`]), in declaration order, beside the `spec.secretRef` environment; no init
 //!   container gets it. `spec.workspace` adds a read-write volume at its `mountPath`: the claim
@@ -61,11 +68,11 @@ use b10x_loom_resource::model::AgentVariant;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, DeploymentStrategy};
 use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::api::core::v1::{
-    Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort, EmptyDirVolumeSource,
-    EnvFromSource, EnvVar, HTTPGetAction, PersistentVolumeClaimVolumeSource, PodSecurityContext,
-    PodSpec, PodTemplateSpec, Probe, ResourceRequirements, SeccompProfile, SecretEnvSource,
-    SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort, ServiceSpec, Volume,
-    VolumeMount,
+    AppArmorProfile, Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort,
+    EmptyDirVolumeSource, EnvFromSource, EnvVar, HTTPGetAction, PersistentVolumeClaimVolumeSource,
+    PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements, SeccompProfile,
+    SecretEnvSource, SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort,
+    ServiceSpec, Volume, VolumeMount,
 };
 use k8s_openapi::api::networking::v1::{
     NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
@@ -323,6 +330,32 @@ impl Renderer<'_> {
             run_as_non_root: Some(true),
             run_as_user: Some(USER),
             ..SecurityContext::default()
+        }
+    }
+
+    /// The security context of the container that runs the agent or the program: [`Self::security`]
+    /// and, for a `Command` resource, the seccomp and AppArmor profiles it declares. The init
+    /// containers keep the pod's `RuntimeDefault`, and so does every resource that declares none.
+    fn program_security(&self) -> SecurityContext {
+        let profile = |declared: &crate::resource::ConfinementProfile| {
+            (declared.kind.clone(), declared.localhost_profile.clone())
+        };
+        SecurityContext {
+            seccomp_profile: self.agent.spec.seccomp_profile.as_ref().map(|declared| {
+                let (type_, localhost_profile) = profile(declared);
+                SeccompProfile {
+                    type_,
+                    localhost_profile,
+                }
+            }),
+            app_armor_profile: self.agent.spec.app_armor_profile.as_ref().map(|declared| {
+                let (type_, localhost_profile) = profile(declared);
+                AppArmorProfile {
+                    type_,
+                    localhost_profile,
+                }
+            }),
+            ..self.security()
         }
     }
 
@@ -606,7 +639,7 @@ impl Renderer<'_> {
             readiness_probe: a2a.map(|_| Self::probe("/ready")),
             liveness_probe: a2a.map(|_| Self::probe("/live")),
             resources: Some(self.resources()),
-            security_context: Some(self.security()),
+            security_context: Some(self.program_security()),
             volume_mounts: Some(mounts),
             ..Container::default()
         };

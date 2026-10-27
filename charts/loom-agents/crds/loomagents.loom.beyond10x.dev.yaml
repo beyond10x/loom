@@ -511,6 +511,19 @@ spec:
                 - agent
                 - model
                 type: object
+              appArmorProfile:
+                properties:
+                  localhostProfile:
+                    type: string
+                  type:
+                    enum:
+                    - RuntimeDefault
+                    - Localhost
+                    - Unconfined
+                    type: string
+                required:
+                - type
+                type: object
               command:
                 properties:
                   args:
@@ -560,6 +573,19 @@ spec:
                 type: object
               routes:
                 x-kubernetes-preserve-unknown-fields: true
+              seccompProfile:
+                properties:
+                  localhostProfile:
+                    type: string
+                  type:
+                    enum:
+                    - RuntimeDefault
+                    - Localhost
+                    - Unconfined
+                    type: string
+                required:
+                - type
+                type: object
               secretFiles:
                 properties:
                   mountPath:
