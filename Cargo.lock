@@ -3780,8 +3780,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness"
-version = "0.21.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.21.0#020d832b9f9a870f00dbeea3c562707eeffcf396"
+version = "0.22.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.22.0#fd8c9ab8a5954ee90cad2e149b37a1f2f7d1ceeb"
 dependencies = [
  "getrandom 0.4.3",
  "metaharness-b10x",
@@ -3798,8 +3798,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-b10x"
-version = "0.21.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.21.0#020d832b9f9a870f00dbeea3c562707eeffcf396"
+version = "0.22.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.22.0#fd8c9ab8a5954ee90cad2e149b37a1f2f7d1ceeb"
 dependencies = [
  "b10x-harness-catalogue",
  "b10x-harness-loop",
@@ -3811,8 +3811,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-claude"
-version = "0.21.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.21.0#020d832b9f9a870f00dbeea3c562707eeffcf396"
+version = "0.22.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.22.0#fd8c9ab8a5954ee90cad2e149b37a1f2f7d1ceeb"
 dependencies = [
  "metaharness-protocol",
  "serde",
@@ -3821,8 +3821,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-codex"
-version = "0.21.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.21.0#020d832b9f9a870f00dbeea3c562707eeffcf396"
+version = "0.22.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.22.0#fd8c9ab8a5954ee90cad2e149b37a1f2f7d1ceeb"
 dependencies = [
  "metaharness-protocol",
  "serde_json",
@@ -3830,8 +3830,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-protocol"
-version = "0.21.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.21.0#020d832b9f9a870f00dbeea3c562707eeffcf396"
+version = "0.22.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.22.0#fd8c9ab8a5954ee90cad2e149b37a1f2f7d1ceeb"
 dependencies = [
  "serde",
  "serde_json",
@@ -3840,8 +3840,8 @@ dependencies = [
 
 [[package]]
 name = "metaharness-tools"
-version = "0.21.0"
-source = "git+https://github.com/beyond10x/metaharness?tag=0.21.0#020d832b9f9a870f00dbeea3c562707eeffcf396"
+version = "0.22.0"
+source = "git+https://github.com/beyond10x/metaharness?tag=0.22.0#fd8c9ab8a5954ee90cad2e149b37a1f2f7d1ceeb"
 dependencies = [
  "b10x-harness-catalogue",
  "b10x-harness-wire",
