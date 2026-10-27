@@ -12,11 +12,13 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-27
+
 ### Changed
 
 - **Breaking:** `intake.confinement.AppliedConfinement` (`loom_sdk::intake::slice::confinement::AppliedConfinement`) gains `adapter` and `facts`: a Substrate launch records the adapter it ran under (`linux`) and the facts it proved, in the struct and as `adapter` and `facts` in its `tests.run` observation's `confinement`, an unconfined one neither, and a struct literal must name both. Records written before still read (story:substrate-0-12-pin)
-- `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.10.0` to the release after `0.12.0`, which carries the confinement contract (ADR 0109); `SubstrateRunner` admits a driver by the families the contract's `linux` adapter proves, refusing one that lacks a family by its name (`confinement.family-unserved`), and no longer checks for `/usr/bin/bwrap` itself (story:substrate-0-12-pin)
-- `b10x-loom-session-executor` builds against the metaharness release that admits the Harness on the newest Substrate (story:substrate-0-12-pin)
+- `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.10.0` to `0.13.0`, which carries the confinement contract (ADR 0109) and its follow-ups; `SubstrateRunner` admits a driver by the families the contract's `linux` adapter proves, refusing one that lacks a family by its name (`confinement.family-unserved`), and no longer checks for `/usr/bin/bwrap` itself (story:substrate-0-12-pin)
+- `b10x-loom-session-executor` moves to metaharness `0.21.0`, which admits Harness `0.21.0` on Substrate `0.13.0` (story:substrate-0-12-pin)
 
 ## [0.45.0] - 2026-10-27
 
@@ -1160,7 +1162,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.45.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.46.0...HEAD
+[0.46.0]: https://github.com/beyond10x/loom/releases/tag/0.46.0
 [0.45.0]: https://github.com/beyond10x/loom/releases/tag/0.45.0
 [0.44.0]: https://github.com/beyond10x/loom/releases/tag/0.44.0
 [0.43.0]: https://github.com/beyond10x/loom/releases/tag/0.43.0
