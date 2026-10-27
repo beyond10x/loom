@@ -141,13 +141,21 @@ fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
         Ok(spec) => spec,
         Err(exit) => return exit,
     };
-    match agent_serve(arguments, spec) {
+    let state = match agent::state_root(arguments.state.as_deref(), &spec) {
+        Ok(state) => state,
+        Err(error) => return failed(&error),
+    };
+    match agent_serve(arguments, spec, &state) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => failed(&error),
     }
 }
 
-fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> Result<(), String> {
+fn agent_serve(
+    arguments: &AgentServeArgs,
+    spec: loom_sdk::agent::AgentSpec,
+    state: &Path,
+) -> Result<(), String> {
     // The roots of `http` binding reads are settled first, before any model, read or record.
     let trust =
         b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
@@ -175,7 +183,7 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
     };
     let classifier: Arc<dyn Model> = Arc::from(classifier);
     let a2a_spec = spec.clone();
-    let plugin = b10x_loom_agent::SpecPlugin::new(spec, &arguments.state)
+    let plugin = b10x_loom_agent::SpecPlugin::new(spec, state)
         .map_err(|e| e.to_string())?
         .with_classifier(Box::new(a2a::SharedModel(Arc::clone(&classifier))))
         .with_turn_models(turn_models(Arc::clone(&model)))
@@ -195,11 +203,11 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
         // as the polling host does, until SIGTERM or SIGINT.
         let (server, socket) =
             listening.ok_or_else(|| "`expose.a2a` declares no listener".to_owned())?;
-        let held = b10x_loom_plugin::state::StateDir::open(&arguments.state, plugin.config())
+        let held = b10x_loom_plugin::state::StateDir::open(state, plugin.config())
             .map_err(|e| e.to_string())?;
         let agent = a2a::Agent {
             spec: a2a_spec,
-            state: &arguments.state,
+            state,
             classifier,
             model,
             trust,
@@ -213,7 +221,7 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
         let serving = listening.map(|(server, socket)| {
             let agent = a2a::Agent {
                 spec: a2a_spec,
-                state: &arguments.state,
+                state,
                 classifier,
                 model,
                 trust,
@@ -221,7 +229,7 @@ fn agent_serve(arguments: &AgentServeArgs, spec: loom_sdk::agent::AgentSpec) -> 
             let (a2a_stop, stop) = (&a2a_stop, &stop);
             scope.spawn(move || a2a::serve(&server, socket, agent, a2a_stop, stop))
         });
-        let ran = b10x_loom_plugin::run_plugin(&plugin, plugin.config(), &arguments.state, &stop);
+        let ran = b10x_loom_plugin::run_plugin(&plugin, plugin.config(), state, &stop);
         a2a_stop.store(true, std::sync::atomic::Ordering::SeqCst);
         let served = serving.map_or(Ok(()), |serving| {
             serving
@@ -244,16 +252,20 @@ fn agent_resume_command(arguments: &AgentResumeArgs) -> ExitCode {
         Ok(spec) => spec,
         Err(exit) => return exit,
     };
-    if let Err(error) = existing_state(&arguments.state) {
+    let state = &match agent::state_root(arguments.state.as_deref(), &spec) {
+        Ok(state) => state,
+        Err(error) => return failed(&error),
+    };
+    if let Err(error) = existing_state(state) {
         return failed(&error);
     }
-    let plugin = match b10x_loom_agent::SpecPlugin::new(spec, &arguments.state) {
+    let plugin = match b10x_loom_agent::SpecPlugin::new(spec, state) {
         Ok(plugin) => plugin,
         Err(error) => return failed(&error.to_string()),
     };
     // The state directory is held as a serving host holds it, so the two never resume one grant
     // at once; a host that holds it refuses this command.
-    let held = match b10x_loom_plugin::state::StateDir::open(&arguments.state, plugin.config()) {
+    let held = match b10x_loom_plugin::state::StateDir::open(state, plugin.config()) {
         Ok(held) => held,
         Err(error) => return failed(&error.to_string()),
     };

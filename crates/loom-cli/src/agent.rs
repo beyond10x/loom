@@ -179,3 +179,26 @@ pub fn checked_line(checked: &Checked) -> String {
 pub fn refused_line(refusal: &SpecRefused) -> String {
     printable(&format!("refused: {}", describe(refusal)))
 }
+
+/// The state directory `agent serve` and `agent resume` hold: `--state` when given, else the
+/// spec's `runtime.state_dir`, so a delivery program reading the same document and the host share
+/// one root (`story:agent-serve-state-root-from-run-file`). A relative path is relative to the
+/// working directory, as a relative `--state` is.
+///
+/// # Errors
+/// `--state` absent and the spec declares no `runtime`. A blank `runtime.state_dir` never gets
+/// here: the spec check refuses it as `BlankText`.
+pub fn state_root(given: Option<&Path>, spec: &AgentSpec) -> Result<PathBuf, String> {
+    if let Some(given) = given {
+        return Ok(given.to_path_buf());
+    }
+    let declared = spec
+        .runtime
+        .as_ref()
+        .map(|runtime| runtime.state_dir.as_str())
+        .ok_or_else(|| {
+            "--state is absent and the spec declares no `runtime.state_dir` to take it from"
+                .to_owned()
+        })?;
+    Ok(PathBuf::from(declared))
+}

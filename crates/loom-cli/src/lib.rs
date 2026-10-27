@@ -411,6 +411,9 @@ stay in the state directory, and `b10x-loom approve <COMMISSION> reply.send --st
 the host performs it at its next poll, or `agent resume` performs it now. writes.mode auto is not
 served yet; none sends nothing.
 
+The state directory is --state, or without it the spec's runtime.state_dir (a relative one is relative to the
+working directory), so a program reading the same document, such as a delivery run, shares the root.
+
 The models are the spec's `model` section (its routes document, relative to the spec, and the
 `agent` and `classifier` roles), or with --catalog the route aliases --model and --classifier-model
 name. With --once it runs one cycle and prints one line per proposal it recorded; without it, it
@@ -445,6 +448,8 @@ pub const AGENT_RESUME_HELP: &str = "Performs the send the commission's Suspensi
 reply.send --state <DIR>` wrote its grant: the write goes through the connectors command line with the
 idempotency key derived from the admitted request and the grant file as its proof, the Suspension is
 released, and the send is counted. A serving host performs granted sends itself at its next poll.
+
+The state directory is --state, or without it the spec's runtime.state_dir.
 
 Exit status:
   0  the send was performed; standard output says what Connectors answered
@@ -529,9 +534,9 @@ pub struct AgentServeArgs {
     #[arg(long, value_name = "FILE")]
     pub spec: PathBuf,
     /// The host's state directory: its cursors, record, cases, Suspensions, grants and send
-    /// counter. One host holds it at a time.
+    /// counter. One host holds it at a time. Without it, the spec's `runtime.state_dir`.
     #[arg(long, value_name = "DIR")]
-    pub state: PathBuf,
+    pub state: Option<PathBuf>,
     /// Run one cycle and stop.
     #[arg(long)]
     pub once: bool,
@@ -561,9 +566,9 @@ pub struct AgentResumeArgs {
     /// The loom.agent/1 document the host served.
     #[arg(long, value_name = "FILE")]
     pub spec: PathBuf,
-    /// The host's state directory.
+    /// The host's state directory. Without it, the spec's `runtime.state_dir`.
     #[arg(long, value_name = "DIR")]
-    pub state: PathBuf,
+    pub state: Option<PathBuf>,
 }
 
 /// The arguments of `b10x-loom agent check`.

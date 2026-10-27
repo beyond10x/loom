@@ -268,13 +268,13 @@ Exit status:
 Host the agent a loom.agent/1 spec declares: poll its channel, answer each item in a governed turn, and send a reply only as the spec's writes admit
 
 ```text
-Usage: b10x-loom agent serve [OPTIONS] --spec <FILE> --state <DIR>
+Usage: b10x-loom agent serve [OPTIONS] --spec <FILE>
 ```
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `--spec <FILE>` | yes | none | The loom.agent/1 document, YAML or JSON, in a regular file |
-| `--state <DIR>` | yes | none | The host's state directory: its cursors, record, cases, Suspensions, grants and send counter. One host holds it at a time |
+| `--state <DIR>` | no | none | The host's state directory: its cursors, record, cases, Suspensions, grants and send counter. One host holds it at a time. Without it, the spec's `runtime.state_dir` |
 | `--once` | no | `false` | Run one cycle and stop |
 | `--catalog <PATH>` | no | none | An llm catalog (`llm.catalog/1` TOML) in a regular file, instead of the spec's models: `--model` and `--classifier-model` then each name a route alias of it |
 | `--model <ID>` | no | none | The model each turn runs on: a name the spec's routes document serves, or with `--catalog` a route alias. By default the spec's `agent` role |
@@ -292,6 +292,9 @@ approval a send is held: the turn ends proposed naming its commission, the case 
 stay in the state directory, and `b10x-loom approve <COMMISSION> reply.send --state <DIR>` grants it;
 the host performs it at its next poll, or `agent resume` performs it now. writes.mode auto is not
 served yet; none sends nothing.
+
+The state directory is --state, or without it the spec's runtime.state_dir (a relative one is relative to the
+working directory), so a program reading the same document, such as a delivery run, shares the root.
 
 The models are the spec's `model` section (its routes document, relative to the spec, and the
 `agent` and `classifier` roles), or with --catalog the route aliases --model and --classifier-model
@@ -328,20 +331,22 @@ Exit status:
 Perform a held send after its approval, once
 
 ```text
-Usage: b10x-loom agent resume --spec <FILE> --state <DIR> <COMMISSION>
+Usage: b10x-loom agent resume [OPTIONS] --spec <FILE> <COMMISSION>
 ```
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `<COMMISSION>` | yes | none | The commission whose held send was approved, as the record line names it |
 | `--spec <FILE>` | yes | none | The loom.agent/1 document the host served |
-| `--state <DIR>` | yes | none | The host's state directory |
+| `--state <DIR>` | no | none | The host's state directory. Without it, the spec's `runtime.state_dir` |
 
 ```text
 Performs the send the commission's Suspension holds, once, after `b10x-loom approve <COMMISSION>
 reply.send --state <DIR>` wrote its grant: the write goes through the connectors command line with the
 idempotency key derived from the admitted request and the grant file as its proof, the Suspension is
 released, and the send is counted. A serving host performs granted sends itself at its next poll.
+
+The state directory is --state, or without it the spec's runtime.state_dir.
 
 Exit status:
   0  the send was performed; standard output says what Connectors answered

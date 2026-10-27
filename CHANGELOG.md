@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- `b10x-loom agent serve` and `agent resume` take their state directory from the spec's `runtime.state_dir` when `--state` is absent; `--state` still wins (story:agent-serve-state-root-from-run-file)
+
 ## [0.45.0] - 2026-10-27
 
 ### Changed
