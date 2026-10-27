@@ -3987,12 +3987,10 @@ mod tests {
             .open(fixture.path(), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
-        let expected = if Path::new("/usr/bin/bwrap").is_file() {
-            ConfinementRefusal::CapabilityUnserved
-        } else {
-            ConfinementRefusal::BackendMissing
-        };
-        assert_eq!(error.reason, expected, "{error}");
+        // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
+        // running launch is the refusal on every host, macOS included.
+        let expected = ConfinementRefusal::CapabilityUnserved;
+        assert_eq!(error.reason, expected, "story:substrate-0-12-pin: {error}");
         drop(launch);
     }
 
@@ -4011,12 +4009,10 @@ mod tests {
             .open(fixture.path(), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
-        let expected = if Path::new("/usr/bin/bwrap").is_file() {
-            ConfinementRefusal::CapabilityUnserved
-        } else {
-            ConfinementRefusal::BackendMissing
-        };
-        assert_eq!(error.reason, expected, "{error}");
+        // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
+        // running launch is the refusal on every host, macOS included.
+        let expected = ConfinementRefusal::CapabilityUnserved;
+        assert_eq!(error.reason, expected, "story:substrate-0-12-pin: {error}");
         drop(launch);
         assert!(
             !running().contains_key(&cgroup),
