@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-27
+
 ### Changed
 
 - **Breaking:** `b10x-loom-session-executor`: a Codex session off metaharness's pin proposes its change; its H9 `gap` stays in `SessionReport::rows` (story:metaharness-0-20-pin)
@@ -1152,7 +1154,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.44.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.45.0...HEAD
+[0.45.0]: https://github.com/beyond10x/loom/releases/tag/0.45.0
 [0.44.0]: https://github.com/beyond10x/loom/releases/tag/0.44.0
 [0.43.0]: https://github.com/beyond10x/loom/releases/tag/0.43.0
 [0.42.0]: https://github.com/beyond10x/loom/releases/tag/0.42.0
