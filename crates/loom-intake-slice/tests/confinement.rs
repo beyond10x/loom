@@ -85,14 +85,16 @@ fn real_confinement_rust_system_tools_and_cleanup() {
             Some("linux"),
             "story:substrate-0-12-pin: a Substrate launch names its adapter"
         );
-        assert!(
-            result
-                .applied
-                .facts
-                .as_ref()
-                .is_some_and(|facts| facts.iter().any(|fact| fact == "whole_tree_kill")),
-            "story:substrate-0-12-pin: a Substrate launch records the facts it proved: {:?}",
-            result.applied.facts
+        assert_eq!(
+            result.applied.facts.as_deref(),
+            Some(
+                &[
+                    "whole_tree_kill".to_owned(),
+                    "ipc_socket_allowlist".to_owned(),
+                    "ipc_signals_contained".to_owned()
+                ][..]
+            ),
+            "story:substrate-0-12-pin: a Substrate launch records exactly the facts it proved"
         );
         let record = result.driver_record.as_ref().expect("actual driver record");
         assert_eq!(record.cgroup, result.applied.cgroup);

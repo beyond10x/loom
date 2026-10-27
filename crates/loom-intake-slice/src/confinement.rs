@@ -3277,14 +3277,17 @@ fn host_program(name: &str, workspace: &Path) -> Option<PathBuf> {
 /// The families every launch needs from Substrate's `linux` adapter: a driver is admitted by the
 /// families and facts it proved when it opened, never by looking at the operating system (ADR
 /// 0109 decision 6). Missing `limits` is the delegated cgroup missing, as before; any other
-/// family is a capability the machine does not serve.
+/// family is a capability the machine does not serve. `limits` comes first: Substrate's probe
+/// withholds the floor (`process_run`, `wait`, `output_read`) together with `limits` when the
+/// cgroup is not delegated, and that driver must be refused `CgroupUndelegated`, the reason the
+/// CLI re-executes itself in a delegated scope on.
 const NEEDED_FAMILIES: [ContractFamily; 6] = [
+    ContractFamily::Limits,
     ContractFamily::ProcessRun,
     ContractFamily::Wait,
     ContractFamily::OutputRead,
     ContractFamily::Workspace,
     ContractFamily::FilesystemView,
-    ContractFamily::Limits,
 ];
 
 /// Admit a driver whose `machine` proves every family in [`NEEDED_FAMILIES`] through Substrate's
@@ -3300,7 +3303,7 @@ fn admitted_facts(
             let (reason, hint) = if family == ContractFamily::Limits {
                 (
                     ConfinementRefusal::CgroupUndelegated,
-                    "; check delegated cpu, memory and pids controllers and user namespaces",
+                    "; Substrate proves it only once bubblewrap runs with user namespaces and the cpu, memory and pids controllers are delegated",
                 )
             } else {
                 (ConfinementRefusal::CapabilityUnserved, "")
@@ -3534,10 +3537,25 @@ mod tests {
             "exec.read-only-files": {"max_files": 16},
         });
         let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
-        assert!(
-            facts.contains(&"whole_tree_kill".to_owned()),
-            "the proved facts are named in FACT_ORDER's spelling: {facts:?}"
+        assert_eq!(
+            facts,
+            [
+                "whole_tree_kill",
+                "ipc_socket_allowlist",
+                "ipc_signals_contained"
+            ],
+            "the proved facts, exactly, in FACT_ORDER's spelling"
         );
+        // A driver whose cgroup is not delegated proves no execution family at all: it is refused
+        // for `limits`, so the CLI re-executes in a delegated scope.
+        let undelegated = admitted_facts(&snapshot(serde_json::json!({})))
+            .expect_err("a driver serving nothing is refused");
+        assert_eq!(
+            undelegated.reason,
+            ConfinementRefusal::CgroupUndelegated,
+            "story:substrate-0-12-pin: {undelegated}"
+        );
+        assert!(undelegated.detail.contains("`limits`"), "{undelegated}");
         for (fact, family, reason) in [
             (
                 "exec.cgroup-limits",
