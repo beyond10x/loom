@@ -1223,7 +1223,112 @@ pub fn admit(
         ));
     }
 
+    confinement_profiles(spec, variant, config)?;
+
     Ok(admitted)
+}
+
+/// The longest `localhostProfile` the controller admits, in bytes.
+pub const MAX_PROFILE_NAME: usize = 253;
+
+/// Whether `name` is a plain profile name or path: `[A-Za-z0-9._/-]`, no leading `/`, no empty
+/// or `..` segment, at most [`MAX_PROFILE_NAME`] bytes.
+fn plain_profile_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_PROFILE_NAME
+        && !name.starts_with('/')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'))
+        && name
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "..")
+}
+
+/// Step 15: the profiles of `spec.seccompProfile` and `spec.appArmorProfile`.
+fn confinement_profiles(
+    spec: &LoomAgentSpec,
+    variant: AgentVariant,
+    config: &Config,
+) -> Result<(), Refusal> {
+    let declared = [
+        (
+            "spec.seccompProfile",
+            &spec.seccomp_profile,
+            &config.allowed_seccomp_localhost_profiles,
+            "allowedSeccompLocalhostProfiles",
+        ),
+        (
+            "spec.appArmorProfile",
+            &spec.app_armor_profile,
+            &config.allowed_app_armor_localhost_profiles,
+            "allowedAppArmorLocalhostProfiles",
+        ),
+    ];
+    for (member, profile, allowed, list) in declared {
+        let Some(profile) = profile else { continue };
+        if variant != AgentVariant::Command {
+            return Err(Refusal::new(
+                "Malformed",
+                member,
+                "only a Command resource declares a profile; an AgentServe pod keeps \
+                 RuntimeDefault",
+            ));
+        }
+        match (profile.kind.as_str(), &profile.localhost_profile) {
+            ("RuntimeDefault", None) => {}
+            ("Unconfined", None) => {
+                if !config.allow_unconfined_profiles {
+                    return Err(Refusal::new(
+                        "ProfileNotAllowed",
+                        format!("{member}.type"),
+                        "the controller's allowUnconfinedProfiles does not allow Unconfined",
+                    ));
+                }
+            }
+            ("Localhost", Some(name)) => {
+                if !plain_profile_name(name) {
+                    return Err(Refusal::new(
+                        "ProfileInvalid",
+                        format!("{member}.localhostProfile"),
+                        format!(
+                            "a profile name is [A-Za-z0-9._/-], not absolute, with no empty or \
+                             `..` segment, at most {MAX_PROFILE_NAME} bytes"
+                        ),
+                    ));
+                }
+                if !allowed.contains(name) {
+                    return Err(Refusal::new(
+                        "ProfileNotAllowed",
+                        format!("{member}.localhostProfile"),
+                        format!("the controller's {list} does not hold it"),
+                    ));
+                }
+            }
+            ("RuntimeDefault" | "Unconfined", Some(_)) => {
+                return Err(Refusal::new(
+                    "ProfileInvalid",
+                    format!("{member}.localhostProfile"),
+                    "only a Localhost profile names one",
+                ));
+            }
+            ("Localhost", None) => {
+                return Err(Refusal::new(
+                    "ProfileInvalid",
+                    format!("{member}.localhostProfile"),
+                    "a Localhost profile needs the name of the profile",
+                ));
+            }
+            _ => {
+                return Err(Refusal::new(
+                    "ProfileInvalid",
+                    format!("{member}.type"),
+                    "a profile is RuntimeDefault, Localhost or Unconfined",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1257,6 +1362,8 @@ mod tests {
             command: None,
             workspace: None,
             config_files: None,
+            seccomp_profile: None,
+            app_armor_profile: None,
         }
     }
 

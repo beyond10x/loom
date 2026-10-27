@@ -196,6 +196,26 @@ types:
       - name: availability
         type: loom.resource.DeploymentAvailability
 
+  # Which seccomp or AppArmor profile confines the program's container (story
+  # command-confinement-profiles): `RuntimeDefault`, the container runtime's own profile;
+  # `Localhost`, a profile the node holds, named by `localhost_profile` (for seccomp a path
+  # relative to the kubelet's seccomp directory, for AppArmor the loaded profile's name), which
+  # no other kind carries; `Unconfined`, no profile. Only a `Command` resource declares one, and
+  # the controller's configuration decides which it admits: `Unconfined` and every `Localhost`
+  # name only when the operator listed them.
+  - name: loom.resource.ConfinementProfileKind
+    kind: enum
+    variants: [RuntimeDefault, Localhost, Unconfined]
+
+  - name: loom.resource.ConfinementProfile
+    kind: struct
+    fields:
+      - name: type
+        type: loom.resource.ConfinementProfileKind
+      - name: localhost_profile
+        type: Optional<String>
+        naming: {wire: localhostProfile}
+
   # The resource's `spec`: the `loom.agent/1` document verbatim, required for `AgentServe` and
   # optional for `Command`; the llm `routes.yaml` inline, a
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
@@ -203,7 +223,9 @@ types:
   # bindings; the Secret the environment comes from and the one mounted as files; plain
   # environment values, in the order the container receives them; an image overriding the
   # controller's default; the program the pod runs instead of `agent serve`; a workspace
-  # volume, and the program's own configuration files, only for `Command`. Wire names are
+  # volume, the program's own configuration files, and the seccomp and AppArmor profiles of its
+  # container (a resource that declares none keeps `RuntimeDefault` seccomp and the runtime's
+  # AppArmor default), only for `Command`. Wire names are
   # Kubernetes's.
   - name: loom.resource.LoomAgentSpec
     kind: struct
@@ -232,6 +254,12 @@ types:
       - name: config_files
         type: Optional<List<loom.resource.ConfigFile>>
         naming: {wire: configFiles}
+      - name: seccomp_profile
+        type: Optional<loom.resource.ConfinementProfile>
+        naming: {wire: seccompProfile}
+      - name: app_armor_profile
+        type: Optional<loom.resource.ConfinementProfile>
+        naming: {wire: appArmorProfile}
 
 entities:
   # One `LoomAgent` resource as the controller holds it. `observed_generation` is the

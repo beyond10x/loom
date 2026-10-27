@@ -907,7 +907,7 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 `defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
-admits none). One instance watches one namespace with one replica; there is no leader election.
+admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 15, `crates/loom-operator/tests/command_confinement_profiles.rs`). One instance watches one namespace with one replica; there is no leader election.
 
 The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
 applied again at its cluster generation and checked again. The record is keyed by name, so the

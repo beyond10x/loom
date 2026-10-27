@@ -14,6 +14,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [0.46.0] - 2026-10-27
 
+### Added
+
+- A `Command` `LoomAgent` declares the seccomp and AppArmor profile of its program's container: `spec.seccompProfile` and `spec.appArmorProfile`, each `{type: RuntimeDefault|Localhost|Unconfined, localhostProfile?}`, rendered in the program container's `securityContext` (the init containers and every resource that declares none keep today's profiles). The controller's configuration decides what it admits: `allowUnconfinedProfiles` (default `false`), `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles`, also chart values; a refusal is `ProfileNotAllowed` or `ProfileInvalid`, and a profile on an `AgentServe` resource is `Malformed` (story:command-confinement-profiles)
+- **Breaking:** `b10x_loom_operator::resource::LoomAgentSpec` and `config::Config` gain members (`seccompProfile`, `appArmorProfile`; `allowUnconfinedProfiles`, `allowedSeccompLocalhostProfiles`, `allowedAppArmorLocalhostProfiles`), and `b10x_loom_resource::model::LoomAgentSpec` gains the two profiles, so a struct literal of them adds them (story:command-confinement-profiles)
+
 ### Changed
 
 - **Breaking:** `intake.confinement.AppliedConfinement` (`loom_sdk::intake::slice::confinement::AppliedConfinement`) gains `adapter` and `facts`: a Substrate launch records the adapter it ran under (`linux`) and the facts it proved, in the struct and as `adapter` and `facts` in its `tests.run` observation's `confinement`, an unconfined one neither, and a struct literal must name both. Records written before still read (story:substrate-0-12-pin)
