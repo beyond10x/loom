@@ -1489,7 +1489,14 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
   refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.
 
-The injected `TestRunner` defaults to Substrate 0.10.0, with host and wire pinned together.
+The injected `TestRunner` defaults to the pinned Substrate release (`crates/loom-intake-slice/Cargo.toml`),
+with host and wire pinned together. A driver is admitted by the families its contract's `linux` adapter
+proves when it opens (`confinement::linux::proof`, ADR 0109), never by an operating-system check: one
+missing `limits` is refused `CgroupUndelegated`, one missing `process_run`, `wait`, `output_read`,
+`workspace` or `filesystem_view` `CapabilityUnserved`, each naming `confinement.family-unserved` and the
+family (`a_driver_missing_a_family_is_refused_naming_it`). Every Substrate launch records
+`AppliedConfinement::adapter` (`linux`) and `facts` (the proved facts, in `FACT_ORDER`); an unconfined
+launch records neither.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
 under `target/`, and resource bounds. Mount dependency-cache subdirectories only; never Cargo's
 credential/config files or the operator's home. Dependencies are prefetched explicitly by the
@@ -1609,7 +1616,7 @@ as is one naming an execution capsule or its filesystem, or a single aperture na
 address (`security_a_record_naming_an_unrequested_capsule_is_refused`,
 `security_a_single_aperture_record_naming_a_listen_address_is_refused`); `check_record` takes
 the record apart without `..`, so a member a later Substrate adds does not compile until judged.
-What remains after the check: Substrate 0.10.0's admission opens each root and file once,
+What remains after the check: Substrate's admission opens each root and file once,
 refusing a link at any component (`openat2` with `RESOLVE_NO_SYMLINKS`), and bubblewrap binds
 the descriptor it opened (`--ro-bind-fd`; Substrate's `crates/substrate-host/src/read_only_roots.rs`
 and `read_only_files.rs`), so only a directory or regular file put in its place between Loom's
@@ -1617,7 +1624,7 @@ check and that admission is bound; nothing swapped after admission is. A root is
 child alone: one under a directory another confined child may write can change while it is read.
 `ChildCommand::sandbox_path` maps a host path to the workspace (`/workspace/...`), a root's mount
 or a file's mount, never a path with `..`, through a link, or sharing only a text prefix. Substrate
-0.10.0 offers writable roots; Loom requests none (`story:writable-host-root`), so a child writes
+offers writable roots; Loom requests none (`story:writable-host-root`), so a child writes
 only in its workspace. A host may declare all of this as one value, `intake.confinement.ConfinementSpec`
 (`story:confinement-spec`): `ChildCommand::confined(&spec)` (`confinement/spec.rs`) applies each
 field through its builder, so the launch checks it as it checks the builder calls, refuses a

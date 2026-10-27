@@ -270,7 +270,8 @@ impl ConfinedChild {
             &self.open.egress.apertures,
             self.digest.clone(),
             Ending::from(observed),
-        )?;
+        )
+        .map(|launched| self.open.adapted(launched))?;
         live_result(launched, self.signalled)
     }
 }

@@ -64,6 +64,11 @@ types:
       - {name: read_only_roots, type: "List<intake.confinement.ToolchainRoot>"}
       - {name: read_only_files, type: "List<intake.confinement.ReadOnlyFile>"}
       - {name: workdir, type: "Optional<String>"}
+      # The Substrate confinement adapter the run went through (ADR 0109) and the facts it proved at
+      # open, in Substrate's FACT_ORDER spelling. Both are absent on an unconfined run, and on a
+      # record written before Loom read them.
+      - {name: adapter, type: "Optional<String>"}
+      - {name: facts, type: "Optional<List<String>>"}
   - name: intake.confinement.ChildStream
     kind: enum
     variants: [Stdout, Stderr]

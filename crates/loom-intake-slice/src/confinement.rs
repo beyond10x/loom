@@ -6,7 +6,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+use std::os::unix::fs::MetadataExt as _;
+#[cfg(test)]
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +31,7 @@ use sha2::{Digest as _, Sha256};
 /// host and port the host names, the address that host was resolved to and an optional byte
 /// ceiling.
 pub use substrate_host::EgressAperture;
+use substrate_host::confinement::{ContractFamily, FACT_ORDER, FAMILY_UNSERVED};
 use substrate_host::{DispatchOutcome, Driver as _, ExecObservation, HostConfig, HostDriver};
 /// The most egress apertures one child reaches ([`ChildCommand::with_egress`]), Substrate's own
 /// limit.
@@ -238,9 +241,22 @@ fn driver_config(
 /// state directory.
 struct OpenDriver {
     driver: Arc<HostDriver>,
+    /// The facts Substrate's `linux` adapter proved for this driver when it opened, in
+    /// `FACT_ORDER`'s spelling ([`admitted_facts`]); every launch on it records them.
+    adapter_facts: Vec<String>,
     cgroup_root: PathBuf,
     egress: DriverEgress,
     state: tempfile::TempDir,
+}
+
+impl OpenDriver {
+    /// `launched`, settled on this driver, recording the adapter it ran under, Substrate's `linux`,
+    /// and the facts that adapter proved when this driver opened.
+    fn adapted(&self, mut launched: Launched) -> Launched {
+        launched.execution.applied.adapter = Some("linux".to_owned());
+        launched.execution.applied.facts = Some(self.adapter_facts.clone());
+        launched
+    }
 }
 
 /// The confined launches running in this process, by cgroup root, over every runner.
@@ -348,7 +364,6 @@ impl SubstrateRunner {
             .tempdir()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
         let mut config = driver_config(parent, state.path(), egress)?;
-        validate_backend(&config.bubblewrap)?;
         // One root has one name: the count of running launches is keyed by it, however the host
         // spelled the root.
         let cgroup_root = self
@@ -391,13 +406,9 @@ impl SubstrateRunner {
             )
         })?;
         drop(running);
-        let facts = driver.machine().facts;
-        if facts.exec_cgroup_limits.is_none() {
-            return Err(refuse(
-                ConfinementRefusal::CgroupUndelegated,
-                "Substrate did not establish cgroup execution capability; check delegated cpu, memory and pids controllers and user namespaces",
-            ));
-        }
+        let machine = driver.machine();
+        let adapter_facts = admitted_facts(&machine)?;
+        let facts = machine.facts;
         if facts.exec_no_egress != Some(true) || facts.exec_workspace_scoped_write != Some(true) {
             return Err(refuse(
                 ConfinementRefusal::CapabilityUnserved,
@@ -432,6 +443,7 @@ impl SubstrateRunner {
         }
         Ok(OpenDriver {
             driver,
+            adapter_facts,
             cgroup_root,
             egress: egress.clone(),
             state,
@@ -569,6 +581,7 @@ impl SubstrateRunner {
             prepared.digest,
             Ending::from(observed),
         )
+        .map(|launched| open.adapted(launched))
     }
 
     /// Start `session` in the adopted workspace as a Substrate raw-pipe session, write `stdin` to
@@ -669,6 +682,7 @@ impl SubstrateRunner {
             prepared.digest,
             Ending::from(observed),
         )
+        .map(|launched| open.adapted(launched))
     }
 }
 
@@ -846,6 +860,9 @@ fn settle(
         read_only_roots: roots_projection(&record.read_only_roots),
         read_only_files: files_projection(&record.read_only_files),
         workdir: record.workdir.clone(),
+        // Named by the driver that settled the launch (`OpenDriver::adapted`); absent until then.
+        adapter: None,
+        facts: None,
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -3257,14 +3274,63 @@ fn host_program(name: &str, workspace: &Path) -> Option<PathBuf> {
         .find(|p| p.is_file() && !p.starts_with(workspace))
 }
 
-fn validate_backend(path: &Path) -> Result<(), ConfinementError> {
-    if !std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0) {
-        return Err(refuse(
-            ConfinementRefusal::BackendMissing,
-            "Substrate requires executable /usr/bin/bwrap",
-        ));
+/// The families every launch needs from Substrate's `linux` adapter: a driver is admitted by the
+/// families and facts it proved when it opened, never by looking at the operating system (ADR
+/// 0109 decision 6). Missing `limits` is the delegated cgroup missing, as before; any other
+/// family is a capability the machine does not serve.
+const NEEDED_FAMILIES: [ContractFamily; 6] = [
+    ContractFamily::ProcessRun,
+    ContractFamily::Wait,
+    ContractFamily::OutputRead,
+    ContractFamily::Workspace,
+    ContractFamily::FilesystemView,
+    ContractFamily::Limits,
+];
+
+/// Admit a driver whose `machine` proves every family in [`NEEDED_FAMILIES`] through Substrate's
+/// `linux` adapter, and answer the facts it proved, in `FACT_ORDER`; a family it lacks is refused
+/// naming `confinement.family-unserved` and the family.
+#[cfg(target_os = "linux")]
+fn admitted_facts(
+    machine: &substrate_wire::CapabilitySnapshot,
+) -> Result<Vec<String>, ConfinementError> {
+    let proved = substrate_host::confinement::linux::proof(machine);
+    for family in NEEDED_FAMILIES {
+        if !proved.serves(&family) {
+            let (reason, hint) = if family == ContractFamily::Limits {
+                (
+                    ConfinementRefusal::CgroupUndelegated,
+                    "; check delegated cpu, memory and pids controllers and user namespaces",
+                )
+            } else {
+                (ConfinementRefusal::CapabilityUnserved, "")
+            };
+            return Err(refuse(
+                reason,
+                format!(
+                    "{FAMILY_UNSERVED}: Substrate's linux adapter does not serve `{}` on this machine{hint}",
+                    enum_name(&family)
+                ),
+            ));
+        }
     }
-    Ok(())
+    Ok(FACT_ORDER
+        .iter()
+        .filter(|fact| proved.proves(fact))
+        .map(enum_name)
+        .collect())
+}
+
+/// Off Linux there is no `linux` adapter, so no driver is admitted (Substrate's own driver refuses
+/// to open there first).
+#[cfg(not(target_os = "linux"))]
+fn admitted_facts(
+    _machine: &substrate_wire::CapabilitySnapshot,
+) -> Result<Vec<String>, ConfinementError> {
+    Err(refuse(
+        ConfinementRefusal::BackendMissing,
+        "Substrate's linux adapter serves Linux only",
+    ))
 }
 
 fn validate_toolchain(toolchain: &Path, installed: &Path) -> Result<(), ConfinementError> {
@@ -3431,20 +3497,84 @@ pub fn prepare_delegated_cgroup() -> Result<PathBuf, ConfinementError> {
 mod tests {
     use super::*;
 
+    /// story:substrate-0-12-pin: the operating-system check for `/usr/bin/bwrap` gave way to the
+    /// families Substrate's `linux` adapter proves; a driver missing one is refused naming it.
+    #[cfg(target_os = "linux")]
     #[test]
-    fn missing_or_nonexecutable_backend_is_named() {
-        let root = tempfile::tempdir().unwrap();
-        let backend = root.path().join("bwrap");
-        assert_eq!(
-            validate_backend(&backend).unwrap_err().reason,
-            ConfinementRefusal::BackendMissing
+    fn a_driver_missing_a_family_is_refused_naming_it() {
+        let snapshot = |exec: serde_json::Value| -> substrate_wire::CapabilitySnapshot {
+            let mut facts = serde_json::json!({
+                "operation.ledger-subject-max-rows": 1,
+                "operation.ledger-subject-max-bytes": 1,
+                "operation.ledger-global-max-rows": 1,
+                "operation.ledger-global-max-bytes": 1,
+            });
+            facts
+                .as_object_mut()
+                .unwrap()
+                .extend(exec.as_object().unwrap().clone());
+            serde_json::from_value(serde_json::json!({
+                "snapshot": "cap_1",
+                "driver": "host",
+                "driver_version": "0",
+                "config_generation": 1,
+                "probed_at": "2026-10-27T00:00:00Z",
+                "facts": facts,
+            }))
+            .unwrap()
+        };
+        let served = serde_json::json!({
+            "exec.argv-only": true,
+            "exec.namespaces": {"user": true, "mount": true, "pid": true, "ipc": true, "uts": true, "network": true},
+            "exec.cgroup-limits": {"processes": true, "memory": true, "cpu": true},
+            "exec.cgroup-kill": true,
+            "exec.output-limit-bytes": 1_048_576,
+            "workspace.guarded-io": true,
+            "exec.read-only-roots": {"max_roots": 4},
+            "exec.read-only-files": {"max_files": 16},
+        });
+        let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
+        assert!(
+            facts.contains(&"whole_tree_kill".to_owned()),
+            "the proved facts are named in FACT_ORDER's spelling: {facts:?}"
         );
-        std::fs::write(&backend, "not executable").unwrap();
-        std::fs::set_permissions(&backend, std::fs::Permissions::from_mode(0o600)).unwrap();
-        assert_eq!(
-            validate_backend(&backend).unwrap_err().reason,
-            ConfinementRefusal::BackendMissing
-        );
+        for (fact, family, reason) in [
+            (
+                "exec.cgroup-limits",
+                "limits",
+                ConfinementRefusal::CgroupUndelegated,
+            ),
+            (
+                "exec.argv-only",
+                "process_run",
+                ConfinementRefusal::CapabilityUnserved,
+            ),
+            (
+                "exec.output-limit-bytes",
+                "output_read",
+                ConfinementRefusal::CapabilityUnserved,
+            ),
+            (
+                "workspace.guarded-io",
+                "workspace",
+                ConfinementRefusal::CapabilityUnserved,
+            ),
+            (
+                "exec.read-only-roots",
+                "filesystem_view",
+                ConfinementRefusal::CapabilityUnserved,
+            ),
+        ] {
+            let mut exec = served.clone();
+            exec.as_object_mut().unwrap().remove(fact);
+            let error =
+                admitted_facts(&snapshot(exec)).expect_err("a driver missing a family is refused");
+            assert_eq!(error.reason, reason, "{fact}: {error}");
+            assert!(
+                error.detail.contains(FAMILY_UNSERVED) && error.detail.contains(family),
+                "{fact}: the refusal names the family: {error}"
+            );
+        }
     }
 
     #[test]
@@ -3890,6 +4020,8 @@ mod tests {
             read_only_roots: Vec::new(),
             read_only_files: Vec::new(),
             workdir: None,
+            adapter: None,
+            facts: None,
         }
     }
 

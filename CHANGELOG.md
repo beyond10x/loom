@@ -12,6 +12,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `intake.confinement.AppliedConfinement` (`loom_sdk::intake::slice::confinement::AppliedConfinement`) gains `adapter` and `facts`: a Substrate launch records the adapter it ran under (`linux`) and the facts it proved, in the struct and as `adapter` and `facts` in its `tests.run` observation's `confinement`, an unconfined one neither, and a struct literal must name both. Records written before still read (story:substrate-0-12-pin)
+- `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.10.0` to the release after `0.12.0`, which carries the confinement contract (ADR 0109); `SubstrateRunner` admits a driver by the families the contract's `linux` adapter proves, refusing one that lacks a family by its name (`confinement.family-unserved`), and no longer checks for `/usr/bin/bwrap` itself (story:substrate-0-12-pin)
+- `b10x-loom-session-executor` builds against the metaharness release that admits the Harness on the newest Substrate (story:substrate-0-12-pin)
+
 ## [0.45.0] - 2026-10-27
 
 ### Changed

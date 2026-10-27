@@ -1188,6 +1188,9 @@ impl TestRunner for UnconfinedRunner {
                 read_only_roots: Vec::new(),
                 read_only_files: Vec::new(),
                 workdir: None,
+                // No Substrate adapter ran this, so none is named.
+                adapter: None,
+                facts: None,
             },
             driver_record: None,
             child_output: finished.child_output,
@@ -1205,7 +1208,7 @@ pub fn backend_name(backend: Backend) -> &'static str {
 
 fn observation_confinement(execution: &TestExecution) -> Value {
     let applied = &execution.applied;
-    let record = serde_json::json!({
+    let mut record = serde_json::json!({
         "backend": backend_name(applied.backend),
         "profile_digest": applied.profile_digest,
         "capability_snapshot": applied.capability_snapshot,
@@ -1221,6 +1224,14 @@ fn observation_confinement(execution: &TestExecution) -> Value {
         ).collect::<Vec<_>>(),
         "driver_record": execution.driver_record,
     });
+    // story:substrate-0-12-pin: a launch Substrate's `linux` adapter admitted names the adapter
+    // and the facts it proved; an unconfined launch, and every record written before, has neither.
+    if let Some(adapter) = &applied.adapter {
+        record["adapter"] = serde_json::json!(adapter);
+    }
+    if let Some(facts) = &applied.facts {
+        record["facts"] = serde_json::json!(facts);
+    }
     fn convert(value: serde_json::Value) -> Value {
         match value {
             serde_json::Value::Null => Value::Null,
@@ -1756,5 +1767,34 @@ mod tests {
         assert_eq!(child.wait().unwrap().code(), Some(3));
         let why = kill_group(&mut child).unwrap_err();
         assert!(why.to_string().contains("already reaped"), "{why}");
+    }
+
+    /// story:substrate-0-12-pin acceptance 4: the observation of a launch names the adapter and
+    /// the facts it proved only when an adapter ran it; an unconfined launch names neither.
+    #[test]
+    fn a_launch_records_the_adapter_and_its_facts_only_when_one_ran_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut execution = UnconfinedRunner
+            .run(&TestCommand::new("true", Vec::<String>::new()), root.path())
+            .unwrap();
+        let unconfined = observation_confinement(&execution);
+        assert_eq!(
+            (unconfined.member("adapter"), unconfined.member("facts")),
+            (None, None),
+            "story:substrate-0-12-pin: an unconfined launch names no adapter: {unconfined:?}"
+        );
+        execution.applied.adapter = Some("linux".to_owned());
+        execution.applied.facts = Some(vec!["whole_tree_kill".to_owned()]);
+        let adapted = observation_confinement(&execution);
+        assert_eq!(
+            adapted.member("adapter"),
+            Some(&Value::Text("linux".to_owned()))
+        );
+        assert_eq!(
+            adapted.member("facts"),
+            Some(&Value::Array(vec![Value::Text(
+                "whole_tree_kill".to_owned()
+            )]))
+        );
     }
 }

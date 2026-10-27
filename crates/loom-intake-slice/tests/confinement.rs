@@ -80,6 +80,20 @@ fn real_confinement_rust_system_tools_and_cleanup() {
         assert_eq!(result.applied.backend, Backend::Substrate);
         assert_eq!(result.applied.network, Some(Vec::new()));
         assert_eq!(result.applied.writable_scopes, ["target"]);
+        assert_eq!(
+            result.applied.adapter.as_deref(),
+            Some("linux"),
+            "story:substrate-0-12-pin: a Substrate launch names its adapter"
+        );
+        assert!(
+            result
+                .applied
+                .facts
+                .as_ref()
+                .is_some_and(|facts| facts.iter().any(|fact| fact == "whole_tree_kill")),
+            "story:substrate-0-12-pin: a Substrate launch records the facts it proved: {:?}",
+            result.applied.facts
+        );
         let record = result.driver_record.as_ref().expect("actual driver record");
         assert_eq!(record.cgroup, result.applied.cgroup);
         assert!(
