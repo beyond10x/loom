@@ -266,7 +266,7 @@ $ b10x-loom agent check --spec ess/scenarios/agent-check/specs/unknown-action.ya
 b10x-loom: refused: UnknownAction at states[0].actions[2]: reply.escalate
 ```
 
-`b10x-loom agent serve --spec <FILE> --state <DIR> [--once]` hosts the agent a checked spec
+`b10x-loom agent serve --spec <FILE> [--state <DIR>] [--once]` hosts the agent a checked spec
 declares: the plugin host over the spec, polling only the channels `channel.allow` lists through
 its `connectors` channel binding, classifying each item and answering it in a governed turn on the
 inner loop's protocol under the state whose `when` names the intent, with exactly
