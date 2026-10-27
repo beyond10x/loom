@@ -33,7 +33,7 @@ use b10x_loom_intake_slice::confinement::{
 };
 use b10x_loom_intake_slice::executor::TestCommand;
 use substrate_wire::{APERTURE_CA_BUNDLE_PATH, ApertureMechanism, AppliedNetwork};
-use support::{bubblewrap_present, skip};
+use support::skip;
 
 /// A variable the process that launches the child holds and the host never names.
 const UNNAMED: &str = "LOOM_CONFINED_CHILD_UNNAMED";
@@ -118,11 +118,7 @@ fn a_missing_guarantee_is_a_typed_refusal() {
     let error = SubstrateRunner::new(Some(fixture.path().to_owned()))
         .run_child(&child)
         .unwrap_err();
-    let expected = if bubblewrap_present() {
-        ConfinementRefusal::CgroupUndelegated
-    } else {
-        ConfinementRefusal::BackendMissing
-    };
+    let expected = past_every_check();
     assert_eq!(error.reason, expected, "{error}");
     assert!(
         !workspace.join("target/ran").exists(),
@@ -430,11 +426,7 @@ fn a_writable_path_outside_the_workspace_or_through_a_link_is_refused() {
     let error = runner
         .run_child(&child().with_writable("scratch"))
         .unwrap_err();
-    let expected = if bubblewrap_present() {
-        ConfinementRefusal::CgroupUndelegated
-    } else {
-        ConfinementRefusal::BackendMissing
-    };
+    let expected = past_every_check();
     assert_eq!(error.reason, expected, "{error}");
     assert!(!ran.exists(), "nothing ran");
 }
@@ -1173,11 +1165,7 @@ fn a_ca_bundle_the_host_cannot_name_is_refused_before_anything_starts() {
     }
     assert!(!ran.exists(), "nothing ran");
 
-    let expected = if bubblewrap_present() {
-        ConfinementRefusal::CgroupUndelegated
-    } else {
-        ConfinementRefusal::BackendMissing
-    };
+    let expected = past_every_check();
     for accepted in [&bundle, &largest] {
         let error = runner
             .run_child(&child().with_ca_bundle(accepted))
@@ -1562,13 +1550,12 @@ fn text(path: &Path) -> String {
 }
 
 /// The refusal a launch gets once every check before the driver passed, on a runner whose cgroup
-/// root is no cgroup: the missing cgroup, or the missing backend.
+/// root is no cgroup: the missing cgroup.
+///
+/// story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so a host
+/// without bubblewrap (macOS) is refused for the cgroup too, never `BackendMissing` first.
 fn past_every_check() -> ConfinementRefusal {
-    if bubblewrap_present() {
-        ConfinementRefusal::CgroupUndelegated
-    } else {
-        ConfinementRefusal::BackendMissing
-    }
+    ConfinementRefusal::CgroupUndelegated
 }
 
 /// A child given `refused`, which the launch refuses `ScopeInvalid` before anything starts, naming
