@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T20:49:23Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-partial-runspec",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-session-executor --test partial_runspec --test from_spec",
+    "reference": "red with fn spec ignoring the overrides (a_partial_runspec_overrides_the_kind_defaults, from_spec_applies_the_specs_overrides failed) vs green 5/5 and 7/7 at 8b7f09ad1 and on aa0d4c427"
+  }
+}

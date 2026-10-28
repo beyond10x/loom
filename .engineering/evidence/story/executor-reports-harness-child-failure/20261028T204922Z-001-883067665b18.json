@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T20:49:22Z",
+  "actor": "human:timo",
+  "artifact": "story:executor-reports-harness-child-failure",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-session-executor --test harness_child_failure --test lineage",
+    "reference": "red on the cherry-picked base (4 failed at the row-count assert: a_failed_harness_child_records_its_cause and 3 more) vs green 16/16 at ab113ee73 and on aa0d4c427"
+  }
+}

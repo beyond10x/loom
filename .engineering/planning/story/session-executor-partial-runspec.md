@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:session-executor-partial-runspec
 kind: story
-status: active
+status: implemented
 title: The session executor merges a caller's partial RunSpec over its per-kind defaults
 summary: effort, budget, strict version and context reach metaharness; takt's partial-runspec blocker is the consumer
 relations:
@@ -25,10 +25,11 @@ scope:
   path: ess/domains/agent.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 13
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T19:13:18Z", actor: "human:timo", revision: 12}
 - {from: "proposed", to: "active", at: "2026-10-28T19:13:18Z", actor: "human:timo", revision: 13}
+- {from: "active", to: "implemented", at: "2026-10-28T20:49:47Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
@@ -97,6 +98,14 @@ names effort).
   sees argv, env and config, not the `RunSpec` (`metaharness/src/process.rs:42-93`) — cited
 - `crates/loom-sdk/src/agent.rs:40-46` re-exports `SessionSpec` — cited
 - AGENTS.md § Session executor, CHANGELOG.md — inferred
+
+Confirmed at the wave's close (the u2 implementor's table, 2026-10-28): every line above right; the
+inferred tests, AGENTS.md and CHANGELOG lines right. Also touched:
+
+- `crates/loom-session-executor/tests/partial_runspec.rs` (new), `from_spec.rs`, `adv_q13_metaharness_pin.rs`, `adversary_w20261023w1_u2.rs` — cited
+- `crates/loom-sdk/tests/agent_spec.rs`, `deploy/crd/loomagents.loom.beyond10x.dev.yaml` — cited
+- README.md (the crate row), `website/data/status.json` — cited
+- b10x-harness has no reader for effort or budget (was medium confidence): confirmed; metaharness does not refuse them, so Loom does — cited
 
 ## Out of scope
 

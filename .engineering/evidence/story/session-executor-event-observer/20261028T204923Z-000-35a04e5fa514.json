@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T20:49:23Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-event-observer",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-session-executor --test event_observer",
+    "reference": "takt's report: 4 red before with_observer, 4 green at f04853c9e; green on aa0d4c427"
+  }
+}

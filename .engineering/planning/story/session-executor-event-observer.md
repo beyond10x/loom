@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:session-executor-event-observer
 kind: story
-status: active
+status: implemented
 title: A caller of the session executor sees each metaharness event while the session runs
 summary: SessionExecutor::with_observer hands each event and the session's copy to the caller, in transcript order; takt prints a harness step live
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:O3
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T20:04:34Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-28T20:04:35Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-10-28T20:49:47Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}}
 ---
 ## Outcome
 
