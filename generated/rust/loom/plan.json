@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb",
-    "contract_digest": "3ce28af44fafd999458bb0325769aa0e54a1d4b0f1cd78c5fabe64beca214063"
+    "source_digest": "9cec9c3c2e445f734256674d6a028fa1ac291ff09f2d6dc173d78cfd492469e9",
+    "contract_digest": "cf6fa784fb9cdfae736c626f5e9e11d58eabef02604ce2fe35a49237718f7cd7"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1055,6 +1055,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.session.ChildEnd",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.session.CommissionId",
       "disposition": {
         "disposition": "generated"
@@ -1070,6 +1077,13 @@
     {
       "kind": "domain_type",
       "source": "loom.session.FrontierId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.session.SessionFailure",
       "disposition": {
         "disposition": "generated"
       }
@@ -1526,6 +1540,25 @@
       }
     },
     {
+      "kind": "command_contract",
+      "source": "loom.session.RecordFailedSession",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.session.RecordFailedSession",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "`creates:` leaving the required field `files` of `loom.session.AgentSession` undetermined, in `failed`"
+        },
+        "contract": "given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed`"
+      }
+    },
+    {
       "kind": "event_type",
       "source": "loom.resource.LoomAgentApplied",
       "disposition": {
@@ -1654,6 +1687,13 @@
     {
       "kind": "event_type",
       "source": "loom.session.SessionChangeProposed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.session.SessionFailed",
       "disposition": {
         "disposition": "generated"
       }

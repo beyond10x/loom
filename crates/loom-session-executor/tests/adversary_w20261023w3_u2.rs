@@ -298,8 +298,9 @@ fn adversary_a_failed_start_keeps_the_predecessor() {
     assert_eq!(rows[0].continues, Some(first.session_id));
 }
 
-/// Holds: a session that ran but whose step suspended (the workspace changed under it) records
-/// nothing and keeps the predecessor.
+/// Holds: a session that ran but whose step suspended (the workspace changed under it) is
+/// recorded as failed, naming the predecessor, and keeps the predecessor for the next call
+/// (story:executor-reports-harness-child-failure; it recorded nothing before).
 #[test]
 fn adversary_a_session_suspended_after_it_ran_keeps_the_predecessor() {
     let fixture = Fixture::new("suspended");
@@ -310,7 +311,10 @@ fn adversary_a_session_suspended_after_it_ran_keeps_the_predecessor() {
     };
     let executor = fixture.executor(&script).continuing(&first);
     suspends(&executor, &commission(COMMISSION));
-    assert!(executor.sessions().is_empty(), "{:#?}", executor.sessions());
+    let failed = executor.sessions();
+    assert_eq!(failed.len(), 1, "{failed:#?}");
+    assert!(failed[0].failure.is_some(), "{failed:#?}");
+    assert_eq!(failed[0].continues, Some(first.session_id.clone()));
     std::fs::write(
         fixture.workspace.join("src/lib.rs"),
         "pub fn add(a: i32, b: i32) -> i32 {\n    a - b\n}\n",
@@ -318,8 +322,9 @@ fn adversary_a_session_suspended_after_it_ran_keeps_the_predecessor() {
     .expect("restore the workspace");
     proposes(&executor, &commission(COMMISSION));
     let rows = executor.sessions();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].continues, Some(first.session_id));
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1].failure, None, "the retry proposed");
+    assert_eq!(rows[1].continues, Some(first.session_id));
 }
 
 /// Holds: a refusal for another commission consumes nothing; the next call for the

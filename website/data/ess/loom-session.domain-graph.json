@@ -40,6 +40,10 @@
         {
           "name": "files",
           "type": "List<ChangedFile>"
+        },
+        {
+          "name": "failure",
+          "type": "Optional<SessionFailure>"
         }
       ],
       "id": "loom.session.AgentSession",

@@ -537,7 +537,8 @@ fn a_session_change_returns_as_a_proposed_action() {
 }
 
 /// A session that changed nothing proposes an empty list of files, and a session that fails
-/// proposes nothing, is no record and suspends for `ExternalAvailability`.
+/// proposes nothing, suspends for `ExternalAvailability` and is recorded as failed: no action, no
+/// files, a `failure`.
 #[test]
 fn an_empty_session_proposes_no_files_and_a_failed_one_suspends() {
     let fixture = Fixture::new("empty");
@@ -571,10 +572,11 @@ fn an_empty_session_proposes_no_files_and_a_failed_one_suspends() {
         "{:?}",
         step.outcome
     );
-    assert!(
-        executor.sessions().is_empty(),
-        "a failed session is no record"
-    );
+    let rows = executor.sessions();
+    assert_eq!(rows.len(), 1, "a failed session is recorded: {rows:?}");
+    assert!(rows[0].failure.is_some(), "with its failure: {rows:?}");
+    assert_eq!(rows[0].action, "", "naming no action");
+    assert!(rows[0].files.is_empty(), "and no file");
     assert!(executor.proposed().is_empty());
 }
 
@@ -654,7 +656,8 @@ fn a_concurrent_workspace_write_refuses_the_stale_proposal() {
 
 /// A file the session changed that was also written in the workspace while it ran, or a file it
 /// added that now exists there, makes the call propose nothing: it suspends for
-/// `ExternalAvailability` naming the path, is no record, and the concurrent write stands.
+/// `ExternalAvailability` naming the path, is recorded as failed with no files, and the
+/// concurrent write stands.
 #[test]
 fn a_concurrent_write_to_a_file_the_session_changed_suspends_the_step() {
     let fixture = Fixture::new("stale");
@@ -677,10 +680,14 @@ fn a_concurrent_write_to_a_file_the_session_changed_suspends_the_step() {
             other => panic!("{path}: a stale change was not refused: {other:?}"),
         };
         assert!(why.contains(path), "{path}: {why}");
-        assert!(
-            executor.sessions().is_empty(),
-            "{path}: a stale change is no record"
+        let rows = executor.sessions();
+        assert_eq!(
+            rows.len(),
+            1,
+            "{path}: a stale change is recorded: {rows:?}"
         );
+        assert!(rows[0].failure.is_some(), "{path}: as failed: {rows:?}");
+        assert!(rows[0].files.is_empty(), "{path}: proposing no file");
         assert!(executor.proposed().is_empty());
         assert_eq!(
             std::fs::read_to_string(fixture.workspace.join(path)).expect("the file"),

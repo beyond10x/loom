@@ -1,4 +1,11 @@
-//! `loom.session.ProposeSessionChange`, answered by `b10x-loom-session-executor`.
+//! `loom.session.ProposeSessionChange` and `loom.session.RecordFailedSession`, answered by
+//! `b10x-loom-session-executor`.
+//!
+//! `RecordFailedSession` runs a scripted Claude Code session that opens and ends as the input's
+//! `failure` says, with no reply and no terminal record ([`Failing`]): its exit status or signal,
+//! or none measured, and the input's stderr tail on its stderr. The executor suspends the step and
+//! records the session as failed; what is published is the `SessionFailed` it returned and the
+//! rows it holds.
 //!
 //! The executor records a session only by running one, so this target runs one: a
 //! `SessionExecutor` of `Kind::Claude` over a workspace made for the invocation, its session a
@@ -29,14 +36,15 @@ use b10x_loom_commission::model::responsibility::{
     CommissionId, ExecutorOutcome, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor as _;
+use b10x_loom_session_executor::metaharness::protocol::ProcessTermination;
 use b10x_loom_session_executor::metaharness::{
-    HarnessProcess, LaunchPlanView, ScriptedLog, ScriptedRunner,
+    HarnessProcess, LaunchPlanView, ProcessPoll, ScriptedLog, ScriptedRunner,
 };
 use b10x_loom_session_executor::model::agent::{AgentId, ToolPolicy};
 use b10x_loom_session_executor::model::primitives::Uuid as SessionUuid;
 use b10x_loom_session_executor::model::session::{
-    AgentSessionState, AgentSessions, ChangedFile, CommissionId as SessionCommissionId,
-    FrontierId as SessionFrontierId, SessionId, SessionKind,
+    AgentSessionState, AgentSessions, ChangedFile, ChildEnd, CommissionId as SessionCommissionId,
+    FrontierId as SessionFrontierId, SessionFailure, SessionId, SessionKind,
 };
 use b10x_loom_session_executor::{
     CredentialSource, Kind, ProcessRunner, SessionExecutor, ToolPolicyDefaults as _,
@@ -50,6 +58,11 @@ use crate::{Live, event, took};
 pub(crate) const PROPOSE_SESSION_CHANGE: &str = "loom.session.ProposeSessionChange";
 pub(crate) const SESSION_CHANGE_PROPOSED: &str = "loom.session.SessionChangeProposed";
 pub(crate) const AGENT_SESSIONS: &str = "loom.session.AgentSessions";
+pub(crate) const RECORD_FAILED_SESSION: &str = "loom.session.RecordFailedSession";
+pub(crate) const SESSION_FAILED: &str = "loom.session.SessionFailed";
+
+/// The action a failed session's frontier offers; the session names none.
+const FAILED_ACTION: &str = "conformance.write";
 
 /// The agent revision the commission is assigned to; the session record does not carry it.
 const AGENT_REVISION: &str = "00000000-0000-4000-8000-000000000001";
@@ -194,29 +207,8 @@ pub(crate) fn propose_session_change(
         executor = executor.continuing(&predecessor(continues, &decoded));
     }
 
-    let case = CaseId("case".to_owned());
-    let commission = Commission::new(CommissionData {
-        commission_id: CommissionId(Uuid(decoded.commission_id.clone())),
-        agent_revision_id: AgentRevisionId(Uuid(AGENT_REVISION.to_owned())),
-        case_id: case.clone(),
-        principal: PrincipalId("conformance".to_owned()),
-        authority_context: AuthorityContext(Value::Null),
-    });
-    let frontier = Frontier::new(FrontierData {
-        frontier_id: FrontierId(Uuid(decoded.frontier_id)),
-        case_id: case,
-        case_revision: 1,
-        claims: Vec::new(),
-        obligations: Vec::new(),
-        actions: vec![FrontierAction {
-            action: decoded.action,
-            status: ActionStatus::Admissible,
-            capability: None,
-            reasons: Vec::new(),
-        }],
-    });
-    let step = executor.run_with_usage(&commission, &frontier);
-    if let ExecutorOutcome::Suspended(suspended) = &step.outcome {
+    let outcome = run(&executor, &decoded, &decoded.action);
+    if let ExecutorOutcome::Suspended(suspended) = &outcome {
         return Err(unavailable(format!(
             "the scripted session failed: {:?}",
             suspended.reason
@@ -241,6 +233,212 @@ pub(crate) fn propose_session_change(
     Ok(Some(
         took(PROPOSE_SESSION_CHANGE, "proposed").emitting(published),
     ))
+}
+
+/// One call of `executor` for the input's commission, over a frontier of the input's id offering
+/// `action`; its outcome.
+fn run(executor: &SessionExecutor, decoded: &Decoded, action: &str) -> ExecutorOutcome {
+    let case = CaseId("case".to_owned());
+    let commission = Commission::new(CommissionData {
+        commission_id: CommissionId(Uuid(decoded.commission_id.clone())),
+        agent_revision_id: AgentRevisionId(Uuid(AGENT_REVISION.to_owned())),
+        case_id: case.clone(),
+        principal: PrincipalId("conformance".to_owned()),
+        authority_context: AuthorityContext(Value::Null),
+    });
+    let frontier = Frontier::new(FrontierData {
+        frontier_id: FrontierId(Uuid(decoded.frontier_id.clone())),
+        case_id: case,
+        case_revision: 1,
+        claims: Vec::new(),
+        obligations: Vec::new(),
+        actions: vec![FrontierAction {
+            action: action.to_owned(),
+            status: ActionStatus::Admissible,
+            capability: None,
+            reasons: Vec::new(),
+        }],
+    });
+    executor.run_with_usage(&commission, &frontier).outcome
+}
+
+/// A scripted Claude Code session that opens, its own session id `vendor`'s when there is one,
+/// and ends as `failure` says without a reply or a terminal record: its exit status or signal, or
+/// none measured, and `failure`'s stderr tail on its stderr, which metaharness hands on because
+/// the child left no terminal record.
+struct Failing {
+    failure: SessionFailure,
+    vendor: Option<String>,
+}
+
+impl ProcessRunner for Failing {
+    fn requires_executable(&self) -> bool {
+        false
+    }
+
+    fn start(&mut self, plan: &LaunchPlanView) -> std::io::Result<Box<dyn HarnessProcess>> {
+        let mut init = serde_json::json!({
+            "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
+            "cwd": plan.cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
+            "plugins": [], "output_style": "default", "apiKeySource": "none",
+            "model": "scripted", "permissionMode": "default",
+        });
+        if let Some(vendor) = &self.vendor {
+            init["session_id"] = serde_json::Value::String(vendor.clone());
+        }
+        let said = self.failure.stderr_tail.clone().unwrap_or_default();
+        let inner = ScriptedRunner::of_lines([init.to_string()], ScriptedLog::new())
+            .saying_on_stderr(said)
+            .start(plan)?;
+        let code = |code: Option<i64>| {
+            code.and_then(|code| i32::try_from(code).ok())
+                .ok_or_else(|| std::io::Error::other("an end without a status this target makes"))
+        };
+        let termination = match self.failure.end {
+            ChildEnd::Exited => ProcessTermination::Exited {
+                code: code(self.failure.code)?,
+            },
+            ChildEnd::Signaled => ProcessTermination::Signaled {
+                signal: code(self.failure.code)?,
+            },
+            ChildEnd::NotMeasured => ProcessTermination::Unknown,
+        };
+        Ok(Box::new(Ended { inner, termination }))
+    }
+}
+
+/// The scripted child, ended as [`Failing`] says.
+struct Ended {
+    inner: Box<dyn HarnessProcess>,
+    termination: ProcessTermination,
+}
+
+impl HarnessProcess for Ended {
+    fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        self.inner.next_line()
+    }
+
+    fn poll_line(&mut self) -> std::io::Result<ProcessPoll> {
+        self.inner.poll_line()
+    }
+
+    fn write_line(&mut self, line: &str) -> std::io::Result<()> {
+        self.inner.write_line(line)
+    }
+
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.inner.kill()
+    }
+
+    fn wait(&mut self) -> std::io::Result<Option<i32>> {
+        Ok(match self.termination {
+            ProcessTermination::Exited { code } => Some(code),
+            ProcessTermination::Signaled { .. } | ProcessTermination::Unknown => None,
+        })
+    }
+
+    fn termination(&self) -> ProcessTermination {
+        self.termination
+    }
+
+    fn stderr(&self) -> String {
+        self.inner.stderr()
+    }
+}
+
+/// `RecordFailedSession`: a scripted session that starts and fails as the input's `failure` says,
+/// run by the executor, and what it recorded. An end this target cannot make (an `Exited` or a
+/// `Signaled` end without a status, or a status outside what a process reports) is unsupported.
+pub(crate) fn record_failed_session(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Result<Option<SemanticCommandResult>, TargetError> {
+    let Some(decoded) = decode_failed(input) else {
+        return Ok(None);
+    };
+    let Some(failure) = codec::session_failure(input, "failure") else {
+        return Ok(None);
+    };
+    if decoded.kind != SessionKind::ClaudeCode {
+        return Err(TargetError::unsupported(
+            format!("a `{:?}` session", decoded.kind),
+            "this target scripts Claude Code sessions only, the kind the suite names",
+        ));
+    }
+    let makes = match failure.end {
+        ChildEnd::NotMeasured => failure.code.is_none(),
+        ChildEnd::Exited | ChildEnd::Signaled => {
+            failure.code.is_some_and(|code| i32::try_from(code).is_ok())
+        }
+    };
+    if !makes {
+        return Err(TargetError::unsupported(
+            format!(
+                "a `{:?}` end with the status {:?}",
+                failure.end, failure.code
+            ),
+            "a process ends with a status or a signal exactly when it was measured",
+        ));
+    }
+    let invocation = Invocation::make(live.sequence)?;
+    let session_id = decoded.session_id.clone();
+    let mut executor = SessionExecutor::new(invocation.workspace(), Vec::new(), "fail")
+        .of_kind(Kind::Claude)
+        .with_runner(Box::new(Failing {
+            failure,
+            vendor: decoded.vendor_session_id.clone(),
+        }))
+        .with_session_ids(move || session_id.clone());
+    executor.credentials = CredentialSource::None;
+    executor.scratch = invocation.0.join("scratch");
+    executor.agent = decoded.agent.clone().map(AgentId);
+    if let Some(continues) = &decoded.continues {
+        executor = executor.continuing(&predecessor(continues, &decoded));
+    }
+
+    if !matches!(
+        run(&executor, &decoded, FAILED_ACTION),
+        ExecutorOutcome::Suspended(_)
+    ) {
+        return Err(unavailable(
+            "the scripted session that fails did not suspend the step".to_owned(),
+        ));
+    }
+    let Some(failed) = executor.failed().pop() else {
+        return Err(unavailable(format!(
+            "the executor recorded no failed session: {:?}",
+            executor.last_report().and_then(|report| report.error)
+        )));
+    };
+    live.sessions.extend(executor.sessions());
+    let published = live.publish(
+        event(SESSION_FAILED)
+            .with("session_id", codec::id(&failed.session_id.0))
+            .with("commission_id", codec::id(&failed.commission_id.0))
+            .with("frontier_id", codec::id(&failed.frontier_id.0))
+            .with("continues", optional_id(failed.continues.as_ref()))
+            .with("failure", codec::session_failure_node(&failed.failure)),
+        correlation,
+    );
+    Ok(Some(
+        took(RECORD_FAILED_SESSION, "failed").emitting(published),
+    ))
+}
+
+/// The input of one `RecordFailedSession` but its `failure`: no action and no files.
+fn decode_failed(input: &Input) -> Option<Decoded> {
+    Some(Decoded {
+        session_id: SessionId(codec::uuid(input, "session_id")?),
+        kind: codec::session_kind(input, "kind")?,
+        commission_id: codec::uuid(input, "commission_id")?.0,
+        frontier_id: codec::uuid(input, "frontier_id")?.0,
+        vendor_session_id: codec::optional_text(input, "vendor_session_id")?,
+        agent: codec::optional_text(input, "agent")?,
+        continues: codec::optional_uuid(input, "continues")?.map(SessionId),
+        action: String::new(),
+        files: Vec::new(),
+    })
 }
 
 /// The input of one `ProposeSessionChange`.
@@ -294,6 +492,13 @@ pub(crate) fn row(held: &AgentSessions) -> ess_conformance::target::ViewRow {
         ("continues".to_owned(), optional_id(held.continues.as_ref())),
         ("action".to_owned(), codec::text_node(&held.action)),
         ("files".to_owned(), codec::changed_files_node(&held.files)),
+        (
+            "failure".to_owned(),
+            held.failure.as_ref().map_or(
+                ess_primitives::node::Node::Null,
+                codec::session_failure_node,
+            ),
+        ),
         ("state".to_owned(), codec::agent_session_state(held.state)),
     ])
 }
@@ -312,6 +517,7 @@ fn predecessor(continues: &SessionId, decoded: &Decoded) -> AgentSessions {
         continues: None,
         action: decoded.action.clone(),
         files: Vec::new(),
+        failure: None,
         state: AgentSessionState::Ended,
     }
 }

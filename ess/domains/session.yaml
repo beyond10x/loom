@@ -86,11 +86,36 @@ types:
       - name: decided_by
         type: loom.session.DecidedBy
 
+  # story:executor-reports-harness-child-failure: how a failed session's harness child ended, as
+  # metaharness's `stream.closed` measured it (`metaharness-protocol` `event.rs`
+  # ProcessTermination): an exit with a status, a signal that took it, or neither measured, which
+  # is never evidence of an exit 0.
+  - name: loom.session.ChildEnd
+    kind: enum
+    variants: [Exited, Signaled, NotMeasured]
+
+  # Why a session that started proposed nothing, as its record keeps it: how its harness child
+  # ended; the exit status of an Exited end or the signal of a Signaled one, absent when
+  # NotMeasured; and the last whole lines of the child's stderr within the executor's
+  # STDERR_TAIL_BYTES, each line holding a credential's shape withheld, absent when metaharness
+  # handed none on (it does only when the child left no terminal record) or the child wrote none.
+  - name: loom.session.SessionFailure
+    kind: struct
+    fields:
+      - name: end
+        type: loom.session.ChildEnd
+      - name: code
+        type: Optional<Integer>
+      - name: stderr_tail
+        type: Optional<String>
+
 entities:
   # The session one AgentExecutor `run` call ran through metaharness (ADR 0098 point 2), for one
-  # commission over one frontier. A session that fails proposes nothing and is no record: the
-  # executor returns Suspended with ExternalAvailability. A session that changed nothing proposes
-  # an empty list of files.
+  # commission over one frontier. A session that fails after its harness child started proposes
+  # nothing and is recorded with its failure (RecordFailedSession): no action, no files, how the
+  # child ended and the tail of its stderr; the executor still returns Suspended with
+  # ExternalAvailability naming why. A session refused before its child started is no record. A
+  # session that changed nothing proposes an empty list of files.
   - name: loom.session.AgentSession
     identity:
       name: session_id
@@ -123,6 +148,10 @@ entities:
         type: String
       - name: files
         type: List<loom.session.ChangedFile>
+      # story:executor-reports-harness-child-failure: why the session proposed nothing, absent
+      # for a session that proposed. A failed session's action is empty and its files none.
+      - name: failure
+        type: Optional<loom.session.SessionFailure>
     relations:
       # Zero or one: ESS has only `one` and `many`, and the Optional field makes it zero or one.
       - name: predecessor
@@ -150,6 +179,21 @@ events:
         type: String
       - name: files
         type: List<loom.session.ChangedFile>
+
+  # story:executor-reports-harness-child-failure: a session that started and proposed nothing,
+  # recorded with why, so a caller reading the record sees the same cause on a repeat.
+  - name: loom.session.SessionFailed
+    fields:
+      - name: session_id
+        type: loom.session.SessionId
+      - name: commission_id
+        type: loom.session.CommissionId
+      - name: frontier_id
+        type: loom.session.FrontierId
+      - name: continues
+        type: Optional<loom.session.SessionId>
+      - name: failure
+        type: loom.session.SessionFailure
 
 commands:
   # The executor returns the session's change as a proposed action (ADR 0098 point 2). Commission
@@ -198,6 +242,49 @@ commands:
             action: input.action
             files: input.files
 
+  # story:executor-reports-harness-child-failure: the executor records a session that started and
+  # proposed nothing, with how its harness child ended and the tail of its stderr. It still returns
+  # Suspended with ExternalAvailability naming why; the record names no action and no files.
+  - name: loom.session.RecordFailedSession
+    input:
+      - name: session_id
+        type: loom.session.SessionId
+      - name: kind
+        type: loom.session.SessionKind
+      - name: commission_id
+        type: loom.session.CommissionId
+      - name: frontier_id
+        type: loom.session.FrontierId
+      - name: vendor_session_id
+        type: Optional<String>
+      - name: agent
+        type: Optional<loom.agent.AgentId>
+      - name: continues
+        type: Optional<loom.session.SessionId>
+      - name: failure
+        type: loom.session.SessionFailure
+    outcomes:
+      - name: failed
+        creates: loom.session.AgentSession
+        instance: session_id
+        sets:
+          kind: input.kind
+          commission_id: input.commission_id
+          frontier_id: input.frontier_id
+          vendor_session_id: input.vendor_session_id
+          agent: input.agent
+          continues: input.continues
+          action: ""
+          failure: input.failure
+        emits: [loom.session.SessionFailed]
+        payload:
+          loom.session.SessionFailed:
+            session_id: input.session_id
+            commission_id: input.commission_id
+            frontier_id: input.frontier_id
+            continues: input.continues
+            failure: input.failure
+
 views:
   # Every session the executor ran, one row per session.
   - name: loom.session.AgentSessions
@@ -222,5 +309,7 @@ views:
         type: String
       - name: files
         type: List<loom.session.ChangedFile>
+      - name: failure
+        type: Optional<loom.session.SessionFailure>
       - name: state
         type: loom.session.AgentSession.State

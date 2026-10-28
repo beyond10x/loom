@@ -23,7 +23,8 @@
 //! for it and, when the session proposes a change, records it as one `AgentSession` through the
 //! generated `ProposeSessionChange` behaviour, naming the commission's and the frontier's real ids
 //! and the vendor's own session id where the harness stated one ([`SessionExecutor::sessions`],
-//! [`SessionExecutor::proposed`]). The proposal's arguments are `{files}` only; the session's
+//! [`SessionExecutor::proposed`]); a session that failed after its harness child started is
+//! recorded through `RecordFailedSession` ([`SessionExecutor::failed`]). The proposal's arguments are `{files}` only; the session's
 //! summary and the SHA-256 digest of its transcript travel on the call's `ExecutorStep`, which the
 //! runtime delivers as the step's observation and never as evidence, so two sessions that propose
 //! the same files are the same request. The step's `usage` is what the session reported it spent,
@@ -52,9 +53,19 @@
 //! metaharness is the one a fresh session gets, and the harness session itself is not resumed.
 //! A predecessor of another commission than the call's is refused before any copy or session.
 //!
-//! A session that fails proposes nothing and is no record: the call returns `Suspended` with
-//! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
-//! files.
+//! A session that fails proposes nothing: the call returns `Suspended` with
+//! `ExternalAvailability` naming why, and [`SessionReport::error`] holds the same text. When its
+//! harness child had started, the session is recorded all the same, through
+//! `loom.session.RecordFailedSession`: its row ([`SessionExecutor::sessions`]) names no action and
+//! no files, and its `failure` (`loom.session.SessionFailure`) keeps how the child ended and the
+//! stderr tail the reason carries, so a caller reading the record sees the same cause on a repeat.
+//! A session refused before its child started is no record. A session that changed nothing
+//! proposes an empty list of files. When the session ended without the JSON line naming its action, or in an error, the
+//! reason also says how the harness child ended (its exit status, the signal that took it, or that
+//! metaharness measured neither) and, when metaharness hands on what the child wrote on standard
+//! error (it does when the child left no terminal record), the last whole lines of it within
+//! [`STDERR_TAIL_BYTES`], each line that holds a credential's shape withheld and never repeated
+//! ([`TOKEN_PREFIXES`], a URL with user information or a query component, a PEM block).
 //!
 //! The change is what the session made in its copy against the bytes the copy was made from, the
 //! workspace as the frontier was handed: a file written in the workspace while the session runs
@@ -83,11 +94,14 @@ use loom::behaviour::{AgentSessionStorage, Generated};
 use loom::models::ModelRole;
 use loom::obligation::UnmetObligation;
 use loom::primitives::Uuid;
-use loom::session::obligations::{AgentSessionsQuery as _, ProposeSessionChangeBehavior as _};
+use loom::session::obligations::{
+    AgentSessionsQuery as _, ProposeSessionChangeBehavior as _, RecordFailedSessionBehavior,
+};
 use loom::session::{
-    AgentSessionSnapshot, AgentSessions, CallDecision, ChangedFile, CommissionId, DecidedBy,
-    FrontierId, ProposeSessionChange, ProposeSessionChangeOutcome, SessionChangeProposed,
-    SessionId, SessionKind, ToolDecision,
+    AgentSession, AgentSessionData, AgentSessionSnapshot, AgentSessions, AnyAgentSession,
+    CallDecision, ChangedFile, CommissionId, DecidedBy, FrontierId, ProposeSessionChange,
+    ProposeSessionChangeOutcome, RecordFailedSession, RecordFailedSessionOutcome,
+    SessionChangeProposed, SessionFailed, SessionFailure, SessionId, SessionKind, ToolDecision,
 };
 use metaharness::protocol::{
     Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
@@ -117,6 +131,27 @@ pub const TOOLS: [&str; 5] = CLAUDE_FILE_TOOLS;
     note = "use `ToolPolicy::codex_default().allow` (`ToolPolicyDefaults`); removed in the release after 0.36.0"
 )]
 pub const CODEX_TOOLS: [&str; 2] = CODEX_SHELL_TOOLS;
+
+/// The most of a harness child's standard error a reason carries: the last whole lines of it that
+/// fit, read from no more than this many bytes at its end.
+pub const STDERR_TAIL_BYTES: usize = 4096;
+
+/// The prefixes of the credentials a line of a harness child's standard error is withheld for,
+/// matched in either case at the start of a word: the list `b10x_loom_agent::TOKEN_PREFIXES`
+/// refuses in an agent spec, held equal to it by `crates/loom-agent/tests/token_prefixes.rs`.
+pub const TOKEN_PREFIXES: [&str; 11] = [
+    "xoxb-",
+    "xoxp-",
+    "xapp-",
+    "sk-",
+    "sk_live_",
+    "sk_test_",
+    "ghp_",
+    "github_pat_",
+    "AKIA",
+    "Bearer ",
+    "-----BEGIN",
+];
 
 /// The file tools of [`ToolPolicyDefaults::claude_default`]: the only Claude Code tools whose
 /// calls this executor can check ([`decide`]).
@@ -644,9 +679,10 @@ impl SessionExecutor {
 
     /// The same executor, its next recorded session continuing `previous`, a session this or
     /// another executor recorded ([`Self::sessions`]): that session names `previous.session_id`
-    /// as `loom.session.AgentSession.continues`. The predecessor is the next recorded session's
-    /// only; a later one continues none unless built again. A call that records no session (it
-    /// failed or was refused) leaves the predecessor to the next call. The request to
+    /// as `loom.session.AgentSession.continues`. The predecessor is the next proposing session's
+    /// only; a later one continues none unless built again. A call that proposes nothing leaves
+    /// the predecessor to the next call, whether it records no session (refused before its
+    /// harness child started) or records a failed one, which names the predecessor too. The request to
     /// metaharness is unchanged and the harness session is not resumed: Loom records the
     /// lineage only.
     ///
@@ -706,7 +742,9 @@ impl SessionExecutor {
     }
 
     /// Every session this executor recorded, one row of the `loom.session.AgentSessions` view
-    /// each, in the order they ran: a session that failed is not among them.
+    /// each, in the order they ran. A session that failed after its harness child started is
+    /// among them with its `failure` (how the child ended, the tail of its stderr), no action and
+    /// no files; one refused before its child started is not.
     #[must_use]
     pub fn sessions(&self) -> Vec<AgentSessions> {
         self.record.borrow().sessions()
@@ -717,6 +755,49 @@ impl SessionExecutor {
     #[must_use]
     pub fn proposed(&self) -> Vec<SessionChangeProposed> {
         self.record.borrow().proposed.clone()
+    }
+
+    /// The `loom.session.SessionFailed` each session recorded as failed published, in the order
+    /// they ran.
+    #[must_use]
+    pub fn failed(&self) -> Vec<SessionFailed> {
+        self.record.borrow().failed.clone()
+    }
+
+    /// Records the session `report` describes, which started and proposed nothing, as one
+    /// `AgentSession` for `commission` over `frontier` with `child`'s end and stderr tail as its
+    /// failure, under `session_id`, continuing `continues` when it names an earlier session.
+    fn record_failure(
+        &self,
+        commission: &CommissionId,
+        frontier: &Frontier<frontier_state::Issued>,
+        report: &SessionReport,
+        child: &ChildEnd,
+        session_id: SessionId,
+        continues: Option<SessionId>,
+    ) -> Result<SessionFailed, String> {
+        self.record
+            .borrow_mut()
+            .fail(RecordFailedSession {
+                session_id,
+                kind: self.session_kind(),
+                commission_id: commission.clone(),
+                frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
+                vendor_session_id: report.vendor_session_id.clone(),
+                agent: self.agent.clone(),
+                continues,
+                failure: child.failure(),
+            })
+            .map_err(|unmet| format!("the failed session could not be recorded: {unmet}"))
+    }
+
+    /// The `loom.session.SessionKind` this executor's sessions are recorded as.
+    fn session_kind(&self) -> SessionKind {
+        match self.kind {
+            Kind::Claude => SessionKind::ClaudeCode,
+            Kind::Codex => SessionKind::Codex,
+            Kind::B10x => SessionKind::Harness,
+        }
     }
 
     /// Records `proposal`, the change of the session `report` describes, as one `AgentSession`
@@ -731,16 +812,11 @@ impl SessionExecutor {
         session_id: SessionId,
         continues: Option<SessionId>,
     ) -> Result<SessionChangeProposed, String> {
-        let kind = match self.kind {
-            Kind::Claude => SessionKind::ClaudeCode,
-            Kind::Codex => SessionKind::Codex,
-            Kind::B10x => SessionKind::Harness,
-        };
         self.record
             .borrow_mut()
             .propose(ProposeSessionChange {
                 session_id,
-                kind,
+                kind: self.session_kind(),
                 commission_id: commission.clone(),
                 frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
                 vendor_session_id: report.vendor_session_id.clone(),
@@ -880,7 +956,11 @@ impl SessionExecutor {
     }
 
     /// One session: the copy made, the session run in it to its end, the proposal read.
-    fn session(&self, report: &mut SessionReport) -> Result<Proposal, String> {
+    fn session(
+        &self,
+        report: &mut SessionReport,
+        child: &mut ChildEnd,
+    ) -> Result<Proposal, String> {
         // One spelling per file: the copy's base and the walk of the copy key a file by the
         // same string only when the embedder named it plainly.
         let unplain: Vec<&str> = self
@@ -964,6 +1044,8 @@ impl SessionExecutor {
         let mut ended_usage: Option<Usage> = None;
         let mut usage_events: Vec<Usage> = Vec::new();
         let mut stream_error = None;
+        // How the harness child ended and what it said on stderr, as metaharness hands them on
+        // (`child`, the caller's: a failed session is recorded with it).
         loop {
             if !halted && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 halted = true;
@@ -1088,6 +1170,15 @@ impl SessionExecutor {
                         final_text = Some(answer.text.clone());
                     }
                 }
+                // Metaharness hands on the child's stderr only here, when it left no terminal
+                // record (`warning::NO_TERMINAL_RECORD`), and its native end on `stream.closed`.
+                Event::Warning { code, message }
+                    if code == metaharness::warning::NO_TERMINAL_RECORD =>
+                {
+                    child.stderr =
+                        stderr_tail(message.strip_prefix(STDERR_SAID).unwrap_or(message));
+                }
+                Event::StreamClosed { process, .. } => child.termination = *process,
                 _ => {}
             }
         }
@@ -1177,7 +1268,10 @@ impl SessionExecutor {
             return Err("the session was halted: the step's time ran out".to_owned());
         }
         if let Some(subtype) = ended_in_error {
-            return Err(format!("the session ended in an error ({subtype})"));
+            return Err(format!(
+                "the session ended in an error ({subtype}){}",
+                child.said()
+            ));
         }
         if !held.is_empty() {
             return Err(format!(
@@ -1186,7 +1280,11 @@ impl SessionExecutor {
             ));
         }
         let replied = replied.or(final_text);
-        let (action, summary) = reply(&replied.unwrap_or_else(|| said.join("\n")))?;
+        let (action, summary) =
+            reply(&replied.unwrap_or_else(|| said.join("\n"))).map_err(|why| match why {
+                Unreplied::NoActionLine => format!("{NO_ACTION_LINE}{}", child.said()),
+                Unreplied::Malformed(why) => why,
+            })?;
         let files = copy.changes()?;
         let stale = copy.stale(&files);
         if !stale.is_empty() {
@@ -1229,7 +1327,26 @@ impl AgentExecutor for SessionExecutor {
         let proposed = self.predecessor_for(&commission).and_then(|continues| {
             // So is an id that is the predecessor's or one this executor already recorded.
             let session_id = self.session_id_for(continues.as_ref())?;
-            let proposal = self.session(&mut report)?;
+            let mut child = ChildEnd::default();
+            let proposal = match self.session(&mut report, &mut child) {
+                Ok(proposal) => proposal,
+                // A session whose child started is recorded with how it ended, naming the
+                // predecessor it continued, which stays for the next call: a retry continues what
+                // the failed attempt continued. One refused before it started is no record.
+                Err(why) if report.started => {
+                    self.record_failure(
+                        &commission,
+                        frontier,
+                        &report,
+                        &child,
+                        session_id,
+                        continues,
+                    )
+                    .map_err(|unrecorded| format!("{why}; {unrecorded}"))?;
+                    return Err(why);
+                }
+                Err(why) => return Err(why),
+            };
             self.record(
                 &commission,
                 frontier,
@@ -1622,6 +1739,43 @@ pub fn fresh_session_id() -> SessionId {
 struct SessionRecord {
     sessions: Vec<AgentSessionSnapshot>,
     proposed: Vec<SessionChangeProposed>,
+    failed: Vec<SessionFailed>,
+}
+
+/// `loom.session.RecordFailedSession`, an obligation of the generated model: its `failed`
+/// outcome leaves `files` undetermined, because the specification's format (`ess/25`) has no
+/// empty-list literal. A failed session proposes nothing, so its files are none; every other field
+/// is the one the outcome's `sets:` names, and the event is its declared payload.
+impl RecordFailedSessionBehavior for SessionRecord {
+    fn record_failed_session(
+        &mut self,
+        input: RecordFailedSession,
+    ) -> Result<RecordFailedSessionOutcome, UnmetObligation> {
+        let session_failed = SessionFailed {
+            session_id: input.session_id.clone(),
+            commission_id: input.commission_id.clone(),
+            frontier_id: input.frontier_id.clone(),
+            continues: input.continues.clone(),
+            failure: input.failure.clone(),
+        };
+        let data = AgentSessionData {
+            session_id: input.session_id,
+            kind: input.kind,
+            commission_id: input.commission_id,
+            frontier_id: input.frontier_id,
+            vendor_session_id: input.vendor_session_id,
+            agent: input.agent,
+            continues: input.continues,
+            action: String::new(),
+            files: Vec::new(),
+            failure: Some(input.failure),
+        };
+        AgentSessionStorage::put(
+            self,
+            AnyAgentSession::Ended(AgentSession::new(data)).snapshot(),
+        );
+        Ok(RecordFailedSessionOutcome::Failed { session_failed })
+    }
 }
 
 impl AgentSessionStorage for SessionRecord {
@@ -1669,11 +1823,23 @@ impl SessionRecord {
         Ok(session_change_proposed)
     }
 
+    /// `RecordFailedSession`, through the generated model's obligation (this store's own
+    /// [`RecordFailedSessionBehavior`]); the event it published, kept.
+    fn fail(&mut self, input: RecordFailedSession) -> Result<SessionFailed, UnmetObligation> {
+        let mut generated = Generated::new(std::mem::take(self));
+        let answered = generated.record_failed_session(input);
+        *self = generated.ports;
+        let RecordFailedSessionOutcome::Failed { session_failed } = answered?;
+        self.failed.push(session_failed.clone());
+        Ok(session_failed)
+    }
+
     /// The `loom.session.AgentSessions` view, by its generated query.
     fn sessions(&self) -> Vec<AgentSessions> {
         let generated = Generated::new(Self {
             sessions: self.sessions.clone(),
             proposed: Vec::new(),
+            failed: Vec::new(),
         });
         generated.agent_sessions().unwrap_or_default()
     }
@@ -2144,22 +2310,236 @@ fn inside(copy: &Path, path: &str) -> bool {
     true
 }
 
+/// Why a reply proposes nothing.
+enum Unreplied {
+    /// It holds no line that opens a JSON object naming `action`.
+    NoActionLine,
+    /// Its JSON line does not read, or names no action.
+    Malformed(String),
+}
+
+/// The reason a session that ended without its action line suspends with, before how the harness
+/// child ended ([`ChildEnd::said`]).
+const NO_ACTION_LINE: &str = "the session ended without the JSON line naming its action";
+
+/// What metaharness's `NO_TERMINAL_RECORD` warning says before the child's stderr.
+const STDERR_SAID: &str = "the harness produced no terminal record and wrote this on stderr: ";
+
 /// The action and summary of a reply: its last line that opens a JSON object naming `action`.
-fn reply(text: &str) -> Result<(String, String), String> {
+fn reply(text: &str) -> Result<(String, String), Unreplied> {
     for line in text.lines().rev() {
         let line = line.trim();
         if line.starts_with('{') && line.contains("\"action\"") {
-            let doc: serde_json::Value = serde_json::from_str(line)
-                .map_err(|error| format!("the session's JSON line does not read: {error}"))?;
+            let doc: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+                Unreplied::Malformed(format!("the session's JSON line does not read: {error}"))
+            })?;
             let action = doc["action"]
                 .as_str()
-                .ok_or("the session's JSON line names no action")?
+                .ok_or_else(|| {
+                    Unreplied::Malformed("the session's JSON line names no action".to_owned())
+                })?
                 .to_owned();
             let summary = doc["summary"].as_str().unwrap_or("").to_owned();
             return Ok((action, summary));
         }
     }
-    Err("the session ended without the JSON line naming its action".to_owned())
+    Err(Unreplied::NoActionLine)
+}
+
+/// How a session's harness child ended, as metaharness handed it on: its native end
+/// (`stream.closed`) and the tail of its stderr ([`stderr_tail`]), which metaharness hands on only
+/// when the child left no terminal record.
+#[derive(Debug, Default)]
+struct ChildEnd {
+    termination: metaharness::protocol::ProcessTermination,
+    stderr: String,
+}
+
+impl ChildEnd {
+    /// What a reason adds about the child: ` (the harness exited with status 1)`, then, when it
+    /// said something on stderr, `; the last lines of its stderr:` and those lines on their own.
+    fn said(&self) -> String {
+        use metaharness::protocol::ProcessTermination;
+        let end = match self.termination {
+            ProcessTermination::Exited { code } => format!("the harness exited with status {code}"),
+            ProcessTermination::Signaled { signal } => {
+                format!("the harness was ended by signal {signal}")
+            }
+            ProcessTermination::Unknown => "metaharness measured no exit status".to_owned(),
+        };
+        if self.stderr.is_empty() {
+            format!(" ({end})")
+        } else {
+            format!(" ({end}); the last lines of its stderr:\n{}", self.stderr)
+        }
+    }
+
+    /// The same, as a failed session's record keeps it (`loom.session.SessionFailure`): the end,
+    /// its status or signal (none when unmeasured), and the stderr tail the reason carries, none
+    /// when the child said nothing metaharness handed on.
+    fn failure(&self) -> SessionFailure {
+        use loom::session::ChildEnd as End;
+        use metaharness::protocol::ProcessTermination;
+        let (end, code) = match self.termination {
+            ProcessTermination::Exited { code } => (End::Exited, Some(i64::from(code))),
+            ProcessTermination::Signaled { signal } => (End::Signaled, Some(i64::from(signal))),
+            ProcessTermination::Unknown => (End::NotMeasured, None),
+        };
+        SessionFailure {
+            end,
+            code,
+            stderr_tail: Some(self.stderr.clone()).filter(|tail| !tail.is_empty()),
+        }
+    }
+}
+
+/// The last whole lines of `stderr`, a harness child's, that fit in [`STDERR_TAIL_BYTES`]: only
+/// the final [`STDERR_TAIL_BYTES`] bytes are read, a line they cut into is dropped whole, and so is
+/// a last line longer than the bound, which a note stands in for. Every line that holds a
+/// credential's shape ([`credential_lines`]) is withheld, a note standing in for each run of them,
+/// and every other control character but a tab is replaced, so the tail is one inert text. Empty
+/// when the child said nothing.
+fn stderr_tail(stderr: &str) -> String {
+    let stderr = stderr.trim_end();
+    let mut start = stderr.len().saturating_sub(STDERR_TAIL_BYTES);
+    while !stderr.is_char_boundary(start) {
+        start += 1;
+    }
+    let window = if start == 0 || stderr.as_bytes()[start - 1] == b'\n' {
+        &stderr[start..]
+    } else {
+        match stderr[start..].find('\n') {
+            Some(at) => &stderr[start + at + 1..],
+            None => {
+                return format!(
+                    "[its last line, longer than {STDERR_TAIL_BYTES} bytes, is not shown]"
+                );
+            }
+        }
+    };
+    let lines: Vec<&str> = window
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect();
+    let withheld = credential_lines(&lines);
+    let mut shown: Vec<String> = Vec::new();
+    let mut run = 0usize;
+    let note = |run: usize| match run {
+        1 => "[a line withheld: it holds a credential's shape]".to_owned(),
+        n => format!("[{n} lines withheld: they hold a credential's shape]"),
+    };
+    for (line, withheld) in lines.iter().zip(&withheld) {
+        if *withheld {
+            run += 1;
+            continue;
+        }
+        if run > 0 {
+            shown.push(note(run));
+            run = 0;
+        }
+        shown.push(
+            line.chars()
+                .map(|c| {
+                    if c.is_control() && c != '\t' {
+                        char::REPLACEMENT_CHARACTER
+                    } else {
+                        c
+                    }
+                })
+                .collect(),
+        );
+    }
+    if run > 0 {
+        shown.push(note(run));
+    }
+    // A note or a replaced character may be longer than what it stands in for: the bound holds
+    // for the tail as shown, its first lines going first.
+    let mut kept = 0;
+    let mut size = 0;
+    for line in shown.iter().rev() {
+        let more = line.len() + usize::from(kept > 0);
+        if size + more > STDERR_TAIL_BYTES {
+            break;
+        }
+        size += more;
+        kept += 1;
+    }
+    shown[shown.len() - kept..].join("\n")
+}
+
+/// Which of `lines` hold a credential's shape: a URL with user information or a query
+/// component, a word that starts with one of [`TOKEN_PREFIXES`] in either case (a word starting
+/// where the line does or after a character that is neither a letter nor a digit), or a line of a
+/// PEM block, from its `-----BEGIN` line to its `-----END` line; an `-----END` line whose
+/// `-----BEGIN` the tail does not hold withholds every line before it too.
+fn credential_lines(lines: &[&str]) -> Vec<bool> {
+    let mut withheld: Vec<bool> = lines.iter().map(|line| holds_credential(line)).collect();
+    let mut in_block = false;
+    for at in 0..lines.len() {
+        let lower = lines[at].to_ascii_lowercase();
+        if lower.contains("-----begin") {
+            in_block = true;
+        }
+        if in_block {
+            withheld[at] = true;
+        }
+        if lower.contains("-----end") {
+            if !in_block {
+                withheld[..=at].iter_mut().for_each(|line| *line = true);
+            }
+            in_block = false;
+        }
+    }
+    withheld
+}
+
+/// Whether `line` holds a credential's shape, as [`credential_lines`] reads one line.
+fn holds_credential(line: &str) -> bool {
+    // A tab is a space here, so `Bearer` followed by either is read alike; offsets are kept.
+    let lower = line.to_ascii_lowercase().replace('\t', " ");
+    let prefixed = TOKEN_PREFIXES.iter().any(|prefix| {
+        let prefix = prefix.to_ascii_lowercase();
+        lower.match_indices(&prefix).any(|(at, _)| {
+            lower[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|before| !before.is_alphanumeric())
+        })
+    });
+    prefixed || line_urls(line).iter().any(|url| url_holds_credential(url))
+}
+
+/// Whether `url` carries user information or a query component. Its authority runs from after
+/// `://` to the first `/`, or to its end: a `#` or a `?` does not end it, so a password holding
+/// either is user information all the same.
+fn url_holds_credential(url: &str) -> bool {
+    let rest = &url[url.find("://").map_or(0, |at| at + 3)..];
+    let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
+    authority.contains('@') || rest.contains('?')
+}
+
+/// Every URL `line` holds: each `://` with the scheme before it (letters, digits, `+`, `-`, `.`,
+/// at least one) and everything after it up to whitespace.
+fn line_urls(line: &str) -> Vec<&str> {
+    let is_scheme = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.');
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(at) = line[from..].find("://").map(|at| from + at) {
+        let start = line[..at]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| is_scheme(*c))
+            .last()
+            .map_or(at, |(index, _)| index);
+        let end = line[at..]
+            .find(char::is_whitespace)
+            .map_or(line.len(), |end| at + end);
+        if start < at {
+            found.push(&line[start..end]);
+        }
+        from = at + 3;
+    }
+    found
 }
 
 /// Whether `path` is one plain path relative to a root: no root, no `.` or `..` part, no part
@@ -2927,7 +3307,7 @@ mod tests {
         executor.credentials = CredentialSource::None;
         executor.scratch = scratch.0.join("scratch");
         let mut report = SessionReport::default();
-        let proposal = executor.session(&mut report);
+        let proposal = executor.session(&mut report, &mut ChildEnd::default());
         assert_eq!(
             proposal.map(|proposal| proposal.action),
             Ok("tests.write".to_owned()),
@@ -3028,7 +3408,7 @@ mod tests {
             executor.credentials = CredentialSource::None;
             executor.scratch = scratch.0.join("scratch");
             let mut report = SessionReport::default();
-            let proposal = executor.session(&mut report);
+            let proposal = executor.session(&mut report, &mut ChildEnd::default());
             assert_eq!(
                 proposal.map(|proposal| proposal.action),
                 Ok("tests.write".to_owned()),
