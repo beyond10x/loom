@@ -49,7 +49,12 @@ fn uuid(n: u64) -> Uuid {
 fn git(dir: &Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .args(["-c", "user.name=t", "-c", "user.email=t@localhost"])
-        .args(["-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "init.defaultBranch=main",
+        ])
         .args(args)
         .current_dir(dir)
         .output()
@@ -86,7 +91,10 @@ impl Fixture {
         std::os::unix::fs::symlink("notes.md", workspace.join("src/link.md")).expect("a link");
         std::os::unix::fs::symlink("src", workspace.join("docs")).expect("a linked directory");
         git(&workspace, &["init", "-q"]);
-        git(&workspace, &["add", "src/lib.rs", "src/notes.md", "src/link.md", "docs"]);
+        git(
+            &workspace,
+            &["add", "src/lib.rs", "src/notes.md", "src/link.md", "docs"],
+        );
         git(&workspace, &["commit", "-q", "-m", "fixture"]);
         std::fs::create_dir_all(root.join("scratch")).expect("the scratch directory");
         std::fs::write(root.join("token.json"), "{\"token\": \"scripted\"}\n").expect("a token");
@@ -337,7 +345,10 @@ fn the_scratch_probe_reads_empty_after_a_copy_was_made() {
     let (why, copy) = suspended(&executor, "strict");
     assert!(why.contains("--strict-version"), "{why}");
     assert!(copy.is_some(), "a copy was made before the refusal");
-    assert!(fixture.scratch_is_empty(), "yet the scratch directory reads empty");
+    assert!(
+        fixture.scratch_is_empty(),
+        "yet the scratch directory reads empty"
+    );
 }
 
 /// The context paths `plain_relative` must refuse, before the copy, in spellings the unit's test
@@ -446,7 +457,9 @@ fn an_effort_cannot_inject_config_or_flags() {
         .clone()
         .expect("Codex's scratch config");
     assert!(
-        !config.lines().any(|line| line.trim_start().starts_with("[mcp_servers.evil]")),
+        !config
+            .lines()
+            .any(|line| line.trim_start().starts_with("[mcp_servers.evil]")),
         "{config}"
     );
     assert_eq!(

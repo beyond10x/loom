@@ -124,14 +124,6 @@ impl Fixture {
         }
         executor
     }
-
-    /// Whether the scratch directory is still empty: no copy was made in it.
-    fn no_copy_made(&self) -> bool {
-        std::fs::read_dir(self.scratch())
-            .expect("the scratch directory")
-            .next()
-            .is_none()
-    }
 }
 
 impl Drop for Fixture {
@@ -330,7 +322,7 @@ fn request(fixture: &Fixture, kind: Kind, overrides: Option<SessionOverrides>) -
 }
 
 /// Why a session of `kind` under `overrides` was suspended with `ExternalAvailability`, the
-/// requests its runner saw, and whether the scratch directory stayed empty.
+/// requests its runner saw, and whether no copy was made ([`no_copy_made`]).
 fn refused(fixture: &Fixture, kind: Kind, overrides: SessionOverrides) -> (String, usize, bool) {
     let recorder = Recorder::new(kind);
     let executor = fixture.executor(kind, &recorder).with_overrides(overrides);
@@ -345,8 +337,19 @@ fn refused(fixture: &Fixture, kind: Kind, overrides: SessionOverrides) -> (Strin
     (
         why.clone(),
         recorder.requests().len(),
-        fixture.no_copy_made(),
+        no_copy_made(&executor),
     )
+}
+
+/// Whether the executor's last call made no copy: its report names no working directory, which
+/// the executor sets as soon as the copy is made. The scratch directory is no witness, since the
+/// copy removes itself when the call returns.
+fn no_copy_made(executor: &SessionExecutor) -> bool {
+    executor
+        .last_report()
+        .expect("a report of the call")
+        .cwd
+        .is_none()
 }
 
 /// `args` with each `flag value` pair named removed, so a request with a member named compares
@@ -438,8 +441,12 @@ fn a_partial_runspec_overrides_the_kind_defaults() {
 
         // Strict version: a scripted runner launches no executable, so it reports no version,
         // and metaharness refuses a strict run off its pin before the runner sees the plan.
-        let (why, started, _) = refused(&fixture, kind, strict(true));
+        let (why, started, no_copy) = refused(&fixture, kind, strict(true));
         assert!(why.contains("--strict-version"), "{kind:?}: {why}");
+        assert!(
+            !no_copy,
+            "{kind:?}: metaharness refuses after the copy, and the probe sees it"
+        );
         assert_eq!(
             started, 0,
             "{kind:?}: the strict run is refused before it starts"
@@ -861,5 +868,24 @@ fn from_spec_applies_the_specs_overrides() {
         assert_eq!(refused, expected);
         let said = refused.to_string();
         assert!(said.contains("fixer"), "{said}");
+    }
+
+    // A named file the copy will not hold: absent from the workspace, or a link there.
+    std::os::unix::fs::symlink("notes.md", fixture.workspace.join("src/link.md")).expect("a link");
+    for path in ["src/absent.md", "src/link.md"] {
+        let mut files = Fixture::files();
+        files.push(path.to_owned());
+        let spec = agent_spec(SessionKind::ClaudeCode, |session| {
+            session.context = vec![path.to_owned()];
+        });
+        let refused = SessionExecutor::from_spec(&spec, &fixture.workspace, files)
+            .expect_err("a context file the copy will not hold");
+        assert_eq!(
+            refused,
+            SpecError::ContextNotCopied {
+                agent: "fixer".to_owned(),
+                path: path.to_owned(),
+            }
+        );
     }
 }
