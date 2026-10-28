@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb
-// contract digest 3ce28af44fafd999458bb0325769aa0e54a1d4b0f1cd78c5fabe64beca214063
+// model digest 3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8
+// contract digest 502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -861,10 +861,17 @@ where
             continues: input.continues.clone(),
             action: input.action.clone(),
             files: input.files.clone(),
+            failure: None,
         };
         let answer = crate::session::ProposeSessionChangeOutcome::Proposed { session_change_proposed: crate::session::SessionChangeProposed { session_id: identity.clone(), commission_id: input.commission_id.clone(), frontier_id: input.frontier_id.clone(), continues: input.continues.clone(), action: input.action.clone(), files: input.files.clone() } };
         AgentSessionStorage::put(&mut self.ports, crate::session::AnyAgentSession::Ended(crate::session::AgentSession::new(data)).snapshot());
         return Ok(answer);
+    }
+}
+
+impl<P: crate::session::obligations::RecordFailedSessionBehavior> crate::session::obligations::RecordFailedSessionBehavior for Generated<P> {
+    fn record_failed_session(&mut self, input: crate::session::RecordFailedSession) -> Result<crate::session::RecordFailedSessionOutcome, UnmetObligation> {
+        crate::session::obligations::RecordFailedSessionBehavior::record_failed_session(&mut self.ports, input)
     }
 }
 
@@ -975,6 +982,7 @@ where
                 continues: held.data.continues,
                 action: held.data.action,
                 files: held.data.files,
+                failure: held.data.failure,
                 state: held.state,
             })
             .collect())

@@ -12,10 +12,27 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-28
+
+### Added
+
+- `loom.session.RecordFailedSession`: a session whose harness child started and that proposed nothing is recorded, its `AgentSessions` row naming no action and no files and its `failure` (`loom.session.SessionFailure`) keeping how the child ended (`ChildEnd`: `Exited`, `Signaled`, `NotMeasured`), the status or signal, the stderr tail the error carries and `reason`, the error without that tail, each line holding a credential's shape withheld and bounded by `STDERR_TAIL_BYTES`, published as `loom.session.SessionFailed` (`SessionExecutor::failed`); it refuses a failure no harness child ends with as `loom.session.FailureRefused` (`unmeasured-with-code`, `measured-without-code`; `failure_refusal`); the step still suspends with `ExternalAvailability` and the same text in `SessionReport::error`, and a session refused before its child started is still no record (story:executor-reports-harness-child-failure)
+- `b10x-loom-session-executor`: a caller names a partial run over the session kind's defaults, `SessionOverrides` (`effort`, `max_budget_micro_usd`, `strict_version`, `context`), through `SessionExecutor::with_overrides` or the public field `SessionExecutor::overrides`: each member named wins, each left unset keeps the kind's value, and nothing Loom sets for its own guarantees (credentials, working directory, scratch copy, hermetic and decision mode, b10x-harness's endpoint and secret route) is taken from the caller. The budget reaches Claude Code as `--max-budget-usd` in dollars rendered exactly (`12500000` is `12.5`); a budget on Codex or b10x-harness, an effort on b10x-harness, and a context file that is not one of the copied files as one plain relative path suspend the step with `ExternalAvailability` before any copy, naming the member and kind or the path (story:session-executor-partial-runspec)
+- `loom.agent.SessionSpec` gains `effort`, `max_budget_micro_usd`, `strict_version` and `context`, decoded by `loom_sdk::agent::parse` and applied by `SessionExecutor::from_spec`, which refuses what the executor would with the new `SpecError::OverrideUnapplied`, `SpecError::BudgetNegative` and `SpecError::ContextNotCopied`; the `LoomAgent` CRD's `spec.agent.session` declares them (story:session-executor-partial-runspec)
+- **Breaking:** a struct literal of `loom.agent.SessionSpec` names the four new members, and an exhaustive match on `SpecError` the three new variants (story:session-executor-partial-runspec)
+- `SessionExecutor::with_observer` hands the host each metaharness event and the session's copy while the session runs (story:session-executor-event-observer)
+
 ### Changed
 
+- `SessionExecutor::sessions()` lists a failed session's row once its harness child started, naming the predecessor `continuing` named, which stays for the next call: a caller taking the last row after a failed run (`sessions().pop()`) now gets the failed session's (story:executor-reports-harness-child-failure)
+- **Breaking:** the generated `loom::session::AgentSessions` and `AgentSessionData` gain `failure: Option<SessionFailure>`, so a struct literal of them names it (story:executor-reports-harness-child-failure)
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` to `0.14.0` (`0b9d50c6`); Loom's confined runs behave as before
 - The specification requires ESS `0.75.0`, and `ess-conformance` and `ess-primitives` move to tag `0.75.0`; generated Rust is unchanged
+- **Breaking:** `b10x_loom_agent::TOKEN_PREFIXES` gains the GitHub token prefixes `gho_`, `ghu_`, `ghs_` and `ghr_` (its type is now `[&str; 15]`): an agent spec holding a value that starts with one is refused as `SecretLiteral`, and the session executor withholds a stderr line holding one (story:executor-reports-harness-child-failure)
+
+### Fixed
+
+- `SessionExecutor`: a session without its action line, or whose action line does not read, names the harness's exit status and its stderr's last lines (`STDERR_TAIL_BYTES`), credential lines withheld, read with terminal escape sequences both removed and replaced, a note standing in for a last line too long once shown (story:executor-reports-harness-child-failure)
 
 ## [0.46.0] - 2026-10-27
 
@@ -1173,7 +1190,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.46.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.47.0...HEAD
+[0.47.0]: https://github.com/beyond10x/loom/releases/tag/0.47.0
 [0.46.0]: https://github.com/beyond10x/loom/releases/tag/0.46.0
 [0.45.0]: https://github.com/beyond10x/loom/releases/tag/0.45.0
 [0.44.0]: https://github.com/beyond10x/loom/releases/tag/0.44.0

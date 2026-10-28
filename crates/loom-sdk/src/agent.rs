@@ -491,7 +491,17 @@ fn session(value: &Value, at: &str) -> Result<SessionSpec, AgentSpecError> {
     let members = Members::of(
         value,
         at,
-        &["kind", "budget", "stop", "confinement", "tools"],
+        &[
+            "kind",
+            "budget",
+            "stop",
+            "confinement",
+            "tools",
+            "effort",
+            "max_budget_micro_usd",
+            "strict_version",
+            "context",
+        ],
     )?;
     Ok(SessionSpec {
         kind: members.get("kind", |value, at| {
@@ -509,6 +519,10 @@ fn session(value: &Value, at: &str) -> Result<SessionSpec, AgentSpecError> {
         stop: members.get("stop", stop_policy)?,
         confinement: members.get("confinement", confinement)?,
         tools: members.get("tools", tool_policy)?,
+        effort: members.maybe("effort", text)?,
+        max_budget_micro_usd: members.maybe("max_budget_micro_usd", integer)?,
+        strict_version: members.maybe("strict_version", boolean)?,
+        context: members.list("context", text)?,
     })
 }
 

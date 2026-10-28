@@ -374,12 +374,20 @@ spec:
                         enum:
                         - none
                         type: string
+                      context:
+                        items:
+                          type: string
+                        type: array
+                      effort:
+                        type: string
                       kind:
                         enum:
                         - ClaudeCode
                         - Codex
                         - Harness
                         type: string
+                      max_budget_micro_usd:
+                        type: integer
                       stop:
                         properties:
                           approval_gate:
@@ -419,6 +427,8 @@ spec:
                         - approval_gate
                         - on_breach
                         type: object
+                      strict_version:
+                        type: boolean
                       tools:
                         properties:
                           allow:

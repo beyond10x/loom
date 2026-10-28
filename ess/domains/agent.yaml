@@ -156,7 +156,15 @@ types:
         type: List<loom.agent.LimitBreachStep>
 
   # The harness session an agent runs, for an agent that runs one: the session's kind, its run
-  # budget and stop policy, what confines it, and its tool policy.
+  # budget and stop policy, what confines it, and its tool policy. Then what the session asks of
+  # its harness over the kind's defaults (story:session-executor-partial-runspec), each absent for
+  # the default: the reasoning effort, in the vendor's vocabulary; a ceiling on what the session
+  # may spend, in micro-USD as RunBudget holds money, which the vendor enforces during the run
+  # (distinct from `budget.max_cost_micro_usd`, which a host enforces through Commission); whether
+  # a harness off its adapter's pinned versions is refused before the session; and the workspace
+  # files handed to the harness as context, each one of the files the session's copy holds,
+  # spelled as one plain relative path. A member the kind's launcher does not apply is refused,
+  # never dropped.
   - name: loom.agent.SessionSpec
     kind: struct
     fields:
@@ -170,6 +178,14 @@ types:
         type: loom.agent.ConfinementMode
       - name: tools
         type: loom.agent.ToolPolicy
+      - name: effort
+        type: Optional<String>
+      - name: max_budget_micro_usd
+        type: Optional<Integer>
+      - name: strict_version
+        type: Optional<Boolean>
+      - name: context
+        type: List<String>
 
   # The outer loop, the poll: the seconds between two polls (`PluginConfig.poll_interval_seconds`),
   # the bindings polled for items, the minutes an item must have aged before it is one

@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T20:49:22Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-event-observer",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "loom task check, each step alone on wave/2026-10-28-w1 aa0d4c427 (2026-10-28): every step exit 0 but cargo test --workspace 101 (2496 passed, 1 failed: loom-xtask release_check_passes_when_tag_version_and_changelog_agree, the shared build directory outside a git tree); that file re-run with the tree's own target: 19 passed",
+    "reference": "crates/loom-session-executor/tests/event_observer.rs, tests/adversary_w20261028w1_a3.rs"
+  }
+}

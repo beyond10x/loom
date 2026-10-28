@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb
-// contract digest 3ce28af44fafd999458bb0325769aa0e54a1d4b0f1cd78c5fabe64beca214063
+// model digest 3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8
+// contract digest 502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Session — `loom.session`.
@@ -41,6 +41,17 @@ pub struct ChangedFile {
     pub content: Option<String>,
 }
 
+/// ChildEnd — `loom.session.ChildEnd`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildEnd {
+    /// `Exited`.
+    Exited,
+    /// `Signaled`.
+    Signaled,
+    /// `NotMeasured`.
+    NotMeasured,
+}
+
 /// CommissionId — `loom.session.CommissionId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommissionId(pub crate::primitives::Uuid);
@@ -60,9 +71,31 @@ pub enum DecidedBy {
     Observe,
 }
 
+/// FailureRefusalReason — `loom.session.FailureRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureRefusalReason {
+    /// `UnmeasuredWithCode`.
+    UnmeasuredWithCode,
+    /// `MeasuredWithoutCode`.
+    MeasuredWithoutCode,
+}
+
 /// FrontierId — `loom.session.FrontierId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontierId(pub crate::primitives::Uuid);
+
+/// SessionFailure — `loom.session.SessionFailure`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionFailure {
+    /// `end` — `loom.session.ChildEnd`.
+    pub end: ChildEnd,
+    /// `code` — `Optional<Integer>`.
+    pub code: Option<i64>,
+    /// `stderr_tail` — `Optional<String>`.
+    pub stderr_tail: Option<String>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
+}
 
 /// SessionId — `loom.session.SessionId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +153,8 @@ pub struct AgentSessionData {
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
     pub files: Vec<ChangedFile>,
+    /// `failure` — `Optional<loom.session.SessionFailure>`.
+    pub failure: Option<SessionFailure>,
 }
 
 /// The states of `loom.session.AgentSession`, at the type level.
@@ -277,6 +312,53 @@ pub enum ProposeSessionChangeOutcome {
     },
 }
 
+/// RecordFailedSession — the input of `loom.session.RecordFailedSession`.
+///
+/// Everything it can result in is [`RecordFailedSessionOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordFailedSession {
+    /// `session_id` — `loom.session.SessionId`.
+    pub session_id: SessionId,
+    /// `kind` — `loom.session.SessionKind`.
+    pub kind: SessionKind,
+    /// `commission_id` — `loom.session.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `frontier_id` — `loom.session.FrontierId`.
+    pub frontier_id: FrontierId,
+    /// `vendor_session_id` — `Optional<String>`.
+    pub vendor_session_id: Option<String>,
+    /// `agent` — `Optional<loom.agent.AgentId>`.
+    pub agent: Option<crate::agent::AgentId>,
+    /// `continues` — `Optional<loom.session.SessionId>`.
+    pub continues: Option<SessionId>,
+    /// `failure` — `loom.session.SessionFailure`.
+    pub failure: SessionFailure,
+}
+
+/// Everything `loom.session.RecordFailedSession` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordFailedSessionOutcome {
+    /// `unmeasured-with-code` — when `(failure.end == NotMeasured and defined(failure.code))`.
+    UnmeasuredWithCode {
+        /// Why it was refused: `loom.session.FailureRefused`.
+        error: FailureRefused,
+    },
+    /// `measured-without-code` — when `(failure.end != NotMeasured and not (defined(failure.code)))`.
+    MeasuredWithoutCode {
+        /// Why it was refused: `loom.session.FailureRefused`.
+        error: FailureRefused,
+    },
+    /// `failed` — otherwise.
+    Failed {
+        /// The `loom.session.SessionFailed` this outcome publishes.
+        session_failed: SessionFailed,
+    },
+}
+
 /// SessionChangeProposed — the event `loom.session.SessionChangeProposed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionChangeProposed {
@@ -292,6 +374,28 @@ pub struct SessionChangeProposed {
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
     pub files: Vec<ChangedFile>,
+}
+
+/// SessionFailed — the event `loom.session.SessionFailed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionFailed {
+    /// `session_id` — `loom.session.SessionId`.
+    pub session_id: SessionId,
+    /// `commission_id` — `loom.session.CommissionId`.
+    pub commission_id: CommissionId,
+    /// `frontier_id` — `loom.session.FrontierId`.
+    pub frontier_id: FrontierId,
+    /// `continues` — `Optional<loom.session.SessionId>`.
+    pub continues: Option<SessionId>,
+    /// `failure` — `loom.session.SessionFailure`.
+    pub failure: SessionFailure,
+}
+
+/// The declared error `loom.session.FailureRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureRefused {
+    /// `reason` — `loom.session.FailureRefusalReason`.
+    pub reason: FailureRefusalReason,
 }
 
 /// AgentSessions — one row of the view `loom.session.AgentSessions`.
@@ -319,6 +423,8 @@ pub struct AgentSessions {
     pub action: String,
     /// `files` — `List<loom.session.ChangedFile>`.
     pub files: Vec<ChangedFile>,
+    /// `failure` — `Optional<loom.session.SessionFailure>`.
+    pub failure: Option<SessionFailure>,
     /// `state` — `loom.session.AgentSession.State`.
     pub state: AgentSessionState,
 }
@@ -327,6 +433,7 @@ pub struct AgentSessions {
 ///
 /// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
     /// The behaviour `loom.session.ProposeSessionChange` — generated.
     ///
@@ -337,6 +444,19 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn propose_session_change(&mut self, input: super::ProposeSessionChange) -> Result<super::ProposeSessionChangeOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.session.RecordFailedSession` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by `creates:` leaving the required field `files` of `loom.session.AgentSession` undetermined, in `failed`.
+    ///
+    /// Contract: given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `unmeasured-with-code` when `(failure.end == NotMeasured and defined(failure.code))`, error `loom.session.FailureRefused`; `measured-without-code` when `(failure.end != NotMeasured and not (defined(failure.code)))`, error `loom.session.FailureRefused`; `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed`.
+    pub trait RecordFailedSessionBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.session.RecordFailedSession`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn record_failed_session(&mut self, input: super::RecordFailedSession) -> Result<super::RecordFailedSessionOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The query `loom.session.AgentSessions` — generated.
@@ -350,4 +470,15 @@ pub mod obligations {
         fn agent_sessions(&self) -> Result<Vec<super::AgentSessions>, crate::obligation::UnmetObligation>;
     }
 
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl RecordFailedSessionBehavior for Unimplemented {
+        fn record_failed_session(&mut self, _input: super::RecordFailedSession) -> Result<super::RecordFailedSessionOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.session.RecordFailedSession" })
+        }
+    }
 }

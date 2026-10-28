@@ -218,6 +218,9 @@ impl ConformanceTarget for LoomTarget {
             session::PROPOSE_SESSION_CHANGE => {
                 session::propose_session_change(&mut live, input, correlation)?
             }
+            session::RECORD_FAILED_SESSION => {
+                session::record_failed_session(&mut live, input, correlation)?
+            }
             resource::APPLY_LOOM_AGENT => resource::apply_loom_agent(&mut live, input, correlation),
             resource::RECORD_CHECK => resource::record_check(&mut live, input, correlation),
             resource::OBSERVE_DEPLOYMENT => {

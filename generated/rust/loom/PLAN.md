@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb
-  contract digest 3ce28af44fafd999458bb0325769aa0e54a1d4b0f1cd78c5fabe64beca214063
+  model digest 3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8
+  contract digest 502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-262 capabilities: **260 generated**, **2 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+269 capabilities: **266 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -163,9 +163,12 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.session.AgentSession.State` |
 | domain type | `loom.session.CallDecision` |
 | domain type | `loom.session.ChangedFile` |
+| domain type | `loom.session.ChildEnd` |
 | domain type | `loom.session.CommissionId` |
 | domain type | `loom.session.DecidedBy` |
+| domain type | `loom.session.FailureRefusalReason` |
 | domain type | `loom.session.FrontierId` |
+| domain type | `loom.session.SessionFailure` |
 | domain type | `loom.session.SessionId` |
 | domain type | `loom.session.SessionKind` |
 | domain type | `loom.session.ToolDecision` |
@@ -227,6 +230,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.run.SelectAction` |
 | command contract | `loom.session.ProposeSessionChange` |
 | command behaviour | `loom.session.ProposeSessionChange` |
+| command contract | `loom.session.RecordFailedSession` |
 | event type | `loom.resource.LoomAgentApplied` |
 | event type | `loom.resource.LoomAgentCompleted` |
 | event type | `loom.resource.LoomAgentDegraded` |
@@ -246,6 +250,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.run.SelectionRecorded` |
 | event type | `loom.run.SelectionStale` |
 | event type | `loom.session.SessionChangeProposed` |
+| event type | `loom.session.SessionFailed` |
 | error type | `loom.agent.A2aRefused` |
 | error type | `loom.agent.HttpReadRefused` |
 | error type | `loom.agent.HttpTrustRefused` |
@@ -264,6 +269,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.run.SelectionNotSelected` |
 | error type | `loom.run.SelectionRecordExists` |
 | error type | `loom.run.SelectionStateConflict` |
+| error type | `loom.session.FailureRefused` |
 | view type | `loom.resource.LoomAgents` |
 | view query | `loom.resource.LoomAgents` |
 | view type | `loom.run.Catalogues` |
@@ -290,6 +296,7 @@ What the specification fully determines is generated; what it cannot determine i
 | --- | --- | --- | --- |
 | command behaviour | `loom.agent.CheckAgentSpec` | kept an obligation by the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed` | given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-format` externally decided (the document's format is not loom.agent/1), error `loom.agent.SpecRefused`; `blank-text` externally decided (a text member of the document is empty or only whitespace), error `loom.agent.SpecRefused`; `not-a-variable-name` externally decided (a bearer_env of the document is not an environment variable name), error `loom.agent.SpecRefused`; `port-out-of-range` externally decided (a port of the document is outside 1 to 65535), error `loom.agent.SpecRefused`; `not-a-plain-path` externally decided (an allow_paths entry of an http binding is not a plain path), error `loom.agent.SpecRefused`; `not-an-instant` externally decided (a Timestamp member of the document is not an RFC 3339 instant), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise |
 | command behaviour | `loom.run.SelectAction` | kept an obligation by the guard `exists entry in entries: (entry.action == input.action)`, in `not-in-catalogue` | given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-exists` for an identity a record already carries, error `loom.run.SelectionExists`; `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected` |
+| command behaviour | `loom.session.RecordFailedSession` | kept an obligation by `creates:` leaving the required field `files` of `loom.session.AgentSession` undetermined, in `failed` | given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `unmeasured-with-code` when `(failure.end == NotMeasured and defined(failure.code))`, error `loom.session.FailureRefused`; `measured-without-code` when `(failure.end != NotMeasured and not (defined(failure.code)))`, error `loom.session.FailureRefused`; `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed` |
 
 ## Refused — not represented by this synthesis
 

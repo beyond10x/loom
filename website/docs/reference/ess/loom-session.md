@@ -27,6 +27,10 @@ The agent session an AgentExecutor runs through metaharness (harness, Claude Cod
 - `path` — `String`
 - `content` — `Optional<String>`, which may be absent
 
+### `ChildEnd`
+
+`loom.session.ChildEnd` is one of `Exited`, `Signaled` and `NotMeasured`.
+
 ### `CommissionId`
 
 `loom.session.CommissionId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
@@ -35,9 +39,22 @@ The agent session an AgentExecutor runs through metaharness (harness, Claude Cod
 
 `loom.session.DecidedBy` is one of `Embedder`, `Frame`, `Deadline`, `Adapter` and `Observe`.
 
+### `FailureRefusalReason`
+
+`loom.session.FailureRefusalReason` is one of `UnmeasuredWithCode` and `MeasuredWithoutCode`.
+
 ### `FrontierId`
 
 `loom.session.FrontierId` wraps `Uuid` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
+
+### `SessionFailure`
+
+`loom.session.SessionFailure` is a record of four fields:
+
+- `end` — `loom.session.ChildEnd`
+- `code` — `Optional<Integer>`, which may be absent
+- `stderr_tail` — `Optional<String>`, which may be absent
+- `reason` — `Optional<String>`, which may be absent
 
 ### `SessionId`
 
@@ -79,6 +96,7 @@ It holds:
 - `continues` — `Optional<loom.session.SessionId>`, which may be absent
 - `action` — `String`
 - `files` — `List<loom.session.ChangedFile>`
+- `failure` — `Optional<loom.session.SessionFailure>`, which may be absent
 
 It references at most one [`AgentSession`](#agentsession), as `predecessor`, carried by `AgentSession.continues`.
 
@@ -123,6 +141,7 @@ It exposes:
 - `continues` — `Optional<loom.session.SessionId>`, which may be absent
 - `action` — `String`
 - `files` — `List<loom.session.ChangedFile>`
+- `failure` — `Optional<loom.session.SessionFailure>`, which may be absent
 - `state` — `loom.session.AgentSession.State`
 
 It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
@@ -153,6 +172,29 @@ It has one outcome.
 
 **`proposed`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.session.AgentSession`, which starts in `Ended`. The new instance's identity is published as `session_id` on `loom.session.SessionChangeProposed`. It emits `loom.session.SessionChangeProposed`. It sets `kind` from `input.kind`, `commission_id` from `input.commission_id`, `frontier_id` from `input.frontier_id`, `vendor_session_id` from `input.vendor_session_id`, `agent` from `input.agent`, `continues` from `input.continues`, `action` from `input.action` and `files` from `input.files`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
+### `RecordFailedSession`
+
+`loom.session.RecordFailedSession`.
+
+It takes:
+
+- `session_id` — `loom.session.SessionId`
+- `kind` — `loom.session.SessionKind`
+- `commission_id` — `loom.session.CommissionId`
+- `frontier_id` — `loom.session.FrontierId`
+- `vendor_session_id` — `Optional<String>`, which may be absent
+- `agent` — `Optional<loom.agent.AgentId>`, which may be absent
+- `continues` — `Optional<loom.session.SessionId>`, which may be absent
+- `failure` — `loom.session.SessionFailure`
+
+It has three outcomes.
+
+**`unmeasured-with-code`** — Taken when `(failure.end == NotMeasured and defined(failure.code))` holds of the input. No entity in this specification changes. It reports `loom.session.FailureRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`measured-without-code`** — Taken when `(failure.end != NotMeasured and not (defined(failure.code)))` holds of the input. No entity in this specification changes. It reports `loom.session.FailureRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`failed`** — The default branch, taken when no other outcome's condition matched. It creates a `loom.session.AgentSession`, which starts in `Ended`. The new instance's identity is published as `session_id` on `loom.session.SessionFailed`. It emits `loom.session.SessionFailed`. It sets `kind` from `input.kind`, `commission_id` from `input.commission_id`, `frontier_id` from `input.frontier_id`, `vendor_session_id` from `input.vendor_session_id`, `agent` from `input.agent`, `continues` from `input.continues`, `action` from `""` and `failure` from `{end: input.failure.end, code: input.failure.code, stderr_tail: input.failure.stderr_tail, reason: implementation-generated}`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
 ## Events
 
 ### `SessionChangeProposed`
@@ -172,7 +214,33 @@ Emitted by `loom.session.ProposeSessionChange` on its `proposed` outcome.
 
 Nothing in this system reacts to it.
 
+### `SessionFailed`
+
+`loom.session.SessionFailed`.
+
+It carries:
+
+- `session_id` — `loom.session.SessionId`
+- `commission_id` — `loom.session.CommissionId`
+- `frontier_id` — `loom.session.FrontierId`
+- `continues` — `Optional<loom.session.SessionId>`, which may be absent
+- `failure` — `loom.session.SessionFailure`
+
+Emitted by `loom.session.RecordFailedSession` on its `failed` outcome.
+
+Nothing in this system reacts to it.
+
+## Errors
+
+### `FailureRefused`
+
+It carries:
+
+- `reason` — `loom.session.FailureRefusalReason`
+
+Reported by `loom.session.RecordFailedSession` on its `unmeasured-with-code` and `measured-without-code` outcomes.
+
 
 ---
 
-Generated from loom v1 · model digest `681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb` · contract digest `slice-sha256/2:84d8101f6b4ec91b8dc754626f0ea2b25ae17e2f1f218b7fd375fff8e92651a3`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8` · contract digest `slice-sha256/2:b5460d1f391bf696958d711bdd974d5e92637beda4d314ccdcb59f5ec2594770`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

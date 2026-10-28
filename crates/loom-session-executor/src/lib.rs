@@ -23,7 +23,8 @@
 //! for it and, when the session proposes a change, records it as one `AgentSession` through the
 //! generated `ProposeSessionChange` behaviour, naming the commission's and the frontier's real ids
 //! and the vendor's own session id where the harness stated one ([`SessionExecutor::sessions`],
-//! [`SessionExecutor::proposed`]). The proposal's arguments are `{files}` only; the session's
+//! [`SessionExecutor::proposed`]); a session that failed after its harness child started is
+//! recorded through `RecordFailedSession` ([`SessionExecutor::failed`]). The proposal's arguments are `{files}` only; the session's
 //! summary and the SHA-256 digest of its transcript travel on the call's `ExecutorStep`, which the
 //! runtime delivers as the step's observation and never as evidence, so two sessions that propose
 //! the same files are the same request. The step's `usage` is what the session reported it spent,
@@ -52,9 +53,22 @@
 //! metaharness is the one a fresh session gets, and the harness session itself is not resumed.
 //! A predecessor of another commission than the call's is refused before any copy or session.
 //!
-//! A session that fails proposes nothing and is no record: the call returns `Suspended` with
-//! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
-//! files.
+//! A session that fails proposes nothing: the call returns `Suspended` with
+//! `ExternalAvailability` naming why, and [`SessionReport::error`] holds the same text. When its
+//! harness child had started, the session is recorded all the same, through
+//! `loom.session.RecordFailedSession`: its row ([`SessionExecutor::sessions`]) names no action and
+//! no files, and its `failure` (`loom.session.SessionFailure`) keeps how the child ended, the
+//! stderr tail the reason carries and the reason without it, read as the tail is, so a caller
+//! reading the record sees the same cause on a repeat.
+//! A session refused before its child started is no record. A session that changed nothing
+//! proposes an empty list of files. When the session ended without the JSON line naming its action,
+//! with one that does not read, or in an error, the
+//! reason also says how the harness child ended (its exit status, the signal that took it, or that
+//! metaharness measured neither) and, when metaharness hands on what the child wrote on standard
+//! error (it does when the child left no terminal record), the last whole lines of it within
+//! [`STDERR_TAIL_BYTES`], each line that holds a credential's shape withheld and never repeated
+//! ([`TOKEN_PREFIXES`], a URL with user information or a query component, a PEM block), read with
+//! its terminal escape sequences both removed and replaced.
 //!
 //! The change is what the session made in its copy against the bytes the copy was made from, the
 //! workspace as the frontier was handed: a file written in the workspace while the session runs
@@ -66,8 +80,9 @@
 //! a concurrent write. A write to such a file between the session's end and the edit effect
 //! applying the proposal is not seen here; that window is the effect's own guard to close.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -83,15 +98,19 @@ use loom::behaviour::{AgentSessionStorage, Generated};
 use loom::models::ModelRole;
 use loom::obligation::UnmetObligation;
 use loom::primitives::Uuid;
-use loom::session::obligations::{AgentSessionsQuery as _, ProposeSessionChangeBehavior as _};
+use loom::session::obligations::{
+    AgentSessionsQuery as _, ProposeSessionChangeBehavior as _, RecordFailedSessionBehavior,
+};
 use loom::session::{
-    AgentSessionSnapshot, AgentSessions, CallDecision, ChangedFile, CommissionId, DecidedBy,
-    FrontierId, ProposeSessionChange, ProposeSessionChangeOutcome, SessionChangeProposed,
-    SessionId, SessionKind, ToolDecision,
+    AgentSession, AgentSessionData, AgentSessionSnapshot, AgentSessions, AnyAgentSession,
+    CallDecision, ChangedFile, CommissionId, DecidedBy, FailureRefusalReason, FailureRefused,
+    FrontierId, ProposeSessionChange, ProposeSessionChangeOutcome, RecordFailedSession,
+    RecordFailedSessionOutcome, SessionChangeProposed, SessionFailed, SessionFailure, SessionId,
+    SessionKind, ToolDecision,
 };
 use metaharness::protocol::{
-    Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
-    Severity, Usage, Verdict,
+    Command, Decision, DecisionMode, Event, EventLine, HermeticMode, HermeticRow, RunSpec,
+    SeamFactory, Severity, Usage, Verdict,
 };
 use metaharness::{ClaudeSeams, CodexSeams, EventPoll, Input, Metaharness};
 use sha2::{Digest as _, Sha256};
@@ -117,6 +136,31 @@ pub const TOOLS: [&str; 5] = CLAUDE_FILE_TOOLS;
     note = "use `ToolPolicy::codex_default().allow` (`ToolPolicyDefaults`); removed in the release after 0.36.0"
 )]
 pub const CODEX_TOOLS: [&str; 2] = CODEX_SHELL_TOOLS;
+
+/// The most of a harness child's standard error a reason carries: the last whole lines of it that
+/// fit, read from no more than this many bytes at its end.
+pub const STDERR_TAIL_BYTES: usize = 4096;
+
+/// The prefixes of the credentials a line of a harness child's standard error is withheld for,
+/// matched in either case at the start of a word: the list `b10x_loom_agent::TOKEN_PREFIXES`
+/// refuses in an agent spec, held equal to it by `crates/loom-agent/tests/token_prefixes.rs`.
+pub const TOKEN_PREFIXES: [&str; 15] = [
+    "xoxb-",
+    "xoxp-",
+    "xapp-",
+    "sk-",
+    "sk_live_",
+    "sk_test_",
+    "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
+    "github_pat_",
+    "AKIA",
+    "Bearer ",
+    "-----BEGIN",
+];
 
 /// The file tools of [`ToolPolicyDefaults::claude_default`]: the only Claude Code tools whose
 /// calls this executor can check ([`decide`]).
@@ -214,6 +258,34 @@ pub enum SpecError {
         /// The entry, as the spec writes it.
         tool: String,
     },
+    /// The spec names a session override ([`SessionOverrides`]) its kind's launcher does not
+    /// apply, so it is refused rather than dropped: `max_budget_micro_usd` on Codex (metaharness
+    /// refuses `--max-budget-usd` there) and on b10x-harness, and `effort` on b10x-harness
+    /// (nothing in its launch reads either).
+    OverrideUnapplied {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The member, as `loom.agent.SessionSpec` names it.
+        member: String,
+    },
+    /// The spec's `max_budget_micro_usd` is negative.
+    BudgetNegative {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The budget, as the spec writes it.
+        budget: i64,
+    },
+    /// A `context` entry names a file the copy will not hold: not one of the files the executor
+    /// copies, not one plain relative path ([`plain_relative`]), or not a regular file of the
+    /// workspace reached through no link.
+    ContextNotCopied {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The entry, as the spec writes it.
+        path: String,
+    },
 }
 
 impl std::fmt::Display for SpecError {
@@ -249,7 +321,98 @@ impl std::fmt::Display for SpecError {
                 "the agent spec {agent} names the tool {tool:?}, which holds a comma or \
                  whitespace and so is no one tool name"
             ),
+            Self::OverrideUnapplied {
+                agent,
+                kind,
+                member,
+            } => write!(
+                f,
+                "the agent spec {agent} names the session's `{member}`, which a {kind:?} \
+                 session's launcher does not apply; leave it unset"
+            ),
+            Self::BudgetNegative { agent, budget } => write!(
+                f,
+                "the agent spec {agent} names `max_budget_micro_usd: {budget}`, which is \
+                 negative"
+            ),
+            Self::ContextNotCopied { agent, path } => write!(
+                f,
+                "the agent spec {agent} names the context file {path:?}, which is not one of \
+                 the files the session's copy holds, spelled as one plain relative path"
+            ),
         }
+    }
+}
+
+/// What a caller asks of a session's harness over its kind's defaults
+/// (`story:session-executor-partial-runspec`): each member it names wins, each it leaves unset
+/// keeps the kind's value. It has no member for what Loom sets for its own guarantees
+/// (credentials, working directory, scratch copy, hermetic mode, decision mode, b10x-harness's
+/// endpoint and secret route), so a caller cannot name those. A member the kind's launcher does
+/// not apply is refused before the copy is made, never dropped: `max_budget_micro_usd` on Codex
+/// and b10x-harness, `effort` on b10x-harness.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionOverrides {
+    /// The reasoning effort, in the vendor's vocabulary: Claude Code's `--effort`, Codex's
+    /// `model_reasoning_effort` in its scratch config.
+    pub effort: Option<String>,
+    /// A ceiling on what the session may spend, in micro-USD, which the vendor enforces during
+    /// the run: Claude Code's `--max-budget-usd`, rendered exactly as a decimal of dollars
+    /// (`12500000` is `12.5`).
+    pub max_budget_micro_usd: Option<u64>,
+    /// Whether metaharness refuses the session before it starts when the harness program is
+    /// outside its adapter's pinned versions; none for the default, which warns.
+    pub strict_version: Option<bool>,
+    /// The workspace files handed to the harness as context, in order: each one of the files the
+    /// executor copies, spelled as one plain relative path ([`plain_relative`]), a regular file
+    /// in the workspace reached through no link (the copy's own rules), and handed from
+    /// the copy. Any other path is refused before the copy, naming it.
+    pub context: Vec<String>,
+}
+
+impl SessionOverrides {
+    /// The member `kind`'s launcher does not apply, by its `loom.agent.SessionSpec` name, when
+    /// these name one.
+    fn unapplied(&self, kind: Kind) -> Option<&'static str> {
+        match kind {
+            Kind::Claude => None,
+            Kind::Codex => self
+                .max_budget_micro_usd
+                .is_some()
+                .then_some("max_budget_micro_usd"),
+            Kind::B10x if self.max_budget_micro_usd.is_some() => Some("max_budget_micro_usd"),
+            Kind::B10x => self.effort.is_some().then_some("effort"),
+        }
+    }
+
+    /// The first context path the copy of `files` from `workspace` will not hold: not one of
+    /// `files`, or not a file [`ScratchCopy::make`] copies ([`copied`]: a plain relative path,
+    /// reached through no link, naming a regular file).
+    fn uncopied<'a>(&'a self, workspace: &Path, files: &[String]) -> Option<&'a String> {
+        self.context
+            .iter()
+            .find(|path| !files.contains(path) || !copied(workspace, path))
+    }
+}
+
+/// `micro_usd` as the decimal of US dollars metaharness passes to the vendor, exactly: no
+/// trailing zero in the fraction, and no fraction for whole dollars (`12500000` is `12.5`, `1`
+/// is `0.000001`, `5000000` is `5`).
+fn usd(micro_usd: u64) -> String {
+    let (dollars, fraction) = (micro_usd / 1_000_000, micro_usd % 1_000_000);
+    if fraction == 0 {
+        return dollars.to_string();
+    }
+    let fraction = format!("{fraction:06}");
+    format!("{dollars}.{}", fraction.trim_end_matches('0'))
+}
+
+/// The harness `kind` as a reader names it.
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Claude => "Claude Code",
+        Kind::Codex => "Codex",
+        Kind::B10x => "b10x-harness",
     }
 }
 
@@ -466,11 +629,39 @@ pub struct SessionExecutor {
     /// name on another kind, beside a token, or not of that shape fails before the copy is made,
     /// as does a b10x-harness call naming neither a name nor a token file.
     pub api_key_secret: Option<String>,
+    /// What the caller asks of the session's harness over its kind's defaults
+    /// ([`SessionOverrides`], [`Self::with_overrides`]); none named by default. A call naming a
+    /// member its kind's launcher does not apply, or a context file the copy does not hold,
+    /// fails before the copy is made.
+    pub overrides: SessionOverrides,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
     record: RefCell<SessionRecord>,
     predecessor: RefCell<Option<Predecessor>>,
+    observer: RefCell<Option<Box<EventObserver>>>,
+    running: Cell<bool>,
+}
+
+/// A caller's observer of a session's events ([`SessionExecutor::with_observer`]): each
+/// `metaharness.event/1` line the executor receives, and the session's scratch copy.
+type EventObserver = dyn FnMut(&EventLine, &Path);
+
+/// The mark that an executor is running a call ([`SessionExecutor::run_with_usage`]), cleared
+/// when the call leaves, by return or by panic.
+struct Running<'a>(&'a Cell<bool>);
+
+impl<'a> Running<'a> {
+    /// The mark, set; none when it was set already (a call made while one runs).
+    fn enter(flag: &'a Cell<bool>) -> Option<Self> {
+        (!flag.replace(true)).then_some(Self(flag))
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
 }
 
 /// The earlier session the next recorded session continues ([`SessionExecutor::continuing`]):
@@ -517,11 +708,14 @@ impl SessionExecutor {
             tools: None,
             agent: None,
             api_key_secret: None,
+            overrides: SessionOverrides::default(),
             runner: RefCell::new(None),
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
             record: RefCell::new(SessionRecord::default()),
             predecessor: RefCell::new(None),
+            observer: RefCell::new(None),
+            running: Cell::new(false),
         }
     }
 
@@ -529,9 +723,11 @@ impl SessionExecutor {
     /// the session kind, the tool policy and the prompt (`agent.brief`) of `spec`, and as its
     /// model the name `spec.model` gives the `agent` role, as written (routes are the host's to
     /// resolve). Otherwise as [`Self::new`]: the copy under the system's temporary directory, on
-    /// the operator's login. Each session it runs records the spec's `agent.id`. The spec's
-    /// budget, stop policy and egress apertures are not applied here; a host bounds the run
-    /// through Commission.
+    /// the operator's login. Each session it runs records the spec's `agent.id`. The session's
+    /// `effort`, `max_budget_micro_usd`, `strict_version` and `context` become
+    /// [`Self::overrides`]; a spec naming none builds the executor it built before them. The
+    /// spec's run budget, stop policy and egress apertures are not applied here; a host bounds
+    /// the run through Commission.
     ///
     /// # Errors
     ///
@@ -541,7 +737,12 @@ impl SessionExecutor {
     /// whitespace; [`SpecError::DecisionModeUnenforced`] for Claude Code or Codex under any mode
     /// but `ask`, and b10x-harness under any but `observe`; and for b10x-harness,
     /// [`SpecError::AllowUnenforced`] for an `allow` other than its default (none) and
-    /// [`SpecError::DenyUnenforced`] for any `deny`.
+    /// [`SpecError::DenyUnenforced`] for any `deny`. Then the overrides:
+    /// [`SpecError::BudgetNegative`] for a negative `max_budget_micro_usd`;
+    /// [`SpecError::OverrideUnapplied`] for a member the kind's launcher does not apply (a budget
+    /// on Codex or b10x-harness, an effort on b10x-harness); and [`SpecError::ContextNotCopied`]
+    /// for a `context` entry that is not one of `files` as one plain relative path, or not a
+    /// regular file of `workspace` reached through no link: one the copy will not hold.
     pub fn from_spec(
         spec: &AgentSpec,
         workspace: impl Into<PathBuf>,
@@ -591,7 +792,38 @@ impl SessionExecutor {
                 });
             }
         }
-        let mut executor = Self::new(workspace, files, spec.agent.brief.clone()).of_kind(kind);
+        let max_budget_micro_usd = session
+            .max_budget_micro_usd
+            .map(|budget| {
+                u64::try_from(budget).map_err(|_| SpecError::BudgetNegative {
+                    agent: agent.0.clone(),
+                    budget,
+                })
+            })
+            .transpose()?;
+        let overrides = SessionOverrides {
+            effort: session.effort.clone(),
+            max_budget_micro_usd,
+            strict_version: session.strict_version,
+            context: session.context.clone(),
+        };
+        if let Some(member) = overrides.unapplied(kind) {
+            return Err(SpecError::OverrideUnapplied {
+                agent: agent.0,
+                kind: session.kind,
+                member: member.to_owned(),
+            });
+        }
+        let workspace: PathBuf = workspace.into();
+        if let Some(path) = overrides.uncopied(&workspace, &files) {
+            return Err(SpecError::ContextNotCopied {
+                agent: agent.0,
+                path: path.clone(),
+            });
+        }
+        let mut executor = Self::new(workspace, files, spec.agent.brief.clone())
+            .of_kind(kind)
+            .with_overrides(overrides);
         executor.model = spec
             .model
             .roles
@@ -642,11 +874,34 @@ impl SessionExecutor {
         self
     }
 
+    /// The same executor, handing each event of its sessions to `observer` while the session
+    /// runs: every `metaharness.event/1` line the executor receives, right after it is appended
+    /// to [`SessionReport::transcript`] and before the executor acts on it, in transcript order,
+    /// with the session's scratch copy ([`SessionReport::cwd`]). The observer is handed the event
+    /// by shared reference and reaches neither the report nor the session's decisions. It is
+    /// handed the copy to read files from and must not write there: the copy is the session's,
+    /// and whatever it holds when the session ends, a file the observer wrote included, is part
+    /// of what the session proposes, which Commission revalidates like any change. A call made
+    /// while this executor already runs a session, as from the observer, is refused before any
+    /// copy is made or child started: it returns `Suspended` with `ExternalAvailability` naming
+    /// that the executor is already running a session, records nothing and leaves
+    /// [`Self::last_report`] as it was, and the session running goes on. A panic in the
+    /// observer halts the session (metaharness kills the harness child) and then continues out
+    /// of the call with its own payload; the call records no session and leaves
+    /// [`Self::last_report`] as it was. The observer serves every call of this executor; an event
+    /// the executor could not serialize is in neither the transcript nor the observer's view.
+    #[must_use]
+    pub fn with_observer(self, observer: impl FnMut(&EventLine, &Path) + 'static) -> Self {
+        *self.observer.borrow_mut() = Some(Box::new(observer));
+        self
+    }
+
     /// The same executor, its next recorded session continuing `previous`, a session this or
     /// another executor recorded ([`Self::sessions`]): that session names `previous.session_id`
-    /// as `loom.session.AgentSession.continues`. The predecessor is the next recorded session's
-    /// only; a later one continues none unless built again. A call that records no session (it
-    /// failed or was refused) leaves the predecessor to the next call. The request to
+    /// as `loom.session.AgentSession.continues`. The predecessor is the next proposing session's
+    /// only; a later one continues none unless built again. A call that proposes nothing leaves
+    /// the predecessor to the next call, whether it records no session (refused before its
+    /// harness child started) or records a failed one, which names the predecessor too. The request to
     /// metaharness is unchanged and the harness session is not resumed: Loom records the
     /// lineage only.
     ///
@@ -706,7 +961,9 @@ impl SessionExecutor {
     }
 
     /// Every session this executor recorded, one row of the `loom.session.AgentSessions` view
-    /// each, in the order they ran: a session that failed is not among them.
+    /// each, in the order they ran. A session that failed after its harness child started is
+    /// among them with its `failure` (how the child ended, the tail of its stderr), no action and
+    /// no files; one refused before its child started is not.
     #[must_use]
     pub fn sessions(&self) -> Vec<AgentSessions> {
         self.record.borrow().sessions()
@@ -717,6 +974,49 @@ impl SessionExecutor {
     #[must_use]
     pub fn proposed(&self) -> Vec<SessionChangeProposed> {
         self.record.borrow().proposed.clone()
+    }
+
+    /// The `loom.session.SessionFailed` each session recorded as failed published, in the order
+    /// they ran.
+    #[must_use]
+    pub fn failed(&self) -> Vec<SessionFailed> {
+        self.record.borrow().failed.clone()
+    }
+
+    /// Records the session `report` describes, which started and proposed nothing, as one
+    /// `AgentSession` for `commission` over `frontier` with `failure` ([`ChildEnd::failure`]),
+    /// under `session_id`, continuing `continues` when it names an earlier session.
+    fn record_failure(
+        &self,
+        commission: &CommissionId,
+        frontier: &Frontier<frontier_state::Issued>,
+        report: &SessionReport,
+        failure: SessionFailure,
+        session_id: SessionId,
+        continues: Option<SessionId>,
+    ) -> Result<SessionFailed, String> {
+        self.record
+            .borrow_mut()
+            .fail(RecordFailedSession {
+                session_id,
+                kind: self.session_kind(),
+                commission_id: commission.clone(),
+                frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
+                vendor_session_id: report.vendor_session_id.clone(),
+                agent: self.agent.clone(),
+                continues,
+                failure,
+            })
+            .map_err(|unmet| format!("the failed session could not be recorded: {unmet}"))
+    }
+
+    /// The `loom.session.SessionKind` this executor's sessions are recorded as.
+    fn session_kind(&self) -> SessionKind {
+        match self.kind {
+            Kind::Claude => SessionKind::ClaudeCode,
+            Kind::Codex => SessionKind::Codex,
+            Kind::B10x => SessionKind::Harness,
+        }
     }
 
     /// Records `proposal`, the change of the session `report` describes, as one `AgentSession`
@@ -731,16 +1031,11 @@ impl SessionExecutor {
         session_id: SessionId,
         continues: Option<SessionId>,
     ) -> Result<SessionChangeProposed, String> {
-        let kind = match self.kind {
-            Kind::Claude => SessionKind::ClaudeCode,
-            Kind::Codex => SessionKind::Codex,
-            Kind::B10x => SessionKind::Harness,
-        };
         self.record
             .borrow_mut()
             .propose(ProposeSessionChange {
                 session_id,
-                kind,
+                kind: self.session_kind(),
                 commission_id: commission.clone(),
                 frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
                 vendor_session_id: report.vendor_session_id.clone(),
@@ -766,6 +1061,35 @@ impl SessionExecutor {
         self
     }
 
+    /// The same executor, its sessions asking `overrides` of the harness over its kind's
+    /// defaults ([`SessionOverrides`]): each member named wins, each left unset keeps the kind's
+    /// value. Nothing else of the request is taken from the caller.
+    #[must_use]
+    pub fn with_overrides(mut self, overrides: SessionOverrides) -> Self {
+        self.overrides = overrides;
+        self
+    }
+
+    /// [`Self::overrides`] are ones this executor applies: every member is one its kind's
+    /// launcher applies, and every context file one of [`Self::files`], spelled as one plain
+    /// relative path. Each refusal names the member and kind, or the path.
+    fn check_overrides(&self) -> Result<(), String> {
+        if let Some(member) = self.overrides.unapplied(self.kind) {
+            return Err(format!(
+                "the session override `{member}` is not applied by a {} session's launcher, so \
+                 it is refused rather than dropped; leave it unset",
+                kind_name(self.kind)
+            ));
+        }
+        if let Some(path) = self.overrides.uncopied(&self.workspace, &self.files) {
+            return Err(format!(
+                "the context file {path:?} is not one of the files the session's copy holds, \
+                 spelled as one plain relative path"
+            ));
+        }
+        Ok(())
+    }
+
     /// The same executor, whose session is started by `runner` instead of the real program
     /// (metaharness's `ScriptedRunner`, or one that wraps it).
     #[must_use]
@@ -787,7 +1111,10 @@ impl SessionExecutor {
     /// it yet); b10x-harness `On`, pointed at [`Self::endpoint`] with its subscription token, or
     /// with [`Self::api_key_secret`] under `ApiKey` when one is named, confined by substrate in the
     /// loop's own process so its write tools reach the copy
-    /// and nothing else. Each with the copy as its declared scratch working directory.
+    /// and nothing else. Each with the copy as its declared scratch working directory. Then
+    /// [`Self::overrides`], each member named over the kind's default: the effort, the budget as
+    /// a decimal of dollars, strict version, and each context file by its path in the copy
+    /// (relative, as metaharness reads it beneath the working directory).
     fn spec(&self, copy: &Path) -> Result<RunSpec, String> {
         let mut spec = RunSpec::new(self.kind);
         spec.credentials = self.credentials;
@@ -795,6 +1122,13 @@ impl SessionExecutor {
         spec.scratch_cwd = true;
         spec.prompt = Some(self.brief.clone());
         spec.model.clone_from(&self.model);
+        let overrides = &self.overrides;
+        spec.effort.clone_from(&overrides.effort);
+        spec.max_budget_usd = overrides.max_budget_micro_usd.map(usd);
+        if let Some(strict) = overrides.strict_version {
+            spec.strict_version = strict;
+        }
+        spec.context = overrides.context.iter().map(PathBuf::from).collect();
         let decisions = match self.policy().decisions {
             PolicyDecisions::Frame => DecisionMode::Frame,
             PolicyDecisions::Ask => DecisionMode::Ask,
@@ -880,7 +1214,11 @@ impl SessionExecutor {
     }
 
     /// One session: the copy made, the session run in it to its end, the proposal read.
-    fn session(&self, report: &mut SessionReport) -> Result<Proposal, String> {
+    fn session(
+        &self,
+        report: &mut SessionReport,
+        child: &mut ChildEnd,
+    ) -> Result<Proposal, String> {
         // One spelling per file: the copy's base and the walk of the copy key a file by the
         // same string only when the embedder named it plainly.
         let unplain: Vec<&str> = self
@@ -895,6 +1233,7 @@ impl SessionExecutor {
             ));
         }
         self.check_api_key_secret()?;
+        self.check_overrides()?;
         let offered = self.offered();
         let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;
         report.cwd = Some(copy.dir.clone());
@@ -964,6 +1303,9 @@ impl SessionExecutor {
         let mut ended_usage: Option<Usage> = None;
         let mut usage_events: Vec<Usage> = Vec::new();
         let mut stream_error = None;
+        let mut observer = self.observer.borrow_mut();
+        // How the harness child ended and what it said on stderr, as metaharness hands them on
+        // (`child`, the caller's: a failed session is recorded with it).
         loop {
             if !halted && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 halted = true;
@@ -983,6 +1325,17 @@ impl SessionExecutor {
             if let Ok(text) = serde_json::to_string(&*line) {
                 report.transcript.extend_from_slice(text.as_bytes());
                 report.transcript.push(b'\n');
+                // The caller's observer, handed what was just appended ([`Self::with_observer`]);
+                // its panic halts the session before it leaves the call.
+                if let Some(observe) = observer.as_mut()
+                    && let Err(panicked) =
+                        catch_unwind(AssertUnwindSafe(|| observe(&line, &copy.dir)))
+                {
+                    let _ = run.send(Command::Halt {
+                        reason: "the caller's event observer panicked".to_owned(),
+                    });
+                    resume_unwind(panicked);
+                }
             }
             match &line.event {
                 Event::SessionStarted {
@@ -1088,6 +1441,15 @@ impl SessionExecutor {
                         final_text = Some(answer.text.clone());
                     }
                 }
+                // Metaharness hands on the child's stderr only here, when it left no terminal
+                // record (`warning::NO_TERMINAL_RECORD`), and its native end on `stream.closed`.
+                Event::Warning { code, message }
+                    if code == metaharness::warning::NO_TERMINAL_RECORD =>
+                {
+                    child.stderr =
+                        stderr_tail(message.strip_prefix(STDERR_SAID).unwrap_or(message));
+                }
+                Event::StreamClosed { process, .. } => child.termination = *process,
                 _ => {}
             }
         }
@@ -1177,7 +1539,10 @@ impl SessionExecutor {
             return Err("the session was halted: the step's time ran out".to_owned());
         }
         if let Some(subtype) = ended_in_error {
-            return Err(format!("the session ended in an error ({subtype})"));
+            return Err(format!(
+                "the session ended in an error ({subtype}){}",
+                child.said()
+            ));
         }
         if !held.is_empty() {
             return Err(format!(
@@ -1186,7 +1551,11 @@ impl SessionExecutor {
             ));
         }
         let replied = replied.or(final_text);
-        let (action, summary) = reply(&replied.unwrap_or_else(|| said.join("\n")))?;
+        let (action, summary) =
+            reply(&replied.unwrap_or_else(|| said.join("\n"))).map_err(|why| match why {
+                Unreplied::NoActionLine => format!("{NO_ACTION_LINE}{}", child.said()),
+                Unreplied::Malformed(why) => format!("{why}{}", child.said()),
+            })?;
         let files = copy.changes()?;
         let stale = copy.stale(&files);
         if !stale.is_empty() {
@@ -1223,13 +1592,51 @@ impl AgentExecutor for SessionExecutor {
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorStep {
         let started = Instant::now();
+        // A call made while this executor runs one (from its event observer) is refused before
+        // anything: no id taken, no copy, no child, nothing recorded, the last report as it was.
+        let Some(_running) = Running::enter(&self.running) else {
+            let why = "this executor is already running a session; a call made while it runs, \
+                       as from its event observer, is refused"
+                .to_owned();
+            let report = SessionReport {
+                error: Some(why.clone()),
+                ..SessionReport::default()
+            };
+            return ExecutorStep {
+                outcome: ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
+                    reason: SuspensionReason::ExternalAvailability(Json::Text(why)),
+                }),
+                usage: Some(usage_of(&report, started.elapsed())),
+                transcript_digest: None,
+                summary: None,
+            };
+        };
         let mut report = SessionReport::default();
         let commission = CommissionId(Uuid(commission.data().commission_id.0.0.clone()));
         // A predecessor of another commission is refused before any copy or session.
         let proposed = self.predecessor_for(&commission).and_then(|continues| {
             // So is an id that is the predecessor's or one this executor already recorded.
             let session_id = self.session_id_for(continues.as_ref())?;
-            let proposal = self.session(&mut report)?;
+            let mut child = ChildEnd::default();
+            let proposal = match self.session(&mut report, &mut child) {
+                Ok(proposal) => proposal,
+                // A session whose child started is recorded with how it ended, naming the
+                // predecessor it continued, which stays for the next call: a retry continues what
+                // the failed attempt continued. One refused before it started is no record.
+                Err(why) if report.started => {
+                    self.record_failure(
+                        &commission,
+                        frontier,
+                        &report,
+                        child.failure(&why),
+                        session_id,
+                        continues,
+                    )
+                    .map_err(|unrecorded| format!("{why}; {unrecorded}"))?;
+                    return Err(why);
+                }
+                Err(why) => return Err(why),
+            };
             self.record(
                 &commission,
                 frontier,
@@ -1622,6 +2029,69 @@ pub fn fresh_session_id() -> SessionId {
 struct SessionRecord {
     sessions: Vec<AgentSessionSnapshot>,
     proposed: Vec<SessionChangeProposed>,
+    failed: Vec<SessionFailed>,
+}
+
+/// The refusal `loom.session.RecordFailedSession` answers `failure` with, `None` when it records
+/// it: `unmeasured-with-code` for a code with a `NotMeasured` end, `measured-without-code` for
+/// none with an `Exited` or a `Signaled` one. A process ends with a status or a signal exactly
+/// when its end is measured, so the executor's own failures are never refused.
+#[must_use]
+pub fn failure_refusal(failure: &SessionFailure) -> Option<RecordFailedSessionOutcome> {
+    use loom::session::ChildEnd as End;
+    let refused = |reason| FailureRefused { reason };
+    match (failure.end, failure.code) {
+        (End::NotMeasured, Some(_)) => Some(RecordFailedSessionOutcome::UnmeasuredWithCode {
+            error: refused(FailureRefusalReason::UnmeasuredWithCode),
+        }),
+        (End::Exited | End::Signaled, None) => {
+            Some(RecordFailedSessionOutcome::MeasuredWithoutCode {
+                error: refused(FailureRefusalReason::MeasuredWithoutCode),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// `loom.session.RecordFailedSession`, an obligation of the generated model. It refuses a failure
+/// no harness child ends with ([`failure_refusal`]). Its `failed` outcome leaves `files`
+/// undetermined, because the specification's format (`ess/25`) has no empty-list literal, and
+/// `failure.reason` generated: a failed session proposes nothing, so its files are none, and its
+/// reason is the one the executor put in `failure` ([`ChildEnd::failure`]). Every other field is
+/// the one the outcome's `sets:` names, and the event is its declared payload.
+impl RecordFailedSessionBehavior for SessionRecord {
+    fn record_failed_session(
+        &mut self,
+        input: RecordFailedSession,
+    ) -> Result<RecordFailedSessionOutcome, UnmetObligation> {
+        if let Some(refused) = failure_refusal(&input.failure) {
+            return Ok(refused);
+        }
+        let session_failed = SessionFailed {
+            session_id: input.session_id.clone(),
+            commission_id: input.commission_id.clone(),
+            frontier_id: input.frontier_id.clone(),
+            continues: input.continues.clone(),
+            failure: input.failure.clone(),
+        };
+        let data = AgentSessionData {
+            session_id: input.session_id,
+            kind: input.kind,
+            commission_id: input.commission_id,
+            frontier_id: input.frontier_id,
+            vendor_session_id: input.vendor_session_id,
+            agent: input.agent,
+            continues: input.continues,
+            action: String::new(),
+            files: Vec::new(),
+            failure: Some(input.failure),
+        };
+        AgentSessionStorage::put(
+            self,
+            AnyAgentSession::Ended(AgentSession::new(data)).snapshot(),
+        );
+        Ok(RecordFailedSessionOutcome::Failed { session_failed })
+    }
 }
 
 impl AgentSessionStorage for SessionRecord {
@@ -1669,11 +2139,30 @@ impl SessionRecord {
         Ok(session_change_proposed)
     }
 
+    /// `RecordFailedSession`, through the generated model's obligation (this store's own
+    /// [`RecordFailedSessionBehavior`]); the event it published, kept. A refusal is an error.
+    fn fail(&mut self, input: RecordFailedSession) -> Result<SessionFailed, String> {
+        let mut generated = Generated::new(std::mem::take(self));
+        let answered = generated.record_failed_session(input);
+        *self = generated.ports;
+        match answered.map_err(|unmet| unmet.to_string())? {
+            RecordFailedSessionOutcome::Failed { session_failed } => {
+                self.failed.push(session_failed.clone());
+                Ok(session_failed)
+            }
+            RecordFailedSessionOutcome::UnmeasuredWithCode { error }
+            | RecordFailedSessionOutcome::MeasuredWithoutCode { error } => {
+                Err(format!("it was refused ({:?})", error.reason))
+            }
+        }
+    }
+
     /// The `loom.session.AgentSessions` view, by its generated query.
     fn sessions(&self) -> Vec<AgentSessions> {
         let generated = Generated::new(Self {
             sessions: self.sessions.clone(),
             proposed: Vec::new(),
+            failed: Vec::new(),
         });
         generated.agent_sessions().unwrap_or_default()
     }
@@ -2144,22 +2633,331 @@ fn inside(copy: &Path, path: &str) -> bool {
     true
 }
 
+/// Why a reply proposes nothing.
+enum Unreplied {
+    /// It holds no line that opens a JSON object naming `action`.
+    NoActionLine,
+    /// Its JSON line does not read, or names no action.
+    Malformed(String),
+}
+
+/// The reason a session that ended without its action line suspends with, before how the harness
+/// child ended ([`ChildEnd::said`]).
+const NO_ACTION_LINE: &str = "the session ended without the JSON line naming its action";
+
+/// What metaharness's `NO_TERMINAL_RECORD` warning says before the child's stderr.
+const STDERR_SAID: &str = "the harness produced no terminal record and wrote this on stderr: ";
+
 /// The action and summary of a reply: its last line that opens a JSON object naming `action`.
-fn reply(text: &str) -> Result<(String, String), String> {
+fn reply(text: &str) -> Result<(String, String), Unreplied> {
     for line in text.lines().rev() {
         let line = line.trim();
         if line.starts_with('{') && line.contains("\"action\"") {
-            let doc: serde_json::Value = serde_json::from_str(line)
-                .map_err(|error| format!("the session's JSON line does not read: {error}"))?;
+            let doc: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+                Unreplied::Malformed(format!("the session's JSON line does not read: {error}"))
+            })?;
             let action = doc["action"]
                 .as_str()
-                .ok_or("the session's JSON line names no action")?
+                .ok_or_else(|| {
+                    Unreplied::Malformed("the session's JSON line names no action".to_owned())
+                })?
                 .to_owned();
             let summary = doc["summary"].as_str().unwrap_or("").to_owned();
             return Ok((action, summary));
         }
     }
-    Err("the session ended without the JSON line naming its action".to_owned())
+    Err(Unreplied::NoActionLine)
+}
+
+/// How a session's harness child ended, as metaharness handed it on: its native end
+/// (`stream.closed`) and the tail of its stderr ([`stderr_tail`]), which metaharness hands on only
+/// when the child left no terminal record.
+#[derive(Debug, Default)]
+struct ChildEnd {
+    termination: metaharness::protocol::ProcessTermination,
+    stderr: String,
+}
+
+impl ChildEnd {
+    /// What a reason adds about the child: ` (the harness exited with status 1)`, then, when it
+    /// said something on stderr, `; the last lines of its stderr:` and those lines on their own.
+    fn said(&self) -> String {
+        use metaharness::protocol::ProcessTermination;
+        let end = match self.termination {
+            ProcessTermination::Exited { code } => format!("the harness exited with status {code}"),
+            ProcessTermination::Signaled { signal } => {
+                format!("the harness was ended by signal {signal}")
+            }
+            ProcessTermination::Unknown => "metaharness measured no exit status".to_owned(),
+        };
+        if self.stderr.is_empty() {
+            format!(" ({end})")
+        } else {
+            format!(" ({end}){STDERR_SAID_BY_REASON}{}", self.stderr)
+        }
+    }
+
+    /// The same, as a failed session's record keeps it (`loom.session.SessionFailure`): the end,
+    /// its status or signal (none when unmeasured), the stderr tail the reason carries, none when
+    /// the child said nothing metaharness handed on, and `why`, the reason the step was suspended
+    /// with, as the record keeps it ([`record_reason`]).
+    fn failure(&self, why: &str) -> SessionFailure {
+        use loom::session::ChildEnd as End;
+        use metaharness::protocol::ProcessTermination;
+        let (end, code) = match self.termination {
+            ProcessTermination::Exited { code } => (End::Exited, Some(i64::from(code))),
+            ProcessTermination::Signaled { signal } => (End::Signaled, Some(i64::from(signal))),
+            ProcessTermination::Unknown => (End::NotMeasured, None),
+        };
+        SessionFailure {
+            end,
+            code,
+            stderr_tail: Some(self.stderr.clone()).filter(|tail| !tail.is_empty()),
+            reason: Some(record_reason(why, self)),
+        }
+    }
+}
+
+/// The last whole lines of `stderr`, a harness child's, that fit in [`STDERR_TAIL_BYTES`]: only
+/// the final [`STDERR_TAIL_BYTES`] bytes are read, a line they cut into is dropped whole, and so is
+/// a last line longer than the bound, which a note stands in for. Every line that holds a
+/// credential's shape ([`credential_lines`]) is withheld, a note standing in for each run of them,
+/// and every other control character but a tab is replaced, so the tail is one inert text. Empty
+/// when the child said nothing.
+fn stderr_tail(stderr: &str) -> String {
+    let stderr = stderr.trim_end();
+    let mut start = stderr.len().saturating_sub(STDERR_TAIL_BYTES);
+    while !stderr.is_char_boundary(start) {
+        start += 1;
+    }
+    let window = if start == 0 || stderr.as_bytes()[start - 1] == b'\n' {
+        &stderr[start..]
+    } else {
+        match stderr[start..].find('\n') {
+            Some(at) => &stderr[start + at + 1..],
+            None => {
+                return format!(
+                    "[its last line, longer than {STDERR_TAIL_BYTES} bytes, is not shown]"
+                );
+            }
+        }
+    };
+    let shown = walked(window);
+    // A note or a replaced character may be longer than what it stands in for: the bound holds
+    // for the tail as shown, its first lines going first. A last line that no longer fits once
+    // shown is dropped as one the window cannot hold, a note standing in for it.
+    let mut kept = 0;
+    let mut size = 0;
+    for line in shown.iter().rev() {
+        let more = line.len() + usize::from(kept > 0);
+        if size + more > STDERR_TAIL_BYTES {
+            break;
+        }
+        size += more;
+        kept += 1;
+    }
+    if kept == 0 {
+        return format!(
+            "[its last line, longer than {STDERR_TAIL_BYTES} bytes as shown, is not shown]"
+        );
+    }
+    shown[shown.len() - kept..].join("\n")
+}
+
+/// The reason a failed session's record keeps (`loom.session.SessionFailure.reason`): `why`, the
+/// reason the step was suspended with, without the stderr tail [`ChildEnd::said`] ends it with
+/// (the record keeps that as its `stderr_tail`); each line shown and withheld as the tail's are
+/// ([`walked`]); its first [`STDERR_TAIL_BYTES`] bytes at most, a note ending one that is cut.
+fn record_reason(why: &str, child: &ChildEnd) -> String {
+    let why = if child.stderr.is_empty() {
+        why
+    } else {
+        why.strip_suffix(&format!("{STDERR_SAID_BY_REASON}{}", child.stderr))
+            .unwrap_or(why)
+    };
+    let reason = walked(why).join("\n");
+    if reason.len() <= STDERR_TAIL_BYTES {
+        return reason;
+    }
+    let note = format!(" [cut at {STDERR_TAIL_BYTES} bytes]");
+    let mut cut = STDERR_TAIL_BYTES - note.len();
+    while !reason.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{note}", &reason[..cut])
+}
+
+/// What [`ChildEnd::said`] puts between how the child ended and its stderr tail.
+const STDERR_SAID_BY_REASON: &str = "; the last lines of its stderr:\n";
+
+/// The lines of `text` as a tail or a record shows them: each one inert ([`inert`]), and each
+/// that holds a credential's shape ([`credential_lines`]) withheld, read both with its escape
+/// sequences and control characters removed, as a terminal shows it, and with each replaced, a
+/// note standing in for each run of withheld lines. A line's `\r` ending is dropped.
+fn walked(text: &str) -> Vec<String> {
+    let forms: Vec<(String, String)> = text
+        .split('\n')
+        .map(|line| inert(line.strip_suffix('\r').unwrap_or(line)))
+        .collect();
+    let shown_forms: Vec<&str> = forms.iter().map(|(shown, _)| shown.as_str()).collect();
+    let bare_forms: Vec<&str> = forms.iter().map(|(_, bare)| bare.as_str()).collect();
+    let withheld: Vec<bool> = credential_lines(&shown_forms)
+        .into_iter()
+        .zip(credential_lines(&bare_forms))
+        .map(|(shown, bare)| shown || bare)
+        .collect();
+    let mut shown: Vec<String> = Vec::new();
+    let mut run = 0usize;
+    let note = |run: usize| match run {
+        1 => "[a line withheld: it holds a credential's shape]".to_owned(),
+        n => format!("[{n} lines withheld: they hold a credential's shape]"),
+    };
+    for ((line, _), withheld) in forms.into_iter().zip(withheld) {
+        if withheld {
+            run += 1;
+            continue;
+        }
+        if run > 0 {
+            shown.push(note(run));
+            run = 0;
+        }
+        shown.push(line);
+    }
+    if run > 0 {
+        shown.push(note(run));
+    }
+    shown
+}
+
+/// `line` made inert, twice: as shown, each terminal escape sequence and each other control
+/// character but a tab replaced by one U+FFFD, which no word continues across; and bare, each of
+/// them removed, the text a terminal would show. An escape sequence is `ESC` with what it takes:
+/// a control sequence (`ESC [` or `U+009B`, its parameter and intermediate bytes, its final
+/// byte); a string (`ESC ]`, `ESC P`, `ESC X`, `ESC ^`, `ESC _`, up to `BEL` or `ESC \`); or
+/// its intermediate bytes and one final character. One the line ends inside ends with it.
+fn inert(line: &str) -> (String, String) {
+    let mut shown = String::with_capacity(line.len());
+    let mut bare = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if !c.is_control() || c == '\t' {
+            shown.push(c);
+            bare.push(c);
+            continue;
+        }
+        shown.push(char::REPLACEMENT_CHARACTER);
+        let csi = match c {
+            '\u{9b}' => true,
+            '\u{1b}' => match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    true
+                }
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\u{7}' || (c == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some(_) => {
+                    while chars
+                        .next_if(|c| ('\u{20}'..='\u{2f}').contains(c))
+                        .is_some()
+                    {}
+                    chars.next_if(|c| ('\u{30}'..='\u{7e}').contains(c));
+                    continue;
+                }
+                None => false,
+            },
+            _ => false,
+        };
+        if csi {
+            while chars
+                .next_if(|c| ('\u{20}'..='\u{3f}').contains(c))
+                .is_some()
+            {}
+            chars.next_if(|c| ('\u{40}'..='\u{7e}').contains(c));
+        }
+    }
+    (shown, bare)
+}
+
+/// Which of `lines` hold a credential's shape: a URL with user information or a query
+/// component, a word that starts with one of [`TOKEN_PREFIXES`] in either case (a word starting
+/// where the line does or after a character that is neither a letter nor a digit), or a line of a
+/// PEM block, from its `-----BEGIN` line to its `-----END` line; an `-----END` line whose
+/// `-----BEGIN` the tail does not hold withholds every line before it too.
+fn credential_lines(lines: &[&str]) -> Vec<bool> {
+    let mut withheld: Vec<bool> = lines.iter().map(|line| holds_credential(line)).collect();
+    let mut in_block = false;
+    for at in 0..lines.len() {
+        let lower = lines[at].to_ascii_lowercase();
+        if lower.contains("-----begin") {
+            in_block = true;
+        }
+        if in_block {
+            withheld[at] = true;
+        }
+        if lower.contains("-----end") {
+            if !in_block {
+                withheld[..=at].iter_mut().for_each(|line| *line = true);
+            }
+            in_block = false;
+        }
+    }
+    withheld
+}
+
+/// Whether `line` holds a credential's shape, as [`credential_lines`] reads one line.
+fn holds_credential(line: &str) -> bool {
+    // A tab is a space here, so `Bearer` followed by either is read alike; offsets are kept.
+    let lower = line.to_ascii_lowercase().replace('\t', " ");
+    let prefixed = TOKEN_PREFIXES.iter().any(|prefix| {
+        let prefix = prefix.to_ascii_lowercase();
+        lower.match_indices(&prefix).any(|(at, _)| {
+            lower[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|before| !before.is_alphanumeric())
+        })
+    });
+    prefixed || line_urls(line).iter().any(|url| url_holds_credential(url))
+}
+
+/// Whether `url` carries user information or a query component. Its authority runs from after
+/// `://` to the first `/`, or to its end: a `#` or a `?` does not end it, so a password holding
+/// either is user information all the same.
+fn url_holds_credential(url: &str) -> bool {
+    let rest = &url[url.find("://").map_or(0, |at| at + 3)..];
+    let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
+    authority.contains('@') || rest.contains('?')
+}
+
+/// Every URL `line` holds: each `://` with the scheme before it (letters, digits, `+`, `-`, `.`,
+/// at least one) and everything after it up to whitespace.
+fn line_urls(line: &str) -> Vec<&str> {
+    let is_scheme = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.');
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(at) = line[from..].find("://").map(|at| from + at) {
+        let start = line[..at]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| is_scheme(*c))
+            .last()
+            .map_or(at, |(index, _)| index);
+        let end = line[at..]
+            .find(char::is_whitespace)
+            .map_or(line.len(), |end| at + end);
+        if start < at {
+            found.push(&line[start..end]);
+        }
+        from = at + 3;
+    }
+    found
 }
 
 /// Whether `path` is one plain path relative to a root: no root, no `.` or `..` part, no part
@@ -2183,6 +2981,23 @@ fn through_link(workspace: &Path, path: &str) -> bool {
         at.push(part);
         std::fs::symlink_metadata(&at).is_ok_and(|meta| meta.file_type().is_symlink())
     })
+}
+
+/// The metadata of `file` in `workspace` when it is a regular file there, read without following
+/// a link: the only kind of entry [`ScratchCopy::make`] copies.
+fn regular_file(workspace: &Path, file: &str) -> Option<std::fs::Metadata> {
+    std::fs::symlink_metadata(workspace.join(file))
+        .ok()
+        .filter(std::fs::Metadata::is_file)
+}
+
+/// Whether [`ScratchCopy::make`] copies `file` of `workspace`, by its own rules: a plain relative
+/// path ([`plain_relative`]), reached through no link ([`through_link`]), naming a regular file
+/// ([`regular_file`]).
+fn copied(workspace: &Path, file: &str) -> bool {
+    plain_relative(file)
+        && !through_link(workspace, file)
+        && regular_file(workspace, file).is_some()
 }
 
 /// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, and beside it
@@ -2234,12 +3049,9 @@ impl ScratchCopy {
             }
             copy.unlinked.push(file.clone());
             let from = workspace.join(file);
-            let Ok(meta) = std::fs::symlink_metadata(&from) else {
+            let Some(meta) = regular_file(workspace, file) else {
                 continue;
             };
-            if !meta.is_file() {
-                continue;
-            }
             let to = copy.dir.join(file);
             if let Some(parent) = to.parent() {
                 std::fs::create_dir_all(parent)
@@ -2558,6 +3370,46 @@ fn git_state_failed(path: &Path, error: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_records_reason_leaves_its_stderr_tail_out_and_withholds_a_credential() {
+        let child = ChildEnd {
+            termination: metaharness::protocol::ProcessTermination::Exited { code: 1 },
+            stderr: "refused".to_owned(),
+        };
+        let why = format!(
+            "the session ended in an error (\u{1b}[1mghs_SECRETabcdef\u{1b}[0m)\nnext{}",
+            child.said()
+        );
+        assert_eq!(
+            record_reason(&why, &child),
+            "[a line withheld: it holds a credential's shape]\n\
+             next (the harness exited with status 1)"
+        );
+    }
+
+    #[test]
+    fn a_records_reason_keeps_its_start_within_the_bound() {
+        let child = ChildEnd::default();
+        let why = format!("{}{}", "é".repeat(STDERR_TAIL_BYTES), child.said());
+        let reason = record_reason(&why, &child);
+        assert!(reason.len() <= STDERR_TAIL_BYTES, "{}", reason.len());
+        assert!(reason.starts_with("éé"), "its start is kept");
+        assert!(reason.ends_with(&format!(" [cut at {STDERR_TAIL_BYTES} bytes]")));
+    }
+
+    #[test]
+    fn an_escape_sequence_is_one_replacement_as_shown_and_nothing_bare() {
+        assert_eq!(
+            inert("a\u{1b}[1;31mb\u{1b}]0;title\u{7}c\u{1b}(Bd\u{9b}2Ke\rf\tg\u{1b}"),
+            (
+                "a\u{fffd}b\u{fffd}c\u{fffd}d\u{fffd}e\u{fffd}f\tg\u{fffd}".to_owned(),
+                "abcdef\tg".to_owned()
+            )
+        );
+        assert!(holds_credential(&inert("key=\u{1b}[1msk-x").0));
+        assert!(holds_credential(&inert("s\u{1b}[0mk-x").1));
+    }
 
     #[test]
     fn a_path_is_inside_the_copy_only_lexically_under_it() {
@@ -2927,7 +3779,7 @@ mod tests {
         executor.credentials = CredentialSource::None;
         executor.scratch = scratch.0.join("scratch");
         let mut report = SessionReport::default();
-        let proposal = executor.session(&mut report);
+        let proposal = executor.session(&mut report, &mut ChildEnd::default());
         assert_eq!(
             proposal.map(|proposal| proposal.action),
             Ok("tests.write".to_owned()),
@@ -3028,7 +3880,7 @@ mod tests {
             executor.credentials = CredentialSource::None;
             executor.scratch = scratch.0.join("scratch");
             let mut report = SessionReport::default();
-            let proposal = executor.session(&mut report);
+            let proposal = executor.session(&mut report, &mut ChildEnd::default());
             assert_eq!(
                 proposal.map(|proposal| proposal.action),
                 Ok("tests.write".to_owned()),

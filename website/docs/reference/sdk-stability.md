@@ -24,7 +24,7 @@ control-plane path, and fails when either table here and the code disagree.
 
   ```toml
   [dependencies]
-  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.46.0" }
+  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.47.0" }
   ```
 
 - Outside the promise:
@@ -66,7 +66,7 @@ the same JSON document that Canon release renders for the same case
 
 | Loom | `b10x-canon` | `b10x-canon-engineering` |
 |---|---|---|
-| 0.46.0 | 0.6.0 | 0.9.0 |
+| 0.47.0 | 0.6.0 | 0.9.0 |
 
 A release that moves either pin names it in its `CHANGELOG.md` entry.
 
@@ -139,7 +139,7 @@ implements it through.
 | `loom_sdk::connectors::cli::WriteError` | Why a governed write was not invoked: refused (no absolute proof path, an operation not described as a write, a describe Connectors refused) or failed |
 | `loom_sdk::connectors::cli::datasource::WriteOperation`, `loom_sdk::connectors::cli::datasource::WriteApproval`, `loom_sdk::connectors::cli::datasource::WriteResult`, `loom_sdk::connectors::cli::datasource::MutationClassification`, `loom_sdk::connectors::cli::datasource::WriteRefusal` | The governed write's operation, approval proof path, result (Connectors' classification, `request_id` and audit record) and refusal, generated from `loom.datasource` under `ess/`; they change with that declaration |
 | `loom_sdk::connectors::evidence::WriteEvidenceAdapter`, `loom_sdk::connectors::evidence::WriteEvidenceError` | The host evidence adapter: an applied write of its action becomes the protocol's evidence for the step (for `support-triage@1`, a `routing_record` for `ticket.route` naming its target, the `queue` or `owner` the admitted arguments name, in its facts as `target`) through `submit_evidence`; a write not applied records none, nor does a route whose target cannot be read or whose answer names another one (`WriteEvidenceError::Unreadable`) |
-| `loom_sdk::session::SessionExecutor` | The session executor, an `AgentExecutor`: each call runs one harness, Claude Code or Codex session through metaharness in a scratch copy of the workspace's named files and returns the change as a proposed action whose arguments are `{files}` only, a removed file's content null; it never writes the workspace, which an effect changes once Commission admits the proposal. It mints a session id per call and records the session (`sessions`, `proposed`); built `continuing` a recorded session, the next session it records names that one, a predecessor of another commission refused before any session runs, and the request to the harness is unchanged; the session's summary and transcript digest travel on the `ExecutorStep`, never as evidence, and `run_with_usage` reports its tokens, time and cost. A session that fails suspends with `ExternalAvailability` |
+| `loom_sdk::session::SessionExecutor` | The session executor, an `AgentExecutor`: each call runs one harness, Claude Code or Codex session through metaharness in a scratch copy of the workspace's named files and returns the change as a proposed action whose arguments are `{files}` only, a removed file's content null; it never writes the workspace, which an effect changes once Commission admits the proposal. It mints a session id per call and records the session (`sessions`, `proposed`); built `continuing` a recorded session, the next session it records names that one, a predecessor of another commission refused before any session runs, and the request to the harness is unchanged; the session's summary and transcript digest travel on the `ExecutorStep`, never as evidence, and `run_with_usage` reports its tokens, time and cost; built `with_observer`, it hands the host each metaharness event and the session's copy while the session runs. A session that fails suspends with `ExternalAvailability` |
 | `loom_sdk::session::Proposal`, `loom_sdk::session::ProposedFile` | A proposal as an effect reads it back from the admitted request's arguments (`Proposal::from_outcome`), and one file of it |
 | `loom_sdk::session::Kind`, `loom_sdk::session::CredentialSource` | The harness a session runs, and where its credential comes from: metaharness's types |
 | `loom_sdk::serde_json` | The `serde_json` crate Loom links, re-exported for the `Value` a `Briefing` returns as an action's argument schema |
