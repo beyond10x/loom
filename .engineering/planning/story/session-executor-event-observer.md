@@ -8,7 +8,7 @@ summary: SessionExecutor::with_observer hands each event and the session's copy 
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:O3
-revision: 4
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-28T20:04:34Z", actor: "human:timo", revision: 3}
 - {from: "proposed", to: "active", at: "2026-10-28T20:04:35Z", actor: "human:timo", revision: 4}
@@ -22,8 +22,12 @@ executor receives, with the session's scratch copy, right after the executor app
 report's transcript, in transcript order. A host such as takt can then show a harness step's tool
 calls, files, tokens and thinking live.
 
-The observer reads; it cannot change the transcript, the report, the proposal or the session's
-decisions. With no observer, every call behaves as before, byte for byte. A panic in the observer
+The observer reads; it cannot change the transcript, the report or the session's decisions. It is
+handed the copy to read and must not write there: a file it writes there is part of what the
+session proposes, which Commission revalidates like any change (wave 2026-10-28-w1, adversary
+finding A). A call made while the executor already runs a session, as from the observer, is
+refused before any copy or child (`Suspended`, `ExternalAvailability`) and the running session
+goes on (finding B). With no observer, every call behaves as before, byte for byte. A panic in the observer
 is not swallowed: the executor halts the session (metaharness kills the harness child) and the
 panic continues out of the call with its own payload.
 
@@ -60,6 +64,9 @@ Loom noun, and the observer is a builder of the executor, not a command or a rec
 4. `a_panicking_observer_halts_the_session_and_propagates`: a panic in the observer leaves the
    call with the observer's payload, and the harness child is killed.
 5. Every existing test of the crate passes unchanged (no observer: behaviour as before).
+6. `crates/loom-session-executor/tests/adversary_w20261028w1_a3.rs`:
+   `adversary_a_file_the_observer_writes_into_the_copy_is_part_of_the_proposal` and
+   `adversary_a_session_started_from_inside_the_observer_is_refused_and_the_outer_goes_on`.
 
 ## Scope
 
