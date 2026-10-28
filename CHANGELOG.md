@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-28
+
 ### Added
 
 - `loom.session.RecordFailedSession`: a session whose harness child started and that proposed nothing is recorded, its `AgentSessions` row naming no action and no files and its `failure` (`loom.session.SessionFailure`) keeping how the child ended (`ChildEnd`: `Exited`, `Signaled`, `NotMeasured`), the status or signal, the stderr tail the error carries and `reason`, the error without that tail, each line holding a credential's shape withheld and bounded by `STDERR_TAIL_BYTES`, published as `loom.session.SessionFailed` (`SessionExecutor::failed`); it refuses a failure no harness child ends with as `loom.session.FailureRefused` (`unmeasured-with-code`, `measured-without-code`; `failure_refusal`); the step still suspends with `ExternalAvailability` and the same text in `SessionReport::error`, and a session refused before its child started is still no record (story:executor-reports-harness-child-failure)
@@ -1188,7 +1190,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.46.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.47.0...HEAD
+[0.47.0]: https://github.com/beyond10x/loom/releases/tag/0.47.0
 [0.46.0]: https://github.com/beyond10x/loom/releases/tag/0.46.0
 [0.45.0]: https://github.com/beyond10x/loom/releases/tag/0.45.0
 [0.44.0]: https://github.com/beyond10x/loom/releases/tag/0.44.0
