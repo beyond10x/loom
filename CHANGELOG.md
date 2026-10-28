@@ -12,7 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `loom.session.RecordFailedSession`: a session whose harness child started and that proposed nothing is recorded, its `AgentSessions` row naming no action and no files and its `failure` (`loom.session.SessionFailure`) keeping how the child ended (`ChildEnd`: `Exited`, `Signaled`, `NotMeasured`), the status or signal and the stderr tail the error carries, published as `loom.session.SessionFailed` (`SessionExecutor::failed`); the step still suspends with `ExternalAvailability` and the same text in `SessionReport::error`, and a session refused before its child started is still no record (story:executor-reports-harness-child-failure)
+
 ### Changed
+
+- `SessionExecutor::sessions()` lists a failed session's row once its harness child started, naming the predecessor `continuing` named, which stays for the next call: a caller taking the last row after a failed run (`sessions().pop()`) now gets the failed session's (story:executor-reports-harness-child-failure)
+- **Breaking:** the generated `loom::session::AgentSessions` and `AgentSessionData` gain `failure: Option<SessionFailure>`, so a struct literal of them names it (story:executor-reports-harness-child-failure)
 
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` to `0.14.0` (`0b9d50c6`); Loom's confined runs behave as before
 - The specification requires ESS `0.75.0`, and `ess-conformance` and `ess-primitives` move to tag `0.75.0`; generated Rust is unchanged

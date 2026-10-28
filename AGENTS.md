@@ -1215,7 +1215,14 @@ step the same way, and is never read as gone. A named file spelled other than as
 path (a `.`, `..` or empty part, a root) suspends the step before any copy. `SessionExecutor::continuing(&row)` makes the next session it records name that earlier session as `continues` (lineage only: the request to metaharness is a fresh session's and no harness session is resumed); a row of another commission than the call's (compared as UUIDs), or a session id that is the predecessor's or one the executor already recorded, suspends the step with `ExternalAvailability` before any copy, naming the session and both commissions or the id (`crates/loom-session-executor/tests/lineage.rs`). It records each
 session through the generated `loom.session` behaviour (`ess/domains/session.yaml`), a new
 `SessionId` per call; the summary and the SHA-256 transcript digest travel on `ExecutorStep`,
-never as evidence; a failed session suspends with `ExternalAvailability` and is no record. When
+never as evidence. A failed session suspends with `ExternalAvailability`; once its harness child
+started it is recorded all the same, through `loom.session.RecordFailedSession`, a row with no
+action, no files and a `failure` (`loom.session.SessionFailure`: how the child ended, its status
+or signal, and the stderr tail below), naming the predecessor it continued, which stays for the
+next call (`crates/loom-session-executor/tests/adversary_w20261023w3_u2.rs`); one refused before
+its child started is no record. `RecordFailedSession` is an obligation of the
+generated model (its `creates:` leaves `files` undetermined, `ess/25` having no empty-list
+literal), kept by the executor's own store against the generated trait. When
 it ended without the JSON line naming its action, or in an error, the reason names how the harness
 child ended (`stream.closed`: its exit status, its signal, or that metaharness measured neither)
 and, when metaharness hands its stderr on (`NO_TERMINAL_RECORD`, only without a terminal record),

@@ -23,7 +23,8 @@
 //! for it and, when the session proposes a change, records it as one `AgentSession` through the
 //! generated `ProposeSessionChange` behaviour, naming the commission's and the frontier's real ids
 //! and the vendor's own session id where the harness stated one ([`SessionExecutor::sessions`],
-//! [`SessionExecutor::proposed`]). The proposal's arguments are `{files}` only; the session's
+//! [`SessionExecutor::proposed`]); a session that failed after its harness child started is
+//! recorded through `RecordFailedSession` ([`SessionExecutor::failed`]). The proposal's arguments are `{files}` only; the session's
 //! summary and the SHA-256 digest of its transcript travel on the call's `ExecutorStep`, which the
 //! runtime delivers as the step's observation and never as evidence, so two sessions that propose
 //! the same files are the same request. The step's `usage` is what the session reported it spent,
@@ -52,9 +53,14 @@
 //! metaharness is the one a fresh session gets, and the harness session itself is not resumed.
 //! A predecessor of another commission than the call's is refused before any copy or session.
 //!
-//! A session that fails proposes nothing and is no record: the call returns `Suspended` with
-//! `ExternalAvailability` naming why. A session that changed nothing proposes an empty list of
-//! files. When the session ended without the JSON line naming its action, or in an error, the
+//! A session that fails proposes nothing: the call returns `Suspended` with
+//! `ExternalAvailability` naming why, and [`SessionReport::error`] holds the same text. When its
+//! harness child had started, the session is recorded all the same, through
+//! `loom.session.RecordFailedSession`: its row ([`SessionExecutor::sessions`]) names no action and
+//! no files, and its `failure` (`loom.session.SessionFailure`) keeps how the child ended and the
+//! stderr tail the reason carries, so a caller reading the record sees the same cause on a repeat.
+//! A session refused before its child started is no record. A session that changed nothing
+//! proposes an empty list of files. When the session ended without the JSON line naming its action, or in an error, the
 //! reason also says how the harness child ended (its exit status, the signal that took it, or that
 //! metaharness measured neither) and, when metaharness hands on what the child wrote on standard
 //! error (it does when the child left no terminal record), the last whole lines of it within
@@ -88,11 +94,14 @@ use loom::behaviour::{AgentSessionStorage, Generated};
 use loom::models::ModelRole;
 use loom::obligation::UnmetObligation;
 use loom::primitives::Uuid;
-use loom::session::obligations::{AgentSessionsQuery as _, ProposeSessionChangeBehavior as _};
+use loom::session::obligations::{
+    AgentSessionsQuery as _, ProposeSessionChangeBehavior as _, RecordFailedSessionBehavior,
+};
 use loom::session::{
-    AgentSessionSnapshot, AgentSessions, CallDecision, ChangedFile, CommissionId, DecidedBy,
-    FrontierId, ProposeSessionChange, ProposeSessionChangeOutcome, SessionChangeProposed,
-    SessionId, SessionKind, ToolDecision,
+    AgentSession, AgentSessionData, AgentSessionSnapshot, AgentSessions, AnyAgentSession,
+    CallDecision, ChangedFile, CommissionId, DecidedBy, FrontierId, ProposeSessionChange,
+    ProposeSessionChangeOutcome, RecordFailedSession, RecordFailedSessionOutcome,
+    SessionChangeProposed, SessionFailed, SessionFailure, SessionId, SessionKind, ToolDecision,
 };
 use metaharness::protocol::{
     Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
@@ -670,9 +679,10 @@ impl SessionExecutor {
 
     /// The same executor, its next recorded session continuing `previous`, a session this or
     /// another executor recorded ([`Self::sessions`]): that session names `previous.session_id`
-    /// as `loom.session.AgentSession.continues`. The predecessor is the next recorded session's
-    /// only; a later one continues none unless built again. A call that records no session (it
-    /// failed or was refused) leaves the predecessor to the next call. The request to
+    /// as `loom.session.AgentSession.continues`. The predecessor is the next proposing session's
+    /// only; a later one continues none unless built again. A call that proposes nothing leaves
+    /// the predecessor to the next call, whether it records no session (refused before its
+    /// harness child started) or records a failed one, which names the predecessor too. The request to
     /// metaharness is unchanged and the harness session is not resumed: Loom records the
     /// lineage only.
     ///
@@ -732,7 +742,9 @@ impl SessionExecutor {
     }
 
     /// Every session this executor recorded, one row of the `loom.session.AgentSessions` view
-    /// each, in the order they ran: a session that failed is not among them.
+    /// each, in the order they ran. A session that failed after its harness child started is
+    /// among them with its `failure` (how the child ended, the tail of its stderr), no action and
+    /// no files; one refused before its child started is not.
     #[must_use]
     pub fn sessions(&self) -> Vec<AgentSessions> {
         self.record.borrow().sessions()
@@ -743,6 +755,49 @@ impl SessionExecutor {
     #[must_use]
     pub fn proposed(&self) -> Vec<SessionChangeProposed> {
         self.record.borrow().proposed.clone()
+    }
+
+    /// The `loom.session.SessionFailed` each session recorded as failed published, in the order
+    /// they ran.
+    #[must_use]
+    pub fn failed(&self) -> Vec<SessionFailed> {
+        self.record.borrow().failed.clone()
+    }
+
+    /// Records the session `report` describes, which started and proposed nothing, as one
+    /// `AgentSession` for `commission` over `frontier` with `child`'s end and stderr tail as its
+    /// failure, under `session_id`, continuing `continues` when it names an earlier session.
+    fn record_failure(
+        &self,
+        commission: &CommissionId,
+        frontier: &Frontier<frontier_state::Issued>,
+        report: &SessionReport,
+        child: &ChildEnd,
+        session_id: SessionId,
+        continues: Option<SessionId>,
+    ) -> Result<SessionFailed, String> {
+        self.record
+            .borrow_mut()
+            .fail(RecordFailedSession {
+                session_id,
+                kind: self.session_kind(),
+                commission_id: commission.clone(),
+                frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
+                vendor_session_id: report.vendor_session_id.clone(),
+                agent: self.agent.clone(),
+                continues,
+                failure: child.failure(),
+            })
+            .map_err(|unmet| format!("the failed session could not be recorded: {unmet}"))
+    }
+
+    /// The `loom.session.SessionKind` this executor's sessions are recorded as.
+    fn session_kind(&self) -> SessionKind {
+        match self.kind {
+            Kind::Claude => SessionKind::ClaudeCode,
+            Kind::Codex => SessionKind::Codex,
+            Kind::B10x => SessionKind::Harness,
+        }
     }
 
     /// Records `proposal`, the change of the session `report` describes, as one `AgentSession`
@@ -757,16 +812,11 @@ impl SessionExecutor {
         session_id: SessionId,
         continues: Option<SessionId>,
     ) -> Result<SessionChangeProposed, String> {
-        let kind = match self.kind {
-            Kind::Claude => SessionKind::ClaudeCode,
-            Kind::Codex => SessionKind::Codex,
-            Kind::B10x => SessionKind::Harness,
-        };
         self.record
             .borrow_mut()
             .propose(ProposeSessionChange {
                 session_id,
-                kind,
+                kind: self.session_kind(),
                 commission_id: commission.clone(),
                 frontier_id: FrontierId(Uuid(frontier.data().frontier_id.0.0.clone())),
                 vendor_session_id: report.vendor_session_id.clone(),
@@ -906,7 +956,11 @@ impl SessionExecutor {
     }
 
     /// One session: the copy made, the session run in it to its end, the proposal read.
-    fn session(&self, report: &mut SessionReport) -> Result<Proposal, String> {
+    fn session(
+        &self,
+        report: &mut SessionReport,
+        child: &mut ChildEnd,
+    ) -> Result<Proposal, String> {
         // One spelling per file: the copy's base and the walk of the copy key a file by the
         // same string only when the embedder named it plainly.
         let unplain: Vec<&str> = self
@@ -990,8 +1044,8 @@ impl SessionExecutor {
         let mut ended_usage: Option<Usage> = None;
         let mut usage_events: Vec<Usage> = Vec::new();
         let mut stream_error = None;
-        // How the harness child ended and what it said on stderr, as metaharness hands them on.
-        let mut child = ChildEnd::default();
+        // How the harness child ended and what it said on stderr, as metaharness hands them on
+        // (`child`, the caller's: a failed session is recorded with it).
         loop {
             if !halted && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 halted = true;
@@ -1273,7 +1327,26 @@ impl AgentExecutor for SessionExecutor {
         let proposed = self.predecessor_for(&commission).and_then(|continues| {
             // So is an id that is the predecessor's or one this executor already recorded.
             let session_id = self.session_id_for(continues.as_ref())?;
-            let proposal = self.session(&mut report)?;
+            let mut child = ChildEnd::default();
+            let proposal = match self.session(&mut report, &mut child) {
+                Ok(proposal) => proposal,
+                // A session whose child started is recorded with how it ended, naming the
+                // predecessor it continued, which stays for the next call: a retry continues what
+                // the failed attempt continued. One refused before it started is no record.
+                Err(why) if report.started => {
+                    self.record_failure(
+                        &commission,
+                        frontier,
+                        &report,
+                        &child,
+                        session_id,
+                        continues,
+                    )
+                    .map_err(|unrecorded| format!("{why}; {unrecorded}"))?;
+                    return Err(why);
+                }
+                Err(why) => return Err(why),
+            };
             self.record(
                 &commission,
                 frontier,
@@ -1666,6 +1739,43 @@ pub fn fresh_session_id() -> SessionId {
 struct SessionRecord {
     sessions: Vec<AgentSessionSnapshot>,
     proposed: Vec<SessionChangeProposed>,
+    failed: Vec<SessionFailed>,
+}
+
+/// `loom.session.RecordFailedSession`, an obligation of the generated model: its `failed`
+/// outcome leaves `files` undetermined, because the specification's format (`ess/25`) has no
+/// empty-list literal. A failed session proposes nothing, so its files are none; every other field
+/// is the one the outcome's `sets:` names, and the event is its declared payload.
+impl RecordFailedSessionBehavior for SessionRecord {
+    fn record_failed_session(
+        &mut self,
+        input: RecordFailedSession,
+    ) -> Result<RecordFailedSessionOutcome, UnmetObligation> {
+        let session_failed = SessionFailed {
+            session_id: input.session_id.clone(),
+            commission_id: input.commission_id.clone(),
+            frontier_id: input.frontier_id.clone(),
+            continues: input.continues.clone(),
+            failure: input.failure.clone(),
+        };
+        let data = AgentSessionData {
+            session_id: input.session_id,
+            kind: input.kind,
+            commission_id: input.commission_id,
+            frontier_id: input.frontier_id,
+            vendor_session_id: input.vendor_session_id,
+            agent: input.agent,
+            continues: input.continues,
+            action: String::new(),
+            files: Vec::new(),
+            failure: Some(input.failure),
+        };
+        AgentSessionStorage::put(
+            self,
+            AnyAgentSession::Ended(AgentSession::new(data)).snapshot(),
+        );
+        Ok(RecordFailedSessionOutcome::Failed { session_failed })
+    }
 }
 
 impl AgentSessionStorage for SessionRecord {
@@ -1713,11 +1823,23 @@ impl SessionRecord {
         Ok(session_change_proposed)
     }
 
+    /// `RecordFailedSession`, through the generated model's obligation (this store's own
+    /// [`RecordFailedSessionBehavior`]); the event it published, kept.
+    fn fail(&mut self, input: RecordFailedSession) -> Result<SessionFailed, UnmetObligation> {
+        let mut generated = Generated::new(std::mem::take(self));
+        let answered = generated.record_failed_session(input);
+        *self = generated.ports;
+        let RecordFailedSessionOutcome::Failed { session_failed } = answered?;
+        self.failed.push(session_failed.clone());
+        Ok(session_failed)
+    }
+
     /// The `loom.session.AgentSessions` view, by its generated query.
     fn sessions(&self) -> Vec<AgentSessions> {
         let generated = Generated::new(Self {
             sessions: self.sessions.clone(),
             proposed: Vec::new(),
+            failed: Vec::new(),
         });
         generated.agent_sessions().unwrap_or_default()
     }
@@ -2249,6 +2371,24 @@ impl ChildEnd {
             format!(" ({end})")
         } else {
             format!(" ({end}); the last lines of its stderr:\n{}", self.stderr)
+        }
+    }
+
+    /// The same, as a failed session's record keeps it (`loom.session.SessionFailure`): the end,
+    /// its status or signal (none when unmeasured), and the stderr tail the reason carries, none
+    /// when the child said nothing metaharness handed on.
+    fn failure(&self) -> SessionFailure {
+        use loom::session::ChildEnd as End;
+        use metaharness::protocol::ProcessTermination;
+        let (end, code) = match self.termination {
+            ProcessTermination::Exited { code } => (End::Exited, Some(i64::from(code))),
+            ProcessTermination::Signaled { signal } => (End::Signaled, Some(i64::from(signal))),
+            ProcessTermination::Unknown => (End::NotMeasured, None),
+        };
+        SessionFailure {
+            end,
+            code,
+            stderr_tail: Some(self.stderr.clone()).filter(|tail| !tail.is_empty()),
         }
     }
 }
@@ -3167,7 +3307,7 @@ mod tests {
         executor.credentials = CredentialSource::None;
         executor.scratch = scratch.0.join("scratch");
         let mut report = SessionReport::default();
-        let proposal = executor.session(&mut report);
+        let proposal = executor.session(&mut report, &mut ChildEnd::default());
         assert_eq!(
             proposal.map(|proposal| proposal.action),
             Ok("tests.write".to_owned()),
@@ -3268,7 +3408,7 @@ mod tests {
             executor.credentials = CredentialSource::None;
             executor.scratch = scratch.0.join("scratch");
             let mut report = SessionReport::default();
-            let proposal = executor.session(&mut report);
+            let proposal = executor.session(&mut report, &mut ChildEnd::default());
             assert_eq!(
                 proposal.map(|proposal| proposal.action),
                 Ok("tests.write".to_owned()),

@@ -24,6 +24,9 @@ use b10x_loom_session_executor::metaharness::protocol::ProcessTermination;
 use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ProcessPoll, ScriptStep, ScriptedLog, ScriptedRunner,
 };
+use b10x_loom_session_executor::model::session::{
+    AgentSessionState, AgentSessions, ChildEnd, SessionFailure, SessionKind,
+};
 use b10x_loom_session_executor::{
     CredentialSource, Endpoint, Kind, ProcessRunner, STDERR_TAIL_BYTES, SessionExecutor,
 };
@@ -466,6 +469,140 @@ fn control_characters_on_stderr_do_not_reach_the_error() {
         "no control character but a line break or a tab: {tail:?}"
     );
     assert!(tail.contains(REFUSED), "the text itself is kept: {tail:?}");
+}
+
+/// The one session `executor` recorded last, or a panic naming how many it holds.
+fn last_row(executor: &SessionExecutor, count: usize) -> AgentSessions {
+    let rows = executor.sessions();
+    assert_eq!(rows.len(), count, "the sessions recorded: {rows:?}");
+    rows.last().cloned().expect("a recorded session")
+}
+
+#[test]
+fn a_failed_harness_child_records_its_cause() {
+    let scratch = Scratch::new("record");
+    let stderr = format!("loading profile\nconnecting to the endpoint\n{REFUSED}\n");
+    let executor = scratch.executor(silent_session(), &stderr, End::Exited(1));
+    let first = why(&executor);
+
+    let row = last_row(&executor, 1);
+    let failure = row.failure.clone().expect("the record names its failure");
+    assert_eq!(failure.end, ChildEnd::Exited, "how the child ended");
+    assert_eq!(failure.code, Some(1), "its exit status");
+    assert_eq!(
+        failure.stderr_tail.as_deref(),
+        Some(tail_of(&first)),
+        "the stderr tail the error carries, as walked"
+    );
+    assert!(
+        failure
+            .stderr_tail
+            .as_deref()
+            .is_some_and(|tail| tail.ends_with(REFUSED)),
+        "the cause itself: {failure:?}"
+    );
+    assert_eq!(row.kind, SessionKind::Harness);
+    assert_eq!(row.commission_id.0.0, uuid(0xe1).0, "the commission's id");
+    assert_eq!(row.frontier_id.0.0, uuid(0xf3).0, "the frontier's id");
+    assert_eq!(row.action, "", "a failed session names no action");
+    assert!(row.files.is_empty(), "and proposes no file");
+    assert_eq!(row.continues, None);
+    assert_eq!(row.state, AgentSessionState::Ended);
+    assert!(executor.proposed().is_empty(), "nothing was proposed");
+
+    // A repeat of the same refusal reads the same cause off its own record.
+    let second = why(&executor);
+    assert_eq!(second, first, "the same error on a repeat");
+    let again = last_row(&executor, 2);
+    assert_ne!(again.session_id, row.session_id, "a session of its own");
+    assert_eq!(again.failure, row.failure, "the same cause on a repeat");
+}
+
+#[test]
+fn a_failed_session_records_a_signal_or_an_end_metaharness_did_not_measure() {
+    let scratch = Scratch::new("record-ends");
+    let signaled = scratch.executor(silent_session(), "killed\n", End::Signaled(9));
+    let _ = why(&signaled);
+    assert_eq!(
+        last_row(&signaled, 1).failure,
+        Some(SessionFailure {
+            end: ChildEnd::Signaled,
+            code: Some(9),
+            stderr_tail: Some("killed".to_owned()),
+        }),
+        "the signal and its stderr"
+    );
+
+    let unmeasured = scratch.executor(silent_session(), "", End::Unmeasured);
+    let _ = why(&unmeasured);
+    assert_eq!(
+        last_row(&unmeasured, 1).failure,
+        Some(SessionFailure {
+            end: ChildEnd::NotMeasured,
+            code: None,
+            stderr_tail: None,
+        }),
+        "no status it did not see, no tail when it said nothing"
+    );
+}
+
+#[test]
+fn a_failed_session_withholds_a_credential_from_its_record() {
+    let scratch = Scratch::new("record-credential");
+    let stderr = format!(
+        "debug: value={}\n{REFUSED}\n",
+        shaped(&["sk-", "ant-api03-", SECRET])
+    );
+    let executor = scratch.executor(silent_session(), &stderr, End::Exited(1));
+    let _ = why(&executor);
+
+    let tail = last_row(&executor, 1)
+        .failure
+        .and_then(|failure| failure.stderr_tail)
+        .expect("a stderr tail");
+    assert!(!tail.contains(SECRET), "never repeated: {tail:?}");
+    assert!(tail.ends_with(REFUSED), "the cause is kept: {tail:?}");
+}
+
+#[test]
+fn a_session_refused_before_its_child_started_is_no_record() {
+    let scratch = Scratch::new("record-refused");
+    let mut executor = scratch.executor(silent_session(), &format!("{REFUSED}\n"), End::Exited(1));
+    executor.files = vec!["../outside".to_owned()];
+    let _ = why(&executor);
+
+    assert!(
+        !executor.last_report().is_some_and(|report| report.started),
+        "no child started"
+    );
+    assert!(executor.sessions().is_empty(), "and nothing is recorded");
+}
+
+#[test]
+fn a_failed_session_names_its_predecessor_and_leaves_it_to_the_retry() {
+    let scratch = Scratch::new("record-lineage");
+    let stderr = format!("{REFUSED}\n");
+    let earlier = scratch.executor(silent_session(), &stderr, End::Exited(1));
+    let _ = why(&earlier);
+    let predecessor = last_row(&earlier, 1);
+
+    let executor = scratch
+        .executor(silent_session(), &stderr, End::Exited(1))
+        .continuing(&predecessor);
+    let _ = why(&executor);
+    assert_eq!(
+        last_row(&executor, 1).continues,
+        Some(predecessor.session_id.clone()),
+        "the failed session names the session it continues"
+    );
+    let retry = why(&executor);
+    let again = last_row(&executor, 2);
+    assert_eq!(
+        again.continues,
+        Some(predecessor.session_id.clone()),
+        "the retry continues what the failed attempt continued: {retry}"
+    );
+    assert!(again.failure.is_some(), "and fails the same way");
 }
 
 #[test]

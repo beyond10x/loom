@@ -12,7 +12,9 @@ use b10x_loom_executor::model::run::{
     ActionCatalogueState, CatalogueEntry, CatalogueEntryStatus, SelectionRecordState,
     SelectionState, SelectionStrategy,
 };
-use b10x_loom_executor::model::session::{AgentSessionState, ChangedFile, SessionKind};
+use b10x_loom_executor::model::session::{
+    AgentSessionState, ChangedFile, ChildEnd, SessionFailure, SessionKind,
+};
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
 
@@ -238,6 +240,48 @@ pub fn changed_files_node(files: &[ChangedFile]) -> Node {
             })
             .collect(),
     )
+}
+
+/// The `loom.session.SessionFailure` field `name`: its `end`, and its `code` and `stderr_tail`,
+/// each absent or null when it holds none.
+pub fn session_failure(input: &Input, name: &str) -> Option<SessionFailure> {
+    let members = input.get(name)?.as_map()?;
+    Some(SessionFailure {
+        end: match members.get("end")?.as_text()? {
+            "Exited" => ChildEnd::Exited,
+            "Signaled" => ChildEnd::Signaled,
+            "NotMeasured" => ChildEnd::NotMeasured,
+            _ => return None,
+        },
+        code: match members.get("code") {
+            None | Some(Node::Null) => None,
+            Some(node) => Some(integer_of(node)?),
+        },
+        stderr_tail: match members.get("stderr_tail") {
+            None | Some(Node::Null) => None,
+            Some(Node::Text(text)) => Some(text.clone()),
+            Some(_) => return None,
+        },
+    })
+}
+
+/// A `loom.session.SessionFailure` as a suite value, an absent `code` or `stderr_tail` null.
+pub fn session_failure_node(failure: &SessionFailure) -> Node {
+    Node::Map(BTreeMap::from([
+        (
+            "end".to_owned(),
+            name(match failure.end {
+                ChildEnd::Exited => "Exited",
+                ChildEnd::Signaled => "Signaled",
+                ChildEnd::NotMeasured => "NotMeasured",
+            }),
+        ),
+        ("code".to_owned(), failure.code.map_or(Node::Null, number)),
+        (
+            "stderr_tail".to_owned(),
+            failure.stderr_tail.as_deref().map_or(Node::Null, name),
+        ),
+    ]))
 }
 
 /// The declared name of an agent session state.
