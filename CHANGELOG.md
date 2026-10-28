@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `SessionExecutor::with_observer` hands the host each metaharness event and the session's copy while the session runs (story:session-executor-event-observer)
+
 ### Changed
 
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` to `0.14.0` (`0b9d50c6`); Loom's confined runs behave as before
