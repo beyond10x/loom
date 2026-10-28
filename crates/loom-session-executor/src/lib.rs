@@ -269,8 +269,9 @@ pub enum SpecError {
         /// The budget, as the spec writes it.
         budget: i64,
     },
-    /// A `context` entry is not one of the files the executor copies, spelled as one plain
-    /// relative path ([`plain_relative`]).
+    /// A `context` entry names a file the copy will not hold: not one of the files the executor
+    /// copies, not one plain relative path ([`plain_relative`]), or not a regular file of the
+    /// workspace reached through no link.
     ContextNotCopied {
         /// The spec's `agent.id`.
         agent: String,
@@ -355,7 +356,8 @@ pub struct SessionOverrides {
     /// outside its adapter's pinned versions; none for the default, which warns.
     pub strict_version: Option<bool>,
     /// The workspace files handed to the harness as context, in order: each one of the files the
-    /// executor copies, spelled as one plain relative path ([`plain_relative`]), and handed from
+    /// executor copies, spelled as one plain relative path ([`plain_relative`]), a regular file
+    /// in the workspace reached through no link (the copy's own rules), and handed from
     /// the copy. Any other path is refused before the copy, naming it.
     pub context: Vec<String>,
 }
@@ -375,11 +377,13 @@ impl SessionOverrides {
         }
     }
 
-    /// The first context path that is not one of `files`, spelled as one plain relative path.
-    fn uncopied<'a>(&'a self, files: &[String]) -> Option<&'a String> {
+    /// The first context path the copy of `files` from `workspace` will not hold: not one of
+    /// `files`, or not a file [`ScratchCopy::make`] copies ([`copied`]: a plain relative path,
+    /// reached through no link, naming a regular file).
+    fn uncopied<'a>(&'a self, workspace: &Path, files: &[String]) -> Option<&'a String> {
         self.context
             .iter()
-            .find(|path| !plain_relative(path) || !files.contains(path))
+            .find(|path| !files.contains(path) || !copied(workspace, path))
     }
 }
 
@@ -710,7 +714,8 @@ impl SessionExecutor {
     /// [`SpecError::BudgetNegative`] for a negative `max_budget_micro_usd`;
     /// [`SpecError::OverrideUnapplied`] for a member the kind's launcher does not apply (a budget
     /// on Codex or b10x-harness, an effort on b10x-harness); and [`SpecError::ContextNotCopied`]
-    /// for a `context` entry that is not one of `files` as one plain relative path.
+    /// for a `context` entry that is not one of `files` as one plain relative path, or not a
+    /// regular file of `workspace` reached through no link: one the copy will not hold.
     pub fn from_spec(
         spec: &AgentSpec,
         workspace: impl Into<PathBuf>,
@@ -782,7 +787,8 @@ impl SessionExecutor {
                 member: member.to_owned(),
             });
         }
-        if let Some(path) = overrides.uncopied(&files) {
+        let workspace: PathBuf = workspace.into();
+        if let Some(path) = overrides.uncopied(&workspace, &files) {
             return Err(SpecError::ContextNotCopied {
                 agent: agent.0,
                 path: path.clone(),
@@ -1042,7 +1048,7 @@ impl SessionExecutor {
                 kind_name(self.kind)
             ));
         }
-        if let Some(path) = self.overrides.uncopied(&self.files) {
+        if let Some(path) = self.overrides.uncopied(&self.workspace, &self.files) {
             return Err(format!(
                 "the context file {path:?} is not one of the files the session's copy holds, \
                  spelled as one plain relative path"
@@ -2797,6 +2803,23 @@ fn through_link(workspace: &Path, path: &str) -> bool {
     })
 }
 
+/// The metadata of `file` in `workspace` when it is a regular file there, read without following
+/// a link: the only kind of entry [`ScratchCopy::make`] copies.
+fn regular_file(workspace: &Path, file: &str) -> Option<std::fs::Metadata> {
+    std::fs::symlink_metadata(workspace.join(file))
+        .ok()
+        .filter(std::fs::Metadata::is_file)
+}
+
+/// Whether [`ScratchCopy::make`] copies `file` of `workspace`, by its own rules: a plain relative
+/// path ([`plain_relative`]), reached through no link ([`through_link`]), naming a regular file
+/// ([`regular_file`]).
+fn copied(workspace: &Path, file: &str) -> bool {
+    plain_relative(file)
+        && !through_link(workspace, file)
+        && regular_file(workspace, file).is_some()
+}
+
 /// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, and beside it
 /// `git`, the git directory the copy's `.git` names when the workspace has one; both removed
 /// when dropped. It keeps the digest of each file it copied, as copied: the base a session's
@@ -2846,12 +2869,9 @@ impl ScratchCopy {
             }
             copy.unlinked.push(file.clone());
             let from = workspace.join(file);
-            let Ok(meta) = std::fs::symlink_metadata(&from) else {
+            let Some(meta) = regular_file(workspace, file) else {
                 continue;
             };
-            if !meta.is_file() {
-                continue;
-            }
             let to = copy.dir.join(file);
             if let Some(parent) = to.parent() {
                 std::fs::create_dir_all(parent)
