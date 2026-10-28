@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-27T15:47:04Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-0-12-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "release run of Loom 0.46.0 (release.yml, task check on the tag)",
+    "reference": "https://github.com/beyond10x/loom/actions/runs/40534407523"
+  }
+}
