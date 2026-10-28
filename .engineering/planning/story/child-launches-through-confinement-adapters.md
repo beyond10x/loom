@@ -9,7 +9,7 @@ tags:
 - adr-0109
 relations:
 - decomposes: epic:loom-sdk-for-products
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -37,20 +37,27 @@ serves the workspace read-write only. The adapter route waits on Substrate's sto
 
 ## Waits on
 
-Read 2026-10-28 against Substrate 0.14.0 (tag commit `0b9d50c6`), which Loom now pins.
+Read 2026-10-28 against Substrate 0.14.0 (tag commit `0b9d50c6`), which Loom pins.
 
 - Delivered: the `linux` adapter serves `workspace_access: Scoped` on a host whose probe proved
   `exec.workspace-scoped-write` (Substrate 0.14.0 CHANGELOG, `### Added`). The scoped `target`
   write no longer needs `HostDriver::open`.
-- Not delivered: the adapter surface takes `Command { argv, env }` only and every adapter starts
-  the child with standard input null (`substrate-host` `confinement/mod.rs` `ConfinementAdapter`,
-  `local.rs:259`, `systemd.rs:434`, `macos.rs:175`); its output is read after the run
-  (`output`), not as a live stream. `run_child` with `ChildCommand::with_stdin` and `spawn_child`
-  (`ConfinedChild::write_stdin`, live `ChildStream`) need both, through the host driver's pipe
-  sessions today.
-- Not delivered: the profile names egress apertures by operator-declared name
-  (`Network::Egress { apertures: Vec<String> }`); `ChildCommand::with_egress` passes a full
-  `EgressAperture` (host, port, pinned address) to the driver.
+- Not delivered, planned: standard input through a confinement adapter. The adapter surface takes
+  `Command { argv, env }` only and every adapter starts the child with standard input null
+  (`substrate-host` `confinement/mod.rs` `ConfinementAdapter`, `local.rs:259`, `systemd.rs:434`,
+  `macos.rs:175`). Substrate answers with its story:adapter-stdin-pipe (substrate PR 189, head
+  `d1d1deb3`, not merged): adapter fact `stdin_pipe` (design 32), wave 1 on `local`, `linux` and
+  `systemd`; `pod` gets no standard input.
+- Not delivered, planned: a live output stream. Output is read after the run (`output`).
+  Substrate answers with its story:adapter-live-output (same PR): adapter fact `output_live`
+  (design 32), the same wave 1 adapters. `run_child` with `ChildCommand::with_stdin` and
+  `spawn_child` (`ConfinedChild::write_stdin`, live `ChildStream`) need both facts; until then
+  they go through the host driver's pipe sessions.
+- Decided, Loom's side: egress. Substrate's D160 keeps its ADR 0013: a request names no
+  destination, only an operator-declared aperture (`Network::Egress { apertures: Vec<String> }`).
+  Loom's operator declares one aperture per destination, and Loom maps the `host:port` of
+  `ChildCommand::with_egress`'s `EgressAperture` to that aperture's name. That mapping is part
+  of this story when it is scoped.
 
-So the story still waits on Substrate: standard input and a live output stream through a
-confinement adapter, and an aperture the host declares per launch. It stays a draft.
+So the story waits on the Substrate release that ships story:adapter-stdin-pipe and
+story:adapter-live-output. It stays a draft.

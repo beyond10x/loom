@@ -14,6 +14,6 @@ b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-loom-executor = { path = "../loom-executor" }
 b10x-loom-resource = { path = "../loom-resource" }
 b10x-loom-session-executor = { path = "../loom-session-executor" }
-ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.74.0" }
-ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.74.0" }
+ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.75.0" }
+ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.75.0" }
 serde_json = "1"
