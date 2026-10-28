@@ -77,7 +77,7 @@
 //! a concurrent write. A write to such a file between the session's end and the edit effect
 //! applying the proposal is not seen here; that window is the effect's own guard to close.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Component, Path, PathBuf};
@@ -632,11 +632,29 @@ pub struct SessionExecutor {
     record: RefCell<SessionRecord>,
     predecessor: RefCell<Option<Predecessor>>,
     observer: RefCell<Option<Box<EventObserver>>>,
+    running: Cell<bool>,
 }
 
 /// A caller's observer of a session's events ([`SessionExecutor::with_observer`]): each
 /// `metaharness.event/1` line the executor receives, and the session's scratch copy.
 type EventObserver = dyn FnMut(&EventLine, &Path);
+
+/// The mark that an executor is running a call ([`SessionExecutor::run_with_usage`]), cleared
+/// when the call leaves, by return or by panic.
+struct Running<'a>(&'a Cell<bool>);
+
+impl<'a> Running<'a> {
+    /// The mark, set; none when it was set already (a call made while one runs).
+    fn enter(flag: &'a Cell<bool>) -> Option<Self> {
+        (!flag.replace(true)).then_some(Self(flag))
+    }
+}
+
+impl Drop for Running<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
 
 /// The earlier session the next recorded session continues ([`SessionExecutor::continuing`]):
 /// its id and the commission it ran for.
@@ -689,6 +707,7 @@ impl SessionExecutor {
             record: RefCell::new(SessionRecord::default()),
             predecessor: RefCell::new(None),
             observer: RefCell::new(None),
+            running: Cell::new(false),
         }
     }
 
@@ -850,9 +869,15 @@ impl SessionExecutor {
     /// The same executor, handing each event of its sessions to `observer` while the session
     /// runs: every `metaharness.event/1` line the executor receives, right after it is appended
     /// to [`SessionReport::transcript`] and before the executor acts on it, in transcript order,
-    /// with the session's scratch copy ([`SessionReport::cwd`]). The observer reads: it is
-    /// handed the event and the path by shared reference and reaches neither the report nor the
-    /// session, so the call proposes and reports what it would without one. A panic in the
+    /// with the session's scratch copy ([`SessionReport::cwd`]). The observer is handed the event
+    /// by shared reference and reaches neither the report nor the session's decisions. It is
+    /// handed the copy to read files from and must not write there: the copy is the session's,
+    /// and whatever it holds when the session ends, a file the observer wrote included, is part
+    /// of what the session proposes, which Commission revalidates like any change. A call made
+    /// while this executor already runs a session, as from the observer, is refused before any
+    /// copy is made or child started: it returns `Suspended` with `ExternalAvailability` naming
+    /// that the executor is already running a session, records nothing and leaves
+    /// [`Self::last_report`] as it was, and the session running goes on. A panic in the
     /// observer halts the session (metaharness kills the harness child) and then continues out
     /// of the call with its own payload; the call records no session and leaves
     /// [`Self::last_report`] as it was. The observer serves every call of this executor; an event
@@ -1559,6 +1584,25 @@ impl AgentExecutor for SessionExecutor {
         frontier: &Frontier<frontier_state::Issued>,
     ) -> ExecutorStep {
         let started = Instant::now();
+        // A call made while this executor runs one (from its event observer) is refused before
+        // anything: no id taken, no copy, no child, nothing recorded, the last report as it was.
+        let Some(_running) = Running::enter(&self.running) else {
+            let why = "this executor is already running a session; a call made while it runs, \
+                       as from its event observer, is refused"
+                .to_owned();
+            let report = SessionReport {
+                error: Some(why.clone()),
+                ..SessionReport::default()
+            };
+            return ExecutorStep {
+                outcome: ExecutorOutcome::Suspended(ExecutorOutcomeSuspended {
+                    reason: SuspensionReason::ExternalAvailability(Json::Text(why)),
+                }),
+                usage: Some(usage_of(&report, started.elapsed())),
+                transcript_digest: None,
+                summary: None,
+            };
+        };
         let mut report = SessionReport::default();
         let commission = CommissionId(Uuid(commission.data().commission_id.0.0.clone()));
         // A predecessor of another commission is refused before any copy or session.

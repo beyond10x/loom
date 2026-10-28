@@ -1,8 +1,8 @@
 //! Acceptance for `story:session-executor-event-observer`: a caller of the session executor is
 //! handed each `metaharness.event/1` line of a session while it runs
 //! (`SessionExecutor::with_observer`), with the session's scratch copy, in the order the report's
-//! transcript holds them. The observer reads and changes nothing; a panic in it halts the session
-//! and leaves the call.
+//! transcript holds them. The observer changes no transcript or report and must not write the
+//! copy; a panic in it halts the session and leaves the call.
 //!
 //! Every session here is scripted (metaharness's `ScriptedRunner`, the lines a Codex rollout and
 //! its hook requests print): no harness program runs, no model is called and nothing reaches the
