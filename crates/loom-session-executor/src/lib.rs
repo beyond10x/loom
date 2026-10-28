@@ -79,6 +79,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -104,8 +105,8 @@ use loom::session::{
     SessionChangeProposed, SessionFailed, SessionFailure, SessionId, SessionKind, ToolDecision,
 };
 use metaharness::protocol::{
-    Command, Decision, DecisionMode, Event, HermeticMode, HermeticRow, RunSpec, SeamFactory,
-    Severity, Usage, Verdict,
+    Command, Decision, DecisionMode, Event, EventLine, HermeticMode, HermeticRow, RunSpec,
+    SeamFactory, Severity, Usage, Verdict,
 };
 use metaharness::{ClaudeSeams, CodexSeams, EventPoll, Input, Metaharness};
 use sha2::{Digest as _, Sha256};
@@ -626,7 +627,12 @@ pub struct SessionExecutor {
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
     record: RefCell<SessionRecord>,
     predecessor: RefCell<Option<Predecessor>>,
+    observer: RefCell<Option<Box<EventObserver>>>,
 }
+
+/// A caller's observer of a session's events ([`SessionExecutor::with_observer`]): each
+/// `metaharness.event/1` line the executor receives, and the session's scratch copy.
+type EventObserver = dyn FnMut(&EventLine, &Path);
 
 /// The earlier session the next recorded session continues ([`SessionExecutor::continuing`]):
 /// its id and the commission it ran for.
@@ -678,6 +684,7 @@ impl SessionExecutor {
             ids: RefCell::new(Box::new(fresh_session_id)),
             record: RefCell::new(SessionRecord::default()),
             predecessor: RefCell::new(None),
+            observer: RefCell::new(None),
         }
     }
 
@@ -831,6 +838,22 @@ impl SessionExecutor {
     #[must_use]
     pub fn with_session_ids(self, ids: impl FnMut() -> SessionId + 'static) -> Self {
         *self.ids.borrow_mut() = Box::new(ids);
+        self
+    }
+
+    /// The same executor, handing each event of its sessions to `observer` while the session
+    /// runs: every `metaharness.event/1` line the executor receives, right after it is appended
+    /// to [`SessionReport::transcript`] and before the executor acts on it, in transcript order,
+    /// with the session's scratch copy ([`SessionReport::cwd`]). The observer reads: it is
+    /// handed the event and the path by shared reference and reaches neither the report nor the
+    /// session, so the call proposes and reports what it would without one. A panic in the
+    /// observer halts the session (metaharness kills the harness child) and then continues out
+    /// of the call with its own payload; the call records no session and leaves
+    /// [`Self::last_report`] as it was. The observer serves every call of this executor; an event
+    /// the executor could not serialize is in neither the transcript nor the observer's view.
+    #[must_use]
+    pub fn with_observer(self, observer: impl FnMut(&EventLine, &Path) + 'static) -> Self {
+        *self.observer.borrow_mut() = Some(Box::new(observer));
         self
     }
 
@@ -1241,6 +1264,7 @@ impl SessionExecutor {
         let mut ended_usage: Option<Usage> = None;
         let mut usage_events: Vec<Usage> = Vec::new();
         let mut stream_error = None;
+        let mut observer = self.observer.borrow_mut();
         // How the harness child ended and what it said on stderr, as metaharness hands them on
         // (`child`, the caller's: a failed session is recorded with it).
         loop {
@@ -1262,6 +1286,17 @@ impl SessionExecutor {
             if let Ok(text) = serde_json::to_string(&*line) {
                 report.transcript.extend_from_slice(text.as_bytes());
                 report.transcript.push(b'\n');
+                // The caller's observer, handed what was just appended ([`Self::with_observer`]);
+                // its panic halts the session before it leaves the call.
+                if let Some(observe) = observer.as_mut()
+                    && let Err(panicked) =
+                        catch_unwind(AssertUnwindSafe(|| observe(&line, &copy.dir)))
+                {
+                    let _ = run.send(Command::Halt {
+                        reason: "the caller's event observer panicked".to_owned(),
+                    });
+                    resume_unwind(panicked);
+                }
             }
             match &line.event {
                 Event::SessionStarted {
