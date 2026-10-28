@@ -2,13 +2,33 @@
 format: aep.planning-md/3
 id: story:session-executor-partial-runspec
 kind: story
-status: draft
+status: active
 title: The session executor merges a caller's partial RunSpec over its per-kind defaults
 summary: effort, budget, strict version and context reach metaharness; takt's partial-runspec blocker is the consumer
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
-revision: 1
+scope:
+- confidence: inferred
+  path: AGENTS.md
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: charts/loom-agents/crds/loomagents.loom.beyond10x.dev.yaml
+- confidence: cited
+  path: crates/loom-sdk/src/agent.rs
+- confidence: cited
+  path: crates/loom-session-executor/src/lib.rs
+- confidence: inferred
+  path: crates/loom-session-executor/tests
+- confidence: cited
+  path: ess/domains/agent.yaml
+- confidence: cited
+  path: generated/rust/loom
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-10-28T19:13:18Z", actor: "human:timo", revision: 12}
+- {from: "proposed", to: "active", at: "2026-10-28T19:13:18Z", actor: "human:timo", revision: 13}
 ---
 ## Outcome
 
@@ -57,14 +77,49 @@ budget is `Optional<String>`, as metaharness holds it, or a typed amount ESS adm
 
 ## Scope
 
-Inferred 2026-10-28 from `origin/main` 78a6d278a, not yet scoped by a story-scoper.
+Derived 2026-10-28 by an `aep:story-scoper` pass for wave 2026-10-28-w1, read at `origin/main`
+586b0ed83 and the metaharness 0.22.0 checkout (rev `fd8c9ab`, `Cargo.lock:3784`). Confidence: high
+on the cited lines; medium on b10x-harness's handling of effort and budget, which rests on the
+absence of a reference in `metaharness-b10x/src` and `metaharness/src` (only `builder.rs:199-202`
+names effort).
 
-- `crates/loom-session-executor/src/lib.rs` (`SessionExecutor`, `fn spec`, `from_spec`) — cited
-- `ess/domains/agent.yaml` (`loom.agent.SessionSpec`), `generated/rust/loom/` — inferred
-- `crates/loom-session-executor/tests/`, `crates/loom-sdk` re-exports — inferred
-- AGENTS.md § Session executor, CHANGELOG.md, `website/data/status.json` — inferred
+- `crates/loom-session-executor/src/lib.rs`: `SessionExecutor` (:425), `from_spec` (:545-603, reads
+  no `session.budget`, `stop` or `confinement`), `fn spec` (:791, also sets `scratch_cwd`,
+  `substrate_embedded` and the b10x token fields) — cited
+- `ess/domains/agent.yaml`: `loom.agent.SessionSpec` (:160-171); money is integer micro-USD there
+  (`RunBudget.max_cost_micro_usd`, :114) — cited
+- `generated/rust/loom/src/agent.rs` (`SessionSpec`, :475-486) and the CRD copy
+  `charts/loom-agents/crds/loomagents.loom.beyond10x.dev.yaml`, regenerated only — cited
+- metaharness 0.22.0 `RunSpec` (`metaharness-protocol/src/spec.rs`): `effort: Option<String>`
+  (:365), `max_budget_usd: Option<String>` (:379), `strict_version: bool` (:463),
+  `context: Vec<PathBuf>` (:590); Codex refuses a budget by name (`metaharness-codex/src/launch.rs:928-934`) — cited
+- `crates/loom-session-executor/tests/`: the recorder `Script`/`Request` of `from_spec.rs:91-115`
+  sees argv, env and config, not the `RunSpec` (`metaharness/src/process.rs:42-93`) — cited
+- `crates/loom-sdk/src/agent.rs:40-46` re-exports `SessionSpec` — cited
+- AGENTS.md § Session executor, CHANGELOG.md — inferred
 
 ## Out of scope
 
 The run budget and stop policy the spec already carries (`loom.agent.RunBudget`, applied by a host
 through Commission) and the egress apertures; a takt change.
+
+## Decisions (wave 2026-10-28-w1)
+
+Taken by the wave coordinator inside the item the orchestrator approved
+(approval-record:wave-2026-10-28-w1).
+
+- The open question: the budget is integer micro-USD, `Optional<Integer>`, as `RunBudget` and
+  `loom.metering` hold money (`ess/domains/agent.yaml:114`); the executor renders it as the decimal
+  string metaharness takes (`12500000` is `12.5`). `Decimal` carries the replay caveat of
+  `ess/domains/resource.yaml:12-16`.
+- The executor takes the overrides as a Loom type of its own (effort, budget in micro-USD, strict
+  version, context), never a whole `RunSpec`: an unset `bool` cannot be told from `false` there.
+  Each member the caller names wins over the kind's default; nothing else of the `RunSpec` is read
+  from the caller.
+- A member the kind's launcher does not apply is refused before the copy, never dropped: a budget
+  on Codex (metaharness refuses it, `metaharness-codex/src/launch.rs:928-934`) and on b10x-harness,
+  and effort on b10x-harness (no reader in `metaharness-b10x/src`). From a spec this is a
+  `SpecError`.
+- A context path must be one of the workspace files the executor copies, as one plain relative
+  path; it reaches the `RunSpec` as its path in the scratch copy. Any other path is refused before
+  the copy, naming it.
