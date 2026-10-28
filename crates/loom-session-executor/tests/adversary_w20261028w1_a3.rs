@@ -14,14 +14,17 @@ use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
-    CommissionId, ExecutorStep, Frontier, FrontierAction, FrontierData, FrontierId, PrincipalId,
+    CommissionId, ExecutorOutcome, ExecutorStep, Frontier, FrontierAction, FrontierData,
+    FrontierId, PrincipalId, SuspensionReason,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_session_executor::metaharness::protocol::{Event, EventLine};
 use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ScriptStep, ScriptedLog, ScriptedRunner,
 };
-use b10x_loom_session_executor::{CredentialSource, Kind, ProcessRunner, Proposal, SessionExecutor};
+use b10x_loom_session_executor::{
+    CredentialSource, Kind, ProcessRunner, Proposal, SessionExecutor,
+};
 
 const EDIT: &str = "implementation.edit";
 
@@ -33,10 +36,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-            "adv-w20261028w1-a3-{}-{name}",
-            std::process::id()
-        ));
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join(format!("adv-w20261028w1-a3-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("scratch")).expect("a scratch directory");
         std::fs::create_dir_all(dir.join("tree/src")).expect("the tree");
@@ -174,11 +175,11 @@ fn payload_text(payload: &(dyn std::any::Any + Send)) -> Option<String> {
         .or_else(|| payload.downcast_ref::<String>().cloned())
 }
 
-/// The story's Outcome and `with_observer`'s doc: "the call proposes and reports what it would
-/// without one". The observer is handed the live copy's path; a file it writes there is
-/// proposed back as the session's change.
+/// `with_observer`'s doc, as decided: the observer is handed the session's scratch copy to read
+/// and must not write there; a file it writes there anyway is part of what the session proposes,
+/// which Commission revalidates like any change.
 #[test]
-fn adversary_an_observer_writing_into_the_copy_changes_no_proposal() {
+fn adversary_a_file_the_observer_writes_into_the_copy_is_part_of_the_proposal() {
     let plain_scratch = Scratch::new("plain");
     let plain = plain_scratch.executor(Box::new(Sessions::default()));
     let without = proposed_paths(&step_of(&plain));
@@ -198,9 +199,15 @@ fn adversary_an_observer_writing_into_the_copy_changes_no_proposal() {
     let with = proposed_paths(&step_of(&executor));
 
     assert!(wrote.get(), "the observer was handed the copy");
+    let mut expected = without.clone();
+    expected.push("src/planted.rs".to_owned());
+    expected.sort();
+    let mut with = with;
+    with.sort();
     assert_eq!(
-        with, without,
-        "an observer changes no proposal: a session proposes what it would without one"
+        with, expected,
+        "story:session-executor-event-observer: a file the observer writes into the copy is \
+         part of what the session proposes, beside what it proposes without one ({without:?})"
     );
 }
 
@@ -212,13 +219,13 @@ fn adversary_a_panicking_observer_records_no_session_and_keeps_the_last_report()
     let sessions = Sessions::default();
     let panics = Rc::new(Cell::new(false));
     let armed = Rc::clone(&panics);
-    let executor = scratch
-        .executor(Box::new(sessions.clone()))
-        .with_observer(move |line: &EventLine, _: &Path| {
+    let executor = scratch.executor(Box::new(sessions.clone())).with_observer(
+        move |line: &EventLine, _: &Path| {
             if armed.get() && matches!(line.event, Event::ToolRequested { .. }) {
                 panic!("adversary observer gave up");
             }
-        });
+        },
+    );
 
     step_of(&executor);
     let report = executor.last_report().expect("the first call's report");
@@ -241,14 +248,20 @@ fn adversary_a_panicking_observer_records_no_session_and_keeps_the_last_report()
     );
     assert_eq!(executor.sessions(), recorded, "no session is recorded");
     assert_eq!(executor.proposed(), proposed, "no proposal is recorded");
-    assert!(executor.failed().is_empty(), "no failed session is recorded");
+    assert!(
+        executor.failed().is_empty(),
+        "no failed session is recorded"
+    );
 
     let logs = sessions.logs.borrow();
     assert_eq!(logs.len(), 2, "one child per call");
     let second = &logs[1];
     assert!(second.killed(), "the panicking call's child is killed");
     assert!(
-        second.written().iter().any(|line| line.contains("\"halt\":true")),
+        second
+            .written()
+            .iter()
+            .any(|line| line.contains("\"halt\":true")),
         "the halt was written to the child: {:?}",
         second.written()
     );
@@ -273,19 +286,21 @@ fn adversary_the_observer_sees_a_tool_call_before_the_executor_decides_it() {
     let all_logs = Rc::clone(&sessions.logs);
     let at_request: Rc<RefCell<Option<Vec<String>>>> = Rc::new(RefCell::new(None));
     let snapshot = Rc::clone(&at_request);
-    let executor = scratch
-        .executor(Box::new(sessions))
-        .with_observer(move |line: &EventLine, _: &Path| {
-            if matches!(&line.event, Event::ToolRequested { call_id, .. } if call_id == "call-ls")
-            {
+    let executor = scratch.executor(Box::new(sessions)).with_observer(
+        move |line: &EventLine, _: &Path| {
+            if matches!(&line.event, Event::ToolRequested { call_id, .. } if call_id == "call-ls") {
                 let written = logs.borrow().last().expect("a child").written();
                 *snapshot.borrow_mut() = Some(written);
             }
-        });
+        },
+    );
 
     step_of(&executor);
 
-    let at_request = at_request.borrow().clone().expect("the tool call was observed");
+    let at_request = at_request
+        .borrow()
+        .clone()
+        .expect("the tool call was observed");
     assert!(
         !at_request.iter().any(|line| line.contains("call-ls")),
         "no decision for the call was written when the observer saw it: {at_request:?}"
@@ -305,58 +320,108 @@ fn adversary_an_observer_reads_the_executor_while_the_session_runs() {
     let slot: Rc<RefCell<Weak<SessionExecutor>>> = Rc::new(RefCell::new(Weak::new()));
     let reads = Rc::new(Cell::new(0_u32));
     let (inner, counted) = (Rc::clone(&slot), Rc::clone(&reads));
-    let executor = Rc::new(scratch.executor(Box::new(Sessions::default())).with_observer(
-        move |_: &EventLine, _: &Path| {
-            if let Some(executor) = inner.borrow().upgrade() {
-                let _ = executor.last_report();
-                let _ = executor.sessions();
-                let _ = executor.proposed();
-                let _ = executor.failed();
-                counted.set(counted.get() + 1);
-            }
-        },
-    ));
+    let executor = Rc::new(
+        scratch
+            .executor(Box::new(Sessions::default()))
+            .with_observer(move |_: &EventLine, _: &Path| {
+                if let Some(executor) = inner.borrow().upgrade() {
+                    let _ = executor.last_report();
+                    let _ = executor.sessions();
+                    let _ = executor.proposed();
+                    let _ = executor.failed();
+                    counted.set(counted.get() + 1);
+                }
+            }),
+    );
     *slot.borrow_mut() = Rc::downgrade(&executor);
 
     let step = catch_unwind(AssertUnwindSafe(|| step_of(&executor)));
 
-    assert!(step.is_ok(), "reading the executor from the observer does not panic");
+    assert!(
+        step.is_ok(),
+        "reading the executor from the observer does not panic"
+    );
     assert!(reads.get() > 0, "the observer read the executor");
     assert_eq!(executor.sessions().len(), 1, "the session is recorded");
 }
 
-/// `with_observer`'s doc: a panic leaving an observer "halts the session (metaharness kills the
-/// harness child)". An observer that runs the executor again panics there (the observer's
-/// `RefCell` is held across the outer loop); the nested session's child, already started, is
-/// never halted.
+/// `with_observer`'s doc, as decided: a call made while this executor already runs a session (an
+/// observer that runs the executor again) is refused before any copy is made or child started,
+/// suspended with `ExternalAvailability` naming why; the outer session goes on and is recorded,
+/// and the executor serves the next call.
 #[test]
-fn adversary_a_session_started_from_inside_the_observer_has_its_child_killed() {
+fn adversary_a_session_started_from_inside_the_observer_is_refused_and_the_outer_goes_on() {
     let scratch = Scratch::new("reentrant");
+    let copies = scratch.0.join("scratch");
     let sessions = Sessions::default();
     let logs = Rc::clone(&sessions.logs);
     let slot: Rc<RefCell<Weak<SessionExecutor>>> = Rc::new(RefCell::new(Weak::new()));
-    let nested = Rc::new(Cell::new(false));
-    let (inner, once) = (Rc::clone(&slot), Rc::clone(&nested));
+    let nested: Rc<RefCell<Option<(ExecutorStep, usize, usize)>>> = Rc::new(RefCell::new(None));
+    let (inner, seen) = (Rc::clone(&slot), Rc::clone(&nested));
+    let count = move || std::fs::read_dir(&copies).map_or(0, Iterator::count);
     let executor = Rc::new(scratch.executor(Box::new(sessions)).with_observer(
         move |line: &EventLine, _: &Path| {
-            if !once.get() && matches!(line.event, Event::ToolRequested { .. }) {
-                once.set(true);
-                if let Some(executor) = inner.borrow().upgrade() {
-                    let _ = step_of(&executor);
-                }
+            if seen.borrow().is_none() && matches!(line.event, Event::ToolRequested { .. }) {
+                let before = count();
+                let step = inner.borrow().upgrade().map(|executor| step_of(&executor));
+                let step = step.expect("the executor is alive");
+                *seen.borrow_mut() = Some((step, before, count()));
             }
         },
     ));
     *slot.borrow_mut() = Rc::downgrade(&executor);
 
     let left = catch_unwind(AssertUnwindSafe(|| step_of(&executor)));
-    let said = left.err().and_then(|payload| payload_text(&*payload));
+    let said = left
+        .as_ref()
+        .err()
+        .and_then(|payload| payload_text(&**payload));
+    let outer = left.unwrap_or_else(|_| {
+        panic!(
+            "story:session-executor-event-observer: the outer call goes on, it left with {said:?}"
+        )
+    });
 
-    let logs = logs.borrow();
-    assert_eq!(logs.len(), 2, "the outer and the nested session each started a child");
-    assert!(logs[0].killed(), "the outer child is killed");
+    let (step, before, after) = nested
+        .borrow_mut()
+        .take()
+        .expect("the observer ran the executor");
+    let why = match &step.outcome {
+        ExecutorOutcome::Suspended(suspended) => match &suspended.reason {
+            SuspensionReason::ExternalAvailability(Value::Text(why)) => why.clone(),
+            other => panic!("story:session-executor-event-observer: suspended for {other:?}"),
+        },
+        other => panic!("story:session-executor-event-observer: the nested call ran: {other:?}"),
+    };
     assert!(
-        logs[1].killed(),
-        "the nested session's child is killed (the call left with {said:?})"
+        why.contains("already running a session"),
+        "story:session-executor-event-observer: the nested call names why it is refused: {why}"
+    );
+    assert_eq!(
+        (before, logs.borrow().len()),
+        (after, 1),
+        "story:session-executor-event-observer: the nested call makes no copy and starts no child"
+    );
+    assert_eq!(
+        proposed_paths(&outer),
+        Vec::<String>::new(),
+        "story:session-executor-event-observer: the outer session proposes what it would"
+    );
+    assert_eq!(
+        executor.sessions().len(),
+        1,
+        "story:session-executor-event-observer: the outer session is recorded"
+    );
+    assert_eq!(
+        executor.last_report().and_then(|report| report.error),
+        None,
+        "story:session-executor-event-observer: the last report is the outer session's"
+    );
+
+    proposed_paths(&step_of(&executor));
+    assert_eq!(
+        (executor.sessions().len(), logs.borrow().len()),
+        (2, 2),
+        "story:session-executor-event-observer: the executor serves the next call"
     );
 }
