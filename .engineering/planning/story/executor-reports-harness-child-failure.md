@@ -7,7 +7,7 @@ title: The session executor reports a failed harness child's exit status and the
 relations:
 - decomposes: epic:loom-agent-command-variant
 - serves: vision:governed-autonomy
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -44,3 +44,24 @@ Derived 2026-10-26 by the coordinator, read in the tree at `7f3d7357`.
   child and collects its output) — cited
 - `crates/loom-session-executor/tests/` — inferred
 - AGENTS.md, CHANGELOG.md — inferred
+
+## From the takt 0.17.0 trial (F2)
+
+Finding F2 of the takt 0.17.0 trial, relayed by session `b10x-chef-orchestrator` on 2026-10-28:
+"in loom 0.46.0, at loom-session-executor/src/lib.rs:2162, the harness's stderr error reaches no
+record, so takt retries a refusal that repeats every time, 3 sessions in all."
+
+Read on `origin/main` 78a6d278a: `reply` still returns only "the session ended without the JSON
+line naming its action" (`crates/loom-session-executor/src/lib.rs:2162`).
+
+Added acceptance, beside the three above:
+
+- `a_failed_harness_child_records_its_cause`: the exit status and the bounded stderr tail reach the
+  session's record (`loom.session.AgentSession`, through the executor's error and the case it
+  fails), so a caller reading the record sees the same cause on a repeat and can stop instead of
+  retrying it.
+
+Unmerged prior work: branch `impl/executor-reports-harness-child-failure` (local only, managed tree
+`loomw2-u4`, wave 2026-10-26-w2, never closed) holds a red test (`52ce12b90`,
+`tests/harness_child_failure.rs`) and an implementation (`ce9f322cc`) of the first three items. A
+wave that takes this story starts from those commits or records why not.

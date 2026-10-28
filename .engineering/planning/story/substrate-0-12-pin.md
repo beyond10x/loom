@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-0-12-pin
 kind: story
-status: active
+status: implemented
 title: Loom's confined runner runs on the newest Substrate release and admits a driver by its proved facts
 summary: substrate 0.10.0 -> the release after 0.12.0; OS checks give way to the linux adapter's facts (ADR 0109); the applied record names adapter and facts
 tags:
@@ -10,10 +10,11 @@ tags:
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-27T09:09:23Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-27T09:09:24Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-28T15:03:18Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":2}}, executor: "agent:loom-pins-ess074-sub014", correlation: "D142"}
 ---
 ## Outcome
 

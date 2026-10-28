@@ -9,7 +9,7 @@ tags:
 - adr-0109
 relations:
 - decomposes: epic:loom-sdk-for-products
-revision: 2
+revision: 3
 ---
 ## Outcome
 
@@ -34,3 +34,23 @@ serves the workspace read-write only. The adapter route waits on Substrate's sto
 2. The delegated cases in `tests/confinement.rs` and `tests/confined_child.rs` still hold,
    including the scoped `target` write and a refused write outside it.
 3. `task check` passes.
+
+## Waits on
+
+Read 2026-10-28 against Substrate 0.14.0 (tag commit `0b9d50c6`), which Loom now pins.
+
+- Delivered: the `linux` adapter serves `workspace_access: Scoped` on a host whose probe proved
+  `exec.workspace-scoped-write` (Substrate 0.14.0 CHANGELOG, `### Added`). The scoped `target`
+  write no longer needs `HostDriver::open`.
+- Not delivered: the adapter surface takes `Command { argv, env }` only and every adapter starts
+  the child with standard input null (`substrate-host` `confinement/mod.rs` `ConfinementAdapter`,
+  `local.rs:259`, `systemd.rs:434`, `macos.rs:175`); its output is read after the run
+  (`output`), not as a live stream. `run_child` with `ChildCommand::with_stdin` and `spawn_child`
+  (`ConfinedChild::write_stdin`, live `ChildStream`) need both, through the host driver's pipe
+  sessions today.
+- Not delivered: the profile names egress apertures by operator-declared name
+  (`Network::Egress { apertures: Vec<String> }`); `ChildCommand::with_egress` passes a full
+  `EgressAperture` (host, port, pinned address) to the driver.
+
+So the story still waits on Substrate: standard input and a live output stream through a
+confinement adapter, and an aperture the host declares per launch. It stays a draft.

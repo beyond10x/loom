@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` to `0.14.0` (`0b9d50c6`); Loom's confined runs behave as before
+- The specification requires ESS `0.74.0`, and `ess-conformance` and `ess-primitives` move to tag `0.74.0`; generated Rust is unchanged
+
 ## [0.46.0] - 2026-10-27
 
 ### Added

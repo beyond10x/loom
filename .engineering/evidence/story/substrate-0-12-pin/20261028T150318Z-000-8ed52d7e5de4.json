@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-28T15:03:18Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-0-12-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-intake-slice --locked on Substrate 0.14.0: 363 passed, 0 failed, 4 ignored; a_driver_missing_a_family_is_refused_naming_it ok",
+    "reference": "build/ess-0-74-substrate-0-14"
+  }
+}
