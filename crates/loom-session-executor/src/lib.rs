@@ -57,15 +57,18 @@
 //! `ExternalAvailability` naming why, and [`SessionReport::error`] holds the same text. When its
 //! harness child had started, the session is recorded all the same, through
 //! `loom.session.RecordFailedSession`: its row ([`SessionExecutor::sessions`]) names no action and
-//! no files, and its `failure` (`loom.session.SessionFailure`) keeps how the child ended and the
-//! stderr tail the reason carries, so a caller reading the record sees the same cause on a repeat.
+//! no files, and its `failure` (`loom.session.SessionFailure`) keeps how the child ended, the
+//! stderr tail the reason carries and the reason without it, read as the tail is, so a caller
+//! reading the record sees the same cause on a repeat.
 //! A session refused before its child started is no record. A session that changed nothing
-//! proposes an empty list of files. When the session ended without the JSON line naming its action, or in an error, the
+//! proposes an empty list of files. When the session ended without the JSON line naming its action,
+//! with one that does not read, or in an error, the
 //! reason also says how the harness child ended (its exit status, the signal that took it, or that
 //! metaharness measured neither) and, when metaharness hands on what the child wrote on standard
 //! error (it does when the child left no terminal record), the last whole lines of it within
 //! [`STDERR_TAIL_BYTES`], each line that holds a credential's shape withheld and never repeated
-//! ([`TOKEN_PREFIXES`], a URL with user information or a query component, a PEM block).
+//! ([`TOKEN_PREFIXES`], a URL with user information or a query component, a PEM block), read with
+//! its terminal escape sequences both removed and replaced.
 //!
 //! The change is what the session made in its copy against the bytes the copy was made from, the
 //! workspace as the frontier was handed: a file written in the workspace while the session runs
@@ -100,9 +103,10 @@ use loom::session::obligations::{
 };
 use loom::session::{
     AgentSession, AgentSessionData, AgentSessionSnapshot, AgentSessions, AnyAgentSession,
-    CallDecision, ChangedFile, CommissionId, DecidedBy, FrontierId, ProposeSessionChange,
-    ProposeSessionChangeOutcome, RecordFailedSession, RecordFailedSessionOutcome,
-    SessionChangeProposed, SessionFailed, SessionFailure, SessionId, SessionKind, ToolDecision,
+    CallDecision, ChangedFile, CommissionId, DecidedBy, FailureRefusalReason, FailureRefused,
+    FrontierId, ProposeSessionChange, ProposeSessionChangeOutcome, RecordFailedSession,
+    RecordFailedSessionOutcome, SessionChangeProposed, SessionFailed, SessionFailure, SessionId,
+    SessionKind, ToolDecision,
 };
 use metaharness::protocol::{
     Command, Decision, DecisionMode, Event, EventLine, HermeticMode, HermeticRow, RunSpec,
@@ -140,7 +144,7 @@ pub const STDERR_TAIL_BYTES: usize = 4096;
 /// The prefixes of the credentials a line of a harness child's standard error is withheld for,
 /// matched in either case at the start of a word: the list `b10x_loom_agent::TOKEN_PREFIXES`
 /// refuses in an agent spec, held equal to it by `crates/loom-agent/tests/token_prefixes.rs`.
-pub const TOKEN_PREFIXES: [&str; 11] = [
+pub const TOKEN_PREFIXES: [&str; 15] = [
     "xoxb-",
     "xoxp-",
     "xapp-",
@@ -148,6 +152,10 @@ pub const TOKEN_PREFIXES: [&str; 11] = [
     "sk_live_",
     "sk_test_",
     "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
     "github_pat_",
     "AKIA",
     "Bearer ",
@@ -945,14 +953,14 @@ impl SessionExecutor {
     }
 
     /// Records the session `report` describes, which started and proposed nothing, as one
-    /// `AgentSession` for `commission` over `frontier` with `child`'s end and stderr tail as its
-    /// failure, under `session_id`, continuing `continues` when it names an earlier session.
+    /// `AgentSession` for `commission` over `frontier` with `failure` ([`ChildEnd::failure`]),
+    /// under `session_id`, continuing `continues` when it names an earlier session.
     fn record_failure(
         &self,
         commission: &CommissionId,
         frontier: &Frontier<frontier_state::Issued>,
         report: &SessionReport,
-        child: &ChildEnd,
+        failure: SessionFailure,
         session_id: SessionId,
         continues: Option<SessionId>,
     ) -> Result<SessionFailed, String> {
@@ -966,7 +974,7 @@ impl SessionExecutor {
                 vendor_session_id: report.vendor_session_id.clone(),
                 agent: self.agent.clone(),
                 continues,
-                failure: child.failure(),
+                failure,
             })
             .map_err(|unmet| format!("the failed session could not be recorded: {unmet}"))
     }
@@ -1515,7 +1523,7 @@ impl SessionExecutor {
         let (action, summary) =
             reply(&replied.unwrap_or_else(|| said.join("\n"))).map_err(|why| match why {
                 Unreplied::NoActionLine => format!("{NO_ACTION_LINE}{}", child.said()),
-                Unreplied::Malformed(why) => why,
+                Unreplied::Malformed(why) => format!("{why}{}", child.said()),
             })?;
         let files = copy.changes()?;
         let stale = copy.stale(&files);
@@ -1570,7 +1578,7 @@ impl AgentExecutor for SessionExecutor {
                         &commission,
                         frontier,
                         &report,
-                        &child,
+                        child.failure(&why),
                         session_id,
                         continues,
                     )
@@ -1974,15 +1982,41 @@ struct SessionRecord {
     failed: Vec<SessionFailed>,
 }
 
-/// `loom.session.RecordFailedSession`, an obligation of the generated model: its `failed`
-/// outcome leaves `files` undetermined, because the specification's format (`ess/25`) has no
-/// empty-list literal. A failed session proposes nothing, so its files are none; every other field
-/// is the one the outcome's `sets:` names, and the event is its declared payload.
+/// The refusal `loom.session.RecordFailedSession` answers `failure` with, `None` when it records
+/// it: `unmeasured-with-code` for a code with a `NotMeasured` end, `measured-without-code` for
+/// none with an `Exited` or a `Signaled` one. A process ends with a status or a signal exactly
+/// when its end is measured, so the executor's own failures are never refused.
+#[must_use]
+pub fn failure_refusal(failure: &SessionFailure) -> Option<RecordFailedSessionOutcome> {
+    use loom::session::ChildEnd as End;
+    let refused = |reason| FailureRefused { reason };
+    match (failure.end, failure.code) {
+        (End::NotMeasured, Some(_)) => Some(RecordFailedSessionOutcome::UnmeasuredWithCode {
+            error: refused(FailureRefusalReason::UnmeasuredWithCode),
+        }),
+        (End::Exited | End::Signaled, None) => {
+            Some(RecordFailedSessionOutcome::MeasuredWithoutCode {
+                error: refused(FailureRefusalReason::MeasuredWithoutCode),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// `loom.session.RecordFailedSession`, an obligation of the generated model. It refuses a failure
+/// no harness child ends with ([`failure_refusal`]). Its `failed` outcome leaves `files`
+/// undetermined, because the specification's format (`ess/25`) has no empty-list literal, and
+/// `failure.reason` generated: a failed session proposes nothing, so its files are none, and its
+/// reason is the one the executor put in `failure` ([`ChildEnd::failure`]). Every other field is
+/// the one the outcome's `sets:` names, and the event is its declared payload.
 impl RecordFailedSessionBehavior for SessionRecord {
     fn record_failed_session(
         &mut self,
         input: RecordFailedSession,
     ) -> Result<RecordFailedSessionOutcome, UnmetObligation> {
+        if let Some(refused) = failure_refusal(&input.failure) {
+            return Ok(refused);
+        }
         let session_failed = SessionFailed {
             session_id: input.session_id.clone(),
             commission_id: input.commission_id.clone(),
@@ -2056,14 +2090,21 @@ impl SessionRecord {
     }
 
     /// `RecordFailedSession`, through the generated model's obligation (this store's own
-    /// [`RecordFailedSessionBehavior`]); the event it published, kept.
-    fn fail(&mut self, input: RecordFailedSession) -> Result<SessionFailed, UnmetObligation> {
+    /// [`RecordFailedSessionBehavior`]); the event it published, kept. A refusal is an error.
+    fn fail(&mut self, input: RecordFailedSession) -> Result<SessionFailed, String> {
         let mut generated = Generated::new(std::mem::take(self));
         let answered = generated.record_failed_session(input);
         *self = generated.ports;
-        let RecordFailedSessionOutcome::Failed { session_failed } = answered?;
-        self.failed.push(session_failed.clone());
-        Ok(session_failed)
+        match answered.map_err(|unmet| unmet.to_string())? {
+            RecordFailedSessionOutcome::Failed { session_failed } => {
+                self.failed.push(session_failed.clone());
+                Ok(session_failed)
+            }
+            RecordFailedSessionOutcome::UnmeasuredWithCode { error }
+            | RecordFailedSessionOutcome::MeasuredWithoutCode { error } => {
+                Err(format!("it was refused ({:?})", error.reason))
+            }
+        }
     }
 
     /// The `loom.session.AgentSessions` view, by its generated query.
@@ -2602,14 +2643,15 @@ impl ChildEnd {
         if self.stderr.is_empty() {
             format!(" ({end})")
         } else {
-            format!(" ({end}); the last lines of its stderr:\n{}", self.stderr)
+            format!(" ({end}){STDERR_SAID_BY_REASON}{}", self.stderr)
         }
     }
 
     /// The same, as a failed session's record keeps it (`loom.session.SessionFailure`): the end,
-    /// its status or signal (none when unmeasured), and the stderr tail the reason carries, none
-    /// when the child said nothing metaharness handed on.
-    fn failure(&self) -> SessionFailure {
+    /// its status or signal (none when unmeasured), the stderr tail the reason carries, none when
+    /// the child said nothing metaharness handed on, and `why`, the reason the step was suspended
+    /// with, as the record keeps it ([`record_reason`]).
+    fn failure(&self, why: &str) -> SessionFailure {
         use loom::session::ChildEnd as End;
         use metaharness::protocol::ProcessTermination;
         let (end, code) = match self.termination {
@@ -2621,6 +2663,7 @@ impl ChildEnd {
             end,
             code,
             stderr_tail: Some(self.stderr.clone()).filter(|tail| !tail.is_empty()),
+            reason: Some(record_reason(why, self)),
         }
     }
 }
@@ -2649,43 +2692,10 @@ fn stderr_tail(stderr: &str) -> String {
             }
         }
     };
-    let lines: Vec<&str> = window
-        .split('\n')
-        .map(|line| line.strip_suffix('\r').unwrap_or(line))
-        .collect();
-    let withheld = credential_lines(&lines);
-    let mut shown: Vec<String> = Vec::new();
-    let mut run = 0usize;
-    let note = |run: usize| match run {
-        1 => "[a line withheld: it holds a credential's shape]".to_owned(),
-        n => format!("[{n} lines withheld: they hold a credential's shape]"),
-    };
-    for (line, withheld) in lines.iter().zip(&withheld) {
-        if *withheld {
-            run += 1;
-            continue;
-        }
-        if run > 0 {
-            shown.push(note(run));
-            run = 0;
-        }
-        shown.push(
-            line.chars()
-                .map(|c| {
-                    if c.is_control() && c != '\t' {
-                        char::REPLACEMENT_CHARACTER
-                    } else {
-                        c
-                    }
-                })
-                .collect(),
-        );
-    }
-    if run > 0 {
-        shown.push(note(run));
-    }
+    let shown = walked(window);
     // A note or a replaced character may be longer than what it stands in for: the bound holds
-    // for the tail as shown, its first lines going first.
+    // for the tail as shown, its first lines going first. A last line that no longer fits once
+    // shown is dropped as one the window cannot hold, a note standing in for it.
     let mut kept = 0;
     let mut size = 0;
     for line in shown.iter().rev() {
@@ -2696,7 +2706,133 @@ fn stderr_tail(stderr: &str) -> String {
         size += more;
         kept += 1;
     }
+    if kept == 0 {
+        return format!(
+            "[its last line, longer than {STDERR_TAIL_BYTES} bytes as shown, is not shown]"
+        );
+    }
     shown[shown.len() - kept..].join("\n")
+}
+
+/// The reason a failed session's record keeps (`loom.session.SessionFailure.reason`): `why`, the
+/// reason the step was suspended with, without the stderr tail [`ChildEnd::said`] ends it with
+/// (the record keeps that as its `stderr_tail`); each line shown and withheld as the tail's are
+/// ([`walked`]); its first [`STDERR_TAIL_BYTES`] bytes at most, a note ending one that is cut.
+fn record_reason(why: &str, child: &ChildEnd) -> String {
+    let why = if child.stderr.is_empty() {
+        why
+    } else {
+        why.strip_suffix(&format!("{STDERR_SAID_BY_REASON}{}", child.stderr))
+            .unwrap_or(why)
+    };
+    let reason = walked(why).join("\n");
+    if reason.len() <= STDERR_TAIL_BYTES {
+        return reason;
+    }
+    let note = format!(" [cut at {STDERR_TAIL_BYTES} bytes]");
+    let mut cut = STDERR_TAIL_BYTES - note.len();
+    while !reason.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{note}", &reason[..cut])
+}
+
+/// What [`ChildEnd::said`] puts between how the child ended and its stderr tail.
+const STDERR_SAID_BY_REASON: &str = "; the last lines of its stderr:\n";
+
+/// The lines of `text` as a tail or a record shows them: each one inert ([`inert`]), and each
+/// that holds a credential's shape ([`credential_lines`]) withheld, read both with its escape
+/// sequences and control characters removed, as a terminal shows it, and with each replaced, a
+/// note standing in for each run of withheld lines. A line's `\r` ending is dropped.
+fn walked(text: &str) -> Vec<String> {
+    let forms: Vec<(String, String)> = text
+        .split('\n')
+        .map(|line| inert(line.strip_suffix('\r').unwrap_or(line)))
+        .collect();
+    let shown_forms: Vec<&str> = forms.iter().map(|(shown, _)| shown.as_str()).collect();
+    let bare_forms: Vec<&str> = forms.iter().map(|(_, bare)| bare.as_str()).collect();
+    let withheld: Vec<bool> = credential_lines(&shown_forms)
+        .into_iter()
+        .zip(credential_lines(&bare_forms))
+        .map(|(shown, bare)| shown || bare)
+        .collect();
+    let mut shown: Vec<String> = Vec::new();
+    let mut run = 0usize;
+    let note = |run: usize| match run {
+        1 => "[a line withheld: it holds a credential's shape]".to_owned(),
+        n => format!("[{n} lines withheld: they hold a credential's shape]"),
+    };
+    for ((line, _), withheld) in forms.into_iter().zip(withheld) {
+        if withheld {
+            run += 1;
+            continue;
+        }
+        if run > 0 {
+            shown.push(note(run));
+            run = 0;
+        }
+        shown.push(line);
+    }
+    if run > 0 {
+        shown.push(note(run));
+    }
+    shown
+}
+
+/// `line` made inert, twice: as shown, each terminal escape sequence and each other control
+/// character but a tab replaced by one U+FFFD, which no word continues across; and bare, each of
+/// them removed, the text a terminal would show. An escape sequence is `ESC` with what it takes:
+/// a control sequence (`ESC [` or `U+009B`, its parameter and intermediate bytes, its final
+/// byte); a string (`ESC ]`, `ESC P`, `ESC X`, `ESC ^`, `ESC _`, up to `BEL` or `ESC \`); or
+/// its intermediate bytes and one final character. One the line ends inside ends with it.
+fn inert(line: &str) -> (String, String) {
+    let mut shown = String::with_capacity(line.len());
+    let mut bare = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if !c.is_control() || c == '\t' {
+            shown.push(c);
+            bare.push(c);
+            continue;
+        }
+        shown.push(char::REPLACEMENT_CHARACTER);
+        let csi = match c {
+            '\u{9b}' => true,
+            '\u{1b}' => match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    true
+                }
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\u{7}' || (c == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some(_) => {
+                    while chars
+                        .next_if(|c| ('\u{20}'..='\u{2f}').contains(c))
+                        .is_some()
+                    {}
+                    chars.next_if(|c| ('\u{30}'..='\u{7e}').contains(c));
+                    continue;
+                }
+                None => false,
+            },
+            _ => false,
+        };
+        if csi {
+            while chars
+                .next_if(|c| ('\u{20}'..='\u{3f}').contains(c))
+                .is_some()
+            {}
+            chars.next_if(|c| ('\u{40}'..='\u{7e}').contains(c));
+        }
+    }
+    (shown, bare)
 }
 
 /// Which of `lines` hold a credential's shape: a URL with user information or a query
@@ -3170,6 +3306,46 @@ fn git_state_failed(path: &Path, error: &std::io::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_records_reason_leaves_its_stderr_tail_out_and_withholds_a_credential() {
+        let child = ChildEnd {
+            termination: metaharness::protocol::ProcessTermination::Exited { code: 1 },
+            stderr: "refused".to_owned(),
+        };
+        let why = format!(
+            "the session ended in an error (\u{1b}[1mghs_SECRETabcdef\u{1b}[0m)\nnext{}",
+            child.said()
+        );
+        assert_eq!(
+            record_reason(&why, &child),
+            "[a line withheld: it holds a credential's shape]\n\
+             next (the harness exited with status 1)"
+        );
+    }
+
+    #[test]
+    fn a_records_reason_keeps_its_start_within_the_bound() {
+        let child = ChildEnd::default();
+        let why = format!("{}{}", "é".repeat(STDERR_TAIL_BYTES), child.said());
+        let reason = record_reason(&why, &child);
+        assert!(reason.len() <= STDERR_TAIL_BYTES, "{}", reason.len());
+        assert!(reason.starts_with("éé"), "its start is kept");
+        assert!(reason.ends_with(&format!(" [cut at {STDERR_TAIL_BYTES} bytes]")));
+    }
+
+    #[test]
+    fn an_escape_sequence_is_one_replacement_as_shown_and_nothing_bare() {
+        assert_eq!(
+            inert("a\u{1b}[1;31mb\u{1b}]0;title\u{7}c\u{1b}(Bd\u{9b}2Ke\rf\tg\u{1b}"),
+            (
+                "a\u{fffd}b\u{fffd}c\u{fffd}d\u{fffd}e\u{fffd}f\tg\u{fffd}".to_owned(),
+                "abcdef\tg".to_owned()
+            )
+        );
+        assert!(holds_credential(&inert("key=\u{1b}[1msk-x").0));
+        assert!(holds_credential(&inert("s\u{1b}[0mk-x").1));
+    }
 
     #[test]
     fn a_path_is_inside_the_copy_only_lexically_under_it() {

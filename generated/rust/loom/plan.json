@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "66a02a0baf5fbe8890612e69df450544c958c9f01799dc162cea2a954a89a58c",
-    "contract_digest": "70e66c4d4dd22d9a004633e14def9f35e93b84c0782021c37bc41550f5e18b6a"
+    "source_digest": "3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8",
+    "contract_digest": "502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1076,6 +1076,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.session.FailureRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.session.FrontierId",
       "disposition": {
         "disposition": "generated"
@@ -1555,7 +1562,7 @@
           "class": "undetermined",
           "construct": "`creates:` leaving the required field `files` of `loom.session.AgentSession` undetermined, in `failed`"
         },
-        "contract": "given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed`"
+        "contract": "given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `unmeasured-with-code` when `(failure.end == NotMeasured and defined(failure.code))`, error `loom.session.FailureRefused`; `measured-without-code` when `(failure.end != NotMeasured and not (defined(failure.code)))`, error `loom.session.FailureRefused`; `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed`"
       }
     },
     {
@@ -1820,6 +1827,13 @@
     {
       "kind": "error_type",
       "source": "loom.run.SelectionStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.session.FailureRefused",
       "disposition": {
         "disposition": "generated"
       }

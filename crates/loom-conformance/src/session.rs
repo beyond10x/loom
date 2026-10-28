@@ -1,11 +1,12 @@
 //! `loom.session.ProposeSessionChange` and `loom.session.RecordFailedSession`, answered by
 //! `b10x-loom-session-executor`.
 //!
-//! `RecordFailedSession` runs a scripted Claude Code session that opens and ends as the input's
-//! `failure` says, with no reply and no terminal record ([`Failing`]): its exit status or signal,
-//! or none measured, and the input's stderr tail on its stderr. The executor suspends the step and
-//! records the session as failed; what is published is the `SessionFailed` it returned and the
-//! rows it holds.
+//! `RecordFailedSession` refuses a failure no harness child ends with, as the executor's record
+//! does (`failure_refusal`). Any other runs a scripted Claude Code or Codex session that opens and
+//! ends as the input's `failure` says, with no reply and no terminal record ([`Failing`]): its
+//! exit status or signal, or none measured, and the input's stderr tail on its stderr. The
+//! executor suspends the step and records the session as failed, with its own reason; what is
+//! published is the `SessionFailed` it returned and the rows it holds.
 //!
 //! The executor records a session only by running one, so this target runs one: a
 //! `SessionExecutor` of `Kind::Claude` over a workspace made for the invocation, its session a
@@ -23,9 +24,9 @@
 //! reads the change from the copy, in path order, so the event's `files` are the input's in path
 //! order.
 //!
-//! Only `ClaudeCode` is driven: the synthesized suite names that kind. A `Codex` or `Harness`
-//! session would need its own scripted records, and the target reports it unsupported instead of
-//! answering for it.
+//! `ProposeSessionChange` drives `ClaudeCode` only and `RecordFailedSession` `ClaudeCode` and
+//! `Codex`: the kinds the synthesized suite names for each. Any other kind would need its own
+//! scripted records, and the target reports it unsupported instead of answering for it.
 
 use std::path::{Path, PathBuf};
 
@@ -44,10 +45,12 @@ use b10x_loom_session_executor::model::agent::{AgentId, ToolPolicy};
 use b10x_loom_session_executor::model::primitives::Uuid as SessionUuid;
 use b10x_loom_session_executor::model::session::{
     AgentSessionState, AgentSessions, ChangedFile, ChildEnd, CommissionId as SessionCommissionId,
-    FrontierId as SessionFrontierId, SessionFailure, SessionId, SessionKind,
+    FailureRefusalReason, FrontierId as SessionFrontierId, RecordFailedSessionOutcome,
+    SessionFailure, SessionId, SessionKind,
 };
 use b10x_loom_session_executor::{
     CredentialSource, Kind, ProcessRunner, SessionExecutor, ToolPolicyDefaults as _,
+    failure_refusal,
 };
 use ess_conformance::target::{SemanticCommandResult, TargetError};
 use ess_primitives::ids::CorrelationId;
@@ -60,6 +63,7 @@ pub(crate) const SESSION_CHANGE_PROPOSED: &str = "loom.session.SessionChangeProp
 pub(crate) const AGENT_SESSIONS: &str = "loom.session.AgentSessions";
 pub(crate) const RECORD_FAILED_SESSION: &str = "loom.session.RecordFailedSession";
 pub(crate) const SESSION_FAILED: &str = "loom.session.SessionFailed";
+const FAILURE_REFUSED: &str = "loom.session.FailureRefused";
 
 /// The action a failed session's frontier offers; the session names none.
 const FAILED_ACTION: &str = "conformance.write";
@@ -262,13 +266,40 @@ fn run(executor: &SessionExecutor, decoded: &Decoded, action: &str) -> ExecutorO
     executor.run_with_usage(&commission, &frontier).outcome
 }
 
-/// A scripted Claude Code session that opens, its own session id `vendor`'s when there is one,
-/// and ends as `failure` says without a reply or a terminal record: its exit status or signal, or
-/// none measured, and `failure`'s stderr tail on its stderr, which metaharness hands on because
-/// the child left no terminal record.
+/// A scripted Claude Code or Codex session that opens, its own session id `vendor`'s when there
+/// is one, and ends as `failure` says without a reply or a terminal record: its exit status or
+/// signal, or none measured, and `failure`'s stderr tail on its stderr, which metaharness hands on
+/// because the child left no terminal record.
 struct Failing {
+    kind: Kind,
     failure: SessionFailure,
     vendor: Option<String>,
+}
+
+impl Failing {
+    /// The session's opening record: Claude Code's `system` `init`, or the `session_meta` of a
+    /// Codex rollout (which always names its id: [`record_failed_session`] drives none without).
+    fn opening(&self, cwd: &Path) -> serde_json::Value {
+        if self.kind == Kind::Codex {
+            let id = self.vendor.clone().unwrap_or_default();
+            return serde_json::json!({
+                "timestamp": "2026-08-22T10:00:00.000Z", "type": "session_meta",
+                "payload": {"id": id, "session_id": id, "cli_version": "0.153.4",
+                            "cwd": cwd.display().to_string(), "originator": "codex_exec",
+                            "model_provider": "openai"},
+            });
+        }
+        let mut init = serde_json::json!({
+            "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
+            "cwd": cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
+            "plugins": [], "output_style": "default", "apiKeySource": "none",
+            "model": "scripted", "permissionMode": "default",
+        });
+        if let Some(vendor) = &self.vendor {
+            init["session_id"] = serde_json::Value::String(vendor.clone());
+        }
+        init
+    }
 }
 
 impl ProcessRunner for Failing {
@@ -277,17 +308,9 @@ impl ProcessRunner for Failing {
     }
 
     fn start(&mut self, plan: &LaunchPlanView) -> std::io::Result<Box<dyn HarnessProcess>> {
-        let mut init = serde_json::json!({
-            "type": "system", "subtype": "init", "claude_code_version": "2.1.304",
-            "cwd": plan.cwd.display().to_string(), "tools": ToolPolicy::claude_default().allow, "mcp_servers": [],
-            "plugins": [], "output_style": "default", "apiKeySource": "none",
-            "model": "scripted", "permissionMode": "default",
-        });
-        if let Some(vendor) = &self.vendor {
-            init["session_id"] = serde_json::Value::String(vendor.clone());
-        }
+        let opening = self.opening(plan.cwd);
         let said = self.failure.stderr_tail.clone().unwrap_or_default();
-        let inner = ScriptedRunner::of_lines([init.to_string()], ScriptedLog::new())
+        let inner = ScriptedRunner::of_lines([opening.to_string()], ScriptedLog::new())
             .saying_on_stderr(said)
             .start(plan)?;
         let code = |code: Option<i64>| {
@@ -346,9 +369,33 @@ impl HarnessProcess for Ended {
     }
 }
 
-/// `RecordFailedSession`: a scripted session that starts and fails as the input's `failure` says,
-/// run by the executor, and what it recorded. An end this target cannot make (an `Exited` or a
-/// `Signaled` end without a status, or a status outside what a process reports) is unsupported.
+/// The refusal `RecordFailedSession` answered, as `loom.session.FailureRefused`, `reason` in the
+/// enum's spelling.
+fn failure_refused(refused: &RecordFailedSessionOutcome) -> SemanticCommandResult {
+    let (branch, reason) = match refused {
+        RecordFailedSessionOutcome::UnmeasuredWithCode { error } => ("unmeasured-with-code", error),
+        RecordFailedSessionOutcome::MeasuredWithoutCode { error } => {
+            ("measured-without-code", error)
+        }
+        RecordFailedSessionOutcome::Failed { .. } => {
+            unreachable!("`failure_refusal` answers a refusal only")
+        }
+    };
+    let spelling = match reason.reason {
+        FailureRefusalReason::UnmeasuredWithCode => "UnmeasuredWithCode",
+        FailureRefusalReason::MeasuredWithoutCode => "MeasuredWithoutCode",
+    };
+    took(RECORD_FAILED_SESSION, branch).with_error(crate::error(FAILURE_REFUSED).with(
+        "reason",
+        ess_primitives::node::Node::Text(spelling.to_owned()),
+    ))
+}
+
+/// `RecordFailedSession`: a failure no harness child ends with is refused as the executor's
+/// record refuses it ([`failure_refusal`]); any other, a scripted session of the input's kind
+/// that starts and fails as the input's `failure` says, run by the executor, and what it
+/// recorded, the record's reason the executor's own. A status outside what a process reports, a
+/// `Harness` session, or a `Codex` one naming no id is unsupported.
 pub(crate) fn record_failed_session(
     live: &mut Live,
     input: &Input,
@@ -360,32 +407,35 @@ pub(crate) fn record_failed_session(
     let Some(failure) = codec::session_failure(input, "failure") else {
         return Ok(None);
     };
-    if decoded.kind != SessionKind::ClaudeCode {
-        return Err(TargetError::unsupported(
-            format!("a `{:?}` session", decoded.kind),
-            "this target scripts Claude Code sessions only, the kind the suite names",
-        ));
+    if let Some(refused) = failure_refusal(&failure) {
+        return Ok(Some(failure_refused(&refused)));
     }
-    let makes = match failure.end {
-        ChildEnd::NotMeasured => failure.code.is_none(),
-        ChildEnd::Exited | ChildEnd::Signaled => {
-            failure.code.is_some_and(|code| i32::try_from(code).is_ok())
+    let kind = match (decoded.kind, &decoded.vendor_session_id) {
+        (SessionKind::ClaudeCode, _) => Kind::Claude,
+        (SessionKind::Codex, Some(_)) => Kind::Codex,
+        (kind, _) => {
+            return Err(TargetError::unsupported(
+                format!("a `{kind:?}` session"),
+                "this target scripts Claude Code sessions and Codex sessions naming their id, \
+                 the kinds the suite names",
+            ));
         }
     };
-    if !makes {
+    if failure
+        .code
+        .is_some_and(|code| i32::try_from(code).is_err())
+    {
         return Err(TargetError::unsupported(
-            format!(
-                "a `{:?}` end with the status {:?}",
-                failure.end, failure.code
-            ),
-            "a process ends with a status or a signal exactly when it was measured",
+            format!("the status {:?}", failure.code),
+            "a process reports a status or a signal of 32 bits",
         ));
     }
     let invocation = Invocation::make(live.sequence)?;
     let session_id = decoded.session_id.clone();
     let mut executor = SessionExecutor::new(invocation.workspace(), Vec::new(), "fail")
-        .of_kind(Kind::Claude)
+        .of_kind(kind)
         .with_runner(Box::new(Failing {
+            kind,
             failure,
             vendor: decoded.vendor_session_id.clone(),
         }))

@@ -92,7 +92,7 @@ pub struct Checked {
 /// The prefixes of the credentials a value may not start with: chat bot, user and app tokens,
 /// model-provider and payment keys, source-host tokens, a cloud access key id, an authorization
 /// header and a PEM block.
-pub const TOKEN_PREFIXES: [&str; 11] = [
+pub const TOKEN_PREFIXES: [&str; 15] = [
     "xoxb-",
     "xoxp-",
     "xapp-",
@@ -100,6 +100,10 @@ pub const TOKEN_PREFIXES: [&str; 11] = [
     "sk_live_",
     "sk_test_",
     "ghp_",
+    "gho_",
+    "ghu_",
+    "ghs_",
+    "ghr_",
     "github_pat_",
     "AKIA",
     "Bearer ",

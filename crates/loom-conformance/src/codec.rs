@@ -242,8 +242,8 @@ pub fn changed_files_node(files: &[ChangedFile]) -> Node {
     )
 }
 
-/// The `loom.session.SessionFailure` field `name`: its `end`, and its `code` and `stderr_tail`,
-/// each absent or null when it holds none.
+/// The `loom.session.SessionFailure` field `name`: its `end`, and its `code`, `stderr_tail` and
+/// `reason`, each absent or null when it holds none.
 pub fn session_failure(input: &Input, name: &str) -> Option<SessionFailure> {
     let members = input.get(name)?.as_map()?;
     Some(SessionFailure {
@@ -262,10 +262,16 @@ pub fn session_failure(input: &Input, name: &str) -> Option<SessionFailure> {
             Some(Node::Text(text)) => Some(text.clone()),
             Some(_) => return None,
         },
+        reason: match members.get("reason") {
+            None | Some(Node::Null) => None,
+            Some(Node::Text(text)) => Some(text.clone()),
+            Some(_) => return None,
+        },
     })
 }
 
-/// A `loom.session.SessionFailure` as a suite value, an absent `code` or `stderr_tail` null.
+/// A `loom.session.SessionFailure` as a suite value, an absent `code`, `stderr_tail` or
+/// `reason` null.
 pub fn session_failure_node(failure: &SessionFailure) -> Node {
     Node::Map(BTreeMap::from([
         (
@@ -280,6 +286,10 @@ pub fn session_failure_node(failure: &SessionFailure) -> Node {
         (
             "stderr_tail".to_owned(),
             failure.stderr_tail.as_deref().map_or(Node::Null, name),
+        ),
+        (
+            "reason".to_owned(),
+            failure.reason.as_deref().map_or(Node::Null, name),
         ),
     ]))
 }
