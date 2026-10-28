@@ -356,3 +356,117 @@ Built (2026-10-26, `story:writable-dirs-mode-0700`): the trial's harness refused
 - MCP read proxy (`loom-kubernetes.md` M6), Agency registration (M7), Substrate confinement (Q6).
 - Multi-tenancy of `LoomAgent` resources across namespaces: one namespace per controller instance.
 - takt deliveries: slice C, built as the `Command` variant (§ 9a, decision 7); nothing in slices A or B runs takt.
+
+## 12. Revision 2026-10-28: a sidecar and a schedule for a `Command` agent
+
+Design only; nothing in this section is implemented.
+
+The downstream platform plans a second agent beside the operational one: a walker that uses the
+platform's console the way a person does, through a headless browser, on a schedule, and reports
+what it finds (the platform-side design holds the rest). It runs as a `Command` resource (§ 9a): a
+program the image supplies, `spec.secretFiles` for its login and forge key, `spec.configFiles` for
+its walk policy, `spec.workspace` for its evidence, `spec.env` for the rest. Two things the resource
+cannot say today:
+
+| Need | Today | Gap |
+|---|---|---|
+| A browser in its own container beside the program (its own image, limits and crash domain; no Secret mounted in it) | the pod is the controller's init containers (`stage-secret-files`, `prepare-writable-dirs`, `check`) and one program container, `loom-agent` (`crates/loom-operator/src/render.rs`, `PodSpec`) | no way to declare a second long-running container |
+| Many bounded runs, one at a time, not one run | a `Command` resource is one `batch/v1` Job, `backoffLimit` 0; once it ends the resource is `Completed` or `Failed` and nothing runs again until a new generation (§ 9a, `story:command-variant-runs-once`) | a program that loops inside the one Job ends for good at its first crash, and its budgets are its own bookkeeping, not the cluster's |
+
+### 12.1 `spec.sidecars` (both variants)
+
+A list of containers the controller renders as Kubernetes native sidecars: init containers with
+`restartPolicy: Always`, after the controller's own init containers, so each starts before the
+program and is stopped after it ends. A Job therefore completes when the program container ends,
+and the run's exit status stays the program's (`crates/loom-operator/tests/reconcile.rs`,
+`adv_a_sidecar_does_not_speak_for_the_program`, already holds that a sidecar does not speak for the
+run).
+
+```yaml
+spec:
+  sidecars:
+    - name: browser
+      image: {repository: <registry>/headless-browser, tag: "<pinned>"}
+      args: ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=9222", "..."]
+      env: [{name: TZ, value: UTC}]          # no valueFrom, walked for credentials as spec.env is
+      resources: {requests: {cpu: 500m, memory: 1Gi}, limits: {cpu: "2", memory: 2Gi}}
+      shm: 1Gi                               # optional: a memory emptyDir of this size at /dev/shm
+      readinessPort: 9222                    # optional: a TCP readiness probe on 127.0.0.1
+```
+
+| Rule | Refusal |
+|---|---|
+| The image's repository is in the controller's new `allowedSidecarImages` (repository prefixes); an empty list admits none | `SidecarImageNotAllowed` |
+| The name is `[a-z0-9-]{1,63}`, unique, and none of `loom-agent`, `check`, `stage-secret-files`, `prepare-writable-dirs` | `SidecarNameConflict` |
+| `args` and `env` pass the credential walk `spec.env` and `spec.command` get (§ 9a, `story:loom-agent-spec-env`) | `SecretLiteral` |
+| At most 2 sidecars; `shm` at most 2Gi; resources are required (no default: a browser's need is not an agent's) | `Malformed` |
+| The API server's version is below 1.29 (native sidecars), read once at controller start | `SidecarsUnsupported` |
+
+What the controller gives a sidecar, and what it does not:
+
+- The pod's security context (user 10001, non-root, read-only root, no privilege escalation, drop
+  ALL, `RuntimeDefault` seccomp). `spec.seccompProfile` and `spec.appArmorProfile` stay the
+  program's; a sidecar that needs its own is a later change, not this one.
+- Its own `tmp` and `home` directories, prepared 0700 by `prepare-writable-dirs` as the program's
+  are, mounted by `subPath` at `/tmp` and at `HOME`.
+- No Secret: neither `spec.secretRef` as environment nor a `spec.secretFiles` mount, no
+  `/config`, no workspace. A sidecar is reached by the program over the pod's loopback only; the
+  controller renders no Service port and no NetworkPolicy ingress for it.
+- Its egress is the pod's: the NetworkPolicy rendered from `deploy.kubernetes.egress` (§ 5.2)
+  holds for every container, so a browser reaches what the agent's egress list names and nothing
+  else.
+
+The Role is unchanged (sidecars are part of the pod template). An `AgentServe` resource may declare
+sidecars too; its Deployment's availability stays the program container's readiness.
+
+### 12.2 `spec.schedule` (`Command` only)
+
+```yaml
+spec:
+  schedule:
+    cron: "*/20 * * * *"
+    timeZone: UTC             # optional, IANA name
+    suspend: false            # optional: the kill switch, no new run starts while true
+    startingDeadlineSeconds: 300   # optional
+```
+
+With `spec.schedule` the controller renders a `batch/v1` CronJob in the Job's place: the same name,
+the same pod template, `jobTemplate.spec.backoffLimit` 0, `concurrencyPolicy: Forbid` (fixed, not
+a field: two runs never share the workspace), `successfulJobsHistoryLimit` 3 and
+`failedJobsHistoryLimit` 3. Lifecycle and status:
+
+- A scheduled resource never reaches `Completed` or `Failed`; it stays `Running` while the
+  CronJob exists, `suspend` included.
+- `status.lastRun` (`loom.resource.RunEnd`, the type `status.run` uses) is the end of the most
+  recent finished Job the CronJob owns, read as `story:command-run-exit-status` reads one (the
+  Job's own pod by owner uid, the program container's `state.terminated`). The condition
+  `Completed` is not set; a condition `LastRunSucceeded` (True `RunSucceeded`, False `RunFailed`,
+  Unknown `NoRunYet`) carries the exit code and end time.
+- A new generation patches the CronJob's template (a CronJob's template is mutable, unlike a
+  Job's). A run of an older generation that is still active finishes under its old template;
+  `Forbid` keeps the next run from starting beside it.
+- Removing `spec.schedule` from a resource deletes the CronJob in the foreground and then creates
+  the one Job of § 9a; adding it deletes that Job first. The two never coexist.
+- The Role gains `cronjobs` (create, update, patch, get, list, watch, delete).
+- `spec.schedule` on an `AgentServe` resource is `Malformed`.
+
+Rejected: a program that loops forever inside the one Job (first crash ends it until someone
+respecifies it, and a hung run is never cut by the cluster); a `Deployment` for a `Command`
+resource (it restarts a program that exited 0 and has no notion of a run's end).
+
+### 12.3 Not changed
+
+- Identity bootstrap: the walker's login is provisioned outside the cluster and reaches the pod as
+  a `spec.secretFiles` Secret, which exists. No user-defined init container is proposed: one that
+  creates users would need the downstream platform's administrator credential in the agent's own
+  pod.
+- The egress rule for a host entry stays port-only (§ 5.2): a NetworkPolicy names no host. An
+  agent that must reach one public host only enforces it in the program (a browser's allowed
+  origins), and says so in its own design.
+
+### 12.4 Stories this revision implies (not filed)
+
+| Order | Slug | Acceptance |
+|---|---|---|
+| 1 | `command-sidecars` | A `Command` resource with one sidecar renders it as an init container with `restartPolicy: Always`, without any Secret, `/config` or workspace mount, and its Job reaches `Completed` with the program's exit code while the sidecar was still running; the refusals in § 12.1 each have a render test |
+| 2 | `command-schedule` | A `Command` resource with `spec.schedule` renders a CronJob (`Forbid`, `backoffLimit` 0); two consecutive runs, one exiting 0 and one exiting 3, set `status.lastRun` and `LastRunSucceeded` to each in turn; `suspend: true` starts no run |
