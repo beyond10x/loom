@@ -3,7 +3,9 @@
 //!
 //! Every session is scripted (metaharness's `ScriptedRunner`, the lines a Codex rollout and its
 //! hook requests print): no harness program runs, no model is called and nothing reaches the
-//! network. Scratch lives under Cargo's per-test temporary directory.
+//! network. Scratch lives under the system's temporary directory, not under the build directory:
+//! inside a checkout, the copy would have the repository's `AGENTS.md` above it, which
+//! metaharness's hermetic floor (H11) refuses.
 
 use std::cell::{Cell, RefCell};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -36,8 +38,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("adv-w20261028w1-a3-{}-{name}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("adv-w20261028w1-a3-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("scratch")).expect("a scratch directory");
         std::fs::create_dir_all(dir.join("tree/src")).expect("the tree");
@@ -160,7 +162,7 @@ fn step_of(executor: &SessionExecutor) -> ExecutorStep {
 
 fn proposed_paths(step: &ExecutorStep) -> Vec<String> {
     Proposal::from_outcome(&step.outcome)
-        .expect("the session proposes")
+        .unwrap_or_else(|| panic!("the session proposes: {:?}", step.outcome))
         .expect("a proposal's arguments")
         .files
         .iter()
