@@ -17,6 +17,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` to `0.14.0` (`0b9d50c6`); Loom's confined runs behave as before
 - The specification requires ESS `0.75.0`, and `ess-conformance` and `ess-primitives` move to tag `0.75.0`; generated Rust is unchanged
 
+### Fixed
+
+- `SessionExecutor`: a session without its action line names the harness's exit status and its stderr's last lines (`STDERR_TAIL_BYTES`), credential lines withheld (story:executor-reports-harness-child-failure)
+
 ## [0.46.0] - 2026-10-27
 
 ### Added

@@ -25,11 +25,8 @@ use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ProcessPoll, ScriptStep, ScriptedLog, ScriptedRunner,
 };
 use b10x_loom_session_executor::{
-    CredentialSource, Endpoint, Kind, ProcessRunner, SessionExecutor,
+    CredentialSource, Endpoint, Kind, ProcessRunner, STDERR_TAIL_BYTES, SessionExecutor,
 };
-
-/// The bound D5 names; the crate states it once it bounds the tail.
-const STDERR_TAIL_BYTES: usize = 4096;
 
 const WRITE: &str = "tests.write";
 const TODAY: &str = "the session ended without the JSON line naming its action";
@@ -106,6 +103,8 @@ impl Drop for Scratch {
 enum End {
     Exited(i32),
     Signaled(i32),
+    /// Metaharness measured no native end (a replayed child).
+    Unmeasured,
 }
 
 /// A scripted b10x-harness child that prints its lines, wrote `stderr`, and ends as `end` says.
@@ -163,7 +162,7 @@ impl HarnessProcess for Ended {
     fn wait(&mut self) -> std::io::Result<Option<i32>> {
         Ok(match self.end {
             End::Exited(code) => Some(code),
-            End::Signaled(_) => None,
+            End::Signaled(_) | End::Unmeasured => None,
         })
     }
 
@@ -171,6 +170,7 @@ impl HarnessProcess for Ended {
         match self.end {
             End::Exited(code) => ProcessTermination::Exited { code },
             End::Signaled(signal) => ProcessTermination::Signaled { signal },
+            End::Unmeasured => ProcessTermination::Unknown,
         }
     }
 
@@ -433,5 +433,50 @@ fn a_child_with_a_terminal_record_and_no_json_line_still_names_its_exit_status()
     assert!(
         why.contains("exited with status 3"),
         "the exit status: {why:?}"
+    );
+}
+
+/// D5's ceiling on the bound.
+const _: () = assert!(STDERR_TAIL_BYTES <= 4096);
+
+#[test]
+fn a_child_metaharness_measured_no_end_for_is_said_to_have_none() {
+    let scratch = Scratch::new("unmeasured");
+    let why = why(&scratch.executor(silent_session(), "", End::Unmeasured));
+
+    assert!(why.starts_with(TODAY), "today's message: {why:?}");
+    assert!(
+        why.contains("metaharness measured no exit status"),
+        "never an exit 0 it did not see: {why:?}"
+    );
+    assert!(!why.contains("status 0"), "no invented status: {why:?}");
+}
+
+#[test]
+fn control_characters_on_stderr_do_not_reach_the_error() {
+    let scratch = Scratch::new("control");
+    let stderr = format!("\u{1b}[31m{REFUSED}\u{1b}[0m\u{7}\r\nnext\u{0}line\n");
+    let why = why(&scratch.executor(silent_session(), &stderr, End::Exited(1)));
+
+    let tail = tail_of(&why);
+    assert!(
+        !tail
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t'),
+        "no control character but a line break or a tab: {tail:?}"
+    );
+    assert!(tail.contains(REFUSED), "the text itself is kept: {tail:?}");
+}
+
+#[test]
+fn a_word_that_only_contains_a_prefix_inside_it_is_kept() {
+    let scratch = Scratch::new("inside");
+    let stderr = "the task-runner failed on disk-full\nsee https://docs.example/errors/wire\n";
+    let why = why(&scratch.executor(silent_session(), stderr, End::Exited(1)));
+
+    assert_eq!(
+        tail_of(&why),
+        stderr.trim_end(),
+        "nothing withheld: {why:?}"
     );
 }
