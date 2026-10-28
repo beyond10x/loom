@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 66a02a0baf5fbe8890612e69df450544c958c9f01799dc162cea2a954a89a58c
-// contract digest 70e66c4d4dd22d9a004633e14def9f35e93b84c0782021c37bc41550f5e18b6a
+// model digest 3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8
+// contract digest 502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Session — `loom.session`.
@@ -71,6 +71,15 @@ pub enum DecidedBy {
     Observe,
 }
 
+/// FailureRefusalReason — `loom.session.FailureRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureRefusalReason {
+    /// `UnmeasuredWithCode`.
+    UnmeasuredWithCode,
+    /// `MeasuredWithoutCode`.
+    MeasuredWithoutCode,
+}
+
 /// FrontierId — `loom.session.FrontierId`: a distinct wrapper around `Uuid`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrontierId(pub crate::primitives::Uuid);
@@ -84,6 +93,8 @@ pub struct SessionFailure {
     pub code: Option<i64>,
     /// `stderr_tail` — `Optional<String>`.
     pub stderr_tail: Option<String>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
 }
 
 /// SessionId — `loom.session.SessionId`: a distinct wrapper around `Uuid`.
@@ -331,6 +342,16 @@ pub struct RecordFailedSession {
 /// outcomes exist to prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordFailedSessionOutcome {
+    /// `unmeasured-with-code` — when `(failure.end == NotMeasured and defined(failure.code))`.
+    UnmeasuredWithCode {
+        /// Why it was refused: `loom.session.FailureRefused`.
+        error: FailureRefused,
+    },
+    /// `measured-without-code` — when `(failure.end != NotMeasured and not (defined(failure.code)))`.
+    MeasuredWithoutCode {
+        /// Why it was refused: `loom.session.FailureRefused`.
+        error: FailureRefused,
+    },
     /// `failed` — otherwise.
     Failed {
         /// The `loom.session.SessionFailed` this outcome publishes.
@@ -368,6 +389,13 @@ pub struct SessionFailed {
     pub continues: Option<SessionId>,
     /// `failure` — `loom.session.SessionFailure`.
     pub failure: SessionFailure,
+}
+
+/// The declared error `loom.session.FailureRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailureRefused {
+    /// `reason` — `loom.session.FailureRefusalReason`.
+    pub reason: FailureRefusalReason,
 }
 
 /// AgentSessions — one row of the view `loom.session.AgentSessions`.
@@ -422,7 +450,7 @@ pub mod obligations {
     ///
     /// Why it is not generated: kept an obligation by `creates:` leaving the required field `files` of `loom.session.AgentSession` undetermined, in `failed`.
     ///
-    /// Contract: given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed`.
+    /// Contract: given `loom.session.RecordFailedSession` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `unmeasured-with-code` when `(failure.end == NotMeasured and defined(failure.code))`, error `loom.session.FailureRefused`; `measured-without-code` when `(failure.end != NotMeasured and not (defined(failure.code)))`, error `loom.session.FailureRefused`; `failed` otherwise, creates `loom.session.AgentSession`, emits `loom.session.SessionFailed`.
     pub trait RecordFailedSessionBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.session.RecordFailedSession`.
         ///

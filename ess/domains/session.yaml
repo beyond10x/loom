@@ -94,11 +94,19 @@ types:
     kind: enum
     variants: [Exited, Signaled, NotMeasured]
 
+  # Why RecordFailedSession refuses a failure: a code with an end that was not measured, or none
+  # with one that was. A process ends with a status or a signal exactly when its end is measured.
+  - name: loom.session.FailureRefusalReason
+    kind: enum
+    variants: [UnmeasuredWithCode, MeasuredWithoutCode]
+
   # Why a session that started proposed nothing, as its record keeps it: how its harness child
   # ended; the exit status of an Exited end or the signal of a Signaled one, absent when
   # NotMeasured; and the last whole lines of the child's stderr within the executor's
   # STDERR_TAIL_BYTES, each line holding a credential's shape withheld, absent when metaharness
-  # handed none on (it does only when the child left no terminal record) or the child wrote none.
+  # handed none on (it does only when the child left no terminal record) or the child wrote none;
+  # and the reason the executor suspended the step with, its stderr tail left out and each line
+  # holding a credential's shape withheld, within STDERR_TAIL_BYTES.
   - name: loom.session.SessionFailure
     kind: struct
     fields:
@@ -107,6 +115,8 @@ types:
       - name: code
         type: Optional<Integer>
       - name: stderr_tail
+        type: Optional<String>
+      - name: reason
         type: Optional<String>
 
 entities:
@@ -195,6 +205,13 @@ events:
       - name: failure
         type: loom.session.SessionFailure
 
+errors:
+  # The refusal of RecordFailedSession: a failure no harness child ends with.
+  - name: loom.session.FailureRefused
+    fields:
+      - name: reason
+        type: loom.session.FailureRefusalReason
+
 commands:
   # The executor returns the session's change as a proposed action (ADR 0098 point 2). Commission
   # rechecks it against the case's revision and an effect applies it or refuses it: those answers
@@ -244,7 +261,8 @@ commands:
 
   # story:executor-reports-harness-child-failure: the executor records a session that started and
   # proposed nothing, with how its harness child ended and the tail of its stderr. It still returns
-  # Suspended with ExternalAvailability naming why; the record names no action and no files.
+  # Suspended with ExternalAvailability naming why; the record names no action and no files. Its
+  # reason is the executor's own (generated): the one the step was suspended with.
   - name: loom.session.RecordFailedSession
     input:
       - name: session_id
@@ -264,6 +282,22 @@ commands:
       - name: failure
         type: loom.session.SessionFailure
     outcomes:
+      - name: unmeasured-with-code
+        when:
+          all:
+            - failure.end == NotMeasured
+            - defined(failure.code)
+        error: loom.session.FailureRefused
+        payload:
+          loom.session.FailureRefused: {reason: UnmeasuredWithCode}
+      - name: measured-without-code
+        when:
+          all:
+            - failure.end != NotMeasured
+            - not defined(failure.code)
+        error: loom.session.FailureRefused
+        payload:
+          loom.session.FailureRefused: {reason: MeasuredWithoutCode}
       - name: failed
         creates: loom.session.AgentSession
         instance: session_id
@@ -275,7 +309,11 @@ commands:
           agent: input.agent
           continues: input.continues
           action: ""
-          failure: input.failure
+          failure:
+            end: input.failure.end
+            code: input.failure.code
+            stderr_tail: input.failure.stderr_tail
+            reason: {generated: true}
         emits: [loom.session.SessionFailed]
         payload:
           loom.session.SessionFailed:
@@ -283,7 +321,11 @@ commands:
             commission_id: input.commission_id
             frontier_id: input.frontier_id
             continues: input.continues
-            failure: input.failure
+            failure:
+              end: input.failure.end
+              code: input.failure.code
+              stderr_tail: input.failure.stderr_tail
+              reason: {generated: true}
 
 views:
   # Every session the executor ran, one row per session.

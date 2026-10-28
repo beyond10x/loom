@@ -529,6 +529,11 @@ fn a_failed_session_records_a_signal_or_an_end_metaharness_did_not_measure() {
             end: ChildEnd::Signaled,
             code: Some(9),
             stderr_tail: Some("killed".to_owned()),
+            reason: Some(
+                "the session ended without the JSON line naming its action \
+                 (the harness was ended by signal 9)"
+                    .to_owned()
+            ),
         }),
         "the signal and its stderr"
     );
@@ -541,6 +546,11 @@ fn a_failed_session_records_a_signal_or_an_end_metaharness_did_not_measure() {
             end: ChildEnd::NotMeasured,
             code: None,
             stderr_tail: None,
+            reason: Some(
+                "the session ended without the JSON line naming its action \
+                 (metaharness measured no exit status)"
+                    .to_owned()
+            ),
         }),
         "no status it did not see, no tail when it said nothing"
     );
@@ -556,12 +566,18 @@ fn a_failed_session_withholds_a_credential_from_its_record() {
     let executor = scratch.executor(silent_session(), &stderr, End::Exited(1));
     let _ = why(&executor);
 
-    let tail = last_row(&executor, 1)
-        .failure
-        .and_then(|failure| failure.stderr_tail)
-        .expect("a stderr tail");
+    let failure = last_row(&executor, 1).failure.expect("a failure");
+    let tail = failure.stderr_tail.expect("a stderr tail");
     assert!(!tail.contains(SECRET), "never repeated: {tail:?}");
     assert!(tail.ends_with(REFUSED), "the cause is kept: {tail:?}");
+    assert_eq!(
+        failure.reason.as_deref(),
+        Some(
+            "the session ended without the JSON line naming its action \
+             (the harness exited with status 1)"
+        ),
+        "the reason, its stderr tail left to `stderr_tail`"
+    );
 }
 
 #[test]

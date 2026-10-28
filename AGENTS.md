@@ -1224,17 +1224,22 @@ session through the generated `loom.session` behaviour (`ess/domains/session.yam
 never as evidence. A failed session suspends with `ExternalAvailability`; once its harness child
 started it is recorded all the same, through `loom.session.RecordFailedSession`, a row with no
 action, no files and a `failure` (`loom.session.SessionFailure`: how the child ended, its status
-or signal, and the stderr tail below), naming the predecessor it continued, which stays for the
+or signal, the stderr tail below, and `reason`, the error without that tail, walked and bounded
+as the tail is), naming the predecessor it continued, which stays for the
 next call (`crates/loom-session-executor/tests/adversary_w20261023w3_u2.rs`); one refused before
 its child started is no record. `RecordFailedSession` is an obligation of the
 generated model (its `creates:` leaves `files` undetermined, `ess/25` having no empty-list
-literal), kept by the executor's own store against the generated trait. When
-it ended without the JSON line naming its action, or in an error, the reason names how the harness
+literal, and `failure.reason` generated), kept by the executor's own store against the generated
+trait; it refuses a failure no child ends with (`FailureRefused`: a code with a `NotMeasured` end,
+none with a measured one; `failure_refusal`). When
+it ended without the JSON line naming its action, with one that does not read, or in an error, the reason names how the harness
 child ended (`stream.closed`: its exit status, its signal, or that metaharness measured neither)
 and, when metaharness hands its stderr on (`NO_TERMINAL_RECORD`, only without a terminal record),
 the last whole lines within `STDERR_TAIL_BYTES` (4096) of it, each line holding a credential's
 shape withheld (`TOKEN_PREFIXES`, which `crates/loom-agent/tests/token_prefixes.rs` holds equal
-to the agent check's, a URL with user information or a query, a PEM block)
+to the agent check's, a URL with user information or a query, a PEM block), each line read with
+its terminal escape sequences and control characters both removed and replaced by U+FFFD, the
+form it is shown in
 (`crates/loom-session-executor/tests/harness_child_failure.rs`). Each
 call's `SessionReport::trace` (`SessionTrace`, read through `last_report`) is the session's
 record projected to `trace-ir/1` and summarized by `metaharness::protocol::summarize`: the vendor
