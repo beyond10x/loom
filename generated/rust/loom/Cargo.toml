@@ -1,6 +1,6 @@
 # generated from loom v1
-# model digest 681e301b22a78408728f7494574db0a63782bdd6e9eacfacfd6da23a475bfabb
-# contract digest 3ce28af44fafd999458bb0325769aa0e54a1d4b0f1cd78c5fabe64beca214063
+# model digest a23a6f244d530236dbcb07b5c5ca18eb5085f5cbd06c39d810ae2dc8f8d5053d
+# contract digest 6a2ed198428cb0ef09e92fa338dc66da73e2486daf14a89ea1f4fee825b501b5
 # do not edit: regenerate with `ess synthesize --layout crate`
 
 [package]

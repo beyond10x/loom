@@ -1206,7 +1206,12 @@ decision mode to metaharness, denies an offered tool it cannot check, and record
 (`crates/loom-session-executor/tests/from_spec.rs`). It accepts Claude Code and Codex only under
 `decisions: ask` and b10x-harness only under `observe` with no `allow` or `deny`, and refuses
 any other spec, or a tool name holding a comma or whitespace, with a `SpecError` before any
-session. A file the
+session. A caller's partial run, `SessionOverrides` (`with_overrides`, or the spec's `effort`,
+`max_budget_micro_usd`, `strict_version` and `context`), wins member by member over the kind's
+defaults in `fn spec` and has no member for Loom's guarantees; a budget on Codex or b10x-harness,
+an effort on b10x-harness, or a context path that is not one of the copied files as one plain
+relative path suspends the step with `ExternalAvailability` before any copy (a `SpecError` from
+`from_spec`), never dropped (`crates/loom-session-executor/tests/partial_runspec.rs`). A file the
 session changed that the workspace no longer holds as copied when the session ends makes the step
 suspend with `ExternalAvailability` instead; a write after that is the effect's guard to catch.
 A path with a `.git` part, or one reached through a link in the workspace, is neither copied nor
