@@ -249,6 +249,33 @@ pub enum SpecError {
         /// The entry, as the spec writes it.
         tool: String,
     },
+    /// The spec names a session override ([`SessionOverrides`]) its kind's launcher does not
+    /// apply, so it is refused rather than dropped: `max_budget_micro_usd` on Codex (metaharness
+    /// refuses `--max-budget-usd` there) and on b10x-harness, and `effort` on b10x-harness
+    /// (nothing in its launch reads either).
+    OverrideUnapplied {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The session kind, as the spec names it.
+        kind: SessionKind,
+        /// The member, as `loom.agent.SessionSpec` names it.
+        member: String,
+    },
+    /// The spec's `max_budget_micro_usd` is negative.
+    BudgetNegative {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The budget, as the spec writes it.
+        budget: i64,
+    },
+    /// A `context` entry is not one of the files the executor copies, spelled as one plain
+    /// relative path ([`plain_relative`]).
+    ContextNotCopied {
+        /// The spec's `agent.id`.
+        agent: String,
+        /// The entry, as the spec writes it.
+        path: String,
+    },
 }
 
 impl std::fmt::Display for SpecError {
@@ -284,7 +311,95 @@ impl std::fmt::Display for SpecError {
                 "the agent spec {agent} names the tool {tool:?}, which holds a comma or \
                  whitespace and so is no one tool name"
             ),
+            Self::OverrideUnapplied {
+                agent,
+                kind,
+                member,
+            } => write!(
+                f,
+                "the agent spec {agent} names the session's `{member}`, which a {kind:?} \
+                 session's launcher does not apply; leave it unset"
+            ),
+            Self::BudgetNegative { agent, budget } => write!(
+                f,
+                "the agent spec {agent} names `max_budget_micro_usd: {budget}`, which is \
+                 negative"
+            ),
+            Self::ContextNotCopied { agent, path } => write!(
+                f,
+                "the agent spec {agent} names the context file {path:?}, which is not one of \
+                 the files the session's copy holds, spelled as one plain relative path"
+            ),
         }
+    }
+}
+
+/// What a caller asks of a session's harness over its kind's defaults
+/// (`story:session-executor-partial-runspec`): each member it names wins, each it leaves unset
+/// keeps the kind's value. It has no member for what Loom sets for its own guarantees
+/// (credentials, working directory, scratch copy, hermetic mode, decision mode, b10x-harness's
+/// endpoint and secret route), so a caller cannot name those. A member the kind's launcher does
+/// not apply is refused before the copy is made, never dropped: `max_budget_micro_usd` on Codex
+/// and b10x-harness, `effort` on b10x-harness.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionOverrides {
+    /// The reasoning effort, in the vendor's vocabulary: Claude Code's `--effort`, Codex's
+    /// `model_reasoning_effort` in its scratch config.
+    pub effort: Option<String>,
+    /// A ceiling on what the session may spend, in micro-USD, which the vendor enforces during
+    /// the run: Claude Code's `--max-budget-usd`, rendered exactly as a decimal of dollars
+    /// (`12500000` is `12.5`).
+    pub max_budget_micro_usd: Option<u64>,
+    /// Whether metaharness refuses the session before it starts when the harness program is
+    /// outside its adapter's pinned versions; none for the default, which warns.
+    pub strict_version: Option<bool>,
+    /// The workspace files handed to the harness as context, in order: each one of the files the
+    /// executor copies, spelled as one plain relative path ([`plain_relative`]), and handed from
+    /// the copy. Any other path is refused before the copy, naming it.
+    pub context: Vec<String>,
+}
+
+impl SessionOverrides {
+    /// The member `kind`'s launcher does not apply, by its `loom.agent.SessionSpec` name, when
+    /// these name one.
+    fn unapplied(&self, kind: Kind) -> Option<&'static str> {
+        match kind {
+            Kind::Claude => None,
+            Kind::Codex => self
+                .max_budget_micro_usd
+                .is_some()
+                .then_some("max_budget_micro_usd"),
+            Kind::B10x if self.max_budget_micro_usd.is_some() => Some("max_budget_micro_usd"),
+            Kind::B10x => self.effort.is_some().then_some("effort"),
+        }
+    }
+
+    /// The first context path that is not one of `files`, spelled as one plain relative path.
+    fn uncopied<'a>(&'a self, files: &[String]) -> Option<&'a String> {
+        self.context
+            .iter()
+            .find(|path| !plain_relative(path) || !files.contains(path))
+    }
+}
+
+/// `micro_usd` as the decimal of US dollars metaharness passes to the vendor, exactly: no
+/// trailing zero in the fraction, and no fraction for whole dollars (`12500000` is `12.5`, `1`
+/// is `0.000001`, `5000000` is `5`).
+fn usd(micro_usd: u64) -> String {
+    let (dollars, fraction) = (micro_usd / 1_000_000, micro_usd % 1_000_000);
+    if fraction == 0 {
+        return dollars.to_string();
+    }
+    let fraction = format!("{fraction:06}");
+    format!("{dollars}.{}", fraction.trim_end_matches('0'))
+}
+
+/// The harness `kind` as a reader names it.
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Claude => "Claude Code",
+        Kind::Codex => "Codex",
+        Kind::B10x => "b10x-harness",
     }
 }
 
@@ -501,6 +616,11 @@ pub struct SessionExecutor {
     /// name on another kind, beside a token, or not of that shape fails before the copy is made,
     /// as does a b10x-harness call naming neither a name nor a token file.
     pub api_key_secret: Option<String>,
+    /// What the caller asks of the session's harness over its kind's defaults
+    /// ([`SessionOverrides`], [`Self::with_overrides`]); none named by default. A call naming a
+    /// member its kind's launcher does not apply, or a context file the copy does not hold,
+    /// fails before the copy is made.
+    pub overrides: SessionOverrides,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
@@ -552,6 +672,7 @@ impl SessionExecutor {
             tools: None,
             agent: None,
             api_key_secret: None,
+            overrides: SessionOverrides::default(),
             runner: RefCell::new(None),
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
@@ -564,9 +685,11 @@ impl SessionExecutor {
     /// the session kind, the tool policy and the prompt (`agent.brief`) of `spec`, and as its
     /// model the name `spec.model` gives the `agent` role, as written (routes are the host's to
     /// resolve). Otherwise as [`Self::new`]: the copy under the system's temporary directory, on
-    /// the operator's login. Each session it runs records the spec's `agent.id`. The spec's
-    /// budget, stop policy and egress apertures are not applied here; a host bounds the run
-    /// through Commission.
+    /// the operator's login. Each session it runs records the spec's `agent.id`. The session's
+    /// `effort`, `max_budget_micro_usd`, `strict_version` and `context` become
+    /// [`Self::overrides`]; a spec naming none builds the executor it built before them. The
+    /// spec's run budget, stop policy and egress apertures are not applied here; a host bounds
+    /// the run through Commission.
     ///
     /// # Errors
     ///
@@ -576,7 +699,11 @@ impl SessionExecutor {
     /// whitespace; [`SpecError::DecisionModeUnenforced`] for Claude Code or Codex under any mode
     /// but `ask`, and b10x-harness under any but `observe`; and for b10x-harness,
     /// [`SpecError::AllowUnenforced`] for an `allow` other than its default (none) and
-    /// [`SpecError::DenyUnenforced`] for any `deny`.
+    /// [`SpecError::DenyUnenforced`] for any `deny`. Then the overrides:
+    /// [`SpecError::BudgetNegative`] for a negative `max_budget_micro_usd`;
+    /// [`SpecError::OverrideUnapplied`] for a member the kind's launcher does not apply (a budget
+    /// on Codex or b10x-harness, an effort on b10x-harness); and [`SpecError::ContextNotCopied`]
+    /// for a `context` entry that is not one of `files` as one plain relative path.
     pub fn from_spec(
         spec: &AgentSpec,
         workspace: impl Into<PathBuf>,
@@ -626,7 +753,37 @@ impl SessionExecutor {
                 });
             }
         }
-        let mut executor = Self::new(workspace, files, spec.agent.brief.clone()).of_kind(kind);
+        let max_budget_micro_usd = session
+            .max_budget_micro_usd
+            .map(|budget| {
+                u64::try_from(budget).map_err(|_| SpecError::BudgetNegative {
+                    agent: agent.0.clone(),
+                    budget,
+                })
+            })
+            .transpose()?;
+        let overrides = SessionOverrides {
+            effort: session.effort.clone(),
+            max_budget_micro_usd,
+            strict_version: session.strict_version,
+            context: session.context.clone(),
+        };
+        if let Some(member) = overrides.unapplied(kind) {
+            return Err(SpecError::OverrideUnapplied {
+                agent: agent.0,
+                kind: session.kind,
+                member: member.to_owned(),
+            });
+        }
+        if let Some(path) = overrides.uncopied(&files) {
+            return Err(SpecError::ContextNotCopied {
+                agent: agent.0,
+                path: path.clone(),
+            });
+        }
+        let mut executor = Self::new(workspace, files, spec.agent.brief.clone())
+            .of_kind(kind)
+            .with_overrides(overrides);
         executor.model = spec
             .model
             .roles
@@ -842,6 +999,35 @@ impl SessionExecutor {
         self
     }
 
+    /// The same executor, its sessions asking `overrides` of the harness over its kind's
+    /// defaults ([`SessionOverrides`]): each member named wins, each left unset keeps the kind's
+    /// value. Nothing else of the request is taken from the caller.
+    #[must_use]
+    pub fn with_overrides(mut self, overrides: SessionOverrides) -> Self {
+        self.overrides = overrides;
+        self
+    }
+
+    /// [`Self::overrides`] are ones this executor applies: every member is one its kind's
+    /// launcher applies, and every context file one of [`Self::files`], spelled as one plain
+    /// relative path. Each refusal names the member and kind, or the path.
+    fn check_overrides(&self) -> Result<(), String> {
+        if let Some(member) = self.overrides.unapplied(self.kind) {
+            return Err(format!(
+                "the session override `{member}` is not applied by a {} session's launcher, so \
+                 it is refused rather than dropped; leave it unset",
+                kind_name(self.kind)
+            ));
+        }
+        if let Some(path) = self.overrides.uncopied(&self.files) {
+            return Err(format!(
+                "the context file {path:?} is not one of the files the session's copy holds, \
+                 spelled as one plain relative path"
+            ));
+        }
+        Ok(())
+    }
+
     /// The same executor, whose session is started by `runner` instead of the real program
     /// (metaharness's `ScriptedRunner`, or one that wraps it).
     #[must_use]
@@ -863,7 +1049,10 @@ impl SessionExecutor {
     /// it yet); b10x-harness `On`, pointed at [`Self::endpoint`] with its subscription token, or
     /// with [`Self::api_key_secret`] under `ApiKey` when one is named, confined by substrate in the
     /// loop's own process so its write tools reach the copy
-    /// and nothing else. Each with the copy as its declared scratch working directory.
+    /// and nothing else. Each with the copy as its declared scratch working directory. Then
+    /// [`Self::overrides`], each member named over the kind's default: the effort, the budget as
+    /// a decimal of dollars, strict version, and each context file by its path in the copy
+    /// (relative, as metaharness reads it beneath the working directory).
     fn spec(&self, copy: &Path) -> Result<RunSpec, String> {
         let mut spec = RunSpec::new(self.kind);
         spec.credentials = self.credentials;
@@ -871,6 +1060,13 @@ impl SessionExecutor {
         spec.scratch_cwd = true;
         spec.prompt = Some(self.brief.clone());
         spec.model.clone_from(&self.model);
+        let overrides = &self.overrides;
+        spec.effort.clone_from(&overrides.effort);
+        spec.max_budget_usd = overrides.max_budget_micro_usd.map(usd);
+        if let Some(strict) = overrides.strict_version {
+            spec.strict_version = strict;
+        }
+        spec.context = overrides.context.iter().map(PathBuf::from).collect();
         let decisions = match self.policy().decisions {
             PolicyDecisions::Frame => DecisionMode::Frame,
             PolicyDecisions::Ask => DecisionMode::Ask,
@@ -975,6 +1171,7 @@ impl SessionExecutor {
             ));
         }
         self.check_api_key_secret()?;
+        self.check_overrides()?;
         let offered = self.offered();
         let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;
         report.cwd = Some(copy.dir.clone());

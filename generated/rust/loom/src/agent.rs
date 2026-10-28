@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 9cec9c3c2e445f734256674d6a028fa1ac291ff09f2d6dc173d78cfd492469e9
-// contract digest cf6fa784fb9cdfae736c626f5e9e11d58eabef02604ce2fe35a49237718f7cd7
+// model digest 66a02a0baf5fbe8890612e69df450544c958c9f01799dc162cea2a954a89a58c
+// contract digest 70e66c4d4dd22d9a004633e14def9f35e93b84c0782021c37bc41550f5e18b6a
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -483,6 +483,14 @@ pub struct SessionSpec {
     pub confinement: ConfinementMode,
     /// `tools` — `loom.agent.ToolPolicy`.
     pub tools: ToolPolicy,
+    /// `effort` — `Optional<String>`.
+    pub effort: Option<String>,
+    /// `max_budget_micro_usd` — `Optional<Integer>`.
+    pub max_budget_micro_usd: Option<i64>,
+    /// `strict_version` — `Optional<Boolean>`.
+    pub strict_version: Option<bool>,
+    /// `context` — `List<String>`.
+    pub context: Vec<String>,
 }
 
 /// StateWhen — `loom.agent.StateWhen`.

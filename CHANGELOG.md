@@ -15,12 +15,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `loom.session.RecordFailedSession`: a session whose harness child started and that proposed nothing is recorded, its `AgentSessions` row naming no action and no files and its `failure` (`loom.session.SessionFailure`) keeping how the child ended (`ChildEnd`: `Exited`, `Signaled`, `NotMeasured`), the status or signal and the stderr tail the error carries, published as `loom.session.SessionFailed` (`SessionExecutor::failed`); the step still suspends with `ExternalAvailability` and the same text in `SessionReport::error`, and a session refused before its child started is still no record (story:executor-reports-harness-child-failure)
+- `b10x-loom-session-executor`: a caller names a partial run over the session kind's defaults, `SessionOverrides` (`effort`, `max_budget_micro_usd`, `strict_version`, `context`), through `SessionExecutor::with_overrides` or the public field `SessionExecutor::overrides`: each member named wins, each left unset keeps the kind's value, and nothing Loom sets for its own guarantees (credentials, working directory, scratch copy, hermetic and decision mode, b10x-harness's endpoint and secret route) is taken from the caller. The budget reaches Claude Code as `--max-budget-usd` in dollars rendered exactly (`12500000` is `12.5`); a budget on Codex or b10x-harness, an effort on b10x-harness, and a context file that is not one of the copied files as one plain relative path suspend the step with `ExternalAvailability` before any copy, naming the member and kind or the path (story:session-executor-partial-runspec)
+- `loom.agent.SessionSpec` gains `effort`, `max_budget_micro_usd`, `strict_version` and `context`, decoded by `loom_sdk::agent::parse` and applied by `SessionExecutor::from_spec`, which refuses what the executor would with the new `SpecError::OverrideUnapplied`, `SpecError::BudgetNegative` and `SpecError::ContextNotCopied`; the `LoomAgent` CRD's `spec.agent.session` declares them (story:session-executor-partial-runspec)
+- **Breaking:** a struct literal of `loom.agent.SessionSpec` names the four new members, and an exhaustive match on `SpecError` the three new variants (story:session-executor-partial-runspec)
 
 ### Changed
 
 - `SessionExecutor::sessions()` lists a failed session's row once its harness child started, naming the predecessor `continuing` named, which stays for the next call: a caller taking the last row after a failed run (`sessions().pop()`) now gets the failed session's (story:executor-reports-harness-child-failure)
 - **Breaking:** the generated `loom::session::AgentSessions` and `AgentSessionData` gain `failure: Option<SessionFailure>`, so a struct literal of them names it (story:executor-reports-harness-child-failure)
-
 - `b10x-substrate-host` and `b10x-substrate-wire` move from Substrate `0.13.0` to `0.14.0` (`0b9d50c6`); Loom's confined runs behave as before
 - The specification requires ESS `0.75.0`, and `ess-conformance` and `ess-primitives` move to tag `0.75.0`; generated Rust is unchanged
 
