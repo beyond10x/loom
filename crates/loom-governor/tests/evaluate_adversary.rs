@@ -314,7 +314,7 @@ fn adversary_every_bundled_protocol_matches_the_governor_through_a_superseded_re
                     &catalog,
                     &request(
                         &name,
-                        &snapshot(&protocol_id, revisions, rev),
+                        &snapshot_of(&name, &protocol_id, revisions, rev),
                         records,
                         None,
                     ),
@@ -422,13 +422,30 @@ fn adversary_naming_a_refused_record_costs_a_bounded_multiple_of_deciding() {
 }
 
 /// The case inputs a case on `protocol` opens with here: Loom's run defaults for
-/// `software-change@1`, none for a protocol that declares none.
+/// `software-change@1`; for any other protocol, each input it declares at its first declared
+/// value (engineering-protocols 0.13.0 bundles `self-improvement@1` and `story-delivery@2`,
+/// which declare inputs; story:engineering-protocols-0-13-pin), none for a protocol that declares
+/// none.
 fn inputs_for(protocol: &str) -> loom_governor::CaseInputs {
     if protocol == "software-change@1" {
-        software_change_inputs()
-    } else {
-        loom_governor::CaseInputs::none()
+        return software_change_inputs();
     }
+    let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
+    let entry = catalog
+        .iter()
+        .find(|entry| entry.name() == protocol)
+        .unwrap_or_else(|| panic!("{protocol} is bundled"));
+    let pairs: Vec<(String, String)> = entry
+        .model
+        .case
+        .iter()
+        .flat_map(|case| case.inputs.iter())
+        .map(|(input, declared)| {
+            let value = declared.values.first().expect("a declared value");
+            (input.as_str().to_owned(), value.as_str().to_owned())
+        })
+        .collect();
+    loom_governor::CaseInputs::try_from_pairs(pairs).expect("distinct inputs")
 }
 
 /// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
@@ -451,6 +468,26 @@ fn with_inputs(case: &mut serde_json::Value) {
             .collect();
         case["inputs"] = serde_json::Value::Object(inputs);
     }
+}
+
+/// `snapshot` of a case on the registration `name`, with the inputs `inputs_for(name)` opens it
+/// with: a protocol id names no revision, and `story.delivery/1` declares no input where
+/// `story.delivery/2` does (story:engineering-protocols-0-13-pin).
+fn snapshot_of(
+    name: &str,
+    protocol_id: &str,
+    revisions: &BTreeMap<String, String>,
+    case_revision: &str,
+) -> Value {
+    let mut case = snapshot(protocol_id, revisions, case_revision);
+    let inputs: serde_json::Map<String, Value> = inputs_for(name)
+        .iter()
+        .map(|(input, value)| (input.to_owned(), Value::from(value)))
+        .collect();
+    if !inputs.is_empty() {
+        case["inputs"] = Value::Object(inputs);
+    }
+    case
 }
 
 /// Delivers `observation`, as a host does before it submits a record citing it: the governor

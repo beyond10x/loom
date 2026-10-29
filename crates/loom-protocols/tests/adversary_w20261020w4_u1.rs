@@ -40,21 +40,23 @@ fn refusal(name: &str, yaml: &str) -> String {
         .expect_err(name)
 }
 
-/// `protocols add self.improvement@2 file.yaml` where the file declares `self.improvement/1`:
-/// the install store's refusal names a registration, and that registration must install.
+/// `protocols add team.review@2 file.yaml` where the file declares `team.review/1`: the install
+/// store's refusal names a registration, and that registration must install. The case used
+/// `self.improvement`, which engineering-protocols 0.13.0 bundles, and a bundled registration is
+/// never replaced (story:engineering-protocols-0-13-pin).
 #[test]
 fn protocols_add_names_a_registration_that_installs_when_the_file_declares_another_revision() {
     let tmp = tempfile::tempdir().unwrap();
-    let source = tmp.path().join("self-improvement.yaml");
-    fs::write(&source, declaring("self.improvement", 1)).unwrap();
+    let source = tmp.path().join("team-review.yaml");
+    fs::write(&source, declaring("team.review", 1)).unwrap();
     let store = InstallStore::new(tmp.path().join("installed"));
     let refused = store
-        .install_file("self.improvement@2", &source, false)
+        .install_file("team.review@2", &source, false)
         .expect_err("a dotted registration is refused");
     let named = suggested(&refused).expect("the refusal names a registration");
     if let Err(error) = store.install_file(&named, &source, false) {
         panic!(
-            "the registration the refusal named, {named}, does not install: {error}\nrefusal: {refused}"
+            "story:engineering-protocols-0-13-pin: the registration the refusal named, {named}, does not install: {error}\nrefusal: {refused}"
         );
     }
 }

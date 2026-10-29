@@ -209,8 +209,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-assertion-providers"
-version = "0.9.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
+version = "0.13.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.13.0#41ae496a619f4112c3027921495d602e025b4f7f"
 dependencies = [
  "clap",
  "jsonschema 0.33.0",
@@ -223,8 +223,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon"
-version = "0.6.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.6.0#efcfd0407cd060c75816b8806148ddb9eabf16c9"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.7.0#a4317d800f5127ae9bd85d09fdf39dcf4e79607e"
 dependencies = [
  "serde",
  "serde_json",
@@ -235,8 +235,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering"
-version = "0.9.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
+version = "0.13.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.13.0#41ae496a619f4112c3027921495d602e025b4f7f"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering-assertions",
@@ -247,8 +247,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering-assertions"
-version = "0.9.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.9.0#53a221be0bbcf40129ee9a4e7bb1a28007ad18a2"
+version = "0.13.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.13.0#41ae496a619f4112c3027921495d602e025b4f7f"
 dependencies = [
  "anyhow",
  "b10x-assertion-providers",
@@ -263,8 +263,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-expr"
-version = "0.6.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.6.0#efcfd0407cd060c75816b8806148ddb9eabf16c9"
+version = "0.7.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.7.0#a4317d800f5127ae9bd85d09fdf39dcf4e79607e"
 dependencies = [
  "logos",
  "serde",
@@ -1597,7 +1597,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4287,7 +4287,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4558,7 +4558,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4626,7 +4626,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5140,7 +5140,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5770,7 +5770,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
