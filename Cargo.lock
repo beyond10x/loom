@@ -209,8 +209,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-assertion-providers"
-version = "0.13.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.13.0#41ae496a619f4112c3027921495d602e025b4f7f"
+version = "0.14.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.14.0#9a30403d42f69fd2e07a20dc57c8c520d57fbb4d"
 dependencies = [
  "clap",
  "jsonschema 0.33.0",
@@ -223,8 +223,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon"
-version = "0.7.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.7.0#a4317d800f5127ae9bd85d09fdf39dcf4e79607e"
+version = "0.8.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.8.0#cf171757878af943105132f686ff8c46170f8a77"
 dependencies = [
  "serde",
  "serde_json",
@@ -235,8 +235,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering"
-version = "0.13.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.13.0#41ae496a619f4112c3027921495d602e025b4f7f"
+version = "0.14.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.14.0#9a30403d42f69fd2e07a20dc57c8c520d57fbb4d"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering-assertions",
@@ -247,8 +247,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering-assertions"
-version = "0.13.0"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.13.0#41ae496a619f4112c3027921495d602e025b4f7f"
+version = "0.14.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.14.0#9a30403d42f69fd2e07a20dc57c8c520d57fbb4d"
 dependencies = [
  "anyhow",
  "b10x-assertion-providers",
@@ -263,8 +263,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-expr"
-version = "0.7.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.7.0#a4317d800f5127ae9bd85d09fdf39dcf4e79607e"
+version = "0.8.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.8.0#cf171757878af943105132f686ff8c46170f8a77"
 dependencies = [
  "logos",
  "serde",

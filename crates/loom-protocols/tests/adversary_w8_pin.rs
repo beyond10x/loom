@@ -122,7 +122,7 @@ fn the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags() {
 /// `eval-gated-change@1`, since 0.10.0 `loop-improvement@1`, `self-improvement@1` and
 /// `story-delivery@1`, since 0.11.0 `story-delivery@2`; `incident.response/1` declares
 /// `investigate_cause`. The names are the
-/// release's `protocols/` directory at engineering-protocols 0.13.0.
+/// release's `protocols/` directory at engineering-protocols 0.14.0, unchanged since 0.13.0.
 #[test]
 fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
     let names = |catalog: &ProtocolCatalog| -> BTreeSet<String> {
