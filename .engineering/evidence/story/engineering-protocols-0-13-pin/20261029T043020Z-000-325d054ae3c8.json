@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-29T04:30:20Z",
+  "actor": "human:timo",
+  "artifact": "story:engineering-protocols-0-13-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate 2026-10-29: every task check step (spec, ess-gate, drift, conform, fmt, clippy, test, consumer-check, docs-check), task plan, loom-xtask release-check --tag 0.49.0 and task website exited 0"
+  }
+}

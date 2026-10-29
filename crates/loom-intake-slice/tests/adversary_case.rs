@@ -14,6 +14,8 @@ use loom_governor::{CanonGovernor, MemoryCaseStore};
 
 const PICK: &str = "software-change@1";
 const INTENT: &str = "make the failing test pass";
+/// The case inputs the run defaults (`case::RUN_DEFAULTS`) give a value for.
+const RUN_INPUTS: [&str; 3] = ["risk", "change_kind", "affects_security_boundary"];
 
 /// The SHA-256 of the UTF-8 bytes of [`INTENT`], computed outside Rust (`sha256sum`).
 const INTENT_SHA256: &str = "f24909fc778c4e3c3482f6d6205955ec0015425fe1cc23822b034e54865abb93";
@@ -229,8 +231,10 @@ fn adversary_report_head_when_head_stays_and_when_it_moves_back() {
     ));
 }
 
-/// Every ELS built-in opens: `intent` and `implementation` get the hash and `HEAD` where the
-/// protocol declares them, every other declared artifact `r0`, and nothing undeclared.
+/// Every ELS built-in whose case inputs the run defaults supply opens: `intent` and
+/// `implementation` get the hash and `HEAD` where the protocol declares them, every other declared
+/// artifact `r0`, and nothing undeclared. One that declares an input they have no value for
+/// (`self-improvement@1`, `story-delivery@2`) is refused naming it.
 #[test]
 fn adversary_every_registry_protocol_opens_on_a_git_workspace() {
     let workspace = Repo::new("registry");
@@ -255,14 +259,36 @@ fn adversary_every_registry_protocol_opens_on_a_git_workspace() {
                 (artifact.as_str().to_owned(), revision)
             })
             .collect();
-        let opened = case::open(
+        let unsupplied: Vec<String> = declared
+            .model
+            .case
+            .iter()
+            .flat_map(|case| case.inputs.ids())
+            .map(|input| input.as_str().to_owned())
+            .filter(|input| !RUN_INPUTS.contains(&input.as_str()))
+            .collect();
+        let outcome = case::open(
             &governor,
             &pick,
             INTENT,
             workspace.path(),
             &b10x_loom_intake_slice::case::RUN_DEFAULTS,
-        )
-        .unwrap_or_else(|error| panic!("{pick} opens: {error}"));
+        );
+        if !unsupplied.is_empty() {
+            match outcome {
+                Err(CaseError::Open(loom_governor::OpenError::MissingInput { input })) => assert!(
+                    unsupplied.contains(&input),
+                    "story:engineering-protocols-0-13-pin: {pick} is refused naming an input the \
+                     run defaults have no value for ({unsupplied:?}), not `{input}`"
+                ),
+                other => panic!(
+                    "story:engineering-protocols-0-13-pin: {pick} declares {unsupplied:?}, which \
+                     the run defaults do not supply, so it is refused naming one, not {other:?}"
+                ),
+            }
+            continue;
+        }
+        let opened = outcome.unwrap_or_else(|error| panic!("{pick} opens: {error}"));
         assert_eq!(
             governor.revisions(&opened).expect("held"),
             expected,

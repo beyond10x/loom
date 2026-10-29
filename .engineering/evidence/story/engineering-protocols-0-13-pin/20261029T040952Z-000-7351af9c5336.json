@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-29T04:09:52Z",
+  "actor": "human:timo",
+  "artifact": "story:engineering-protocols-0-13-pin",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "D181, b10x-chef-orchestrator under the operator's grant, 2026-10-29 (approval-record:engineering-protocols-0-13-pin-d181)"
+  }
+}
