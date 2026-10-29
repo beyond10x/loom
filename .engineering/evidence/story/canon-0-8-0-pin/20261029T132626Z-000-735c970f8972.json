@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T13:26:26Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-0-8-0-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate 2026-10-29 at 0f286e5c: task check (2540 passed, 0 failed), task plan, task website and loom-xtask release-check --tag 0.50.0 exited 0",
+    "reference": "wave/2026-10-29-w1"
+  }
+}

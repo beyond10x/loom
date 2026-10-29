@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:canon-0-8-0-pin
 kind: story
-status: active
+status: implemented
 title: Loom builds on Canon 0.8.0 and engineering-protocols 0.14.0, one copy beside takt
 summary: takt moves to Canon 0.8.0 without a second Canon
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-29T12:57:53Z", actor: "human:timo", revision: 2, decided_on: {"recorded":{"approval":1}}}
 - {from: "proposed", to: "active", at: "2026-10-29T12:57:53Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"approval":1}}}
+- {from: "active", to: "implemented", at: "2026-10-29T13:26:26Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"approval":1}}}
 ---
 # Story: canon-0-8-0-pin
 
