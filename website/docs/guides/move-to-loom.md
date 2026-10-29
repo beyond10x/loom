@@ -19,7 +19,7 @@ Every crate now comes from the Loom repository:
 
 ```toml
 [dependencies]
-b10x-loom-commission = { git = "https://github.com/beyond10x/loom", tag = "0.49.1" }
+b10x-loom-commission = { git = "https://github.com/beyond10x/loom", tag = "0.50.0" }
 ```
 
 An application that uses several of them can depend on `b10x-loom-sdk` alone; see
