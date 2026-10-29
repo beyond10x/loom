@@ -12,6 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** Loom builds on Canon `0.7.0` and engineering-protocols `0.13.0`, moved together in `b10x-loom-governor`, `b10x-loom-protocols`, `b10x-loom-intake-router` and `b10x-loom-intake-slice`. `ProtocolEntry::model` is Canon `0.7.0`'s `Protocol`, so a consumer that adds Canon or engineering-protocols itself pins these tags beside this release, with one copy of each in its lock. `story.delivery/2`, whose `after` Canon `0.6.0` refused, now compiles (story:engineering-protocols-0-13-pin)
+- **Breaking:** the bundled catalog (`ProtocolCatalog::engineering`, `::bundled`, `protocols list` and the router) gains engineering-protocols' built-ins `loop-improvement@1`, `self-improvement@1`, `story-delivery@1` and `story-delivery@2`. `protocols add` under one of these names is now refused (`cannot replace or remove bundled protocol`). Each engineering entry names revision `0.13.0` (story:engineering-protocols-0-13-pin)
+- `self-improvement@1` declares the case input `surface`, and `story-delivery@2` declares `tests_first` and `gate_on`. `b10x-loom run`'s defaults give none of them a value, so a run that picks either is refused naming the input (`OpenError::MissingInput`). An embedder that passes the inputs opens them (story:engineering-protocols-0-13-pin)
+
 ## [0.48.0] - 2026-10-29
 
 ### Changed
@@ -1199,7 +1207,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.48.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.49.0...HEAD
+[0.49.0]: https://github.com/beyond10x/loom/releases/tag/0.49.0
 [0.48.0]: https://github.com/beyond10x/loom/releases/tag/0.48.0
 [0.47.0]: https://github.com/beyond10x/loom/releases/tag/0.47.0
 [0.46.0]: https://github.com/beyond10x/loom/releases/tag/0.46.0
