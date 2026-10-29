@@ -12,6 +12,18 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-10-29
+
+No breaking changes.
+
+### Changed
+
+- The specification requires ESS `0.77.0`, and `ess-conformance` and `ess-primitives` move to tag `0.77.0`; generated Rust, the CRD and the reference pages are unchanged, and the commission domain graph names `0.77.0`
+
+### Security
+
+- `Cargo.lock` moves `libz-sys` to `1.1.31`, which no longer logs the build probe's environment (RUSTSEC-2026-0418, patched `>= 1.1.31`)
+
 ## [0.50.0] - 2026-10-29
 
 ### Changed

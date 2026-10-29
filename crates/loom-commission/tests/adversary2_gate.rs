@@ -198,13 +198,13 @@ fn adversary2_gate_refuses_an_older_required_ess() {
     let inputs = scratch.dir.join("ess/commission/ess-inputs.yaml");
     let text = fs::read_to_string(&inputs).unwrap();
     assert_eq!(
-        text.matches("requires: ess 0.76.0").count(),
+        text.matches("requires: ess 0.77.0").count(),
         1,
         "ess-inputs"
     );
     fs::write(
         &inputs,
-        text.replace("requires: ess 0.76.0", "requires: ess 0.51.0"),
+        text.replace("requires: ess 0.77.0", "requires: ess 0.51.0"),
     )
     .unwrap();
 
