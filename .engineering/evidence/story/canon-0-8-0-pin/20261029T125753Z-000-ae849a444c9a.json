@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-29T12:57:53Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-0-8-0-pin",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "approval",
+    "source": "D203, b10x-chef-orchestrator under the operator's grant, 2026-10-29",
+    "reference": "approval-record:canon-0-8-0-pin-d203"
+  }
+}

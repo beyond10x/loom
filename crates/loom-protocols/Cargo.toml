@@ -11,8 +11,8 @@ publish = false
 name = "loom_protocols"
 
 [dependencies]
-b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.7.0" }
-b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.13.0" }
+b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.8.0" }
+b10x-canon-engineering = { git = "https://github.com/beyond10x/engineering-protocols", tag = "0.14.0" }
 intake = { path = "../../generated/rust/intake" }
 serde_json = "1"
 sha2 = "0.10"

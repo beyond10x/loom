@@ -166,7 +166,7 @@ impl ProtocolCatalog {
                 ProtocolSource {
                     kind: SourceKind::Engineering,
                     location: "engineering-protocols".into(),
-                    revision: "0.13.0".into(),
+                    revision: "0.14.0".into(),
                     path: format!("protocols/{name}/{major}.yaml"),
                 },
             )?;

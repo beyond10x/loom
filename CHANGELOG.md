@@ -12,6 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** Loom builds on Canon `0.8.0` and engineering-protocols `0.14.0`, moved together in `b10x-loom-governor`, `b10x-loom-protocols`, `b10x-loom-intake-router` and `b10x-loom-intake-slice`. `ProtocolEntry::model` is Canon `0.8.0`'s `Protocol`, so a consumer that adds Canon or engineering-protocols itself pins these tags beside this release, with one copy of each in its lock (story:canon-0-8-0-pin)
+- **Breaking:** Canon `0.8.0`'s `Predicate` gains `Since(EvidenceSince)`, so a consumer that matches exhaustively on the protocol model `ProtocolEntry::model` hands over adds that arm; an evidence instant may carry a fraction of a second (story:canon-0-8-0-pin)
+- The bundled `story.delivery/2` is engineering-protocols `0.14.0`'s: under `tests_first=required` a red gate admits `implementation.edit` only after a failing run observed after the latest `tests_change`. Each engineering entry names revision `0.14.0` (story:canon-0-8-0-pin)
+
 ## [0.49.1] - 2026-10-29
 
 No breaking changes.
@@ -1215,7 +1223,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.49.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.50.0...HEAD
+[0.50.0]: https://github.com/beyond10x/loom/releases/tag/0.50.0
 [0.49.1]: https://github.com/beyond10x/loom/releases/tag/0.49.1
 [0.49.0]: https://github.com/beyond10x/loom/releases/tag/0.49.0
 [0.48.0]: https://github.com/beyond10x/loom/releases/tag/0.48.0
