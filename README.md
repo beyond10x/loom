@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.50.0`, released from source at the tag `0.50.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.50.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.50.0"`. `b10x-loom run` completed a live run
+Version `0.50.1`, released from source at the tag `0.50.1`
+([release](https://github.com/beyond10x/loom/releases/tag/0.50.1)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.50.1"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -66,7 +66,7 @@ variant.
 Since `0.6.0` a run whose case moved to a revision whose frontier still admits an action ends
 `RunOutcome::CaseMovedOn`, naming the Run's revision and the current one; start a new Run at the
 current revision. Callers that match `RunOutcome` exhaustively handle the new variant. Loom
-requires ESS 0.76.0.
+requires ESS 0.77.0.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog
@@ -128,7 +128,7 @@ revision it was suspended at. Callers of `run_until_blocked` see no change; call
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
-plugin turn is one Run. Loom requires ESS 0.76.0.
+plugin turn is one Run. Loom requires ESS 0.77.0.
 
 Since `0.15.0` a confidence fallback is recorded as two selections, the overruled fast one
 naming its replacement, each with the strategy of the selector that made it, and every
@@ -156,14 +156,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.50.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.50.1 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.50.0
+b10x-loom 0.50.1
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -403,7 +403,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.50.0'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.50.1'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: []
@@ -470,7 +470,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.50.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.50.1" }
 ```
 
 The example below

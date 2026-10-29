@@ -86,7 +86,7 @@ fn run_ess(step: &str, args: &[&str], cwd: &Path) -> Result<Output, String> {
         .output()
         .map_err(|error| {
             format!(
-                "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.76.0 on PATH \
+                "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.77.0 on PATH \
                  (ess/commission/ess-inputs.yaml)"
             )
         })
@@ -411,14 +411,14 @@ fn gate_fails_at_step_1_on_an_older_required_ess() {
     let text = fs::read_to_string(&inputs)
         .unwrap_or_else(|error| panic!("read {}: {error}", inputs.display()));
     assert_eq!(
-        text.matches("requires: ess 0.76.0").count(),
+        text.matches("requires: ess 0.77.0").count(),
         1,
-        "{}: expected exactly one `requires: ess 0.76.0`",
+        "{}: expected exactly one `requires: ess 0.77.0`",
         inputs.display()
     );
     fs::write(
         &inputs,
-        text.replace("requires: ess 0.76.0", "requires: ess 0.51.0"),
+        text.replace("requires: ess 0.77.0", "requires: ess 0.51.0"),
     )
     .unwrap_or_else(|error| panic!("write {}: {error}", inputs.display()));
 
