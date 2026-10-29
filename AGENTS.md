@@ -914,6 +914,10 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 `run --config <file>`, `render --resource <file> [--config <file>]` (exit 0; 3 refused; 2 not a
 `LoomAgent`; 1 unreadable) and `crd` (the CRD's bytes). `render` without `--config` uses
 `Config::builtin()`: namespace `default`, no model route, no Secret name or egress host allowed.
+`run` installs rustls' `ring` provider as the process default before it builds the kube client:
+the binary's graph enables both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`),
+and with both rustls picks none and panics at the first TLS client
+(`crates/loom-operator/tests/startup.rs`, `run_builds_its_tls_client_and_connects_to_the_cluster`).
 
 `config.yaml` (`src/config.rs`, unknown members refused): `namespace`,
 `defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional

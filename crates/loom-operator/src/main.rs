@@ -49,6 +49,11 @@ fn render(arguments: &RenderArgs) -> ExitCode {
 }
 
 fn run(arguments: &RunArgs) -> ExitCode {
+    // kube builds its TLS client on rustls' process-level provider. This binary's graph enables
+    // both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`), so rustls cannot choose
+    // one and panics at the first client: install `ring`, the provider kube's `rustls-tls` names.
+    // An `Err` means a provider is installed already, which is all the client needs.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let config = match Config::load(&arguments.config) {
         Ok(config) => config,
         Err(error) => return failed(1, &error.0),

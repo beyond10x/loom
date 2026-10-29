@@ -12,6 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.50.2] - 2026-10-29
+
+No breaking changes.
+
+### Fixed
+
+- `b10x-loom-operator run` installs rustls' `ring` provider before building the kube client; 0.46.0 to 0.50.1 enable both `ring` and `aws-lc-rs`, and 0.50.1 panicked at start (exit 101)
+
 ## [0.50.1] - 2026-10-29
 
 No breaking changes.
@@ -1235,7 +1243,9 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.50.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.50.2...HEAD
+[0.50.2]: https://github.com/beyond10x/loom/releases/tag/0.50.2
+[0.50.1]: https://github.com/beyond10x/loom/releases/tag/0.50.1
 [0.50.0]: https://github.com/beyond10x/loom/releases/tag/0.50.0
 [0.49.1]: https://github.com/beyond10x/loom/releases/tag/0.49.1
 [0.49.0]: https://github.com/beyond10x/loom/releases/tag/0.49.0
