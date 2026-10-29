@@ -12,6 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.49.1] - 2026-10-29
+
+No breaking changes.
+
+### Changed
+
+- The specification requires ESS `0.76.0`, and `ess-conformance` and `ess-primitives` move to tag `0.76.0`; generated Rust, the CRD and the reference pages are unchanged, and the commission domain graph names `0.76.0`. ESS 0.76.0's library changes (`TypeBinding::declared`, the presence fields on `Case` and `FieldCase`) reach no Loom crate
+
 ## [0.49.0] - 2026-10-29
 
 ### Changed
@@ -1207,7 +1215,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.49.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.49.1...HEAD
+[0.49.1]: https://github.com/beyond10x/loom/releases/tag/0.49.1
 [0.49.0]: https://github.com/beyond10x/loom/releases/tag/0.49.0
 [0.48.0]: https://github.com/beyond10x/loom/releases/tag/0.48.0
 [0.47.0]: https://github.com/beyond10x/loom/releases/tag/0.47.0

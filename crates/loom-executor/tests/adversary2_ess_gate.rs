@@ -241,7 +241,7 @@ fn mutant_spec_requiring_an_older_ess_is_killed() {
         |tree| {
             replace(
                 &tree.join("ess/ess-inputs.yaml"),
-                "requires: ess 0.75.0",
+                "requires: ess 0.76.0",
                 "requires: ess 0.51.0",
             );
         },
