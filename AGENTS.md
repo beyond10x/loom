@@ -270,6 +270,17 @@ printed exist there. Check `df -h /` before a full gate and run one full gate at
 managed worktree with `worktree finish --discard-cache --archive <tree>`, which removes its build
 cache; never delete a `target/` by hand.
 
+Where a test puts its scratch depends on what it needs from the directories above it:
+
+- A test that starts a metaharness session keeps its workspace and scratch copy outside the
+  checkout, under `std::env::temp_dir()`, never `CARGO_TARGET_TMPDIR`. CI's `target/` is inside the
+  checkout, so a copy there has the repository's `AGENTS.md` and `CLAUDE.md` above it, and
+  metaharness's hermetic floor (H11) suspends the session. A tree built into a directory outside
+  the checkout passes, so the failure shows only in CI (PR 144, run `40766941531`).
+- `crates/loom-xtask/tests/release_check.rs` needs the opposite: its fixture repositories live
+  under the build directory and must be inside a git tree. The test fails when
+  `CARGO_TARGET_DIR` points outside the checkout.
+
 ## Generated files
 
 | Path | Generator | Regenerate | Drift check |

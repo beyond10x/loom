@@ -12,6 +12,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-29
+
+### Changed
+
+- **Breaking:** `b10x-loom-session-executor` moves from metaharness `0.22.0` to `0.23.0`, which admits Harness `0.22.0`: the re-exported `b10x_loom_session_executor::metaharness` and the `EventLine` that `SessionExecutor::with_observer` hands over are metaharness `0.23.0`'s, so a consumer that names metaharness itself pins `0.23.0` beside this release (one `metaharness-protocol` in its lock)
+- **Breaking:** a b10x-harness session with `strict_version` admits Harness `0.22.0` only; a `0.21.0` binary is refused before the session starts (metaharness `0.23.0`)
+- Every session Loom starts passes metaharness `0.23.0`'s `check_spec`, which refuses a setting a kind's launch would drop: Loom already refuses a budget on Codex or b10x-harness and an effort on b10x-harness before the copy, and sets `max_turns` only on Claude Code and b10x-harness
+- The harness crates in `Cargo.lock` (`b10x-harness-catalogue`, `-loop`, `-wire`) move from `0.21.0` to `0.22.0` with metaharness
+
 ## [0.47.0] - 2026-10-28
 
 ### Added
@@ -1190,7 +1199,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.47.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.48.0...HEAD
+[0.48.0]: https://github.com/beyond10x/loom/releases/tag/0.48.0
 [0.47.0]: https://github.com/beyond10x/loom/releases/tag/0.47.0
 [0.46.0]: https://github.com/beyond10x/loom/releases/tag/0.46.0
 [0.45.0]: https://github.com/beyond10x/loom/releases/tag/0.45.0
