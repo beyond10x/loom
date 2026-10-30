@@ -1726,7 +1726,7 @@ fn the_writable_dirs_are_0700_and_owned_by_the_pod_user() {
 
 /// The model gateway a credential-free resource declares: a cluster service with a port and a
 /// path.
-const MODEL_UPSTREAM: &str = "http://llm-gateway.llm.svc:8080/v1";
+const MODEL_UPSTREAM: &str = "http://llm-gateway.llm.svc:8080";
 /// The Connectors instance, by its fully qualified cluster name.
 const CONNECTORS_UPSTREAM: &str = "http://connectors.connectors.svc.cluster.local:8080";
 /// Its git smart-HTTP path, on the default port.
@@ -2310,7 +2310,7 @@ fn a_boundary_upstream_the_controller_does_not_allow_is_refused() {
         "http://llm-gateway.llm.svc:8080/v2",
         "http://llm-gateway.llm.svc:8081/v1",
         "http://llm-gateway.llm.svc.cluster.local:8080/v1",
-        "http://llm-gateway.llm.svc:8080",
+        "http://llm-gateway.llm.svc:8080/v1",
     ] {
         let message = refusal(
             &credential_free_command(&model_boundary(upstream, "llm-gateway")),

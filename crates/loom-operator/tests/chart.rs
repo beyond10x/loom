@@ -27,7 +27,7 @@ const OVERRIDES: [&str; 12] = [
     "allowUnconfinedProfiles=true",
     "allowedSeccompLocalhostProfiles={profiles/takt.json}",
     "allowedAppArmorLocalhostProfiles={takt-delivery}",
-    "allowedBoundaryUpstreams={http://llm-gateway.llm.svc:8080/v1}",
+    "allowedBoundaryUpstreams={http://llm-gateway.llm.svc:8080}",
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -291,7 +291,7 @@ fn overrides_reach_the_controller_image_and_config() {
             allow_unconfined_profiles: true,
             allowed_seccomp_localhost_profiles: vec!["profiles/takt.json".to_owned()],
             allowed_app_armor_localhost_profiles: vec!["takt-delivery".to_owned()],
-            allowed_boundary_upstreams: vec!["http://llm-gateway.llm.svc:8080/v1".to_owned()],
+            allowed_boundary_upstreams: vec!["http://llm-gateway.llm.svc:8080".to_owned()],
         }
     );
 }

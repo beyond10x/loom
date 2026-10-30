@@ -14,7 +14,7 @@
 //! allowUnconfinedProfiles: false
 //! allowedSeccompLocalhostProfiles: [profiles/takt.json]
 //! allowedAppArmorLocalhostProfiles: [takt-delivery]
-//! allowedBoundaryUpstreams: ['http://llm-gateway.llm.svc:8080/v1']
+//! allowedBoundaryUpstreams: ['http://llm-gateway.llm.svc:8080']
 //! ```
 //!
 //! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
@@ -238,12 +238,12 @@ mod tests {
         assert!(absent.allowed_boundary_upstreams.is_empty());
         assert!(Config::builtin().allowed_boundary_upstreams.is_empty());
         let listed = Config::parse(&format!(
-            "{base}allowedBoundaryUpstreams: ['http://llm-gateway.llm.svc:8080/v1']\n"
+            "{base}allowedBoundaryUpstreams: ['http://llm-gateway.llm.svc:8080']\n"
         ))
         .expect("a configuration");
         assert_eq!(
             listed.allowed_boundary_upstreams,
-            ["http://llm-gateway.llm.svc:8080/v1"]
+            ["http://llm-gateway.llm.svc:8080"]
         );
     }
 }

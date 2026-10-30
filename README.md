@@ -436,7 +436,7 @@ egress entry (`BoundaryEgressHost`), and an audience, operation id or repository
 spec:
   routes: {}
   boundary:
-    model: {upstream: 'http://llm-gateway.llm.svc:8080/v1', audience: llm-gateway}
+    model: {upstream: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
     connectors:
       upstream: 'http://connectors.connectors.svc:8080'
       audience: connectors

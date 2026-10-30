@@ -112,7 +112,7 @@ tasks:
         --set 'allowUnconfinedProfiles=true'
         --set 'allowedSeccompLocalhostProfiles={profiles/takt.json}'
         --set 'allowedAppArmorLocalhostProfiles={takt-delivery}'
-        --set 'allowedBoundaryUpstreams={http://llm-gateway.llm.svc:8080/v1}'
+        --set 'allowedBoundaryUpstreams={http://llm-gateway.llm.svc:8080}'
         > /dev/null
 
   no-hand-model:
