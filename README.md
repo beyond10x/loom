@@ -304,6 +304,29 @@ in its place. The controller runs it in an init container of a `Command` pod for
 `HOME`, whose emptyDirs Kubernetes leaves mode 0777. Exit 1 names the directory it could not
 prepare.
 
+`b10x-loom agent boundary` is the credential boundary of a credential-free agent pod: the agent
+holds no credential and calls it on loopback, and it relays to in-cluster upstreams with the pod's
+projected service-account token, read from its file again on every request. It binds `127.0.0.1`
+only, one port per declared upstream:
+
+```console
+b10x-loom agent boundary \
+  --model-upstream http://llm-gateway.agent-credentials.svc:8080 --model-token <FILE> \
+  --connectors-upstream http://connectors-github.agent-credentials.svc:8080 --connectors-token <FILE> \
+  --operation pull_request.get --operation check_runs.list \
+  --git-upstream http://connectors-github.agent-credentials.svc:8080/git --git-token <FILE> \
+  --repository acme/widgets
+```
+
+Port 8401 relays any request under `/v1/` to the model upstream and streams the answer; 8402
+relays `GET /v1/describe` and a `POST /v1alpha2/invoke` whose JSON body names a declared
+`--operation`; 8403 relays git smart-HTTP (`info/refs`, `git-upload-pack`, `git-receive-pack`) for
+a declared `--repository`. The agent's credential headers never pass, anything undeclared is
+refused before it reaches the upstream, and the token is never printed. Upstreams are plain
+`http://`; an `https` one exits 2. `b10x-loom agent boundary-ready --port <PORT>...` exits 0 when
+every port accepts a connection, the sidecar's startup probe. § Credential boundary in
+[AGENTS.md](AGENTS.md) lists every refusal.
+
 ## Deploy agents to Kubernetes
 
 A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent` (Loom's deployment
@@ -549,6 +572,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-cli` | The `b10x-loom` command line |
 | `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval and reading its `http` bindings by bounded GET (`HttpGet`); `b10x-loom agent serve` hosts it |
 | `b10x-loom-a2a` | The A2A listener of a served agent (`expose.a2a`): its agent card, one governed turn per `SendMessage` answered with the turn's record, `GetTask` following the turn's runtime events, readiness and liveness probes, and a refusal of every other request without the agent's bearer; `b10x-loom agent serve` opens it |
+| `b10x-loom-boundary` | The credential boundary of a credential-free agent pod: loopback relays for the model (8401), the Connectors wire (8402, declared operations only) and git smart-HTTP (8403, declared repositories only), each adding the pod's projected service-account token and dropping the agent's credential headers; `b10x-loom agent boundary` runs it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.20.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`); a caller names a partial run over the kind's defaults, `SessionOverrides` (effort, a budget in micro-USD, strict version, context files), refused before the copy where the kind's launcher does not apply a member |

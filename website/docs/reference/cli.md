@@ -34,6 +34,8 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom agent resume`](#b10x-loom-agent-resume) | Perform a held send after its approval, once |
 | [`b10x-loom agent stage-files`](#b10x-loom-agent-stage-files) | Copy the keys of a mounted Secret volume into a directory this user owns, the directory mode 0700 and each file 0600 |
 | [`b10x-loom agent prepare-dirs`](#b10x-loom-agent-prepare-dirs) | Make each directory one this user owns with mode exactly 0700, keeping what it holds |
+| [`b10x-loom agent boundary`](#b10x-loom-agent-boundary) | Serve the credential boundary of a credential-free agent pod: relay model, Connectors and git requests from loopback to their upstreams with a projected token the agent never holds |
+| [`b10x-loom agent boundary-ready`](#b10x-loom-agent-boundary-ready) | Say whether every boundary port on 127.0.0.1 accepts a connection: the boundary's startup probe |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
 
@@ -407,6 +409,71 @@ be a link, and only its owner can set its mode.
 Exit status:
   0  every directory was prepared; standard output says how many
   1  a directory is a link, is not a directory, or cannot be made or set to 0700
+  2  the command line is not valid
+```
+
+## `b10x-loom agent boundary`
+
+Serve the credential boundary of a credential-free agent pod: relay model, Connectors and git requests from loopback to their upstreams with a projected token the agent never holds
+
+```text
+Usage: b10x-loom agent boundary [OPTIONS] <--model-upstream <URL>|--connectors-upstream <URL>|--git-upstream <URL>>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--model-upstream <URL>` | no | none | The model upstream (an llm gateway), a plain http:// URL; relayed on 127.0.0.1:8401 |
+| `--model-token <FILE>` | no | none | The file holding the model upstream's projected service-account token, read on every request |
+| `--connectors-upstream <URL>` | no | none | The Connectors upstream, a plain http:// URL; relayed on 127.0.0.1:8402 |
+| `--connectors-token <FILE>` | no | none | The file holding the Connectors upstream's projected service-account token, read on every request |
+| `--operation <ID>` | no | none | An operation `POST /v1alpha2/invoke` admits; give one or more |
+| `--git-upstream <URL>` | no | none | The git smart-HTTP upstream, a plain http:// URL whose path is the base the repositories sit under; relayed on 127.0.0.1:8403 |
+| `--git-token <FILE>` | no | none | The file holding the git upstream's projected service-account token, read on every request |
+| `--repository <OWNER/REPO>` | no | none | A repository the git relay serves, `<owner>/<repo>` without `.git`; give one or more |
+
+```text
+b10x-loom-operator runs this as the sidecar `boundary` of a pod whose LoomAgent declares
+spec.boundary, as another user than the agent container. The agent holds no credential and calls the
+boundary on loopback; the boundary holds only kubelet-projected service-account tokens, one file per
+upstream. Each declared upstream gets one listener on 127.0.0.1, and nothing else is bound:
+  8401  --model-upstream: any request under /v1/, the response streamed back
+  8402  --connectors-upstream: GET /v1/describe and POST /v1alpha2/invoke, an invoke admitted only for
+        an --operation (its body at most 65536 bytes, one JSON object naming its operation once)
+  8403  --git-upstream: git smart-HTTP (info/refs, git-upload-pack, git-receive-pack) for each
+        --repository
+Each relayed request reads its token file again, so a rotation is picked up, drops the agent's
+credential and hop-by-hop headers and adds `Authorization: Bearer <token>`; with no usable token it
+answers 503 and sends nothing. Anything else is refused locally and never reaches the upstream.
+Upstreams are plain http:// URLs. Standard error gets one line per request (service, method, path,
+status); the token is never printed. SIGTERM or SIGINT ends it.
+
+Exit status:
+  0  SIGTERM or SIGINT ended it
+  1  a port cannot be bound
+  2  the command line is not valid: a relay group incomplete or none given, an upstream that is not a
+     plain http:// URL (https, user information, a query or a fragment), or an operation or
+     repository out of shape; the message names the flag, never its value
+```
+
+## `b10x-loom agent boundary-ready`
+
+Say whether every boundary port on 127.0.0.1 accepts a connection: the boundary's startup probe
+
+```text
+Usage: b10x-loom agent boundary-ready --port <PORT>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--port <PORT>` | yes | none | A port on 127.0.0.1 that must accept a connection; give one or more |
+
+```text
+b10x-loom-operator runs this as the exec startup probe of the sidecar `boundary`, with one --port
+per declared relay. Each port is tried on 127.0.0.1 for at most one second.
+
+Exit status:
+  0  every 127.0.0.1:<PORT> accepts a TCP connection
+  1  one does not; standard error names it
   2  the command line is not valid
 ```
 

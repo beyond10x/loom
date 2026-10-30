@@ -480,6 +480,102 @@ pub enum AgentCommand {
     /// Make each directory one this user owns with mode exactly 0700, keeping what it holds.
     #[command(after_help = AGENT_PREPARE_DIRS_HELP)]
     PrepareDirs(AgentPrepareDirsArgs),
+    /// Serve the credential boundary of a credential-free agent pod: relay model, Connectors and
+    /// git requests from loopback to their upstreams with a projected token the agent never holds.
+    #[command(after_help = AGENT_BOUNDARY_HELP)]
+    Boundary(AgentBoundaryArgs),
+    /// Say whether every boundary port on 127.0.0.1 accepts a connection: the boundary's startup
+    /// probe.
+    #[command(after_help = AGENT_BOUNDARY_READY_HELP)]
+    BoundaryReady(AgentBoundaryReadyArgs),
+}
+
+/// What `agent boundary --help` says about the relays, what they refuse and the exit status.
+pub const AGENT_BOUNDARY_HELP: &str = "b10x-loom-operator runs this as the sidecar `boundary` of a pod whose LoomAgent declares
+spec.boundary, as another user than the agent container. The agent holds no credential and calls the
+boundary on loopback; the boundary holds only kubelet-projected service-account tokens, one file per
+upstream. Each declared upstream gets one listener on 127.0.0.1, and nothing else is bound:
+  8401  --model-upstream: any request under /v1/, the response streamed back
+  8402  --connectors-upstream: GET /v1/describe and POST /v1alpha2/invoke, an invoke admitted only for
+        an --operation (its body at most 65536 bytes, one JSON object naming its operation once)
+  8403  --git-upstream: git smart-HTTP (info/refs, git-upload-pack, git-receive-pack) for each
+        --repository
+Each relayed request reads its token file again, so a rotation is picked up, drops the agent's
+credential and hop-by-hop headers and adds `Authorization: Bearer <token>`; with no usable token it
+answers 503 and sends nothing. Anything else is refused locally and never reaches the upstream.
+Upstreams are plain http:// URLs. Standard error gets one line per request (service, method, path,
+status); the token is never printed. SIGTERM or SIGINT ends it.
+
+Exit status:
+  0  SIGTERM or SIGINT ended it
+  1  a port cannot be bound
+  2  the command line is not valid: a relay group incomplete or none given, an upstream that is not a
+     plain http:// URL (https, user information, a query or a fragment), or an operation or
+     repository out of shape; the message names the flag, never its value";
+
+/// The arguments of `b10x-loom agent boundary`. Each relay is all of its flags or none of them,
+/// and at least one is given.
+#[derive(Debug, Args)]
+#[command(group(
+    clap::ArgGroup::new("relays")
+        .required(true)
+        .multiple(true)
+        .args(["model_upstream", "connectors_upstream", "git_upstream"])
+))]
+pub struct AgentBoundaryArgs {
+    /// The model upstream (an llm gateway), a plain http:// URL; relayed on 127.0.0.1:8401.
+    #[arg(long, value_name = "URL", requires = "model_token")]
+    pub model_upstream: Option<String>,
+    /// The file holding the model upstream's projected service-account token, read on every
+    /// request.
+    #[arg(long, value_name = "FILE", requires = "model_upstream")]
+    pub model_token: Option<PathBuf>,
+    /// The Connectors upstream, a plain http:// URL; relayed on 127.0.0.1:8402.
+    #[arg(long, value_name = "URL", requires_all = ["connectors_token", "operations"])]
+    pub connectors_upstream: Option<String>,
+    /// The file holding the Connectors upstream's projected service-account token, read on every
+    /// request.
+    #[arg(long, value_name = "FILE", requires = "connectors_upstream")]
+    pub connectors_token: Option<PathBuf>,
+    /// An operation `POST /v1alpha2/invoke` admits; give one or more.
+    #[arg(
+        long = "operation",
+        value_name = "ID",
+        requires = "connectors_upstream"
+    )]
+    pub operations: Vec<String>,
+    /// The git smart-HTTP upstream, a plain http:// URL whose path is the base the repositories
+    /// sit under; relayed on 127.0.0.1:8403.
+    #[arg(long, value_name = "URL", requires_all = ["git_token", "repositories"])]
+    pub git_upstream: Option<String>,
+    /// The file holding the git upstream's projected service-account token, read on every
+    /// request.
+    #[arg(long, value_name = "FILE", requires = "git_upstream")]
+    pub git_token: Option<PathBuf>,
+    /// A repository the git relay serves, `<owner>/<repo>` without `.git`; give one or more.
+    #[arg(
+        long = "repository",
+        value_name = "OWNER/REPO",
+        requires = "git_upstream"
+    )]
+    pub repositories: Vec<String>,
+}
+
+/// What `agent boundary-ready --help` says about the probe and its exit status.
+pub const AGENT_BOUNDARY_READY_HELP: &str = "b10x-loom-operator runs this as the exec startup probe of the sidecar `boundary`, with one --port
+per declared relay. Each port is tried on 127.0.0.1 for at most one second.
+
+Exit status:
+  0  every 127.0.0.1:<PORT> accepts a TCP connection
+  1  one does not; standard error names it
+  2  the command line is not valid";
+
+/// The arguments of `b10x-loom agent boundary-ready`.
+#[derive(Debug, Args)]
+pub struct AgentBoundaryReadyArgs {
+    /// A port on 127.0.0.1 that must accept a connection; give one or more.
+    #[arg(long = "port", value_name = "PORT", required = true)]
+    pub ports: Vec<u16>,
 }
 
 /// What `agent prepare-dirs --help` says about the directories and its exit status.

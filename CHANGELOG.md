@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-loom-boundary` and `b10x-loom agent boundary`: a credential-free agent pod's loopback relays on 127.0.0.1, model on 8401, the Connectors wire on 8402 for declared operations, git smart-HTTP on 8403 for declared repositories; each relayed request carries the projected service-account token read from its file that request, the agent's credential headers are dropped, and an undeclared request is refused before it reaches the upstream (story:boundary-loopback-relays)
+- `b10x-loom agent boundary-ready --port <PORT>...`: the boundary's startup probe, exit 0 when every 127.0.0.1 port accepts a connection (story:boundary-loopback-relays)
+
 ## [0.50.2] - 2026-10-29
 
 No breaking changes.

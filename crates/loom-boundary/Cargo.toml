@@ -1,0 +1,22 @@
+[package]
+name = "b10x-loom-boundary"
+description = "The credential boundary of an agent pod: loopback relays that forward model, Connectors and git smart-HTTP requests to in-cluster upstreams with a projected service-account token the agent never holds, and refuse what is not declared."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_boundary"
+
+[dependencies]
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde = "1"
+serde_json = "1"
+tokio = { version = "1.53", features = ["fs", "io-util", "net", "rt", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.53", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

@@ -567,6 +567,56 @@ or owner, records nothing, and `WriteEvidenceError::Unreadable` says why. The go
 `tests/connectors_cli_write.rs` and `tests/support_triage_route.rs` (on `support-triage@1` and
 the Canon governor) hold it.
 
+## Credential boundary
+
+`b10x-loom-boundary` (`crates/loom-boundary`, `story:boundary-loopback-relays`) is the sidecar
+`boundary` of a credential-free agent pod (`spec.boundary`). The agent container (user 10001)
+holds no credential and calls it on loopback; the boundary (user 10002, same network namespace)
+holds only kubelet-projected service-account tokens, one file per upstream, and relays each
+admitted request to an in-cluster upstream with `Authorization: Bearer <token>`.
+`b10x-loom agent boundary` runs it, and `b10x-loom agent boundary-ready --port <PORT>...` is its
+startup probe: exit 0 when every `127.0.0.1:<port>` accepts a TCP connection, 1 otherwise.
+
+- Command line: `--model-upstream <URL> --model-token <FILE>`, `--connectors-upstream <URL>
+  --connectors-token <FILE> --operation <ID>...` and `--git-upstream <URL> --git-token <FILE>
+  --repository <OWNER/REPO>...`. Each group is all or none (clap `requires`) and at least one is
+  given. An upstream is plain `http://`: an `https`, user-information, query or fragment upstream,
+  an operation or a repository out of shape exits 2, naming the flag and never its value.
+  SIGTERM or SIGINT ends it with exit 0; a port that cannot be bound exits 1.
+- Ports, each bound on `127.0.0.1` for a declared group and nothing else bound: `MODEL_PORT`
+  8401, any method on a path under `/v1/`, streamed; `CONNECTORS_PORT` 8402, `GET /v1/describe`
+  and `POST /v1alpha2/invoke` exactly, no query; `GIT_PORT` 8403,
+  `GET /<owner>/<repo>.git/info/refs?service=git-upload-pack|git-receive-pack` (that query
+  exactly) and `POST /<owner>/<repo>.git/git-upload-pack|git-receive-pack`, for a declared
+  `<owner>/<repo>` (parts `[A-Za-z0-9._-]+`, neither `.` nor `..`, declared without `.git`). The
+  upstream URL is its base path, without a trailing slash, plus the request path and query.
+  `bind` refuses a non-loopback address, so a test binds `127.0.0.1:0`.
+- Every relayed request reads the token file again (64 KiB at most, ASCII whitespace trimmed,
+  visible ASCII only), so a kubelet rotation is picked up; an absent, empty or malformed token
+  answers 503 and sends nothing. It drops `authorization`, `proxy-authorization`, `x-api-key`,
+  `cookie`, hop-by-hop headers and the names `connection` lists, sets `host` to the upstream's and
+  adds the token; the git relay passes only `content-type`, `content-encoding`, `git-protocol` and
+  `accept`. Responses lose their hop-by-hop headers. Bodies stream both ways; only the invoke body
+  is buffered, up to 64 KiB (Connectors' request limit, 413 past it), and admitted only as one JSON
+  object whose top level names a declared `operation` once, as a string, and repeats no key (403
+  otherwise, with a fixed JSON error that repeats no request value). The admitted body is
+  forwarded byte for byte, never re-serialized.
+- Refused locally and never sent upstream: CONNECT and TRACE (405; TRACE would echo the token),
+  an absolute- or authority-form target (400), a model path with an empty, `.` or `..` segment, a
+  backslash or an encoded `.`, `/` or `\` (400), and any other route or an undeclared repository
+  (404). An unreachable upstream is 502, a connect that takes over 10 s is 504; a response, once
+  started, has no time limit.
+- One line per request on standard error: service, method, path (no query), status. The token is
+  never logged and never returned.
+- Not implemented: TLS to the upstream (an `https` upstream is refused; in-cluster TLS is a later
+  story), connection reuse (one upstream connection per request), MCP tools.
+- Tests: `crates/loom-boundary/tests/relays.rs` (fake upstreams on `127.0.0.1:0` that record what
+  they receive; fixture tokens under `CARGO_TARGET_TMPDIR`), the invoke admission's reasons in
+  `crates/loom-boundary/src/invoke.rs`, and the command line in
+  `crates/loom-cli/tests/agent_boundary.rs`, whose
+  `the_boundary_relays_on_its_declared_port_only_and_ends_on_sigterm` binds 8401 and fails, saying
+  so, when another process holds it.
+
 ## Mandate
 
 `b10x-loom-mandate` (`crates/loom-mandate`, library `loom_mandate`) is the one crate that links
@@ -1814,7 +1864,9 @@ run. Never make a live model call for a page; cite a record under `docs/qualific
 
 - Never make a model or network call in a test (tests use recorded responses and local fixtures),
   and never for a documentation page.
-- Never read a credential file in Loom code or tests.
+- Never read a credential file in Loom code or tests. The one exception: `b10x-loom-boundary`
+  reads its own projected service-account token, at the path its command line gives
+  (§ Credential boundary); its tests write fixture tokens and read only those.
 - Never edit a generated file by hand, and never write an `UNMAPPED:` marker into `ess/`.
 - Never implement a story while either ESS gate is red.
 - Never add a dependency from `b10x-loom-commission` to the executor, Canon or a model-provider
