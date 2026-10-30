@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T02:59:51Z",
+  "actor": "human:timo",
+  "artifact": "story:boundary-container-projected-token",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "PR 151 CI at 00888509: loom / task check, macos build, Build documentation, Security and privacy passed; local gate at ac094367 2216 passed, 1 failed (stale CRD member list), fixed in 00888509 (crd 20/0)",
+    "reference": "https://github.com/beyond10x/loom/pull/151"
+  }
+}

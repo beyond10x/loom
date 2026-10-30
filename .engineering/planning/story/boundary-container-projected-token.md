@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:boundary-container-projected-token
 kind: story
-status: active
+status: implemented
 title: spec.boundary renders a boundary container with a projected token, and refuses secrets beside it
 relations:
 - decomposes: epic:credential-free-agent-pod
@@ -18,10 +18,11 @@ scope:
   path: crates/loom-operator/src/render.rs
 - confidence: cited
   path: ess/domains/resource.yaml
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T02:59:52Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 

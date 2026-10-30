@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:boundary-loopback-relays
 kind: story
-status: active
+status: implemented
 title: The boundary serves model, Connectors-wire and git relays on loopback for declared operations and repositories
 relations:
 - decomposes: epic:credential-free-agent-pod
@@ -12,10 +12,11 @@ scope:
   path: crates/loom-boundary
 - confidence: cited
   path: crates/loom-cli/src
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T02:59:52Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 
