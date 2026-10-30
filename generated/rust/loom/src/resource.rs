@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8
-// contract digest 502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377
+// model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
+// contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -16,6 +16,26 @@ pub enum AgentVariant {
     AgentServe,
     /// `Command`.
     Command,
+}
+
+/// Boundary — `loom.resource.Boundary`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Boundary {
+    /// `model` — `Optional<loom.resource.BoundaryUpstream>`.
+    pub model: Option<BoundaryUpstream>,
+    /// `connectors` — `Optional<loom.resource.ConnectorsBoundary>`.
+    pub connectors: Option<ConnectorsBoundary>,
+    /// `git` — `Optional<loom.resource.GitBoundary>`.
+    pub git: Option<GitBoundary>,
+}
+
+/// BoundaryUpstream — `loom.resource.BoundaryUpstream`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryUpstream {
+    /// `upstream` — `String`.
+    pub upstream: String,
+    /// `audience` — `String`.
+    pub audience: String,
 }
 
 /// CheckResult — `loom.resource.CheckResult`.
@@ -100,6 +120,17 @@ pub enum ConfinementProfileKind {
     Unconfined,
 }
 
+/// ConnectorsBoundary — `loom.resource.ConnectorsBoundary`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorsBoundary {
+    /// `upstream` — `String`.
+    pub upstream: String,
+    /// `audience` — `String`.
+    pub audience: String,
+    /// `operations` — `List<String>`.
+    pub operations: Vec<String>,
+}
+
 /// DeploymentAvailability — `loom.resource.DeploymentAvailability`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeploymentAvailability {
@@ -123,6 +154,17 @@ pub struct EnvVar {
     pub name: String,
     /// `value` — `String`.
     pub value: String,
+}
+
+/// GitBoundary — `loom.resource.GitBoundary`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitBoundary {
+    /// `upstream` — `String`.
+    pub upstream: String,
+    /// `audience` — `String`.
+    pub audience: String,
+    /// `repositories` — `List<String>`.
+    pub repositories: Vec<String>,
 }
 
 /// ImageRef — `loom.resource.ImageRef`.
@@ -181,6 +223,8 @@ pub struct LoomAgentSpec {
     pub seccomp_profile: Option<ConfinementProfile>,
     /// `app_armor_profile` — `Optional<loom.resource.ConfinementProfile>`.
     pub app_armor_profile: Option<ConfinementProfile>,
+    /// `boundary` — `Optional<loom.resource.Boundary>`.
+    pub boundary: Option<Boundary>,
 }
 
 /// ResourceName — `loom.resource.ResourceName`: a distinct wrapper around `String`.

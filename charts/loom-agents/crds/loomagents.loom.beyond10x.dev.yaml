@@ -534,6 +534,49 @@ spec:
                 required:
                 - type
                 type: object
+              boundary:
+                properties:
+                  connectors:
+                    properties:
+                      audience:
+                        type: string
+                      operations:
+                        items:
+                          type: string
+                        type: array
+                      upstream:
+                        type: string
+                    required:
+                    - upstream
+                    - audience
+                    - operations
+                    type: object
+                  git:
+                    properties:
+                      audience:
+                        type: string
+                      repositories:
+                        items:
+                          type: string
+                        type: array
+                      upstream:
+                        type: string
+                    required:
+                    - upstream
+                    - audience
+                    - repositories
+                    type: object
+                  model:
+                    properties:
+                      audience:
+                        type: string
+                      upstream:
+                        type: string
+                    required:
+                    - upstream
+                    - audience
+                    type: object
+                type: object
               command:
                 properties:
                   args:

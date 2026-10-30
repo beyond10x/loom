@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8",
-    "contract_digest": "502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377"
+    "source_digest": "e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5",
+    "contract_digest": "5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -782,6 +782,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.Boundary",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.BoundaryUpstream",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.resource.CheckResult",
       "disposition": {
         "disposition": "generated"
@@ -838,6 +852,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.ConnectorsBoundary",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.resource.DeploymentAvailability",
       "disposition": {
         "disposition": "generated"
@@ -853,6 +874,13 @@
     {
       "kind": "domain_type",
       "source": "loom.resource.EnvVar",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.GitBoundary",
       "disposition": {
         "disposition": "generated"
       }
