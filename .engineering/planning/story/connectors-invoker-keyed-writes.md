@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connectors-invoker-keyed-writes
 kind: story
-status: active
+status: implemented
 title: ConnectorsInvoker sends writes keyed with the admitted request's idempotency key (invoke_v1alpha2_keyed)
 relations:
 - decomposes: epic:effect-bindings
@@ -18,10 +18,11 @@ scope:
   path: crates/loom-connectors/tests/adversary.rs
 - confidence: cited
   path: crates/loom-connectors/tests/connectors_invoker.rs
-revision: 9
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T16:39:59Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-10-30T16:39:59Z", actor: "human:timo", revision: 9}
+- {from: "active", to: "implemented", at: "2026-10-30T17:37:27Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 
@@ -76,13 +77,28 @@ generated model, that is an ESS change first and the story returns to the coordi
 
 ## Scope
 
-- cited: `crates/loom-connectors/Cargo.toml` (the two connectors pins), `Cargo.lock`
-- cited: `crates/loom-connectors/src/lib.rs` (`invoke_v1alpha2` call, about line 284, and the
-  module doc, lines 1-60)
-- inferred: `crates/loom-connectors/src/cli/write.rs` (`idempotency_key`, reused, not changed)
-- cited: `crates/loom-connectors/tests/connectors_invoker.rs`; inferred: `tests/adversary.rs`,
-  `tests/read_fan_out.rs`, `tests/adversary_read_performed.rs`,
-  `crates/loom-commission-testkit/tests/read_fan_out.rs` if the v0.62.0 client changes types
-- inferred: `consumers/pinned/` (it copies `Cargo.lock`), the dependency guard's lists
-- AGENTS.md § Connectors (the `v0.35.0` pin line and the invoke paragraph); CHANGELOG.md is the
-  coordinator's
+Confirmed by the wave 2026-10-30-w3 diff (`git diff a5f30124 impl/connectors-invoker-keyed-writes`, head 585a32fd):
+
+- `crates/loom-connectors/Cargo.toml`: connectors-client and connectors-core `v0.35.0` -> `v0.62.0`, `sha2 0.11.0` (already in the lock); `Cargo.lock` adds `connectors-operation-types`
+- `crates/loom-connectors/src/lib.rs`: the keyed invoke, `is_key_refusal`, the error codes, `read_otherwise` (number exactness by the host reader's rule), module doc
+- `crates/loom-connectors/src/cli/write.rs`, `src/cli.rs`: `idempotency_key` (same signature, digest) and `commission_idempotency_key`
+- tests: `connectors_invoker.rs`, `adversary.rs` (`a_replayed_success_is_an_error` runs on a read binding, assertion names this story), `adversary_w20261030w3_d.rs` (new), `security_w20261030w3_d.rs` (new); `crates/loom-agent/tests/serve.rs` (the key shape)
+- `AGENTS.md` § Connectors (pin line, keyed paragraph); CHANGELOG.md by the coordinator
+- Later items, outside this story: loom-agent's per-resume `Ids` can repeat a run and request id pair within one commission; Connectors could refuse a replay that names its own request as the original, or expose the request id on `Invoked`
+
+## Amendment
+
+Correction round 1 of wave 2026-10-30-w3 (review-result:adv-w20261030w3-d-pass-1 and
+sec-w20261030w3-d-pass-1, finding lib.rs:273) changes the key. Where § Outcome and
+§ Acceptance name `cli::idempotency_key(request)` as the invoker's key, read
+`cli::commission_idempotency_key(commission, request)` instead. It is
+`loom-action-request-<request id>-<SHA-256 of commission, case, run and request ids>`, so the
+two transports no longer share one key for an admitted request: `ConnectorsCli` sends
+`cli::idempotency_key`, the same digest without the commission. The reason: action request ids
+are unique only per run or resume, so a key built from the request id alone let two runs share a
+key and get a false replay.
+
+The same round also settles three more cases:
+- `approval_required` and `idempotency_conflict` are `Err` whatever mutation they carry.
+- Only the key refusal's exact shape gets the standing-grants remedy.
+- A number the host would read as another `f64` is refused before any call.

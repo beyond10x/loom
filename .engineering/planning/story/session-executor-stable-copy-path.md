@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:session-executor-stable-copy-path
 kind: story
-status: active
+status: implemented
 title: The session executor works in a scratch copy path the host keeps stable across a case's sessions
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
@@ -12,10 +12,11 @@ scope:
   path: crates/loom-session-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-session-executor/tests/stable_copy_path.rs
-revision: 5
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T16:39:59Z", actor: "human:timo", revision: 4}
 - {from: "proposed", to: "active", at: "2026-10-30T16:39:59Z", actor: "human:timo", revision: 5}
+- {from: "active", to: "implemented", at: "2026-10-30T17:37:27Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 
@@ -75,11 +76,9 @@ None: the scratch copy is host configuration `ess/` does not declare.
 
 ## Scope
 
-- cited: `crates/loom-session-executor/src/lib.rs`: `struct SessionExecutor` fields and `fn new`
-  (about lines 588-720), `ScratchCopy::make` (about line 3056), the call in `fn session` (about
-  line 1247)
-- cited: `crates/loom-session-executor/tests/stable_copy_path.rs` (new)
-- AGENTS.md § Session executor (one paragraph); CHANGELOG.md is the coordinator's
-- Shares `src/lib.rs` with `story:session-executor-claude-loopback-endpoint`: this story stays
-  outside `fn spec` and `fn check_api_key_secret`.
-- Touches the scratch copy's confinement: a security-reviewer pass runs beside the adversary.
+Confirmed by the wave 2026-10-30-w3 diff (`git diff a5f30124 impl/session-executor-stable-copy-path`, head d669026d):
+
+- `crates/loom-session-executor/src/lib.rs`: `SessionExecutor::copy_name`, `ScratchCopy::claim` (name check, scratch sticky-bit check, lstat and ownership check, exclusive lock, dev/inode re-check, emptying a leftover), `ScratchCopy::open_up`, `effective_uid`, `Drop for ScratchCopy`, and the call in `fn session`
+- tests: `stable_copy_path.rs` (new), `adversary_w20261030w3_c.rs` (new), `security_w20261030w3_c.rs` (new)
+- `AGENTS.md` § Session executor; the `SessionExecutor::endpoint` field doc names Claude (merge commit 3b0ed40c); CHANGELOG.md by the coordinator
+- The metaharness part stays a later item, as § Outcome names it

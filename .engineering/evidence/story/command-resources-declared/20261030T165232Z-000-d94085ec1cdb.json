@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T16:52:32Z",
+  "actor": "human:timo",
+  "artifact": "story:command-resources-declared",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-operator --locked --test command_resources --test chart",
+    "reference": "scratch loom-w3/a/run3.log (base sources: command_resources 7 failed, chart 2 failed) vs green.log (11526b6f: 7 and 8 passed)"
+  }
+}

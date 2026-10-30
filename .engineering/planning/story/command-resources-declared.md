@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:command-resources-declared
 kind: story
-status: active
+status: implemented
 title: A Command LoomAgent declares its resources or the controller refuses it ResourcesRequired
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -26,10 +26,11 @@ scope:
   path: crates/loom-operator/tests/golden/takt-delivery.yaml
 - confidence: cited
   path: website/docs/reference/operator-cli.md
-revision: 13
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T16:39:59Z", actor: "human:timo", revision: 12}
 - {from: "proposed", to: "active", at: "2026-10-30T16:39:59Z", actor: "human:timo", revision: 13}
+- {from: "active", to: "implemented", at: "2026-10-30T17:37:26Z", actor: "human:timo", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}}
 ---
 ## Outcome
 
@@ -101,13 +102,12 @@ The red run is the new test file on a commit that adds only it.
 
 ## Scope
 
-- cited: `crates/loom-operator/src/config.rs` (`Config`, `Resources`, `builtin`, the module doc)
-- cited: `crates/loom-operator/src/render.rs` (`fn resources`, about line 464)
-- inferred: `crates/loom-operator/src/admission.rs` (the refusal, beside the other controller refusals)
-- cited: `crates/loom-operator/src/cli.rs` (`RENDER_HELP`, the built-in configuration text), and the
-  generated `website/docs/reference/operator-cli.md`
-- cited: `charts/loom-agents/values.yaml`, `charts/loom-agents/templates/configmap.yaml`
-- cited: `crates/loom-operator/tests/chart.rs`, `crates/loom-operator/tests/golden/takt-delivery.yaml`
-  and its fixture (a `Command` resource rendered under the built-in configuration)
-- inferred: `examples/` manifests of a `Command` resource without resources
-- AGENTS.md § Operator (and § Resource if it names the default); CHANGELOG.md is the coordinator's
+Confirmed by the wave 2026-10-30-w3 diff (`git diff a5f30124 impl/command-resources-declared`, head 6879b251):
+
+- `crates/loom-operator/src/config.rs`: `defaultCommandResources`, and the quantity check on every `Resources` field in `Config::parse`
+- `crates/loom-operator/src/admission.rs`: refusal `ResourcesRequired` (step 17), `pod_resources`, `Admitted.resources`
+- `crates/loom-operator/src/render.rs`: renders the admitted size; `crates/loom-operator/src/cli.rs`: `RENDER_HELP`
+- `charts/loom-agents/values.yaml`, `charts/loom-agents/templates/configmap.yaml`: the chart default `{cpu: "4", memory: 8Gi}`
+- tests: `command_resources.rs` (new), `adversary_w20261030w3_a.rs` (new), `chart.rs`, `render.rs`, `command_confinement_profiles.rs`, `adv_cmdv_u4_config_files.rs`, `adversary_d243_u1.rs`, `security_d243_u1.rs` (test configs gained the member)
+- `website/docs/reference/operator-cli.md` (generated), `README.md`, `AGENTS.md`; CHANGELOG.md by the coordinator
+- Not touched, noted: `docs/design/loom-agent-crd-deployment.md:201` still describes the old default

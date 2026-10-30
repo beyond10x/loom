@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T16:47:49Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-claude-loopback-endpoint",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-session-executor --locked --test claude_endpoint",
+    "reference": "scratch loom-w3/b/red.log (base a5f30124: 3 failed) vs green.log (04186d63: 4 passed)"
+  }
+}

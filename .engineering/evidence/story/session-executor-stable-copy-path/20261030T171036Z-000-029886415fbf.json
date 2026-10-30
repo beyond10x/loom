@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-30T17:10:36Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-stable-copy-path",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:sec-w20261030w3-c-pass-1",
+    "review": "review-result:sec-w20261030w3-c-pass-1",
+    "outcome": "fixed"
+  }
+}
