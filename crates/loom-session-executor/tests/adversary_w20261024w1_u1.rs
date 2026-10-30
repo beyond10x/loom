@@ -451,17 +451,21 @@ fn adversary_without_a_secret_the_subscription_route_is_unchanged() {
 
 /// Without a secret, an endpoint whose `token_file` is empty (the secret route's spelling of "no
 /// token") names no credential at all; the call must not launch the loop pointed at an empty path.
+/// Since story:session-executor-keyless-loopback a keyless endpoint on a loopback host is admitted
+/// with no credential (tests/endpoint_keyless.rs), so this case points at a host that is not one.
 #[test]
 fn adversary_an_empty_token_file_without_a_secret_starts_no_session() {
     let scratch = Scratch::new("empty-token");
     let (session, seen) = Session::stating("none");
-    let executor = scratch.executor(Kind::B10x, session, None);
+    let mut executor = scratch.executor(Kind::B10x, session, None);
+    executor.endpoint.as_mut().expect("an endpoint").base_url =
+        "https://models.example.test/v1".to_owned();
     let step = step_of(&executor);
     let args = seen.borrow().args.clone();
     assert!(
         !seen.borrow().started,
-        "a call naming neither a secret nor a token file starts no session; it launched {:?} \
-         and ended {:?}",
+        "story:session-executor-keyless-loopback: a call naming neither a secret nor a token \
+         file, at a host that is not loopback, starts no session; it launched {:?} and ended {:?}",
         args,
         step.outcome
     );
