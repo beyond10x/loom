@@ -593,10 +593,11 @@ startup probe: exit 0 when every `127.0.0.1:<port>` accepts a TCP connection, 1 
   `bind` refuses a non-loopback address, so a test binds `127.0.0.1:0`.
 - Every relayed request reads the token file again (64 KiB at most, ASCII whitespace trimmed,
   visible ASCII only), so a kubelet rotation is picked up; an absent, empty or malformed token
-  answers 503 and sends nothing. It drops `authorization`, `proxy-authorization`, `x-api-key`,
+  answers 503 and sends nothing; a path that is no regular file (a FIFO) is not opened. It drops `authorization`, `proxy-authorization`, `x-api-key`,
   `cookie`, hop-by-hop headers and the names `connection` lists, sets `host` to the upstream's and
   adds the token; the git relay passes only `content-type`, `content-encoding`, `git-protocol` and
-  `accept`. Responses lose their hop-by-hop headers. Bodies stream both ways; only the invoke body
+  `accept`. Responses lose their hop-by-hop headers and every header whose value holds the token
+  (an upstream reflecting `Authorization`). Bodies stream both ways; only the invoke body
   is buffered, up to 64 KiB (Connectors' request limit, 413 past it), and admitted only as one JSON
   object whose top level names a declared `operation` once, as a string, and repeats no key (403
   otherwise, with a fixed JSON error that repeats no request value). The admitted body is

@@ -423,6 +423,8 @@ async fn relay_request(relay: &Relay, request: Request<Incoming>) -> Response<Re
     let Some(token) = read_token(&relay.token).await else {
         return refused(TOKEN_UNAVAILABLE);
     };
+    // The token's own bytes, so a response header that reflects it is dropped (`send`).
+    let secret = token.as_bytes()[BEARER.len()..].to_vec();
     let Ok(uri) = format!("{}{}", relay.upstream.base_path(), forward.target).parse::<Uri>() else {
         return refused(BODY_UNREADABLE);
     };
@@ -432,7 +434,7 @@ async fn relay_request(relay: &Relay, request: Request<Incoming>) -> Response<Re
     *upstream_request.version_mut() = Version::HTTP_11;
     *upstream_request.headers_mut() =
         forwarded_headers(&parts.headers, forward.headers, &relay.upstream, token);
-    send(&relay.upstream, upstream_request).await
+    send(&relay.upstream, upstream_request, &secret).await
 }
 
 /// Buffers an invoke body up to [`MAX_INVOKE_BYTES`] and admits it by its operation.
@@ -487,6 +489,10 @@ async fn drain(mut body: Incoming) {
 /// The `Authorization` value for the token in `path`, read now: at most [`MAX_TOKEN_BYTES`],
 /// ASCII whitespace trimmed, visible ASCII only. `None` when there is no usable token.
 async fn read_token(path: &Path) -> Option<HeaderValue> {
+    // Checked before the open, which on a FIFO would wait for a writer and hold the request.
+    if !tokio::fs::metadata(path).await.ok()?.is_file() {
+        return None;
+    }
     let file = tokio::fs::File::open(path).await.ok()?;
     if !file.metadata().await.ok()?.is_file() {
         return None;
@@ -503,8 +509,8 @@ async fn read_token(path: &Path) -> Option<HeaderValue> {
     if token.is_empty() || !token.iter().all(u8::is_ascii_graphic) {
         return None;
     }
-    let mut value = Vec::with_capacity(7 + token.len());
-    value.extend_from_slice(b"Bearer ");
+    let mut value = Vec::with_capacity(BEARER.len() + token.len());
+    value.extend_from_slice(BEARER);
     value.extend_from_slice(token);
     let mut header = HeaderValue::from_bytes(&value).ok()?;
     header.set_sensitive(true);
@@ -566,8 +572,17 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
     }
 }
 
-/// Sends `request` to `upstream` on a new connection and streams its response back.
-async fn send(upstream: &Upstream, request: Request<RelayBody>) -> Response<RelayBody> {
+/// The scheme the relay writes before the token in `Authorization`.
+const BEARER: &[u8] = b"Bearer ";
+
+/// Sends `request` to `upstream` on a new connection and streams its response back, without
+/// hop-by-hop headers and without any header whose value holds `secret`, the token the request
+/// carried: an upstream that reflects `Authorization` never hands it to the agent.
+async fn send(
+    upstream: &Upstream,
+    request: Request<RelayBody>,
+    secret: &[u8],
+) -> Response<RelayBody> {
     let connecting = TcpStream::connect((upstream.connect_host(), upstream.port()));
     let stream = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
         Err(_) => return refused(CONNECT_TIMED_OUT),
@@ -592,7 +607,28 @@ async fn send(upstream: &Upstream, request: Request<RelayBody>) -> Response<Rela
         return refused(UPSTREAM_FAILED);
     }
     strip_hop_by_hop(&mut parts.headers);
+    strip_reflected(&mut parts.headers, secret);
     Response::from_parts(parts, body.boxed())
+}
+
+/// Removes every header whose value holds `secret`.
+fn strip_reflected(headers: &mut HeaderMap, secret: &[u8]) {
+    if secret.is_empty() {
+        return;
+    }
+    let reflected: Vec<header::HeaderName> = headers
+        .iter()
+        .filter(|(_, value)| {
+            value
+                .as_bytes()
+                .windows(secret.len())
+                .any(|window| window == secret)
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in reflected {
+        headers.remove(&name);
+    }
 }
 
 fn full(bytes: Bytes) -> RelayBody {
