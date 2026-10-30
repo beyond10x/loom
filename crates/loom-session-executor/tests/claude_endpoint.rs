@@ -37,6 +37,7 @@ const EDITED: &str = "pub fn a() -> i32 {\n    1\n}\n";
 const RELAY: &str = "http://127.0.0.1:8401/v1";
 /// The key metaharness gives a child pointed at a declared endpoint: a marker, not a secret.
 const PLACEHOLDER: &str = "metaharness-model-endpoint";
+const STORY: &str = "story:session-executor-claude-loopback-endpoint";
 
 fn uuid(n: u64) -> Uuid {
     Uuid(format!("00000000-0000-4000-8000-{n:012x}"))
@@ -214,8 +215,8 @@ fn proposed(executor: &SessionExecutor, step: &ExecutorStep, what: &str) {
 }
 
 /// The step suspended for an external availability, the session never started, no copy made,
-/// and the report's error holds every one of `names`.
-fn refused(scratch: &Scratch, endpoint: Endpoint, names: &[&str]) {
+/// and the report's error holds every one of `names`; the error is returned.
+fn refused(scratch: &Scratch, endpoint: Endpoint, names: &[&str]) -> String {
     let what = format!("{endpoint:?}");
     let (session, seen) = Session::new("ANTHROPIC_API_KEY");
     let executor = scratch.executor(session, Some(endpoint));
@@ -249,19 +250,43 @@ fn refused(scratch: &Scratch, endpoint: Endpoint, names: &[&str]) {
             "{what}: the error names {name}: {error}"
         );
     }
+    error
 }
 
 #[test]
 fn a_claude_session_with_a_keyless_loopback_endpoint_gets_it_as_its_model_endpoint() {
-    for (at, (base_url, model, expected_model)) in [
-        (RELAY, None, "relay-model"),
+    for (at, (base_url, root, model, expected_model)) in [
+        (RELAY, "http://127.0.0.1:8401", None, "relay-model"),
         (
             RELAY,
+            "http://127.0.0.1:8401",
             Some("claude-sonnet-scripted"),
             "claude-sonnet-scripted",
         ),
-        ("http://localhost:8401/v1/", None, "relay-model"),
-        ("http://[::1]:8401/v1", None, "relay-model"),
+        (
+            "http://localhost:8401/v1/",
+            "http://localhost:8401",
+            None,
+            "relay-model",
+        ),
+        (
+            "http://[::1]:8401/v1",
+            "http://[::1]:8401",
+            None,
+            "relay-model",
+        ),
+        (
+            "http://127.0.0.1:8401/relay/v1",
+            "http://127.0.0.1:8401/relay",
+            None,
+            "relay-model",
+        ),
+        (
+            "http://127.0.0.1:8401/v1/v1",
+            "http://127.0.0.1:8401/v1",
+            None,
+            "relay-model",
+        ),
     ]
     .into_iter()
     .enumerate()
@@ -284,8 +309,9 @@ fn a_claude_session_with_a_keyless_loopback_endpoint_gets_it_as_its_model_endpoi
         assert!(seen.started, "{base_url}: the session was started");
         assert_eq!(
             seen.env.get("ANTHROPIC_BASE_URL").map(String::as_str),
-            Some(base_url.trim_end_matches('/')),
-            "{base_url}: the child is pointed at the endpoint"
+            Some(root),
+            "{base_url}: the child is pointed at the endpoint's root, its one trailing /v1 \
+             removed, because Claude Code posts to {{root}}/v1/messages ({STORY})"
         );
         assert_eq!(
             seen.env.get("ANTHROPIC_API_KEY").map(String::as_str),
@@ -322,7 +348,7 @@ fn a_claude_endpoint_that_is_not_loopback_or_names_a_key_is_refused() {
     refused(
         &scratch,
         endpoint("https://api.example.test/v1", "anthropic-messages"),
-        &["https://api.example.test/v1", "loopback"],
+        &["https://api.example.test", "loopback"],
     );
 
     let scratch = Scratch::new("userinfo");
@@ -351,6 +377,117 @@ fn a_claude_endpoint_on_another_wire_is_refused() {
         endpoint(RELAY, "openai-responses"),
         &["openai-responses", "anthropic-messages"],
     );
+}
+
+/// The endpoint is the gateway root plus `/v1`; one whose path does not end in a `/v1` segment
+/// has no root to give Claude Code and is refused before any copy.
+#[test]
+fn a_claude_endpoint_whose_path_does_not_end_in_v1_is_refused() {
+    for (at, base_url) in [
+        "http://127.0.0.1:8401",
+        "http://127.0.0.1:8401/",
+        "http://127.0.0.1:8401/v2",
+        "http://127.0.0.1:8401/v1x",
+        "http://127.0.0.1:8401/xv1",
+        "http://127.0.0.1:8401/v1/messages",
+        "http://127.0.0.1:8401/v1//",
+        "http://127.0.0.1:8401/V1",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let scratch = Scratch::new(&format!("no-v1-{at}"));
+        refused(
+            &scratch,
+            endpoint(base_url, "anthropic-messages"),
+            &["/v1", "http://127.0.0.1:8401"],
+        );
+    }
+}
+
+/// A refusal names the endpoint by its scheme and host only: no user information, path, query or
+/// fragment, which may carry a secret; and no URL at all when the base URL does not parse.
+#[test]
+fn a_refused_claude_endpoint_names_only_its_scheme_and_host() {
+    for (at, (base_url, named, hidden)) in [
+        (
+            "https://user:pw-secret@api.example.test:8443/v1?key=q-secret#f-secret",
+            Some("https://api.example.test:8443"),
+            &["pw-secret", "q-secret", "f-secret", "user:", "/v1"][..],
+        ),
+        (
+            "http://user:pw-secret@127.0.0.1:8401/v1",
+            Some("http://127.0.0.1:8401"),
+            &["pw-secret", "user:"][..],
+        ),
+        (
+            "127.0.0.1:8401/v1-secret",
+            None,
+            &["127.0.0.1:8401", "v1-secret"][..],
+        ),
+        (
+            "localhost:8401/v1-secret",
+            None,
+            &["localhost:8401", "v1-secret"][..],
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let scratch = Scratch::new(&format!("named-{at}"));
+        let error = refused(
+            &scratch,
+            endpoint(base_url, "anthropic-messages"),
+            &["loopback"],
+        );
+        if let Some(named) = named {
+            assert!(error.contains(named), "{base_url}: names {named}: {error}");
+        } else {
+            assert!(!error.contains("://"), "{base_url}: names no URL: {error}");
+        }
+        for hidden in hidden {
+            assert!(
+                !error.contains(hidden),
+                "{base_url}: the refusal repeats {hidden:?}: {error}"
+            );
+        }
+    }
+}
+
+/// An empty or blank model is no model: the executor's falls back to the endpoint's, and with
+/// neither the child is given no `--model` at all, never `--model ""`.
+#[test]
+fn a_blank_model_is_no_model() {
+    for (at, (executor_model, endpoint_model, expected)) in [
+        (None, "", None),
+        (None, "  ", None),
+        (Some(""), "", None),
+        (Some(" \t"), "relay-model", Some("relay-model")),
+        (Some(""), "relay-model", Some("relay-model")),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let scratch = Scratch::new(&format!("blank-model-{at}"));
+        let (session, seen) = Session::new("ANTHROPIC_API_KEY");
+        let mut keyless = endpoint(RELAY, "anthropic-messages");
+        keyless.model = endpoint_model.to_owned();
+        let mut executor = scratch.executor(session, Some(keyless));
+        executor.model = executor_model.map(str::to_owned);
+        let step = step_of(&executor);
+        proposed(
+            &executor,
+            &step,
+            &format!("{executor_model:?}/{endpoint_model:?}"),
+        );
+        let seen = seen.borrow();
+        assert_eq!(
+            after(&seen.args, "--model"),
+            expected,
+            "{executor_model:?}/{endpoint_model:?}: {:?}",
+            seen.args
+        );
+    }
 }
 
 #[test]
