@@ -23,8 +23,9 @@ Exit status:
 /// What `render` prints and how it exits.
 pub const RENDER_HELP: &str = "The resource's namespace is its metadata.namespace, else the configuration's. Without --config the
 built-in configuration applies: namespace default, the agent image registry.example/loom-agent at
-this version, 250m CPU and 256Mi memory, no model route, and no Secret name, egress host or
-boundary upstream admitted.
+this version, 250m CPU and 256Mi memory for an AgentServe resource, no default size for a Command
+resource (one without spec.agent.deploy.kubernetes.resources is refused ResourcesRequired), no
+model route, and no Secret name, egress host or boundary upstream admitted.
 The children carry the resource as owner only when the document has a metadata.uid.
 
 Exit status:
@@ -67,7 +68,7 @@ pub enum Command {
 #[derive(Debug, Args)]
 pub struct RunArgs {
     /// The controller's configuration, YAML: namespace, defaultImage, defaultResources,
-    /// modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles,
+    /// defaultCommandResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles,
     /// allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles, allowedBoundaryUpstreams.
     #[arg(long, value_name = "FILE")]
     pub config: PathBuf,

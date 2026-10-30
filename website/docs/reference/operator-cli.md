@@ -33,7 +33,7 @@ Usage: b10x-loom-operator run --config <FILE>
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
-| `--config <FILE>` | yes | none | The controller's configuration, YAML: namespace, defaultImage, defaultResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles, allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles, allowedBoundaryUpstreams |
+| `--config <FILE>` | yes | none | The controller's configuration, YAML: namespace, defaultImage, defaultResources, defaultCommandResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles, allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles, allowedBoundaryUpstreams |
 
 ```text
 The configuration names the one namespace watched, the default agent image and resources, the
@@ -66,8 +66,9 @@ Usage: b10x-loom-operator render [OPTIONS] --resource <FILE>
 ```text
 The resource's namespace is its metadata.namespace, else the configuration's. Without --config the
 built-in configuration applies: namespace default, the agent image registry.example/loom-agent at
-this version, 250m CPU and 256Mi memory, no model route, and no Secret name, egress host or
-boundary upstream admitted.
+this version, 250m CPU and 256Mi memory for an AgentServe resource, no default size for a Command
+resource (one without spec.agent.deploy.kubernetes.resources is refused ResourcesRequired), no
+model route, and no Secret name, egress host or boundary upstream admitted.
 The children carry the resource as owner only when the document has a metadata.uid.
 
 Exit status:

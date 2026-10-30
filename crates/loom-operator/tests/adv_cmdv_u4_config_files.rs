@@ -10,6 +10,7 @@ use serde_yaml_ng::Value;
 const CONFIG: &str = "namespace: agents
 defaultImage: {repository: registry.example/loom-agent, tag: '0.40.0'}
 defaultResources: {cpu: 100m, memory: 128Mi}
+defaultCommandResources: {cpu: 100m, memory: 128Mi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: [platform-operator-secrets, takt-forge]
 allowedEgressHosts: [chat.example, models.example]

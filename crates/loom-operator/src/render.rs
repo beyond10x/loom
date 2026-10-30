@@ -461,19 +461,12 @@ impl Renderer<'_> {
         )
     }
 
+    /// The size admission decided ([`crate::admission`] step 17), requests equal to limits.
     fn resources(&self) -> ResourceRequirements {
-        let (cpu, memory) = self.kubernetes().map_or_else(
-            || {
-                (
-                    self.config.default_resources.cpu.clone(),
-                    self.config.default_resources.memory.clone(),
-                )
-            },
-            |k| (k.resources.cpu.clone(), k.resources.memory.clone()),
-        );
+        let size = &self.admitted.resources;
         let quantities = BTreeMap::from([
-            ("cpu".to_owned(), Quantity(cpu)),
-            ("memory".to_owned(), Quantity(memory)),
+            ("cpu".to_owned(), Quantity(size.cpu.clone())),
+            ("memory".to_owned(), Quantity(size.memory.clone())),
         ]);
         ResourceRequirements {
             limits: Some(quantities.clone()),
