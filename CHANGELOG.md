@@ -12,6 +12,19 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-30
+
+### Added
+
+- `b10x-loom-boundary` and `b10x-loom agent boundary`: a credential-free agent pod's loopback relays on 127.0.0.1, model on 8401, the Connectors wire on 8402 for declared operations, git smart-HTTP on 8403 for declared repositories; each relayed request carries the projected service-account token read from its file that request, the agent's credential headers are dropped, and an undeclared request is refused before it reaches the upstream (story:boundary-loopback-relays)
+- `b10x-loom agent boundary-ready --port <PORT>...`: the boundary's startup probe, exit 0 when every 127.0.0.1 port accepts a connection (story:boundary-loopback-relays)
+- `LoomAgent` `spec.boundary` renders a native sidecar `boundary` (`b10x-loom agent boundary` from the default image, user 10002) that alone mounts a projected service-account token per declared upstream; the agent container gets only the loopback `LOOM_BOUNDARY_*_URL` values, and the controller refuses a boundary beside a Secret, an upstream that is no plain `http://` cluster service, and one the new `allowedBoundaryUpstreams` (chart value and `config.yaml` member, empty by default) does not admit: each entry is `{kind: model|connectors|git, url, audience, port?}`, and a declared upstream needs an entry of its kind with exactly its URL and audience (`BoundaryUpstreamNotAllowed` at `upstream` or `audience`); admission also applies the relay's own checks, so an operation id is at most 256 bytes; an `AgentServe` resource with empty routes and a boundary without `model` is refused `NoModelRoute` at `spec.boundary.model`, and a `Command` one gets an empty `routes.yaml` (story:boundary-container-projected-token)
+- A credential-free resource's NetworkPolicy opens only DNS and each declared upstream's namespace on one port, the entry's `port` (the pod port the upstream's Service targets) or else the URL's; a host or namespace egress entry beside `spec.boundary` is refused `BoundaryEgressHost` or `BoundaryEgressNamespace` (story:credential-free-network-policy)
+
+### Changed
+
+- **Breaking:** a `LoomAgent` `spec.env` entry named `LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL` or `LOOM_BOUNDARY_GIT_URL` is refused `EnvNameConflict`, with or without a boundary (story:boundary-container-projected-token)
+
 ## [0.50.2] - 2026-10-29
 
 No breaking changes.
@@ -1243,7 +1256,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.50.2...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.51.0...HEAD
+[0.51.0]: https://github.com/beyond10x/loom/releases/tag/0.51.0
 [0.50.2]: https://github.com/beyond10x/loom/releases/tag/0.50.2
 [0.50.1]: https://github.com/beyond10x/loom/releases/tag/0.50.1
 [0.50.0]: https://github.com/beyond10x/loom/releases/tag/0.50.0

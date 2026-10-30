@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 3eaa31da5328862649d35817de6ffbd6c83301fc907231eb38f96fee2f39bdf8
-  contract digest 502f7fdaf6c4bf4e079fb7e264c3e01fadaa93e7078e1a9a25ddcf74f0523377
+  model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
+  contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-269 capabilities: **266 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+273 capabilities: **270 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -124,6 +124,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.plugin.SourceRead` |
 | domain type | `loom.plugin.TurnResult` |
 | domain type | `loom.resource.AgentVariant` |
+| domain type | `loom.resource.Boundary` |
+| domain type | `loom.resource.BoundaryUpstream` |
 | domain type | `loom.resource.CheckResult` |
 | domain type | `loom.resource.CommandSpec` |
 | domain type | `loom.resource.Condition` |
@@ -132,9 +134,11 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.ConfigFile` |
 | domain type | `loom.resource.ConfinementProfile` |
 | domain type | `loom.resource.ConfinementProfileKind` |
+| domain type | `loom.resource.ConnectorsBoundary` |
 | domain type | `loom.resource.DeploymentAvailability` |
 | domain type | `loom.resource.DeploymentStatus` |
 | domain type | `loom.resource.EnvVar` |
+| domain type | `loom.resource.GitBoundary` |
 | domain type | `loom.resource.ImageRef` |
 | domain type | `loom.resource.LoomAgent.State` |
 | domain type | `loom.resource.LoomAgentSpec` |

@@ -13,10 +13,10 @@ use b10x_loom_cli::model_catalog::ModelCatalog;
 use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
-    AgentCheckArgs, AgentCommand, AgentPrepareDirsArgs, AgentResumeArgs, AgentServeArgs,
-    AgentStageFilesArgs, ApproveArgs, Cli, Command, Confinement, DEFAULT_MODEL, EvaluateArgs,
-    Output, PluginCommand, PluginName, ProtocolCommand, ResumeArgs, RunArgs, approve_exit_status,
-    resume_exit_status, run_exit_status,
+    AgentBoundaryArgs, AgentBoundaryReadyArgs, AgentCheckArgs, AgentCommand, AgentPrepareDirsArgs,
+    AgentResumeArgs, AgentServeArgs, AgentStageFilesArgs, ApproveArgs, Cli, Command, Confinement,
+    DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand, ResumeArgs,
+    RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_cli::{a2a, agent};
 use b10x_loom_intake_slice::bindings::ActionBindings;
@@ -76,6 +76,8 @@ fn main() -> ExitCode {
             AgentCommand::Resume(arguments) => agent_resume_command(&arguments),
             AgentCommand::StageFiles(arguments) => agent_stage_files_command(&arguments),
             AgentCommand::PrepareDirs(arguments) => agent_prepare_dirs_command(&arguments),
+            AgentCommand::Boundary(arguments) => agent_boundary_command(&arguments),
+            AgentCommand::BoundaryReady(arguments) => agent_boundary_ready_command(&arguments),
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
@@ -121,6 +123,105 @@ fn agent_prepare_dirs_command(arguments: &AgentPrepareDirsArgs) -> ExitCode {
     }
     println!("prepared {} directories", arguments.dirs.len());
     ExitCode::SUCCESS
+}
+
+/// `agent boundary`: one loopback relay per declared upstream until SIGTERM or SIGINT, as
+/// `AGENT_BOUNDARY_HELP` states. A refused upstream or declaration exits 2 naming the flag only.
+fn agent_boundary_command(arguments: &AgentBoundaryArgs) -> ExitCode {
+    let relays = match boundary_relays(arguments) {
+        Ok(relays) => relays,
+        Err(why) => {
+            eprintln!("b10x-loom: {why}");
+            return ExitCode::from(2);
+        }
+    };
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => return failed(&format!("no runtime for the boundary: {error}")),
+    };
+    let served = runtime.block_on(serve_boundary(relays));
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    match served {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(why) => failed(&why),
+    }
+}
+
+/// The relays `arguments` declare. Clap holds each group all or none; this checks each upstream
+/// and declaration, and names the flag of the first that is refused, never its value.
+fn boundary_relays(
+    arguments: &AgentBoundaryArgs,
+) -> Result<Vec<b10x_loom_boundary::Relay>, String> {
+    use b10x_loom_boundary::{Relay, Upstream};
+    let upstream =
+        |flag: &str, url: &str| Upstream::parse(url).map_err(|refused| format!("{flag} {refused}"));
+    let mut relays = Vec::new();
+    if let (Some(url), Some(token)) = (&arguments.model_upstream, &arguments.model_token) {
+        relays.push(Relay::model(
+            upstream("--model-upstream", url)?,
+            token.clone(),
+        ));
+    }
+    if let (Some(url), Some(token)) = (&arguments.connectors_upstream, &arguments.connectors_token)
+    {
+        let upstream = upstream("--connectors-upstream", url)?;
+        let relay = Relay::connectors(upstream, token.clone(), arguments.operations.clone())
+            .map_err(|refused| format!("--operation: {refused}"))?;
+        relays.push(relay);
+    }
+    if let (Some(url), Some(token)) = (&arguments.git_upstream, &arguments.git_token) {
+        let upstream = upstream("--git-upstream", url)?;
+        let relay = Relay::git(upstream, token.clone(), arguments.repositories.clone())
+            .map_err(|refused| format!("--repository: {refused}"))?;
+        relays.push(relay);
+    }
+    Ok(relays)
+}
+
+/// Binds every relay on 127.0.0.1 at its port, then serves them until SIGTERM or SIGINT.
+async fn serve_boundary(relays: Vec<b10x_loom_boundary::Relay>) -> Result<(), String> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let taken = |kind: SignalKind, name: &str| {
+        signal(kind).map_err(|e| format!("{name} cannot be handled: {e}"))
+    };
+    let mut terminate = taken(SignalKind::terminate(), "SIGTERM")?;
+    let mut interrupt = taken(SignalKind::interrupt(), "SIGINT")?;
+    let mut listeners = Vec::new();
+    for relay in relays {
+        let address = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, relay.port()));
+        let service = relay.service();
+        let listener = b10x_loom_boundary::bind(address, relay)
+            .await
+            .map_err(|refused| format!("the {service} relay on {address}: {refused}"))?;
+        listeners.push((service, listener));
+    }
+    for (service, listener) in listeners {
+        eprintln!(
+            "b10x-loom boundary: {service} relay on {}",
+            listener.local_addr()
+        );
+        tokio::spawn(listener.serve());
+    }
+    tokio::select! {
+        _ = terminate.recv() => {}
+        _ = interrupt.recv() => {}
+    }
+    Ok(())
+}
+
+/// `agent boundary-ready`: exit 0 when every `127.0.0.1:<port>` accepts a connection.
+fn agent_boundary_ready_command(arguments: &AgentBoundaryReadyArgs) -> ExitCode {
+    match b10x_loom_boundary::ready(&arguments.ports, std::time::Duration::from_secs(1)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(port) => {
+            eprintln!("b10x-loom: 127.0.0.1:{port} accepts no connection");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// The spec of `agent serve` and `agent resume`, read and checked; a refused spec exits 3.

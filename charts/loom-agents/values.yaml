@@ -1,9 +1,9 @@
 image:
   repository: registry.example/loom-operator
-  tag: "0.50.2"
+  tag: "0.51.0"
 agentImage:
   repository: registry.example/loom-agent
-  tag: "0.50.2"
+  tag: "0.51.0"
 modelRoute:
   url: ""
   protocol: ""
@@ -14,6 +14,7 @@ allowedClaimNames: []
 allowUnconfinedProfiles: false
 allowedSeccompLocalhostProfiles: []
 allowedAppArmorLocalhostProfiles: []
+allowedBoundaryUpstreams: []
 resources:
   requests:
     cpu: 50m

@@ -567,6 +567,57 @@ or owner, records nothing, and `WriteEvidenceError::Unreadable` says why. The go
 `tests/connectors_cli_write.rs` and `tests/support_triage_route.rs` (on `support-triage@1` and
 the Canon governor) hold it.
 
+## Credential boundary
+
+`b10x-loom-boundary` (`crates/loom-boundary`, `story:boundary-loopback-relays`) is the sidecar
+`boundary` of a credential-free agent pod (`spec.boundary`). The agent container (user 10001)
+holds no credential and calls it on loopback; the boundary (user 10002, same network namespace)
+holds only kubelet-projected service-account tokens, one file per upstream, and relays each
+admitted request to an in-cluster upstream with `Authorization: Bearer <token>`.
+`b10x-loom agent boundary` runs it, and `b10x-loom agent boundary-ready --port <PORT>...` is its
+startup probe: exit 0 when every `127.0.0.1:<port>` accepts a TCP connection, 1 otherwise.
+
+- Command line: `--model-upstream <URL> --model-token <FILE>`, `--connectors-upstream <URL>
+  --connectors-token <FILE> --operation <ID>...` and `--git-upstream <URL> --git-token <FILE>
+  --repository <OWNER/REPO>...`. Each group is all or none (clap `requires`) and at least one is
+  given. An upstream is plain `http://`: an `https`, user-information, query or fragment upstream,
+  an operation or a repository out of shape exits 2, naming the flag and never its value.
+  SIGTERM or SIGINT ends it with exit 0; a port that cannot be bound exits 1.
+- Ports, each bound on `127.0.0.1` for a declared group and nothing else bound: `MODEL_PORT`
+  8401, any method on a path under `/v1/`, streamed; `CONNECTORS_PORT` 8402, `GET /v1/describe`
+  and `POST /v1alpha2/invoke` exactly, no query; `GIT_PORT` 8403,
+  `GET /<owner>/<repo>.git/info/refs?service=git-upload-pack|git-receive-pack` (that query
+  exactly) and `POST /<owner>/<repo>.git/git-upload-pack|git-receive-pack`, for a declared
+  `<owner>/<repo>` (parts `[A-Za-z0-9._-]+`, neither `.` nor `..`, declared without `.git`). The
+  upstream URL is its base path, without a trailing slash, plus the request path and query.
+  `bind` refuses a non-loopback address, so a test binds `127.0.0.1:0`.
+- Every relayed request reads the token file again (64 KiB at most, ASCII whitespace trimmed,
+  visible ASCII only), so a kubelet rotation is picked up; an absent, empty or malformed token
+  answers 503 and sends nothing; a path that is no regular file (a FIFO) is not opened. It drops `authorization`, `proxy-authorization`, `x-api-key`,
+  `cookie`, hop-by-hop headers and the names `connection` lists, sets `host` to the upstream's and
+  adds the token; the git relay passes only `content-type`, `content-encoding`, `git-protocol` and
+  `accept`. Responses lose their hop-by-hop headers and every header whose value holds the token
+  (an upstream reflecting `Authorization`). Bodies stream both ways; only the invoke body
+  is buffered, up to 64 KiB (Connectors' request limit, 413 past it), and admitted only as one JSON
+  object whose top level names a declared `operation` once, as a string, and repeats no key (403
+  otherwise, with a fixed JSON error that repeats no request value). The admitted body is
+  forwarded byte for byte, never re-serialized.
+- Refused locally and never sent upstream: CONNECT and TRACE (405; TRACE would echo the token),
+  an absolute- or authority-form target (400), a model path with an empty, `.` or `..` segment, a
+  backslash or an encoded `.`, `/` or `\` (400), and any other route or an undeclared repository
+  (404). An unreachable upstream is 502, a connect that takes over 10 s is 504; a response, once
+  started, has no time limit.
+- One line per request on standard error: service, method, path (no query), status. The token is
+  never logged and never returned.
+- Not implemented: TLS to the upstream (an `https` upstream is refused; in-cluster TLS is a later
+  story), connection reuse (one upstream connection per request), MCP tools.
+- Tests: `crates/loom-boundary/tests/relays.rs` (fake upstreams on `127.0.0.1:0` that record what
+  they receive; fixture tokens under `CARGO_TARGET_TMPDIR`), the invoke admission's reasons in
+  `crates/loom-boundary/src/invoke.rs`, and the command line in
+  `crates/loom-cli/tests/agent_boundary.rs`, whose
+  `the_boundary_relays_on_its_declared_port_only_and_ends_on_sigterm` binds 8401 and fails, saying
+  so, when another process holds it.
+
 ## Mandate
 
 `b10x-loom-mandate` (`crates/loom-mandate`, library `loom_mandate`) is the one crate that links
@@ -848,6 +899,14 @@ spec without `runtime.connectors`. `RecordCheck`
 records the variant the controller admitted; `respecified` clears it, and the view and
 `status.variant` carry it.
 
+`spec.boundary` (`Boundary`, `story:boundary-container-projected-token`, design D243) makes an
+agent credential-free on either variant: optional `model`, `connectors` and `git` upstreams, each
+an `upstream`, the base URL of a cluster service, and an `audience`, that of the projected
+service-account token the boundary adds to each call; `connectors` also lists the operation ids
+it admits (`operations`) and `git` the `<owner>/<repo>` repositories (`repositories`). A resource
+that declares it holds no Secret. Its refusals are the controller's (§ Operator), as for
+`spec.env`, not the domain's.
+
 The spec lives in the cluster, in the resource; the record keeps only the generation it applied
 and the check for that generation, and a controller re-reads the spec on every reconcile. A stored
 `AgentSpec` would hold a `Decimal` (`loops.inner.classify_threshold`) that no ESS 0.69.0 view
@@ -913,7 +972,8 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 `b10x_loom_resource::crd` and the CRD. The command line (`src/cli.rs`, clap derive) is
 `run --config <file>`, `render --resource <file> [--config <file>]` (exit 0; 3 refused; 2 not a
 `LoomAgent`; 1 unreadable) and `crd` (the CRD's bytes). `render` without `--config` uses
-`Config::builtin()`: namespace `default`, no model route, no Secret name or egress host allowed.
+`Config::builtin()`: namespace `default`, no model route, no Secret name, egress host or boundary
+upstream allowed.
 `run` installs rustls' `ring` provider as the process default before it builds the kube client:
 the binary's graph enables both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`),
 and with both rustls picks none and panics at the first TLS client
@@ -923,7 +983,7 @@ and with both rustls picks none and panics at the first TLS client
 `defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
-admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 15, `crates/loom-operator/tests/command_confinement_profiles.rs`). One instance watches one namespace with one replica; there is no leader election.
+admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists entries `{kind, url, audience, port?}` (`config::AllowedUpstream`, unknown members refused): a declared `spec.boundary.<kind>` is admitted only when an entry has its kind (`model`, `connectors` or `git`), exactly its `upstream` as `url` and exactly its `audience`, so neither one relay's URL under another relay nor an audience the entry does not give (an API-server audience, say) passes; the optional `port` (1 to 65535) is the pod port the upstream's Service targets, which the NetworkPolicy opens in place of the URL's port, since a NetworkPolicy matches the port after Service translation; empty, the default, it admits none. One instance watches one namespace with one replica; there is no leader election.
 
 The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
 applied again at its cluster generation and checked again. The record is keyed by name, so the
@@ -942,7 +1002,31 @@ refuses them; `spec.connectorsConfig`, which the ConfigMap receives verbatim, de
 each word of the raw text, comments included (named by line), a word holding `:` or `;` also in
 its pieces, shell punctuation (`<>|&()$` and backtick) separating words too; a routes or connectors document
 beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admitted unwalked, and
-words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
+words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`), and
+on `AgentServe` empty routes beside a `spec.boundary` that declares an upstream but no `model`
+(`NoModelRoute` at `spec.boundary.model`: its NetworkPolicy opens no model route, so its agent
+would reach no model); with
+`spec.boundary` (`story:boundary-container-projected-token`), none of `model`, `connectors` and
+`git` declared (`Malformed` at `spec.boundary`), a `secretRef` or `secretFiles` beside it
+(`BoundaryWithSecret` at that member), then per declared upstream an `upstream` that is no plain
+`http://` URL of a cluster service (`admission::cluster_service`: no user information, query or
+fragment; the host `<service>.<namespace>.svc` or `<service>.<namespace>.svc.cluster.local` of
+DNS-1123 labels; an optional port, 1 to 65535, and a path of plain segments; `https` is refused
+in this wave) or that `b10x_loom_boundary::Upstream::parse` refuses (`BoundaryUpstreamInvalid`),
+one no `allowedBoundaryUpstreams` entry of its kind lists exactly (`BoundaryUpstreamNotAllowed`
+at `upstream`), an `audience` that is empty or holds whitespace or a control
+character, `operations` or `repositories` empty, out of form for the operator or for the relay
+(an operation id 1 to 256 bytes of `[A-Za-z0-9._-]`; a repository `<owner>/<repo>` of such
+parts, neither `.` nor `..`, the repository not ending in `.git`; neither starting with `-`,
+which `agent boundary` would read as a flag; `b10x_loom_boundary::operation_id` and
+`repository_name` beside the operator's own checks) or given twice (`Malformed` at the member),
+a relay `b10x_loom_boundary::Relay` refuses to build from those values as `agent boundary` builds
+it from the rendered flags (`Malformed` at the list), a credential in it (the member whole, then
+each string word by word as `spec.command`; `SecretLiteral`), an `audience` the entry of its
+kind and URL does not give exactly (`BoundaryUpstreamNotAllowed` at `audience`), and a
+`deploy.kubernetes.egress` entry naming a host (`BoundaryEgressHost` at its `host`) or a
+namespace (`BoundaryEgressNamespace` at its `namespace`; `story:credential-free-network-policy`,
+design D243 § 2: beside a boundary the pod reaches DNS and its upstreams only); a
 `secretRef` or `secretFiles` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
 would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
@@ -950,10 +1034,13 @@ credential in `spec.command` (`SecretLiteral`; `TooLarge` beyond the bound); in 
 variant, a credential in a name or value (the list whole, then each value word by word as
 `spec.command`; `SecretLiteral` at `spec.env[<i>].value` or `.name`, `TooLarge` beyond the bound),
 then a name that is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for
-the same rule), a name in `render::CONTROLLER_ENV` (`HOME`, refused on both variants) or one an
+the same rule), a name in `render::CONTROLLER_ENV` (`HOME` and the boundary URLs
+`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL` and `LOOM_BOUNDARY_GIT_URL`, each
+refused on both variants, with or without `spec.boundary`) or one an
 earlier entry gives (`EnvNameConflict`); then each `spec.env` value and each `spec.command`
 entry again as the kubelet may expand it (`$$` is `$`). The walk knows only
-`render::controller_env` and the `spec.env` entries (before it for a value, all of them for a
+`render::controller_env` (with `spec.boundary`, the URL of each declared relay) and the
+`spec.env` entries (before it for a value, all of them for a
 command); a name it does not know (a `secretRef` key, the service environment such as
 `KUBERNETES_PORT`) is read twice, left as written and as `UNKNOWN_REFERENCE` (`a://`), since it
 may supply a URL scheme. Each reading is walked whole and word by word (`SecretLiteral`, its
@@ -980,8 +1067,11 @@ or the parser's recursion limit, once the strings read hold none; a `spec.worksp
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
-`agent serve` does not; with no routes and no `modelRoute` it gets an empty `routes.yaml`, and
-without `spec.agent` the default routes document routes no model (no role names one). Then
+`agent serve` does not; with no routes and no `modelRoute`, or no routes beside a boundary
+without `model`, it gets an empty `routes.yaml`, and
+without `spec.agent` the default routes document routes no model (no role names one); with
+`spec.boundary.model` its endpoint is the model relay, `http://127.0.0.1:8401/v1`, with the model
+route's protocol and model. Then
 each child it would render is read, and one that exists without this resource as controller is
 `ChildNotOwned`, naming its kind and name. That refusal is the cluster's, not the spec's: each later
 reconcile at that generation reads the children again, and once none is someone else's the record
@@ -1046,7 +1136,8 @@ Deployment (one replica, `Recreate`, init container
 user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests equal to limits,
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
 default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
-with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service.
+with the default routes; ingress from each ingress entry; with `spec.boundary` see below); and
+with `expose.a2a` a Service.
 `deploy.kubernetes.image_repository` is not read. A `Command` resource has a `batch/v1` Job in the
 Deployment's place, named like it: `backoffLimit` 0, no `ttlSecondsAfterFinished`, the same pod
 template with `restartPolicy: Never`, so its program runs once. Its pod has no `check`
@@ -1075,8 +1166,40 @@ reason: a reader such as `b10x-gates` refuses a file another user owns or that g
 may read, and the kubelet owns a Secret volume's files. The copy is taken when the pod starts, so
 a changed Secret reaches the agent only in a new pod, and `stage-files` removes a staged file no
 current key names. Either sets `fsGroup` 10001. The golden files
-`tests/golden/platform-operator.yaml` and `tests/golden/takt-delivery.yaml` are rewritten by
+`tests/golden/platform-operator.yaml`, `tests/golden/takt-delivery.yaml` and
+`tests/golden/credential-free.yaml` are rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
+
+A resource with `spec.boundary` (`story:boundary-container-projected-token`, design D243 § 2,
+§ 4) gets a second container, the native sidecar `boundary`: the last init container, with
+`restartPolicy: Always`, so it runs beside the agent and a Job still completes. From
+`defaultImage`, never `spec.image`, it runs `command: [b10x-loom]` with `args: [agent, boundary,
+…]`: `--model-upstream <URL> --model-token /var/run/loom/boundary/tokens/model`;
+`--connectors-upstream <URL> --connectors-token /var/run/loom/boundary/tokens/connectors` and an
+`--operation <ID>` per operation in declared order; `--git-upstream <URL> --git-token
+/var/run/loom/boundary/tokens/git` and a `--repository <OWNER/REPO>` per repository; each group
+only for a declared upstream. These flags are the contract with `b10x-loom agent boundary`. Its
+startup probe execs `b10x-loom agent boundary-ready` with a `--port` per declared relay (model
+8401, connectors 8402, git 8403; `render::RELAYS`), period 1 s, failure threshold 30, so the
+containers after it start once every relay listens. It runs as user and group 10002, non-root,
+on a read-only root, without privilege escalation or capabilities, seccomp `RuntimeDefault`, its
+requests equal to its limits (`render::BOUNDARY_CPU`, `render::BOUNDARY_MEMORY`), with no
+environment. Its only mount is the projected volume `boundary-tokens`, read-only at
+`/var/run/loom/boundary/tokens`: one `serviceAccountToken` source per declared upstream (the
+declared audience, `expirationSeconds: 600`, path `model`, `connectors` or `git`). No other
+container mounts it, the boundary mounts nothing else, and `automountServiceAccountToken` stays
+false. The agent container gets `LOOM_BOUNDARY_MODEL_URL=http://127.0.0.1:8401/v1`,
+`LOOM_BOUNDARY_CONNECTORS_URL=http://127.0.0.1:8402` and
+`LOOM_BOUNDARY_GIT_URL=http://127.0.0.1:8403`, each only for a declared upstream, as controller
+env before `spec.env`. The NetworkPolicy (`story:credential-free-network-policy`, design D243
+§ 2) then opens DNS and, per declared upstream, the namespace its host names
+(`kubernetes.io/metadata.name`) on one TCP port: the `port` of the `allowedBoundaryUpstreams`
+entry that admitted it (the pod port its Service targets), else the URL's (80 when it names
+none); no egress entry of `spec.agent` (admission refuses host and namespace entries, and render
+skips them beside a boundary), no model-route rule. Without `boundary.model` and with empty
+routes a `Command` resource's `routes.yaml` is empty. A resource without `spec.boundary` renders
+byte for byte as before.
+Native sidecars need Kubernetes 1.29 or newer, where they are on by default.
 
 The chart `charts/loom-agents` (Helm 3) installs `crds/` (§ Generated files), the controller
 Deployment (`command: [b10x-loom-operator]`, `args: [run, --config, /etc/loom-operator/config.yaml]`),
@@ -1814,7 +1937,9 @@ run. Never make a live model call for a page; cite a record under `docs/qualific
 
 - Never make a model or network call in a test (tests use recorded responses and local fixtures),
   and never for a documentation page.
-- Never read a credential file in Loom code or tests.
+- Never read a credential file in Loom code or tests. The one exception: `b10x-loom-boundary`
+  reads its own projected service-account token, at the path its command line gives
+  (§ Credential boundary); its tests write fixture tokens and read only those.
 - Never edit a generated file by hand, and never write an `UNMAPPED:` marker into `ess/`.
 - Never implement a story while either ESS gate is red.
 - Never add a dependency from `b10x-loom-commission` to the executor, Canon or a model-provider

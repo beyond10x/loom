@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.50.2`, released from source at the tag `0.50.2`
-([release](https://github.com/beyond10x/loom/releases/tag/0.50.2)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.50.2"`. `b10x-loom run` completed a live run
+Version `0.51.0`, released from source at the tag `0.51.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.51.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.51.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -156,14 +156,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.50.2 https://github.com/beyond10x/loom.git
+git clone --branch 0.51.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.50.2
+b10x-loom 0.51.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -304,6 +304,29 @@ in its place. The controller runs it in an init container of a `Command` pod for
 `HOME`, whose emptyDirs Kubernetes leaves mode 0777. Exit 1 names the directory it could not
 prepare.
 
+`b10x-loom agent boundary` is the credential boundary of a credential-free agent pod: the agent
+holds no credential and calls it on loopback, and it relays to in-cluster upstreams with the pod's
+projected service-account token, read from its file again on every request. It binds `127.0.0.1`
+only, one port per declared upstream:
+
+```console
+b10x-loom agent boundary \
+  --model-upstream http://llm-gateway.agent-credentials.svc:8080 --model-token <FILE> \
+  --connectors-upstream http://connectors-github.agent-credentials.svc:8080 --connectors-token <FILE> \
+  --operation pull_request.get --operation check_runs.list \
+  --git-upstream http://connectors-github.agent-credentials.svc:8080/git --git-token <FILE> \
+  --repository acme/widgets
+```
+
+Port 8401 relays any request under `/v1/` to the model upstream and streams the answer; 8402
+relays `GET /v1/describe` and a `POST /v1alpha2/invoke` whose JSON body names a declared
+`--operation`; 8403 relays git smart-HTTP (`info/refs`, `git-upload-pack`, `git-receive-pack`) for
+a declared `--repository`. The agent's credential headers never pass, anything undeclared is
+refused before it reaches the upstream, and the token is never printed. Upstreams are plain
+`http://`; an `https` one exits 2. `b10x-loom agent boundary-ready --port <PORT>...` exits 0 when
+every port accepts a connection, the sidecar's startup probe. § Credential boundary in
+[AGENTS.md](AGENTS.md) lists every refusal.
+
 ## Deploy agents to Kubernetes
 
 A `LoomAgent` resource carries a `loom.agent/1` document as its `spec.agent` (Loom's deployment
@@ -334,8 +357,8 @@ kind: Deployment
 Helm installs the chart's `crds/` once and never upgrades it; `b10x-loom-operator crd` prints the
 CRD of the installed version. For each resource the controller first runs the check of
 `b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes`,
-`spec.connectorsConfig`, `spec.env` and `spec.configFiles`, and holds the Secret, the namespace
-and the egress hosts to its configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
+`spec.connectorsConfig`, `spec.env` and `spec.configFiles`, and holds the Secret, the namespace,
+the egress hosts and a boundary's upstreams to its configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
 and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
 checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
 with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
@@ -366,8 +389,9 @@ and again expanded against what it knows (its own `env` and the `spec.env` entri
 reference to any other name both as written and as a URL scheme, since it may supply one. It
 refuses a credential in any of these readings or in a name (`SecretLiteral`), a name that is not
 `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`), and a name given twice or one it sets itself
-(`EnvNameConflict`; `HOME`, on either variant). A secret belongs in `spec.secretRef` or
-`spec.secretFiles`: the walk knows credential shapes, not every secret.
+(`EnvNameConflict`; `HOME` and the `LOOM_BOUNDARY_*_URL` names, on either variant). A secret
+belongs in `spec.secretRef` or `spec.secretFiles`: the walk knows credential shapes, not every
+secret.
 For a `Command` resource the controller checks `spec.agent` only for a credential and against
 the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential too.
 A `Command` resource may leave `spec.agent` out and give its program's own configuration as
@@ -391,6 +415,53 @@ spec:
         token_env = "TAKT_ENDPOINT_TOKEN"
 ```
 
+A resource may instead be credential-free (`spec.boundary`, on either variant). It declares the
+upstreams its agent calls, `model`, `connectors` (with the operation ids it admits) and `git`
+(with the `<owner>/<repo>` repositories it admits), each a plain `http://` URL of a cluster
+service (`http://<service>.<namespace>.svc`, optionally `.cluster.local`, a port and a path) and
+the audience of a projected service-account token. The pod then gets a second container,
+`boundary`, a native sidecar running `b10x-loom agent boundary` from the controller's default
+image: it alone mounts the tokens, one per upstream, each valid 600 s, and the agent container
+gets only loopback URLs (`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL`,
+`LOOM_BOUNDARY_GIT_URL`); with `boundary.model` the default routes name the model relay. The
+NetworkPolicy opens DNS and each upstream's namespace on its port, and nothing else. The values
+must list each upstream in `allowedBoundaryUpstreams` (empty by default) as an entry of its
+`kind` (`model`, `connectors` or `git`), its `url` and its token `audience`, which the resource
+must give exactly, and optionally the `port` of the upstream's pods that its Service targets,
+which the NetworkPolicy then opens in place of the URL's port. The controller refuses a
+boundary beside `spec.secretRef` or `spec.secretFiles` (`BoundaryWithSecret`), an upstream that
+is no cluster service or is `https` (`BoundaryUpstreamInvalid`), one no entry of its kind lists
+or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host or namespace
+egress entry (`BoundaryEgressHost`, `BoundaryEgressNamespace`), empty routes on an `AgentServe`
+resource without `boundary.model` (`NoModelRoute`; a `Command` resource gets an empty
+`routes.yaml`), and an audience, operation id (at most 256 bytes) or repository out of form
+(`Malformed`). Native sidecars need Kubernetes 1.29 or newer.
+
+```yaml
+spec:
+  routes: {}
+  boundary:
+    model: {upstream: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
+    connectors:
+      upstream: 'http://connectors.connectors.svc:8080'
+      audience: connectors
+      operations: [merge_request.create]
+    git:
+      upstream: 'http://connectors.connectors.svc/git'
+      audience: connectors-git
+      repositories: [agents/takt-target]
+```
+
+The controller's `config.yaml` (the chart's `allowedBoundaryUpstreams` value) that admits it,
+here with the git path served on port 80 of a Service whose pods listen on 8080:
+
+```yaml
+allowedBoundaryUpstreams:
+  - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
+  - {kind: connectors, url: 'http://connectors.connectors.svc:8080', audience: connectors}
+  - {kind: git, url: 'http://connectors.connectors.svc/git', audience: connectors-git, port: 8080}
+```
+
 `b10x-loom-operator render` prints what the controller would apply for one resource and talks to no
 cluster. Install it with `cargo install --locked --path crates/loom-operator`. Here the example
 spec is wrapped as a resource that asks for the default routes (`routes: {}`), which needs a model
@@ -403,7 +474,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.50.2'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.51.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: []
@@ -470,7 +541,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.50.2" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.51.0" }
 ```
 
 The example below
@@ -549,6 +620,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-cli` | The `b10x-loom` command line |
 | `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval and reading its `http` bindings by bounded GET (`HttpGet`); `b10x-loom agent serve` hosts it |
 | `b10x-loom-a2a` | The A2A listener of a served agent (`expose.a2a`): its agent card, one governed turn per `SendMessage` answered with the turn's record, `GetTask` following the turn's runtime events, readiness and liveness probes, and a refusal of every other request without the agent's bearer; `b10x-loom agent serve` opens it |
+| `b10x-loom-boundary` | The credential boundary of a credential-free agent pod: loopback relays for the model (8401), the Connectors wire (8402, declared operations only) and git smart-HTTP (8403, declared repositories only), each adding the pod's projected service-account token and dropping the agent's credential headers; `b10x-loom agent boundary` runs it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.20.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`); a caller names a partial run over the kind's defaults, `SessionOverrides` (effort, a budget in micro-USD, strict version, context files), refused before the copy where the kind's launcher does not apply a member |

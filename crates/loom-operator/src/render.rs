@@ -42,7 +42,7 @@
 //!   `RuntimeDefault`, `Localhost` with a `localhostProfile` name, or `Unconfined`; the program's
 //!   container carries them in its own `securityContext`, overriding the pod's `RuntimeDefault`
 //!   seccomp profile, and the init containers keep the pod's. The controller's configuration
-//!   decides which it admits ([`crate::admission`] step 15); a resource that declares none renders
+//!   decides which it admits ([`crate::admission`] step 16); a resource that declares none renders
 //!   as before.
 //!
 //!   On either variant `spec.env` is the agent container's `env` after the controller's own
@@ -55,24 +55,55 @@
 //!   by user 10001), and the agent container mounts that subdirectory read-only at
 //!   `spec.secretFiles.mountPath`, so a reader that refuses a file another user owns or others
 //!   may read accepts them. With either the pod's `fsGroup` is 10001.
+//!
+//!   With `spec.boundary` (story boundary-container-projected-token) no container the agent runs
+//!   in can read a credential. The init container `boundary`, last and a native sidecar
+//!   (`restartPolicy: Always`, so it runs beside the agent and a Job still completes), runs
+//!   `b10x-loom agent boundary` from the configured default image, never `spec.image`: for a
+//!   declared `model`, `--model-upstream <URL> --model-token <tokens>/model`; for `connectors`,
+//!   `--connectors-upstream <URL> --connectors-token <tokens>/connectors` and an `--operation`
+//!   per operation id in declared order; for `git`, `--git-upstream <URL> --git-token
+//!   <tokens>/git` and a `--repository` per repository, `<tokens>` being
+//!   [`BOUNDARY_TOKENS_DIR`]. It runs as user and group [`BOUNDARY_USER`] on a read-only root,
+//!   no privilege escalation, no capability, the runtime's default seccomp profile, its requests
+//!   equal to its limits ([`BOUNDARY_CPU`], [`BOUNDARY_MEMORY`]) and no environment; its startup
+//!   probe runs `b10x-loom agent boundary-ready` with a `--port` per declared relay ([`RELAYS`]:
+//!   model 8401, connectors 8402, git 8403) every second, 30 times at most, so the containers
+//!   after it start once every relay listens. Its only mount, read-only at
+//!   [`BOUNDARY_TOKENS_DIR`], is the projected volume `boundary-tokens`: one service-account
+//!   token per declared upstream, its audience the declared one, valid
+//!   [`BOUNDARY_TOKEN_SECONDS`] seconds, at `model`, `connectors` or `git`; no other container
+//!   mounts it and the pod's own token stays unmounted. The agent container gets each declared
+//!   relay's URL (`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL`,
+//!   `LOOM_BOUNDARY_GIT_URL`) as the controller's own environment, before `spec.env`, and with
+//!   `spec.boundary.model` the default routes name the model relay. A resource without
+//!   `spec.boundary` renders as before.
 //! * NetworkPolicy `<resource>`: deny by default; egress to DNS in `kube-system`, to each
 //!   `deploy.kubernetes.egress` entry (a namespace entry as a namespace and pod selector peer, a
 //!   host entry by its port only, since a NetworkPolicy names no host) and, with the default
 //!   routes, to the model route's port; ingress from each `deploy.kubernetes.ingress` namespace.
+//!   With `spec.boundary` (story credential-free-network-policy) the egress is DNS and, per
+//!   declared upstream, the namespace its host names on a TCP port: the `port` of the
+//!   `allowedBoundaryUpstreams` entry that admitted it, the pod port its Service targets, which a
+//!   NetworkPolicy matches after the Service has translated it, else the URL's port (80 when it
+//!   names none); no `deploy.kubernetes.egress` entry (admission refuses each) and no rule to the
+//!   model route.
 //! * Service `<resource>` (ClusterIP, port `a2a`) only with `expose.a2a`.
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroU16;
 
 use b10x_loom_resource::model::AgentVariant;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, DeploymentStrategy};
 use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::api::core::v1::{
     AppArmorProfile, Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort,
-    EmptyDirVolumeSource, EnvFromSource, EnvVar, HTTPGetAction, PersistentVolumeClaimVolumeSource,
-    PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements, SeccompProfile,
-    SecretEnvSource, SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServicePort,
-    ServiceSpec, Volume, VolumeMount,
+    EmptyDirVolumeSource, EnvFromSource, EnvVar, ExecAction, HTTPGetAction,
+    PersistentVolumeClaimVolumeSource, PodSecurityContext, PodSpec, PodTemplateSpec, Probe,
+    ProjectedVolumeSource, ResourceRequirements, SeccompProfile, SecretEnvSource,
+    SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServiceAccountTokenProjection,
+    ServicePort, ServiceSpec, Volume, VolumeMount, VolumeProjection,
 };
 use k8s_openapi::api::networking::v1::{
     NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyIngressRule, NetworkPolicyPeer,
@@ -89,7 +120,7 @@ use serde::Serialize;
 use crate::FIELD_MANAGER;
 use crate::admission::{self, Admitted, Refusal};
 use crate::config::Config;
-use crate::resource::{CommandSpec, LoomAgent};
+use crate::resource::{Boundary, CommandSpec, LoomAgent};
 
 /// The user every container runs as.
 pub const USER: i64 = 10001;
@@ -137,17 +168,149 @@ pub const GENERATION_ANNOTATION: &str = "loom.beyond10x.dev/generation";
 /// The variable naming the `Command` variant's home directory, [`STATE_DIR`].
 pub const HOME: &str = "HOME";
 /// Every environment variable the controller sets on a container of either variant; a
-/// `spec.env` entry may name none of them.
-pub const CONTROLLER_ENV: [&str; 1] = [HOME];
+/// `spec.env` entry may name none of them, whether or not the resource declares a boundary.
+pub const CONTROLLER_ENV: [&str; 4] = [
+    HOME,
+    RELAYS[0].variable,
+    RELAYS[1].variable,
+    RELAYS[2].variable,
+];
+
+/// The name of the container that holds a credential-free pod's only credential: an init
+/// container with `restartPolicy: Always` (a Kubernetes native sidecar), so a `Command`
+/// resource's Job still completes when its program ends.
+pub const BOUNDARY_CONTAINER: &str = "boundary";
+/// The user and group the boundary runs as: another than the agent's [`USER`].
+pub const BOUNDARY_USER: i64 = 10002;
+/// The projected volume holding one service-account token per declared upstream, mounted in the
+/// boundary container alone.
+pub const BOUNDARY_TOKENS_VOLUME: &str = "boundary-tokens";
+/// Where the boundary reads its tokens, each at `<dir>/<model|connectors|git>`.
+pub const BOUNDARY_TOKENS_DIR: &str = "/var/run/loom/boundary/tokens";
+/// How long a projected token is valid, in seconds; the kubelet renews it before it expires.
+pub const BOUNDARY_TOKEN_SECONDS: i64 = 600;
+/// The boundary container's CPU, requests and limits alike.
+pub const BOUNDARY_CPU: &str = "100m";
+/// The boundary container's memory, requests and limits alike.
+pub const BOUNDARY_MEMORY: &str = "64Mi";
+/// How often the kubelet runs the boundary's startup probe, in seconds.
+pub const BOUNDARY_PROBE_PERIOD_SECONDS: i32 = 1;
+/// How many failed startup probes the kubelet accepts before it restarts the boundary.
+pub const BOUNDARY_PROBE_FAILURES: i32 = 30;
+
+/// One kind of upstream the boundary relays to: its name (the token file's, the member's under
+/// `spec.boundary` and the prefix of its flags), the loopback port the boundary listens on, and
+/// the variable naming that URL in the agent container.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Relay {
+    /// `model`, `connectors` or `git`.
+    pub kind: &'static str,
+    /// The loopback port the boundary listens on for it.
+    pub port: u16,
+    /// The variable the agent container reads the loopback URL from.
+    pub variable: &'static str,
+    /// The loopback URL the agent calls.
+    pub url: &'static str,
+}
+
+/// The relays, in the order a boundary's upstreams are rendered: the model, Connectors, git.
+pub const RELAYS: [Relay; 3] = [
+    Relay {
+        kind: "model",
+        port: 8401,
+        variable: "LOOM_BOUNDARY_MODEL_URL",
+        url: "http://127.0.0.1:8401/v1",
+    },
+    Relay {
+        kind: "connectors",
+        port: 8402,
+        variable: "LOOM_BOUNDARY_CONNECTORS_URL",
+        url: "http://127.0.0.1:8402",
+    },
+    Relay {
+        kind: "git",
+        port: 8403,
+        variable: "LOOM_BOUNDARY_GIT_URL",
+        url: "http://127.0.0.1:8403",
+    },
+];
+
+/// What one declared upstream admits besides its URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admits<'a> {
+    /// The model gateway: every call.
+    Everything,
+    /// The Connectors instance: these operation ids, each passed as `--operation`.
+    Operations(&'a [String]),
+    /// The git upstream: these `<owner>/<repo>`, each passed as `--repository`.
+    Repositories(&'a [String]),
+}
+
+/// One upstream a `spec.boundary` declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Upstream<'a> {
+    /// Its relay in the boundary.
+    pub relay: Relay,
+    /// Its base URL, a cluster service.
+    pub url: &'a str,
+    /// The audience of its projected token.
+    pub audience: &'a str,
+    /// What the boundary admits on it.
+    pub admits: Admits<'a>,
+}
+
+/// The upstreams `boundary` declares, in the order of [`RELAYS`].
+#[must_use]
+pub fn upstreams(boundary: &Boundary) -> Vec<Upstream<'_>> {
+    let [model, connectors, git] = RELAYS;
+    let mut out = Vec::new();
+    if let Some(declared) = &boundary.model {
+        out.push(Upstream {
+            relay: model,
+            url: &declared.upstream,
+            audience: &declared.audience,
+            admits: Admits::Everything,
+        });
+    }
+    if let Some(declared) = &boundary.connectors {
+        out.push(Upstream {
+            relay: connectors,
+            url: &declared.upstream,
+            audience: &declared.audience,
+            admits: Admits::Operations(&declared.operations),
+        });
+    }
+    if let Some(declared) = &boundary.git {
+        out.push(Upstream {
+            relay: git,
+            url: &declared.upstream,
+            audience: &declared.audience,
+            admits: Admits::Repositories(&declared.repositories),
+        });
+    }
+    out
+}
 
 /// The environment the controller sets on the agent container of `variant`, each name and
-/// value, in the order the container receives them, before `spec.env`.
+/// value, in the order the container receives them, before `spec.env`: `HOME` for `Command`,
+/// then the loopback URL of each upstream `boundary` declares.
 #[must_use]
-pub fn controller_env(variant: AgentVariant) -> Vec<(&'static str, &'static str)> {
-    match variant {
+pub fn controller_env(
+    variant: AgentVariant,
+    boundary: Option<&Boundary>,
+) -> Vec<(&'static str, &'static str)> {
+    let mut env = match variant {
         AgentVariant::AgentServe => Vec::new(),
         AgentVariant::Command => vec![(HOME, STATE_DIR)],
-    }
+    };
+    env.extend(
+        boundary
+            .map(upstreams)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|upstream| (upstream.relay.variable, upstream.relay.url)),
+    );
+    env
 }
 /// The label that names the namespace a peer stands in, which Kubernetes sets on every namespace.
 const NAMESPACE_LABEL: &str = "kubernetes.io/metadata.name";
@@ -443,6 +606,118 @@ impl Renderer<'_> {
         (mounts, volumes)
     }
 
+    /// The upstreams `spec.boundary` declares; none without one.
+    fn boundary_upstreams(&self) -> Vec<Upstream<'_>> {
+        self.agent
+            .spec
+            .boundary
+            .as_ref()
+            .map(upstreams)
+            .unwrap_or_default()
+    }
+
+    /// The container that holds a credential-free pod's only credential, when `spec.boundary`
+    /// declares an upstream: a native sidecar (an init container with `restartPolicy: Always`)
+    /// running `b10x-loom agent boundary` from the controller's default image as
+    /// [`BOUNDARY_USER`], which relays the agent's loopback calls to each declared upstream with
+    /// its projected token. It mounts the token volume alone, read-only, and gets no
+    /// environment; its startup probe holds the agent back until every relay listens.
+    fn boundary(&self) -> Option<Container> {
+        let declared = self.boundary_upstreams();
+        if declared.is_empty() {
+            return None;
+        }
+        let mut args = vec!["agent".to_owned(), "boundary".to_owned()];
+        let mut ready = ["b10x-loom", "agent", "boundary-ready"]
+            .map(str::to_owned)
+            .to_vec();
+        for upstream in &declared {
+            let kind = upstream.relay.kind;
+            args.extend([
+                format!("--{kind}-upstream"),
+                upstream.url.to_owned(),
+                format!("--{kind}-token"),
+                format!("{BOUNDARY_TOKENS_DIR}/{kind}"),
+            ]);
+            let (flag, admitted): (&str, &[String]) = match upstream.admits {
+                Admits::Everything => ("", &[]),
+                Admits::Operations(operations) => ("--operation", operations),
+                Admits::Repositories(repositories) => ("--repository", repositories),
+            };
+            for value in admitted {
+                args.extend([flag.to_owned(), value.clone()]);
+            }
+            ready.extend(["--port".to_owned(), upstream.relay.port.to_string()]);
+        }
+        let quantities = BTreeMap::from([
+            ("cpu".to_owned(), Quantity(BOUNDARY_CPU.to_owned())),
+            ("memory".to_owned(), Quantity(BOUNDARY_MEMORY.to_owned())),
+        ]);
+        Some(Container {
+            name: BOUNDARY_CONTAINER.to_owned(),
+            image: Some(self.config.default_image.to_string()),
+            command: Some(vec!["b10x-loom".to_owned()]),
+            args: Some(args),
+            restart_policy: Some("Always".to_owned()),
+            startup_probe: Some(Probe {
+                exec: Some(ExecAction {
+                    command: Some(ready),
+                }),
+                period_seconds: Some(BOUNDARY_PROBE_PERIOD_SECONDS),
+                failure_threshold: Some(BOUNDARY_PROBE_FAILURES),
+                ..Probe::default()
+            }),
+            resources: Some(ResourceRequirements {
+                limits: Some(quantities.clone()),
+                requests: Some(quantities),
+                ..ResourceRequirements::default()
+            }),
+            security_context: Some(SecurityContext {
+                run_as_user: Some(BOUNDARY_USER),
+                run_as_group: Some(BOUNDARY_USER),
+                seccomp_profile: Some(SeccompProfile {
+                    type_: "RuntimeDefault".to_owned(),
+                    localhost_profile: None,
+                }),
+                ..self.security()
+            }),
+            volume_mounts: Some(vec![VolumeMount {
+                name: BOUNDARY_TOKENS_VOLUME.to_owned(),
+                mount_path: BOUNDARY_TOKENS_DIR.to_owned(),
+                read_only: Some(true),
+                ..VolumeMount::default()
+            }]),
+            ..Container::default()
+        })
+    }
+
+    /// The projected volume of the boundary's tokens: one service-account token per declared
+    /// upstream, its audience the declared one, valid [`BOUNDARY_TOKEN_SECONDS`], at the
+    /// upstream's kind.
+    fn boundary_volume(&self) -> Option<Volume> {
+        let declared = self.boundary_upstreams();
+        (!declared.is_empty()).then(|| Volume {
+            name: BOUNDARY_TOKENS_VOLUME.to_owned(),
+            projected: Some(ProjectedVolumeSource {
+                default_mode: None,
+                sources: Some(
+                    declared
+                        .iter()
+                        .map(|upstream| VolumeProjection {
+                            service_account_token: Some(ServiceAccountTokenProjection {
+                                audience: Some(upstream.audience.to_owned()),
+                                expiration_seconds: Some(BOUNDARY_TOKEN_SECONDS),
+                                path: upstream.relay.kind.to_owned(),
+                            }),
+                            ..VolumeProjection::default()
+                        })
+                        .collect(),
+                ),
+            }),
+            ..Volume::default()
+        })
+    }
+
     /// The init container that copies `spec.secretFiles` out of the Secret volume, whose files
     /// the kubelet owns, into a directory the pod's user owns: `b10x-loom agent stage-files`
     /// from the controller's default image, which carries `b10x-loom` whatever `spec.image` is.
@@ -529,23 +804,24 @@ impl Renderer<'_> {
     }
 
     /// The agent container's environment: the controller's own ([`CONTROLLER_ENV`]; `HOME` for
-    /// the `Command` variant), then `spec.env` in declaration order; none when both are empty.
-    /// The init containers get none of it: they run `b10x-loom` for the controller, not the
-    /// agent.
+    /// the `Command` variant, then the boundary's loopback URL of each declared upstream), then
+    /// `spec.env` in declaration order; none when both are empty. The init containers get none
+    /// of it: they run `b10x-loom` for the controller, not the agent.
     fn env(&self) -> Option<Vec<EnvVar>> {
-        let env: Vec<EnvVar> = controller_env(self.admitted.variant)
-            .into_iter()
-            .map(|(name, value)| EnvVar {
-                name: name.to_owned(),
-                value: Some(value.to_owned()),
-                value_from: None,
-            })
-            .chain(self.agent.spec.env.iter().flatten().map(|entry| EnvVar {
-                name: entry.name.clone(),
-                value: Some(entry.value.clone()),
-                value_from: None,
-            }))
-            .collect();
+        let env: Vec<EnvVar> =
+            controller_env(self.admitted.variant, self.agent.spec.boundary.as_ref())
+                .into_iter()
+                .map(|(name, value)| EnvVar {
+                    name: name.to_owned(),
+                    value: Some(value.to_owned()),
+                    value_from: None,
+                })
+                .chain(self.agent.spec.env.iter().flatten().map(|entry| EnvVar {
+                    name: entry.name.clone(),
+                    value: Some(entry.value.clone()),
+                    value_from: None,
+                }))
+                .collect();
         (!env.is_empty()).then_some(env)
     }
 
@@ -674,6 +950,7 @@ impl Renderer<'_> {
                         .into_iter()
                         .chain(self.prepare_dirs())
                         .chain((self.admitted.variant == AgentVariant::AgentServe).then_some(check))
+                        .chain(self.boundary())
                         .collect();
                     (!init.is_empty()).then_some(init)
                 },
@@ -698,6 +975,7 @@ impl Renderer<'_> {
                     ]
                     .into_iter()
                     .chain(extra_volumes)
+                    .chain(self.boundary_volume())
                     .collect(),
                 ),
                 ..PodSpec::default()
@@ -764,8 +1042,14 @@ impl Renderer<'_> {
             ]),
         }];
         let mut ingress = Vec::new();
+        let upstreams = self.boundary_upstreams();
         if let Some(kubernetes) = self.kubernetes() {
-            for entry in &kubernetes.egress {
+            let entries = if upstreams.is_empty() {
+                kubernetes.egress.as_slice()
+            } else {
+                &[]
+            };
+            for entry in entries {
                 let to = entry.namespace.as_ref().map(|namespace| {
                     vec![NetworkPolicyPeer {
                         namespace_selector: Some(in_namespace(namespace)),
@@ -797,13 +1081,33 @@ impl Renderer<'_> {
                 });
             }
         }
-        if self.admitted.default_routes
-            && let Some(route) = &self.config.model_route
-        {
-            egress.push(NetworkPolicyEgressRule {
-                to: None,
-                ports: Some(vec![tcp(i32::from(route.port()))]),
-            });
+        if upstreams.is_empty() {
+            if self.admitted.default_routes
+                && let Some(route) = &self.config.model_route
+            {
+                egress.push(NetworkPolicyEgressRule {
+                    to: None,
+                    ports: Some(vec![tcp(i32::from(route.port()))]),
+                });
+            }
+        } else {
+            for upstream in &upstreams {
+                let Ok(service) = admission::cluster_service(upstream.url) else {
+                    continue;
+                };
+                let port = self
+                    .config
+                    .allowed_upstream(upstream.relay.kind, upstream.url, upstream.audience)
+                    .and_then(|allowed| allowed.port)
+                    .map_or(service.port, NonZeroU16::get);
+                egress.push(NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        namespace_selector: Some(in_namespace(service.namespace)),
+                        ..NetworkPolicyPeer::default()
+                    }]),
+                    ports: Some(vec![tcp(i32::from(port))]),
+                });
+            }
         }
         NetworkPolicy {
             metadata: self.meta(self.name.to_owned()),

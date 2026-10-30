@@ -1,6 +1,7 @@
 //! The controller's configuration, `config.yaml`: the namespace it watches, the agent image and
 //! resources a `LoomAgent` gets when it names none, the model route a resource without routes is
-//! given, and the Secret names and egress hosts a resource may use.
+//! given, the Secret names and egress hosts a resource may use, and the upstreams a
+//! credential-free resource's boundary may relay to.
 //!
 //! ```yaml
 //! namespace: agents
@@ -13,14 +14,24 @@
 //! allowUnconfinedProfiles: false
 //! allowedSeccompLocalhostProfiles: [profiles/takt.json]
 //! allowedAppArmorLocalhostProfiles: [takt-delivery]
+//! allowedBoundaryUpstreams:
+//!   - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
+//!   - {kind: git, url: 'http://connectors.connectors.svc/git', audience: connectors-git, port: 8080}
 //! ```
 //!
 //! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
 //! `allowUnconfinedProfiles` defaults to `false`. A member the configuration does not declare is
 //! refused, so a misspelt key is never ignored.
+//!
+//! Each `allowedBoundaryUpstreams` entry admits one upstream for one relay: its `kind` (`model`,
+//! `connectors` or `git`), its `url` and its token `audience`, which a `spec.boundary.<kind>`
+//! must give exactly, and optionally the `port` (1 to 65535) of the upstream's pods that its
+//! Service targets, which the pod's NetworkPolicy opens in place of the URL's port, since a
+//! NetworkPolicy matches the pod port after the Service has translated it.
 
 use std::fmt;
 use std::fs;
+use std::num::NonZeroU16;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -61,6 +72,51 @@ pub struct Config {
     /// name; empty admits none.
     #[serde(default)]
     pub allowed_app_armor_localhost_profiles: Vec<String>,
+    /// The upstreams a `spec.boundary` may name, each for one relay kind, its URL and audience
+    /// matched exactly; empty admits none.
+    #[serde(default)]
+    pub allowed_boundary_upstreams: Vec<AllowedUpstream>,
+}
+
+/// The relay a boundary upstream is declared for, as `spec.boundary` names its members.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpstreamKind {
+    /// `spec.boundary.model`, the model pass-through.
+    Model,
+    /// `spec.boundary.connectors`, the Connectors wire.
+    Connectors,
+    /// `spec.boundary.git`, the git smart-HTTP relay.
+    Git,
+}
+
+impl UpstreamKind {
+    /// The member's name under `spec.boundary`: `model`, `connectors` or `git`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Model => "model",
+            Self::Connectors => "connectors",
+            Self::Git => "git",
+        }
+    }
+}
+
+/// One `allowedBoundaryUpstreams` entry: a `spec.boundary.<kind>` whose `upstream` is `url` and
+/// whose `audience` is `audience`, each exactly, is admitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllowedUpstream {
+    /// The relay it may be declared for.
+    pub kind: UpstreamKind,
+    /// The upstream's base URL.
+    pub url: String,
+    /// The audience of the projected token the boundary sends it.
+    pub audience: String,
+    /// The pod port the upstream's Service targets, which the NetworkPolicy opens; absent, the
+    /// URL's port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<NonZeroU16>,
 }
 
 /// A container image, `repository:tag`.
@@ -137,7 +193,7 @@ impl std::error::Error for ConfigError {}
 impl Config {
     /// The configuration `render` uses without `--config`: namespace `default`, the agent image
     /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory, no model
-    /// route, and no Secret name or egress host admitted.
+    /// route, and no Secret name, egress host or boundary upstream admitted.
     #[must_use]
     pub fn builtin() -> Self {
         Self {
@@ -157,6 +213,7 @@ impl Config {
             allow_unconfined_profiles: false,
             allowed_seccomp_localhost_profiles: Vec::new(),
             allowed_app_armor_localhost_profiles: Vec::new(),
+            allowed_boundary_upstreams: Vec::new(),
         }
     }
 
@@ -166,6 +223,29 @@ impl Config {
     /// The decoder's message, naming the member, when `text` is not a configuration.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         serde_yaml_ng::from_str(text).map_err(|error| ConfigError(error.to_string()))
+    }
+
+    /// Whether an `allowedBoundaryUpstreams` entry names the relay `kind` (`model`, `connectors`
+    /// or `git`) at exactly `url`, whatever its audience.
+    #[must_use]
+    pub fn allows_upstream_url(&self, kind: &str, url: &str) -> bool {
+        self.allowed_boundary_upstreams
+            .iter()
+            .any(|allowed| allowed.kind.as_str() == kind && allowed.url == url)
+    }
+
+    /// The `allowedBoundaryUpstreams` entry admitting the relay `kind` at exactly `url` with
+    /// exactly `audience`, if one does.
+    #[must_use]
+    pub fn allowed_upstream(
+        &self,
+        kind: &str,
+        url: &str,
+        audience: &str,
+    ) -> Option<&AllowedUpstream> {
+        self.allowed_boundary_upstreams.iter().find(|allowed| {
+            allowed.kind.as_str() == kind && allowed.url == url && allowed.audience == audience
+        })
     }
 
     /// Reads and decodes the configuration at `path`.
@@ -221,5 +301,95 @@ mod tests {
         assert_eq!(config.model_route, None);
         assert!(config.allowed_secret_names.is_empty());
         assert!(config.allowed_egress_hosts.is_empty());
+    }
+
+    #[test]
+    fn the_boundary_upstreams_are_listed_and_absent_admit_none() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        let absent = Config::parse(base).expect("a configuration");
+        assert!(absent.allowed_boundary_upstreams.is_empty());
+        assert!(Config::builtin().allowed_boundary_upstreams.is_empty());
+        let listed = Config::parse(&format!(
+            "{base}allowedBoundaryUpstreams:\n- {{kind: model, url: 'http://llm-gateway.llm.svc:8080', \
+             audience: llm-gateway}}\n- {{kind: git, url: 'http://connectors.connectors.svc/git', \
+             audience: connectors-git, port: 8080}}\n"
+        ))
+        .expect("a configuration");
+        assert_eq!(
+            listed.allowed_boundary_upstreams,
+            [
+                AllowedUpstream {
+                    kind: UpstreamKind::Model,
+                    url: "http://llm-gateway.llm.svc:8080".to_owned(),
+                    audience: "llm-gateway".to_owned(),
+                    port: None,
+                },
+                AllowedUpstream {
+                    kind: UpstreamKind::Git,
+                    url: "http://connectors.connectors.svc/git".to_owned(),
+                    audience: "connectors-git".to_owned(),
+                    port: NonZeroU16::new(8080),
+                },
+            ]
+        );
+        assert_eq!(
+            listed
+                .allowed_upstream(
+                    "git",
+                    "http://connectors.connectors.svc/git",
+                    "connectors-git"
+                )
+                .and_then(|allowed| allowed.port),
+            NonZeroU16::new(8080)
+        );
+        assert_eq!(
+            listed.allowed_upstream(
+                "model",
+                "http://connectors.connectors.svc/git",
+                "connectors-git"
+            ),
+            None,
+            "an entry admits its own kind only"
+        );
+    }
+
+    /// `story:boundary-container-projected-token`: an `allowedBoundaryUpstreams` entry is a kind,
+    /// a URL and an audience, with an optional pod port; a bare URL, an unknown member or kind, a
+    /// missing audience and port 0 are refused when the configuration is read.
+    #[test]
+    fn a_boundary_upstream_entry_out_of_shape_is_refused() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        for (entry, named) in [
+            (
+                "'http://llm-gateway.llm.svc:8080'",
+                "struct AllowedUpstream",
+            ),
+            (
+                "{kind: model, url: 'http://gw.llm.svc', audience: gw, host: gw.example}",
+                "host",
+            ),
+            (
+                "{kind: tools, url: 'http://gw.llm.svc', audience: gw}",
+                "tools",
+            ),
+            ("{kind: model, url: 'http://gw.llm.svc'}", "audience"),
+            (
+                "{kind: model, url: 'http://gw.llm.svc', audience: gw, port: 0}",
+                "nonzero",
+            ),
+            (
+                "{kind: model, url: 'http://gw.llm.svc', audience: gw, port: 65536}",
+                "65536",
+            ),
+        ] {
+            let error = Config::parse(&format!("{base}allowedBoundaryUpstreams: [{entry}]\n"))
+                .expect_err(entry);
+            assert!(
+                error.0.contains("allowedBoundaryUpstreams") && error.0.contains(named),
+                "story:boundary-container-projected-token: {entry}: {error}"
+            );
+        }
     }
 }

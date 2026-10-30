@@ -28,3 +28,4 @@ data:
     allowedAppArmorLocalhostProfiles: {{ .Values.allowedAppArmorLocalhostProfiles | toJson }}
     allowedEgressHosts: {{ .Values.allowedEgressHosts | toJson }}
     allowedClaimNames: {{ .Values.allowedClaimNames | toJson }}
+    allowedBoundaryUpstreams: {{ .Values.allowedBoundaryUpstreams | toJson }}

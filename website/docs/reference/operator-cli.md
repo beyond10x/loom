@@ -33,12 +33,13 @@ Usage: b10x-loom-operator run --config <FILE>
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
-| `--config <FILE>` | yes | none | The controller's configuration, YAML: namespace, defaultImage, defaultResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles, allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles |
+| `--config <FILE>` | yes | none | The controller's configuration, YAML: namespace, defaultImage, defaultResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles, allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles, allowedBoundaryUpstreams |
 
 ```text
 The configuration names the one namespace watched, the default agent image and resources, the
-model route a resource with empty routes is given, and the Secret names and egress hosts a resource
-may use. The cluster is the in-cluster service account's, else the current kubeconfig context's.
+model route a resource with empty routes is given, the Secret names and egress hosts a resource may
+use, and the upstreams a credential-free resource's boundary may relay to. The cluster is the
+in-cluster service account's, else the current kubeconfig context's.
 Each resource is checked in-process before any child exists; a refused one has no children and its
 status names the refusal. The record of the resources lives in memory: after a restart every
 resource is checked again and its status rewritten.
@@ -65,7 +66,8 @@ Usage: b10x-loom-operator render [OPTIONS] --resource <FILE>
 ```text
 The resource's namespace is its metadata.namespace, else the configuration's. Without --config the
 built-in configuration applies: namespace default, the agent image registry.example/loom-agent at
-this version, 250m CPU and 256Mi memory, no model route, and no Secret name or egress host admitted.
+this version, 250m CPU and 256Mi memory, no model route, and no Secret name, egress host or
+boundary upstream admitted.
 The children carry the resource as owner only when the document has a metadata.uid.
 
 Exit status:

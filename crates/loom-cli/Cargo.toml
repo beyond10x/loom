@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 b10x-loom-a2a = { path = "../loom-a2a" }
 b10x-loom-agent = { path = "../loom-agent" }
+b10x-loom-boundary = { path = "../loom-boundary" }
 b10x-loom-protocols = { path = "../loom-protocols" }
 serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
@@ -36,7 +37,7 @@ intake_model = { package = "intake", path = "../../generated/rust/intake" }
 clap = { version = "4.6", features = ["derive"] }
 tempfile = "3"
 libc = "0.2"
-tokio = { version = "1.53", features = ["rt", "signal", "macros"] }
+tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "signal", "macros"] }
 
 [dev-dependencies]
 b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }
@@ -44,4 +45,6 @@ b10x-loom-intake-references = { path = "../loom-intake-references" }
 chrono = "0.4"
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+serde = "1"
 serde_json = "1"
+serde_yaml_ng = "0.10"
