@@ -24,7 +24,9 @@
 //! `deploy.kubernetes.resources`, since its program is Loom's own. A `Command` pod runs the
 //! image's own program, whose need Loom does not know: without declared resources it gets the
 //! optional `defaultCommandResources`, and without that the resource is refused
-//! `ResourcesRequired`.
+//! `ResourcesRequired`. Each `cpu` and `memory` of the two is a non-negative Kubernetes
+//! quantity (`250m`, `4`, `8Gi`, `1e3`); any other text refuses the configuration, naming the
+//! member and the value, so neither `run` nor `render --config` starts on it.
 //!
 //! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
 //! `allowUnconfinedProfiles` defaults to `false`. A member the configuration does not declare is
@@ -236,7 +238,13 @@ impl Config {
     /// # Errors
     /// The decoder's message, naming the member, when `text` is not a configuration.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        serde_yaml_ng::from_str(text).map_err(|error| ConfigError(error.to_string()))
+        let config: Self =
+            serde_yaml_ng::from_str(text).map_err(|error| ConfigError(error.to_string()))?;
+        sized("defaultResources", &config.default_resources)?;
+        if let Some(size) = &config.default_command_resources {
+            sized("defaultCommandResources", size)?;
+        }
+        Ok(config)
     }
 
     /// Whether an `allowedBoundaryUpstreams` entry names the relay `kind` (`model`, `connectors`
@@ -272,6 +280,50 @@ impl Config {
         Self::parse(&text)
             .map_err(|error| ConfigError(format!("--config {}: {error}", path.display())))
     }
+}
+
+/// The suffixes a Kubernetes quantity may end in: none, the decimal SI ones and the binary SI
+/// ones.
+const QUANTITY_SUFFIXES: [&str; 16] = [
+    "", "n", "u", "m", "k", "M", "G", "T", "P", "E", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei",
+];
+
+/// Whether `text` is a non-negative Kubernetes quantity as the API server reads one: an
+/// optional `+`, digits with an optional decimal part (`2.`, `.5`), then a suffix of
+/// [`QUANTITY_SUFFIXES`] or a decimal exponent (`e3`, `E-3`). No blank, space or other unit.
+fn quantity(text: &str) -> bool {
+    let unsigned = text.strip_prefix('+').unwrap_or(text);
+    let end = unsigned
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(unsigned.len());
+    let (number, suffix) = unsigned.split_at(end);
+    let number = match number.split_once('.') {
+        None => !number.is_empty(),
+        Some((whole, fraction)) => {
+            !fraction.contains('.') && !(whole.is_empty() && fraction.is_empty())
+        }
+    };
+    let exponent = || {
+        suffix
+            .strip_prefix(['e', 'E'])
+            .map(|rest| rest.strip_prefix(['+', '-']).unwrap_or(rest))
+            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+    };
+    number && (QUANTITY_SUFFIXES.contains(&suffix) || exponent())
+}
+
+/// Refuses a `cpu` or `memory` of `size`, the configuration's `member`, that is no Kubernetes
+/// quantity, naming the member and the value: such a size would be refused at apply, where no
+/// refusal names it.
+fn sized(member: &str, size: &Resources) -> Result<(), ConfigError> {
+    for (field, value) in [("cpu", &size.cpu), ("memory", &size.memory)] {
+        if !quantity(value) {
+            return Err(ConfigError(format!(
+                "{member}.{field}: {value:?} is not a Kubernetes quantity"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

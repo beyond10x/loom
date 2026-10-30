@@ -338,8 +338,11 @@ its ServiceAccount and a Role limited to its namespace, which grants nothing on 
 `get` and `list` on Pods. The values
 name the controller image (`image`), the agent image a resource gets when it names none
 (`agentImage`), the model route, an in-cluster proxy given by `modelRoute.url`, `.protocol` and
-`.model` that holds no credential, and the Secret names and egress hosts a resource may use
-(`allowedSecretNames`, `allowedEgressHosts`; an empty list allows none). `helm install` takes the
+`.model` that holds no credential, the Secret names and egress hosts a resource may use
+(`allowedSecretNames`, `allowedEgressHosts`; an empty list allows none), the size of an
+`AgentServe` pod that declares none (`defaultAgentResources`, 250m CPU and 256Mi) and that of a
+`Command` pod that declares none (`defaultCommandResources`, 4 CPU and 8Gi; `null` sets none, and
+such a resource is then refused). `helm install` takes the
 release name, chart, namespace and `--set` values shown here; `--include-crds` is only for
 `helm template`, since `helm install` installs `crds/` itself:
 
@@ -369,7 +372,13 @@ and the conditions `Checked`, `Available` and, for a `Command` resource, `Comple
 A resource with `spec.command` is the `Command` variant: its pod runs the image's own program
 (`spec.command.entrypoint` and `args`, each left to the image when absent) instead of
 `b10x-loom agent serve`, with no check before it, and reads `spec.agent` at `/config/agent.yaml`.
-That is how a takt delivery runs as a `LoomAgent`. Its pod is a `batch/v1` Job in the Deployment's
+That is how a takt delivery runs as a `LoomAgent`. Loom cannot size a program it does not know,
+so every container of a `Command` pod but the boundary sidecar gets the CPU and memory of
+`spec.agent.deploy.kubernetes.resources`, else the controller configuration's
+`defaultCommandResources`; with neither the resource is refused `ResourcesRequired`. The chart
+sets that member; a hand-written controller `config.yaml` needs it
+(`defaultCommandResources: {cpu: '4', memory: 8Gi}`, each a Kubernetes quantity) or each
+`Command` resource must declare its own. Its pod is a `batch/v1` Job in the Deployment's
 place, so the program runs once: when it ends the resource reads `Completed` or `Failed` and
 nothing starts it again until `spec` changes, which replaces the Job. Its `status.run` holds the
 program's exit code (`exitCode`), when it ended (`finishedAt`) and the `reason`, read from the
@@ -477,6 +486,7 @@ $ cat operator.yaml
 namespace: agents
 defaultImage: {repository: registry.example/loom-agent, tag: '0.52.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
+defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: []
 allowedEgressHosts: [chat.example, models.example]

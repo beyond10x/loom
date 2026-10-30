@@ -217,8 +217,10 @@ fn a_command_resource_without_resources_is_refused_resources_required() {
             );
             let detail = &message[REQUIRED.len()..];
             assert!(
-                detail.contains("spec.agent.deploy.kubernetes.resources")
-                    && detail.contains("defaultCommandResources"),
+                detail.contains(
+                    "declare its cpu and memory in spec.agent.deploy.kubernetes.resources"
+                ) && detail
+                    .contains("set defaultCommandResources in the controller's configuration",),
                 "{case}, {config_name}: the detail names the member to set and the \
                  configuration's default: {message}"
             );
@@ -325,5 +327,95 @@ fn default_command_resources_is_optional_and_a_misspelt_member_is_refused() {
     ] {
         let error = Config::parse(&format!("{CONFIG}{text}")).expect_err(text);
         assert!(error.0.contains(named), "{text}: {error}");
+    }
+}
+
+/// A configuration whose `defaultResources` is `serve` and whose `defaultCommandResources` is
+/// `command`, each `(cpu, memory)` written as a quoted YAML string.
+fn sized_config(serve: (&str, &str), command: (&str, &str)) -> String {
+    let quoted = |text: &str| serde_json::to_string(text).expect("JSON text");
+    format!(
+        "namespace: agents\ndefaultImage: {{repository: registry.example/loom-agent, tag: \
+         '0.40.0'}}\ndefaultResources: {{cpu: {}, memory: {}}}\ndefaultCommandResources: {{cpu: \
+         {}, memory: {}}}\n",
+        quoted(serve.0),
+        quoted(serve.1),
+        quoted(command.0),
+        quoted(command.1)
+    )
+}
+
+/// Spellings Kubernetes does not read as a non-negative quantity.
+const NOT_QUANTITIES: [&str; 12] = [
+    "", " ", "4 cores", "8GB", "8 Gi", "-4", "4m ", "Gi", ".", "1e", "1.2.3", "8gi",
+];
+
+/// Spellings it does.
+const QUANTITIES: [&str; 14] = [
+    "250m", "4", "0", "8Gi", "0.5", "1.5Gi", ".5", "2.", "1e3", "2E-3", "100M", "2k", "1Ei", "500u",
+];
+
+#[test]
+fn a_size_in_the_configuration_that_is_no_kubernetes_quantity_is_refused_naming_member_and_value() {
+    let good = ("1", "1Gi");
+    for value in NOT_QUANTITIES {
+        for (member, serve, command) in [
+            ("defaultResources.cpu", (value, "1Gi"), good),
+            ("defaultResources.memory", ("1", value), good),
+            ("defaultCommandResources.cpu", good, (value, "1Gi")),
+            ("defaultCommandResources.memory", good, ("1", value)),
+        ] {
+            let error = Config::parse(&sized_config(serve, command))
+                .expect_err(&format!("{member}: {value:?}"));
+            assert_eq!(
+                error.0,
+                format!("{member}: {value:?} is not a Kubernetes quantity"),
+                "{member}"
+            );
+        }
+    }
+    for value in QUANTITIES {
+        let config = Config::parse(&sized_config((value, value), (value, value)))
+            .unwrap_or_else(|error| panic!("{value:?} is a quantity: {error}"));
+        assert_eq!(
+            config.default_command_resources.map(|size| size.memory),
+            Some(value.to_owned())
+        );
+    }
+}
+
+#[test]
+fn render_and_run_refuse_a_configuration_holding_no_quantity() {
+    let dir = scratch("command-resources-bad-config");
+    let config = dir.join("config.yaml");
+    fs::write(&config, sized_config(("1", "1Gi"), ("4", "8GB"))).expect("the config");
+    let resource = dir.join("smoke.yaml");
+    fs::write(&resource, command_without_agent(BARE)).expect("the resource");
+    let expected = format!(
+        "b10x-loom-operator: --config {}: defaultCommandResources.memory: \"8GB\" is not a \
+         Kubernetes quantity\n",
+        config.display()
+    );
+    for (command, args) in [
+        (
+            "render",
+            vec!["--resource", resource.to_str().expect("UTF-8")],
+        ),
+        ("run", Vec::new()),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom-operator"))
+            .arg(command)
+            .args(args)
+            .arg("--config")
+            .arg(&config)
+            .output()
+            .expect("the binary runs");
+        assert_eq!(output.status.code(), Some(1), "{command}: {output:?}");
+        assert!(output.stdout.is_empty(), "{command}: {output:?}");
+        assert_eq!(
+            String::from_utf8(output.stderr).expect("UTF-8"),
+            expected,
+            "{command}"
+        );
     }
 }
