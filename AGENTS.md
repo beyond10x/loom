@@ -1425,6 +1425,19 @@ else the endpoint's, and metaharness gives the child `ANTHROPIC_BASE_URL`, its p
 a key, not on loopback or on another wire suspends the step with `ExternalAvailability` before any
 copy, naming why; one with no endpoint is unchanged
 (`crates/loom-session-executor/tests/claude_endpoint.rs`).
+A host that names the scratch copy (`SessionExecutor::copy_name`) has every session under that
+name work in the same path, `<scratch>/<copy_name>/copy`, so a harness that puts its working
+directory into its context sends the same bytes from step to step; without a name each session's
+root is unique (`session-<pid>-<nanos>-<n>`). The name is one plain path component of at most 64
+bytes (no `/`, `.`, `..`, control character or empty name), else the step suspends with
+`ExternalAvailability` before any copy. The root is the user's own `0700` directory, held by an
+exclusive lock on it for the session (`ScratchCopy::claim`): a directory of the effective user's
+that no session holds, one an earlier session left, is emptied without following a link; a link,
+any other entry, another user's directory, or one a running session holds (another executor
+under the same name) suspends the step before any copy, naming the path and touching nothing.
+The root is removed when the call returns, then the lock released. The effective user is read
+from `/proc/self/status`; where that cannot be read only a root the call made itself is used
+(`crates/loom-session-executor/tests/stable_copy_path.rs`).
 A b10x-harness session streams its reply in `text-delta` fragments: the executor joins a
 turn's fragments with no separator, keeping the line breaks they carry, and starts each turn
 (`TurnStarted`) on a new line before it looks for the action line; a Claude Code or Codex text
