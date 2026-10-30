@@ -1440,11 +1440,14 @@ launched with no credential flag. The executor does not see `LOOM_BOUNDARY_MODEL
 is the host. Any other keyless endpoint suspends the step before any copy with the error it always
 had (`crates/loom-session-executor/tests/endpoint_keyless.rs`). A Claude Code session takes an
 endpoint only in that keyless loopback form and speaking `anthropic-messages`: `fn spec` hands
-metaharness its `base_url` as `model_endpoint` with `credentials: none` and the executor's model or
-else the endpoint's, and metaharness gives the child `ANTHROPIC_BASE_URL`, its placeholder key and
-`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no operator credential. A Claude Code endpoint naming
-a key, not on loopback or on another wire suspends the step with `ExternalAvailability` before any
-copy, naming why; one with no endpoint is unchanged
+metaharness its `base_url` less exactly one trailing `/v1` segment as `model_endpoint` (the gateway
+root: Claude Code posts to `{root}/v1/messages`) with `credentials: none` and the executor's model
+or else the endpoint's, a blank one being none, and metaharness gives the child
+`ANTHROPIC_BASE_URL`, its placeholder key and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no
+operator credential. A Claude Code endpoint naming a key, not on loopback, on another wire, or
+whose path does not end in one `/v1` segment (or that carries a query or fragment) suspends the
+step with `ExternalAvailability` before any copy, naming why and the endpoint by its scheme and
+host only; one with no endpoint is unchanged
 (`crates/loom-session-executor/tests/claude_endpoint.rs`).
 A host that names the scratch copy (`SessionExecutor::copy_name`) has every session under that
 name work in the same path, `<scratch>/<copy_name>/copy`, so a harness that puts its working

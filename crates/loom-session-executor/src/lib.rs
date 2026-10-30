@@ -426,7 +426,9 @@ impl std::error::Error for SpecError {}
 /// then pointed at no credential, and the far end (a credential-free pod's boundary relay) adds it.
 ///
 /// A `Kind::Claude` session takes only that keyless loopback endpoint, speaking
-/// `anthropic-messages`: metaharness gets `base_url` as its `model_endpoint` with no credential,
+/// `anthropic-messages` and ending in one `/v1` path segment: metaharness gets `base_url` less
+/// that segment, the gateway root Claude Code posts `/v1/messages` under, as its `model_endpoint`
+/// with no credential,
 /// and the child gets `ANTHROPIC_BASE_URL`, metaharness's placeholder key and no nonessential
 /// traffic. Any other endpoint on it suspends the step before any copy. Codex ignores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1161,10 +1163,16 @@ impl SessionExecutor {
                 if let Some(endpoint) = &self.endpoint {
                     // Keyless, loopback and `anthropic-messages` ([`Self::check_claude_endpoint`]):
                     // the far end adds the credential, and the child holds metaharness's
-                    // placeholder only. No wire: metaharness refuses one on a vendor arm.
+                    // placeholder only. No wire: metaharness refuses one on a vendor arm. The
+                    // endpoint is metaharness's root, without the `/v1` the base URL carries.
                     spec.credentials = CredentialSource::None;
-                    spec.model_endpoint = Some(endpoint.base_url.clone());
-                    spec.model = Some(self.model.clone().unwrap_or(endpoint.model.clone()));
+                    spec.model_endpoint = Some(Self::claude_root(endpoint)?);
+                    // A blank model is no model: no `--model ""`.
+                    spec.model = [self.model.as_deref(), Some(endpoint.model.as_str())]
+                        .into_iter()
+                        .flatten()
+                        .find(|model| !model.trim().is_empty())
+                        .map(str::to_owned);
                 }
             }
             Kind::Codex => {
@@ -1248,36 +1256,83 @@ impl SessionExecutor {
     }
 
     /// A Claude Code session's [`Self::endpoint`], when named, names no key (`token_file` empty,
-    /// `token_pointer` none), is on a loopback host ([`keyless_loopback`]) and speaks
-    /// `anthropic-messages`, the one wire Claude Code speaks; the error names which it is not.
-    /// Other kinds are checked elsewhere.
+    /// `token_pointer` none), is on a loopback host ([`keyless_loopback`]), speaks
+    /// `anthropic-messages`, the one wire Claude Code speaks, and has a root
+    /// ([`Self::claude_root`]); the error names which it is not, and names the endpoint by its
+    /// scheme and host only. Other kinds are checked elsewhere.
     fn check_claude_endpoint(&self) -> Result<(), String> {
         let (Kind::Claude, Some(endpoint)) = (self.kind, &self.endpoint) else {
             return Ok(());
         };
-        let base_url = endpoint.base_url.escape_debug();
+        let at = Self::endpoint_origin(&endpoint.base_url);
         if !endpoint.token_file.as_os_str().is_empty() || endpoint.token_pointer.is_some() {
             return Err(format!(
-                "a Claude Code session's endpoint `{base_url}` names a key (its token_file or \
+                "a Claude Code session's endpoint{at} names a key (its token_file or \
                  token_pointer); a Claude Code session is pointed only at a keyless loopback \
                  endpoint, whose far end adds the credential"
             ));
         }
         if !keyless_loopback(endpoint) {
             return Err(format!(
-                "a Claude Code session's endpoint `{base_url}` is not an http or https URL on a \
-                 loopback host (127.0.0.0/8, ::1, localhost) with no user information; a Claude \
-                 Code session is pointed only at a keyless loopback endpoint"
+                "a Claude Code session's endpoint{at} is not an http or https URL on a loopback \
+                 host (127.0.0.0/8, ::1, localhost) with no user information; a Claude Code \
+                 session is pointed only at a keyless loopback endpoint"
             ));
         }
         if endpoint.wire != "anthropic-messages" {
             return Err(format!(
-                "a Claude Code session's endpoint `{base_url}` speaks `{}`; Claude Code speaks \
+                "a Claude Code session's endpoint{at} speaks `{}`; Claude Code speaks \
                  anthropic-messages only",
                 endpoint.wire.escape_debug()
             ));
         }
-        Ok(())
+        Self::claude_root(endpoint).map(drop)
+    }
+
+    /// The root metaharness points Claude Code at, which posts to `{root}/v1/messages`: the
+    /// endpoint's `base_url`, the gateway root plus `/v1` as every endpoint is spelled, with
+    /// exactly one trailing `/v1` path segment (and a slash after it) removed. A base URL whose
+    /// path does not end in one, or that carries a query or fragment, has no root.
+    fn claude_root(endpoint: &Endpoint) -> Result<String, String> {
+        let at = Self::endpoint_origin(&endpoint.base_url);
+        let no_root = || {
+            format!(
+                "a Claude Code session's endpoint{at} has no gateway root: its base URL must be \
+                 the root plus one trailing /v1 path segment, with no query or fragment, because \
+                 Claude Code posts to the root's /v1/messages"
+            )
+        };
+        let mut url = url::Url::parse(&endpoint.base_url).map_err(|_| no_root())?;
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err(no_root());
+        }
+        let path = url.path();
+        let root = path
+            .strip_suffix('/')
+            .unwrap_or(path)
+            .strip_suffix("/v1")
+            .ok_or_else(no_root)?
+            .to_owned();
+        url.set_path(&root);
+        Ok(url.as_str().trim_end_matches('/').to_owned())
+    }
+
+    /// ` at `scheme://host[:port]`` for a refusal naming an endpoint, quoted escaped: never its
+    /// user information, path, query or fragment, any of which may carry a secret. Empty when
+    /// the base URL does not parse or names no host, so no URL is named at all.
+    fn endpoint_origin(base_url: &str) -> String {
+        let Ok(url) = url::Url::parse(base_url) else {
+            return String::new();
+        };
+        let Some(host) = url.host_str() else {
+            return String::new();
+        };
+        let port = url
+            .port()
+            .map(|port| format!(":{port}"))
+            .unwrap_or_default();
+        let origin = format!("{}://{host}{port}", url.scheme());
+        format!(" at `{}`", origin.escape_debug())
     }
 
     /// One session: the copy made, the session run in it to its end, the proposal read.
