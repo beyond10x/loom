@@ -58,7 +58,7 @@ use loom::json::Value;
 
 mod write;
 
-pub use write::{WriteError, idempotency_key};
+pub use write::{WriteError, commission_idempotency_key, idempotency_key};
 
 /// The only environment variables the program is started with, taken from the environment the
 /// client was given: where the operator's configuration, state, keyring session and programs are.

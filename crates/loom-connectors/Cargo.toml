@@ -13,6 +13,7 @@ connectors-client = { git = "https://github.com/beyond10x/connectors", tag = "v0
 connectors-core = { git = "https://github.com/beyond10x/connectors", tag = "v0.62.0" }
 loom = { path = "../../generated/rust/loom" }
 serde_json = "1"
+sha2 = "0.11.0"
 tokio = { version = "1.53", features = ["rt-multi-thread"] }
 
 [dev-dependencies]
