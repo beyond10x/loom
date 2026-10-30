@@ -216,6 +216,59 @@ types:
         type: Optional<String>
         naming: {wire: localhostProfile}
 
+  # One upstream the boundary relays to (story boundary-container-projected-token, design D243
+  # § 4): `upstream`, the base URL of a cluster service (`http://<service>.<namespace>.svc`, an
+  # optional `.cluster.local` and port, and an optional path the relayed path is appended to);
+  # `audience`, the audience of the projected service-account token the boundary adds to each
+  # call, which the upstream checks by TokenReview. The controller refuses an upstream its
+  # configuration does not list.
+  - name: loom.resource.BoundaryUpstream
+    kind: struct
+    fields:
+      - name: upstream
+        type: String
+      - name: audience
+        type: String
+
+  # The Connectors instance the boundary relays to, and the operation ids (`merge_request.create`)
+  # it admits on `/v1alpha2/invoke`; every other operation is refused in the pod.
+  - name: loom.resource.ConnectorsBoundary
+    kind: struct
+    fields:
+      - name: upstream
+        type: String
+      - name: audience
+        type: String
+      - name: operations
+        type: List<String>
+
+  # The git smart-HTTP upstream the boundary relays to, and the repositories (`<owner>/<repo>`) it
+  # admits; every other repository is refused in the pod.
+  - name: loom.resource.GitBoundary
+    kind: struct
+    fields:
+      - name: upstream
+        type: String
+      - name: audience
+        type: String
+      - name: repositories
+        type: List<String>
+
+  # A credential-free agent (epic credential-free-agent-pod): a second container, `boundary`,
+  # holds the pod's only credential, a projected service-account token per declared upstream,
+  # and relays the agent's calls on loopback to the model, to the declared Connectors operations
+  # and to the declared git repositories. A resource that declares it holds no Secret: the
+  # controller refuses it beside `secret_ref` or `secret_files`.
+  - name: loom.resource.Boundary
+    kind: struct
+    fields:
+      - name: model
+        type: Optional<loom.resource.BoundaryUpstream>
+      - name: connectors
+        type: Optional<loom.resource.ConnectorsBoundary>
+      - name: git
+        type: Optional<loom.resource.GitBoundary>
+
   # The resource's `spec`: the `loom.agent/1` document verbatim, required for `AgentServe` and
   # optional for `Command`; the llm `routes.yaml` inline, a
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
@@ -225,8 +278,8 @@ types:
   # controller's default; the program the pod runs instead of `agent serve`; a workspace
   # volume, the program's own configuration files, and the seccomp and AppArmor profiles of its
   # container (a resource that declares none keeps `RuntimeDefault` seccomp and the runtime's
-  # AppArmor default), only for `Command`. Wire names are
-  # Kubernetes's.
+  # AppArmor default), only for `Command`; and, on either variant, the boundary that holds a
+  # credential-free agent's only credential. Wire names are Kubernetes's.
   - name: loom.resource.LoomAgentSpec
     kind: struct
     fields:
@@ -260,6 +313,8 @@ types:
       - name: app_armor_profile
         type: Optional<loom.resource.ConfinementProfile>
         naming: {wire: appArmorProfile}
+      - name: boundary
+        type: Optional<loom.resource.Boundary>
 
 entities:
   # One `LoomAgent` resource as the controller holds it. `observed_generation` is the
