@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-10-30
+
 ### Added
 
 - The controller configuration gains optional `defaultCommandResources` (`{cpu, memory}`), the size of every container but the boundary in a `Command` pod that declares none, and the `loom-agents` chart sets it to `{cpu: "4", memory: 8Gi}`, sized for a coding agent: the earlier 256Mi default got a coding-agent pod run OOM-killed (story:command-resources-declared)
@@ -1285,7 +1287,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.52.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.53.0...HEAD
+[0.53.0]: https://github.com/beyond10x/loom/releases/tag/0.53.0
 [0.52.0]: https://github.com/beyond10x/loom/releases/tag/0.52.0
 [0.51.0]: https://github.com/beyond10x/loom/releases/tag/0.51.0
 [0.50.2]: https://github.com/beyond10x/loom/releases/tag/0.50.2
