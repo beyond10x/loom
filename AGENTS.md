@@ -1004,7 +1004,10 @@ and with both rustls picks none and panics at the first TLS client
 `defaultImage {repository, tag}`, `defaultResources {cpu, memory}` (the size of an `AgentServe`
 pod that declares none), optional `defaultCommandResources {cpu, memory}` (the size of a `Command`
 pod that declares none; the chart sets `{cpu: "4", memory: 8Gi}` and a values override of `null`
-renders no member; `story:command-resources-declared`), optional
+renders no member; `story:command-resources-declared`; each `cpu` and `memory` of both members
+is a non-negative Kubernetes quantity, checked by `Config::parse` without a dependency, else
+`<member>.<field>: "<value>" is not a Kubernetes quantity` and neither `run` nor
+`render --config` starts), optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
 admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists entries `{kind, url, audience, port?}` (`config::AllowedUpstream`, unknown members refused): a declared `spec.boundary.<kind>` is admitted only when an entry has its kind (`model`, `connectors` or `git`), exactly its `upstream` as `url` and exactly its `audience`, so neither one relay's URL under another relay nor an audience the entry does not give (an API-server audience, say) passes; the optional `port` (1 to 65535) is the pod port the upstream's Service targets, which the NetworkPolicy opens in place of the URL's port, since a NetworkPolicy matches the port after Service translation; empty, the default, it admits none. One instance watches one namespace with one replica; there is no leader election.
