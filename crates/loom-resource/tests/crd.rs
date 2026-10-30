@@ -869,6 +869,7 @@ fn spec_agent_is_the_agent_document_and_optional() {
         [
             "agent",
             "appArmorProfile",
+            "boundary",
             "command",
             "configFiles",
             "connectorsConfig",
