@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-30
+
 ### Added
 
 - `b10x-loom-boundary` and `b10x-loom agent boundary`: a credential-free agent pod's loopback relays on 127.0.0.1, model on 8401, the Connectors wire on 8402 for declared operations, git smart-HTTP on 8403 for declared repositories; each relayed request carries the projected service-account token read from its file that request, the agent's credential headers are dropped, and an undeclared request is refused before it reaches the upstream (story:boundary-loopback-relays)
@@ -1254,7 +1256,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.50.2...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.51.0...HEAD
+[0.51.0]: https://github.com/beyond10x/loom/releases/tag/0.51.0
 [0.50.2]: https://github.com/beyond10x/loom/releases/tag/0.50.2
 [0.50.1]: https://github.com/beyond10x/loom/releases/tag/0.50.1
 [0.50.0]: https://github.com/beyond10x/loom/releases/tag/0.50.0
