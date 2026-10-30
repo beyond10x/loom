@@ -1,6 +1,7 @@
 //! The controller's configuration, `config.yaml`: the namespace it watches, the agent image and
 //! resources a `LoomAgent` gets when it names none, the model route a resource without routes is
-//! given, and the Secret names and egress hosts a resource may use.
+//! given, the Secret names and egress hosts a resource may use, and the upstreams a
+//! credential-free resource's boundary may relay to.
 //!
 //! ```yaml
 //! namespace: agents
@@ -13,6 +14,7 @@
 //! allowUnconfinedProfiles: false
 //! allowedSeccompLocalhostProfiles: [profiles/takt.json]
 //! allowedAppArmorLocalhostProfiles: [takt-delivery]
+//! allowedBoundaryUpstreams: ['http://llm-gateway.llm.svc:8080/v1']
 //! ```
 //!
 //! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
@@ -61,6 +63,10 @@ pub struct Config {
     /// name; empty admits none.
     #[serde(default)]
     pub allowed_app_armor_localhost_profiles: Vec<String>,
+    /// The upstream base URLs a `spec.boundary` may name, each matched exactly; empty admits
+    /// none.
+    #[serde(default)]
+    pub allowed_boundary_upstreams: Vec<String>,
 }
 
 /// A container image, `repository:tag`.
@@ -137,7 +143,7 @@ impl std::error::Error for ConfigError {}
 impl Config {
     /// The configuration `render` uses without `--config`: namespace `default`, the agent image
     /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory, no model
-    /// route, and no Secret name or egress host admitted.
+    /// route, and no Secret name, egress host or boundary upstream admitted.
     #[must_use]
     pub fn builtin() -> Self {
         Self {
@@ -157,6 +163,7 @@ impl Config {
             allow_unconfined_profiles: false,
             allowed_seccomp_localhost_profiles: Vec::new(),
             allowed_app_armor_localhost_profiles: Vec::new(),
+            allowed_boundary_upstreams: Vec::new(),
         }
     }
 
@@ -221,5 +228,22 @@ mod tests {
         assert_eq!(config.model_route, None);
         assert!(config.allowed_secret_names.is_empty());
         assert!(config.allowed_egress_hosts.is_empty());
+    }
+
+    #[test]
+    fn the_boundary_upstreams_are_listed_and_absent_admit_none() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        let absent = Config::parse(base).expect("a configuration");
+        assert!(absent.allowed_boundary_upstreams.is_empty());
+        assert!(Config::builtin().allowed_boundary_upstreams.is_empty());
+        let listed = Config::parse(&format!(
+            "{base}allowedBoundaryUpstreams: ['http://llm-gateway.llm.svc:8080/v1']\n"
+        ))
+        .expect("a configuration");
+        assert_eq!(
+            listed.allowed_boundary_upstreams,
+            ["http://llm-gateway.llm.svc:8080/v1"]
+        );
     }
 }

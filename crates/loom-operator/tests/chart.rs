@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde_yaml_ng::Value;
 
 /// The overrides `task chart-check` renders the chart with, as `--set` arguments.
-const OVERRIDES: [&str; 11] = [
+const OVERRIDES: [&str; 12] = [
     "image.tag=0.0.1-test",
     "agentImage.repository=registry.example/other-agent",
     "modelRoute.url=http://model-route.agents.svc:8080/v1",
@@ -27,6 +27,7 @@ const OVERRIDES: [&str; 11] = [
     "allowUnconfinedProfiles=true",
     "allowedSeccompLocalhostProfiles={profiles/takt.json}",
     "allowedAppArmorLocalhostProfiles={takt-delivery}",
+    "allowedBoundaryUpstreams={http://llm-gateway.llm.svc:8080/v1}",
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -254,6 +255,7 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
             allow_unconfined_profiles: false,
             allowed_seccomp_localhost_profiles: Vec::new(),
             allowed_app_armor_localhost_profiles: Vec::new(),
+            allowed_boundary_upstreams: Vec::new(),
         }
     );
 }
@@ -289,6 +291,7 @@ fn overrides_reach_the_controller_image_and_config() {
             allow_unconfined_profiles: true,
             allowed_seccomp_localhost_profiles: vec!["profiles/takt.json".to_owned()],
             allowed_app_armor_localhost_profiles: vec!["takt-delivery".to_owned()],
+            allowed_boundary_upstreams: vec!["http://llm-gateway.llm.svc:8080/v1".to_owned()],
         }
     );
 }

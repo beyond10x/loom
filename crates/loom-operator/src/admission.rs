@@ -28,38 +28,59 @@
 //! 4. An empty `spec.routes` while the controller configures no model route (`NoModelRoute`);
 //!    a `Command` resource then gets an empty `routes.yaml`. With a model route, the default
 //!    routes document routes each model a role of `spec.agent` names; a `Command` resource
-//!    without `spec.agent` names none, so its document declares the endpoint and no route.
-//! 5. A `spec.secretRef` or `spec.secretFiles` outside the configuration's `allowedSecretNames`
+//!    without `spec.agent` names none, so its document declares the endpoint and no route. With
+//!    `spec.boundary.model` the endpoint is the boundary's model relay, `http://127.0.0.1:8401/v1`,
+//!    in place of the model route's URL; its protocol and model stay the model route's.
+//! 5. A present `spec.boundary` (story boundary-container-projected-token, design D243): one
+//!    declaring none of `model`, `connectors` and `git` is `Malformed`, and a `spec.secretRef`
+//!    or `spec.secretFiles` beside it is `BoundaryWithSecret` at that member. Then each declared
+//!    upstream in that order: its `upstream` is a plain `http://` URL of a cluster service
+//!    ([`cluster_service`]: no user information, query or fragment; the host
+//!    `<service>.<namespace>.svc` or `<service>.<namespace>.svc.cluster.local` of DNS-1123
+//!    labels; an optional port and path of plain segments), else `BoundaryUpstreamInvalid`, an
+//!    `https` upstream included, and one the configuration's `allowedBoundaryUpstreams` lists
+//!    exactly, else `BoundaryUpstreamNotAllowed`; its `audience` is one word, neither empty nor
+//!    holding whitespace or a control character; `connectors.operations` and
+//!    `git.repositories` are not empty and give each entry once and in form (an operation id
+//!    `[A-Za-z0-9._-]+`, a repository `<owner>/<repo>` of such parts, neither `.` nor `..`, the
+//!    repository not ending in `.git`; neither starting with `-`, which would read as a flag);
+//!    else `Malformed` at the member. Then the member is walked for a credential, whole and each
+//!    string word by word as `spec.command` is (`SecretLiteral`), and a
+//!    `deploy.kubernetes.egress` entry of `spec.agent` naming a host, which a credential-free
+//!    pod's NetworkPolicy never opens, is `BoundaryEgressHost` at its `host` (story
+//!    credential-free-network-policy).
+//! 6. A `spec.secretRef` or `spec.secretFiles` outside the configuration's `allowedSecretNames`
 //!    (`SecretNotAllowed`).
-//! 6. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
-//! 7. A `deploy.kubernetes.egress` entry naming neither a host nor a namespace, whose rule would
+//! 7. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
+//! 8. A `deploy.kubernetes.egress` entry naming neither a host nor a namespace, whose rule would
 //!    admit every destination on its port, or naming a host outside `allowedEgressHosts`
 //!    (`EgressHostNotAllowed`).
-//! 8. `spec.command`, each entrypoint and argument walked whole and word by word as the
+//! 9. `spec.command`, each entrypoint and argument walked whole and word by word as the
 //!    connectors text is (`SecretLiteral`); one beyond the walk's bound is `TooLarge`.
-//! 9. `spec.env`, on either variant: the list walked whole, names and values, then each value
-//!    word by word as `spec.command` is (`SecretLiteral`; `TooLarge` beyond the walk's bound);
-//!    then, entry by entry, a name that is not an environment variable name
-//!    `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for the same rule), a
-//!    name the controller sets on a container itself ([`CONTROLLER_ENV`]) or one an earlier
-//!    entry gives (`EnvNameConflict`). Then each `spec.env` value and each `spec.command`
-//!    entrypoint and argument again, as the program may read it after the kubelet's `$(VAR)`
-//!    expansion (`$$` is `$`). The walk knows only the controller's own environment and the
-//!    `spec.env` entries: a value expands against those before it, a command against all of
-//!    them. A name it does not know (a key of the `spec.secretRef` Secret, the service
-//!    environment such as `KUBERNETES_PORT`) is read twice: left as written, and as
-//!    [`UNKNOWN_REFERENCE`], a scheme, since such a reference may supply one. Each reading is
-//!    walked whole and word by word (`SecretLiteral`, its detail saying it was found after
-//!    expansion; `TooLarge` when the references add more than [`MAX_EXPANDED_BYTES`]).
-//! 10. A non-empty `spec.configFiles`, only for `Command`: on an `AgentServe` resource, whose
+//! 10. `spec.env`, on either variant: the list walked whole, names and values, then each value
+//!     word by word as `spec.command` is (`SecretLiteral`; `TooLarge` beyond the walk's bound);
+//!     then, entry by entry, a name that is not an environment variable name
+//!     `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for the same rule), a
+//!     name the controller sets on a container itself ([`CONTROLLER_ENV`]) or one an earlier
+//!     entry gives (`EnvNameConflict`). Then each `spec.env` value and each `spec.command`
+//!     entrypoint and argument again, as the program may read it after the kubelet's `$(VAR)`
+//!     expansion (`$$` is `$`). The walk knows only the controller's own environment (with
+//!     `spec.boundary`, the URL of each relay it declares) and the `spec.env` entries: a value
+//!     expands against those before it, a command against all of them. A name it does not know
+//!     (a key of the `spec.secretRef` Secret, the service environment such as `KUBERNETES_PORT`)
+//!     is read twice: left as written, and as [`UNKNOWN_REFERENCE`], a scheme, since such a
+//!     reference may supply one. Each reading is walked whole and word by word (`SecretLiteral`,
+//!     its detail saying it was found after expansion; `TooLarge` when the references add more
+//!     than [`MAX_EXPANDED_BYTES`]).
+//! 11. A non-empty `spec.configFiles`, only for `Command`: on an `AgentServe` resource, whose
 //!     program reads none, it is `Malformed`. Then entry by entry, a name that is not a plain
 //!     file name (`[A-Za-z0-9._-]+`, not `.`, not starting with `..`, at most [`MAX_CONFIG_FILE_NAME`] bytes:
 //!     `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap already holds
 //!     (`routes.yaml`, `connectors.toml`, and `agent.yaml` when `spec.agent` is present:
 //!     `ConfigFileConflict`).
-//! 11. The ConfigMap, its keys and values together, over Kubernetes's limit of
+//! 12. The ConfigMap, its keys and values together, over Kubernetes's limit of
 //!     [`MAX_CONFIG_MAP_BYTES`] (`TooLarge`), refused rather than failing at apply.
-//! 12. Each `spec.configFiles` content, which the controller decodes nothing of, walked for a
+//! 13. Each `spec.configFiles` content, which the controller decodes nothing of, walked for a
 //!     credential (`SecretLiteral`) by every walk step 3 makes and more: the list whole, names
 //!     and contents; each content as a YAML stream, every document in turn and every string the
 //!     walk reads in it (key, value or tag, aliases replayed, a duplicate key included) whole
@@ -74,16 +95,23 @@
 //!     or a YAML stream it cannot read whole (its aliases or nesting cost more than the agent
 //!     decoder's bound allows, or the parser's recursion or repetition limit stops it), is
 //!     `TooLarge` once the strings read before it stopped hold no credential.
-//! 13. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
+//! 14. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
 //!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
 //!     or the other one (`MountPathInvalid`).
-//! 14. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
+//! 15. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
 //!     (`ClaimNotAllowed`).
+//! 16. `spec.seccompProfile` and `spec.appArmorProfile`: on an `AgentServe` resource
+//!     `Malformed`; a type other than `RuntimeDefault`, `Localhost` and `Unconfined`, a
+//!     `localhostProfile` beside `RuntimeDefault` or `Unconfined`, a `Localhost` profile without
+//!     one, or one that is not a plain name or path (`ProfileInvalid`); an `Unconfined` profile
+//!     the configuration's `allowUnconfinedProfiles` does not allow, or a `Localhost` name
+//!     outside `allowedSeccompLocalhostProfiles` or `allowedAppArmorLocalhostProfiles`
+//!     (`ProfileNotAllowed`).
 //!
-//! The walk of steps 2, 3 and 12 reads a text that is not a `loom.agent/1` document only within
-//! the agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and [`MAX_WALKED_BYTES`];
-//! a document beyond either is refused `TooLarge` rather than admitted unread. Words are walked
-//! in sequences that each stay within both bounds.
+//! The walk of steps 2, 3, 5 and 13 reads a text that is not a `loom.agent/1` document only
+//! within the agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and
+//! [`MAX_WALKED_BYTES`]; a document beyond either is refused `TooLarge` rather than admitted
+//! unread. Words are walked in sequences that each stay within both bounds.
 //!
 //! A refusal reads `refused: <reason> at <member>: <detail>`, as `b10x-loom agent check` prints
 //! it, the member spelt from the resource (`spec.agent.bindings[1].base_url`); its detail never
@@ -104,8 +132,10 @@ use serde_yaml_ng::{Mapping, Value};
 use b10x_loom_resource::model::AgentVariant;
 
 use crate::config::{Config, ModelRoute};
-use crate::render::{CONFIG_DIR, CONTROLLER_ENV, controller_env};
-use crate::resource::{CommandSpec, ConfigFile, EnvVar, LoomAgentSpec};
+use crate::render::{
+    Admits, CONFIG_DIR, CONTROLLER_ENV, RELAYS, Upstream, controller_env, upstreams,
+};
+use crate::resource::{Boundary, CommandSpec, ConfigFile, EnvVar, LoomAgentSpec};
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
@@ -494,7 +524,7 @@ fn expanded_words(written: &str, readings: [String; 2], member: &str, out: &mut 
 /// reading is `SecretLiteral` at the member, never repeating it; references adding more than
 /// [`MAX_EXPANDED_BYTES`] to a reading are `TooLarge`.
 fn expanded_credential(spec: &LoomAgentSpec, variant: AgentVariant) -> Result<(), Refusal> {
-    let own: HashMap<&str, String> = controller_env(variant)
+    let own: HashMap<&str, String> = controller_env(variant, spec.boundary.as_ref())
         .into_iter()
         .map(|(name, value)| (name, value.to_owned()))
         .collect();
@@ -998,6 +1028,295 @@ pub fn default_routes(route: &ModelRoute, spec: Option<&AgentSpec>) -> String {
     serde_yaml_ng::to_string(&Value::Mapping(document)).unwrap_or_default()
 }
 
+/// The cluster service a boundary upstream names: the namespace its NetworkPolicy rule selects
+/// and the TCP port it opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClusterService<'a> {
+    /// The namespace, the host's second label.
+    pub namespace: &'a str,
+    /// The port the URL names, 80 when it names none.
+    pub port: u16,
+}
+
+/// Whether `label` is a DNS-1123 label: 1 to 63 bytes of `[a-z0-9-]`, starting and ending with
+/// a letter or digit.
+fn dns_label(label: &str) -> bool {
+    let bytes = label.as_bytes();
+    (1..=63).contains(&bytes.len())
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
+        && bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+        && bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+}
+
+/// Whether `segment` is a plain path segment: `[A-Za-z0-9._~-]`, not empty, `.` or `..`.
+fn plain_segment(segment: &str) -> bool {
+    !segment.is_empty()
+        && segment != "."
+        && segment != ".."
+        && segment
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'~' | b'-'))
+}
+
+/// The cluster service `url`, a boundary upstream, names. It is a plain `http://` URL without
+/// user information, query or fragment; its host is `<service>.<namespace>.svc` or
+/// `<service>.<namespace>.svc.cluster.local`, each a DNS-1123 label; its port, when it names
+/// one, is 1 to 65535; its path, when it has one, is plain segments.
+///
+/// # Errors
+/// What is wrong with `url`, never repeating it.
+pub fn cluster_service(url: &str) -> Result<ClusterService<'_>, &'static str> {
+    let Some(rest) = url.strip_prefix("http://") else {
+        return Err(if url.starts_with("https://") {
+            "an https upstream is not admitted; the boundary relays plain http to a cluster service"
+        } else {
+            "it is not a plain http:// URL"
+        });
+    };
+    if rest.contains(['?', '#']) {
+        return Err("it holds a query or a fragment");
+    }
+    let (authority, path) = match rest.split_once('/') {
+        Some((authority, path)) => (authority, Some(path)),
+        None => (rest, None),
+    };
+    if authority.contains('@') {
+        return Err("it holds user information");
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        None => (authority, 80),
+        Some((host, port)) => {
+            if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err("its port is not a number");
+            }
+            match port.parse::<u16>() {
+                Ok(port) if port > 0 => (host, port),
+                _ => return Err("its port is not between 1 and 65535"),
+            }
+        }
+    };
+    let labels: Vec<&str> = host.split('.').collect();
+    let namespace = match labels.as_slice() {
+        [service, namespace, "svc"] | [service, namespace, "svc", "cluster", "local"]
+            if dns_label(service) && dns_label(namespace) =>
+        {
+            *namespace
+        }
+        _ => {
+            return Err(
+                "its host is not a cluster service, <service>.<namespace>.svc with an optional \
+                 .cluster.local, each a DNS-1123 label",
+            );
+        }
+    };
+    if path.is_some_and(|path| !path.split('/').all(plain_segment)) {
+        return Err("its path is not plain segments of [A-Za-z0-9._~-], none empty, `.` or `..`");
+    }
+    Ok(ClusterService { namespace, port })
+}
+
+/// Whether `id` is a Connectors operation id the boundary may pass as `--operation`:
+/// `[A-Za-z0-9._-]+`, not starting with `-`, which would read as a flag.
+fn operation_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('-')
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+/// Whether `entry` is a repository the boundary may pass as `--repository`: `<owner>/<repo>`,
+/// each part `[A-Za-z0-9._-]+` and not `.` or `..`, not starting with `-`, the repository not
+/// ending in `.git`.
+fn repository(entry: &str) -> bool {
+    let part = |part: &str| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    };
+    !entry.starts_with('-')
+        && entry.split_once('/').is_some_and(|(owner, repo)| {
+            part(owner) && part(repo) && !repo.to_ascii_lowercase().ends_with(".git")
+        })
+}
+
+/// Refuses `items`, the list at `at`, when it is empty or an entry is not `plain` (`Malformed`,
+/// naming `form`) or repeats an earlier one (`Malformed`), never repeating an entry.
+fn boundary_list(
+    items: &[String],
+    at: &str,
+    plain: fn(&str) -> bool,
+    form: &str,
+) -> Result<(), Refusal> {
+    if items.is_empty() {
+        return Err(Refusal::new(
+            spelling(RefusalReason::Malformed),
+            at,
+            "it is empty, so the boundary would admit nothing on this upstream",
+        ));
+    }
+    let mut seen: HashMap<&str, usize> = HashMap::with_capacity(items.len());
+    for (index, item) in items.iter().enumerate() {
+        let member = format!("{at}[{index}]");
+        if !plain(item) {
+            return Err(Refusal::new(
+                spelling(RefusalReason::Malformed),
+                member,
+                format!("it is not {form}"),
+            ));
+        }
+        if let Some(first) = seen.insert(item.as_str(), index) {
+            return Err(Refusal::new(
+                spelling(RefusalReason::Malformed),
+                member,
+                format!("it repeats {at}[{first}]"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Walks `boundary`, whose upstreams are `declared`, for a credential as `spec.command` is: the
+/// member whole, then each URL, audience, operation id and repository word by word.
+fn boundary_credential(boundary: &Boundary, declared: &[Upstream<'_>]) -> Result<(), Refusal> {
+    credential(&yaml(boundary, "spec.boundary")?, "spec.boundary")?;
+    let mut found = Vec::new();
+    for upstream in declared {
+        let at = format!("spec.boundary.{}", upstream.relay.kind);
+        let mut strings = vec![
+            (upstream.url, format!("{at}.upstream")),
+            (upstream.audience, format!("{at}.audience")),
+        ];
+        let (list, items) = match upstream.admits {
+            Admits::Everything => ("", &[][..]),
+            Admits::Operations(items) => ("operations", items),
+            Admits::Repositories(items) => ("repositories", items),
+        };
+        strings.extend(
+            items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| (item.as_str(), format!("{at}.{list}[{index}]"))),
+        );
+        for (text, member) in strings {
+            found.extend(words(text).into_iter().map(|text| Word {
+                text,
+                member: member.clone(),
+                line: None,
+            }));
+        }
+    }
+    word_credential(&found, "spec.boundary")
+}
+
+/// Step 5: a present `spec.boundary`. It declares an upstream (`Malformed`); no `spec.secretRef`
+/// or `spec.secretFiles` stands beside it (`BoundaryWithSecret`); each upstream is a cluster
+/// service ([`cluster_service`]: `BoundaryUpstreamInvalid`) the configuration's
+/// `allowedBoundaryUpstreams` lists exactly (`BoundaryUpstreamNotAllowed`), its audience one
+/// word and its operations or repositories in form, each once (`Malformed`); its strings hold
+/// no credential (`SecretLiteral`); and no `deploy.kubernetes.egress` entry of `spec.agent`
+/// names a host (`BoundaryEgressHost`).
+fn boundary(
+    spec: &LoomAgentSpec,
+    decoded: Option<&AgentSpec>,
+    config: &Config,
+) -> Result<(), Refusal> {
+    let Some(boundary) = &spec.boundary else {
+        return Ok(());
+    };
+    let declared = upstreams(boundary);
+    if declared.is_empty() {
+        return Err(Refusal::new(
+            spelling(RefusalReason::Malformed),
+            "spec.boundary",
+            "it declares none of model, connectors and git, so it relays nothing",
+        ));
+    }
+    for (present, member) in [
+        (spec.secret_ref.is_some(), "spec.secretRef"),
+        (spec.secret_files.is_some(), "spec.secretFiles"),
+    ] {
+        if present {
+            return Err(Refusal::new(
+                "BoundaryWithSecret",
+                member,
+                "a resource with spec.boundary holds no credential in its pod; its boundary's \
+                 projected tokens stand in for a Secret",
+            ));
+        }
+    }
+    for upstream in &declared {
+        let at = format!("spec.boundary.{}", upstream.relay.kind);
+        cluster_service(upstream.url).map_err(|detail| {
+            Refusal::new("BoundaryUpstreamInvalid", format!("{at}.upstream"), detail)
+        })?;
+        if !config
+            .allowed_boundary_upstreams
+            .iter()
+            .any(|allowed| allowed == upstream.url)
+        {
+            return Err(Refusal::new(
+                "BoundaryUpstreamNotAllowed",
+                format!("{at}.upstream"),
+                "the controller's allowedBoundaryUpstreams does not hold it",
+            ));
+        }
+        if upstream.audience.is_empty()
+            || upstream
+                .audience
+                .chars()
+                .any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(Refusal::new(
+                spelling(RefusalReason::Malformed),
+                format!("{at}.audience"),
+                "a token audience is one word: not empty, without whitespace or a control \
+                 character",
+            ));
+        }
+        match upstream.admits {
+            Admits::Everything => {}
+            Admits::Operations(items) => boundary_list(
+                items,
+                &format!("{at}.operations"),
+                operation_id,
+                "a Connectors operation id, [A-Za-z0-9._-]+ not starting with -",
+            )?,
+            Admits::Repositories(items) => boundary_list(
+                items,
+                &format!("{at}.repositories"),
+                repository,
+                "<owner>/<repo>, each part [A-Za-z0-9._-]+ and not . or .., not starting with -, \
+                 the repository not ending in .git",
+            )?,
+        }
+    }
+    boundary_credential(boundary, &declared)?;
+    if let Some(index) = decoded
+        .and_then(|decoded| decoded.deploy.as_ref())
+        .and_then(|deploy| deploy.kubernetes.as_ref())
+        .and_then(|kubernetes| {
+            kubernetes
+                .egress
+                .iter()
+                .position(|entry| entry.host.is_some())
+        })
+    {
+        return Err(Refusal::new(
+            "BoundaryEgressHost",
+            format!("spec.agent.deploy.kubernetes.egress[{index}].host"),
+            "a resource with spec.boundary reaches the outside only through its boundary's \
+             upstreams, so its NetworkPolicy opens no host",
+        ));
+    }
+    Ok(())
+}
+
 /// Admits `spec`, a `LoomAgent` in `namespace`, under `config`, checking `spec.agent` against
 /// `actions` (the action ids of a catalog protocol by its `name@major`).
 ///
@@ -1100,7 +1419,20 @@ pub fn admit(
 
     let (routes, default_routes) = match (given, &config.model_route) {
         (Some(text), _) => (text, false),
-        (None, Some(route)) => (default_routes(route, decoded.as_ref()), true),
+        (None, Some(route)) => {
+            let route = match spec
+                .boundary
+                .as_ref()
+                .and_then(|boundary| boundary.model.as_ref())
+            {
+                Some(_) => ModelRoute {
+                    url: RELAYS[0].url.to_owned(),
+                    ..route.clone()
+                },
+                None => route.clone(),
+            };
+            (default_routes(&route, decoded.as_ref()), true)
+        }
         (None, None) if variant == AgentVariant::Command => (String::new(), false),
         (None, None) => {
             return Err(Refusal::new(
@@ -1110,6 +1442,8 @@ pub fn admit(
             ));
         }
     };
+
+    boundary(spec, decoded.as_ref(), config)?;
 
     if let Some(secret) = &spec.secret_ref
         && !config.allowed_secret_names.contains(&secret.name)
@@ -1245,7 +1579,7 @@ fn plain_profile_name(name: &str) -> bool {
             .all(|segment| !segment.is_empty() && segment != "..")
 }
 
-/// Step 15: the profiles of `spec.seccompProfile` and `spec.appArmorProfile`.
+/// Step 16: the profiles of `spec.seccompProfile` and `spec.appArmorProfile`.
 fn confinement_profiles(
     spec: &LoomAgentSpec,
     variant: AgentVariant,
@@ -1364,6 +1698,7 @@ mod tests {
             config_files: None,
             seccomp_profile: None,
             app_armor_profile: None,
+            boundary: None,
         }
     }
 

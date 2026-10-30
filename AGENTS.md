@@ -898,6 +898,14 @@ spec without `runtime.connectors`. `RecordCheck`
 records the variant the controller admitted; `respecified` clears it, and the view and
 `status.variant` carry it.
 
+`spec.boundary` (`Boundary`, `story:boundary-container-projected-token`, design D243) makes an
+agent credential-free on either variant: optional `model`, `connectors` and `git` upstreams, each
+an `upstream`, the base URL of a cluster service, and an `audience`, that of the projected
+service-account token the boundary adds to each call; `connectors` also lists the operation ids
+it admits (`operations`) and `git` the `<owner>/<repo>` repositories (`repositories`). A resource
+that declares it holds no Secret. Its refusals are the controller's (§ Operator), as for
+`spec.env`, not the domain's.
+
 The spec lives in the cluster, in the resource; the record keeps only the generation it applied
 and the check for that generation, and a controller re-reads the spec on every reconcile. A stored
 `AgentSpec` would hold a `Decimal` (`loops.inner.classify_threshold`) that no ESS 0.69.0 view
@@ -963,7 +971,8 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 `b10x_loom_resource::crd` and the CRD. The command line (`src/cli.rs`, clap derive) is
 `run --config <file>`, `render --resource <file> [--config <file>]` (exit 0; 3 refused; 2 not a
 `LoomAgent`; 1 unreadable) and `crd` (the CRD's bytes). `render` without `--config` uses
-`Config::builtin()`: namespace `default`, no model route, no Secret name or egress host allowed.
+`Config::builtin()`: namespace `default`, no model route, no Secret name, egress host or boundary
+upstream allowed.
 `run` installs rustls' `ring` provider as the process default before it builds the kube client:
 the binary's graph enables both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`),
 and with both rustls picks none and panics at the first TLS client
@@ -973,7 +982,7 @@ and with both rustls picks none and panics at the first TLS client
 `defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
-admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 15, `crates/loom-operator/tests/command_confinement_profiles.rs`). One instance watches one namespace with one replica; there is no leader election.
+admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists the upstream base URLs a `spec.boundary` may name, each matched exactly; empty, the default, it admits none. One instance watches one namespace with one replica; there is no leader election.
 
 The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
 applied again at its cluster generation and checked again. The record is keyed by name, so the
@@ -992,7 +1001,21 @@ refuses them; `spec.connectorsConfig`, which the ConfigMap receives verbatim, de
 each word of the raw text, comments included (named by line), a word holding `:` or `;` also in
 its pieces, shell punctuation (`<>|&()$` and backtick) separating words too; a routes or connectors document
 beyond the walk's bound (4096 `[` or `{` bytes, 2 MiB) is `TooLarge`, never admitted unwalked, and
-words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); a
+words are walked in sequences within it; empty routes without `modelRoute` (`NoModelRoute`); with
+`spec.boundary` (`story:boundary-container-projected-token`), none of `model`, `connectors` and
+`git` declared (`Malformed` at `spec.boundary`), a `secretRef` or `secretFiles` beside it
+(`BoundaryWithSecret` at that member), then per declared upstream an `upstream` that is no plain
+`http://` URL of a cluster service (`admission::cluster_service`: no user information, query or
+fragment; the host `<service>.<namespace>.svc` or `<service>.<namespace>.svc.cluster.local` of
+DNS-1123 labels; an optional port, 1 to 65535, and a path of plain segments; `https` is refused
+in this wave: `BoundaryUpstreamInvalid`), one `allowedBoundaryUpstreams` does not list exactly
+(`BoundaryUpstreamNotAllowed`), an `audience` that is empty or holds whitespace or a control
+character, `operations` or `repositories` empty, out of form (an operation id `[A-Za-z0-9._-]+`;
+a repository `<owner>/<repo>` of such parts, neither `.` nor `..`, the repository not ending in
+`.git`; neither starting with `-`, which `agent boundary` would read as a flag) or given twice
+(`Malformed` at the member), a credential in it (the member whole, then each string word by word
+as `spec.command`; `SecretLiteral`), and a `deploy.kubernetes.egress` entry naming a host
+(`BoundaryEgressHost` at its `host`, `story:credential-free-network-policy`); a
 `secretRef` or `secretFiles` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
 would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
@@ -1000,10 +1023,13 @@ credential in `spec.command` (`SecretLiteral`; `TooLarge` beyond the bound); in 
 variant, a credential in a name or value (the list whole, then each value word by word as
 `spec.command`; `SecretLiteral` at `spec.env[<i>].value` or `.name`, `TooLarge` beyond the bound),
 then a name that is not `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`, `loom.agent`'s reason for
-the same rule), a name in `render::CONTROLLER_ENV` (`HOME`, refused on both variants) or one an
+the same rule), a name in `render::CONTROLLER_ENV` (`HOME` and the boundary URLs
+`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL` and `LOOM_BOUNDARY_GIT_URL`, each
+refused on both variants, with or without `spec.boundary`) or one an
 earlier entry gives (`EnvNameConflict`); then each `spec.env` value and each `spec.command`
 entry again as the kubelet may expand it (`$$` is `$`). The walk knows only
-`render::controller_env` and the `spec.env` entries (before it for a value, all of them for a
+`render::controller_env` (with `spec.boundary`, the URL of each declared relay) and the
+`spec.env` entries (before it for a value, all of them for a
 command); a name it does not know (a `secretRef` key, the service environment such as
 `KUBERNETES_PORT`) is read twice, left as written and as `UNKNOWN_REFERENCE` (`a://`), since it
 may supply a URL scheme. Each reading is walked whole and word by word (`SecretLiteral`, its
@@ -1031,7 +1057,9 @@ or the parser's recursion limit, once the strings read hold none; a `spec.worksp
 (`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
 `agent serve` does not; with no routes and no `modelRoute` it gets an empty `routes.yaml`, and
-without `spec.agent` the default routes document routes no model (no role names one). Then
+without `spec.agent` the default routes document routes no model (no role names one); with
+`spec.boundary.model` its endpoint is the model relay, `http://127.0.0.1:8401/v1`, with the model
+route's protocol and model. Then
 each child it would render is read, and one that exists without this resource as controller is
 `ChildNotOwned`, naming its kind and name. That refusal is the cluster's, not the spec's: each later
 reconcile at that generation reads the children again, and once none is someone else's the record
@@ -1096,7 +1124,8 @@ Deployment (one replica, `Recreate`, init container
 user 10001, read-only root, no capability, seccomp `RuntimeDefault`, requests equal to limits,
 annotation `loom.beyond10x.dev/generation`, probes only with `expose.a2a`); a NetworkPolicy (deny by
 default; egress to DNS in `kube-system`, to each egress entry, and to the model route's port only
-with the default routes; ingress from each ingress entry); and with `expose.a2a` a Service.
+with the default routes; ingress from each ingress entry; with `spec.boundary` see below); and
+with `expose.a2a` a Service.
 `deploy.kubernetes.image_repository` is not read. A `Command` resource has a `batch/v1` Job in the
 Deployment's place, named like it: `backoffLimit` 0, no `ttlSecondsAfterFinished`, the same pod
 template with `restartPolicy: Never`, so its program runs once. Its pod has no `check`
@@ -1125,8 +1154,36 @@ reason: a reader such as `b10x-gates` refuses a file another user owns or that g
 may read, and the kubelet owns a Secret volume's files. The copy is taken when the pod starts, so
 a changed Secret reaches the agent only in a new pod, and `stage-files` removes a staged file no
 current key names. Either sets `fsGroup` 10001. The golden files
-`tests/golden/platform-operator.yaml` and `tests/golden/takt-delivery.yaml` are rewritten by
+`tests/golden/platform-operator.yaml`, `tests/golden/takt-delivery.yaml` and
+`tests/golden/credential-free.yaml` are rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
+
+A resource with `spec.boundary` (`story:boundary-container-projected-token`, design D243 § 2,
+§ 4) gets a second container, the native sidecar `boundary`: the last init container, with
+`restartPolicy: Always`, so it runs beside the agent and a Job still completes. From
+`defaultImage`, never `spec.image`, it runs `command: [b10x-loom]` with `args: [agent, boundary,
+…]`: `--model-upstream <URL> --model-token /var/run/loom/boundary/tokens/model`;
+`--connectors-upstream <URL> --connectors-token /var/run/loom/boundary/tokens/connectors` and an
+`--operation <ID>` per operation in declared order; `--git-upstream <URL> --git-token
+/var/run/loom/boundary/tokens/git` and a `--repository <OWNER/REPO>` per repository; each group
+only for a declared upstream. These flags are the contract with `b10x-loom agent boundary`. Its
+startup probe execs `b10x-loom agent boundary-ready` with a `--port` per declared relay (model
+8401, connectors 8402, git 8403; `render::RELAYS`), period 1 s, failure threshold 30, so the
+containers after it start once every relay listens. It runs as user and group 10002, non-root,
+on a read-only root, without privilege escalation or capabilities, seccomp `RuntimeDefault`, its
+requests equal to its limits (`render::BOUNDARY_CPU`, `render::BOUNDARY_MEMORY`), with no
+environment. Its only mount is the projected volume `boundary-tokens`, read-only at
+`/var/run/loom/boundary/tokens`: one `serviceAccountToken` source per declared upstream (the
+declared audience, `expirationSeconds: 600`, path `model`, `connectors` or `git`). No other
+container mounts it, the boundary mounts nothing else, and `automountServiceAccountToken` stays
+false. The agent container gets `LOOM_BOUNDARY_MODEL_URL=http://127.0.0.1:8401/v1`,
+`LOOM_BOUNDARY_CONNECTORS_URL=http://127.0.0.1:8402` and
+`LOOM_BOUNDARY_GIT_URL=http://127.0.0.1:8403`, each only for a declared upstream, as controller
+env before `spec.env`. The NetworkPolicy (`story:credential-free-network-policy`) then opens DNS,
+the namespace egress entries of `spec.agent` and, per declared upstream, the namespace its host
+names (`kubernetes.io/metadata.name`) on its TCP port (80 when it names none); no model-route
+rule and no host rule. A resource without `spec.boundary` renders byte for byte as before.
+Native sidecars need Kubernetes 1.29 or newer, where they are on by default.
 
 The chart `charts/loom-agents` (Helm 3) installs `crds/` (§ Generated files), the controller
 Deployment (`command: [b10x-loom-operator]`, `args: [run, --config, /etc/loom-operator/config.yaml]`),

@@ -1026,12 +1026,22 @@ fn a_credential_in_spec_env_is_refused_without_repeating_it() {
 }
 
 /// [`CONTROLLER_ENV`] is every name the controller sets on any container of either variant, so a
-/// name the renderer starts setting without adding it there fails here.
+/// name the renderer starts setting without adding it there fails here. A credential-free
+/// resource of either variant, declaring every upstream and no `spec.env`, is rendered too.
 #[test]
 fn a_reserved_variable_name_is_refused() {
     let mut set = Vec::new();
-    for resource in [command_with(""), serve_with("")] {
-        let pod = pod_of(&render_document(&resource, &config()).expect("rendered"));
+    let every = boundary(true, true, true);
+    for (resource, config) in [
+        (command_with(""), config()),
+        (serve_with(""), config()),
+        (
+            format!("{HEAD}  routes: {{}}\n  command: {{args: [--iterations, '1']}}\n{every}"),
+            boundary_config(),
+        ),
+        (credential_free_serve(&every), boundary_config()),
+    ] {
+        let pod = pod_of(&render_document(&resource, &config).expect("rendered"));
         for list in ["containers", "initContainers"] {
             for container in pod[list].as_sequence().into_iter().flatten() {
                 set.extend(env_of(container).into_iter().map(|(name, _)| name));
@@ -1712,4 +1722,1095 @@ fn the_writable_dirs_are_0700_and_owned_by_the_pod_user() {
             assert!(volume["emptyDir"].is_mapping(), "{name} is an emptyDir");
         }
     }
+}
+
+/// The model gateway a credential-free resource declares: a cluster service with a port and a
+/// path.
+const MODEL_UPSTREAM: &str = "http://llm-gateway.llm.svc:8080/v1";
+/// The Connectors instance, by its fully qualified cluster name.
+const CONNECTORS_UPSTREAM: &str = "http://connectors.connectors.svc.cluster.local:8080";
+/// Its git smart-HTTP path, on the default port.
+const GIT_UPSTREAM: &str = "http://connectors.connectors.svc/git";
+
+/// `text` as a YAML flow scalar: JSON text, which YAML reads as written.
+fn quoted(text: &str) -> String {
+    serde_json::to_string(text).expect("JSON text")
+}
+
+/// The test configuration, allowing `upstreams` as the boundary upstreams.
+fn allowing(upstreams: &[&str]) -> Config {
+    Config::parse(&format!(
+        "{CONFIG}allowedBoundaryUpstreams: {}\n",
+        serde_json::to_string(upstreams).expect("JSON text")
+    ))
+    .expect("the test configuration with boundary upstreams")
+}
+
+/// The test configuration with the three upstreams the credential-free resources declare.
+fn boundary_config() -> Config {
+    allowing(&[MODEL_UPSTREAM, CONNECTORS_UPSTREAM, GIT_UPSTREAM])
+}
+
+/// `spec.boundary` declaring `model`, `connectors` and `git` where asked, as YAML.
+fn boundary(model: bool, connectors: bool, git: bool) -> String {
+    let mut out = String::from("  boundary:\n");
+    if model {
+        out.push_str(&format!(
+            "    model: {{upstream: '{MODEL_UPSTREAM}', audience: llm-gateway}}\n"
+        ));
+    }
+    if connectors {
+        out.push_str(&format!(
+            "    connectors: {{upstream: '{CONNECTORS_UPSTREAM}', audience: connectors, \
+             operations: [merge_request.create, merge_request.get]}}\n"
+        ));
+    }
+    if git {
+        out.push_str(&format!(
+            "    git: {{upstream: '{GIT_UPSTREAM}', audience: connectors-git, repositories: \
+             [agents/takt-target, agents/takt-docs]}}\n"
+        ));
+    }
+    out
+}
+
+/// A `spec.boundary` declaring only `model`, at `upstream` with `audience`.
+fn model_boundary(upstream: &str, audience: &str) -> String {
+    format!(
+        "  boundary:\n    model: {{upstream: {}, audience: {}}}\n",
+        quoted(upstream),
+        quoted(audience)
+    )
+}
+
+/// A `spec.boundary` declaring only `connectors`, admitting `operations`.
+fn connectors_boundary(operations: &[&str]) -> String {
+    format!(
+        "  boundary:\n    connectors: {{upstream: '{CONNECTORS_UPSTREAM}', audience: connectors, \
+         operations: {}}}\n",
+        serde_json::to_string(operations).expect("JSON text")
+    )
+}
+
+/// A `spec.boundary` declaring only `git`, admitting `repositories`.
+fn git_boundary(repositories: &[&str]) -> String {
+    format!(
+        "  boundary:\n    git: {{upstream: '{GIT_UPSTREAM}', audience: connectors-git, \
+         repositories: {}}}\n",
+        serde_json::to_string(repositories).expect("JSON text")
+    )
+}
+
+/// A takt delivery with no credential in its pod: its own image and arguments, a workspace on a
+/// claim, plain environment and its run configuration as a file, then `rest` (a boundary, as a
+/// rule); no `spec.agent`, no `secretRef`, no `secretFiles`.
+fn credential_free_command(rest: &str) -> String {
+    format!(
+        "{HEAD}  routes: {{}}\n  image: {{repository: registry.example/takt, tag: '0.12.0'}}\n  \
+         command: {{args: [--iterations, '1']}}\n  workspace: {{mountPath: /workspace, claimName: \
+         takt-workspace}}\n{}{}{rest}",
+        env(&[("CARGO_NET_OFFLINE", "true")]),
+        config_files(&[("run.toml", "iterations = 1\n")]),
+    )
+}
+
+/// The example without its two host egress entries, which a boundary refuses; its namespace
+/// entries (logs and metrics in `monitoring`) and its ingress stay.
+fn credential_free_agent() -> String {
+    let agent: String = example()
+        .lines()
+        .filter(|line| !line.contains("{name: chat-api,") && !line.contains("{name: model-api,"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert_eq!(
+        agent.lines().count() + 2,
+        example().lines().count(),
+        "two host entries removed"
+    );
+    agent
+}
+
+/// The serve variant of a credential-free agent: the example without host egress, the default
+/// routes, then `rest`.
+fn credential_free_serve(rest: &str) -> String {
+    wrapped(&credential_free_agent(), &format!("  routes: {{}}\n{rest}"))
+}
+
+/// The container named `name` among `pod`'s init containers.
+fn init_container<'a>(pod: &'a Value, name: &str) -> Option<&'a Value> {
+    pod["initContainers"]
+        .as_sequence()
+        .into_iter()
+        .flatten()
+        .find(|container| text(container, &["name"]) == name)
+}
+
+/// An egress rule as the namespace its peer names (none for a rule without a peer) and its
+/// ports as `(protocol, port)`.
+type EgressRule = (Option<String>, Vec<(String, i64)>);
+
+/// Each egress rule of the rendered NetworkPolicy.
+fn egress_of(rendered: &str) -> Vec<EgressRule> {
+    let docs = documents(rendered);
+    let policy = docs
+        .iter()
+        .find(|doc| text(doc, &["kind"]) == "NetworkPolicy")
+        .expect("a NetworkPolicy");
+    at(policy, &["spec", "egress"])
+        .as_sequence()
+        .expect("egress rules")
+        .iter()
+        .map(|rule| {
+            let namespace = rule["to"].as_sequence().map(|peers| {
+                assert_eq!(peers.len(), 1, "one peer: {rule:?}");
+                text(
+                    &peers[0],
+                    &[
+                        "namespaceSelector",
+                        "matchLabels",
+                        "kubernetes.io/metadata.name",
+                    ],
+                )
+                .to_owned()
+            });
+            let ports = rule["ports"]
+                .as_sequence()
+                .expect("ports")
+                .iter()
+                .map(|port| {
+                    (
+                        text(port, &["protocol"]).to_owned(),
+                        port["port"].as_i64().expect("a port number"),
+                    )
+                })
+                .collect();
+            (namespace, ports)
+        })
+        .collect()
+}
+
+/// A rule to `namespace` on one port.
+fn rule(namespace: &str, protocol: &str, port: i64) -> EgressRule {
+    (
+        Some(namespace.to_owned()),
+        vec![(protocol.to_owned(), port)],
+    )
+}
+
+/// The DNS rule every NetworkPolicy opens first.
+fn dns() -> EgressRule {
+    (
+        Some("kube-system".to_owned()),
+        vec![("UDP".to_owned(), 53), ("TCP".to_owned(), 53)],
+    )
+}
+
+/// The values a refusal of a boundary member must never repeat.
+const BOUNDARY_VALUES: [&str; 9] = [
+    "llm-gateway",
+    "LLM-Gateway",
+    "connectors.connectors",
+    "not-a-real-password",
+    "000fake",
+    "000-fake",
+    "merge",
+    "takt-",
+    "10.0.0.1",
+];
+
+fn repeats_no_boundary_value(message: &str) {
+    for value in BOUNDARY_VALUES {
+        assert!(!message.contains(value), "{value} repeated: {message}");
+    }
+}
+
+/// `story:boundary-container-projected-token` (design D243 § 2, § 4, decision A1): a resource
+/// that declares `spec.boundary` gets a second container, `boundary`, as a native sidecar (an
+/// init container with `restartPolicy: Always`, last, so a Job still completes when its program
+/// ends) running `b10x-loom agent boundary` from the controller's default image as user 10002.
+/// It alone mounts the projected volume that holds one service-account token per declared
+/// upstream (its audience the declared one, 600 s); it mounts nothing else and gets no
+/// environment, and the pod's own token stays unmounted.
+#[test]
+fn a_boundary_renders_a_second_container_holding_the_only_token() {
+    let every = boundary(true, true, true);
+    for resource in [
+        credential_free_command(&every),
+        credential_free_serve(&every),
+    ] {
+        let pod = pod_of(&render_document(&resource, &boundary_config()).expect("rendered"));
+        let init = pod["initContainers"]
+            .as_sequence()
+            .expect("init containers");
+        let sidecar = init.last().expect("an init container");
+        assert_eq!(
+            text(sidecar, &["name"]),
+            "boundary",
+            "the last init container"
+        );
+        assert_eq!(
+            init.iter()
+                .filter(|container| text(container, &["name"]) == "boundary")
+                .count(),
+            1
+        );
+        assert_eq!(
+            text(sidecar, &["restartPolicy"]),
+            "Always",
+            "a native sidecar"
+        );
+        assert_eq!(
+            text(sidecar, &["image"]),
+            "registry.example/loom-agent:0.40.0",
+            "the controller's default image, never spec.image"
+        );
+        assert_eq!(strings(sidecar, &["command"]), ["b10x-loom"]);
+        assert_eq!(
+            strings(sidecar, &["args"]),
+            [
+                "agent",
+                "boundary",
+                "--model-upstream",
+                MODEL_UPSTREAM,
+                "--model-token",
+                "/var/run/loom/boundary/tokens/model",
+                "--connectors-upstream",
+                CONNECTORS_UPSTREAM,
+                "--connectors-token",
+                "/var/run/loom/boundary/tokens/connectors",
+                "--operation",
+                "merge_request.create",
+                "--operation",
+                "merge_request.get",
+                "--git-upstream",
+                GIT_UPSTREAM,
+                "--git-token",
+                "/var/run/loom/boundary/tokens/git",
+                "--repository",
+                "agents/takt-target",
+                "--repository",
+                "agents/takt-docs",
+            ]
+        );
+        let probe = &sidecar["startupProbe"];
+        assert_eq!(
+            strings(probe, &["exec", "command"]),
+            [
+                "b10x-loom",
+                "agent",
+                "boundary-ready",
+                "--port",
+                "8401",
+                "--port",
+                "8402",
+                "--port",
+                "8403"
+            ]
+        );
+        assert_eq!(probe["periodSeconds"], Value::from(1));
+        assert_eq!(probe["failureThreshold"], Value::from(30));
+
+        let security = &sidecar["securityContext"];
+        assert_eq!(security["runAsUser"], Value::from(10002));
+        assert_eq!(security["runAsGroup"], Value::from(10002));
+        assert_eq!(security["runAsNonRoot"], Value::Bool(true));
+        assert_eq!(security["readOnlyRootFilesystem"], Value::Bool(true));
+        assert_eq!(security["allowPrivilegeEscalation"], Value::Bool(false));
+        assert_eq!(strings(security, &["capabilities", "drop"]), ["ALL"]);
+        assert!(security["capabilities"]["add"].is_null(), "no capability");
+        assert_eq!(
+            text(security, &["seccompProfile", "type"]),
+            "RuntimeDefault"
+        );
+        let resources = &sidecar["resources"];
+        assert!(
+            resources["limits"]["cpu"].is_string() && resources["limits"]["memory"].is_string()
+        );
+        assert_eq!(resources["requests"], resources["limits"]);
+        assert!(
+            sidecar["env"].is_null() && sidecar["envFrom"].is_null(),
+            "no environment on the boundary"
+        );
+        assert_eq!(
+            mounts_of(sidecar),
+            [(
+                "boundary-tokens".to_owned(),
+                "/var/run/loom/boundary/tokens".to_owned(),
+                None
+            )],
+            "its only mount: no workspace, ConfigMap, emptyDir or Secret"
+        );
+        assert_eq!(sidecar["volumeMounts"][0]["readOnly"], Value::Bool(true));
+
+        let volumes = pod["volumes"].as_sequence().expect("volumes");
+        let tokens = volumes
+            .iter()
+            .find(|volume| text(volume, &["name"]) == "boundary-tokens")
+            .expect("the token volume");
+        let sources = tokens["projected"]["sources"]
+            .as_sequence()
+            .expect("projected sources");
+        let declared: Vec<(String, i64, String)> = sources
+            .iter()
+            .map(|source| {
+                assert_eq!(
+                    source.as_mapping().map(serde_yaml_ng::Mapping::len),
+                    Some(1),
+                    "a service-account token and nothing else: {source:?}"
+                );
+                let token = &source["serviceAccountToken"];
+                (
+                    text(token, &["audience"]).to_owned(),
+                    token["expirationSeconds"].as_i64().expect("an expiry"),
+                    text(token, &["path"]).to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                ("llm-gateway".to_owned(), 600, "model".to_owned()),
+                ("connectors".to_owned(), 600, "connectors".to_owned()),
+                ("connectors-git".to_owned(), 600, "git".to_owned()),
+            ]
+        );
+        for list in ["containers", "initContainers"] {
+            for container in pod[list].as_sequence().into_iter().flatten() {
+                if text(container, &["name"]) != "boundary" {
+                    assert!(
+                        !mounts_of(container)
+                            .iter()
+                            .any(|(name, _, _)| name == "boundary-tokens"),
+                        "only the boundary mounts the tokens: {container:?}"
+                    );
+                }
+                assert!(container["envFrom"].is_null(), "no Secret environment");
+            }
+        }
+        assert!(
+            volumes.iter().all(|volume| volume["secret"].is_null()),
+            "no Secret volume"
+        );
+        assert_eq!(pod["automountServiceAccountToken"], Value::Bool(false));
+    }
+
+    let pod = pod_of(
+        &render_document(
+            &credential_free_command(&boundary(true, false, false)),
+            &boundary_config(),
+        )
+        .expect("rendered"),
+    );
+    let sidecar = init_container(&pod, "boundary").expect("the boundary");
+    assert_eq!(
+        strings(sidecar, &["args"]),
+        [
+            "agent",
+            "boundary",
+            "--model-upstream",
+            MODEL_UPSTREAM,
+            "--model-token",
+            "/var/run/loom/boundary/tokens/model"
+        ],
+        "only the declared upstreams"
+    );
+    assert_eq!(
+        strings(&sidecar["startupProbe"], &["exec", "command"]),
+        ["b10x-loom", "agent", "boundary-ready", "--port", "8401"]
+    );
+    let tokens = pod["volumes"]
+        .as_sequence()
+        .expect("volumes")
+        .iter()
+        .find(|volume| text(volume, &["name"]) == "boundary-tokens")
+        .expect("the token volume");
+    assert_eq!(
+        tokens["projected"]["sources"].as_sequence().map(Vec::len),
+        Some(1)
+    );
+
+    for resource in [takt_resource(), default_resource()] {
+        let pod = pod_of(&render_document(&resource, &config()).expect("rendered"));
+        assert!(
+            init_container(&pod, "boundary").is_none(),
+            "no boundary without one"
+        );
+        assert!(
+            !pod["volumes"]
+                .as_sequence()
+                .expect("volumes")
+                .iter()
+                .any(|volume| text(volume, &["name"]) == "boundary-tokens")
+        );
+    }
+}
+
+/// The agent container reaches each declared upstream through the boundary on loopback: it gets
+/// the boundary's URL for each, after the controller's own environment and before `spec.env`,
+/// mounts no token and has no Secret. With the default routes and `boundary.model`, the routes
+/// document's endpoint is the boundary, with the model route's protocol and model.
+#[test]
+fn the_agent_container_gets_the_boundary_urls_and_no_token() {
+    let urls = [
+        ("LOOM_BOUNDARY_MODEL_URL", "http://127.0.0.1:8401/v1"),
+        ("LOOM_BOUNDARY_CONNECTORS_URL", "http://127.0.0.1:8402"),
+        ("LOOM_BOUNDARY_GIT_URL", "http://127.0.0.1:8403"),
+    ];
+    let rendered = render_document(
+        &credential_free_command(&boundary(true, true, true)),
+        &boundary_config(),
+    )
+    .expect("rendered");
+    let pod = pod_of(&rendered);
+    assert_eq!(
+        pod["containers"].as_sequence().map(Vec::len),
+        Some(1),
+        "the boundary is an init container, not a second program"
+    );
+    let agent = &pod["containers"][0];
+    assert_eq!(text(agent, &["name"]), "loom-agent");
+    let mut expected = owned(&[("HOME", "/var/lib/agent")]);
+    expected.extend(owned(&urls));
+    expected.extend(owned(&[("CARGO_NET_OFFLINE", "true")]));
+    assert_eq!(
+        env_of(agent),
+        expected,
+        "the controller's own, the boundary's URLs, then spec.env"
+    );
+    assert!(agent["envFrom"].is_null(), "no Secret as its environment");
+    assert!(
+        !mounts_of(agent)
+            .iter()
+            .any(|(name, _, _)| name == "boundary-tokens"),
+        "no token"
+    );
+    let data = config_map_data(&rendered);
+    let routes: Value = serde_yaml_ng::from_str(
+        &data
+            .iter()
+            .find(|(key, _)| key == "routes.yaml")
+            .expect("routes.yaml")
+            .1,
+    )
+    .expect("routes.yaml is YAML");
+    assert_eq!(
+        text(&routes, &["endpoints", "model-route", "base_url"]),
+        "http://127.0.0.1:8401/v1"
+    );
+    assert_eq!(
+        text(&routes, &["endpoints", "model-route", "protocol"]),
+        "messages"
+    );
+    assert_eq!(
+        text(&routes, &["endpoints", "model-route", "auth", "kind"]),
+        "anonymous"
+    );
+
+    for declared in [
+        [true, false, false],
+        [false, true, false],
+        [false, false, true],
+        [false, true, true],
+    ] {
+        let [model, connectors, git] = declared;
+        let rendered = render_document(
+            &credential_free_serve(&boundary(model, connectors, git)),
+            &boundary_config(),
+        )
+        .expect("rendered");
+        let given: Vec<(&str, &str)> = urls
+            .iter()
+            .zip(declared)
+            .filter(|(_, declared)| *declared)
+            .map(|(url, _)| *url)
+            .collect();
+        let pod = pod_of(&rendered);
+        assert_eq!(
+            env_of(&pod["containers"][0]),
+            owned(&given),
+            "each URL only for a declared upstream, on the serve variant too"
+        );
+        if model {
+            let routes: Value = serde_yaml_ng::from_str(
+                &config_map_data(&rendered)
+                    .iter()
+                    .find(|(key, _)| key == "routes.yaml")
+                    .expect("routes.yaml")
+                    .1,
+            )
+            .expect("YAML");
+            assert_eq!(
+                text(&routes, &["endpoints", "model-route", "base_url"]),
+                "http://127.0.0.1:8401/v1"
+            );
+            assert_eq!(
+                text(&routes, &["routes", "small"]),
+                "model-route/small-model"
+            );
+        }
+    }
+}
+
+/// A credential-free agent holds no Secret: `spec.boundary` beside `spec.secretRef` or
+/// `spec.secretFiles` is refused at that member before any child exists, even when the
+/// configuration allows the Secret.
+#[test]
+fn a_boundary_beside_a_secret_is_refused() {
+    let every = boundary(true, true, true);
+    for (secret, member) in [
+        (
+            "  secretRef: {name: platform-operator-secrets}\n",
+            "spec.secretRef",
+        ),
+        (
+            "  secretFiles: {name: takt-forge, mountPath: /var/run/secrets/takt}\n",
+            "spec.secretFiles",
+        ),
+    ] {
+        let rest = format!("{secret}{every}");
+        for resource in [credential_free_command(&rest), credential_free_serve(&rest)] {
+            let message = refusal(&resource, &boundary_config());
+            assert!(
+                message.starts_with(&format!("refused: BoundaryWithSecret at {member}: ")),
+                "{message}"
+            );
+            assert!(
+                !message.contains("platform-operator-secrets") && !message.contains("takt-forge"),
+                "{message}"
+            );
+        }
+        render_document(&credential_free_command(secret), &boundary_config())
+            .expect("the Secret alone is admitted");
+    }
+}
+
+/// The controller's `allowedBoundaryUpstreams` lists the upstreams a resource may name, exactly;
+/// empty, as built in, it admits none.
+#[test]
+fn a_boundary_upstream_the_controller_does_not_allow_is_refused() {
+    for (member, declared) in [
+        ("model", boundary(true, false, false)),
+        ("connectors", boundary(false, true, false)),
+        ("git", boundary(false, false, true)),
+    ] {
+        let expected = format!(
+            "refused: BoundaryUpstreamNotAllowed at spec.boundary.{member}.upstream: the \
+             controller's allowedBoundaryUpstreams does not hold it"
+        );
+        assert_eq!(
+            refusal(&credential_free_command(&declared), &config()),
+            expected
+        );
+        assert_eq!(
+            refusal(&credential_free_serve(&declared), &allowing(&[])),
+            expected
+        );
+    }
+    for upstream in [
+        "http://llm-gateway.llm.svc:8080/v2",
+        "http://llm-gateway.llm.svc:8081/v1",
+        "http://llm-gateway.llm.svc.cluster.local:8080/v1",
+        "http://llm-gateway.llm.svc:8080",
+    ] {
+        let message = refusal(
+            &credential_free_command(&model_boundary(upstream, "llm-gateway")),
+            &boundary_config(),
+        );
+        assert!(
+            message.starts_with(
+                "refused: BoundaryUpstreamNotAllowed at spec.boundary.model.upstream: "
+            ),
+            "{upstream}: {message}"
+        );
+        repeats_no_boundary_value(&message);
+    }
+}
+
+/// `story:credential-free-network-policy`: a credential-free agent's NetworkPolicy opens DNS,
+/// each declared upstream's namespace on its port (80 when the URL names none) and the spec's
+/// namespace egress entries, and nothing else: no rule without a peer, so no host entry and no
+/// model-route rule.
+#[test]
+fn a_credential_free_agent_reaches_dns_and_its_upstream_namespaces_only() {
+    let every = boundary(true, true, true);
+    let serve =
+        render_document(&credential_free_serve(&every), &boundary_config()).expect("rendered");
+    assert_eq!(
+        egress_of(&serve),
+        [
+            dns(),
+            rule("monitoring", "TCP", 3100),
+            rule("monitoring", "TCP", 9090),
+            rule("llm", "TCP", 8080),
+            rule("connectors", "TCP", 8080),
+            rule("connectors", "TCP", 80),
+        ]
+    );
+    let docs = documents(&serve);
+    let policy = docs
+        .iter()
+        .find(|doc| text(doc, &["kind"]) == "NetworkPolicy")
+        .expect("a NetworkPolicy");
+    assert_eq!(
+        text(
+            policy,
+            &[
+                "spec",
+                "ingress",
+                "0",
+                "from",
+                "0",
+                "namespaceSelector",
+                "matchLabels",
+                "kubernetes.io/metadata.name"
+            ]
+        ),
+        "operator-clients",
+        "ingress as declared"
+    );
+
+    let command =
+        render_document(&credential_free_command(&every), &boundary_config()).expect("rendered");
+    assert_eq!(
+        egress_of(&command),
+        [
+            dns(),
+            rule("llm", "TCP", 8080),
+            rule("connectors", "TCP", 8080),
+            rule("connectors", "TCP", 80),
+        ]
+    );
+    let only_git = render_document(
+        &credential_free_command(&boundary(false, false, true)),
+        &boundary_config(),
+    )
+    .expect("rendered");
+    assert_eq!(
+        egress_of(&only_git),
+        [dns(), rule("connectors", "TCP", 80)],
+        "no model-route rule beside a boundary, even with the default routes"
+    );
+
+    let without = render_document(&command_without_agent(""), &config()).expect("rendered");
+    assert_eq!(
+        egress_of(&without),
+        [dns(), (None, vec![("TCP".to_owned(), 8080)])],
+        "without a boundary the default routes still open the model route's port"
+    );
+}
+
+/// A NetworkPolicy names no host, so a host entry's rule opens its port to every destination;
+/// beside a boundary such an entry is refused at its host, even one the configuration allows.
+#[test]
+fn a_host_egress_entry_beside_a_boundary_is_refused() {
+    let first = wrapped(
+        &example(),
+        &format!("  routes: {{}}\n{}", boundary(true, false, false)),
+    );
+    let message = refusal(&first, &boundary_config());
+    assert!(
+        message.starts_with(
+            "refused: BoundaryEgressHost at spec.agent.deploy.kubernetes.egress[0].host: "
+        ),
+        "{message}"
+    );
+    assert!(!message.contains("chat.example"), "{message}");
+
+    let agent = credential_free_agent().replace(
+        "      - {name: metrics,",
+        "      - {name: chat-api, host: chat.example, port: 443}\n      - {name: metrics,",
+    );
+    let message = refusal(
+        &wrapped(
+            &agent,
+            &format!("  routes: {{}}\n{}", boundary(false, true, true)),
+        ),
+        &boundary_config(),
+    );
+    assert!(
+        message.starts_with(
+            "refused: BoundaryEgressHost at spec.agent.deploy.kubernetes.egress[1].host: "
+        ),
+        "{message}"
+    );
+    assert!(!message.contains("chat.example"), "{message}");
+    render_document(&wrapped(&agent, "  routes: {}\n"), &boundary_config())
+        .expect("the same host is admitted without a boundary");
+}
+
+/// An upstream is a plain `http://` URL of a cluster service, `<service>.<namespace>.svc` with
+/// an optional `.cluster.local`, port and path, so the NetworkPolicy can name its namespace;
+/// anything else is refused at its member, even when the configuration lists it, and the refusal
+/// never repeats it. An `https` upstream is refused in this wave (approval record wave-d243-l).
+#[test]
+fn an_upstream_that_is_no_cluster_service_is_refused() {
+    let long_label = format!("http://{}.llm.svc/v1", "a".repeat(64));
+    let invalid = [
+        "https://llm-gateway.llm.svc:8443/v1",
+        "HTTP://llm-gateway.llm.svc/v1",
+        "ftp://llm-gateway.llm.svc/v1",
+        "llm-gateway.llm.svc:8080",
+        "//llm-gateway.llm.svc:8080",
+        "http://user:not-a-real-password@llm-gateway.llm.svc/v1",
+        "http://user@llm-gateway.llm.svc/v1",
+        "http://llm-gateway.llm.svc/v1?key=not-a-real-password",
+        "http://llm-gateway.llm.svc?key",
+        "http://llm-gateway.llm.svc/v1#part",
+        "http://llm-gateway.example/v1",
+        "http://llm-gateway.svc/v1",
+        "http://llm-gateway.llm.svc.cluster/v1",
+        "http://llm-gateway.llm.svc.cluster.local.example/v1",
+        "http://llm-gateway.llm.other.svc/v1",
+        "http://llm-gateway.llm.svc./v1",
+        "http://LLM-Gateway.llm.svc/v1",
+        "http://-llm-gateway.llm.svc/v1",
+        "http://llm-gateway-.llm.svc/v1",
+        "http://llm_gateway.llm.svc/v1",
+        "http://.llm.svc/v1",
+        &long_label,
+        "http://10.0.0.1:8080/v1",
+        "http://[fd00::1]:8080/v1",
+        "http://llm-gateway.llm.svc:0/v1",
+        "http://llm-gateway.llm.svc:65536/v1",
+        "http://llm-gateway.llm.svc:/v1",
+        "http://llm-gateway.llm.svc:80a/v1",
+        "http://llm-gateway.llm.svc:+80/v1",
+        "http://llm-gateway.llm.svc/v1//chat",
+        "http://llm-gateway.llm.svc/v1/../admin",
+        "http://llm-gateway.llm.svc/v1/./chat",
+        "http://llm-gateway.llm.svc/v1/",
+        "http://llm-gateway.llm.svc/",
+        "http://llm-gateway.llm.svc/v 1",
+        "http://llm-gateway.llm.svc/v1%2Fadmin",
+        "http://llm-gateway.llm.svc/v1\\admin",
+        "http://llm-gateway.llm.svc /v1",
+        "http://llm-gateway.llm.svc/v1\n",
+        "http://",
+        "",
+    ];
+    for upstream in invalid {
+        let message = refusal(
+            &credential_free_command(&model_boundary(upstream, "llm-gateway")),
+            &allowing(&[upstream]),
+        );
+        assert!(
+            message
+                .starts_with("refused: BoundaryUpstreamInvalid at spec.boundary.model.upstream: "),
+            "{upstream:?}: {message}"
+        );
+        repeats_no_boundary_value(&message);
+        assert!(
+            !message.contains("fd00") && !message.contains("aaaa"),
+            "{message}"
+        );
+    }
+    let connectors = "  boundary:\n    connectors: {upstream: 'https://connectors.connectors.svc', \
+                      audience: connectors, operations: [merge_request.create]}\n";
+    let git = "  boundary:\n    git: {upstream: 'http://connectors.svc/git', audience: \
+               connectors-git, repositories: [agents/takt-target]}\n";
+    for (declared, member) in [(connectors, "connectors"), (git, "git")] {
+        let message = refusal(
+            &credential_free_command(declared),
+            &allowing(&[
+                "https://connectors.connectors.svc",
+                "http://connectors.svc/git",
+            ]),
+        );
+        assert!(
+            message.starts_with(&format!(
+                "refused: BoundaryUpstreamInvalid at spec.boundary.{member}.upstream: "
+            )),
+            "{message}"
+        );
+        repeats_no_boundary_value(&message);
+    }
+
+    for (upstream, namespace, port) in [
+        ("http://llm-gateway.llm.svc", "llm", 80),
+        (
+            "http://llm-gateway.llm.svc.cluster.local:8080/v1",
+            "llm",
+            8080,
+        ),
+        ("http://a.b-1.svc:65535/x/y.z_~-", "b-1", 65535),
+        ("http://0gateway.llm.svc:1/v1/chat", "llm", 1),
+    ] {
+        let rendered = render_document(
+            &credential_free_command(&model_boundary(upstream, "llm-gateway")),
+            &allowing(&[upstream]),
+        )
+        .unwrap_or_else(|error| panic!("{upstream}: {error}"));
+        assert_eq!(
+            egress_of(&rendered),
+            [dns(), rule(namespace, "TCP", port)],
+            "{upstream}"
+        );
+    }
+}
+
+/// A boundary that declares none of `model`, `connectors` and `git` holds nothing to relay.
+#[test]
+fn a_boundary_that_declares_no_upstream_is_malformed() {
+    for resource in [
+        credential_free_command("  boundary: {}\n"),
+        credential_free_serve("  boundary: {}\n"),
+    ] {
+        let message = refusal(&resource, &boundary_config());
+        assert!(
+            message.starts_with("refused: Malformed at spec.boundary: "),
+            "{message}"
+        );
+    }
+}
+
+/// An audience is the token's audience, a plain word: empty, or holding whitespace or a control
+/// character, it is `Malformed`, never repeated.
+#[test]
+fn a_boundary_audience_that_is_empty_or_not_one_word_is_malformed() {
+    for audience in [
+        "",
+        "llm gateway",
+        "llm\tgateway",
+        " llm-gateway",
+        "llm-gateway\n",
+        "llm\u{7}gateway",
+        "llm\u{a0}gateway",
+    ] {
+        let message = refusal(
+            &credential_free_command(&model_boundary(MODEL_UPSTREAM, audience)),
+            &boundary_config(),
+        );
+        assert!(
+            message.starts_with("refused: Malformed at spec.boundary.model.audience: "),
+            "{audience:?}: {message}"
+        );
+        repeats_no_boundary_value(&message);
+        assert!(!message.contains("gateway"), "{message}");
+    }
+}
+
+/// The operations a boundary admits are Connectors operation ids and its repositories are
+/// `<owner>/<repo>`, each given once: an empty list, an entry out of form (one starting with `-`
+/// would read as a flag of the boundary's command line) or given twice is `Malformed` at it.
+#[test]
+fn boundary_operations_and_repositories_out_of_form_are_malformed() {
+    let operations: [(&[&str], &str); 8] = [
+        (&[], "spec.boundary.connectors.operations"),
+        (
+            &["merge_request.create", "merge request"],
+            "spec.boundary.connectors.operations[1]",
+        ),
+        (
+            &["merge_request/create"],
+            "spec.boundary.connectors.operations[0]",
+        ),
+        (
+            &["merge_request:create"],
+            "spec.boundary.connectors.operations[0]",
+        ),
+        (&[""], "spec.boundary.connectors.operations[0]"),
+        (&["--model-token"], "spec.boundary.connectors.operations[0]"),
+        (&["-merge"], "spec.boundary.connectors.operations[0]"),
+        (
+            &[
+                "merge_request.create",
+                "merge_request.get",
+                "merge_request.create",
+            ],
+            "spec.boundary.connectors.operations[2]",
+        ),
+    ];
+    for (listed, member) in operations {
+        let message = refusal(
+            &credential_free_command(&connectors_boundary(listed)),
+            &boundary_config(),
+        );
+        assert!(
+            message.starts_with(&format!("refused: Malformed at {member}: ")),
+            "{listed:?}: {message}"
+        );
+        repeats_no_boundary_value(&message);
+    }
+    let repeated = refusal(
+        &credential_free_command(&connectors_boundary(&[
+            "merge_request.create",
+            "merge_request.get",
+            "merge_request.create",
+        ])),
+        &boundary_config(),
+    );
+    assert!(
+        repeated.ends_with("it repeats spec.boundary.connectors.operations[0]"),
+        "{repeated}"
+    );
+
+    let repositories: [(&[&str], &str); 16] = [
+        (&[], "spec.boundary.git.repositories"),
+        (&["takt-target"], "spec.boundary.git.repositories[0]"),
+        (
+            &["agents/takt-target/extra"],
+            "spec.boundary.git.repositories[0]",
+        ),
+        (&["agents/"], "spec.boundary.git.repositories[0]"),
+        (&["/takt-target"], "spec.boundary.git.repositories[0]"),
+        (&["./takt-target"], "spec.boundary.git.repositories[0]"),
+        (&["../takt-target"], "spec.boundary.git.repositories[0]"),
+        (&["agents/.."], "spec.boundary.git.repositories[0]"),
+        (&["agents/."], "spec.boundary.git.repositories[0]"),
+        (
+            &["agents/takt-target.git"],
+            "spec.boundary.git.repositories[0]",
+        ),
+        (
+            &["agents/takt-target.GIT"],
+            "spec.boundary.git.repositories[0]",
+        ),
+        (&["agents/takt target"], "spec.boundary.git.repositories[0]"),
+        (&["agents/takt:target"], "spec.boundary.git.repositories[0]"),
+        (
+            &["-agents/takt-target"],
+            "spec.boundary.git.repositories[0]",
+        ),
+        (&[""], "spec.boundary.git.repositories[0]"),
+        (
+            &[
+                "agents/takt-target",
+                "agents/takt-docs",
+                "agents/takt-target",
+            ],
+            "spec.boundary.git.repositories[2]",
+        ),
+    ];
+    for (listed, member) in repositories {
+        let message = refusal(
+            &credential_free_command(&git_boundary(listed)),
+            &boundary_config(),
+        );
+        assert!(
+            message.starts_with(&format!("refused: Malformed at {member}: ")),
+            "{listed:?}: {message}"
+        );
+        repeats_no_boundary_value(&message);
+    }
+
+    let admitted = render_document(
+        &credential_free_command(&format!(
+            "{}{}",
+            connectors_boundary(&["merge_request.create", "Issue-2.get_all"]),
+            git_boundary(&["agents/takt-target", "Agents.Two/repo_name-2.x"])
+                .replace("  boundary:\n", "")
+        )),
+        &boundary_config(),
+    )
+    .expect("operation ids and repositories in form are admitted");
+    let pod = pod_of(&admitted);
+    let args = strings(
+        init_container(&pod, "boundary").expect("the boundary"),
+        &["args"],
+    );
+    assert!(
+        args.ends_with(&[
+            "--repository".to_owned(),
+            "agents/takt-target".to_owned(),
+            "--repository".to_owned(),
+            "Agents.Two/repo_name-2.x".to_owned(),
+        ]),
+        "{args:?}"
+    );
+}
+
+/// The boundary's strings reach the pod spec, so they are walked for a credential as
+/// `spec.command` is, and a refusal never repeats one.
+#[test]
+fn a_credential_in_the_boundary_is_refused_without_repeating_it() {
+    for (declared, expected) in [
+        (
+            model_boundary(MODEL_UPSTREAM, "ghp_000fake"),
+            "refused: SecretLiteral at spec.boundary.model.audience: a value with the prefix \
+             `ghp_`",
+        ),
+        (
+            connectors_boundary(&["merge_request.create", "xoxb-000-fake"]),
+            "refused: SecretLiteral at spec.boundary.connectors.operations[1]: a value with the \
+             prefix `xoxb-`",
+        ),
+        (
+            git_boundary(&["ghp_000fake/takt-target"]),
+            "refused: SecretLiteral at spec.boundary.git.repositories[0]: a value with the prefix \
+             `ghp_`",
+        ),
+    ] {
+        let message = refusal(&credential_free_command(&declared), &boundary_config());
+        assert!(message.starts_with(expected), "{expected} <- {message}");
+        repeats_no_boundary_value(&message);
+    }
+}
+
+/// The boundary's URLs are the controller's own environment: a `spec.env` entry may not take
+/// their names (on either variant, with or without a boundary), and the `$(VAR)` walk expands a
+/// reference to one the boundary declares to its URL, which completes no user information, while
+/// a reference to one it does not declare is read as a possible URL scheme.
+#[test]
+fn the_boundary_urls_are_the_controllers_environment() {
+    for name in [
+        "LOOM_BOUNDARY_MODEL_URL",
+        "LOOM_BOUNDARY_CONNECTORS_URL",
+        "LOOM_BOUNDARY_GIT_URL",
+    ] {
+        let rest = env(&[("CARGO_HOME", "/w"), (name, "http://127.0.0.1:9/v1")]);
+        for (resource, config) in [
+            (command_with(&rest), config()),
+            (serve_with(&rest), config()),
+            (
+                credential_free_serve(&format!("{rest}{}", boundary(true, true, true))),
+                boundary_config(),
+            ),
+        ] {
+            assert_eq!(
+                refusal(&resource, &config),
+                "refused: EnvNameConflict at spec.env[1].name: the controller sets it on the \
+                 container"
+            );
+        }
+    }
+
+    let note = env(&[(
+        "NOTE",
+        "$(LOOM_BOUNDARY_MODEL_URL)u:not-a-real-password@forge.example",
+    )]);
+    render_document(
+        &credential_free_serve(&format!("{note}{}", boundary(true, false, false))),
+        &boundary_config(),
+    )
+    .expect("the model URL it expands to completes no user information");
+    let message = refusal(
+        &credential_free_serve(&format!("{note}{}", boundary(false, true, false))),
+        &boundary_config(),
+    );
+    assert!(
+        message.starts_with("refused: SecretLiteral at spec.env[0].value: ")
+            && message.ends_with(", after `$(VAR)` expansion"),
+        "an undeclared upstream's name is unknown: {message}"
+    );
+    repeats_no_boundary_value(&message);
+}
+
+#[test]
+fn a_credential_free_command_resource_renders_as_its_golden_file() {
+    let rendered = render_document(
+        &credential_free_command(&boundary(true, true, true)),
+        &boundary_config(),
+    )
+    .expect("rendered");
+    let golden = root().join("crates/loom-operator/tests/golden/credential-free.yaml");
+    if std::env::var_os("LOOM_OPERATOR_BLESS").is_some() {
+        fs::write(&golden, &rendered).expect("the golden file is written");
+    }
+    let expected = fs::read_to_string(&golden).expect("the golden file");
+    assert_eq!(
+        rendered,
+        expected,
+        "render differs from {}",
+        golden.display()
+    );
 }

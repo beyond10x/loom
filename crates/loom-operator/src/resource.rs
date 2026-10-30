@@ -65,6 +65,57 @@ pub struct LoomAgentSpec {
     /// container runtime's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub app_armor_profile: Option<ConfinementProfile>,
+    /// The upstreams a credential-free agent reaches through the `boundary` container, which
+    /// holds the pod's only credential; on either variant, and never beside a Secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<Boundary>,
+}
+
+/// `spec.boundary`: the upstreams the `boundary` container relays the agent's loopback calls to,
+/// each with the audience of the projected service-account token it adds; at least one declared.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Boundary {
+    /// The model gateway, relayed at `http://127.0.0.1:8401/v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<BoundaryUpstream>,
+    /// The Connectors instance, relayed at `http://127.0.0.1:8402`, for the listed operations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connectors: Option<ConnectorsBoundary>,
+    /// The git smart-HTTP upstream, relayed at `http://127.0.0.1:8403`, for the listed
+    /// repositories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<GitBoundary>,
+}
+
+/// One upstream of the boundary: a cluster service URL and the token audience it checks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundaryUpstream {
+    /// `http://<service>.<namespace>.svc[.cluster.local][:<port>][/<path>]`.
+    pub upstream: String,
+    /// The audience of the projected service-account token.
+    pub audience: String,
+}
+
+/// `spec.boundary.connectors`: the Connectors upstream and the operation ids it admits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectorsBoundary {
+    /// `http://<service>.<namespace>.svc[.cluster.local][:<port>][/<path>]`.
+    pub upstream: String,
+    /// The audience of the projected service-account token.
+    pub audience: String,
+    /// The operation ids the boundary admits, such as `merge_request.create`.
+    pub operations: Vec<String>,
+}
+
+/// `spec.boundary.git`: the git smart-HTTP upstream and the repositories it admits.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GitBoundary {
+    /// `http://<service>.<namespace>.svc[.cluster.local][:<port>][/<path>]`.
+    pub upstream: String,
+    /// The audience of the projected service-account token.
+    pub audience: String,
+    /// The repositories the boundary admits, each `<owner>/<repo>`.
+    pub repositories: Vec<String>,
 }
 
 impl LoomAgentSpec {
