@@ -647,7 +647,8 @@ pub struct SessionExecutor {
     pub overrides: SessionOverrides,
     /// The name of the session's scratch root under [`Self::scratch`], so that every session
     /// under it works in the same path, `<scratch>/<copy_name>/copy`; none, the default, for a
-    /// root unique to each session. One plain path component of at most 64 bytes, else a call
+    /// root unique to each session. One plain path component of at most 64 bytes not starting
+    /// `session-`, in a scratch no other user can write unless it has the sticky bit, else a call
     /// fails before the copy is made. A directory of this user's that an earlier session left at
     /// the path is emptied first; anything else there, or a session still running in it, fails
     /// the call before the copy is made ([`ScratchCopy::claim`]).
@@ -3248,10 +3249,13 @@ impl ScratchCopy {
     /// ([`SessionExecutor::copy_name`]), empty, `0700` and held by an exclusive lock on the
     /// directory, which the returned handle keeps until the copy is dropped. It is made when the
     /// path holds nothing; a directory of this user's there that no session holds, one an
-    /// earlier session left, is emptied, its entries removed without following a link. Before
-    /// anything at the path is touched, it refuses a name that is not one plain path component of
-    /// at most 64 bytes, a link or any other entry that is not this user's directory, and a
-    /// directory a running session holds, which emptying would take from under it.
+    /// earlier session left, is emptied, its entries removed without following a link, after its
+    /// directories are opened up ([`Self::open_up`]). Before anything at the path is touched, it
+    /// refuses a name that is not one plain path component of at most 64 bytes or that starts
+    /// `session-` (an unnamed session's root, which holds no lock), a scratch other users can
+    /// write that has no sticky bit (one of them could swap the root for a link after it is
+    /// checked), a link or any other entry that is not this user's directory, and a directory a
+    /// running session holds, which emptying would take from under it.
     fn claim(scratch: &Path, name: &str) -> Result<(PathBuf, std::fs::File), String> {
         use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
         if name.is_empty()
@@ -3260,22 +3264,31 @@ impl ScratchCopy {
             || name == ".."
             || name.contains('/')
             || name.chars().any(char::is_control)
+            || name.starts_with("session-")
         {
             return Err(format!(
-                "the copy name {name:?} is not one plain path component of at most 64 bytes"
+                "the copy name {name:?} is not one plain path component of at most 64 bytes \
+                 that does not start with \"session-\""
+            ));
+        }
+        let mode = std::fs::metadata(scratch)
+            .map_err(|error| format!("read the scratch directory {}: {error}", scratch.display()))?
+            .mode();
+        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+            return Err(format!(
+                "the scratch directory {} can be written by other users and has no sticky bit; \
+                 no named copy is made there",
+                scratch.display()
             ));
         }
         let root = scratch.join(name);
-        let created = match std::fs::DirBuilder::new().mode(0o700).create(&root) {
-            Ok(()) => true,
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+        match std::fs::DirBuilder::new().mode(0o700).create(&root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(error) => {
                 return Err(format!("make the scratch copy {}: {error}", root.display()));
             }
-        };
-        let own = |meta: &std::fs::Metadata| {
-            meta.is_dir() && (created || Some(meta.uid()) == Self::effective_uid())
-        };
+        }
         let refused = || {
             format!(
                 "the scratch copy path {} holds an entry that is not a directory of this user's; \
@@ -3283,9 +3296,16 @@ impl ScratchCopy {
                 root.display()
             )
         };
+        let Some(uid) = Self::effective_uid() else {
+            return Err(refused());
+        };
+        let own = |meta: &std::fs::Metadata| meta.is_dir() && meta.uid() == uid;
         if !std::fs::symlink_metadata(&root).is_ok_and(|meta| own(&meta)) {
             return Err(refused());
         }
+        // A leftover root the user made `0000` opens only once it is the user's own again.
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("set the mode of {}: {error}", root.display()))?;
         let held = std::fs::File::open(&root)
             .map_err(|error| format!("open the scratch copy {}: {error}", root.display()))?;
         held.try_lock().map_err(|error| {
@@ -3304,8 +3324,7 @@ impl ScratchCopy {
         if !same {
             return Err(refused());
         }
-        held.set_permissions(std::fs::Permissions::from_mode(0o700))
-            .map_err(|error| format!("set the mode of {}: {error}", root.display()))?;
+        Self::open_up(&root, uid);
         let entries = std::fs::read_dir(&root)
             .map_err(|error| format!("read the scratch copy {}: {error}", root.display()))?;
         for entry in entries {
@@ -3322,8 +3341,28 @@ impl ScratchCopy {
         Ok((root, held))
     }
 
+    /// Gives `dir` and every directory under it that the user `uid` owns mode `0700`, links not
+    /// followed, so that removing the tree is not stopped by a directory a session made
+    /// read-only, as Go makes its module cache. Whatever it cannot change is left for the
+    /// removal to report.
+    fn open_up(dir: &Path, uid: u32) {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        if !std::fs::symlink_metadata(dir).is_ok_and(|meta| meta.is_dir() && meta.uid() == uid) {
+            return;
+        }
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                Self::open_up(&entry.path(), uid);
+            }
+        }
+    }
+
     /// The process's effective user id, read from `/proc/self/status`; none where that cannot be
-    /// read, so that no directory found at a named copy's path counts as this user's.
+    /// read, so that no named copy is made and no directory is opened up.
     fn effective_uid() -> Option<u32> {
         let status = std::fs::read_to_string("/proc/self/status").ok()?;
         let ids = status.lines().find_map(|line| line.strip_prefix("Uid:"))?;
@@ -3496,6 +3535,9 @@ impl ScratchCopy {
 
 impl Drop for ScratchCopy {
     fn drop(&mut self) {
+        if let Some(uid) = Self::effective_uid() {
+            Self::open_up(&self.root, uid);
+        }
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }

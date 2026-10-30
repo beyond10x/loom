@@ -335,8 +335,9 @@ fn without_a_copy_name_each_session_gets_its_own_path() {
 }
 
 /// A name that is not one plain path component (`a/b`, `..`, `.`, empty, a control character,
-/// 65 bytes) suspends the step with `ExternalAvailability` before any copy: no session starts
-/// and nothing is made in scratch. A name of 64 bytes is one.
+/// 65 bytes), or one starting `session-`, the prefix of an unnamed session's root, suspends the
+/// step with `ExternalAvailability` before any copy: no session starts and nothing is made in
+/// scratch. A name of 64 bytes is one.
 #[test]
 fn a_copy_name_that_is_not_one_plain_component_is_refused() {
     let scratch = Scratch::new("names");
@@ -344,6 +345,7 @@ fn a_copy_name_that_is_not_one_plain_component_is_refused() {
     let long = "a".repeat(65);
 
     for name in [
+        "session-17",
         "a/b",
         "..",
         ".",
@@ -468,6 +470,34 @@ fn a_link_or_foreign_entry_at_the_path_is_refused() {
         "the file is left"
     );
     assert_eq!(scratch.scratch_entries(), ["file", "linked"]);
+}
+
+/// A named copy is made only in a scratch that no other user can write, or that has the sticky
+/// bit: in a scratch others can write without it, the step suspends with `ExternalAvailability`
+/// naming the scratch, before anything is made there. The same scratch with the sticky bit runs.
+#[test]
+fn a_scratch_others_can_write_without_the_sticky_bit_is_refused() {
+    let scratch = Scratch::new("open-scratch");
+    let sessions = Sessions::default();
+    std::fs::set_permissions(scratch.scratch(), std::fs::Permissions::from_mode(0o777))
+        .expect("a scratch others can write");
+
+    let executor = scratch.executor(Some("case-17"), &sessions);
+    let why = refusal(&step_of(&executor));
+    assert!(
+        why.contains(&scratch.scratch().display().to_string()),
+        "the refusal names the scratch: {why}"
+    );
+    assert!(sessions.started.borrow().is_empty(), "no session starts");
+    assert!(
+        scratch.scratch_entries().is_empty(),
+        "nothing is made in scratch: {:?}",
+        scratch.scratch_entries()
+    );
+
+    std::fs::set_permissions(scratch.scratch(), std::fs::Permissions::from_mode(0o1777))
+        .expect("the sticky bit");
+    proposes(&step_of(&scratch.executor(Some("case-17"), &sessions)));
 }
 
 /// A call made while the executor already runs a session, here from its observer, is refused
