@@ -1,9 +1,9 @@
 image:
   repository: registry.example/loom-operator
-  tag: "0.52.0"
+  tag: "0.53.0"
 agentImage:
   repository: registry.example/loom-agent
-  tag: "0.52.0"
+  tag: "0.53.0"
 modelRoute:
   url: ""
   protocol: ""
@@ -25,3 +25,6 @@ resources:
 defaultAgentResources:
   cpu: 250m
   memory: 256Mi
+defaultCommandResources:
+  cpu: "4"
+  memory: 8Gi

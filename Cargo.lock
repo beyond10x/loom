@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-a2a"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "a2a",
  "b10x-loom-plugin",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-agent"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-a2a",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-boundary"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -542,14 +542,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-commission",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-conformance"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-agent",
  "b10x-loom-commission",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-connectors"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -596,12 +596,13 @@ dependencies = [
  "connectors-core",
  "loom",
  "serde_json",
+ "sha2 0.11.0",
  "tokio",
 ]
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-commission",
@@ -617,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -633,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-conformance"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-intake-slice",
  "ess-conformance",
@@ -644,14 +645,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -663,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -692,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-mandate"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -710,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-operator"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-models",
  "b10x-loom-agent",
@@ -735,7 +736,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -748,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin-slack"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-plugin",
@@ -759,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-protocols"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -772,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-resource"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "jsonschema 0.52.1",
  "loom",
@@ -782,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-sdk"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -808,7 +809,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-selector-laya"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -821,7 +822,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-session-executor"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -1205,8 +1206,8 @@ version = "1.0.0"
 
 [[package]]
 name = "connectors-client"
-version = "0.35.0"
-source = "git+https://github.com/beyond10x/connectors?tag=v0.35.0#aedd89aa4533486f45e801fa09a329c64dcde0ab"
+version = "0.62.0"
+source = "git+https://github.com/beyond10x/connectors?tag=v0.62.0#ea7ec6085e336bf38a7345af472180cdd683b455"
 dependencies = [
  "connectors-core",
  "futures-util",
@@ -1219,14 +1220,24 @@ dependencies = [
 
 [[package]]
 name = "connectors-core"
-version = "0.35.0"
-source = "git+https://github.com/beyond10x/connectors?tag=v0.35.0#aedd89aa4533486f45e801fa09a329c64dcde0ab"
+version = "0.62.0"
+source = "git+https://github.com/beyond10x/connectors?tag=v0.62.0#ea7ec6085e336bf38a7345af472180cdd683b455"
 dependencies = [
+ "connectors-operation-types",
  "hex",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "thiserror",
+]
+
+[[package]]
+name = "connectors-operation-types"
+version = "0.0.0"
+source = "git+https://github.com/beyond10x/connectors?tag=v0.62.0#ea7ec6085e336bf38a7345af472180cdd683b455"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3685,7 +3696,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -3693,7 +3704,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -3703,7 +3714,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "anyhow",
  "b10x-llm-models",
@@ -3716,7 +3727,7 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.52.0"
+version = "0.53.0"
 dependencies = [
  "b10x-loom-resource",
  "clap",

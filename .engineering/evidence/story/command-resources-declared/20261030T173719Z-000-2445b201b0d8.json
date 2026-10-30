@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T17:37:19Z",
+  "actor": "human:timo",
+  "artifact": "story:command-resources-declared",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "scoped local gate on wave/2026-10-30-w3 at 1d67d956: fmt, drift, crd-drift, chart-check, docs-check, deps-guard, task plan, clippy -D warnings and cargo test for loom-connectors, -session-executor, -operator, -sdk, -a2a, -agent, -cli, -plugin, -plugin-slack, loom-docs, -conformance",
+    "reference": "scratch loom-w3/gate.log: EXIT=0, 162 test binaries, 1072 passed"
+  }
+}

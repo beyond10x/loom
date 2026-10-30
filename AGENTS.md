@@ -507,20 +507,38 @@ tag (now `0.15.2`); any other crate that adds Canon uses the same reference.
 ## Connectors
 
 `b10x-loom-connectors` (`crates/loom-connectors`, `loom_sdk::connectors`) is the one crate that
-links Connectors: `connectors-client` and `connectors-core` at tag `v0.35.0`. Move both together.
+links Connectors: `connectors-client` and `connectors-core` at tag `v0.62.0`. Move both together.
+`serde_json`'s `arbitrary_precision` was already on for `b10x-loom-sdk` through `b10x-canon-expr`
+`0.8.0` and `b10x-assertion-providers` `0.15.2`; since `v0.62.0`, `connectors-core` also turns it
+on through `b10x-loom-connectors`' own normal dependencies.
 `ConnectorsInvoker` fills Commission's `ConnectorInvoker` from the host's `ConnectorEndpoint`
 records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
 `CredentialResolver` the host injects; it reads no credential itself. It describes on
 `GET /v1/describe` and invokes once on `POST /v1alpha2/invoke`, never `/v1/invoke`, and never
 resends. A binding declares its operation's `effect`: `Write` for the `mutation` profile the
 service describes (Connectors records an attempt), `Read` otherwise; a binding described otherwise
-is `Err` and not invoked. A write's `Performed` names its attempt, a read's the execution audit
+is `Err` and not invoked. A write is sent keyed (`invoke_v1alpha2_keyed`) with
+`cli::commission_idempotency_key` of the admitted request in the binding's commission: a SHA-256
+digest of the commission, case, run and admitted request ids, so a retry or a resume of one request
+keeps its key and two commissions, cases or runs never share one. `ConnectorsCli::invoke_write`
+has no commission and sends `cli::idempotency_key`, the same digest without it. A read is sent
+unkeyed (`invoke_v1alpha2`), since a key on a read is `unsupported`
+(`story:connectors-invoker-keyed-writes`). Keyed writes need a Connectors host whose `service`
+configuration sets `standing_grants` (connectors `contracts/service/compatibility.md` § 2.1); a
+host without it refuses the key `unsupported` with no request id, which is `Err` naming the missing
+standing grant and the remedy (a `connectors.standing-grants/1` grant file covering the instance
+and operation, and `state`), and the write is never sent again unkeyed. Any other `unsupported` is
+`Err` naming the code without that remedy. A write's `Performed` names its attempt (a
+replay, `mutation.replayed: true`, names the original attempt), a read's the execution audit
 record Connectors completed (`audit`) and no attempt, and `ConnectorEffects` refuses any other
 `Performed` as a failure to answer. `Refused` is only what Connectors states as nothing changed
 (`mutation.classification` `refused` or `not_attempted` on a valid response); every other failure,
-a write without a recorded attempt included, is `Err`. The sync port runs on a Tokio runtime the
-invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
-on a loopback port.
+a write without a recorded attempt included, is `Err` naming Connectors' code, and so are
+`approval_required` and `idempotency_conflict` whatever `mutation` they carry. An argument number
+the host would read as another value (an integer beyond `i64` and `u64`, or a number whose shortest
+`f64` text denotes another value) is `Err` before any call. The sync port runs on a Tokio runtime
+the invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake
+service on a loopback port.
 
 `loom_connectors::cli::ConnectorsCli` is the other path: a client over the operator's
 `connectors` command line, for reads and for one governed write. As a read client it serves a host polling a `loom.datasource` source outside a run and a
@@ -981,7 +999,8 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 `b10x_loom_resource::crd` and the CRD. The command line (`src/cli.rs`, clap derive) is
 `run --config <file>`, `render --resource <file> [--config <file>]` (exit 0; 3 refused; 2 not a
 `LoomAgent`; 1 unreadable) and `crd` (the CRD's bytes). `render` without `--config` uses
-`Config::builtin()`: namespace `default`, no model route, no Secret name, egress host or boundary
+`Config::builtin()`: namespace `default`, no `defaultCommandResources` (so an unsized `Command`
+resource is refused `ResourcesRequired`), no model route, no Secret name, egress host or boundary
 upstream allowed.
 `run` installs rustls' `ring` provider as the process default before it builds the kube client:
 the binary's graph enables both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`),
@@ -989,7 +1008,13 @@ and with both rustls picks none and panics at the first TLS client
 (`crates/loom-operator/tests/startup.rs`, `run_builds_its_tls_client_and_connects_to_the_cluster`).
 
 `config.yaml` (`src/config.rs`, unknown members refused): `namespace`,
-`defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
+`defaultImage {repository, tag}`, `defaultResources {cpu, memory}` (the size of an `AgentServe`
+pod that declares none), optional `defaultCommandResources {cpu, memory}` (the size of a `Command`
+pod that declares none; the chart sets `{cpu: "4", memory: 8Gi}` and a values override of `null`
+renders no member; `story:command-resources-declared`; each `cpu` and `memory` of both members
+is a non-negative Kubernetes quantity, checked by `Config::parse` without a dependency, else
+`<member>.<field>: "<value>" is not a Kubernetes quantity` and neither `run` nor
+`render --config` starts), optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
 admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists entries `{kind, url, audience, port?}` (`config::AllowedUpstream`, unknown members refused): a declared `spec.boundary.<kind>` is admitted only when an entry has its kind (`model`, `connectors` or `git`), exactly its `upstream` as `url` and exactly its `audience`, so neither one relay's URL under another relay nor an audience the entry does not give (an API-server audience, say) passes; the optional `port` (1 to 65535) is the pod port the upstream's Service targets, which the NetworkPolicy opens in place of the URL's port, since a NetworkPolicy matches the port after Service translation; empty, the default, it admits none. One instance watches one namespace with one replica; there is no leader election.
@@ -1074,7 +1099,13 @@ stream whose aliases or nesting the walk cannot read whole within the agent deco
 or the parser's recursion limit, once the strings read hold none; a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
-(`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
+(`ClaimNotAllowed`); a profile out of form or not allowed (step 16); last, a `Command` resource
+with no `spec.agent.deploy.kubernetes.resources` under a configuration without
+`defaultCommandResources` (`ResourcesRequired` at `spec.agent.deploy.kubernetes.resources`, a
+controller refusal like `BoundaryEgressHost`; the pod's containers but the fixed-size boundary
+sidecar get the declared size, else `defaultResources` for `AgentServe` and
+`defaultCommandResources` for `Command`, requests equal to limits;
+`crates/loom-operator/tests/command_resources.rs`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
 `agent serve` does not; with no routes and no `modelRoute`, or no routes beside a boundary
 without `model`, it gets an empty `routes.yaml`, and
@@ -1417,7 +1448,36 @@ host is loopback (`127.0.0.0/8`, `::1`, `localhost`): a credential-free pod's ag
 model through the boundary's relay on `127.0.0.1:8401`, which adds the credential, and the loop is
 launched with no credential flag. The executor does not see `LOOM_BOUNDARY_MODEL_URL`, so the rule
 is the host. Any other keyless endpoint suspends the step before any copy with the error it always
-had (`crates/loom-session-executor/tests/endpoint_keyless.rs`).
+had (`crates/loom-session-executor/tests/endpoint_keyless.rs`). A Claude Code session takes an
+endpoint only in that keyless loopback form and speaking `anthropic-messages`: `fn spec` hands
+metaharness its `base_url` less exactly one trailing `/v1` segment as `model_endpoint` (the gateway
+root: Claude Code posts to `{root}/v1/messages`) with `credentials: none` and the executor's model
+or else the endpoint's, a blank one being none, and metaharness gives the child
+`ANTHROPIC_BASE_URL`, its placeholder key and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, no
+operator credential. A Claude Code endpoint naming a key, not on loopback, on another wire, or
+whose path does not end in one `/v1` segment (or that carries a query or fragment) suspends the
+step with `ExternalAvailability` before any copy, naming why and the endpoint by its scheme and
+host only; one with no endpoint is unchanged
+(`crates/loom-session-executor/tests/claude_endpoint.rs`).
+A host that names the scratch copy (`SessionExecutor::copy_name`) has every session under that
+name work in the same path, `<scratch>/<copy_name>/copy`, so a harness that puts its working
+directory into its context sends the same bytes from step to step; without a name each session's
+root is unique (`session-<pid>-<nanos>-<n>`). The name is one plain path component of at most 64
+bytes (no `/`, `.`, `..`, control character or empty name) that does not start `session-` (an
+unnamed root, which holds no lock), else the step suspends with `ExternalAvailability` before any
+copy; so does a scratch other users can write that has no sticky bit, naming the scratch. The
+root is the user's own `0700` directory, held by an exclusive lock on it for the session
+(`ScratchCopy::claim`): a directory of the effective user's that no session holds, one an earlier
+session left, is made `0700` and emptied without following a link; a link, any other entry,
+another user's directory, or one a running session holds (another executor under the same name)
+suspends the step before any copy, naming the path and touching nothing. Before a root is
+emptied or removed, each directory of the user's in it is made `0700` again, so a read-only one
+a session left (Go's module cache) does not wedge the name (`ScratchCopy::open_up`). The root is
+removed when the call returns, then the lock released. The effective user is read from
+`/proc/self/status`; where that cannot be read no named copy is made
+(`crates/loom-session-executor/tests/stable_copy_path.rs`,
+`crates/loom-session-executor/tests/adversary_w20261030w3_c.rs`,
+`crates/loom-session-executor/tests/security_w20261030w3_c.rs`).
 A b10x-harness session streams its reply in `text-delta` fragments: the executor joins a
 turn's fragments with no separator, keeping the line breaks they carry, and starts each turn
 (`TurnStarted`) on a new line before it looks for the action line; a Claude Code or Codex text

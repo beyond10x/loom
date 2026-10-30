@@ -12,6 +12,29 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-10-30
+
+### Added
+
+- The controller configuration gains optional `defaultCommandResources` (`{cpu, memory}`), the size of every container but the boundary in a `Command` pod that declares none, and the `loom-agents` chart sets it to `{cpu: "4", memory: 8Gi}`, sized for a coding agent: the earlier 256Mi default got a coding-agent pod run OOM-killed (story:command-resources-declared)
+- `SessionExecutor::copy_name`: a session's scratch copy at `<scratch>/<name>`, the same path on every step under that name, so a harness that puts its working directory into its context sends the same bytes each step and the provider's prompt cache holds; one session at a time holds a name (an exclusive lock on the root), and a leftover root is emptied without following links (story:session-executor-stable-copy-path)
+- A Claude Code session executor given a keyless loopback endpoint speaking `anthropic-messages` points the session at the endpoint's root (its base URL less one trailing `/v1`): metaharness gets it as `model_endpoint` with credentials none, and the child gets `ANTHROPIC_BASE_URL`, metaharness's placeholder key and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (story:session-executor-claude-loopback-endpoint)
+
+### Changed
+
+- **Breaking:** a `Command` `LoomAgent` that declares no `spec.agent.deploy.kubernetes.resources`, on a controller whose configuration sets no `defaultCommandResources`, is refused `ResourcesRequired` at `spec.agent.deploy.kubernetes.resources`, where it used to get the 250m/256Mi agent default. Migration: a `config.yaml` not written by the chart adds `defaultCommandResources: {cpu: "4", memory: 8Gi}` (or declares the resources on each resource); `helm upgrade --reuse-values` from an earlier chart keeps the earlier values, so pass `--set defaultCommandResources.cpu=4 --set defaultCommandResources.memory=8Gi` or use `--reset-then-reuse-values`; `render` without `--config` refuses such a resource (exit 3) (story:command-resources-declared)
+- **Breaking:** the controller refuses to start, and `render --config` refuses, on a `config.yaml` whose `defaultResources` or `defaultCommandResources` `cpu` or `memory` is not a non-negative Kubernetes quantity, naming the member and the value, where such a value used to reach the pod spec and fail only when Kubernetes rejected the Job (story:command-resources-declared)
+- **Breaking:** a Claude Code session executor whose endpoint names a key, is not on loopback, speaks another wire, or whose base URL does not end in one `/v1` segment now suspends the step with `ExternalAvailability` before any copy, where the endpoint used to be ignored; the refusal names the endpoint by scheme and host only (story:session-executor-claude-loopback-endpoint)
+- **Breaking:** `ConnectorsInvoker` sends every write keyed (`invoke_v1alpha2_keyed`), so a Connectors service without `standing_grants` now answers `Err` naming the missing standing grant and how to add it, where the write used to go out unkeyed; there is no unkeyed resend. A replayed write is `Performed` naming the original attempt; `approval_required` and `idempotency_conflict` are `Err` naming the code, never resent (story:connectors-invoker-keyed-writes)
+- **Breaking:** a write's idempotency key now covers the commission, case and run as well as the action request: `ConnectorsInvoker` sends `cli::commission_idempotency_key` (`loom-action-request-<request id>-<SHA-256 of commission, case, run and request ids>`), and `ConnectorsCli` sends `cli::idempotency_key`, the same digest without the commission, so two commissions or runs admitting the same request id no longer share a key. A write sent before the upgrade and retried after it goes out under a new key, so Connectors performs it again instead of replaying the first outcome: check the original attempt before retrying such a write (story:connectors-invoker-keyed-writes)
+- `connectors-client` and `connectors-core` move from `v0.35.0` to `v0.62.0`; connectors-core turns on `serde_json` `arbitrary_precision` on `b10x-loom-connectors`' own edges (loom-sdk builds already had it through canon-expr and assertion-providers) (story:connectors-invoker-keyed-writes)
+- A named scratch copy is refused, suspending the step with `ExternalAvailability` and naming the scratch, when the scratch directory can be written by other users and has no sticky bit; a copy name starting `session-` is refused, and read-only directories a session left no longer block removing or reusing the root (story:session-executor-stable-copy-path)
+
+### Fixed
+
+- An argument number the Connectors host would read as another value (an integer beyond `i64` and `u64`, or a fraction or exponent whose nearest `f64` is another value) is refused before any call; with `serde_json` `arbitrary_precision` on, the earlier exactness check passed every number (story:connectors-invoker-keyed-writes)
+- Only the Connectors host's refusal of the key itself gets the standing-grants remedy; another `unsupported` answer names the code alone (story:connectors-invoker-keyed-writes)
+
 ## [0.52.0] - 2026-10-30
 
 ### Changed
@@ -1264,7 +1287,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.52.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.53.0...HEAD
+[0.53.0]: https://github.com/beyond10x/loom/releases/tag/0.53.0
 [0.52.0]: https://github.com/beyond10x/loom/releases/tag/0.52.0
 [0.51.0]: https://github.com/beyond10x/loom/releases/tag/0.51.0
 [0.50.2]: https://github.com/beyond10x/loom/releases/tag/0.50.2

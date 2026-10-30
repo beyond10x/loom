@@ -9,6 +9,7 @@ use serde_yaml_ng::Value;
 const BASE: &str = "namespace: agents
 defaultImage: {repository: registry.example/loom-agent, tag: '0.40.0'}
 defaultResources: {cpu: 100m, memory: 128Mi}
+defaultCommandResources: {cpu: 100m, memory: 128Mi}
 ";
 
 const PERMISSIVE: &str = "allowUnconfinedProfiles: true

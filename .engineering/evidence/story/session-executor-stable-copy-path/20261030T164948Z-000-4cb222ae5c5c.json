@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T16:49:48Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-stable-copy-path",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-session-executor --locked --test stable_copy_path",
+    "reference": "scratch loom-w3/c/red2.log (member without behaviour: 5 failed) vs green2.log (a455466e: 7 passed)"
+  }
+}

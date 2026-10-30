@@ -22,6 +22,16 @@
 //!   `story:connector-read-performed`; `a_read_without_a_complete_audit_record_is_an_error`,
 //!   `a_write_without_a_recorded_attempt_is_still_an_error` and
 //!   `a_binding_the_service_describes_otherwise_is_never_invoked` bound it.
+//! - `story:connectors-invoker-keyed-writes`: a write is sent with the admitted request's
+//!   idempotency key in its commission
+//!   (`a_write_is_sent_with_the_admitted_requests_idempotency_key`), a read without
+//!   one (`a_read_is_sent_without_a_key`); a replay is `Performed` naming the original attempt
+//!   (`a_replayed_write_is_performed_naming_the_original_attempt`); `approval_required`,
+//!   `idempotency_conflict` and a host without standing grants refusing the key are `Err` naming
+//!   the code, each after one request (`approval_required_and_idempotency_conflict_are_errors_and_
+//!   not_retried`, `a_host_without_standing_grants_refusing_the_key_is_an_error_naming_it`). The
+//!   fake service is a host with standing grants unless made
+//!   [`FakeService::without_standing_grants`].
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::iter::repeat_n;
@@ -43,13 +53,15 @@ use b10x_loom_commission::model::responsibility::{
     action_binding_state, commission_state, connector_endpoint_state,
 };
 use b10x_loom_commission::outcome::RunStore;
-use b10x_loom_commission::ports::connector::ConnectorEffects;
+use b10x_loom_commission::ports::connector::{ConnectorEffects, ConnectorInvoker};
+use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError};
 use b10x_loom_commission::runtime::{
     LoopContext, LoopEnd, LoopError, LoopFailure, run_until_blocked,
 };
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
+use b10x_loom_connectors::cli::{commission_idempotency_key, idempotency_key};
 use b10x_loom_connectors::{ConnectorsInvoker, CredentialError, CredentialResolver, EndpointError};
 use serde_json::json;
 
@@ -101,8 +113,21 @@ struct FakeService {
 }
 
 impl FakeService {
-    /// A service describing `instance` and answering every invocation with `answer`.
+    /// A service describing `instance` and answering every invocation with `answer`: a host whose
+    /// configuration sets `standing_grants`, so it reads a write's `idempotency_key`.
     fn start(instance: &str, answer: Answering) -> Self {
+        Self::serving(instance, answer, true)
+    }
+
+    /// A host whose configuration sets no `standing_grants`: it refuses an invocation carrying
+    /// `idempotency_key` as Connectors `v0.62.0` does (compatibility § 2.1, "Refused §4 members":
+    /// HTTP 400 `unsupported`, `request_id: null`, no `mutation`), and answers any other with
+    /// `answer`.
+    fn without_standing_grants(instance: &str, answer: Answering) -> Self {
+        Self::serving(instance, answer, false)
+    }
+
+    fn serving(instance: &str, answer: Answering, standing_grants: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
         let addr = listener.local_addr().expect("the bound address");
         let received = Arc::new(Mutex::new(Vec::new()));
@@ -139,7 +164,7 @@ impl FakeService {
                         break;
                     }
                     let Ok(stream) = stream else { continue };
-                    serve(stream, &received, &descriptor, &answer);
+                    serve(stream, &received, &descriptor, &answer, standing_grants);
                 }
             })
         };
@@ -181,8 +206,15 @@ impl Drop for FakeService {
     }
 }
 
-/// Reads one HTTP/1.1 request from `stream`, records it and answers it, then closes.
-fn serve(stream: TcpStream, received: &Mutex<Vec<Received>>, descriptor: &str, answer: &Answering) {
+/// Reads one HTTP/1.1 request from `stream`, records it and answers it, then closes. Without
+/// `standing_grants`, an invocation carrying `idempotency_key` is refused as the host refuses it.
+fn serve(
+    stream: TcpStream,
+    received: &Mutex<Vec<Received>>,
+    descriptor: &str,
+    answer: &Answering,
+    standing_grants: bool,
+) {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     if reader.read_line(&mut line).unwrap_or(0) == 0 {
@@ -228,11 +260,12 @@ fn serve(stream: TcpStream, received: &Mutex<Vec<Received>>, descriptor: &str, a
     let (status, text) = match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/v1/describe") => (200, descriptor.to_owned()),
         ("POST", "/v1alpha2/invoke") => {
-            let request_id = request.json()["request_id"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned();
-            answer(&request_id)
+            let body = request.json();
+            if !standing_grants && body.get("idempotency_key").is_some() {
+                key_refused()
+            } else {
+                answer(body["request_id"].as_str().unwrap_or_default())
+            }
         }
         _ => (404, String::new()),
     };
@@ -244,6 +277,24 @@ fn serve(stream: TcpStream, received: &Mutex<Vec<Received>>, descriptor: &str, a
         text.len()
     );
     let _ = stream.flush();
+}
+
+/// What a host without standing grants answers an invocation carrying `idempotency_key`: the
+/// member is refused before the envelope is read, so no request id is echoed (connectors
+/// `v0.62.0`, `InvokeRequest::decode`).
+fn key_refused() -> (u16, String) {
+    let body = json!({
+        "version": "v1alpha2",
+        "request_id": null,
+        "status": "error",
+        "error": {
+            "code": "unsupported",
+            "message": "invocation member is not supported on this binding"
+        },
+        "audit_ref": null,
+        "audit_status": "unavailable"
+    });
+    (400, body.to_string())
 }
 
 /// The mutation member of a response, for the attempt [`ATTEMPT`] of `request_id`.
@@ -448,7 +499,7 @@ fn run(invoker: &ConnectorsInvoker, instance: &str) -> Result<LoopEnd, LoopError
 /// `instance` with `effect`: the executor proposes it once, the runtime admits it and hands it to
 /// `ConnectorEffects` over `invoker`; after the invocation the case completes.
 fn run_bound(
-    invoker: &ConnectorsInvoker,
+    invoker: impl ConnectorInvoker,
     instance: &str,
     operation: &str,
     effect: ConnectorOperationEffect,
@@ -498,6 +549,48 @@ fn run_bound(
         &mut runs,
         &mut Context::default(),
     )
+}
+
+/// The invoker under test, keeping every request the runtime handed it.
+struct Recording<'a> {
+    invoker: &'a ConnectorsInvoker,
+    admitted: Mutex<Vec<AdmittedRequest>>,
+}
+
+impl<'a> Recording<'a> {
+    fn new(invoker: &'a ConnectorsInvoker) -> Self {
+        Self {
+            invoker,
+            admitted: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn admitted(&self) -> Vec<AdmittedRequest> {
+        self.admitted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl ConnectorInvoker for Recording<'_> {
+    fn invoke(
+        &self,
+        binding: &ActionBindingData,
+        request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        self.admitted
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(request.clone());
+        self.invoker.invoke(binding, request)
+    }
+
+    fn concurrent(&self) -> Option<&(dyn ConnectorInvoker + Sync)> {
+        self.invoker
+            .concurrent()
+            .map(|_| self as &(dyn ConnectorInvoker + Sync))
+    }
 }
 
 /// The effect error a loop stopped with.
@@ -875,4 +968,245 @@ fn a_binding_the_service_describes_otherwise_is_never_invoked() {
         let paths: Vec<String> = service.received().into_iter().map(|r| r.path).collect();
         assert_eq!(paths, ["/v1/describe"], "{name}: described, never invoked");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// `story:connectors-invoker-keyed-writes`.
+
+/// The original attempt a replay names, another than [`ATTEMPT`].
+const ORIGINAL_ATTEMPT: &str = "00000000-0000-4000-8000-0000000000b2";
+
+/// The one invocation `service` received carries `idempotency_key` = the key of the one request
+/// `recording` was handed in the commission that admitted it, within Connectors' key limit.
+fn assert_keyed_once(name: &str, service: &FakeService, recording: &Recording<'_>) {
+    let admitted = recording.admitted();
+    assert_eq!(admitted.len(), 1, "{name}: one admitted request");
+    let invocations = service.invocations();
+    assert_eq!(
+        invocations.len(),
+        1,
+        "{name}: invoked exactly once, never resent: {invocations:?}"
+    );
+    let key = commission_idempotency_key(&commission().data().commission_id, &admitted[0]);
+    assert_eq!(
+        invocations[0].json()["idempotency_key"],
+        json!(key),
+        "{name}: the write carries the admitted request's idempotency key in its commission"
+    );
+    assert!(
+        !key.is_empty() && key.len() <= connectors_core::v1alpha2::KEY_LIMIT,
+        "{name}: the key is within Connectors' limit: {key}"
+    );
+}
+
+/// An error answered before the host's audit anchor, with the request id echoed and no
+/// `mutation` (compatibility § 2.1, Keyed writes under a standing grant).
+fn keyed_refusal(status: u16, code: &'static str) -> Answering {
+    Box::new(move |request_id| {
+        let body = json!({
+            "version": "v1alpha2",
+            "request_id": request_id,
+            "status": "error",
+            "error": {"code": code, "message": "the fake service says so"},
+            "audit_ref": null,
+            "audit_status": "unavailable"
+        });
+        (status, body.to_string())
+    })
+}
+
+/// A write is sent with `cli::commission_idempotency_key` of the admitted request in its
+/// commission, and its success is `Performed` naming the attempt.
+#[test]
+fn a_write_is_sent_with_the_admitted_requests_idempotency_key() {
+    let service = FakeService::start(INSTANCE, applied(json!({"written": "src/lib.rs"})));
+    let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+        .expect("one endpoint per instance");
+    let recording = Recording::new(&invoker);
+    let end = run_bound(
+        &recording,
+        INSTANCE,
+        OPERATION,
+        ConnectorOperationEffect::Write,
+    )
+    .expect("the loop ends");
+
+    assert_eq!(end.effects.len(), 1, "{:?}", end.effects);
+    let EffectOutcome::Performed(performed) = &end.effects[0] else {
+        panic!("not performed: {:?}", end.effects);
+    };
+    assert_eq!(
+        performed.attempt,
+        Some(ConnectorAttemptId(ATTEMPT.to_owned())),
+        "the attempt the service reported"
+    );
+    assert_keyed_once("keyed write", &service, &recording);
+    let admitted = &recording.admitted()[0];
+    let key = commission_idempotency_key(&commission().data().commission_id, admitted);
+    assert!(
+        key.contains(&end.admitted[0].action_request_id.0.0),
+        "the key names the admitted request: {key}"
+    );
+    assert_ne!(
+        key,
+        idempotency_key(admitted),
+        "the invoker's key is scoped to the commission, the command line's is not"
+    );
+}
+
+/// A read is sent with the five members of the unkeyed envelope and no key: a key on a read is
+/// `unsupported` on every host.
+#[test]
+fn a_read_is_sent_without_a_key() {
+    let service = FakeService::start(
+        INSTANCE,
+        read_answer(
+            json!({"text": "fn main() {}"}),
+            Some("aud-7"),
+            "complete",
+            None,
+        ),
+    );
+    let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+        .expect("one endpoint per instance");
+    let end = run_bound(
+        &invoker,
+        INSTANCE,
+        READ_OPERATION,
+        ConnectorOperationEffect::Read,
+    )
+    .expect("the loop ends");
+
+    assert!(
+        matches!(&end.effects[..], [EffectOutcome::Performed(p)] if p.audit == Some(ConnectorAuditRef("aud-7".to_owned()))),
+        "the read is performed: {:?}",
+        end.effects
+    );
+    let invocations = service.invocations();
+    assert_eq!(invocations.len(), 1, "invoked exactly once");
+    let body = invocations[0].json();
+    let mut members: Vec<&str> = body
+        .as_object()
+        .expect("the invocation is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    members.sort_unstable();
+    assert_eq!(
+        members,
+        ["input", "operation", "request_id", "revision", "version"],
+        "a read carries no idempotency_key: {body}"
+    );
+}
+
+/// A replay (`mutation.replayed: true`, compatibility § 2.1) answers the original attempt's
+/// outcome: `Performed` naming the original attempt, after one request.
+#[test]
+fn a_replayed_write_is_performed_naming_the_original_attempt() {
+    let answer: Answering = Box::new(|request_id| {
+        let body = json!({
+            "version": "v1alpha2",
+            "request_id": request_id,
+            "status": "success",
+            "result": {"written": "src/lib.rs"},
+            "audit_ref": "aud-9",
+            "audit_status": "complete",
+            "mutation": {
+                "classification": "applied",
+                "attempt": {"instance": INSTANCE, "id": ORIGINAL_ATTEMPT},
+                "original_request_id": "the-original-request",
+                "replayed": true,
+                "cause": null
+            }
+        });
+        (200, body.to_string())
+    });
+    let service = FakeService::start(INSTANCE, answer);
+    let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+        .expect("one endpoint per instance");
+    let recording = Recording::new(&invoker);
+    let end = run_bound(
+        &recording,
+        INSTANCE,
+        OPERATION,
+        ConnectorOperationEffect::Write,
+    )
+    .expect("the loop ends");
+
+    assert_eq!(
+        end.effects,
+        vec![EffectOutcome::Performed(
+            b10x_loom_commission::model::responsibility::EffectOutcomePerformed {
+                report: Value::Object(vec![(
+                    "written".to_owned(),
+                    Value::Text("src/lib.rs".to_owned())
+                )]),
+                attempt: Some(ConnectorAttemptId(ORIGINAL_ATTEMPT.to_owned())),
+                audit: None,
+                usage: None,
+            }
+        )],
+        "the replay is performed and names the original attempt"
+    );
+    assert_keyed_once("replay", &service, &recording);
+}
+
+/// `approval_required` (no standing grant covers the write) and `idempotency_conflict` (the key is
+/// live for another request) are `Err` naming the code, never `Refused`, after one request.
+#[test]
+fn approval_required_and_idempotency_conflict_are_errors_and_not_retried() {
+    for (code, status) in [("approval_required", 403), ("idempotency_conflict", 409)] {
+        let service = FakeService::start(INSTANCE, keyed_refusal(status, code));
+        let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+            .expect("one endpoint per instance");
+        let recording = Recording::new(&invoker);
+        let message = effect_error(
+            code,
+            run_bound(
+                &recording,
+                INSTANCE,
+                OPERATION,
+                ConnectorOperationEffect::Write,
+            ),
+        );
+        assert!(
+            message.contains(code),
+            "{code}: the error names it: {message}"
+        );
+        assert_keyed_once(code, &service, &recording);
+    }
+}
+
+/// A host without standing grants refuses the key `unsupported` before dispatch. The invoker
+/// answers `Err` naming the code, the missing standing grant and how a host gets one, after the one
+/// keyed request: it never resends the write without its key.
+#[test]
+fn a_host_without_standing_grants_refusing_the_key_is_an_error_naming_it() {
+    let service = FakeService::without_standing_grants(INSTANCE, applied(json!({})));
+    let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
+        .expect("one endpoint per instance");
+    let recording = Recording::new(&invoker);
+    let message = effect_error(
+        "no standing grants",
+        run_bound(
+            &recording,
+            INSTANCE,
+            OPERATION,
+            ConnectorOperationEffect::Write,
+        ),
+    );
+    for named in [
+        "unsupported",
+        "standing_grants",
+        "connectors.standing-grants/1",
+        "`state`",
+        INSTANCE,
+        OPERATION,
+    ] {
+        assert!(
+            message.contains(named),
+            "the error names {named}: {message}"
+        );
+    }
+    assert_keyed_once("no standing grants", &service, &recording);
 }

@@ -7,6 +7,7 @@
 //! namespace: agents
 //! defaultImage: {repository: registry.example/loom-agent, tag: '0.40.0'}
 //! defaultResources: {cpu: 250m, memory: 256Mi}
+//! defaultCommandResources: {cpu: '4', memory: 8Gi}
 //! modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small}
 //! allowedSecretNames: [platform-operator-secrets]
 //! allowedEgressHosts: [chat.example]
@@ -18,6 +19,14 @@
 //!   - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
 //!   - {kind: git, url: 'http://connectors.connectors.svc/git', audience: connectors-git, port: 8080}
 //! ```
+//!
+//! `defaultResources` sizes an `AgentServe` pod whose spec declares no
+//! `deploy.kubernetes.resources`, since its program is Loom's own. A `Command` pod runs the
+//! image's own program, whose need Loom does not know: without declared resources it gets the
+//! optional `defaultCommandResources`, and without that the resource is refused
+//! `ResourcesRequired`. Each `cpu` and `memory` of the two is a non-negative Kubernetes
+//! quantity (`250m`, `4`, `8Gi`, `1e3`); any other text refuses the configuration, naming the
+//! member and the value, so neither `run` nor `render --config` starts on it.
 //!
 //! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
 //! `allowUnconfinedProfiles` defaults to `false`. A member the configuration does not declare is
@@ -44,8 +53,12 @@ pub struct Config {
     pub namespace: String,
     /// The agent image a resource without `spec.image` runs.
     pub default_image: Image,
-    /// The resources of a pod whose spec declares no `deploy.kubernetes.resources`.
+    /// The resources of an `AgentServe` pod whose spec declares no `deploy.kubernetes.resources`.
     pub default_resources: Resources,
+    /// The resources of a `Command` pod whose spec declares no `deploy.kubernetes.resources`;
+    /// absent, such a resource is refused `ResourcesRequired`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_command_resources: Option<Resources>,
     /// The in-cluster model route a resource with an empty `spec.routes` is given; without one
     /// such a resource is refused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -192,8 +205,10 @@ impl std::error::Error for ConfigError {}
 
 impl Config {
     /// The configuration `render` uses without `--config`: namespace `default`, the agent image
-    /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory, no model
-    /// route, and no Secret name, egress host or boundary upstream admitted.
+    /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory for an
+    /// `AgentServe` resource, no default size for a `Command` resource (one that declares none
+    /// is refused `ResourcesRequired`), no model route, and no Secret name, egress host or
+    /// boundary upstream admitted.
     #[must_use]
     pub fn builtin() -> Self {
         Self {
@@ -206,6 +221,7 @@ impl Config {
                 cpu: "250m".to_owned(),
                 memory: "256Mi".to_owned(),
             },
+            default_command_resources: None,
             model_route: None,
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),
@@ -222,7 +238,13 @@ impl Config {
     /// # Errors
     /// The decoder's message, naming the member, when `text` is not a configuration.
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        serde_yaml_ng::from_str(text).map_err(|error| ConfigError(error.to_string()))
+        let config: Self =
+            serde_yaml_ng::from_str(text).map_err(|error| ConfigError(error.to_string()))?;
+        sized("defaultResources", &config.default_resources)?;
+        if let Some(size) = &config.default_command_resources {
+            sized("defaultCommandResources", size)?;
+        }
+        Ok(config)
     }
 
     /// Whether an `allowedBoundaryUpstreams` entry names the relay `kind` (`model`, `connectors`
@@ -258,6 +280,50 @@ impl Config {
         Self::parse(&text)
             .map_err(|error| ConfigError(format!("--config {}: {error}", path.display())))
     }
+}
+
+/// The suffixes a Kubernetes quantity may end in: none, the decimal SI ones and the binary SI
+/// ones.
+const QUANTITY_SUFFIXES: [&str; 16] = [
+    "", "n", "u", "m", "k", "M", "G", "T", "P", "E", "Ki", "Mi", "Gi", "Ti", "Pi", "Ei",
+];
+
+/// Whether `text` is a non-negative Kubernetes quantity as the API server reads one: an
+/// optional `+`, digits with an optional decimal part (`2.`, `.5`), then a suffix of
+/// [`QUANTITY_SUFFIXES`] or a decimal exponent (`e3`, `E-3`). No blank, space or other unit.
+fn quantity(text: &str) -> bool {
+    let unsigned = text.strip_prefix('+').unwrap_or(text);
+    let end = unsigned
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(unsigned.len());
+    let (number, suffix) = unsigned.split_at(end);
+    let number = match number.split_once('.') {
+        None => !number.is_empty(),
+        Some((whole, fraction)) => {
+            !fraction.contains('.') && !(whole.is_empty() && fraction.is_empty())
+        }
+    };
+    let exponent = || {
+        suffix
+            .strip_prefix(['e', 'E'])
+            .map(|rest| rest.strip_prefix(['+', '-']).unwrap_or(rest))
+            .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+    };
+    number && (QUANTITY_SUFFIXES.contains(&suffix) || exponent())
+}
+
+/// Refuses a `cpu` or `memory` of `size`, the configuration's `member`, that is no Kubernetes
+/// quantity, naming the member and the value: such a size would be refused at apply, where no
+/// refusal names it.
+fn sized(member: &str, size: &Resources) -> Result<(), ConfigError> {
+    for (field, value) in [("cpu", &size.cpu), ("memory", &size.memory)] {
+        if !quantity(value) {
+            return Err(ConfigError(format!(
+                "{member}.{field}: {value:?} is not a Kubernetes quantity"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

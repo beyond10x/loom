@@ -6,8 +6,22 @@
 //! binding it resolves the binding's `instance_id` to its endpoint, resolves the endpoint's
 //! credential reference through the host's [`CredentialResolver`], describes the service
 //! (`GET /v1/describe`) and invokes the bound operation once on the v1alpha2 binding
-//! (`POST /v1alpha2/invoke`, `connectors_client::Client::invoke_v1alpha2`) with the admitted
-//! request's arguments. It never falls back to `/v1/invoke` and never resends.
+//! (`POST /v1alpha2/invoke`) with the admitted request's arguments. It never falls back to
+//! `/v1/invoke` and never resends.
+//!
+//! A write is sent with an idempotency key (`connectors_client::Client::invoke_v1alpha2_keyed`,
+//! `story:connectors-invoker-keyed-writes`): [`cli::commission_idempotency_key`] of the admitted
+//! request in the binding's commission, a digest of the commission, case, run and admitted request
+//! ids. A retry or a resume of one admitted request carries its key again; requests of two
+//! commissions, cases or runs never share one. [`cli::ConnectorsCli::invoke_write`] knows no
+//! commission and sends [`cli::idempotency_key`], the same derivation without it, so the two
+//! transports never share a key either. A read is sent without one (`Client::invoke_v1alpha2`),
+//! since a key on a read is `unsupported`. A Connectors host runs keyed writes only when its
+//! `service` configuration sets `standing_grants` (Connectors
+//! `contracts/service/compatibility.md` § 2.1, Keyed writes under a standing grant); a host
+//! without them refuses the key `unsupported` with no request id before it reads the envelope,
+//! and the invoker answers `Err` naming the missing standing grant and how to add one. Any other
+//! `unsupported` is `Err` naming the code alone. It never sends the write again without its key.
 //!
 //! The binding's `effect` must be the one the service describes for the operation: `Write` for
 //! the `mutation` profile (an `external_write`, for which Connectors records an attempt), `Read`
@@ -19,17 +33,18 @@
 //!
 //! | Connectors answers | The invoker answers |
 //! |---|---|
-//! | for a `Write` binding, success with a `mutation` naming its attempt on the bound instance | `Performed`: the result as the report, the attempt's id |
+//! | for a `Write` binding, success with a `mutation` naming its attempt on the bound instance, a replay (`replayed: true`) included | `Performed`: the result as the report, the attempt's id (a replay's is the original attempt) |
 //! | for a `Read` binding, success with no `mutation` and its audit record `complete`, with a non-empty `audit_ref` | `Performed`: the result as the report, the audit record's `audit_ref` |
-//! | for a `Write` binding, error with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
-//! | anything else: a write's success naming no attempt or another instance's, a read's answer with a `mutation` (success or error), a read's audit record not `complete` or with an empty `audit_ref`, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
+//! | for a `Write` binding, error other than `approval_required` and `idempotency_conflict` with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
+//! | anything else: a write's success naming no attempt or another instance's, a read's answer with a `mutation` (success or error), a read's audit record not `complete` or with an empty `audit_ref`, `approval_required` and `idempotency_conflict` whatever `mutation` they carry, an error with no `mutation` (the `unsupported` refusal of the key included), `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err`, naming Connectors' code |
 //!
 //! An error with no `mutation` is no proof that the operation was not dispatched, so it is never
 //! a refusal. An `instance_id` with no endpoint, a credential that does not resolve, a failed
 //! describe, a service that describes another instance and a binding whose effect is not the one
-//! described are `Err` before the operation is invoked, and so is an argument number that cannot be
-//! sent without changing its value (one beyond the 64-bit integer range, or one whose shortest
-//! float text differs from the admitted one).
+//! described are `Err` before the operation is invoked, and so is an argument number the
+//! Connectors host would read as another value: its reader keeps an integer within `i64` or `u64`
+//! and reads every other number as the nearest `f64`, so a number is sent only when it is such an
+//! integer or denotes the same value as the shortest `f64` text of it.
 //!
 //! `ConnectorInvoker::invoke` is synchronous and the client is async: the invoker owns a Tokio
 //! runtime and runs each invocation on it, so it can be called from any thread, including one
@@ -46,9 +61,11 @@
 //! [`cli::ConnectorsCli::invoke_write`], is the local transport for a write the runtime admitted:
 //! it takes the [`AdmittedRequest`], writes only its admitted action with its admitted arguments
 //! (any other is refused before a process starts), passes the person's approval proof by path and
-//! an idempotency key derived from the request id, and returns Connectors' classification; this
-//! invoker, the service transport, is unchanged. [`evidence::WriteEvidenceAdapter`] is the host
-//! evidence adapter that turns an applied write into the protocol's evidence for its step.
+//! an idempotency key derived from the request's case, run and request ids, and returns
+//! Connectors' classification; this invoker, the service transport, adds its commission to the
+//! key.
+//! [`evidence::WriteEvidenceAdapter`] is the host evidence adapter that turns an applied write
+//! into the protocol's evidence for its step.
 
 pub mod cli;
 pub mod evidence;
@@ -66,7 +83,7 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::connector::ConnectorInvoker;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError};
 use connectors_client::{Client, Endpoint, Failure, Invoked};
-use connectors_core::v1alpha2::{AuditStatus, EffectKnowledge, ErrorCode};
+use connectors_core::v1alpha2::{AuditStatus, EffectKnowledge, ErrorCode, InvokeRequest};
 
 /// Resolves the credential an endpoint names. The host supplies it; the invoker reads no
 /// credential itself and keeps none between invocations.
@@ -256,6 +273,10 @@ impl ConnectorInvoker for ConnectorsInvoker {
         let expected = instance.clone();
         let target = operation.clone();
         let effect = binding.effect;
+        // A write carries the key of its admitted request in the binding's commission, the same
+        // on a retry or a resume of that request; a key on a read is `unsupported` on every host.
+        let key = (effect == ConnectorOperationEffect::Write)
+            .then(|| cli::commission_idempotency_key(&binding.commission_id, request));
         let answered = self.block_on(async move {
             let descriptor = client.describe().await.map_err(|error| {
                 format!(
@@ -280,12 +301,18 @@ impl ConnectorInvoker for ConnectorsInvoker {
                     ));
                 }
             }
-            Ok(
-                match client.invoke_v1alpha2(&descriptor, &target, input).await {
-                    Ok(invoked) => Answered::Invoked(invoked),
-                    Err(failure) => Answered::Failed(failure),
-                },
-            )
+            let invoked = match key {
+                Some(key) => {
+                    client
+                        .invoke_v1alpha2_keyed(&descriptor, &target, input, &key)
+                        .await
+                }
+                None => client.invoke_v1alpha2(&descriptor, &target, input).await,
+            };
+            Ok(match invoked {
+                Ok(invoked) => Answered::Invoked(invoked),
+                Err(failure) => Answered::Failed(failure),
+            })
         })?;
         match answered.map_err(EffectError::new)? {
             Answered::Invoked(invoked) => match binding.effect {
@@ -393,20 +420,74 @@ fn refused(
         )
     });
     let mut said = format!(
-        "the Connector operation `{operation}` of `{instance}` answered {:?}: {}",
-        failure.error.code, failure.error.message
+        "the Connector operation `{operation}` of `{instance}` answered `{}`: {}",
+        code_name(failure.error.code),
+        failure.error.message
     );
     let read = effect == ConnectorOperationEffect::Read;
     if read && failure.mutation.is_some() {
         said.push_str(" (a read, and it recorded an attempt)");
     }
-    if answered && nothing_changed && !read {
+    // A host without standing grants refuses the key of a write before it reads a valid envelope
+    // (compatibility § 2.1, "Refused §4 members"): `unsupported` with no request id, no attempt
+    // and no audit record. The client keeps no request id, so the refusal is recognised by the
+    // message the host's reader gives it; any other `unsupported` only names the code. The write
+    // is not sent again without the key.
+    if !read && is_key_refusal(failure) {
+        said.push_str(&format!(
+            " (a Connectors host whose configuration sets no standing grants refuses a write's \
+             idempotency key, and a write is only sent with one: set the host's `service` \
+             configuration `standing_grants` to the path of a `connectors.standing-grants/1` grant \
+             file with a grant covering instance `{instance}` and operation `{operation}`, and its \
+             `state` to a directory)"
+        ));
+    }
+    // A key that needs an approval or names another input is no refusal of this write: the run
+    // cannot go on past it as if the write were declined, whatever `mutation` the answer carries.
+    let keyed = matches!(
+        failure.error.code,
+        ErrorCode::ApprovalRequired | ErrorCode::IdempotencyConflict
+    );
+    if answered && nothing_changed && !read && !keyed {
         Ok(EffectOutcome::Refused(EffectOutcomeRefused {
             reason: said,
             ends_run: false,
         }))
     } else {
         Err(EffectError::new(said))
+    }
+}
+
+/// Whether `failure` is a host's refusal of the `idempotency_key` member itself: the answer
+/// `connectors_core::v1alpha2::InvokeRequest::decode` gives a keyed request (`unsupported`, no
+/// request id), in an envelope with no `mutation`, no `audit_ref` and `audit_status`
+/// `unavailable`. The message is taken from that reader, so it moves with the pin.
+fn is_key_refusal(failure: &Failure) -> bool {
+    let probe = serde_json::json!({
+        "version": connectors_core::v1alpha2::VERSION,
+        "request_id": "loom-key-probe",
+        "operation": "probe",
+        "revision": "probe",
+        "input": {},
+        "idempotency_key": "loom-key-probe"
+    });
+    let Err(refusal) = InvokeRequest::decode(probe.to_string().as_bytes()) else {
+        return false;
+    };
+    refusal.request_id.is_none()
+        && failure.error.code == refusal.error.code
+        && failure.error.code == ErrorCode::Unsupported
+        && failure.error.message == refusal.error.message
+        && failure.mutation.is_none()
+        && failure.audit_ref.is_none()
+        && failure.audit_status == Some(AuditStatus::Unavailable)
+}
+
+/// The code as Connectors spells it on the wire (`approval_required`).
+fn code_name(code: ErrorCode) -> String {
+    match serde_json::to_value(code) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => format!("{code:?}"),
     }
 }
 
@@ -419,13 +500,10 @@ fn to_serde(value: &Value) -> Result<serde_json::Value, EffectError> {
             let number: serde_json::Number = text.parse().map_err(|_| {
                 EffectError::new(format!("the argument number `{text}` is not JSON"))
             })?;
-            let exact = decimal(text).is_some_and(|admitted| {
-                decimal(&number.to_string()).is_some_and(|sent| sent == admitted)
-            });
-            if !exact {
+            if let Some(reading) = read_otherwise(text) {
                 return Err(EffectError::new(format!(
                     "the argument number `{text}` cannot be sent without changing its value \
-                     (it would be sent as `{number}`)"
+                     ({reading})"
                 )));
             }
             serde_json::Value::Number(number)
@@ -446,6 +524,28 @@ fn to_serde(value: &Value) -> Result<serde_json::Value, EffectError> {
             serde_json::Value::Object(object)
         }
     })
+}
+
+/// How the Connectors host reads the JSON number `text` when it reads another value than `text`
+/// denotes; `None` when it reads that value. Its reader (`connectors_core::read_json`) keeps an
+/// integer that fits `i64` or `u64` and reads every other number as the nearest `f64`, refusing
+/// one beyond `f64`, whichever `serde_json` features the build unified; so the value is kept
+/// only when the shortest `f64` text of `text` denotes it.
+fn read_otherwise(text: &str) -> Option<String> {
+    let integer = !text.contains(['.', 'e', 'E']);
+    if integer && (text.parse::<i64>().is_ok() || text.parse::<u64>().is_ok()) {
+        return None;
+    }
+    let Some(nearest) = text
+        .parse::<f64>()
+        .ok()
+        .filter(|nearest| nearest.is_finite())
+    else {
+        return Some("the Connectors host refuses it, beyond `f64`".to_owned());
+    };
+    let read = format!("{nearest:e}");
+    let exact = decimal(text).is_some_and(|admitted| decimal(&read) == Some(admitted));
+    (!exact).then(|| format!("the Connectors host reads it as `{read}`"))
 }
 
 /// The value a JSON number's text denotes, as (negative, significant digits, exponent): the
