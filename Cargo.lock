@@ -493,6 +493,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-boundary"
+version = "0.50.2"
+dependencies = [
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "b10x-loom-cli"
 version = "0.50.2"
 dependencies = [
@@ -504,6 +516,7 @@ dependencies = [
  "b10x-llm-tool-call",
  "b10x-loom-a2a",
  "b10x-loom-agent",
+ "b10x-loom-boundary",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
  "b10x-loom-governor",
