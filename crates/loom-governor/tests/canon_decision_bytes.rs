@@ -5,7 +5,7 @@
 //!
 //! `tests/fixtures/chg-1842.fixture.yaml` and
 //! `tests/fixtures/security-boundary-independent.fixture.yaml` are byte-for-byte copies of
-//! `fixtures/software-change/` in beyond10x/engineering-protocols at tag `0.14.0`, the release this
+//! `fixtures/software-change/` in beyond10x/engineering-protocols at tag `0.15.2`, the release this
 //! crate depends on. The first is Loom's own protocol (`software.change/1`) over a full change; the
 //! second exercises independence on `different_principal`, and both go through the protocol's
 //! outcome decisions, which neither side is given explicitly.
