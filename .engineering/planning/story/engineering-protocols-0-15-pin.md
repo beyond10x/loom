@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:engineering-protocols-0-15-pin
 kind: story
-status: active
+status: implemented
 title: Loom builds on engineering-protocols 0.15.2
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T06:45:42Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T06:45:42Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T08:00:35Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

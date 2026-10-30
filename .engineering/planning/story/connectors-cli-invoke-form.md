@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:connectors-cli-invoke-form
 kind: story
-status: active
+status: implemented
 title: ConnectorsCli invokes through Connectors v0.60.0's invoke <connector>/<instance> form
 relations:
 - decomposes: epic:plugin-layer
 - serves: vision:O1
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T06:45:42Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T06:45:42Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T08:00:35Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 

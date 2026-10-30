@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-30T08:00:35Z",
+  "actor": "human:timo",
+  "artifact": "story:session-executor-keyless-loopback",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "PR 152 CI at 68523274: loom / task check, macos build, Build documentation, Security and privacy, local evidence passed; local task check on that tree 2651 passed, 0 failed",
+    "reference": "https://github.com/beyond10x/loom/pull/152"
+  }
+}
