@@ -22,8 +22,9 @@
 //!    input document on stdin, never in argv. A describe naming no usable `connector` or
 //!    `instance` fails naming the member, and nothing is invoked.
 //!
-//! `K` is [`idempotency_key`] of the admitted request: the same admitted request always carries
-//! the same key, so calling again for it can only observe the first attempt, never apply twice
+//! `K` is [`idempotency_key`] of the admitted request, a digest of its case, run and request ids:
+//! the same admitted request always carries the same key, and requests of two runs never share
+//! one, so calling again for it can only observe the first attempt, never apply twice
 //! (connectors `docs/local-gitlab-merge.md`: "Reuse the exact key for observation of this
 //! invocation").
 //!
@@ -36,12 +37,15 @@
 
 use std::path::Path;
 
+use b10x_loom_commission::model::responsibility::CommissionId;
 use b10x_loom_commission::ports::effect::AdmittedRequest;
+use connectors_core::v1alpha2::KEY_LIMIT;
 use loom::datasource::{
     AdapterAlias, MutationClassification, OperationId, WriteApproval, WriteOperation, WriteRefusal,
     WriteResult,
 };
 use loom::json::{self, Value};
+use sha2::{Digest as _, Sha256};
 
 use super::{Bounded, CliError, ConnectorsCli, Described, WRITE_PROFILES, argument, text};
 
@@ -68,13 +72,64 @@ impl std::fmt::Display for WriteError {
 
 impl std::error::Error for WriteError {}
 
-/// The `--idempotency-key` of a write for `request`: its admitted request id, under a prefix
-/// naming Loom. The same admitted request always yields the same key.
+/// The `--idempotency-key` of a write for `request`: [`key`] over its case, run and admitted
+/// request id. The same admitted request always yields the same key, a resumed one included (the
+/// runtime resumes it under the same three ids); requests of two runs or two cases never share
+/// one.
 pub fn idempotency_key(request: &AdmittedRequest) -> String {
-    format!(
-        "loom-action-request-{}",
-        request.data().action_request_id.0.0
-    )
+    key(None, request)
+}
+
+/// The `idempotency_key` a [`ConnectorsInvoker`](crate::ConnectorsInvoker) sends for a write of
+/// `request` admitted in `commission`: [`key`] over the commission id, then the request's case,
+/// run and admitted request id. Two commissions admitting requests with the same ids never share
+/// a key, and no command-line key ([`idempotency_key`]) equals one.
+pub fn commission_idempotency_key(commission: &CommissionId, request: &AdmittedRequest) -> String {
+    key(Some(commission), request)
+}
+
+/// Names the derivation; a key of another derivation never collides with these.
+const KEY_DOMAIN: &str = "loom.connectors.idempotency-key/1";
+
+/// `loom-action-request-<id>-<digest>`, or `loom-action-request-<digest>` when the admitted
+/// request id would carry the key past Connectors' limit ([`KEY_LIMIT`] bytes). The digest is the
+/// lowercase hex SHA-256 of [`KEY_DOMAIN`], then whether a commission scopes the key, then the
+/// commission id when it does, the case id, the run id and the admitted request id, each preceded
+/// by its length in bytes as a big-endian `u64`, so no two lists of parts share an encoding. The
+/// id in the key is for the reader; the digest alone makes it unique.
+fn key(commission: Option<&CommissionId>, request: &AdmittedRequest) -> String {
+    let admitted = request.data();
+    let mut hasher = Sha256::new();
+    let mut part = |bytes: &[u8]| {
+        let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(bytes);
+    };
+    part(KEY_DOMAIN.as_bytes());
+    match commission {
+        Some(commission) => {
+            part(b"commission");
+            part(commission.0.0.as_bytes());
+        }
+        None => part(b"no commission"),
+    }
+    part(admitted.case_id.0.as_bytes());
+    part(admitted.run_id.0.0.as_bytes());
+    part(admitted.action_request_id.0.0.as_bytes());
+    let digest: String = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let named = format!(
+        "loom-action-request-{}-{digest}",
+        admitted.action_request_id.0.0
+    );
+    if named.len() <= KEY_LIMIT {
+        named
+    } else {
+        format!("loom-action-request-{digest}")
+    }
 }
 
 impl ConnectorsCli {

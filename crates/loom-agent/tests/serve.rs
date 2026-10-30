@@ -659,10 +659,22 @@ fn a_send_is_held_until_approved() {
         .expect("the send is performed after the grant");
 
     assert_eq!(resumed.classification, "applied");
-    assert_eq!(
-        resumed.idempotency_key,
-        format!("loom-action-request-{suspended_request}"),
-        "the key names the request the turn suspended"
+    let digest = resumed
+        .idempotency_key
+        .strip_prefix(&format!("loom-action-request-{suspended_request}-"))
+        .unwrap_or_else(|| {
+            panic!(
+                "the key names the request the turn suspended: {}",
+                resumed.idempotency_key
+            )
+        });
+    assert!(
+        digest.len() == 64
+            && digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
+        "the key ends in the request's SHA-256 digest: {}",
+        resumed.idempotency_key
     );
     assert_eq!(granted.action_request_id.0.0, suspended_request);
     let writes = invokes_of(&fixture, WRITE);
@@ -960,8 +972,9 @@ fn approve_send(state: &Path, commission: &str) {
 
 /// Two questions in the allowed channel, each answered in its own turn and held; a person
 /// approves both. The two sends are two writes of two admitted requests, so Connectors must see
-/// two idempotency keys: `--idempotency-key` is "loom-action-request-<admitted request id>"
-/// (`crates/loom-connectors/src/cli/write.rs:71`) and Connectors reuses a key to observe the
+/// two idempotency keys: `--idempotency-key` is "loom-action-request-<admitted request id>-"
+/// followed by a digest of the request's case, run and request ids (`idempotency_key` in
+/// `crates/loom-connectors/src/cli/write.rs`), and Connectors reuses a key to observe the
 /// first invocation, never to apply a second one. The turn's ids restart at one for every turn
 /// (`crates/loom-plugin/src/turn.rs:948-961`), so two items whose turns take the same steps
 /// suspend requests of the same id, and the second approved reply carries the first one's key.

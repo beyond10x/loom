@@ -508,8 +508,9 @@ tag (now `0.15.2`); any other crate that adds Canon uses the same reference.
 
 `b10x-loom-connectors` (`crates/loom-connectors`, `loom_sdk::connectors`) is the one crate that
 links Connectors: `connectors-client` and `connectors-core` at tag `v0.62.0`. Move both together.
-Since `v0.62.0`, `connectors-core` turns on `serde_json`'s `arbitrary_precision` for every crate
-built with it.
+`serde_json`'s `arbitrary_precision` was already on for `b10x-loom-sdk` through `b10x-canon-expr`
+`0.8.0` and `b10x-assertion-providers` `0.15.2`; since `v0.62.0`, `connectors-core` also turns it
+on through `b10x-loom-connectors`' own normal dependencies.
 `ConnectorsInvoker` fills Commission's `ConnectorInvoker` from the host's `ConnectorEndpoint`
 records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
 `CredentialResolver` the host injects; it reads no credential itself. It describes on
@@ -517,21 +518,27 @@ records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
 resends. A binding declares its operation's `effect`: `Write` for the `mutation` profile the
 service describes (Connectors records an attempt), `Read` otherwise; a binding described otherwise
 is `Err` and not invoked. A write is sent keyed (`invoke_v1alpha2_keyed`) with
-`cli::idempotency_key` of the admitted request, the key `ConnectorsCli::invoke_write` sends; a read
-is sent unkeyed (`invoke_v1alpha2`), since a key on a read is `unsupported`
+`cli::commission_idempotency_key` of the admitted request in the binding's commission: a SHA-256
+digest of the commission, case, run and admitted request ids, so a retry or a resume of one request
+keeps its key and two commissions, cases or runs never share one. `ConnectorsCli::invoke_write`
+has no commission and sends `cli::idempotency_key`, the same digest without it. A read is sent
+unkeyed (`invoke_v1alpha2`), since a key on a read is `unsupported`
 (`story:connectors-invoker-keyed-writes`). Keyed writes need a Connectors host whose `service`
 configuration sets `standing_grants` (connectors `contracts/service/compatibility.md` § 2.1); a
-host without it refuses the key `unsupported`, which is `Err` naming the missing standing grant and
-the remedy (a `connectors.standing-grants/1` grant file covering the instance and operation, and
-`state`), and the write is never sent again unkeyed. A write's `Performed` names its attempt (a
+host without it refuses the key `unsupported` with no request id, which is `Err` naming the missing
+standing grant and the remedy (a `connectors.standing-grants/1` grant file covering the instance
+and operation, and `state`), and the write is never sent again unkeyed. Any other `unsupported` is
+`Err` naming the code without that remedy. A write's `Performed` names its attempt (a
 replay, `mutation.replayed: true`, names the original attempt), a read's the execution audit
 record Connectors completed (`audit`) and no attempt, and `ConnectorEffects` refuses any other
 `Performed` as a failure to answer. `Refused` is only what Connectors states as nothing changed
 (`mutation.classification` `refused` or `not_attempted` on a valid response); every other failure,
-a write without a recorded attempt, `approval_required` and `idempotency_conflict` included, is
-`Err` naming Connectors' code. The sync port runs on a Tokio runtime the
-invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake service
-on a loopback port.
+a write without a recorded attempt included, is `Err` naming Connectors' code, and so are
+`approval_required` and `idempotency_conflict` whatever `mutation` they carry. An argument number
+the host would read as another value (an integer beyond `i64` and `u64`, or a number whose shortest
+`f64` text denotes another value) is `Err` before any call. The sync port runs on a Tokio runtime
+the invoker owns. `crates/loom-connectors/tests/connectors_invoker.rs` holds it against a fake
+service on a loopback port.
 
 `loom_connectors::cli::ConnectorsCli` is the other path: a client over the operator's
 `connectors` command line, for reads and for one governed write. As a read client it serves a host polling a `loom.datasource` source outside a run and a

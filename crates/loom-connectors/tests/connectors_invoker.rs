@@ -23,7 +23,8 @@
 //!   `a_write_without_a_recorded_attempt_is_still_an_error` and
 //!   `a_binding_the_service_describes_otherwise_is_never_invoked` bound it.
 //! - `story:connectors-invoker-keyed-writes`: a write is sent with the admitted request's
-//!   idempotency key (`a_write_is_sent_with_the_admitted_requests_idempotency_key`), a read without
+//!   idempotency key in its commission
+//!   (`a_write_is_sent_with_the_admitted_requests_idempotency_key`), a read without
 //!   one (`a_read_is_sent_without_a_key`); a replay is `Performed` naming the original attempt
 //!   (`a_replayed_write_is_performed_naming_the_original_attempt`); `approval_required`,
 //!   `idempotency_conflict` and a host without standing grants refusing the key are `Err` naming
@@ -60,7 +61,7 @@ use b10x_loom_commission::runtime::{
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor};
-use b10x_loom_connectors::cli::idempotency_key;
+use b10x_loom_connectors::cli::{commission_idempotency_key, idempotency_key};
 use b10x_loom_connectors::{ConnectorsInvoker, CredentialError, CredentialResolver, EndpointError};
 use serde_json::json;
 
@@ -976,7 +977,7 @@ fn a_binding_the_service_describes_otherwise_is_never_invoked() {
 const ORIGINAL_ATTEMPT: &str = "00000000-0000-4000-8000-0000000000b2";
 
 /// The one invocation `service` received carries `idempotency_key` = the key of the one request
-/// `recording` was handed, the key the local transport sends for that request.
+/// `recording` was handed in the commission that admitted it, within Connectors' key limit.
 fn assert_keyed_once(name: &str, service: &FakeService, recording: &Recording<'_>) {
     let admitted = recording.admitted();
     assert_eq!(admitted.len(), 1, "{name}: one admitted request");
@@ -986,10 +987,15 @@ fn assert_keyed_once(name: &str, service: &FakeService, recording: &Recording<'_
         1,
         "{name}: invoked exactly once, never resent: {invocations:?}"
     );
+    let key = commission_idempotency_key(&commission().data().commission_id, &admitted[0]);
     assert_eq!(
         invocations[0].json()["idempotency_key"],
-        json!(idempotency_key(&admitted[0])),
-        "{name}: the write carries the admitted request's idempotency key"
+        json!(key),
+        "{name}: the write carries the admitted request's idempotency key in its commission"
+    );
+    assert!(
+        !key.is_empty() && key.len() <= connectors_core::v1alpha2::KEY_LIMIT,
+        "{name}: the key is within Connectors' limit: {key}"
     );
 }
 
@@ -1009,8 +1015,8 @@ fn keyed_refusal(status: u16, code: &'static str) -> Answering {
     })
 }
 
-/// A write is sent with `cli::idempotency_key` of the admitted request, and its success is
-/// `Performed` naming the attempt.
+/// A write is sent with `cli::commission_idempotency_key` of the admitted request in its
+/// commission, and its success is `Performed` naming the attempt.
 #[test]
 fn a_write_is_sent_with_the_admitted_requests_idempotency_key() {
     let service = FakeService::start(INSTANCE, applied(json!({"written": "src/lib.rs"})));
@@ -1035,10 +1041,16 @@ fn a_write_is_sent_with_the_admitted_requests_idempotency_key() {
         "the attempt the service reported"
     );
     assert_keyed_once("keyed write", &service, &recording);
-    let key = idempotency_key(&recording.admitted()[0]);
+    let admitted = &recording.admitted()[0];
+    let key = commission_idempotency_key(&commission().data().commission_id, admitted);
     assert!(
         key.contains(&end.admitted[0].action_request_id.0.0),
-        "the key is the admitted request's: {key}"
+        "the key names the admitted request: {key}"
+    );
+    assert_ne!(
+        key,
+        idempotency_key(admitted),
+        "the invoker's key is scoped to the commission, the command line's is not"
     );
 }
 
