@@ -7,7 +7,18 @@ title: spec.boundary renders a boundary container with a projected token, and re
 relations:
 - decomposes: epic:credential-free-agent-pod
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: charts/loom-agents
+- confidence: cited
+  path: crates/loom-operator/src/admission.rs
+- confidence: cited
+  path: crates/loom-operator/src/config.rs
+- confidence: cited
+  path: crates/loom-operator/src/render.rs
+- confidence: cited
+  path: ess/domains/resource.yaml
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 3}

@@ -7,7 +7,10 @@ title: A credential-free agent's NetworkPolicy allows DNS and namespace peers on
 relations:
 - decomposes: epic:credential-free-agent-pod
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: crates/loom-operator/src/render.rs
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T00:48:54Z", actor: "human:timo", revision: 3}

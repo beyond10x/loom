@@ -7,7 +7,12 @@ title: The boundary serves model, Connectors-wire and git relays on loopback for
 relations:
 - decomposes: epic:credential-free-agent-pod
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: crates/loom-boundary
+- confidence: cited
+  path: crates/loom-cli/src
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T00:48:53Z", actor: "human:timo", revision: 3}
