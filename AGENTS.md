@@ -1402,6 +1402,13 @@ then names no subscription token (`token_file` empty, `token_pointer` none); a n
 a Claude Code or Codex session, or not of that shape (`metaharness_b10x::validate_api_key_secret`,
 or holding a control character) suspends the step with `ExternalAvailability` before any copy
 (`crates/loom-session-executor/tests/endpoint_secret.rs`).
+An endpoint naming no key at all (no secret, `token_file` empty, `token_pointer` none) is admitted
+only when its `base_url` is an `http` or `https` URL with no user name or password whose parsed
+host is loopback (`127.0.0.0/8`, `::1`, `localhost`): a credential-free pod's agent reaches the
+model through the boundary's relay on `127.0.0.1:8401`, which adds the credential, and the loop is
+launched with no credential flag. The executor does not see `LOOM_BOUNDARY_MODEL_URL`, so the rule
+is the host. Any other keyless endpoint suspends the step before any copy with the error it always
+had (`crates/loom-session-executor/tests/endpoint_keyless.rs`).
 A b10x-harness session streams its reply in `text-delta` fragments: the executor joins a
 turn's fragments with no separator, keeping the line breaks they carry, and starts each turn
 (`TurnStarted`) on a new line before it looks for the action line; a Claude Code or Codex text
@@ -1419,7 +1426,7 @@ halts the session (the child is killed) and leaves the call
 (`crates/loom-session-executor/tests/event_observer.rs`,
 `crates/loom-session-executor/tests/adversary_w20261028w1_a3.rs`).
 It is the one crate that links metaharness (`metaharness` and
-`metaharness-b10x` at tag `0.19.0`; move them together); `b10x-loom-sdk` and
+`metaharness-b10x` at tag `0.23.0`; move them together); `b10x-loom-sdk` and
 `b10x-loom-conformance` reach it through it. No `metaharness` program runs. Its tests run
 scripted sessions only (metaharness's `ScriptedRunner`): no harness program, no model, no
 network.
