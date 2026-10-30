@@ -1,4 +1,4 @@
-{"ok":true,"result":{"adapter":"slack","operation":"conversations.history","revision":"rev-1","result":{
+{"ok":true,"result":{"connector":"slack","instance":"workspace","operation":"conversations.history","revision":"rev-1","result":{
   "ok": true,
   "messages": [
     {"type": "message", "user": "U0ALICE", "text": "Please add a retry to the payment webhook handler.", "ts": "1700000500.000500"},

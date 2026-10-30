@@ -178,10 +178,7 @@ fn invokes_of(fixture: &Fixture, operation: &str) -> Vec<Vec<String>> {
     fixture
         .runs("invoke")
         .into_iter()
-        .filter(|argv| {
-            argv.windows(2)
-                .any(|w| w[0] == "--operation" && w[1] == operation)
-        })
+        .filter(|argv| support::host::operation_of(argv) == Some(operation))
         .collect()
 }
 
