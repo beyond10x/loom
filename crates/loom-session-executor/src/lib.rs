@@ -636,6 +636,13 @@ pub struct SessionExecutor {
     /// member its kind's launcher does not apply, or a context file the copy does not hold,
     /// fails before the copy is made.
     pub overrides: SessionOverrides,
+    /// The name of the session's scratch root under [`Self::scratch`], so that every session
+    /// under it works in the same path, `<scratch>/<copy_name>/copy`; none, the default, for a
+    /// root unique to each session. One plain path component of at most 64 bytes, else a call
+    /// fails before the copy is made. A directory of this user's that an earlier session left at
+    /// the path is emptied first; anything else there, or a session still running in it, fails
+    /// the call before the copy is made ([`ScratchCopy::claim`]).
+    pub copy_name: Option<String>,
     runner: RefCell<Option<Box<dyn ProcessRunner>>>,
     last: RefCell<Option<SessionReport>>,
     ids: RefCell<Box<dyn FnMut() -> SessionId>>,
@@ -682,6 +689,7 @@ impl std::fmt::Debug for SessionExecutor {
             .field("files", &self.files.len())
             .field("model", &self.model)
             .field("scratch", &self.scratch)
+            .field("copy_name", &self.copy_name)
             .finish_non_exhaustive()
     }
 }
@@ -711,6 +719,7 @@ impl SessionExecutor {
             agent: None,
             api_key_secret: None,
             overrides: SessionOverrides::default(),
+            copy_name: None,
             runner: RefCell::new(None),
             last: RefCell::new(None),
             ids: RefCell::new(Box::new(fresh_session_id)),
@@ -1244,7 +1253,12 @@ impl SessionExecutor {
         self.check_api_key_secret()?;
         self.check_overrides()?;
         let offered = self.offered();
-        let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;
+        let copy = ScratchCopy::make(
+            &self.scratch,
+            self.copy_name.as_deref(),
+            &self.workspace,
+            &self.files,
+        )?;
         report.cwd = Some(copy.dir.clone());
         let builder = Metaharness::from_spec(self.spec(&copy.dir)?);
         let mut seams: Box<dyn SeamFactory> = match self.kind {
@@ -3035,39 +3049,54 @@ fn copied(workspace: &Path, file: &str) -> bool {
         && regular_file(workspace, file).is_some()
 }
 
-/// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, and beside it
-/// `git`, the git directory the copy's `.git` names when the workspace has one; both removed
-/// when dropped. It keeps the digest of each file it copied, as copied: the base a session's
-/// change is read against; and each named path that no link of the workspace reached when the
-/// copy was made, whether there was a file at it or not.
+/// The scratch copy a session works in: `<scratch>/session-<pid>-<n>/copy`, or
+/// `<scratch>/<name>/copy` under a copy name, and beside it `git`, the git directory the copy's
+/// `.git` names when the workspace has one; the root removed when dropped, and a named root's
+/// lock ([`Self::claim`]) released after that. It keeps the digest of each file it copied, as
+/// copied: the base a session's change is read against; and each named path that no link of the
+/// workspace reached when the copy was made, whether there was a file at it or not.
 struct ScratchCopy {
     root: PathBuf,
     dir: PathBuf,
     workspace: PathBuf,
     base: BTreeMap<String, String>,
     unlinked: Vec<String>,
+    _held: Option<std::fs::File>,
 }
 
 impl ScratchCopy {
-    /// Makes the copy of `files` of `workspace` under `scratch`: each regular file with its
+    /// Makes the copy of `files` of `workspace` under `scratch`, in a root unique to the session
+    /// or, under a copy name, in `<scratch>/<name>` ([`Self::claim`]): each regular file with its
     /// bytes and its executable bit; a link, a directory, a path that is not plain, or one
     /// reached through a link in the workspace ([`through_link`]) is left out; then the
     /// workspace's git state ([`Self::carry_git`]).
-    fn make(scratch: &Path, workspace: &Path, files: &[String]) -> Result<Self, String> {
+    fn make(
+        scratch: &Path,
+        name: Option<&str>,
+        workspace: &Path,
+        files: &[String],
+    ) -> Result<Self, String> {
         use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |since| since.as_nanos());
-        let root = scratch.join(format!("session-{}-{stamp}-{n}", std::process::id()));
-        std::fs::DirBuilder::new()
-            .mode(0o700)
-            .create(&root)
-            .map_err(|error| format!("make the scratch copy {}: {error}", root.display()))?;
+        let (root, held) = if let Some(name) = name {
+            let (root, held) = Self::claim(scratch, name)?;
+            (root, Some(held))
+        } else {
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos());
+            let root = scratch.join(format!("session-{}-{stamp}-{n}", std::process::id()));
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&root)
+                .map_err(|error| format!("make the scratch copy {}: {error}", root.display()))?;
+            (root, None)
+        };
         let mut copy = Self {
             dir: root.join("copy"),
             root,
+            _held: held,
             workspace: workspace.to_path_buf(),
             base: BTreeMap::new(),
             unlinked: Vec::new(),
@@ -3108,6 +3137,92 @@ impl ScratchCopy {
         }
         copy.carry_git(workspace)?;
         Ok(copy)
+    }
+
+    /// The root `<scratch>/<name>` of a session under a copy name
+    /// ([`SessionExecutor::copy_name`]), empty, `0700` and held by an exclusive lock on the
+    /// directory, which the returned handle keeps until the copy is dropped. It is made when the
+    /// path holds nothing; a directory of this user's there that no session holds, one an
+    /// earlier session left, is emptied, its entries removed without following a link. Before
+    /// anything at the path is touched, it refuses a name that is not one plain path component of
+    /// at most 64 bytes, a link or any other entry that is not this user's directory, and a
+    /// directory a running session holds, which emptying would take from under it.
+    fn claim(scratch: &Path, name: &str) -> Result<(PathBuf, std::fs::File), String> {
+        use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
+        if name.is_empty()
+            || name.len() > 64
+            || name == "."
+            || name == ".."
+            || name.contains('/')
+            || name.chars().any(char::is_control)
+        {
+            return Err(format!(
+                "the copy name {name:?} is not one plain path component of at most 64 bytes"
+            ));
+        }
+        let root = scratch.join(name);
+        let created = match std::fs::DirBuilder::new().mode(0o700).create(&root) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+            Err(error) => {
+                return Err(format!("make the scratch copy {}: {error}", root.display()));
+            }
+        };
+        let own = |meta: &std::fs::Metadata| {
+            meta.is_dir() && (created || Some(meta.uid()) == Self::effective_uid())
+        };
+        let refused = || {
+            format!(
+                "the scratch copy path {} holds an entry that is not a directory of this user's; \
+                 it is left as it is",
+                root.display()
+            )
+        };
+        if !std::fs::symlink_metadata(&root).is_ok_and(|meta| own(&meta)) {
+            return Err(refused());
+        }
+        let held = std::fs::File::open(&root)
+            .map_err(|error| format!("open the scratch copy {}: {error}", root.display()))?;
+        held.try_lock().map_err(|error| {
+            format!(
+                "the scratch copy {} is held by a session under the copy name {name:?}: {error}",
+                root.display()
+            )
+        })?;
+        // The lock counts only while the path still names the directory it is on: a session
+        // that held it removes it as it ends.
+        let opened = held
+            .metadata()
+            .map_err(|error| format!("read the scratch copy {}: {error}", root.display()))?;
+        let same = std::fs::symlink_metadata(&root)
+            .is_ok_and(|now| own(&now) && now.dev() == opened.dev() && now.ino() == opened.ino());
+        if !same {
+            return Err(refused());
+        }
+        held.set_permissions(std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("set the mode of {}: {error}", root.display()))?;
+        let entries = std::fs::read_dir(&root)
+            .map_err(|error| format!("read the scratch copy {}: {error}", root.display()))?;
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| format!("read the scratch copy {}: {error}", root.display()))?;
+            let path = entry.path();
+            let removed = if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
+            removed.map_err(|error| format!("remove the leftover {}: {error}", path.display()))?;
+        }
+        Ok((root, held))
+    }
+
+    /// The process's effective user id, read from `/proc/self/status`; none where that cannot be
+    /// read, so that no directory found at a named copy's path counts as this user's.
+    fn effective_uid() -> Option<u32> {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let ids = status.lines().find_map(|line| line.strip_prefix("Uid:"))?;
+        ids.split_whitespace().nth(1)?.parse().ok()
     }
 
     /// The session's home ([`Homed`]): `home` beside the copy, made empty and `0700`, removed
@@ -3603,8 +3718,13 @@ mod tests {
         let tree = scratch.0.join("tree");
         std::fs::create_dir_all(&tree).expect("the tree");
         std::fs::write(tree.join("a.txt"), "a\n").expect("a file");
-        let copy = ScratchCopy::make(&scratch.0.join("scratch"), &tree, &["a.txt".to_owned()])
-            .expect("the copy");
+        let copy = ScratchCopy::make(
+            &scratch.0.join("scratch"),
+            None,
+            &tree,
+            &["a.txt".to_owned()],
+        )
+        .expect("the copy");
         assert!(copy.dir.join("a.txt").is_file());
         assert!(std::fs::symlink_metadata(copy.dir.join(".git")).is_err());
         assert!(std::fs::symlink_metadata(copy.dir.with_file_name("git")).is_err());
@@ -3690,7 +3810,8 @@ mod tests {
         assert!(through_link(&tree, "src/linked"));
         assert!(!through_link(&tree, "src/lib.rs"));
         assert!(!through_link(&tree, "src/absent/file.rs"));
-        let copy = ScratchCopy::make(&scratch.0.join("scratch"), &tree, &files).expect("the copy");
+        let copy =
+            ScratchCopy::make(&scratch.0.join("scratch"), None, &tree, &files).expect("the copy");
         assert!(copy.dir.join("src/lib.rs").is_file());
         assert!(!copy.dir.join("src/linked").exists());
         std::fs::create_dir_all(copy.dir.join("src/linked/deep")).expect("a directory in the copy");
@@ -3749,7 +3870,8 @@ mod tests {
         std::fs::write(tree.join("README.md"), "r\n").expect("a file");
         std::fs::write(outside.join("lib.rs"), "a\n").expect("the same bytes outside");
         let files = ["src/lib.rs", "src/new.rs", "README.md"].map(str::to_owned);
-        let copy = ScratchCopy::make(&scratch.0.join("scratch"), &tree, &files).expect("the copy");
+        let copy =
+            ScratchCopy::make(&scratch.0.join("scratch"), None, &tree, &files).expect("the copy");
         std::fs::write(copy.dir.join("README.md"), "edited\n").expect("the session's edit");
         std::fs::rename(tree.join("src"), scratch.0.join("moved")).expect("src moved away");
         std::os::unix::fs::symlink(&outside, tree.join("src")).expect("src now a link");
