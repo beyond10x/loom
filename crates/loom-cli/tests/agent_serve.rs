@@ -739,14 +739,17 @@ runtime:
             .collect()
     }
 
-    /// The invocations of `operation`.
+    /// The invocations of `operation`: `invoke <connector>/<instance> <operation>`, after the
+    /// global flags (`story:connectors-cli-invoke-form`).
     fn invoked(&self, operation: &str) -> Vec<Vec<String>> {
         self.argv()
             .into_iter()
-            .filter(|argv| argv.contains(&"invoke".to_owned()))
             .filter(|argv| {
-                argv.windows(2)
-                    .any(|w| w[0] == "--operation" && w[1] == operation)
+                argv.iter()
+                    .position(|argument| argument == "invoke")
+                    .filter(|at| *at == 0 || argv[at - 1] != "operations")
+                    .and_then(|at| argv.get(at + 2))
+                    .is_some_and(|invoked| invoked == operation)
             })
             .collect()
     }

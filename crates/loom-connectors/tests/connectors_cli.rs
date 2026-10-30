@@ -1,5 +1,6 @@
 //! Acceptance for `story:connectors-cli-reads`: `loom_connectors::cli` reads a data source through
-//! the `connectors` command line, `operations describe` then one `operations invoke`.
+//! the `connectors` command line, `operations describe` then one `invoke <connector>/<instance>
+//! <operation>` of the target the describe named (`story:connectors-cli-invoke-form`).
 //!
 //! The program is `tests/fixtures/connectors/fake-connectors`, copied into each test's own
 //! directory under `CARGO_TARGET_TMPDIR`. It appends its argv to `<state-dir>/argv.log`, writes
@@ -7,11 +8,15 @@
 //! `<state-dir>/stdin.log`, and answers from the JSON fixture files the test copies into the state
 //! directory: shapes `connectors --output json` prints at tag `v0.38.0`
 //! (`apps/connectors/src/local/operations.rs`: `describe` and `project`;
-//! `crates/connectors-host/src/local/owner/supervisor.rs`: `read_answer`). Every test hands the
-//! client its own environment, `HOME` a directory of the test, so nothing reads the operator's.
+//! `crates/connectors-host/src/local/owner/supervisor.rs`: `read_answer`), with the `connector`
+//! and `instance` tag `v0.60.0` names in a describe and an invoke answer in place of an invoke's
+//! `adapter`. Like `v0.60.0` it refuses the removed `operations invoke` as a parse refusal, exit
+//! status 2. Every test hands the client its own environment, `HOME` a directory of the test, so
+//! nothing reads the operator's.
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use b10x_loom_connectors::cli::datasource::{
     AdapterAlias, ConnectionId, ConnectorsCliConfig, DataSource, OperationId, ReadKind, ReadResult,
@@ -20,6 +25,8 @@ use b10x_loom_connectors::cli::datasource::{
 use b10x_loom_connectors::cli::{CliError, ConnectorsCli, json};
 
 const ADAPTER: &str = "chat";
+/// The `invoke` target the chat describe answers name: their `connector` and `instance`.
+const TARGET: &str = "chat/team";
 const CONNECTION: &str = "conn-fixture";
 const LIST: &str = "channel.history";
 const SEARCH: &str = "message.search";
@@ -77,7 +84,8 @@ impl Fixture {
         ConnectorsCli::new(self.config(), sources).with_environment(self.environment())
     }
 
-    /// `operations <verb>` of `operation` answers with the fixture `file`.
+    /// `operations describe` (`verb` `describe`) or `invoke` (`verb` `invoke`) of `operation`
+    /// answers with the fixture `file`.
     fn answer(&self, verb: &str, operation: &str, file: &str) {
         fs::copy(
             fixtures().join(file),
@@ -86,7 +94,7 @@ impl Fixture {
         .unwrap();
     }
 
-    /// `operations <verb>` exits with `status`.
+    /// `operations describe` or `invoke`, as `verb` names it, exits with `status`.
     fn exit(&self, verb: &str, status: i32) {
         fs::write(
             self.state().join(format!("{verb}.exit")),
@@ -110,15 +118,44 @@ impl Fixture {
             .collect()
     }
 
-    /// The runs whose verb is `operations <verb>`.
+    /// The runs of `operations describe` (`verb` `describe`) or of the command `invoke` (`verb`
+    /// `invoke`), never the removed `operations invoke` (`story:connectors-cli-invoke-form`).
     fn runs(&self, verb: &str) -> Vec<Vec<String>> {
         self.argv()
             .into_iter()
-            .filter(|argv| {
-                argv.windows(2)
-                    .any(|w| w[0] == "operations" && w[1] == verb)
-            })
+            .filter(|argv| is_run(argv, verb))
             .collect()
+    }
+}
+
+/// Whether `argv` runs `operations describe` (`verb` `describe`) or `invoke` (`verb` `invoke`).
+fn is_run(argv: &[String], verb: &str) -> bool {
+    match (command(argv), verb) {
+        ([invoke, ..], "invoke") => invoke == "invoke",
+        ([operations, named, ..], _) => operations == "operations" && named == verb,
+        _ => false,
+    }
+}
+
+/// The words of `argv` after the global flags and their values: the command and its arguments.
+fn command(argv: &[String]) -> &[String] {
+    let mut at = 0;
+    while matches!(
+        argv.get(at).map(String::as_str),
+        Some("--output" | "--config" | "--state-dir")
+    ) {
+        at += 2;
+    }
+    &argv[at.min(argv.len())..]
+}
+
+/// The target and operation an `invoke` run names, `invoke <target> <operation>`.
+fn invoked(argv: &[String]) -> (&str, &str) {
+    match command(argv) {
+        [invoke, target, operation, ..] if invoke == "invoke" => {
+            (target.as_str(), operation.as_str())
+        }
+        other => panic!("not an invoke: {other:?}"),
     }
 }
 
@@ -217,7 +254,16 @@ fn invoke_read_runs_one_invoke() {
     );
     let invokes = fixture.runs("invoke");
     assert_eq!(invokes.len(), 1, "{:?}", fixture.argv());
-    assert_eq!(value_of(&invokes[0], "--operation").as_deref(), Some(LIST));
+    // The target the describe named, then the operation (`story:connectors-cli-invoke-form`).
+    assert_eq!(invoked(&invokes[0]), (TARGET, LIST), "{:?}", fixture.argv());
+    assert!(
+        fixture
+            .argv()
+            .iter()
+            .all(|argv| !argv.windows(2).any(|w| w == ["operations", "invoke"])),
+        "no run names the removed `operations invoke`: {:?}",
+        fixture.argv()
+    );
     assert_eq!(
         value_of(&invokes[0], "--connection").as_deref(),
         Some(CONNECTION)
@@ -264,14 +310,22 @@ fn read_uses_the_declared_operation() {
         );
         let runs = &fixture.argv()[before..];
         assert_eq!(runs.len(), 2, "{runs:?}");
-        for run in runs {
-            assert_eq!(value_of(run, "--operation").as_deref(), Some(id), "{run:?}");
-            assert_eq!(
-                value_of(run, "--adapter").as_deref(),
-                Some(ADAPTER),
-                "{run:?}"
-            );
-        }
+        // The describe selects by the alias; the invoke names the target the describe answered
+        // (`story:connectors-cli-invoke-form`).
+        let (describe, invoke) = (&runs[0], &runs[1]);
+        assert!(is_run(describe, "describe"), "{describe:?}");
+        assert_eq!(
+            value_of(describe, "--operation").as_deref(),
+            Some(id),
+            "{describe:?}"
+        );
+        assert_eq!(
+            value_of(describe, "--adapter").as_deref(),
+            Some(ADAPTER),
+            "{describe:?}"
+        );
+        assert!(is_run(invoke, "invoke"), "{invoke:?}");
+        assert_eq!(invoked(invoke), (TARGET, id), "{invoke:?}");
     }
 }
 
@@ -378,10 +432,7 @@ fn a_resource_profile_read_is_invoked_without_an_approval_file() {
     );
     let invokes = fixture.runs("invoke");
     assert_eq!(invokes.len(), 1, "{:?}", fixture.argv());
-    assert_eq!(
-        value_of(&invokes[0], "--operation").as_deref(),
-        Some(REACTIONS)
-    );
+    assert_eq!(invoked(&invokes[0]), (TARGET, REACTIONS), "{invokes:?}");
     // Every fake log this test file's tests have written, this one's included.
     let logs = Path::new(env!("CARGO_TARGET_TMPDIR")).join("connectors_cli");
     let mut scanned = 0;
@@ -491,14 +542,11 @@ fn argv_holds_only_declared_flags() {
                 GET
             ]),
             globals(&[
-                "operations",
                 "invoke",
-                "--adapter",
-                ADAPTER,
+                TARGET,
+                GET,
                 "--connection",
                 CONNECTION,
-                "--operation",
-                GET,
                 "--schema",
                 "sch-get-1",
                 "--revision",
@@ -535,6 +583,148 @@ fn argv_holds_only_declared_flags() {
     let answer = cli.invoke_read(&adapter(), &connection(), &operation(GET), &input());
     assert!(matches!(answer, Err(CliError::Failed(_))), "{answer:?}");
     assert_eq!(fixture.runs("invoke").len(), 1, "{:?}", fixture.argv());
+}
+
+/// The invoke's target is the `connector` and `instance` the describe answer names. An answer
+/// naming either not, or naming one that is no single argv id (empty, read as a flag, holding
+/// whitespace or a `/`), fails naming it and starts no invoke (`story:connectors-cli-invoke-form`).
+#[test]
+fn a_describe_answer_without_a_usable_target_starts_no_invoke() {
+    let fixture = Fixture::new("a_describe_answer_without_a_usable_target_starts_no_invoke");
+    fixture.answer("invoke", LIST, "invoke-read.json");
+    let described = fs::read_to_string(fixtures().join("describe-list.json")).unwrap();
+    let (connector, instance) = (r#""connector":"chat""#, r#""instance":"team""#);
+    let cli = fixture.cli(Vec::new());
+    let cases = [
+        (described.replace(&format!(",{connector}"), ""), "connector"),
+        (described.replace(&format!(",{instance}"), ""), "instance"),
+        (described.replace(instance, r#""instance":7"#), "instance"),
+        (
+            described.replace(connector, r#""connector":"""#),
+            "connector",
+        ),
+        (
+            described.replace(connector, r#""connector":"--config""#),
+            "connector",
+        ),
+        (
+            described.replace(instance, r#""instance":"te am""#),
+            "instance",
+        ),
+        (
+            described.replace(instance, r#""instance":"team/other""#),
+            "instance",
+        ),
+        (
+            described.replace(connector, r#""connector":"chat/team""#),
+            "connector",
+        ),
+    ];
+
+    for (answer, named) in &cases {
+        assert_ne!(answer, &described, "the fixture changed: {described}");
+        fs::write(
+            fixture.state().join(format!("describe.{LIST}.json")),
+            answer,
+        )
+        .unwrap();
+        match cli.invoke_read(&adapter(), &connection(), &operation(LIST), &input()) {
+            Err(CliError::Failed(why)) => assert!(why.contains(named), "{named}: {why}"),
+            other => panic!("{answer}: the read was not refused: {other:?}"),
+        }
+    }
+    assert_eq!(
+        fixture.runs("describe").len(),
+        cases.len(),
+        "{:?}",
+        fixture.argv()
+    );
+    assert_eq!(fixture.argv().len(), cases.len(), "{:?}", fixture.argv());
+}
+
+/// The fake refuses what Connectors `v0.60.0` removed as `v0.60.0` does: a parse refusal, exit
+/// status 2, on stderr with stdout empty (`apps/connectors-cli-contract/src/runtime.rs`,
+/// `cli_parse`). So a client still building one of these command lines fails here as it would
+/// against the operator's `connectors` (`story:connectors-cli-invoke-form`).
+#[test]
+fn the_fake_refuses_the_removed_command_lines_as_connectors_does() {
+    let fixture = Fixture::new("the_fake_refuses_the_removed_command_lines_as_connectors_does");
+    fixture.answer("describe", LIST, "describe-list.json");
+    fixture.answer("invoke", LIST, "invoke-read.json");
+    let state = fixture.state().display().to_string();
+    let removed: [&[&str]; 5] = [
+        &[
+            "operations",
+            "invoke",
+            "--adapter",
+            ADAPTER,
+            "--connection",
+            CONNECTION,
+            "--operation",
+            LIST,
+            "--schema",
+            "sch-list-1",
+            "--revision",
+            "rev-1",
+            "--input-stdin",
+        ],
+        &[
+            "invoke",
+            TARGET,
+            LIST,
+            "--adapter",
+            ADAPTER,
+            "--input-stdin",
+        ],
+        &[
+            "invoke",
+            "--endpoint",
+            "fixture-endpoint",
+            "--operation",
+            LIST,
+        ],
+        &["describe", "--endpoint", "fixture-endpoint"],
+        &["serve", "--config", "fixture.toml"],
+    ];
+
+    for arguments in removed {
+        let output = Command::new(fixture.root.join("connectors"))
+            .args(["--output", "json", "--state-dir", &state])
+            .args(arguments)
+            .env_clear()
+            .envs(fixture.environment())
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}");
+        assert_eq!(
+            json::parse(String::from_utf8_lossy(&output.stderr).trim()).unwrap(),
+            json::parse(r#"{"ok":false,"error":{"code":"cli_parse","data":{}}}"#).unwrap(),
+            "{arguments:?}"
+        );
+    }
+    assert!(
+        !fixture.state().join("stdin.log").exists(),
+        "a refused invoke read no input"
+    );
+    // The command line the client builds is answered.
+    let output = Command::new(fixture.root.join("connectors"))
+        .args(["--output", "json", "--state-dir", &state])
+        .args([
+            "invoke",
+            TARGET,
+            LIST,
+            "--connection",
+            CONNECTION,
+            "--input-stdin",
+        ])
+        .env_clear()
+        .envs(fixture.environment())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
 }
 
 #[test]

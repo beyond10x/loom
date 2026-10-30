@@ -119,11 +119,16 @@ impl Fixture {
             .to_string()
     }
 
+    /// The runs of `invoke <connector>/<instance> <operation>`, the form Connectors `v0.60.0`
+    /// invokes with; the removed `operations invoke` is none (`story:connectors-cli-invoke-form`).
     fn invokes(&self) -> usize {
         fs::read_to_string(self.state().join("argv.log"))
             .unwrap_or_default()
             .lines()
-            .filter(|line| line.contains("\tinvoke\t"))
+            .filter(|line| {
+                line.contains(&format!("\tinvoke\tdesk/support\t{ROUTE}\t"))
+                    && !line.contains("\toperations\tinvoke\t")
+            })
             .count()
     }
 }

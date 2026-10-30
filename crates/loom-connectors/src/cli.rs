@@ -12,20 +12,26 @@
 //! One read is two commands, each `connectors --output json [--config F] [--state-dir D]` and then:
 //!
 //! 1. `operations describe --adapter A --operation O`, which answers the operation's schema
-//!    identity (`schema`), the descriptor `revision` and the operation with its `profile` and
+//!    identity (`schema`), the descriptor `revision`, the operation with its `profile` and
 //!    `input_schema` (connectors `v0.38.0`, `apps/connectors/src/local/operations.rs`, `describe`
-//!    and `operation`);
-//! 2. `operations invoke --adapter A --connection C --operation O --schema S --revision R
-//!    --input-stdin`, run once, with the input document on stdin, never in argv.
+//!    and `operation`), and the `connector` and `instance` the alias `A` names (connectors
+//!    `v0.60.0`, `connectors.cli.OperationDescribeResult`, `ess/domains/cli.yaml`);
+//! 2. `invoke N/I O --connection C --schema S --revision R --input-stdin`, where `N/I` is that
+//!    `connector` and `instance`, run once, with the input document on stdin, never in argv
+//!    (`story:connectors-cli-invoke-form`). Connectors `v0.60.0` removed `operations invoke` and
+//!    refuses it as a parse error, so this client needs `v0.60.0` or newer.
 //!
 //! A read of an operation `describe` reports with the `mutation` profile ([`WRITE_PROFILES`]) is
 //! refused after the describe and before any invoke; Connectors itself refuses any write without
-//! `--approval-file`, which no read passes (only [`ConnectorsCli::invoke_write`] does, from the
-//! `write` submodule), and that holds a write an adapter publishes under another profile. A program that forks is bounded only as the process it started: a
-//! timeout kills and reaps that process, not its children. The command line's argv
-//! holds only the flags above and the ids they take; an id, or a schema or revision `describe`
-//! answered, that is empty, starts with `-`, or holds whitespace or a control character starts no
-//! command, and a `--config` or `--state-dir` path starting with `-` starts none either. Each
+//! its approval proof, which no read passes (only [`ConnectorsCli::invoke_write`] does, from the
+//! `write` submodule), and that holds a write an adapter publishes under another profile. A
+//! program that forks is bounded only as the process it started: a timeout kills and reaps that
+//! process, not its children. The command line's argv holds only the flags above and the ids they
+//! take; an id, or a schema, revision, connector or instance `describe` answered, that is empty,
+//! starts with `-`, or holds whitespace or a control character starts no command, and neither
+//! does a connector or instance holding `/`, or a describe naming no connector or no instance: the
+//! read fails naming the member, after the describe and before any invoke. A `--config` or
+//! `--state-dir` path starting with `-` starts no command either. Each
 //! command is bounded by `timeout_seconds` ([`DEFAULT_TIMEOUT_SECONDS`] when absent): one still
 //! running is killed and reaped, and the read fails naming the timeout and the operation; a
 //! timeout this host's clock cannot hold starts no command and is refused naming it. Nothing
@@ -165,7 +171,7 @@ impl ConnectorsCli {
                     .filter_map(|kind| declared(source, kind).map(|operation| (kind, operation)))
                     .map(|(kind, operation)| {
                         self.describe_for(Some(&source.name), &source.adapter, operation)
-                            .map(|entity| (kind, entity))
+                            .map(|described| (kind, described.entity))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok((source.clone(), entities))
@@ -184,13 +190,16 @@ impl ConnectorsCli {
         operation: &OperationId,
     ) -> Result<SourceEntity, CliError> {
         self.describe_for(None, adapter, operation)
+            .map(|described| described.entity)
     }
 
-    /// Reads `operation` of `adapter` on `connection`: one describe, then exactly one
-    /// `operations invoke` with `input` on stdin.
+    /// Reads `operation` of `adapter` on `connection`: one describe, then exactly one `invoke` of
+    /// the `connector/instance` the describe names, with `input` on stdin.
     ///
     /// # Errors
-    /// As [`ConnectorsCli::describe`], and the invoke's refusal or failure.
+    /// As [`ConnectorsCli::describe`]; [`CliError::Failed`] naming the member, before any invoke,
+    /// when the describe names no usable `connector` or `instance`; and the invoke's refusal or
+    /// failure.
     pub fn invoke_read(
         &self,
         adapter: &AdapterAlias,
@@ -240,8 +249,9 @@ impl ConnectorsCli {
         source: Option<&SourceName>,
         adapter: &AdapterAlias,
         operation: &OperationId,
-    ) -> Result<SourceEntity, CliError> {
-        let (entity, profile) = self.described(source, adapter, operation)?;
+    ) -> Result<Described, CliError> {
+        let described = self.described(source, adapter, operation)?;
+        let profile = &described.profile;
         if WRITE_PROFILES.contains(&profile.as_str()) {
             return Err(CliError::Refused(ReadRefusal {
                 source: source.cloned(),
@@ -254,16 +264,17 @@ impl ConnectorsCli {
                 ),
             }));
         }
-        Ok(entity)
+        Ok(described)
     }
 
-    /// What `operations describe` reports for `operation` of `adapter`, and its `profile`.
+    /// What `operations describe` reports for `operation` of `adapter`: its entity, its
+    /// `profile` and the invoke target it names.
     fn described(
         &self,
         source: Option<&SourceName>,
         adapter: &AdapterAlias,
         operation: &OperationId,
-    ) -> Result<(SourceEntity, String), CliError> {
+    ) -> Result<Described, CliError> {
         argument("adapter", &adapter.0)?;
         argument("operation", &operation.0)?;
         let described = self.run(
@@ -321,7 +332,11 @@ impl ConnectorsCli {
                 .ok_or_else(|| missing("describe", "revision"))?
                 .to_owned(),
         };
-        Ok((entity, profile.to_owned()))
+        Ok(Described {
+            entity,
+            profile: profile.to_owned(),
+            target: target(&described),
+        })
     }
 
     fn read_through(
@@ -335,7 +350,8 @@ impl ConnectorsCli {
         argument("adapter", &adapter.0)?;
         argument("connection", &connection.0)?;
         argument("operation", &operation.0)?;
-        let entity = self.describe_for(source, adapter, operation)?;
+        let Described { entity, target, .. } = self.describe_for(source, adapter, operation)?;
+        let target = target?;
         argument("schema", &entity.schema)?;
         argument("revision", &entity.revision)?;
         let mut document = String::new();
@@ -345,14 +361,11 @@ impl ConnectorsCli {
             adapter,
             operation,
             &[
-                "operations",
                 "invoke",
-                "--adapter",
-                &adapter.0,
+                &target,
+                &operation.0,
                 "--connection",
                 &connection.0,
-                "--operation",
-                &operation.0,
                 "--schema",
                 &entity.schema,
                 "--revision",
@@ -378,8 +391,8 @@ impl ConnectorsCli {
         // `source_audit.audit_ref`: the member the command line prints the execution audit record
         // in (connectors `v0.38.0`, `apps/connectors/src/local/operations.rs` `project`;
         // `docs/local-gitlab-merge.md`: success "adds `request_id`, `mutation` and
-        // `source_audit`"). `operations invoke --help` names no audit member, and at `v0.38.0` a
-        // read prints none, so it is absent there.
+        // `source_audit`"). `v0.60.0`'s `connectors.cli.InvokeResult` declares `source_audit`, and
+        // its `audit_ref`, optional, so a read without one has none.
         let audit_ref = invoked
             .member("source_audit")
             .and_then(|audit| text(audit, "audit_ref"))
@@ -582,6 +595,37 @@ impl ConnectorsCli {
             stderr,
         })
     }
+}
+
+/// What `operations describe` reports for one operation: the entity, its `profile`, and the
+/// `connector/instance` an invoke of it names, or why the describe names no usable one. The
+/// target is checked only where an invoke needs it, so [`ConnectorsCli::sources`] and
+/// [`ConnectorsCli::describe`] answer a describe without one.
+struct Described {
+    entity: SourceEntity,
+    profile: String,
+    target: Result<String, CliError>,
+}
+
+/// The invoke target `connector/instance` of a describe answer (connectors `v0.60.0`,
+/// `connectors.cli.OperationDescribeResult`: both required, filled from the configuration the
+/// alias names). Each part must stand in argv and hold no `/`, so the target names exactly that
+/// connector and instance.
+fn target(described: &Value) -> Result<String, CliError> {
+    let connector = part(described, "connector")?;
+    let instance = part(described, "instance")?;
+    Ok(format!("{connector}/{instance}"))
+}
+
+fn part<'v>(described: &'v Value, name: &str) -> Result<&'v str, CliError> {
+    let value = text(described, name).ok_or_else(|| missing("describe", name))?;
+    argument(name, value)?;
+    if value.contains('/') {
+        return Err(CliError::Failed(format!(
+            "describe gave {name} `{value}`, which holds `/`, so no invoke target is named"
+        )));
+    }
+    Ok(value)
 }
 
 /// How often a running command is checked against its bound.

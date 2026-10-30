@@ -147,15 +147,16 @@ fn fixture_run_invokes_no_write() {
     assert!(!argv.is_empty(), "the fake was run");
     let mut invoked = Vec::new();
     for run in &argv {
-        let verb = run
-            .windows(2)
-            .find(|w| w[0] == "operations")
-            .map(|w| w[1].as_str());
-        let operation = run
-            .windows(2)
-            .find(|w| w[0] == "--operation")
-            .map(|w| w[1].as_str())
-            .unwrap_or_default();
+        // `operations describe`, or `invoke <connector>/<instance> <operation>`
+        // (`story:connectors-cli-invoke-form`).
+        let verb = match support::host::command(run) {
+            [invoke, ..] if invoke == "invoke" => Some("invoke"),
+            [operations, verb, ..] if operations == "operations" && verb != "invoke" => {
+                Some(verb.as_str())
+            }
+            _ => None,
+        };
+        let operation = support::host::operation_of(run).unwrap_or_default();
         assert!(
             matches!(verb, Some("describe" | "invoke")),
             "only describe and invoke run: {run:?}"

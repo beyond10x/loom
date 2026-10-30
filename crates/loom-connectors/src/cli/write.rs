@@ -16,9 +16,11 @@
 //!
 //! 1. `operations describe --adapter A --operation O`, which must report the operation with a
 //!    write profile ([`WRITE_PROFILES`]); any other is refused `not-a-write` and not invoked;
-//! 2. `operations invoke --adapter A --connection C --operation O --schema S --revision R
-//!    --input-stdin --approval-file P --idempotency-key K`, run once, with the input document on
-//!    stdin, never in argv.
+//! 2. `invoke N/I O --connection C --schema S --revision R --input-stdin --approval-file P
+//!    --idempotency-key K`, where `N/I` is the `connector` and `instance` the describe names, as
+//!    for a read (connectors `v0.60.0`, `story:connectors-cli-invoke-form`), run once, with the
+//!    input document on stdin, never in argv. A describe naming no usable `connector` or
+//!    `instance` fails naming the member, and nothing is invoked.
 //!
 //! `K` is [`idempotency_key`] of the admitted request: the same admitted request always carries
 //! the same key, so calling again for it can only observe the first attempt, never apply twice
@@ -41,7 +43,7 @@ use loom::datasource::{
 };
 use loom::json::{self, Value};
 
-use super::{Bounded, CliError, ConnectorsCli, WRITE_PROFILES, argument, text};
+use super::{Bounded, CliError, ConnectorsCli, Described, WRITE_PROFILES, argument, text};
 
 /// Why a governed write was not invoked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +79,9 @@ pub fn idempotency_key(request: &AdmittedRequest) -> String {
 
 impl ConnectorsCli {
     /// Writes `operation` for the admitted `request` with `input` on stdin and the proof
-    /// `approval` names: one describe, then exactly one `operations invoke`. The write is bound to
-    /// the admitted request: `operation.action` must be its `action` and `input` its `arguments`.
+    /// `approval` names: one describe, then exactly one `invoke` of the `connector/instance` the
+    /// describe names. The write is bound to the admitted request: `operation.action` must be its
+    /// `action` and `input` its `arguments`.
     ///
     /// # Errors
     /// [`WriteError::Refused`] with code `action-not-admitted` when `operation.action` is not the
@@ -87,7 +90,8 @@ impl ConnectorsCli {
     /// holding a control character or `approval-not-absolute` for a relative one, each before
     /// any process starts; with `not-a-write` when `describe` reports another profile than a
     /// write's, before the invoke; with Connectors' code when it refused the describe.
-    /// [`WriteError::Failed`] when the describe failed, or an argument would read as a flag.
+    /// [`WriteError::Failed`] when the describe failed or named no usable `connector` or
+    /// `instance`, or an argument would read as a flag.
     pub fn invoke_write(
         &self,
         request: &AdmittedRequest,
@@ -162,7 +166,11 @@ impl ConnectorsCli {
         ] {
             argument(name, value).map_err(WriteError::from)?;
         }
-        let (entity, profile) = self.described(None, adapter, operation)?;
+        let Described {
+            entity,
+            profile,
+            target,
+        } = self.described(None, adapter, operation)?;
         if !WRITE_PROFILES.contains(&profile.as_str()) {
             return Err(refused(
                 adapter,
@@ -175,20 +183,18 @@ impl ConnectorsCli {
                 ),
             ));
         }
+        let target = target?;
         argument("schema", &entity.schema)?;
         argument("revision", &entity.revision)?;
         let mut document = String::new();
         json::push_value(&mut document, input);
         let (mut command, timeout, _) = self.command(
             &[
-                "operations",
                 "invoke",
-                "--adapter",
-                &adapter.0,
+                &target,
+                &operation.0,
                 "--connection",
                 &connection.0,
-                "--operation",
-                &operation.0,
                 "--schema",
                 &entity.schema,
                 "--revision",

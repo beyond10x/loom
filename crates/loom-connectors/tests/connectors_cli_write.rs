@@ -1,8 +1,9 @@
 //! Acceptance for `story:connectors-governed-write`: `ConnectorsCli::invoke_write` performs a write
 //! an admitted request names through the `connectors` command line, `operations describe` then one
-//! `operations invoke` with the person's approval proof (`--approval-file`) and an idempotency key
-//! derived from the admitted request (`--idempotency-key`), and returns the write as Connectors
-//! classifies it.
+//! `invoke <connector>/<instance> <operation>` of the target the describe named
+//! (`story:connectors-cli-invoke-form`) with the person's approval proof (`--approval-file`) and an
+//! idempotency key derived from the admitted request (`--idempotency-key`), and returns the write
+//! as Connectors classifies it.
 //!
 //! The program is `tests/fixtures/connectors/fake-connectors`, as in `connectors_cli.rs`, copied
 //! into each test's own directory under `CARGO_TARGET_TMPDIR/connectors_cli_write` (never under
@@ -42,6 +43,8 @@ use b10x_loom_connectors::cli::datasource::{
 use b10x_loom_connectors::cli::{CliError, ConnectorsCli, WriteError, idempotency_key, json};
 
 const ADAPTER: &str = "desk";
+/// The `invoke` target the route's describe answers name: their `connector` and `instance`.
+const TARGET: &str = "desk/support";
 const CONNECTION: &str = "conn-desk";
 const ROUTE: &str = "ticket.route";
 const NOW: &str = "2026-10-17T09:00:00Z";
@@ -102,7 +105,8 @@ impl Fixture {
             .to_string()
     }
 
-    /// `operations <verb>` of [`ROUTE`] answers with the fixture `file`.
+    /// `operations describe` (`verb` `describe`) or `invoke` (`verb` `invoke`) of [`ROUTE`]
+    /// answers with the fixture `file`.
     fn answer(&self, verb: &str, file: &str) {
         fs::copy(
             fixtures().join(file),
@@ -111,7 +115,7 @@ impl Fixture {
         .unwrap();
     }
 
-    /// `operations <verb>` exits with `status`.
+    /// `operations describe` or `invoke`, as `verb` names it, exits with `status`.
     fn exit(&self, verb: &str, status: i32) {
         fs::write(
             self.state().join(format!("{verb}.exit")),
@@ -134,12 +138,15 @@ impl Fixture {
             .collect()
     }
 
+    /// The runs of `operations describe` (`verb` `describe`) or of the command `invoke` (`verb`
+    /// `invoke`), never the removed `operations invoke` (`story:connectors-cli-invoke-form`).
     fn runs(&self, verb: &str) -> Vec<Vec<String>> {
         self.argv()
             .into_iter()
-            .filter(|argv| {
-                argv.windows(2)
-                    .any(|w| w[0] == "operations" && w[1] == verb)
+            .filter(|argv| match (command(argv), verb) {
+                ([invoke, ..], "invoke") => invoke == "invoke",
+                ([operations, named, ..], _) => operations == "operations" && named == verb,
+                _ => false,
             })
             .collect()
     }
@@ -147,6 +154,18 @@ impl Fixture {
     fn stdin(&self) -> String {
         fs::read_to_string(self.state().join("stdin.log")).unwrap_or_default()
     }
+}
+
+/// The words of `argv` after the global flags and their values: the command and its arguments.
+fn command(argv: &[String]) -> &[String] {
+    let mut at = 0;
+    while matches!(
+        argv.get(at).map(String::as_str),
+        Some("--output" | "--config" | "--state-dir")
+    ) {
+        at += 2;
+    }
+    &argv[at.min(argv.len())..]
 }
 
 fn fixtures() -> PathBuf {
@@ -361,21 +380,23 @@ fn an_admitted_write_passes_the_proof_path_and_the_derived_key() {
     assert_eq!(invokes.len(), 1, "{:?}", fixture.argv());
     assert_eq!(fixture.argv().len(), 2, "{:?}", fixture.argv());
     let invoke = &invokes[0];
-    let at = invoke
-        .iter()
-        .position(|argument| argument == "operations")
-        .unwrap();
+    assert!(
+        fixture
+            .argv()
+            .iter()
+            .all(|argv| !argv.windows(2).any(|w| w == ["operations", "invoke"])),
+        "no run names the removed `operations invoke`: {:?}",
+        fixture.argv()
+    );
+    // The target the describe named, then the operation (`story:connectors-cli-invoke-form`).
     assert_eq!(
-        invoke[at..],
+        command(invoke),
         [
-            "operations",
             "invoke",
-            "--adapter",
-            ADAPTER,
+            TARGET,
+            ROUTE,
             "--connection",
             CONNECTION,
-            "--operation",
-            ROUTE,
             "--schema",
             "sch-route-1",
             "--revision",
@@ -459,6 +480,51 @@ fn an_operation_not_described_as_a_write_is_refused_before_the_invoke() {
     }
     assert_eq!(fixture.runs("describe").len(), 1, "{:?}", fixture.argv());
     assert_eq!(fixture.runs("invoke").len(), 0, "{:?}", fixture.argv());
+}
+
+/// A write's target is the `connector` and `instance` its describe names: an answer naming no
+/// instance, or a connector that would read as a flag, fails naming it and is never invoked
+/// (`story:connectors-cli-invoke-form`).
+#[test]
+fn a_write_whose_describe_names_no_target_is_never_invoked() {
+    let fixture = Fixture::new("a_write_whose_describe_names_no_target_is_never_invoked");
+    fixture.answer("invoke", "invoke-route-applied.json");
+    let described = fs::read_to_string(fixtures().join("describe-route.json")).unwrap();
+    let cases = [
+        (
+            described.replace(r#","instance":"support""#, ""),
+            "instance",
+        ),
+        (
+            described.replace(r#""connector":"desk""#, r#""connector":"--approval-file""#),
+            "connector",
+        ),
+    ];
+
+    for (answer, named) in &cases {
+        assert_ne!(answer, &described, "the fixture changed: {described}");
+        fs::write(
+            fixture.state().join(format!("describe.{ROUTE}.json")),
+            answer,
+        )
+        .unwrap();
+        match fixture.cli().invoke_write(
+            &admitted(1),
+            &route(),
+            &input(),
+            &approval(fixture.proof()),
+        ) {
+            Err(WriteError::Failed(why)) => assert!(why.contains(named), "{named}: {why}"),
+            other => panic!("{answer}: the write was not refused: {other:?}"),
+        }
+    }
+    assert_eq!(
+        fixture.runs("describe").len(),
+        cases.len(),
+        "{:?}",
+        fixture.argv()
+    );
+    assert_eq!(fixture.argv().len(), cases.len(), "{:?}", fixture.argv());
 }
 
 /// The same admitted request yields the same key, so a second call can only observe the first

@@ -204,9 +204,10 @@ fn a_message_runs_one_governed_turn_and_sends_nothing() {
         "{record}"
     );
     assert!(
-        fixture.runs("invoke").iter().all(|argv| !argv
-            .windows(2)
-            .any(|w| w[0] == "--operation" && w[1] == WRITE)),
+        fixture
+            .runs("invoke")
+            .iter()
+            .all(|argv| support::host::operation_of(argv) != Some(WRITE)),
         "nothing is sent through A2A"
     );
     assert!(
