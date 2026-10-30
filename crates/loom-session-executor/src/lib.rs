@@ -424,6 +424,11 @@ impl std::error::Error for SpecError {}
 /// `token_pointer` none. With no secret either, it names no key at all, which is admitted only
 /// when `base_url`'s host is a loopback address (`127.0.0.0/8`, `::1`, `localhost`): the loop is
 /// then pointed at no credential, and the far end (a credential-free pod's boundary relay) adds it.
+///
+/// A `Kind::Claude` session takes only that keyless loopback endpoint, speaking
+/// `anthropic-messages`: metaharness gets `base_url` as its `model_endpoint` with no credential,
+/// and the child gets `ANTHROPIC_BASE_URL`, metaharness's placeholder key and no nonessential
+/// traffic. Any other endpoint on it suspends the step before any copy. Codex ignores it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
     /// The endpoint origin plus its API prefix.
@@ -1108,7 +1113,8 @@ impl SessionExecutor {
 
     /// The run metaharness is asked for, its decision mode the tool policy's ([`Self::policy`];
     /// by default every Claude Code and Codex call decided here, every b10x-harness call
-    /// observed), and by kind: Claude Code `Strict`; Codex `On` (its strict floor fails on four rows its
+    /// observed), and by kind: Claude Code `Strict`, pointed at [`Self::endpoint`] with no
+    /// credential when one is named; Codex `On` (its strict floor fails on four rows its
     /// opening record does not carry, H1a, H1b, H4 and H5, which metaharness cannot decide for
     /// it yet); b10x-harness `On`, pointed at [`Self::endpoint`] with its subscription token, or
     /// with [`Self::api_key_secret`] under `ApiKey` when one is named, confined by substrate in the
@@ -1141,6 +1147,14 @@ impl SessionExecutor {
             Kind::Claude => {
                 spec.hermetic = HermeticMode::Strict;
                 spec.max_turns = self.max_turns;
+                if let Some(endpoint) = &self.endpoint {
+                    // Keyless, loopback and `anthropic-messages` ([`Self::check_claude_endpoint`]):
+                    // the far end adds the credential, and the child holds metaharness's
+                    // placeholder only. No wire: metaharness refuses one on a vendor arm.
+                    spec.credentials = CredentialSource::None;
+                    spec.model_endpoint = Some(endpoint.base_url.clone());
+                    spec.model = Some(self.model.clone().unwrap_or(endpoint.model.clone()));
+                }
             }
             Kind::Codex => {
                 spec.hermetic = HermeticMode::On;
@@ -1222,6 +1236,39 @@ impl SessionExecutor {
         metaharness_b10x::validate_api_key_secret(name)
     }
 
+    /// A Claude Code session's [`Self::endpoint`], when named, names no key (`token_file` empty,
+    /// `token_pointer` none), is on a loopback host ([`keyless_loopback`]) and speaks
+    /// `anthropic-messages`, the one wire Claude Code speaks; the error names which it is not.
+    /// Other kinds are checked elsewhere.
+    fn check_claude_endpoint(&self) -> Result<(), String> {
+        let (Kind::Claude, Some(endpoint)) = (self.kind, &self.endpoint) else {
+            return Ok(());
+        };
+        let base_url = endpoint.base_url.escape_debug();
+        if !endpoint.token_file.as_os_str().is_empty() || endpoint.token_pointer.is_some() {
+            return Err(format!(
+                "a Claude Code session's endpoint `{base_url}` names a key (its token_file or \
+                 token_pointer); a Claude Code session is pointed only at a keyless loopback \
+                 endpoint, whose far end adds the credential"
+            ));
+        }
+        if !keyless_loopback(endpoint) {
+            return Err(format!(
+                "a Claude Code session's endpoint `{base_url}` is not an http or https URL on a \
+                 loopback host (127.0.0.0/8, ::1, localhost) with no user information; a Claude \
+                 Code session is pointed only at a keyless loopback endpoint"
+            ));
+        }
+        if endpoint.wire != "anthropic-messages" {
+            return Err(format!(
+                "a Claude Code session's endpoint `{base_url}` speaks `{}`; Claude Code speaks \
+                 anthropic-messages only",
+                endpoint.wire.escape_debug()
+            ));
+        }
+        Ok(())
+    }
+
     /// One session: the copy made, the session run in it to its end, the proposal read.
     fn session(
         &self,
@@ -1242,6 +1289,7 @@ impl SessionExecutor {
             ));
         }
         self.check_api_key_secret()?;
+        self.check_claude_endpoint()?;
         self.check_overrides()?;
         let offered = self.offered();
         let copy = ScratchCopy::make(&self.scratch, &self.workspace, &self.files)?;

@@ -486,12 +486,14 @@ fn adversary_a_keyless_launch_whose_loop_records_a_key_is_held_back() {
     assert!(error.contains("H4"), "the H4 row holds it back: {error:?}");
 }
 
-/// A Claude Code or Codex session with a keyless endpoint off loopback set: the endpoint is not
-/// read, so the keyless refusal is not raised and the endpoint never reaches the launch.
+/// A Codex session with a keyless endpoint off loopback set: the endpoint is not read, so the
+/// keyless refusal is not raised and the endpoint never reaches the launch. A Claude Code session
+/// reads its endpoint since `story:session-executor-claude-loopback-endpoint`, and one off loopback
+/// is refused before the copy (`tests/claude_endpoint.rs`).
 #[test]
-fn adversary_claude_and_codex_ignore_a_keyless_foreign_endpoint() {
+fn adversary_codex_ignores_a_keyless_foreign_endpoint() {
     let foreign = "https://models.example.test/v1";
-    for (at, kind) in [Kind::Claude, Kind::Codex].into_iter().enumerate() {
+    for (at, kind) in [Kind::Codex].into_iter().enumerate() {
         let scratch = Scratch::new(&format!("other-kind-{at}"));
         let (session, seen) = Session::plain(false);
         let executor = scratch.executor(kind, session, foreign);
@@ -518,4 +520,36 @@ fn adversary_claude_and_codex_ignore_a_keyless_foreign_endpoint() {
         );
         assert_eq!(credential_flags(&seen.args), Vec::<&str>::new(), "{kind:?}");
     }
+}
+
+/// A Claude Code session with a keyless endpoint off loopback set: refused before the copy with
+/// an error of its own, never the b10x-harness keyless refusal, and nothing is launched.
+#[test]
+fn adversary_claude_refuses_a_keyless_foreign_endpoint_with_its_own_error() {
+    let scratch = Scratch::new("claude-foreign");
+    let (session, seen) = Session::plain(false);
+    let executor = scratch.executor(Kind::Claude, session, "https://models.example.test/v1");
+    let step = step_of(&executor);
+    assert!(
+        matches!(
+            &step.outcome,
+            ExecutorOutcome::Suspended(suspended)
+                if matches!(suspended.reason, SuspensionReason::ExternalAvailability(_))
+        ),
+        "{:?}",
+        step.outcome
+    );
+    assert!(
+        !seen.borrow().started,
+        "nothing is launched (story:session-executor-claude-loopback-endpoint)"
+    );
+    let error = executor
+        .last_report()
+        .and_then(|report| report.error)
+        .expect("the report says why");
+    assert_ne!(error, REFUSAL, "the b10x-harness refusal is not reused");
+    assert!(
+        error.contains("loopback"),
+        "story:session-executor-claude-loopback-endpoint: {error}"
+    );
 }
