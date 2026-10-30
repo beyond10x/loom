@@ -335,7 +335,12 @@ impl ConnectorsCli {
         Ok(Described {
             entity,
             profile: profile.to_owned(),
-            target: target(&described),
+            // The target is the alias's only when the answer names the alias: one naming another
+            // was refused above, and one naming none names no target.
+            target: match described.member("adapter") {
+                Some(_) => target(&described),
+                None => Err(missing("describe", "adapter")),
+            },
         })
     }
 
