@@ -334,8 +334,8 @@ kind: Deployment
 Helm installs the chart's `crds/` once and never upgrades it; `b10x-loom-operator crd` prints the
 CRD of the installed version. For each resource the controller first runs the check of
 `b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes`,
-`spec.connectorsConfig`, `spec.env` and `spec.configFiles`, and holds the Secret, the namespace
-and the egress hosts to its configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
+`spec.connectorsConfig`, `spec.env` and `spec.configFiles`, and holds the Secret, the namespace,
+the egress hosts and a boundary's upstreams to its configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)
 and no child is created. Otherwise it applies a ServiceAccount, a ConfigMap, a Deployment that
 checks the spec again in an init container and runs `b10x-loom agent serve`, a NetworkPolicy and,
 with `expose.a2a`, a Service, all owned by the resource, and publishes `state`
@@ -366,8 +366,9 @@ and again expanded against what it knows (its own `env` and the `spec.env` entri
 reference to any other name both as written and as a URL scheme, since it may supply one. It
 refuses a credential in any of these readings or in a name (`SecretLiteral`), a name that is not
 `[A-Za-z_][A-Za-z0-9_]*` (`NotAVariableName`), and a name given twice or one it sets itself
-(`EnvNameConflict`; `HOME`, on either variant). A secret belongs in `spec.secretRef` or
-`spec.secretFiles`: the walk knows credential shapes, not every secret.
+(`EnvNameConflict`; `HOME` and the `LOOM_BOUNDARY_*_URL` names, on either variant). A secret
+belongs in `spec.secretRef` or `spec.secretFiles`: the walk knows credential shapes, not every
+secret.
 For a `Command` resource the controller checks `spec.agent` only for a credential and against
 the `loom.agent/1` decoder, not the plugin catalog, and walks `spec.command` for a credential too.
 A `Command` resource may leave `spec.agent` out and give its program's own configuration as
@@ -389,6 +390,38 @@ spec:
       content: |
         base_url = "http://model-route.agents.svc:8080/v1"
         token_env = "TAKT_ENDPOINT_TOKEN"
+```
+
+A resource may instead be credential-free (`spec.boundary`, on either variant). It declares the
+upstreams its agent calls, `model`, `connectors` (with the operation ids it admits) and `git`
+(with the `<owner>/<repo>` repositories it admits), each a plain `http://` URL of a cluster
+service (`http://<service>.<namespace>.svc`, optionally `.cluster.local`, a port and a path) and
+the audience of a projected service-account token. The pod then gets a second container,
+`boundary`, a native sidecar running `b10x-loom agent boundary` from the controller's default
+image: it alone mounts the tokens, one per upstream, each valid 600 s, and the agent container
+gets only loopback URLs (`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL`,
+`LOOM_BOUNDARY_GIT_URL`); with `boundary.model` the default routes name the model relay. The
+NetworkPolicy opens DNS, the namespace egress entries and each upstream's namespace on its
+port, and no host. The values must list each upstream exactly in `allowedBoundaryUpstreams`
+(empty by default). The controller refuses a boundary beside `spec.secretRef` or
+`spec.secretFiles` (`BoundaryWithSecret`), an upstream that is no cluster service or is `https`
+(`BoundaryUpstreamInvalid`), one the values do not list (`BoundaryUpstreamNotAllowed`), a host
+egress entry (`BoundaryEgressHost`), and an audience, operation id or repository out of form
+(`Malformed`). Native sidecars need Kubernetes 1.29 or newer.
+
+```yaml
+spec:
+  routes: {}
+  boundary:
+    model: {upstream: 'http://llm-gateway.llm.svc:8080/v1', audience: llm-gateway}
+    connectors:
+      upstream: 'http://connectors.connectors.svc:8080'
+      audience: connectors
+      operations: [merge_request.create]
+    git:
+      upstream: 'http://connectors.connectors.svc/git'
+      audience: connectors-git
+      repositories: [agents/takt-target]
 ```
 
 `b10x-loom-operator render` prints what the controller would apply for one resource and talks to no

@@ -12,7 +12,9 @@
 //! a finished Job is not started again before a new generation, and its status reports how the
 //! run ended (`status.run`: the program's exit code and end time, read from the Job's pod, and
 //! the condition `Completed`). On either variant the pod has a
-//! workspace volume and the Secret as files when the resource asks for them. Before any child
+//! workspace volume and the Secret as files when the resource asks for them; with `spec.boundary`
+//! it holds no Secret, and the native sidecar `boundary` alone mounts its credentials, projected
+//! service-account tokens, and relays the agent's calls to the declared upstreams. Before any child
 //! is rendered the spec is checked in-process (`b10x_loom_agent::check_text`, the library behind
 //! `b10x-loom agent check`), `spec.routes` is walked for a credential and read by llm's strict
 //! routes parser, and `spec.connectorsConfig` is decoded as TOML and walked, word by word and
@@ -99,6 +101,7 @@ mod tests {
                 kind: "RuntimeDefault".to_owned(),
                 localhost_profile: None,
             }),
+            boundary: Some(full_boundary()),
         };
         let written = serde_json::to_value(full).expect("JSON");
         let mut keys: Vec<&str> = written
@@ -109,6 +112,71 @@ mod tests {
             .collect();
         keys.sort_unstable();
         assert_eq!(keys, members);
+    }
+
+    /// A `spec.boundary` declaring every upstream.
+    fn full_boundary() -> resource::Boundary {
+        resource::Boundary {
+            model: Some(resource::BoundaryUpstream {
+                upstream: "http://m.n.svc".to_owned(),
+                audience: "m".to_owned(),
+            }),
+            connectors: Some(resource::ConnectorsBoundary {
+                upstream: "http://c.n.svc".to_owned(),
+                audience: "c".to_owned(),
+                operations: vec!["o".to_owned()],
+            }),
+            git: Some(resource::GitBoundary {
+                upstream: "http://g.n.svc".to_owned(),
+                audience: "g".to_owned(),
+                repositories: vec!["o/r".to_owned()],
+            }),
+        }
+    }
+
+    /// The members of the object schema `schema`, sorted.
+    fn properties(schema: &serde_yaml_ng::Value) -> Vec<String> {
+        let mut members: Vec<String> = schema["properties"]
+            .as_mapping()
+            .expect("properties")
+            .keys()
+            .map(|key| key.as_str().expect("a name").to_owned())
+            .collect();
+        members.sort_unstable();
+        members
+    }
+
+    /// The members of the JSON object `value`, sorted.
+    fn keys(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    #[test]
+    fn the_crd_names_the_boundary_members_the_kube_type_reads() {
+        let crd: serde_yaml_ng::Value = serde_yaml_ng::from_str(CRD).expect("the CRD is YAML");
+        let schema = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+            ["properties"]["boundary"];
+        let written = serde_json::to_value(full_boundary()).expect("JSON");
+        assert_eq!(keys(&written), properties(schema));
+        for upstream in ["model", "connectors", "git"] {
+            assert_eq!(
+                keys(&written[upstream]),
+                properties(&schema["properties"][upstream]),
+                "spec.boundary.{upstream}"
+            );
+        }
+        assert_eq!(
+            serde_json::from_value::<resource::Boundary>(serde_json::json!({}))
+                .expect("every upstream is optional"),
+            resource::Boundary::default()
+        );
     }
 
     #[test]

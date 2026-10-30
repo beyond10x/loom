@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `LoomAgent` `spec.boundary` renders a native sidecar `boundary` (`b10x-loom agent boundary` from the default image, user 10002) that alone mounts a projected service-account token per declared upstream; the agent container gets only the loopback `LOOM_BOUNDARY_*_URL` values, and the controller refuses a boundary beside a Secret, an upstream that is no plain `http://` cluster service or that the new `allowedBoundaryUpstreams` (chart value, empty by default) does not list (story:boundary-container-projected-token)
+- A credential-free resource's NetworkPolicy opens only DNS, its namespace egress entries and each declared upstream's namespace on its port, and a host egress entry beside `spec.boundary` is refused `BoundaryEgressHost` (story:credential-free-network-policy)
+
 ## [0.50.2] - 2026-10-29
 
 No breaking changes.
