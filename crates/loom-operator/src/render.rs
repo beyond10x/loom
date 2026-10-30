@@ -82,14 +82,17 @@
 //!   `deploy.kubernetes.egress` entry (a namespace entry as a namespace and pod selector peer, a
 //!   host entry by its port only, since a NetworkPolicy names no host) and, with the default
 //!   routes, to the model route's port; ingress from each `deploy.kubernetes.ingress` namespace.
-//!   With `spec.boundary` (story credential-free-network-policy) the egress is DNS, the
-//!   `deploy.kubernetes.egress` namespace entries (admission refuses a host entry) and, per
-//!   declared upstream, the namespace its host names on its TCP port (80 when it names none);
-//!   no rule to the model route.
+//!   With `spec.boundary` (story credential-free-network-policy) the egress is DNS and, per
+//!   declared upstream, the namespace its host names on a TCP port: the `port` of the
+//!   `allowedBoundaryUpstreams` entry that admitted it, the pod port its Service targets, which a
+//!   NetworkPolicy matches after the Service has translated it, else the URL's port (80 when it
+//!   names none); no `deploy.kubernetes.egress` entry (admission refuses each) and no rule to the
+//!   model route.
 //! * Service `<resource>` (ClusterIP, port `a2a`) only with `expose.a2a`.
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::num::NonZeroU16;
 
 use b10x_loom_resource::model::AgentVariant;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, DeploymentStrategy};
@@ -1039,8 +1042,14 @@ impl Renderer<'_> {
             ]),
         }];
         let mut ingress = Vec::new();
+        let upstreams = self.boundary_upstreams();
         if let Some(kubernetes) = self.kubernetes() {
-            for entry in &kubernetes.egress {
+            let entries = if upstreams.is_empty() {
+                kubernetes.egress.as_slice()
+            } else {
+                &[]
+            };
+            for entry in entries {
                 let to = entry.namespace.as_ref().map(|namespace| {
                     vec![NetworkPolicyPeer {
                         namespace_selector: Some(in_namespace(namespace)),
@@ -1072,7 +1081,6 @@ impl Renderer<'_> {
                 });
             }
         }
-        let upstreams = self.boundary_upstreams();
         if upstreams.is_empty() {
             if self.admitted.default_routes
                 && let Some(route) = &self.config.model_route
@@ -1083,16 +1091,21 @@ impl Renderer<'_> {
                 });
             }
         } else {
-            for service in upstreams
-                .iter()
-                .filter_map(|upstream| admission::cluster_service(upstream.url).ok())
-            {
+            for upstream in &upstreams {
+                let Ok(service) = admission::cluster_service(upstream.url) else {
+                    continue;
+                };
+                let port = self
+                    .config
+                    .allowed_upstream(upstream.relay.kind, upstream.url, upstream.audience)
+                    .and_then(|allowed| allowed.port)
+                    .map_or(service.port, NonZeroU16::get);
                 egress.push(NetworkPolicyEgressRule {
                     to: Some(vec![NetworkPolicyPeer {
                         namespace_selector: Some(in_namespace(service.namespace)),
                         ..NetworkPolicyPeer::default()
                     }]),
-                    ports: Some(vec![tcp(i32::from(service.port))]),
+                    ports: Some(vec![tcp(i32::from(port))]),
                 });
             }
         }

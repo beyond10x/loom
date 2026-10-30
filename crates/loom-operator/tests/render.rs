@@ -1737,18 +1737,32 @@ fn quoted(text: &str) -> String {
     serde_json::to_string(text).expect("JSON text")
 }
 
-/// The test configuration, allowing `upstreams` as the boundary upstreams.
-fn allowing(upstreams: &[&str]) -> Config {
+/// The test configuration, allowing `upstreams` (each its kind, URL and audience) as the
+/// boundary upstreams.
+fn allowing(upstreams: &[(&str, &str, &str)]) -> Config {
+    let entries: Vec<serde_json::Value> = upstreams
+        .iter()
+        .map(|(kind, url, audience)| {
+            serde_json::json!({"kind": kind, "url": url, "audience": audience})
+        })
+        .collect();
     Config::parse(&format!(
         "{CONFIG}allowedBoundaryUpstreams: {}\n",
-        serde_json::to_string(upstreams).expect("JSON text")
+        serde_json::Value::Array(entries)
     ))
     .expect("the test configuration with boundary upstreams")
 }
 
+/// The three upstreams the credential-free resources declare, each for its relay and audience.
+const ALLOWED: [(&str, &str, &str); 3] = [
+    ("model", MODEL_UPSTREAM, "llm-gateway"),
+    ("connectors", CONNECTORS_UPSTREAM, "connectors"),
+    ("git", GIT_UPSTREAM, "connectors-git"),
+];
+
 /// The test configuration with the three upstreams the credential-free resources declare.
 fn boundary_config() -> Config {
-    allowing(&[MODEL_UPSTREAM, CONNECTORS_UPSTREAM, GIT_UPSTREAM])
+    allowing(&ALLOWED)
 }
 
 /// `spec.boundary` declaring `model`, `connectors` and `git` where asked, as YAML.
@@ -1814,20 +1828,36 @@ fn credential_free_command(rest: &str) -> String {
     )
 }
 
-/// The example without its two host egress entries, which a boundary refuses; its namespace
-/// entries (logs and metrics in `monitoring`) and its ingress stay.
+/// The example without its egress entries, two hosts and two namespaces, which a boundary
+/// refuses (`story:credential-free-network-policy`); its ingress stays.
 fn credential_free_agent() -> String {
+    let entries = [
+        "{name: chat-api,",
+        "{name: model-api,",
+        "{name: logs, namespace:",
+        "{name: metrics, namespace:",
+    ];
     let agent: String = example()
         .lines()
-        .filter(|line| !line.contains("{name: chat-api,") && !line.contains("{name: model-api,"))
+        .filter(|line| !entries.iter().any(|entry| line.contains(entry)))
         .map(|line| format!("{line}\n"))
         .collect();
-    assert_eq!(
-        agent.lines().count() + 2,
-        example().lines().count(),
-        "two host entries removed"
+    let agent = agent.replace(
+        "    egress:\n    ingress:\n",
+        "    egress: []\n    ingress:\n",
     );
+    assert_eq!(
+        agent.lines().count() + 4,
+        example().lines().count(),
+        "story:credential-free-network-policy: the four egress entries removed"
+    );
+    assert!(agent.contains("    egress: []\n"), "{agent}");
     agent
+}
+
+/// A serve agent without egress entries, its routes given (no model route), then `rest`.
+fn credential_free_serve_routed(rest: &str) -> String {
+    wrapped(&credential_free_agent(), &format!("{GIVEN_ROUTES}{rest}"))
 }
 
 /// The serve variant of a credential-free agent: the example without host egress, the default
@@ -2213,11 +2243,15 @@ fn the_agent_container_gets_the_boundary_urls_and_no_token() {
         [false, true, true],
     ] {
         let [model, connectors, git] = declared;
-        let rendered = render_document(
-            &credential_free_serve(&boundary(model, connectors, git)),
-            &boundary_config(),
-        )
-        .expect("rendered");
+        let resource = if model {
+            credential_free_serve(&boundary(model, connectors, git))
+        } else {
+            credential_free_serve_routed(&boundary(model, connectors, git))
+        };
+        let rendered = render_document(&resource, &boundary_config()).expect(
+            "rendered (story:boundary-container-projected-token: a serve agent without \
+             boundary.model gives its routes)",
+        );
         let given: Vec<(&str, &str)> = urls
             .iter()
             .zip(declared)
@@ -2295,15 +2329,18 @@ fn a_boundary_upstream_the_controller_does_not_allow_is_refused() {
     ] {
         let expected = format!(
             "refused: BoundaryUpstreamNotAllowed at spec.boundary.{member}.upstream: the \
-             controller's allowedBoundaryUpstreams does not hold it"
+             controller's allowedBoundaryUpstreams does not hold it for this relay"
         );
         assert_eq!(
             refusal(&credential_free_command(&declared), &config()),
-            expected
+            expected,
+            "story:boundary-container-projected-token: the entry names the relay"
         );
         assert_eq!(
-            refusal(&credential_free_serve(&declared), &allowing(&[])),
-            expected
+            refusal(&credential_free_serve_routed(&declared), &allowing(&[])),
+            expected,
+            "story:boundary-container-projected-token: given routes, since a serve agent \
+             without boundary.model and empty routes is refused NoModelRoute first"
         );
     }
     for upstream in [
@@ -2326,10 +2363,74 @@ fn a_boundary_upstream_the_controller_does_not_allow_is_refused() {
     }
 }
 
-/// `story:credential-free-network-policy`: a credential-free agent's NetworkPolicy opens DNS,
-/// each declared upstream's namespace on its port (80 when the URL names none) and the spec's
-/// namespace egress entries, and nothing else: no rule without a peer, so no host entry and no
-/// model-route rule.
+/// `story:boundary-container-projected-token`: an `allowedBoundaryUpstreams` entry admits one
+/// relay kind at one URL with one token audience. A URL listed only for another kind is refused
+/// at the `upstream` (the Connectors wire is no model relay, whose pass-through would reach every
+/// operation), and an audience the entry for that kind and URL does not give is refused at the
+/// `audience` (an API-server audience would make the token a Kubernetes API credential).
+#[test]
+fn a_boundary_upstream_is_allowed_for_its_kind_and_audience_only() {
+    let connectors_as_model = format!(
+        "  boundary:\n    model: {{upstream: '{CONNECTORS_UPSTREAM}', audience: connectors}}\n"
+    );
+    let message = refusal(
+        &credential_free_command(&connectors_as_model),
+        &boundary_config(),
+    );
+    assert_eq!(
+        message,
+        "refused: BoundaryUpstreamNotAllowed at spec.boundary.model.upstream: the controller's \
+         allowedBoundaryUpstreams does not hold it for this relay",
+        "story:boundary-container-projected-token"
+    );
+    repeats_no_boundary_value(&message);
+
+    for audience in [
+        "https://kubernetes.default.svc.cluster.local",
+        "https://kubernetes.default.svc",
+        "kubernetes",
+        "connectors",
+        "llm-gateway-2",
+    ] {
+        let message = refusal(
+            &credential_free_command(&model_boundary(MODEL_UPSTREAM, audience)),
+            &boundary_config(),
+        );
+        assert_eq!(
+            message,
+            "refused: BoundaryUpstreamNotAllowed at spec.boundary.model.audience: the \
+             controller's allowedBoundaryUpstreams does not hold this upstream with this \
+             audience",
+            "story:boundary-container-projected-token: {audience}"
+        );
+    }
+    let swapped = format!(
+        "  boundary:\n    connectors: {{upstream: '{CONNECTORS_UPSTREAM}', audience: \
+         connectors-git, operations: [merge_request.get]}}\n"
+    );
+    assert!(
+        refusal(&credential_free_command(&swapped), &boundary_config()).starts_with(
+            "refused: BoundaryUpstreamNotAllowed at spec.boundary.connectors.audience: "
+        ),
+        "story:boundary-container-projected-token"
+    );
+
+    let both = allowing(&[
+        ("model", MODEL_UPSTREAM, "llm-gateway"),
+        ("model", MODEL_UPSTREAM, "llm-gateway-2"),
+    ]);
+    for audience in ["llm-gateway", "llm-gateway-2"] {
+        render_document(
+            &credential_free_command(&model_boundary(MODEL_UPSTREAM, audience)),
+            &both,
+        )
+        .unwrap_or_else(|error| panic!("{audience}: {error}"));
+    }
+}
+
+/// `story:credential-free-network-policy`: a credential-free agent's NetworkPolicy opens DNS and
+/// each declared upstream's namespace on its port (80 when the URL names none), and nothing
+/// else: no namespace or host egress entry (admission refuses both) and no model-route rule.
 #[test]
 fn a_credential_free_agent_reaches_dns_and_its_upstream_namespaces_only() {
     let every = boundary(true, true, true);
@@ -2339,12 +2440,11 @@ fn a_credential_free_agent_reaches_dns_and_its_upstream_namespaces_only() {
         egress_of(&serve),
         [
             dns(),
-            rule("monitoring", "TCP", 3100),
-            rule("monitoring", "TCP", 9090),
             rule("llm", "TCP", 8080),
             rule("connectors", "TCP", 8080),
             rule("connectors", "TCP", 80),
-        ]
+        ],
+        "story:credential-free-network-policy: DNS and the upstreams only"
     );
     let docs = documents(&serve);
     let policy = docs
@@ -2399,6 +2499,45 @@ fn a_credential_free_agent_reaches_dns_and_its_upstream_namespaces_only() {
     );
 }
 
+/// A NetworkPolicy matches the pod port after the Service has translated it, so an
+/// `allowedBoundaryUpstreams` entry may name the port the upstream's Service targets; the rule for
+/// that upstream opens it in place of the URL's port, and an upstream whose entry names none
+/// keeps the URL's.
+#[test]
+fn an_allowed_upstreams_pod_port_is_the_port_its_rule_opens() {
+    let config = Config::parse(&format!(
+        "{CONFIG}allowedBoundaryUpstreams:\n- {{kind: model, url: '{MODEL_UPSTREAM}', audience: \
+         llm-gateway, port: 8000}}\n- {{kind: connectors, url: '{CONNECTORS_UPSTREAM}', audience: \
+         connectors}}\n- {{kind: git, url: '{GIT_UPSTREAM}', audience: connectors-git, port: \
+         9418}}\n"
+    ))
+    .expect("a configuration with pod ports");
+    let rendered = render_document(
+        &credential_free_command(&boundary(true, true, true)),
+        &config,
+    )
+    .expect("rendered");
+    assert_eq!(
+        egress_of(&rendered),
+        [
+            dns(),
+            rule("llm", "TCP", 8000),
+            rule("connectors", "TCP", 8080),
+            rule("connectors", "TCP", 9418),
+        ],
+        "story:credential-free-network-policy: the entry's pod port, else the URL's"
+    );
+    let pod = pod_of(&rendered);
+    let args = strings(
+        init_container(&pod, "boundary").expect("the boundary"),
+        &["args"],
+    );
+    assert!(
+        args.contains(&MODEL_UPSTREAM.to_owned()) && args.contains(&GIT_UPSTREAM.to_owned()),
+        "the boundary still dials the Service URL: {args:?}"
+    );
+}
+
 /// A NetworkPolicy names no host, so a host entry's rule opens its port to every destination;
 /// beside a boundary such an entry is refused at its host, even one the configuration allows.
 #[test]
@@ -2417,25 +2556,103 @@ fn a_host_egress_entry_beside_a_boundary_is_refused() {
     assert!(!message.contains("chat.example"), "{message}");
 
     let agent = credential_free_agent().replace(
-        "      - {name: metrics,",
-        "      - {name: chat-api, host: chat.example, port: 443}\n      - {name: metrics,",
+        "    egress: []\n",
+        "    egress:\n      - {name: chat-api, host: chat.example, port: 443}\n",
     );
     let message = refusal(
         &wrapped(
             &agent,
-            &format!("  routes: {{}}\n{}", boundary(false, true, true)),
+            &format!("  routes: {{}}\n{}", boundary(true, true, true)),
         ),
         &boundary_config(),
     );
     assert!(
         message.starts_with(
-            "refused: BoundaryEgressHost at spec.agent.deploy.kubernetes.egress[1].host: "
+            "refused: BoundaryEgressHost at spec.agent.deploy.kubernetes.egress[0].host: "
         ),
-        "{message}"
+        "story:credential-free-network-policy: the only entry is the host: {message}"
     );
     assert!(!message.contains("chat.example"), "{message}");
     render_document(&wrapped(&agent, "  routes: {}\n"), &boundary_config())
         .expect("the same host is admitted without a boundary");
+}
+
+/// Design D243 § 2: beside a boundary the pod's egress is DNS and the upstreams only. A
+/// namespace egress entry, which would open that namespace (an upstream's included, on another
+/// port) past the boundary, is refused at its namespace, whatever its selector or port, and the
+/// refusal never repeats it; without a boundary the same entries are admitted.
+#[test]
+fn a_namespace_egress_entry_beside_a_boundary_is_refused() {
+    let message = refusal(
+        &wrapped(
+            &credential_free_agent().replace(
+                "    egress: []\n",
+                "    egress:\n      - {name: logs, namespace: monitoring, selector: [{name: app, \
+                 value: logs}], port: 3100}\n",
+            ),
+            &format!("  routes: {{}}\n{}", boundary(true, false, false)),
+        ),
+        &boundary_config(),
+    );
+    assert_eq!(
+        message,
+        "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: a \
+         resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
+         NetworkPolicy opens no namespace",
+        "story:credential-free-network-policy"
+    );
+    for (entries, member) in [
+        (
+            "      - {name: store, namespace: connectors, port: 5432}\n",
+            "egress[0].namespace",
+        ),
+        (
+            "      - {name: gateway, namespace: llm, port: 8080}\n",
+            "egress[0].namespace",
+        ),
+        (
+            "      - {name: logs, namespace: monitoring, port: 3100}\n      - {name: chat-api, \
+             host: chat.example, port: 443}\n",
+            "egress[0].namespace",
+        ),
+        (
+            "      - {name: chat-api, host: chat.example, port: 443}\n      - {name: logs, \
+             namespace: monitoring, port: 3100}\n",
+            "egress[0].host",
+        ),
+    ] {
+        let agent =
+            credential_free_agent().replace("    egress: []\n", &format!("    egress:\n{entries}"));
+        for rest in [
+            boundary(true, true, true),
+            boundary(true, false, false),
+            boundary(true, false, true),
+        ] {
+            let message = refusal(
+                &wrapped(&agent, &format!("  routes: {{}}\n{rest}")),
+                &boundary_config(),
+            );
+            assert!(
+                message.starts_with(&format!(
+                    "refused: BoundaryEgress{} at spec.agent.deploy.kubernetes.{member}: ",
+                    if member.ends_with("host") {
+                        "Host"
+                    } else {
+                        "Namespace"
+                    }
+                )),
+                "story:credential-free-network-policy: {message}"
+            );
+            for value in ["monitoring", "connectors", "llm", "chat.example"] {
+                assert!(
+                    !message.contains(&format!(" {value}")),
+                    "{value}: {message}"
+                );
+            }
+        }
+        render_document(&wrapped(&agent, "  routes: {}\n"), &boundary_config())
+            .expect("the same entries are admitted without a boundary");
+    }
 }
 
 /// An upstream is a plain `http://` URL of a cluster service, `<service>.<namespace>.svc` with
@@ -2491,7 +2708,7 @@ fn an_upstream_that_is_no_cluster_service_is_refused() {
     for upstream in invalid {
         let message = refusal(
             &credential_free_command(&model_boundary(upstream, "llm-gateway")),
-            &allowing(&[upstream]),
+            &allowing(&[("model", upstream, "llm-gateway")]),
         );
         assert!(
             message
@@ -2512,8 +2729,12 @@ fn an_upstream_that_is_no_cluster_service_is_refused() {
         let message = refusal(
             &credential_free_command(declared),
             &allowing(&[
-                "https://connectors.connectors.svc",
-                "http://connectors.svc/git",
+                (
+                    "connectors",
+                    "https://connectors.connectors.svc",
+                    "connectors",
+                ),
+                ("git", "http://connectors.svc/git", "connectors-git"),
             ]),
         );
         assert!(
@@ -2537,7 +2758,7 @@ fn an_upstream_that_is_no_cluster_service_is_refused() {
     ] {
         let rendered = render_document(
             &credential_free_command(&model_boundary(upstream, "llm-gateway")),
-            &allowing(&[upstream]),
+            &allowing(&[("model", upstream, "llm-gateway")]),
         )
         .unwrap_or_else(|error| panic!("{upstream}: {error}"));
         assert_eq!(
@@ -2546,6 +2767,61 @@ fn an_upstream_that_is_no_cluster_service_is_refused() {
             "{upstream}"
         );
     }
+}
+
+/// Beside a boundary the NetworkPolicy opens no model route, so the default routes may only name
+/// the model relay. A boundary without `model` and an empty `spec.routes`: an `AgentServe`
+/// resource, whose agent would reach no model, is refused `NoModelRoute` at
+/// `spec.boundary.model`, with or without a configured model route; a `Command` resource gets an
+/// empty `routes.yaml`, as when no model route is configured. Given routes are taken as given.
+#[test]
+fn a_boundary_without_a_model_relay_gets_no_default_routes() {
+    let without_route = Config {
+        model_route: None,
+        ..boundary_config()
+    };
+    for declared in [
+        boundary(false, true, false),
+        boundary(false, false, true),
+        boundary(false, true, true),
+    ] {
+        for config in [boundary_config(), without_route.clone()] {
+            assert_eq!(
+                refusal(&credential_free_serve(&declared), &config),
+                "refused: NoModelRoute at spec.boundary.model: spec.routes is empty and the \
+                 boundary declares no model relay, the only model a credential-free pod reaches",
+                "story:boundary-container-projected-token"
+            );
+            let rendered =
+                render_document(&credential_free_command(&declared), &config).expect("rendered");
+            let routes = config_map_data(&rendered)
+                .into_iter()
+                .find(|(key, _)| key == "routes.yaml")
+                .expect("routes.yaml")
+                .1;
+            assert_eq!(
+                routes, "",
+                "story:boundary-container-projected-token: no model route in routes.yaml"
+            );
+            assert!(
+                egress_of(&rendered)
+                    .iter()
+                    .all(|(namespace, _)| namespace.is_some()),
+                "no rule without a peer"
+            );
+        }
+        render_document(&credential_free_serve_routed(&declared), &boundary_config())
+            .expect("given routes are admitted");
+    }
+    let with_model = render_document(
+        &credential_free_command(&boundary(true, true, false)),
+        &without_route,
+    );
+    assert!(
+        with_model.is_ok(),
+        "a Command resource with boundary.model and no model route gets empty routes: \
+         {with_model:?}"
+    );
 }
 
 /// A boundary that declares none of `model`, `connectors` and `git` holds nothing to relay.
@@ -2586,6 +2862,68 @@ fn a_boundary_audience_that_is_empty_or_not_one_word_is_malformed() {
         );
         repeats_no_boundary_value(&message);
         assert!(!message.contains("gateway"), "{message}");
+    }
+}
+
+/// Admission takes the relay's own declaration checks (`b10x-loom-boundary`) beside its own, so
+/// a boundary it admits is a command line `b10x-loom agent boundary` accepts: an operation id is
+/// at most 256 bytes, and the relays built from the rendered arguments, as the command line
+/// builds them, are each accepted.
+#[test]
+fn an_admitted_boundary_is_a_command_line_the_relay_accepts() {
+    let longest = format!("merge_request.{}", "x".repeat(242));
+    assert_eq!(longest.len(), 256);
+    let beyond = format!("{longest}x");
+    let message = refusal(
+        &credential_free_command(&connectors_boundary(&["merge_request.get", &beyond])),
+        &boundary_config(),
+    );
+    assert!(
+        message.starts_with("refused: Malformed at spec.boundary.connectors.operations[1]: "),
+        "story:boundary-container-projected-token: {message}"
+    );
+    repeats_no_boundary_value(&message);
+
+    for declared in [
+        connectors_boundary(&["merge_request.get", &longest]),
+        boundary(true, true, true),
+        git_boundary(&[".a-/b.-_", "a/...", "Agents.Two/repo_name-2.x"]),
+    ] {
+        let rendered = render_document(&credential_free_command(&declared), &boundary_config())
+            .unwrap_or_else(|error| panic!("{declared}: {error}"));
+        let pod = pod_of(&rendered);
+        let args = strings(
+            init_container(&pod, "boundary").expect("the boundary"),
+            &["args"],
+        );
+        let after = |flag: &str| -> Vec<String> {
+            args.windows(2)
+                .filter(|pair| pair[0] == flag)
+                .map(|pair| pair[1].clone())
+                .collect()
+        };
+        let upstream = |flag: &str| {
+            after(flag).first().map(|url| {
+                b10x_loom_boundary::Upstream::parse(url)
+                    .unwrap_or_else(|refused| panic!("{flag}: {refused}"))
+            })
+        };
+        let mut built = 0;
+        if let Some(url) = upstream("--model-upstream") {
+            b10x_loom_boundary::Relay::model(url, "/model");
+            built += 1;
+        }
+        if let Some(url) = upstream("--connectors-upstream") {
+            b10x_loom_boundary::Relay::connectors(url, "/connectors", after("--operation"))
+                .unwrap_or_else(|refused| panic!("--operation: {refused}"));
+            built += 1;
+        }
+        if let Some(url) = upstream("--git-upstream") {
+            b10x_loom_boundary::Relay::git(url, "/git", after("--repository"))
+                .unwrap_or_else(|refused| panic!("--repository: {refused}"));
+            built += 1;
+        }
+        assert!(built > 0, "{args:?}");
     }
 }
 
@@ -2784,13 +3122,15 @@ fn the_boundary_urls_are_the_controllers_environment() {
     )
     .expect("the model URL it expands to completes no user information");
     let message = refusal(
-        &credential_free_serve(&format!("{note}{}", boundary(false, true, false))),
+        &credential_free_serve_routed(&format!("{note}{}", boundary(false, true, false))),
         &boundary_config(),
     );
     assert!(
         message.starts_with("refused: SecretLiteral at spec.env[0].value: ")
             && message.ends_with(", after `$(VAR)` expansion"),
-        "an undeclared upstream's name is unknown: {message}"
+        "an undeclared upstream's name is unknown (story:boundary-container-projected-token: \
+         given routes, since a serve agent without boundary.model and empty routes is refused \
+         NoModelRoute first): {message}"
     );
     repeats_no_boundary_value(&message);
 }

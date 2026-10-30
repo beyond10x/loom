@@ -424,12 +424,17 @@ the audience of a projected service-account token. The pod then gets a second co
 image: it alone mounts the tokens, one per upstream, each valid 600 s, and the agent container
 gets only loopback URLs (`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL`,
 `LOOM_BOUNDARY_GIT_URL`); with `boundary.model` the default routes name the model relay. The
-NetworkPolicy opens DNS, the namespace egress entries and each upstream's namespace on its
-port, and no host. The values must list each upstream exactly in `allowedBoundaryUpstreams`
-(empty by default). The controller refuses a boundary beside `spec.secretRef` or
-`spec.secretFiles` (`BoundaryWithSecret`), an upstream that is no cluster service or is `https`
-(`BoundaryUpstreamInvalid`), one the values do not list (`BoundaryUpstreamNotAllowed`), a host
-egress entry (`BoundaryEgressHost`), and an audience, operation id or repository out of form
+NetworkPolicy opens DNS and each upstream's namespace on its port, and nothing else. The values
+must list each upstream in `allowedBoundaryUpstreams` (empty by default) as an entry of its
+`kind` (`model`, `connectors` or `git`), its `url` and its token `audience`, which the resource
+must give exactly, and optionally the `port` of the upstream's pods that its Service targets,
+which the NetworkPolicy then opens in place of the URL's port. The controller refuses a
+boundary beside `spec.secretRef` or `spec.secretFiles` (`BoundaryWithSecret`), an upstream that
+is no cluster service or is `https` (`BoundaryUpstreamInvalid`), one no entry of its kind lists
+or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host or namespace
+egress entry (`BoundaryEgressHost`, `BoundaryEgressNamespace`), empty routes on an `AgentServe`
+resource without `boundary.model` (`NoModelRoute`; a `Command` resource gets an empty
+`routes.yaml`), and an audience, operation id (at most 256 bytes) or repository out of form
 (`Malformed`). Native sidecars need Kubernetes 1.29 or newer.
 
 ```yaml
@@ -445,6 +450,16 @@ spec:
       upstream: 'http://connectors.connectors.svc/git'
       audience: connectors-git
       repositories: [agents/takt-target]
+```
+
+The controller's `config.yaml` (the chart's `allowedBoundaryUpstreams` value) that admits it,
+here with the git path served on port 80 of a Service whose pods listen on 8080:
+
+```yaml
+allowedBoundaryUpstreams:
+  - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
+  - {kind: connectors, url: 'http://connectors.connectors.svc:8080', audience: connectors}
+  - {kind: git, url: 'http://connectors.connectors.svc/git', audience: connectors-git, port: 8080}
 ```
 
 `b10x-loom-operator render` prints what the controller would apply for one resource and talks to no

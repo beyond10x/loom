@@ -10,12 +10,16 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use b10x_loom_operator::config::{Config, Image, ModelRoute, Resources};
+use std::num::NonZeroU16;
+
+use b10x_loom_operator::config::{
+    AllowedUpstream, Config, Image, ModelRoute, Resources, UpstreamKind,
+};
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
 /// The overrides `task chart-check` renders the chart with, as `--set` arguments.
-const OVERRIDES: [&str; 12] = [
+const OVERRIDES: [&str; 18] = [
     "image.tag=0.0.1-test",
     "agentImage.repository=registry.example/other-agent",
     "modelRoute.url=http://model-route.agents.svc:8080/v1",
@@ -27,7 +31,13 @@ const OVERRIDES: [&str; 12] = [
     "allowUnconfinedProfiles=true",
     "allowedSeccompLocalhostProfiles={profiles/takt.json}",
     "allowedAppArmorLocalhostProfiles={takt-delivery}",
-    "allowedBoundaryUpstreams={http://llm-gateway.llm.svc:8080}",
+    "allowedBoundaryUpstreams[0].kind=model",
+    "allowedBoundaryUpstreams[0].url=http://llm-gateway.llm.svc:8080",
+    "allowedBoundaryUpstreams[0].audience=llm-gateway",
+    "allowedBoundaryUpstreams[0].port=8000",
+    "allowedBoundaryUpstreams[1].kind=git",
+    "allowedBoundaryUpstreams[1].url=http://connectors.connectors.svc/git",
+    "allowedBoundaryUpstreams[1].audience=connectors-git",
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -291,7 +301,20 @@ fn overrides_reach_the_controller_image_and_config() {
             allow_unconfined_profiles: true,
             allowed_seccomp_localhost_profiles: vec!["profiles/takt.json".to_owned()],
             allowed_app_armor_localhost_profiles: vec!["takt-delivery".to_owned()],
-            allowed_boundary_upstreams: vec!["http://llm-gateway.llm.svc:8080".to_owned()],
+            allowed_boundary_upstreams: vec![
+                AllowedUpstream {
+                    kind: UpstreamKind::Model,
+                    url: "http://llm-gateway.llm.svc:8080".to_owned(),
+                    audience: "llm-gateway".to_owned(),
+                    port: NonZeroU16::new(8000),
+                },
+                AllowedUpstream {
+                    kind: UpstreamKind::Git,
+                    url: "http://connectors.connectors.svc/git".to_owned(),
+                    audience: "connectors-git".to_owned(),
+                    port: None,
+                },
+            ],
         }
     );
 }

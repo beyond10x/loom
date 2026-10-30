@@ -18,7 +18,9 @@ const CONNECTORS: &str = "http://connectors.connectors.svc:8080";
 /// Its git smart-HTTP path.
 const GIT: &str = "http://connectors.connectors.svc/git";
 
-/// The controller configuration: the three upstreams allowed, the workspace claim allowed.
+/// The controller configuration: the three upstreams allowed, each for its relay with the
+/// audiences the cases declare (its own, and `llm-gateway` for the plain-audience case), the
+/// workspace claim allowed.
 fn config() -> Config {
     Config::parse(&format!(
         "namespace: agents
@@ -26,10 +28,18 @@ defaultImage: {{repository: registry.example/loom-agent, tag: '0.40.0'}}
 defaultResources: {{cpu: 100m, memory: 128Mi}}
 modelRoute: {{url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}}
 allowedClaimNames: [takt-workspace]
-allowedBoundaryUpstreams: ['{MODEL}', '{CONNECTORS}', '{GIT}']
+allowedBoundaryUpstreams:
+- {{kind: model, url: '{MODEL}', audience: llm-gateway}}
+- {{kind: connectors, url: '{CONNECTORS}', audience: connectors}}
+- {{kind: connectors, url: '{CONNECTORS}', audience: llm-gateway}}
+- {{kind: git, url: '{GIT}', audience: connectors-git}}
+- {{kind: git, url: '{GIT}', audience: llm-gateway}}
 "
     ))
-    .expect("the test configuration")
+    .expect(
+        "the test configuration (story:boundary-container-projected-token: an \
+         allowedBoundaryUpstreams entry is a kind, a URL and an audience)",
+    )
 }
 
 /// `spec.boundary` declaring the upstream `kind` alone, its token audience `audience`.
@@ -76,9 +86,9 @@ fn command(boundary: &serde_json::Value, workspace: bool) -> String {
     resource("takt-delivery", spec)
 }
 
-/// The operator example without its host egress entries (refused beside a boundary), as the
-/// `AgentServe` resource `platform-operator` with `boundary`, and a workspace claim when
-/// `workspace`.
+/// The operator example without its egress entries (host and namespace entries are refused
+/// beside a boundary), as the `AgentServe` resource `platform-operator` with `boundary`, and a
+/// workspace claim when `workspace`.
 fn serve(boundary: &serde_json::Value, workspace: bool) -> String {
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/agents/operator.yaml");
@@ -86,8 +96,11 @@ fn serve(boundary: &serde_json::Value, workspace: bool) -> String {
     let mut agent: serde_json::Value = serde_yaml_ng::from_str(&text).expect("the example is YAML");
     agent["deploy"]["kubernetes"]["egress"]
         .as_array_mut()
-        .expect("egress entries")
-        .retain(|entry| entry.get("host").is_none());
+        .expect(
+            "egress entries (story:credential-free-network-policy: beside a boundary a host or \
+             namespace entry is refused, so none stays)",
+        )
+        .clear();
     let mut spec = json!({"agent": agent, "routes": {}, "boundary": boundary});
     if workspace {
         spec["workspace"] = json!({"mountPath": "/workspace", "claimName": "takt-workspace"});

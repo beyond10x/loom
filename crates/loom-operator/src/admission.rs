@@ -30,25 +30,37 @@
 //!    routes document routes each model a role of `spec.agent` names; a `Command` resource
 //!    without `spec.agent` names none, so its document declares the endpoint and no route. With
 //!    `spec.boundary.model` the endpoint is the boundary's model relay, `http://127.0.0.1:8401/v1`,
-//!    in place of the model route's URL; its protocol and model stay the model route's.
+//!    in place of the model route's URL; its protocol and model stay the model route's. An empty
+//!    `spec.routes` beside a `spec.boundary` that declares an upstream but no `model`, whose pod's
+//!    NetworkPolicy opens no model route, is `NoModelRoute` at `spec.boundary.model` for an
+//!    `AgentServe` resource, whose agent would reach no model; a `Command` resource gets an empty
+//!    `routes.yaml`, with or without a model route.
 //! 5. A present `spec.boundary` (story boundary-container-projected-token, design D243): one
 //!    declaring none of `model`, `connectors` and `git` is `Malformed`, and a `spec.secretRef`
 //!    or `spec.secretFiles` beside it is `BoundaryWithSecret` at that member. Then each declared
 //!    upstream in that order: its `upstream` is a plain `http://` URL of a cluster service
 //!    ([`cluster_service`]: no user information, query or fragment; the host
 //!    `<service>.<namespace>.svc` or `<service>.<namespace>.svc.cluster.local` of DNS-1123
-//!    labels; an optional port and path of plain segments), else `BoundaryUpstreamInvalid`, an
-//!    `https` upstream included, and one the configuration's `allowedBoundaryUpstreams` lists
-//!    exactly, else `BoundaryUpstreamNotAllowed`; its `audience` is one word, neither empty nor
-//!    holding whitespace or a control character; `connectors.operations` and
-//!    `git.repositories` are not empty and give each entry once and in form (an operation id
-//!    `[A-Za-z0-9._-]+`, a repository `<owner>/<repo>` of such parts, neither `.` nor `..`, the
-//!    repository not ending in `.git`; neither starting with `-`, which would read as a flag);
-//!    else `Malformed` at the member. Then the member is walked for a credential, whole and each
-//!    string word by word as `spec.command` is (`SecretLiteral`), and a
-//!    `deploy.kubernetes.egress` entry of `spec.agent` naming a host, which a credential-free
-//!    pod's NetworkPolicy never opens, is `BoundaryEgressHost` at its `host` (story
-//!    credential-free-network-policy).
+//!    labels; an optional port and path of plain segments) that `b10x_loom_boundary::Upstream`
+//!    parses, else `BoundaryUpstreamInvalid`, an `https` upstream included; an
+//!    `allowedBoundaryUpstreams` entry of the configuration has its kind (`model`, `connectors`,
+//!    `git`) and exactly its URL, else `BoundaryUpstreamNotAllowed` at `upstream`; its `audience`
+//!    is one word, neither empty nor holding whitespace or a control character (`Malformed`);
+//!    `connectors.operations` and `git.repositories` are not empty and give each entry once and
+//!    in form for the operator and for the relay (an operation id 1 to 256 bytes of
+//!    `[A-Za-z0-9._-]`, a repository `<owner>/<repo>` of such parts, neither `.` nor `..`, the
+//!    repository not ending in `.git`; neither starting with `-`, which would read as a flag),
+//!    else `Malformed` at the member; and the relay `b10x-loom-boundary` builds from those
+//!    values, as `b10x-loom agent boundary` builds it from the rendered flags, is accepted, else
+//!    `Malformed` at the list. Then the member is walked for a credential, whole and each string
+//!    word by word as `spec.command` is (`SecretLiteral`), and each declared `audience` is
+//!    exactly that of an entry of its kind and URL, else `BoundaryUpstreamNotAllowed` at
+//!    `audience` (an audience the API server accepts would make the token a Kubernetes API
+//!    credential). A credential-free pod's NetworkPolicy
+//!    opens DNS and the upstreams only (story credential-free-network-policy), so a
+//!    `deploy.kubernetes.egress` entry of `spec.agent`, in order, naming a host is
+//!    `BoundaryEgressHost` at its `host`, and one naming a namespace `BoundaryEgressNamespace` at
+//!    its `namespace`.
 //! 6. A `spec.secretRef` or `spec.secretFiles` outside the configuration's `allowedSecretNames`
 //!    (`SecretNotAllowed`).
 //! 7. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
@@ -125,6 +137,7 @@ use b10x_loom_agent::{
     Checked, RefusalReason, StreamWalk, TOKEN_PREFIXES, check_text, spelling,
     yaml_stream_credential,
 };
+use b10x_loom_boundary::{Relay as BoundaryRelay, Upstream as BoundaryUrl};
 use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
 use serde_yaml_ng::{Mapping, Value};
@@ -133,7 +146,8 @@ use b10x_loom_resource::model::AgentVariant;
 
 use crate::config::{Config, ModelRoute};
 use crate::render::{
-    Admits, CONFIG_DIR, CONTROLLER_ENV, RELAYS, Upstream, controller_env, upstreams,
+    Admits, BOUNDARY_TOKENS_DIR, CONFIG_DIR, CONTROLLER_ENV, RELAYS, Upstream, controller_env,
+    upstreams,
 };
 use crate::resource::{Boundary, CommandSpec, ConfigFile, EnvVar, LoomAgentSpec};
 
@@ -1118,7 +1132,8 @@ pub fn cluster_service(url: &str) -> Result<ClusterService<'_>, &'static str> {
 }
 
 /// Whether `id` is a Connectors operation id the boundary may pass as `--operation`:
-/// `[A-Za-z0-9._-]+`, not starting with `-`, which would read as a flag.
+/// `[A-Za-z0-9._-]+`, not starting with `-`, which would read as a flag. Admission also takes
+/// `b10x_loom_boundary::operation_id`, which bounds it to 256 bytes.
 fn operation_id(id: &str) -> bool {
     !id.is_empty()
         && !id.starts_with('-')
@@ -1216,11 +1231,14 @@ fn boundary_credential(boundary: &Boundary, declared: &[Upstream<'_>]) -> Result
 
 /// Step 5: a present `spec.boundary`. It declares an upstream (`Malformed`); no `spec.secretRef`
 /// or `spec.secretFiles` stands beside it (`BoundaryWithSecret`); each upstream is a cluster
-/// service ([`cluster_service`]: `BoundaryUpstreamInvalid`) the configuration's
-/// `allowedBoundaryUpstreams` lists exactly (`BoundaryUpstreamNotAllowed`), its audience one
-/// word and its operations or repositories in form, each once (`Malformed`); its strings hold
-/// no credential (`SecretLiteral`); and no `deploy.kubernetes.egress` entry of `spec.agent`
-/// names a host (`BoundaryEgressHost`).
+/// service ([`cluster_service`]) the relay parses (`BoundaryUpstreamInvalid`), which an
+/// `allowedBoundaryUpstreams` entry of its kind lists exactly (`BoundaryUpstreamNotAllowed` at
+/// `upstream`), its audience one word (`Malformed`), its operations or repositories in form for
+/// the operator and the relay, each once (`Malformed`), and the relay `b10x-loom-boundary`
+/// builds from it accepted ([`relay`]); its strings hold no credential (`SecretLiteral`); each
+/// audience is exactly that of an entry of its kind and URL (`BoundaryUpstreamNotAllowed` at
+/// `audience`); and no `deploy.kubernetes.egress` entry of `spec.agent` names a host
+/// (`BoundaryEgressHost`) or a namespace (`BoundaryEgressNamespace`).
 fn boundary(
     spec: &LoomAgentSpec,
     decoded: Option<&AgentSpec>,
@@ -1251,19 +1269,22 @@ fn boundary(
         }
     }
     for upstream in &declared {
-        let at = format!("spec.boundary.{}", upstream.relay.kind);
-        cluster_service(upstream.url).map_err(|detail| {
+        let kind = upstream.relay.kind;
+        let at = format!("spec.boundary.{kind}");
+        let invalid = |detail: String| {
             Refusal::new("BoundaryUpstreamInvalid", format!("{at}.upstream"), detail)
+        };
+        cluster_service(upstream.url).map_err(|detail| invalid(detail.to_owned()))?;
+        let url = BoundaryUrl::parse(upstream.url).map_err(|refused| {
+            invalid(format!(
+                "`b10x-loom agent boundary` refuses it: it {refused}"
+            ))
         })?;
-        if !config
-            .allowed_boundary_upstreams
-            .iter()
-            .any(|allowed| allowed == upstream.url)
-        {
+        if !config.allows_upstream_url(kind, upstream.url) {
             return Err(Refusal::new(
                 "BoundaryUpstreamNotAllowed",
                 format!("{at}.upstream"),
-                "the controller's allowedBoundaryUpstreams does not hold it",
+                "the controller's allowedBoundaryUpstreams does not hold it for this relay",
             ));
         }
         if upstream.audience.is_empty()
@@ -1284,37 +1305,81 @@ fn boundary(
             Admits::Operations(items) => boundary_list(
                 items,
                 &format!("{at}.operations"),
-                operation_id,
-                "a Connectors operation id, [A-Za-z0-9._-]+ not starting with -",
+                |id| operation_id(id) && b10x_loom_boundary::operation_id(id),
+                "a Connectors operation id, 1 to 256 bytes of [A-Za-z0-9._-] not starting with -",
             )?,
             Admits::Repositories(items) => boundary_list(
                 items,
                 &format!("{at}.repositories"),
-                repository,
+                |entry| repository(entry) && b10x_loom_boundary::repository_name(entry),
                 "<owner>/<repo>, each part [A-Za-z0-9._-]+ and not . or .., not starting with -, \
                  the repository not ending in .git",
             )?,
         }
+        relay(upstream, url, &at)?;
     }
     boundary_credential(boundary, &declared)?;
-    if let Some(index) = decoded
+    for upstream in &declared {
+        if config
+            .allowed_upstream(upstream.relay.kind, upstream.url, upstream.audience)
+            .is_none()
+        {
+            return Err(Refusal::new(
+                "BoundaryUpstreamNotAllowed",
+                format!("spec.boundary.{}.audience", upstream.relay.kind),
+                "the controller's allowedBoundaryUpstreams does not hold this upstream with this \
+                 audience",
+            ));
+        }
+    }
+    let egress = decoded
         .and_then(|decoded| decoded.deploy.as_ref())
         .and_then(|deploy| deploy.kubernetes.as_ref())
-        .and_then(|kubernetes| {
-            kubernetes
-                .egress
-                .iter()
-                .position(|entry| entry.host.is_some())
-        })
-    {
-        return Err(Refusal::new(
-            "BoundaryEgressHost",
-            format!("spec.agent.deploy.kubernetes.egress[{index}].host"),
-            "a resource with spec.boundary reaches the outside only through its boundary's \
-             upstreams, so its NetworkPolicy opens no host",
-        ));
+        .map(|kubernetes| kubernetes.egress.as_slice())
+        .unwrap_or_default();
+    for (index, entry) in egress.iter().enumerate() {
+        let at = format!("spec.agent.deploy.kubernetes.egress[{index}]");
+        if entry.host.is_some() {
+            return Err(Refusal::new(
+                "BoundaryEgressHost",
+                format!("{at}.host"),
+                "a resource with spec.boundary reaches the outside only through its boundary's \
+                 upstreams, so its NetworkPolicy opens no host",
+            ));
+        }
+        if entry.namespace.is_some() {
+            return Err(Refusal::new(
+                "BoundaryEgressNamespace",
+                format!("{at}.namespace"),
+                "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so \
+                 its NetworkPolicy opens no namespace",
+            ));
+        }
     }
     Ok(())
+}
+
+/// Builds the relay `upstream` declares (at `at`, its URL already parsed as `url`) with
+/// `b10x-loom-boundary`, from the values the rendered `--<kind>-upstream`, `--operation` and
+/// `--repository` flags carry, as `b10x-loom agent boundary` builds it from them, so a boundary
+/// admission admits is one the relay accepts. The per-entry checks before it name the entry;
+/// this refuses whatever else the relay refuses (`Malformed` at the list).
+fn relay(upstream: &Upstream<'_>, url: BoundaryUrl, at: &str) -> Result<(), Refusal> {
+    let token = format!("{BOUNDARY_TOKENS_DIR}/{}", upstream.relay.kind);
+    let built = match upstream.admits {
+        Admits::Everything => Ok(BoundaryRelay::model(url, token)),
+        Admits::Operations(items) => BoundaryRelay::connectors(url, token, items.iter().cloned())
+            .map_err(|refused| ("operations", refused)),
+        Admits::Repositories(items) => BoundaryRelay::git(url, token, items.iter().cloned())
+            .map_err(|refused| ("repositories", refused)),
+    };
+    built.map(|_| ()).map_err(|(list, refused)| {
+        Refusal::new(
+            spelling(RefusalReason::Malformed),
+            format!("{at}.{list}"),
+            format!("`b10x-loom agent boundary` refuses it: {refused}"),
+        )
+    })
 }
 
 /// Admits `spec`, a `LoomAgent` in `namespace`, under `config`, checking `spec.agent` against
@@ -1417,8 +1482,23 @@ pub fn admit(
     let connectors = spec.connectors_config.clone().unwrap_or_default();
     connectors_credential(&connectors)?;
 
+    let boundary_without_model = spec
+        .boundary
+        .as_ref()
+        .is_some_and(|boundary| boundary.model.is_none() && !upstreams(boundary).is_empty());
     let (routes, default_routes) = match (given, &config.model_route) {
         (Some(text), _) => (text, false),
+        (None, _) if boundary_without_model => {
+            if variant == AgentVariant::AgentServe {
+                return Err(Refusal::new(
+                    "NoModelRoute",
+                    "spec.boundary.model",
+                    "spec.routes is empty and the boundary declares no model relay, the only \
+                     model a credential-free pod reaches",
+                ));
+            }
+            (String::new(), false)
+        }
         (None, Some(route)) => {
             let route = match spec
                 .boundary

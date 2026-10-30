@@ -244,14 +244,21 @@ impl Relay {
     }
 }
 
-fn operation_id(operation: &str) -> bool {
-    (1..=256).contains(&operation.len())
+/// The longest operation id the Connectors relay admits, in bytes.
+pub const MAX_OPERATION_BYTES: usize = 256;
+
+/// Whether [`Relay::connectors`] admits `operation` as a declared operation id: 1 to
+/// [`MAX_OPERATION_BYTES`] bytes of visible ASCII other than `"` and `\`.
+pub fn operation_id(operation: &str) -> bool {
+    (1..=MAX_OPERATION_BYTES).contains(&operation.len())
         && operation
             .bytes()
             .all(|byte| byte.is_ascii_graphic() && byte != b'"' && byte != b'\\')
 }
 
-fn repository_name(repository: &str) -> bool {
+/// Whether [`Relay::git`] admits `repository` as a declared repository: `<owner>/<repo>`, each
+/// part `[A-Za-z0-9._-]+` and neither `.` nor `..`, the repository named without `.git`.
+pub fn repository_name(repository: &str) -> bool {
     let Some((owner, name)) = repository.split_once('/') else {
         return false;
     };

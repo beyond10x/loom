@@ -34,9 +34,14 @@ allowedClaimNames: [takt-workspace]
 
 fn config() -> Config {
     Config::parse(&format!(
-        "{CONFIG}allowedBoundaryUpstreams: ['{MODEL}', '{CONNECTORS}', '{GIT}']\n"
+        "{CONFIG}allowedBoundaryUpstreams:\n- {{kind: model, url: '{MODEL}', audience: \
+         llm-gateway}}\n- {{kind: connectors, url: '{CONNECTORS}', audience: connectors}}\n- \
+         {{kind: git, url: '{GIT}', audience: connectors-git}}\n"
     ))
-    .expect("the test configuration")
+    .expect(
+        "the test configuration (story:boundary-container-projected-token: an \
+         allowedBoundaryUpstreams entry is a kind, a URL and an audience)",
+    )
 }
 
 fn example() -> String {
@@ -424,8 +429,14 @@ fn an_admitted_upstream_names_the_namespace_and_port_the_relay_dials() {
         ("http://gw.llm.svc", "llm", 80),
         ("http://gw.llm.svc:00080/a/b", "llm", 80),
     ] {
-        let config = Config::parse(&format!("{CONFIG}allowedBoundaryUpstreams: ['{url}']\n"))
-            .expect("a configuration");
+        let config = Config::parse(&format!(
+            "{CONFIG}allowedBoundaryUpstreams: [{{kind: model, url: '{url}', audience: \
+             llm-gateway}}]\n"
+        ))
+        .expect(
+            "a configuration (story:boundary-container-projected-token: an \
+             allowedBoundaryUpstreams entry is a kind, a URL and an audience)",
+        );
         let rendered = render_document(
             &command(&format!(
                 "  boundary:\n    model: {{upstream: '{url}', audience: llm-gateway}}\n"
