@@ -15,6 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - `SessionExecutor` admits a b10x-harness `Endpoint` naming no token file, pointer or secret when its `base_url` host is loopback (127.0.0.0/8, ::1, localhost), and launches the loop with no credential; any other keyless endpoint is refused as before (story:session-executor-keyless-loopback)
+- `b10x-canon-engineering` moves to engineering-protocols `0.15.2` (Canon stays `0.8.0`): `ProtocolCatalog::engineering` and `::bundled` list `protocol-adopt@1` (story:engineering-protocols-0-15-pin)
 
 ## [0.51.0] - 2026-10-30
 

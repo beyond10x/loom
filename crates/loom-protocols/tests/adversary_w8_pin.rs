@@ -120,9 +120,9 @@ fn the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags() {
 /// The CHANGELOG: the engineering registry, and so `ProtocolCatalog::engineering` and `::bundled`,
 /// lists `support-triage@1`, since engineering-protocols 0.7.0 `ml-experiment@1` and, since 0.9.0,
 /// `eval-gated-change@1`, since 0.10.0 `loop-improvement@1`, `self-improvement@1` and
-/// `story-delivery@1`, since 0.11.0 `story-delivery@2`; `incident.response/1` declares
-/// `investigate_cause`. The names are the
-/// release's `protocols/` directory at engineering-protocols 0.14.0, unchanged since 0.13.0.
+/// `story-delivery@1`, since 0.11.0 `story-delivery@2`, since 0.15.0 `protocol-adopt@1`;
+/// `incident.response/1` declares `investigate_cause`. The names are the release's `protocols/`
+/// directory at engineering-protocols 0.15.2.
 #[test]
 fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
     let names = |catalog: &ProtocolCatalog| -> BTreeSet<String> {
@@ -139,14 +139,15 @@ fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
             "incident-response@1".to_owned(),
             "loop-improvement@1".to_owned(),
             "ml-experiment@1".to_owned(),
+            "protocol-adopt@1".to_owned(),
             "self-improvement@1".to_owned(),
             "software-change@1".to_owned(),
             "story-delivery@1".to_owned(),
             "story-delivery@2".to_owned(),
             "support-triage@1".to_owned(),
         ]),
-        "story:engineering-protocols-0-13-pin: the protocols/ directory at engineering-protocols \
-         0.13.0, as its CHANGELOG adds them (0.10.0, 0.11.0)"
+        "story:engineering-protocols-0-15-pin: the protocols/ directory at engineering-protocols \
+         0.15.2, as its CHANGELOG adds them (0.10.0, 0.11.0, 0.15.0)"
     );
     let bundled = ProtocolCatalog::bundled().expect("bundled");
     assert!(names(&bundled).contains("support-triage@1"));
