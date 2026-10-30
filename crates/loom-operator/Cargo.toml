@@ -33,5 +33,6 @@ tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "ti
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 
 [dev-dependencies]
+b10x-loom-boundary = { path = "../loom-boundary" }
 http-body-util = "0.1"
 tower-test = "0.4"

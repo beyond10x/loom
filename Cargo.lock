@@ -714,6 +714,7 @@ version = "0.50.2"
 dependencies = [
  "b10x-llm-models",
  "b10x-loom-agent",
+ "b10x-loom-boundary",
  "b10x-loom-protocols",
  "b10x-loom-resource",
  "b10x-loom-sdk",
