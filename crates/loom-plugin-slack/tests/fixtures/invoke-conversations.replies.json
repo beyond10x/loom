@@ -1,4 +1,4 @@
-{"ok":true,"result":{"adapter":"slack","operation":"conversations.replies","revision":"rev-1","result":{
+{"ok":true,"result":{"connector":"slack","instance":"workspace","operation":"conversations.replies","revision":"rev-1","result":{
   "ok": true,
   "messages": [
     {"type": "message", "user": "U0DAVE", "text": "Who owns the billing service?", "ts": "1700000300.000300", "thread_ts": "1700000300.000300", "reply_count": 1, "latest_reply": "1700000350.000350"},

@@ -73,6 +73,7 @@ fn the_bundled_catalog_lists_eval_gated_change() {
             "incident-response@1",
             "loop-improvement@1",
             "ml-experiment@1",
+            "protocol-adopt@1",
             "self-improvement@1",
             "software-change@1",
             "story-delivery@1",
@@ -80,7 +81,8 @@ fn the_bundled_catalog_lists_eval_gated_change() {
             "support-triage@1",
             "system-query@1",
         ],
-        "story:engineering-protocols-0-13-pin: engineering-protocols 0.10.0 bundles \
+        "story:engineering-protocols-0-15-pin: engineering-protocols 0.15.0 bundles \
+         protocol-adopt@1; story:engineering-protocols-0-13-pin: engineering-protocols 0.10.0 bundles \
          loop-improvement@1, self-improvement@1 and story-delivery@1, and 0.11.0 story-delivery@2"
     );
     let entry = bundled

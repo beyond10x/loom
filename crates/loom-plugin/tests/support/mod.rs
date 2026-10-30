@@ -100,7 +100,8 @@ impl Fixture {
         self.root.join("plugin-state")
     }
 
-    /// `operations <verb>` of `operation` answers with the fixture `file`.
+    /// `operations describe` (`verb` `describe`) or `invoke` (`verb` `invoke`) of `operation`
+    /// answers with the fixture `file`.
     pub fn answer(&self, verb: &str, operation: &str, file: &str) {
         fs::copy(
             fixtures().join(file),
@@ -110,7 +111,7 @@ impl Fixture {
         .unwrap();
     }
 
-    /// `operations <verb>` exits with `status`.
+    /// `operations describe` or `invoke`, as `verb` names it, exits with `status`.
     pub fn exit(&self, verb: &str, status: i32) {
         fs::write(
             self.connectors_state().join(format!("{verb}.exit")),
@@ -180,15 +181,42 @@ impl Fixture {
             .collect()
     }
 
-    /// The runs whose verb is `operations <verb>`.
+    /// The runs of `operations describe` (`verb` `describe`) or of the command `invoke` (`verb`
+    /// `invoke`), never the removed `operations invoke` (`story:connectors-cli-invoke-form`).
     pub fn runs(&self, verb: &str) -> Vec<Vec<String>> {
         self.argv()
             .into_iter()
-            .filter(|argv| {
-                argv.windows(2)
-                    .any(|w| w[0] == "operations" && w[1] == verb)
+            .filter(|argv| match (command(argv), verb) {
+                ([invoke, ..], "invoke") => invoke == "invoke",
+                ([operations, named, ..], _) => operations == "operations" && named == verb,
+                _ => false,
             })
             .collect()
+    }
+}
+
+/// The words of a run's `argv` after the global flags and their values: the command and its
+/// arguments, `operations describe …` or `invoke <connector>/<instance> <operation> …`.
+pub fn command(argv: &[String]) -> &[String] {
+    let mut at = 0;
+    while matches!(
+        argv.get(at).map(String::as_str),
+        Some("--output" | "--config" | "--state-dir")
+    ) {
+        at += 2;
+    }
+    &argv[at.min(argv.len())..]
+}
+
+/// The operation a run names: the `--operation` of `operations describe`, the operation after the
+/// target of `invoke`.
+pub fn operation_of(argv: &[String]) -> Option<&str> {
+    match command(argv) {
+        [invoke, _, operation, ..] if invoke == "invoke" => Some(operation.as_str()),
+        _ => argv
+            .windows(2)
+            .find(|w| w[0] == "--operation")
+            .map(|w| w[1].as_str()),
     }
 }
 

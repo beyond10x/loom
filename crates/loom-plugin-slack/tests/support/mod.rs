@@ -215,13 +215,8 @@ pub fn invokes(fixture: &Fixture) -> Vec<(String, Value)> {
         fs::read_to_string(fixture.connectors_state().join("stdin.log")).unwrap_or_default();
     let operations: Vec<String> = fixture
         .runs("invoke")
-        .into_iter()
-        .map(|argv| {
-            argv.windows(2)
-                .find(|w| w[0] == "--operation")
-                .map(|w| w[1].clone())
-                .unwrap_or_default()
-        })
+        .iter()
+        .map(|argv| host::operation_of(argv).unwrap_or_default().to_owned())
         .collect();
     let inputs: Vec<Value> = inputs
         .lines()

@@ -421,7 +421,9 @@ impl std::error::Error for SpecError {}
 /// The model endpoint a `Kind::B10x` session's loop is pointed at, and the subscription token
 /// it reads there: the loop reads the file itself, and metaharness copies nothing. On the
 /// secret route ([`SessionExecutor::api_key_secret`]) it names no token: `token_file` empty,
-/// `token_pointer` none.
+/// `token_pointer` none. With no secret either, it names no key at all, which is admitted only
+/// when `base_url`'s host is a loopback address (`127.0.0.0/8`, `::1`, `localhost`): the loop is
+/// then pointed at no credential, and the far end (a credential-free pod's boundary relay) adds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
     /// The endpoint origin plus its API prefix.
@@ -1157,6 +1159,12 @@ impl SessionExecutor {
                     // and never the key.
                     spec.credentials = CredentialSource::ApiKey;
                     spec.api_key_secret = Some(name.clone());
+                } else if keyless_loopback(endpoint) {
+                    // The far end on loopback (a credential-free pod's boundary relay) adds the
+                    // credential: the loop is pointed at none.
+                    spec.credentials = CredentialSource::None;
+                    spec.subscription_token_file = None;
+                    spec.subscription_token_pointer = None;
                 } else {
                     spec.credentials = CredentialSource::None;
                     spec.subscription_token_file = Some(endpoint.token_file.display().to_string());
@@ -1172,12 +1180,13 @@ impl SessionExecutor {
     /// [`Self::api_key_secret`], when named, is for a b10x-harness session, is the endpoint's only
     /// credential, and has the shape `<namespace>/<name>` (metaharness's check, so the two cannot
     /// disagree); the value is quoted escaped. Without one, a b10x-harness endpoint names its
-    /// token file: an empty one points the loop at no credential.
+    /// token file, or names no key at all on a loopback host ([`keyless_loopback`]).
     fn check_api_key_secret(&self) -> Result<(), String> {
         let Some(name) = &self.api_key_secret else {
             if self.kind == Kind::B10x
                 && let Some(endpoint) = &self.endpoint
                 && endpoint.token_file.as_os_str().is_empty()
+                && !keyless_loopback(endpoint)
             {
                 return Err(
                     "a b10x-harness session's endpoint names no token file and no API \
@@ -2958,6 +2967,32 @@ fn line_urls(line: &str) -> Vec<&str> {
         from = at + 3;
     }
     found
+}
+
+/// Whether `endpoint` names no key at all (an empty `token_file`, no `token_pointer`) and its
+/// `base_url` is an `http` or `https` URL whose host is a loopback address: an IPv4 address in
+/// `127.0.0.0/8`, `::1`, or `localhost` (any case). A URL carrying a user name or password is not
+/// keyless. The host is read from the parsed URL, so `127.0.0.1.example.test` or
+/// `localhost@example.test` is not loopback (`story:session-executor-keyless-loopback`).
+fn keyless_loopback(endpoint: &Endpoint) -> bool {
+    if !endpoint.token_file.as_os_str().is_empty() || endpoint.token_pointer.is_some() {
+        return false;
+    }
+    let Ok(url) = url::Url::parse(&endpoint.base_url) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        None => false,
+    }
 }
 
 /// Whether `path` is one plain path relative to a root: no root, no `.` or `..` part, no part

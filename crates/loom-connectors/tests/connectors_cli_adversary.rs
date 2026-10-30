@@ -101,12 +101,27 @@ impl Fixture {
             .collect()
     }
 
+    /// The runs of `operations describe` (`verb` `describe`) or of the command `invoke` (`verb`
+    /// `invoke`), never the removed `operations invoke` (`story:connectors-cli-invoke-form`).
     fn runs(&self, verb: &str) -> usize {
         self.argv()
             .iter()
             .filter(|argv| {
-                argv.windows(2)
-                    .any(|w| w[0] == "operations" && w[1] == verb)
+                let mut words = argv.iter().map(String::as_str);
+                // The global flags and their values come first.
+                let first = loop {
+                    match words.next() {
+                        Some("--output" | "--config" | "--state-dir") => {
+                            words.next();
+                        }
+                        other => break other,
+                    }
+                };
+                match (first, verb) {
+                    (Some("invoke"), "invoke") => true,
+                    (Some("operations"), _) => verb != "invoke" && words.next() == Some(verb),
+                    _ => false,
+                }
             })
             .count()
     }

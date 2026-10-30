@@ -92,14 +92,16 @@ fn plugin_run_slack_handler_once() {
     let record = fs::read_to_string(scratch.state().join("record.jsonl")).unwrap();
     assert_eq!(record.lines().count(), 3, "{record}");
     assert_eq!(server.join().expect("the server finished").len(), 12);
+    // `invoke <connector>/<instance> <operation>`, after the global flags
+    // (`story:connectors-cli-invoke-form`).
     let invoked: Vec<String> = scratch
         .argv()
         .iter()
-        .filter(|argv| argv.contains(&"invoke".to_owned()))
         .filter_map(|argv| {
-            argv.windows(2)
-                .find(|w| w[0] == "--operation")
-                .map(|w| w[1].clone())
+            argv.iter()
+                .position(|argument| argument == "invoke")
+                .filter(|at| *at == 0 || argv[at - 1] != "operations")
+                .and_then(|at| argv.get(at + 2).cloned())
         })
         .collect();
     assert_eq!(

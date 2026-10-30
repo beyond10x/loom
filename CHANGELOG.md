@@ -12,6 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-10-30
+
+### Changed
+
+- **Breaking:** `ConnectorsCli` reads and writes through `invoke <connector>/<instance> <operation>`, the target its describe names, in place of the `operations invoke` Connectors v0.60.0 removed, so it needs Connectors v0.60.0 or newer (story:connectors-cli-invoke-form)
+- `SessionExecutor` admits a b10x-harness `Endpoint` naming no token file, pointer or secret when its `base_url` host is loopback (127.0.0.0/8, ::1, localhost), and launches the loop with no credential; any other keyless endpoint is refused as before (story:session-executor-keyless-loopback)
+- `b10x-canon-engineering` moves to engineering-protocols `0.15.2` (Canon stays `0.8.0`): `ProtocolCatalog::engineering` and `::bundled` list `protocol-adopt@1` (story:engineering-protocols-0-15-pin)
+
 ## [0.51.0] - 2026-10-30
 
 ### Added
@@ -1256,7 +1264,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.51.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.52.0...HEAD
+[0.52.0]: https://github.com/beyond10x/loom/releases/tag/0.52.0
 [0.51.0]: https://github.com/beyond10x/loom/releases/tag/0.51.0
 [0.50.2]: https://github.com/beyond10x/loom/releases/tag/0.50.2
 [0.50.1]: https://github.com/beyond10x/loom/releases/tag/0.50.1

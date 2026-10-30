@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.51.0`, released from source at the tag `0.51.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.51.0)). Nothing is on a registry: you
-install from the tag or depend on it with `tag = "0.51.0"`. `b10x-loom run` completed a live run
+Version `0.52.0`, released from source at the tag `0.52.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.52.0)). Nothing is on a registry: you
+install from the tag or depend on it with `tag = "0.52.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -156,14 +156,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.51.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.52.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.51.0
+b10x-loom 0.52.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -237,7 +237,8 @@ the output; the [CLI reference](https://beyond10x.github.io/loom/docs/reference/
 flag.
 
 `b10x-loom plugin run slack-handler --config <file> --state <dir>` hosts the slack-handler plugin:
-it walks the Slack channels the bot is a member of through the Connectors command line, read only,
+it walks the Slack channels the bot is a member of through the Connectors command line (v0.60.0 or
+newer, which invokes as `invoke <connector>/<instance> <operation>`), read only,
 and for each message nobody answered records a proposed reply read from the configured data
 sources, or a proposed case for a task. Nothing is sent. `--once` runs one cycle and prints one
 line per proposal; `b10x-loom plugin report slack-handler --state <dir>` prints them again. The
@@ -474,7 +475,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.51.0'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.52.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: []
@@ -541,7 +542,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.51.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.52.0" }
 ```
 
 The example below
@@ -623,7 +624,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-boundary` | The credential boundary of a credential-free agent pod: loopback relays for the model (8401), the Connectors wire (8402, declared operations only) and git smart-HTTP (8403, declared repositories only), each adding the pod's projected service-account token and dropping the agent's credential headers; `b10x-loom agent boundary` runs it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
-| `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.20.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`); a caller names a partial run over the kind's defaults, `SessionOverrides` (effort, a budget in micro-USD, strict version, context files), refused before the copy where the kind's launcher does not apply a member |
+| `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.20.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`), or name no key on a loopback endpoint such as a credential-free pod's boundary relay; a caller names a partial run over the kind's defaults, `SessionOverrides` (effort, a budget in micro-USD, strict version, context files), refused before the copy where the kind's launcher does not apply a member |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
 | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed turn over Connectors data sources, one record line per item; a turn given a `SendPolicy` may send the reply it proposed, once admitted |

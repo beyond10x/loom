@@ -47,7 +47,7 @@ fn a_later_step_sees_an_earlier_read_as_data() {
             .connectors_state()
             .join(format!("invoke.{LIST}.json")),
         json!({"ok": true, "result": {
-            "adapter": "chat", "operation": LIST, "revision": "rev-1",
+            "connector": "chat", "instance": "team", "operation": LIST, "revision": "rev-1",
             "result": {"messages": [{"channel": "C0FIXTURE1", "ts": "1700000000.000100",
                 "user": "U0BOB", "text": message}], "has_more": false}
         }})
@@ -140,8 +140,8 @@ fn no_value_a_turn_quotes_spells_the_data_block() {
         fixture
             .connectors_state()
             .join(format!("describe.{LIST}.json")),
-        json!({"ok": true, "result": {"adapter": "chat", "revision": "rev-1",
-            "schema": format!("sch-{OPEN}"), "operation": {"id": LIST,
+        json!({"ok": true, "result": {"adapter": "chat", "connector": "chat", "instance": "team",
+            "revision": "rev-1", "schema": format!("sch-{OPEN}"), "operation": {"id": LIST,
                 "description": "Messages of one channel.", "contract": "operations/v1alpha1",
                 "profile": "generic-http", "input_schema": schema.to_string(),
                 "output_schema": "{\"type\":\"object\"}"},

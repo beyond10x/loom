@@ -502,7 +502,7 @@ reports it `open`: one Canon reports `not_applicable` (the case's inputs do not 
 Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.8.0"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
-tag (now `0.14.0`); any other crate that adds Canon uses the same reference.
+tag (now `0.15.2`); any other crate that adds Canon uses the same reference.
 
 ## Connectors
 
@@ -525,8 +525,14 @@ on a loopback port.
 `loom_connectors::cli::ConnectorsCli` is the other path: a client over the operator's
 `connectors` command line, for reads and for one governed write. As a read client it serves a host polling a `loom.datasource` source outside a run and a
 plugin turn's `source.read` inside one. A read needs no `AdmittedRequest` and no binding. Each read is
-`operations describe`, then exactly one `operations invoke --input-stdin`, with `--output json` and
-the configured `--config` and `--state-dir`; argv holds only those flags and their ids. It reads
+`operations describe --adapter <alias> --operation <id>`, then exactly one `invoke
+<connector>/<instance> <id> --connection <c> --schema <s> --revision <r> --input-stdin`, with
+`--output json` and the configured `--config` and `--state-dir`; argv holds only those flags and
+their ids. Connectors `v0.60.0` removed `operations invoke` (a parse refusal, exit status 2), so
+it needs `v0.60.0` or newer. The target is the `connector` and `instance` the describe answer
+names beside the alias (`v0.60.0`, `apps/connectors/src/local/select.rs`, `name`), each held to
+the argv id rules and holding no `/`; an answer missing either fails naming it and starts no
+invoke (`story:connectors-cli-invoke-form`). Loom's configuration names only the alias. It reads
 no credential: the CLI's own keyring custody holds it, and the program starts with only the
 variables `cli::INHERITED` names, never a token. Writes are refused twice. The client refuses an
 operation `operations describe` reports with the `mutation` profile (`cli::WRITE_PROFILES`) before
@@ -542,7 +548,9 @@ outlives the read. A timeout this host's clock cannot hold starts no command and
 `ReadRefusal` naming the source, never retried; `not_granted`'s names the remedy, `connectors
 connections revalidate --adapter <alias>`, which the client never runs.
 `crates/loom-connectors/tests/connectors_cli.rs` and `connectors_cli_adversary.rs` hold it against
-the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv.
+the fake `tests/fixtures/connectors/fake-connectors`, which logs its argv and, as `v0.60.0` does,
+refuses `operations invoke`, `--adapter` or `--endpoint` on `invoke`, `describe` and `serve` with
+exit status 2.
 
 `ConnectorsCli::invoke_write` (`src/cli/write.rs`) is the local transport for a write the runtime
 admitted; `ConnectorsInvoker` stays the service transport. It takes the `AdmittedRequest`, a
@@ -553,7 +561,8 @@ holding a control character, is refused before any process starts. The write is 
 admitted action and arguments: an operation whose `action` is not the admitted request's is refused
 `action-not-admitted`, and input other than its admitted arguments `input-not-admitted`, before any
 process starts. The describe must report the `mutation` profile, else `not-a-write` and
-no invoke. The invoke carries `--idempotency-key` from `cli::idempotency_key`, derived from the
+no invoke. The invoke, of the target the describe names as for a read, carries
+`--idempotency-key` from `cli::idempotency_key`, derived from the
 admitted request id, and runs once; its answer is a `WriteResult` with Connectors'
 classification, and an answer lost or unreadable after it started is `Unknown`, never retried.
 `loom_connectors::evidence::WriteEvidenceAdapter` is the host evidence adapter: only an `applied`
@@ -1402,6 +1411,13 @@ then names no subscription token (`token_file` empty, `token_pointer` none); a n
 a Claude Code or Codex session, or not of that shape (`metaharness_b10x::validate_api_key_secret`,
 or holding a control character) suspends the step with `ExternalAvailability` before any copy
 (`crates/loom-session-executor/tests/endpoint_secret.rs`).
+An endpoint naming no key at all (no secret, `token_file` empty, `token_pointer` none) is admitted
+only when its `base_url` is an `http` or `https` URL with no user name or password whose parsed
+host is loopback (`127.0.0.0/8`, `::1`, `localhost`): a credential-free pod's agent reaches the
+model through the boundary's relay on `127.0.0.1:8401`, which adds the credential, and the loop is
+launched with no credential flag. The executor does not see `LOOM_BOUNDARY_MODEL_URL`, so the rule
+is the host. Any other keyless endpoint suspends the step before any copy with the error it always
+had (`crates/loom-session-executor/tests/endpoint_keyless.rs`).
 A b10x-harness session streams its reply in `text-delta` fragments: the executor joins a
 turn's fragments with no separator, keeping the line breaks they carry, and starts each turn
 (`TurnStarted`) on a new line before it looks for the action line; a Claude Code or Codex text
@@ -1419,7 +1435,7 @@ halts the session (the child is killed) and leaves the call
 (`crates/loom-session-executor/tests/event_observer.rs`,
 `crates/loom-session-executor/tests/adversary_w20261028w1_a3.rs`).
 It is the one crate that links metaharness (`metaharness` and
-`metaharness-b10x` at tag `0.19.0`; move them together); `b10x-loom-sdk` and
+`metaharness-b10x` at tag `0.23.0`; move them together); `b10x-loom-sdk` and
 `b10x-loom-conformance` reach it through it. No `metaharness` program runs. Its tests run
 scripted sessions only (metaharness's `ScriptedRunner`): no harness program, no model, no
 network.

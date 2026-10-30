@@ -1,27 +1,65 @@
 #!/bin/sh
-# A fake `connectors` command line for the tests of `loom_connectors::cli`.
+# A fake `connectors` command line for the tests of `loom_connectors::cli`, answering the command
+# lines of Connectors v0.60.0: `operations describe --adapter <alias> --operation <operation>` and
+# `invoke <connector>/<instance> <operation> --connection ... --input-stdin`.
 #
 # Every run appends its argv to `<state-dir>/argv.log`, one line per run, arguments separated by a
-# tab; writes its environment to `<state-dir>/env.log`; and, for `operations invoke --input-stdin`,
-# appends the document it read on stdin to `<state-dir>/stdin.log`. The test names the log by the
-# `--state-dir` it passes.
+# tab; writes its environment to `<state-dir>/env.log`; and, for `invoke`, appends the document it
+# read on stdin to `<state-dir>/stdin.log`. The test names the log by the `--state-dir` it passes.
 #
-# It answers `operations <verb>` with `<state-dir>/<verb>.<operation>.json`, else
-# `<state-dir>/<verb>.json`, copied there by the test from the JSON fixture files beside this
-# script. `<state-dir>/<verb>.exit`, when present, holds the exit status; a non-zero answer is
-# printed on stderr with stdout empty, as `connectors` prints a refusal.
+# It answers `operations describe` and `invoke` with `<state-dir>/<verb>.<operation>.json`, else
+# `<state-dir>/<verb>.json` (`<verb>` is `describe` or `invoke`), copied there by the test from the
+# JSON fixture files beside this script; a describe answer names the `connector` and `instance`
+# beside the alias, as Connectors v0.60.0 does. `<state-dir>/<verb>.exit`, when present, holds the
+# exit status; a non-zero answer is printed on stderr with stdout empty, as `connectors` prints a
+# refusal.
+#
+# The command lines Connectors v0.60.0 removed are a parse refusal, exit status 2, as there:
+# `operations invoke`, `--adapter` or `--endpoint` on `invoke`, `describe` and `serve`.
 state=
-operation=
+command=
 verb=
+operation=
+target=
+removed=
 previous=
 for argument in "$@"; do
     case "$previous" in
         --state-dir) state=$argument ;;
         --operation) operation=$argument ;;
-        operations) verb=$argument ;;
+    esac
+    case "$previous" in
+        --state-dir | --operation | --output | --config | --adapter | --connection | --schema | \
+            --revision | --approval-file | --idempotency-key | --input-json | --input-file | \
+            --endpoint)
+            previous=
+            continue
+            ;;
+    esac
+    case "$argument" in
+        --adapter | --endpoint)
+            [ "$command" = invoke ] && removed=yes
+            ;;
+        -*) ;;
+        *)
+            if [ -z "$command" ]; then
+                command=$argument
+            elif [ "$command" = operations ] && [ -z "$verb" ]; then
+                verb=$argument
+            elif [ "$command" = invoke ] && [ -z "$target" ]; then
+                target=$argument
+            elif [ "$command" = invoke ] && [ -z "$operation" ]; then
+                operation=$argument
+            fi
+            ;;
     esac
     previous=$argument
 done
+case "$command" in
+    invoke) verb=invoke ;;
+    describe | serve) removed=yes ;;
+    operations) [ "$verb" = invoke ] && removed=yes ;;
+esac
 if [ -z "$state" ]; then
     echo '{"ok":false,"error":{"code":"failure","data":{"code":"invalid_input","kind":"fake"}}}' >&2
     exit 2
@@ -31,6 +69,10 @@ for argument in "$@"; do
     line="$line$argument	"
 done
 printf '%s\n' "$line" >>"$state/argv.log"
+if [ -n "$removed" ]; then
+    echo '{"ok":false,"error":{"code":"cli_parse","data":{}}}' >&2
+    exit 2
+fi
 env >"$state/env.log"
 if [ "$verb" = invoke ]; then
     cat >>"$state/stdin.log"
