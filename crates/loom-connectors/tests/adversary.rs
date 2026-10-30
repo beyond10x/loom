@@ -23,8 +23,8 @@ use b10x_loom_commission::model::responsibility::{
     ActionBinding, ActionBindingData, ActionBindingKey, ActionRequestId, ActionStatus,
     AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData, CommissionId,
     ConnectorCredentialRef, ConnectorEndpoint, ConnectorEndpointData, ConnectorEndpointUrl,
-    ConnectorInstanceId, ConnectorOperationId, EffectOutcome, ExecutorOutcome,
-    ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
+    ConnectorInstanceId, ConnectorOperationEffect, ConnectorOperationId, EffectOutcome,
+    ExecutorOutcome, ExecutorOutcomeProposedAction, FrontierAction, ObservationId, PrincipalId,
     ProposedActionArguments, RunId, action_binding_state, commission_state,
     connector_endpoint_state,
 };
@@ -42,6 +42,8 @@ use serde_json::json;
 const EDIT: &str = "repository.edit";
 const INSTANCE: &str = "source-host";
 const OPERATION: &str = "contents.write";
+/// A read the service also describes, sent unkeyed.
+const READ_OPERATION: &str = "contents.read";
 const REVISION: &str = "rev-7";
 const CREDENTIAL: &str = "source-host-token";
 const SECRET: &str = "s3cret-bearer-ADVERSARY";
@@ -90,6 +92,13 @@ impl FakeService {
                 "description": "write a file",
                 "contract": "operations/v1alpha1",
                 "profile": "mutation",
+                "input_schema": {"type": "object"},
+                "output_schema": {"type": "object"}
+            }, {
+                "id": READ_OPERATION,
+                "description": "read a file",
+                "contract": "operations/v1alpha1",
+                "profile": "read",
                 "input_schema": {"type": "object"},
                 "output_schema": {"type": "object"}
             }],
@@ -300,6 +309,8 @@ fn commission() -> Commission<commission_state::Assigned> {
 fn binding(
     commission: &Commission<commission_state::Assigned>,
     instance: &str,
+    operation: &str,
+    effect: ConnectorOperationEffect,
 ) -> ActionBinding<action_binding_state::Declared> {
     let id = commission.data().commission_id.clone();
     ActionBinding::new(ActionBindingData {
@@ -309,8 +320,8 @@ fn binding(
         },
         commission_id: id,
         instance_id: ConnectorInstanceId(instance.to_owned()),
-        operation_id: ConnectorOperationId(OPERATION.to_owned()),
-        effect: b10x_loom_commission::model::responsibility::ConnectorOperationEffect::Write,
+        operation_id: ConnectorOperationId(operation.to_owned()),
+        effect,
     })
 }
 
@@ -383,6 +394,22 @@ fn run_with(
     instance: &str,
     arguments: Value,
 ) -> Result<LoopEnd, LoopError> {
+    run_bound(
+        invoker,
+        instance,
+        OPERATION,
+        ConnectorOperationEffect::Write,
+        arguments,
+    )
+}
+
+fn run_bound(
+    invoker: &ConnectorsInvoker,
+    instance: &str,
+    operation: &str,
+    effect: ConnectorOperationEffect,
+    arguments: Value,
+) -> Result<LoopEnd, LoopError> {
     let commission = commission();
     let case = commission.data().case_id.clone();
     let open = |revision| {
@@ -408,8 +435,12 @@ fn run_with(
             arguments: ProposedActionArguments(arguments),
         },
     )]);
-    let effects = ConnectorEffects::new(&commission, [binding(&commission, instance)], invoker)
-        .unwrap_or_else(|error| panic!("the binding is refused: {error}"));
+    let effects = ConnectorEffects::new(
+        &commission,
+        [binding(&commission, instance, operation, effect)],
+        invoker,
+    )
+    .unwrap_or_else(|error| panic!("the binding is refused: {error}"));
     let mut issued = 0u64;
     let mut runs = Generated::new(RunStore::new(move || {
         issued += 1;
@@ -433,10 +464,19 @@ fn run(invoker: &ConnectorsInvoker) -> Result<LoopEnd, LoopError> {
 /// What one invocation against `answer` came to: `Ok(outcome)` or `Err(message)`, and how many
 /// invocations the service received.
 fn attempt(answer: Answering) -> (Result<EffectOutcome, String>, usize) {
+    attempt_bound(answer, OPERATION, ConnectorOperationEffect::Write)
+}
+
+/// [`attempt`] with [`EDIT`] bound to `operation` with `effect`.
+fn attempt_bound(
+    answer: Answering,
+    operation: &str,
+    effect: ConnectorOperationEffect,
+) -> (Result<EffectOutcome, String>, usize) {
     let service = FakeService::start(INSTANCE, answer);
     let invoker = ConnectorsInvoker::new([endpoint(INSTANCE, &service.url())], Secrets)
         .expect("one endpoint per instance");
-    let outcome = match run(&invoker) {
+    let outcome = match run_bound(&invoker, INSTANCE, operation, effect, arguments()) {
         Ok(end) => {
             assert_eq!(end.effects.len(), 1, "{:?}", end.effects);
             Ok(end.effects[0].clone())
@@ -579,13 +619,15 @@ fn a_refusal_for_another_request_is_an_error() {
     );
 }
 
-/// `replayed: true` is refused by the first binding's reader; never `Performed`.
+/// `replayed: true` is refused by the first binding's reader, which reads the answer to every
+/// unkeyed invocation: a read's replay is never `Performed`. A write is sent keyed since
+/// `story:connectors-invoker-keyed-writes`, and its replay is `Performed` naming the original
+/// attempt (`connectors_invoker.rs`, `a_replayed_write_is_performed_naming_the_original_attempt`).
 #[test]
 fn a_replayed_success_is_an_error() {
     let mut mutation = mutation_of("applied", "$RID", INSTANCE, json!(null));
     mutation["replayed"] = json!(true);
-    assert_error(
-        "replayed",
+    let (outcome, invocations) = attempt_bound(
         raw(
             200,
             json!({
@@ -598,7 +640,14 @@ fn a_replayed_success_is_an_error() {
                 "mutation": mutation
             }),
         ),
+        READ_OPERATION,
+        ConnectorOperationEffect::Read,
     );
+    assert!(
+        outcome.is_err(),
+        "replayed: a read's replay is Err (something may have changed); a write's replay is Performed since story:connectors-invoker-keyed-writes; got {outcome:?}"
+    );
+    assert_eq!(invocations, 1, "replayed: invoked exactly once");
 }
 
 // ---------------------------------------------------------------------------------------------

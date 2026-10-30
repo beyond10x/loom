@@ -6,8 +6,18 @@
 //! binding it resolves the binding's `instance_id` to its endpoint, resolves the endpoint's
 //! credential reference through the host's [`CredentialResolver`], describes the service
 //! (`GET /v1/describe`) and invokes the bound operation once on the v1alpha2 binding
-//! (`POST /v1alpha2/invoke`, `connectors_client::Client::invoke_v1alpha2`) with the admitted
-//! request's arguments. It never falls back to `/v1/invoke` and never resends.
+//! (`POST /v1alpha2/invoke`) with the admitted request's arguments. It never falls back to
+//! `/v1/invoke` and never resends.
+//!
+//! A write is sent with an idempotency key (`connectors_client::Client::invoke_v1alpha2_keyed`,
+//! `story:connectors-invoker-keyed-writes`): [`cli::idempotency_key`] of the admitted request, the
+//! key [`cli::ConnectorsCli::invoke_write`] sends for it, so one admitted request has one key on
+//! either transport. A read is sent without one (`Client::invoke_v1alpha2`), since a key on a read
+//! is `unsupported`. A Connectors host runs keyed writes only when its `service` configuration sets
+//! `standing_grants` (Connectors `contracts/service/compatibility.md` § 2.1, Keyed writes under a
+//! standing grant); a host without them refuses the key `unsupported` before dispatch, and the
+//! invoker answers `Err` naming the missing standing grant and how to add one. It never sends the
+//! write again without its key.
 //!
 //! The binding's `effect` must be the one the service describes for the operation: `Write` for
 //! the `mutation` profile (an `external_write`, for which Connectors records an attempt), `Read`
@@ -19,10 +29,10 @@
 //!
 //! | Connectors answers | The invoker answers |
 //! |---|---|
-//! | for a `Write` binding, success with a `mutation` naming its attempt on the bound instance | `Performed`: the result as the report, the attempt's id |
+//! | for a `Write` binding, success with a `mutation` naming its attempt on the bound instance, a replay (`replayed: true`) included | `Performed`: the result as the report, the attempt's id (a replay's is the original attempt) |
 //! | for a `Read` binding, success with no `mutation` and its audit record `complete`, with a non-empty `audit_ref` | `Performed`: the result as the report, the audit record's `audit_ref` |
 //! | for a `Write` binding, error with a `mutation` classified `refused` or `not_attempted`, on a valid response | `Refused` |
-//! | anything else: a write's success naming no attempt or another instance's, a read's answer with a `mutation` (success or error), a read's audit record not `complete` or with an empty `audit_ref`, an error with no `mutation`, `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err` |
+//! | anything else: a write's success naming no attempt or another instance's, a read's answer with a `mutation` (success or error), a read's audit record not `complete` or with an empty `audit_ref`, an error with no `mutation` (`approval_required`, `idempotency_conflict` and the `unsupported` refusal of the key included), `unknown`, `applied` without a delivered result, a protocol or transport failure | `Err`, naming Connectors' code |
 //!
 //! An error with no `mutation` is no proof that the operation was not dispatched, so it is never
 //! a refusal. An `instance_id` with no endpoint, a credential that does not resolve, a failed
@@ -47,8 +57,9 @@
 //! it takes the [`AdmittedRequest`], writes only its admitted action with its admitted arguments
 //! (any other is refused before a process starts), passes the person's approval proof by path and
 //! an idempotency key derived from the request id, and returns Connectors' classification; this
-//! invoker, the service transport, is unchanged. [`evidence::WriteEvidenceAdapter`] is the host
-//! evidence adapter that turns an applied write into the protocol's evidence for its step.
+//! invoker, the service transport, sends a write with the same key.
+//! [`evidence::WriteEvidenceAdapter`] is the host evidence adapter that turns an applied write
+//! into the protocol's evidence for its step.
 
 pub mod cli;
 pub mod evidence;
@@ -256,6 +267,10 @@ impl ConnectorInvoker for ConnectorsInvoker {
         let expected = instance.clone();
         let target = operation.clone();
         let effect = binding.effect;
+        // A write carries the key the local transport sends for the same admitted request; a key
+        // on a read is `unsupported` on every host.
+        let key =
+            (effect == ConnectorOperationEffect::Write).then(|| cli::idempotency_key(request));
         let answered = self.block_on(async move {
             let descriptor = client.describe().await.map_err(|error| {
                 format!(
@@ -280,12 +295,18 @@ impl ConnectorInvoker for ConnectorsInvoker {
                     ));
                 }
             }
-            Ok(
-                match client.invoke_v1alpha2(&descriptor, &target, input).await {
-                    Ok(invoked) => Answered::Invoked(invoked),
-                    Err(failure) => Answered::Failed(failure),
-                },
-            )
+            let invoked = match key {
+                Some(key) => {
+                    client
+                        .invoke_v1alpha2_keyed(&descriptor, &target, input, &key)
+                        .await
+                }
+                None => client.invoke_v1alpha2(&descriptor, &target, input).await,
+            };
+            Ok(match invoked {
+                Ok(invoked) => Answered::Invoked(invoked),
+                Err(failure) => Answered::Failed(failure),
+            })
         })?;
         match answered.map_err(EffectError::new)? {
             Answered::Invoked(invoked) => match binding.effect {
@@ -393,12 +414,29 @@ fn refused(
         )
     });
     let mut said = format!(
-        "the Connector operation `{operation}` of `{instance}` answered {:?}: {}",
-        failure.error.code, failure.error.message
+        "the Connector operation `{operation}` of `{instance}` answered `{}`: {}",
+        code_name(failure.error.code),
+        failure.error.message
     );
     let read = effect == ConnectorOperationEffect::Read;
     if read && failure.mutation.is_some() {
         said.push_str(" (a read, and it recorded an attempt)");
+    }
+    // A host without standing grants refuses the key of a write before dispatch, in a valid
+    // envelope with no attempt (compatibility § 2.1, "Refused §4 members"). The write is not sent
+    // again without it.
+    if !read
+        && failure.error.code == ErrorCode::Unsupported
+        && failure.mutation.is_none()
+        && failure.audit_status.is_some()
+    {
+        said.push_str(&format!(
+            " (a Connectors host whose configuration sets no standing grants refuses a write's \
+             idempotency key, and a write is only sent with one: set the host's `service` \
+             configuration `standing_grants` to the path of a `connectors.standing-grants/1` grant \
+             file with a grant covering instance `{instance}` and operation `{operation}`, and its \
+             `state` to a directory)"
+        ));
     }
     if answered && nothing_changed && !read {
         Ok(EffectOutcome::Refused(EffectOutcomeRefused {
@@ -407,6 +445,14 @@ fn refused(
         }))
     } else {
         Err(EffectError::new(said))
+    }
+}
+
+/// The code as Connectors spells it on the wire (`approval_required`).
+fn code_name(code: ErrorCode) -> String {
+    match serde_json::to_value(code) {
+        Ok(serde_json::Value::String(name)) => name,
+        _ => format!("{code:?}"),
     }
 }
 
