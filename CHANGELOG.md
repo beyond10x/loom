@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `ConnectorsCli` reads and writes through `invoke <connector>/<instance> <operation>`, the target its describe names, in place of the `operations invoke` Connectors v0.60.0 removed, so it needs Connectors v0.60.0 or newer (story:connectors-cli-invoke-form)
+
 ## [0.51.0] - 2026-10-30
 
 ### Added

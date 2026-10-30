@@ -237,7 +237,8 @@ the output; the [CLI reference](https://beyond10x.github.io/loom/docs/reference/
 flag.
 
 `b10x-loom plugin run slack-handler --config <file> --state <dir>` hosts the slack-handler plugin:
-it walks the Slack channels the bot is a member of through the Connectors command line, read only,
+it walks the Slack channels the bot is a member of through the Connectors command line (v0.60.0 or
+newer, which invokes as `invoke <connector>/<instance> <operation>`), read only,
 and for each message nobody answered records a proposed reply read from the configured data
 sources, or a proposed case for a task. Nothing is sent. `--once` runs one cycle and prints one
 line per proposal; `b10x-loom plugin report slack-handler --state <dir>` prints them again. The

@@ -1,12 +1,14 @@
 # A data source a plugin reads through the Connectors command line (story connectors-cli-reads).
 # Nouns are read from the `connectors` CLI as it answers `--output json`: `operations describe`
-# answers the operation's schema identity (`schema`), the descriptor `revision` and the operation
-# with its `profile` and `input_schema`; `operations invoke` answers `result` and, where the
-# owner recorded one, `source_audit.audit_ref`. A source is configuration the host reads: it has no
-# lifecycle, so the domain declares types only.
+# answers the operation's schema identity (`schema`), the descriptor `revision`, the operation
+# with its `profile` and `input_schema`, and the `connector` and `instance` the adapter alias
+# names; `invoke <connector>/<instance> <operation>` of that target (Connectors v0.60.0, story
+# connectors-cli-invoke-form) answers `result` and, where the owner recorded one,
+# `source_audit.audit_ref`. A source is configuration the host reads: it has no lifecycle, so the
+# domain declares types only.
 #
 # A governed write (story connectors-governed-write) is the other use of the command line: one
-# `operations invoke` of an operation `describe` reports with the `mutation` profile, for a request
+# `invoke` of an operation `describe` reports with the `mutation` profile, for a request
 # the runtime admitted, with `--approval-file` naming the proof the person's confirmation wrote
 # (`connectors approvals issue --proof-output`) and `--idempotency-key` derived from the admitted
 # request id. Connectors classifies the write `not_attempted`, `refused`, `applied` or `unknown`
@@ -87,7 +89,7 @@ types:
         type: Optional<Integer>
 
   # What `operations describe` reports for one read operation: its exact schema identity (the
-  # value `operations invoke --schema` takes), its input schema as a JSON Schema document and the
+  # value `invoke --schema` takes), its input schema as a JSON Schema document and the
   # descriptor revision (`--revision`).
   - name: loom.datasource.SourceEntity
     kind: struct
@@ -130,9 +132,10 @@ types:
         type: String
 
   # The operation a governed write performs: the protocol action it performs, the adapter and
-  # connection it is written through and the operation, as `--adapter`, `--connection` and
-  # `--operation` name them. `describe` must report the operation with the `mutation` profile, or
-  # nothing is invoked.
+  # connection it is written through and the operation, as `operations describe --adapter` and
+  # `--operation` and `invoke --connection` name them; the invoke's target is the connector and
+  # instance the describe names. `describe` must report the operation with the `mutation`
+  # profile, or nothing is invoked.
   #
   # The write is bound to what the runtime admitted: `action` is the protocol action id, the
   # `action` of Commission's admitted request (`commission.responsibility.ActionRequestData`, a
