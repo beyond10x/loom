@@ -14,6 +14,11 @@ data:
     defaultResources:
       cpu: {{ .Values.defaultAgentResources.cpu | quote }}
       memory: {{ .Values.defaultAgentResources.memory | quote }}
+    {{- with .Values.defaultCommandResources }}
+    defaultCommandResources:
+      cpu: {{ required "defaultCommandResources.cpu is required with defaultCommandResources" .cpu | quote }}
+      memory: {{ required "defaultCommandResources.memory is required with defaultCommandResources" .memory | quote }}
+    {{- end }}
     {{- with .Values.modelRoute }}
     {{- if .url }}
     modelRoute:

@@ -477,6 +477,7 @@ $ cat operator.yaml
 namespace: agents
 defaultImage: {repository: registry.example/loom-agent, tag: '0.52.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
+defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
 allowedSecretNames: []
 allowedEgressHosts: [chat.example, models.example]

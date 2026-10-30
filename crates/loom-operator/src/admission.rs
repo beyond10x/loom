@@ -119,6 +119,12 @@
 //!     the configuration's `allowUnconfinedProfiles` does not allow, or a `Localhost` name
 //!     outside `allowedSeccompLocalhostProfiles` or `allowedAppArmorLocalhostProfiles`
 //!     (`ProfileNotAllowed`).
+//! 17. The size of the pod's containers but the boundary sidecar, requests and limits alike:
+//!     `spec.agent.deploy.kubernetes.resources` when the resource declares it, else for an
+//!     `AgentServe` resource the configuration's `defaultResources` and for a `Command` resource
+//!     its `defaultCommandResources`. A `Command` resource that declares none under a
+//!     configuration without `defaultCommandResources` is `ResourcesRequired` at
+//!     `spec.agent.deploy.kubernetes.resources`: Loom cannot size a program it does not know.
 //!
 //! The walk of steps 2, 3, 5 and 13 reads a text that is not a `loom.agent/1` document only
 //! within the agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and
@@ -144,7 +150,7 @@ use serde_yaml_ng::{Mapping, Value};
 
 use b10x_loom_resource::model::AgentVariant;
 
-use crate::config::{Config, ModelRoute};
+use crate::config::{Config, ModelRoute, Resources};
 use crate::render::{
     Admits, BOUNDARY_TOKENS_DIR, CONFIG_DIR, CONTROLLER_ENV, RELAYS, Upstream, controller_env,
     upstreams,
@@ -215,6 +221,30 @@ pub struct Admitted {
     pub checked: Option<Checked>,
     /// `spec.configFiles`, each a key of the ConfigMap by its name, its content verbatim.
     pub config_files: Vec<ConfigFile>,
+    /// The CPU and memory every container of the pod but the boundary sidecar requests and is
+    /// limited to (step 17).
+    pub resources: Resources,
+}
+
+/// The data of a `<name>-spec` ConfigMap holding `connectors`, `routes`, `agent` when present
+/// and each of `files`.
+fn config_map_data(
+    connectors: &str,
+    routes: &str,
+    agent: Option<&str>,
+    files: &[ConfigFile],
+) -> BTreeMap<String, String> {
+    let mut data = BTreeMap::from([
+        ("connectors.toml".to_owned(), connectors.to_owned()),
+        ("routes.yaml".to_owned(), routes.to_owned()),
+    ]);
+    if let Some(agent) = agent {
+        data.insert("agent.yaml".to_owned(), agent.to_owned());
+    }
+    for file in files {
+        data.insert(file.name.clone(), file.content.clone());
+    }
+    data
 }
 
 impl Admitted {
@@ -222,17 +252,12 @@ impl Admitted {
     /// when the resource has `spec.agent`, and each of `spec.configFiles`.
     #[must_use]
     pub fn config_map_data(&self) -> BTreeMap<String, String> {
-        let mut data = BTreeMap::from([
-            ("connectors.toml".to_owned(), self.connectors.clone()),
-            ("routes.yaml".to_owned(), self.routes.clone()),
-        ]);
-        if let Some(agent) = &self.agent {
-            data.insert("agent.yaml".to_owned(), agent.clone());
-        }
-        for file in &self.config_files {
-            data.insert(file.name.clone(), file.content.clone());
-        }
-        data
+        config_map_data(
+            &self.connectors,
+            &self.routes,
+            self.agent.as_deref(),
+            &self.config_files,
+        )
     }
 
     /// The line the check is recorded as in `status.check.message`.
@@ -1591,25 +1616,14 @@ pub fn admit(
     if !config_files.is_empty() {
         config_file_names(&config_files, variant, agent.is_some())?;
     }
-    let admitted = Admitted {
-        spec: decoded,
-        agent,
-        routes,
-        connectors,
-        default_routes,
-        variant,
-        checked,
-        config_files,
-    };
-    let bytes: usize = admitted
-        .config_map_data()
+    let bytes: usize = config_map_data(&connectors, &routes, agent.as_deref(), &config_files)
         .iter()
         .map(|(key, value)| key.len().saturating_add(value.len()))
         .fold(0, usize::saturating_add);
     if bytes > MAX_CONFIG_MAP_BYTES {
         return Err(Refusal::new(
             "TooLarge",
-            if admitted.config_files.is_empty() {
+            if config_files.is_empty() {
                 "spec"
             } else {
                 "spec.configFiles"
@@ -1620,7 +1634,7 @@ pub fn admit(
             ),
         ));
     }
-    config_files_credential(&admitted.config_files)?;
+    config_files_credential(&config_files)?;
 
     mount_paths(spec)?;
 
@@ -1639,7 +1653,50 @@ pub fn admit(
 
     confinement_profiles(spec, variant, config)?;
 
-    Ok(admitted)
+    let resources = pod_resources(decoded.as_ref(), variant, config)?;
+
+    Ok(Admitted {
+        spec: decoded,
+        agent,
+        routes,
+        connectors,
+        default_routes,
+        variant,
+        checked,
+        config_files,
+        resources,
+    })
+}
+
+/// Step 17: the resources the spec declares, else the configuration's default for `variant`;
+/// `ResourcesRequired` for a `Command` resource when neither gives one.
+fn pod_resources(
+    spec: Option<&AgentSpec>,
+    variant: AgentVariant,
+    config: &Config,
+) -> Result<Resources, Refusal> {
+    if let Some(declared) = spec
+        .and_then(|spec| spec.deploy.as_ref())
+        .and_then(|deploy| deploy.kubernetes.as_ref())
+        .map(|kubernetes| &kubernetes.resources)
+    {
+        return Ok(Resources {
+            cpu: declared.cpu.clone(),
+            memory: declared.memory.clone(),
+        });
+    }
+    match variant {
+        AgentVariant::AgentServe => Ok(config.default_resources.clone()),
+        AgentVariant::Command => config.default_command_resources.clone().ok_or_else(|| {
+            Refusal::new(
+                "ResourcesRequired",
+                "spec.agent.deploy.kubernetes.resources",
+                "Loom cannot size a program it does not know: declare its cpu and memory in \
+                 spec.agent.deploy.kubernetes.resources, or set defaultCommandResources in the \
+                 controller's configuration",
+            )
+        }),
+    }
 }
 
 /// The longest `localhostProfile` the controller admits, in bytes.
@@ -1752,6 +1809,7 @@ mod tests {
     fn config() -> Config {
         let mut config = Config::builtin();
         config.namespace = "agents".to_owned();
+        config.default_command_resources = Some(config.default_resources.clone());
         config
     }
 

@@ -7,6 +7,7 @@
 //! namespace: agents
 //! defaultImage: {repository: registry.example/loom-agent, tag: '0.40.0'}
 //! defaultResources: {cpu: 250m, memory: 256Mi}
+//! defaultCommandResources: {cpu: '4', memory: 8Gi}
 //! modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small}
 //! allowedSecretNames: [platform-operator-secrets]
 //! allowedEgressHosts: [chat.example]
@@ -18,6 +19,12 @@
 //!   - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
 //!   - {kind: git, url: 'http://connectors.connectors.svc/git', audience: connectors-git, port: 8080}
 //! ```
+//!
+//! `defaultResources` sizes an `AgentServe` pod whose spec declares no
+//! `deploy.kubernetes.resources`, since its program is Loom's own. A `Command` pod runs the
+//! image's own program, whose need Loom does not know: without declared resources it gets the
+//! optional `defaultCommandResources`, and without that the resource is refused
+//! `ResourcesRequired`.
 //!
 //! `modelRoute` is optional; the lists may be absent, and an empty list admits none;
 //! `allowUnconfinedProfiles` defaults to `false`. A member the configuration does not declare is
@@ -44,8 +51,12 @@ pub struct Config {
     pub namespace: String,
     /// The agent image a resource without `spec.image` runs.
     pub default_image: Image,
-    /// The resources of a pod whose spec declares no `deploy.kubernetes.resources`.
+    /// The resources of an `AgentServe` pod whose spec declares no `deploy.kubernetes.resources`.
     pub default_resources: Resources,
+    /// The resources of a `Command` pod whose spec declares no `deploy.kubernetes.resources`;
+    /// absent, such a resource is refused `ResourcesRequired`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_command_resources: Option<Resources>,
     /// The in-cluster model route a resource with an empty `spec.routes` is given; without one
     /// such a resource is refused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -192,8 +203,10 @@ impl std::error::Error for ConfigError {}
 
 impl Config {
     /// The configuration `render` uses without `--config`: namespace `default`, the agent image
-    /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory, no model
-    /// route, and no Secret name, egress host or boundary upstream admitted.
+    /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory for an
+    /// `AgentServe` resource, no default size for a `Command` resource (one that declares none
+    /// is refused `ResourcesRequired`), no model route, and no Secret name, egress host or
+    /// boundary upstream admitted.
     #[must_use]
     pub fn builtin() -> Self {
         Self {
@@ -206,6 +219,7 @@ impl Config {
                 cpu: "250m".to_owned(),
                 memory: "256Mi".to_owned(),
             },
+            default_command_resources: None,
             model_route: None,
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),

@@ -15,6 +15,7 @@ use std::num::NonZeroU16;
 use b10x_loom_operator::config::{
     AllowedUpstream, Config, Image, ModelRoute, Resources, UpstreamKind,
 };
+use b10x_loom_operator::render::render_document;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
@@ -258,6 +259,10 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
                 cpu: "250m".to_owned(),
                 memory: "256Mi".to_owned(),
             },
+            default_command_resources: Some(Resources {
+                cpu: "4".to_owned(),
+                memory: "8Gi".to_owned(),
+            }),
             model_route: None,
             allowed_secret_names: Vec::new(),
             allowed_egress_hosts: Vec::new(),
@@ -290,6 +295,10 @@ fn overrides_reach_the_controller_image_and_config() {
                 cpu: "250m".to_owned(),
                 memory: "256Mi".to_owned(),
             },
+            default_command_resources: Some(Resources {
+                cpu: "4".to_owned(),
+                memory: "8Gi".to_owned(),
+            }),
             model_route: Some(ModelRoute {
                 url: "http://model-route.agents.svc:8080/v1".to_owned(),
                 protocol: "messages".to_owned(),
@@ -317,6 +326,54 @@ fn overrides_reach_the_controller_image_and_config() {
             ],
         }
     );
+}
+
+/// `story:command-resources-declared`: the chart sizes a `Command` resource that declares no
+/// resources for a coding agent, `defaultCommandResources: {cpu: "4", memory: 8Gi}`, and a values
+/// override that unsets it renders no such member.
+#[test]
+fn the_chart_sets_the_command_default_and_an_override_unsets_it() {
+    let text = |documents: &[Value]| {
+        let map = kind(documents, "ConfigMap");
+        serde_yaml_ng::from_str::<Value>(map["data"]["config.yaml"].as_str().expect("config.yaml"))
+            .expect("config.yaml is YAML")
+    };
+    let set = text(&template(&[]));
+    assert_eq!(set["defaultCommandResources"]["cpu"], "4");
+    assert_eq!(set["defaultCommandResources"]["memory"], "8Gi");
+    let unset = text(&template(&["defaultCommandResources=null"]));
+    assert!(
+        unset
+            .as_mapping()
+            .expect("a mapping")
+            .get("defaultCommandResources")
+            .is_none(),
+        "{unset:?}"
+    );
+    config(&template(&["defaultCommandResources=null"]));
+}
+
+/// `story:command-resources-declared`: a `Command` resource with no resources, rendered under the
+/// chart's own configuration, runs with 4 CPU and 8Gi.
+#[test]
+fn a_command_resource_without_resources_gets_the_charts_command_default() {
+    let resource = "apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata: {name: smoke, namespace: agents, uid: 00000000-0000-4000-8000-000000000003}
+spec:
+  routes: {}
+  image: {repository: registry.example/smoke, tag: '1.0.0'}
+  command: {args: [--once]}
+";
+    let rendered = render_document(resource, &config(&template(&[]))).expect("rendered");
+    let workload: Value =
+        serde_yaml_ng::from_str(rendered.split("\n---\n").nth(2).expect("the workload"))
+            .expect("YAML");
+    let container = &workload["spec"]["template"]["spec"]["containers"][0];
+    for key in ["requests", "limits"] {
+        assert_eq!(container["resources"][key]["cpu"], "4", "{key}");
+        assert_eq!(container["resources"][key]["memory"], "8Gi", "{key}");
+    }
 }
 
 #[test]

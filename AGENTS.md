@@ -981,7 +981,8 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 `b10x_loom_resource::crd` and the CRD. The command line (`src/cli.rs`, clap derive) is
 `run --config <file>`, `render --resource <file> [--config <file>]` (exit 0; 3 refused; 2 not a
 `LoomAgent`; 1 unreadable) and `crd` (the CRD's bytes). `render` without `--config` uses
-`Config::builtin()`: namespace `default`, no model route, no Secret name, egress host or boundary
+`Config::builtin()`: namespace `default`, no `defaultCommandResources` (so an unsized `Command`
+resource is refused `ResourcesRequired`), no model route, no Secret name, egress host or boundary
 upstream allowed.
 `run` installs rustls' `ring` provider as the process default before it builds the kube client:
 the binary's graph enables both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`),
@@ -989,7 +990,10 @@ and with both rustls picks none and panics at the first TLS client
 (`crates/loom-operator/tests/startup.rs`, `run_builds_its_tls_client_and_connects_to_the_cluster`).
 
 `config.yaml` (`src/config.rs`, unknown members refused): `namespace`,
-`defaultImage {repository, tag}`, `defaultResources {cpu, memory}`, optional
+`defaultImage {repository, tag}`, `defaultResources {cpu, memory}` (the size of an `AgentServe`
+pod that declares none), optional `defaultCommandResources {cpu, memory}` (the size of a `Command`
+pod that declares none; the chart sets `{cpu: "4", memory: 8Gi}` and a values override of `null`
+renders no member; `story:command-resources-declared`), optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
 admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists entries `{kind, url, audience, port?}` (`config::AllowedUpstream`, unknown members refused): a declared `spec.boundary.<kind>` is admitted only when an entry has its kind (`model`, `connectors` or `git`), exactly its `upstream` as `url` and exactly its `audience`, so neither one relay's URL under another relay nor an audience the entry does not give (an API-server audience, say) passes; the optional `port` (1 to 65535) is the pod port the upstream's Service targets, which the NetworkPolicy opens in place of the URL's port, since a NetworkPolicy matches the port after Service translation; empty, the default, it admits none. One instance watches one namespace with one replica; there is no leader election.
@@ -1074,7 +1078,13 @@ stream whose aliases or nesting the walk cannot read whole within the agent deco
 or the parser's recursion limit, once the strings read hold none; a `spec.workspace.mountPath` or
 `spec.secretFiles.mountPath` that is not absolute and plain or overlaps `/etc/agent`, `/config`,
 `/var/lib/agent`, `/tmp` or the other (`MountPathInvalid`); a `claimName` not allowed
-(`ClaimNotAllowed`). A `Command` resource's `spec.agent` passes only the credential walk and the
+(`ClaimNotAllowed`); a profile out of form or not allowed (step 16); last, a `Command` resource
+with no `spec.agent.deploy.kubernetes.resources` under a configuration without
+`defaultCommandResources` (`ResourcesRequired` at `spec.agent.deploy.kubernetes.resources`, a
+controller refusal like `BoundaryEgressHost`; the pod's containers but the fixed-size boundary
+sidecar get the declared size, else `defaultResources` for `AgentServe` and
+`defaultCommandResources` for `Command`, requests equal to limits;
+`crates/loom-operator/tests/command_resources.rs`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
 `agent serve` does not; with no routes and no `modelRoute`, or no routes beside a boundary
 without `model`, it gets an empty `routes.yaml`, and
