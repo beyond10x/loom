@@ -1,9 +1,9 @@
 image:
   repository: registry.example/loom-operator
-  tag: "0.51.0"
+  tag: "0.52.0"
 agentImage:
   repository: registry.example/loom-agent
-  tag: "0.51.0"
+  tag: "0.52.0"
 modelRoute:
   url: ""
   protocol: ""
