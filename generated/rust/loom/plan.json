@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "3a16f4a5548f9ba707a0272811b688cc4ec7e5a5d7df32da0698ee33df0a7d9b",
-    "contract_digest": "94ddf04eaa0edba7434fd7d5286684b791f8683f254a464b49d5b667ab02e2e2"
+    "source_digest": "a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00",
+    "contract_digest": "2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -845,6 +845,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.ConfigMapKeyRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.resource.ConfinementProfile",
       "disposition": {
         "disposition": "generated"
@@ -901,6 +908,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.LastRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.resource.LoomAgent.State",
       "disposition": {
         "disposition": "generated"
@@ -930,6 +944,20 @@
     {
       "kind": "domain_type",
       "source": "loom.resource.RunPhase",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.ScheduleInput",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.ScheduleSpec",
       "disposition": {
         "disposition": "generated"
       }
@@ -1480,6 +1508,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.resource.ObserveScheduledRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.resource.ObserveScheduledRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.resource.RecordCheck",
       "disposition": {
         "disposition": "generated"
@@ -1645,6 +1687,13 @@
     {
       "kind": "event_type",
       "source": "loom.resource.LoomAgentFailed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.resource.LoomAgentLastRunObserved",
       "disposition": {
         "disposition": "generated"
       }

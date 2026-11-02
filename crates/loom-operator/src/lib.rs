@@ -11,7 +11,11 @@
 //! running the image's own program with no init container and the spec at `/config/agent.yaml`;
 //! a finished Job is not started again before a new generation, and its status reports how the
 //! run ended (`status.run`: the program's exit code and end time, read from the Job's pod, and
-//! the condition `Completed`). On either variant the pod has a
+//! the condition `Completed`). With `spec.schedule` (design § 12) it is a `batch/v1` CronJob in
+//! the Job's place instead, one run at a time, the resource stays Running and `status.lastRun`
+//! and the condition `LastRunSucceeded` report the newest finished run; `spec.schedule.input`
+//! makes each run `b10x-loom agent run` over `spec.agent` with that task text. On either variant
+//! the pod has a
 //! workspace volume and the Secret as files when the resource asks for them; with `spec.boundary`
 //! it holds no Secret, and the native sidecar `boundary` alone mounts its credentials, projected
 //! service-account tokens, and relays the agent's calls to the declared upstreams. Before any child
@@ -102,6 +106,7 @@ mod tests {
                 localhost_profile: None,
             }),
             boundary: Some(full_boundary()),
+            schedule: Some(full_schedule()),
         };
         let written = serde_json::to_value(full).expect("JSON");
         let mut keys: Vec<&str> = written
@@ -112,6 +117,23 @@ mod tests {
             .collect();
         keys.sort_unstable();
         assert_eq!(keys, members);
+    }
+
+    /// A `spec.schedule` giving every member, its input by both forms.
+    fn full_schedule() -> resource::Schedule {
+        resource::Schedule {
+            cron: "0 3 * * *".to_owned(),
+            time_zone: Some("UTC".to_owned()),
+            suspend: Some(false),
+            starting_deadline_seconds: Some(300),
+            input: Some(resource::ScheduleInput {
+                text: Some("t".to_owned()),
+                config_map_key_ref: Some(resource::ConfigMapKeyRef {
+                    name: "n".to_owned(),
+                    key: "k".to_owned(),
+                }),
+            }),
+        }
     }
 
     /// A `spec.boundary` declaring every upstream.
@@ -180,6 +202,23 @@ mod tests {
     }
 
     #[test]
+    fn the_crd_names_the_schedule_members_the_kube_type_reads() {
+        let crd: serde_yaml_ng::Value = serde_yaml_ng::from_str(CRD).expect("the CRD is YAML");
+        let schema = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["spec"]
+            ["properties"]["schedule"];
+        let written = serde_json::to_value(full_schedule()).expect("JSON");
+        assert_eq!(keys(&written), properties(schema));
+        assert_eq!(
+            keys(&written["input"]),
+            properties(&schema["properties"]["input"])
+        );
+        assert_eq!(
+            keys(&written["input"]["configMapKeyRef"]),
+            properties(&schema["properties"]["input"]["properties"]["configMapKeyRef"])
+        );
+    }
+
+    #[test]
     fn the_crd_names_the_status_members_the_controller_writes() {
         let crd: serde_yaml_ng::Value = serde_yaml_ng::from_str(CRD).expect("the CRD is YAML");
         let status = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"]["properties"]["status"]
@@ -197,6 +236,7 @@ mod tests {
                 "check",
                 "conditions",
                 "deployment",
+                "lastRun",
                 "observedGeneration",
                 "run",
                 "state",

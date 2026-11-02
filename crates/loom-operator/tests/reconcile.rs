@@ -18,8 +18,9 @@ use b10x_loom_operator::resource::LoomAgent;
 use b10x_loom_resource::ResourceEvent;
 use b10x_loom_resource::model::{
     DeploymentAvailability, LoomAgentApplied, LoomAgentCompleted, LoomAgentDegraded,
-    LoomAgentDeleted, LoomAgentFailed, LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused,
-    LoomAgentRunObserved, LoomAgentRunning, LoomAgentState, ResourceName,
+    LoomAgentDeleted, LoomAgentFailed, LoomAgentLastRunObserved, LoomAgentObserved,
+    LoomAgentRecovered, LoomAgentRefused, LoomAgentRunObserved, LoomAgentRunning, LoomAgentState,
+    ResourceName, RunPhase,
 };
 use http::{Method, Request, Response, StatusCode};
 use kube::Client;
@@ -53,11 +54,12 @@ const CHILDREN: [&str; 5] = [
 ];
 
 /// The collection of each child kind, in the order the controller lists them.
-const COLLECTIONS: [&str; 6] = [
+const COLLECTIONS: [&str; 7] = [
     "/api/v1/namespaces/agents/serviceaccounts",
     "/api/v1/namespaces/agents/configmaps",
     "/apis/apps/v1/namespaces/agents/deployments",
     "/apis/batch/v1/namespaces/agents/jobs",
+    "/apis/batch/v1/namespaces/agents/cronjobs",
     "/apis/networking.k8s.io/v1/namespaces/agents/networkpolicies",
     "/api/v1/namespaces/agents/services",
 ];
@@ -2382,4 +2384,431 @@ async fn adv_a_pod_list_refused_after_the_wait_records_the_run_with_the_note() {
         "the Job's run failed with no exit code read from its pod; its pod could not be read (the \
          list was answered 403)"
     );
+}
+
+// story:command-schedule: a scheduled `Command` resource runs as a CronJob.
+
+/// The CronJob of the resource `platform-operator`.
+const CRON_JOB: &str = "/apis/batch/v1/namespaces/agents/cronjobs/platform-operator";
+
+/// The Jobs of the namespace `agents`.
+const JOBS: &str = "/apis/batch/v1/namespaces/agents/jobs";
+
+/// Every child a scheduled `Command` resource over the example renders, in apply order.
+const SCHEDULED_CHILDREN: [&str; 5] =
+    [CHILDREN[0], CHILDREN[1], CRON_JOB, CHILDREN[3], CHILDREN[4]];
+
+/// The schedule `story:command-schedule`'s scenarios name.
+const SCHEDULE: &str = "  schedule: {cron: '*/20 * * * *'}\n";
+
+/// The example as a `Command` resource at `generation`, running `run` on `schedule`.
+fn scheduled_agent(generation: i64, schedule: &str) -> LoomAgent {
+    let spec = example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1");
+    let rest = format!(
+        "{DEFAULT_ROUTES}  image: {{repository: registry.example/takt, tag: '0.12.0'}}\n  \
+         command: {{args: [run]}}\n{schedule}"
+    );
+    agent(generation, &spec, &rest)
+}
+
+/// A Job named `name` the CronJob whose uid is `owner` made at `created`, with `status` (null:
+/// still active), and its path.
+fn cron_run(name: &str, owner: &str, created: &str, status: Value) -> (String, Value) {
+    let path = format!("{JOBS}/{name}");
+    let mut job = json!({
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": name,
+            "namespace": "agents",
+            "uid": format!("uid-of-{path}"),
+            "creationTimestamp": created,
+            "labels": {
+                "app.kubernetes.io/instance": NAME,
+                "app.kubernetes.io/managed-by": "b10x-loom-operator",
+                "app.kubernetes.io/name": "loom-agent",
+            },
+            "ownerReferences": [{
+                "apiVersion": "batch/v1", "kind": "CronJob", "name": NAME, "uid": owner,
+                "controller": true,
+            }],
+        },
+        "spec": {
+            "selector": {"matchLabels": {
+                "batch.kubernetes.io/controller-uid": format!("uid-of-{path}"),
+            }},
+            "template": {"spec": {"containers": [], "restartPolicy": "Never"}},
+        },
+    });
+    if !status.is_null() {
+        job["status"] = status;
+    }
+    (path, job)
+}
+
+/// The pod `name` of the Job at `job`, its program container in `state`.
+fn cron_pod(name: &str, job: &str, state: Value) -> (String, Value) {
+    let path = format!("{PODS}/{name}");
+    let pod = json!({
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": name,
+            "namespace": "agents",
+            "uid": format!("uid-of-{path}"),
+            "labels": {"batch.kubernetes.io/controller-uid": format!("uid-of-{job}")},
+            "ownerReferences": [{
+                "apiVersion": "batch/v1", "kind": "Job", "name": name, "uid": format!("uid-of-{job}"),
+                "controller": true,
+            }],
+        },
+        "status": {"containerStatuses": [{
+            "name": "loom-agent", "image": "registry.example/takt:0.12.0", "imageID": "",
+            "ready": false, "restartCount": 0, "state": state,
+        }]},
+    });
+    (path, pod)
+}
+
+/// The uid the fake gives the applied CronJob.
+fn cron_uid() -> String {
+    format!("uid-of-{CRON_JOB}")
+}
+
+/// The body of the last apply of `path` among `seen`.
+fn applied_body<'a>(seen: &'a [Seen], path: &str) -> &'a Value {
+    &seen
+        .iter()
+        .rev()
+        .find(|seen| seen.method == Method::PATCH && seen.path == path)
+        .unwrap_or_else(|| panic!("{path} is applied: {seen:?}"))
+        .body
+}
+
+/// The `LastRunObserved` events among `events`.
+fn last_runs(events: &[ResourceEvent]) -> Vec<LoomAgentLastRunObserved> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ResourceEvent::LastRunObserved(observed) => Some(observed.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `resource-schedule/renders-cronjob` and `resource-schedule/runs-reported-in-turn`: a scheduled
+/// resource applies a CronJob and no Job and stays Running; before any run `LastRunSucceeded` is
+/// Unknown `NoRunYet`; each finished Job the CronJob owns, newest last, sets `status.lastRun` and
+/// `LastRunSucceeded` (True `RunSucceeded`, then False `RunFailed` with the exit code and end
+/// time), once each; an active run and a Job the CronJob does not own say nothing.
+#[tokio::test]
+async fn a_scheduled_resource_reports_each_finished_run_in_turn() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), SCHEDULED_CHILDREN);
+    assert!(!fake.holds(JOB), "no Job beside the CronJob");
+    let cron = applied_body(&seen, CRON_JOB);
+    assert_eq!(cron["kind"], "CronJob");
+    assert_eq!(cron["spec"]["schedule"], "*/20 * * * *");
+    assert_eq!(cron["spec"]["concurrencyPolicy"], "Forbid");
+    assert_eq!(cron["spec"]["jobTemplate"]["spec"]["backoffLimit"], 0);
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(status["variant"], "Command");
+    assert!(status.get("lastRun").is_none(), "{status}");
+    assert!(status.get("run").is_none(), "{status}");
+    assert_eq!(
+        conditions(&status),
+        [
+            triple("Checked", "True", "SpecAdmitted"),
+            triple("Available", "True", "Scheduled"),
+            triple("LastRunSucceeded", "Unknown", "NoRunYet"),
+        ]
+    );
+
+    let (first, job) = cron_run(
+        "platform-operator-29369780",
+        &cron_uid(),
+        "2026-11-02T00:20:00Z",
+        succeeded(),
+    );
+    fake.put(&first, job);
+    let (path, pod) = cron_pod(
+        "platform-operator-29369780-a1",
+        &first,
+        terminated(0, "2026-11-02T00:20:07Z", "Completed"),
+    );
+    fake.put(&path, pod);
+    let (foreign, job) = cron_run(
+        "platform-operator-29369999",
+        "uid-of-another-cronjob",
+        "2026-11-02T05:00:00Z",
+        failed(),
+    );
+    fake.put(&foreign, job);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    let seen = fake.take();
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(
+        status["lastRun"],
+        json!({"phase": "Succeeded", "exitCode": 0, "finishedAt": "2026-11-02T00:20:07Z",
+               "reason": "Completed"})
+    );
+    assert_eq!(
+        conditions(&status)[2],
+        triple("LastRunSucceeded", "True", "RunSucceeded")
+    );
+    assert_eq!(
+        message(&status, "LastRunSucceeded"),
+        "the program exited with code 0 at 2026-11-02T00:20:07Z (Completed)"
+    );
+    assert!(
+        paths(&seen, &Method::DELETE).is_empty(),
+        "the CronJob's Jobs are Kubernetes's: {seen:?}"
+    );
+
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    fake.take();
+    assert_eq!(
+        last_runs(&ctx.events()).len(),
+        1,
+        "an unchanged last run is observed once"
+    );
+
+    let (second, job) = cron_run(
+        "platform-operator-29369800",
+        &cron_uid(),
+        "2026-11-02T00:40:00Z",
+        failed(),
+    );
+    fake.put(&second, job);
+    let (path, pod) = cron_pod(
+        "platform-operator-29369800-b2",
+        &second,
+        terminated(3, "2026-11-02T00:40:09Z", "Error"),
+    );
+    fake.put(&path, pod);
+    let (active, job) = cron_run(
+        "platform-operator-29369820",
+        &cron_uid(),
+        "2026-11-02T01:00:00Z",
+        Value::Null,
+    );
+    fake.put(&active, job);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Running", "a failed run fails no resource");
+    assert_eq!(
+        status["lastRun"],
+        json!({"phase": "Failed", "exitCode": 3, "finishedAt": "2026-11-02T00:40:09Z",
+               "reason": "Error"})
+    );
+    assert_eq!(
+        conditions(&status),
+        [
+            triple("Checked", "True", "SpecAdmitted"),
+            triple("Available", "True", "Scheduled"),
+            triple("LastRunSucceeded", "False", "RunFailed"),
+        ]
+    );
+    assert_eq!(
+        message(&status, "LastRunSucceeded"),
+        "the program exited with code 3 at 2026-11-02T00:40:09Z (Error)"
+    );
+    assert_eq!(
+        last_runs(&ctx.events()),
+        [
+            LoomAgentLastRunObserved {
+                name: name(),
+                generation: 1,
+                phase: RunPhase::Succeeded,
+                exit_code: Some(0),
+            },
+            LoomAgentLastRunObserved {
+                name: name(),
+                generation: 1,
+                phase: RunPhase::Failed,
+                exit_code: Some(3),
+            },
+        ]
+    );
+    assert!(
+        ctx.events().iter().all(|event| !matches!(
+            event,
+            ResourceEvent::Completed(_) | ResourceEvent::Failed(_)
+        )),
+        "a scheduled resource never completes nor fails"
+    );
+}
+
+/// `resource-schedule/suspend-starts-nothing`: `suspend: true` applies the CronJob suspended and
+/// reads `Available` False `Suspended`; lifting it applies it running again.
+#[tokio::test]
+async fn a_suspended_schedule_applies_the_cronjob_suspended() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(
+        scheduled_agent(1, "  schedule: {cron: '*/20 * * * *', suspend: true}\n"),
+        &ctx,
+    )
+    .await;
+    let seen = fake.take();
+    assert_eq!(applied_body(&seen, CRON_JOB)["spec"]["suspend"], true);
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(
+        conditions(&status),
+        [
+            triple("Checked", "True", "SpecAdmitted"),
+            triple("Available", "False", "Suspended"),
+            triple("LastRunSucceeded", "Unknown", "NoRunYet"),
+        ]
+    );
+
+    reconciled(scheduled_agent(2, SCHEDULE), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applied_body(&seen, CRON_JOB)["spec"]["suspend"], false);
+    assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
+    assert_eq!(
+        conditions(&published(&seen))[1],
+        triple("Available", "True", "Scheduled")
+    );
+}
+
+/// `resource-schedule/switch-variant`: adding `spec.schedule` deletes the resource's Job, in the
+/// foreground and preconditioned on its uid, before the CronJob is created; while the Job still
+/// terminates nothing is applied.
+#[tokio::test]
+async fn adding_a_schedule_deletes_the_job_before_the_cronjob_is_created() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    assert!(fake.holds(JOB));
+    fake.take();
+
+    fake.set_lingering(true);
+    let action = reconciled(scheduled_agent(2, SCHEDULE), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(30)));
+    let seen = fake.take();
+    assert_eq!(paths(&seen, &Method::DELETE), [JOB]);
+    let delete = seen
+        .iter()
+        .find(|seen| seen.method == Method::DELETE)
+        .expect("a delete");
+    assert_eq!(delete.body["propagationPolicy"], "Foreground");
+    assert_eq!(delete.body["preconditions"]["uid"], format!("uid-of-{JOB}"));
+    assert!(
+        applies(&seen).is_empty(),
+        "nothing while the Job terminates"
+    );
+    assert!(!fake.holds(CRON_JOB));
+
+    fake.remove(JOB);
+    reconciled(scheduled_agent(2, SCHEDULE), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), SCHEDULED_CHILDREN);
+    assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
+    assert!(fake.holds(CRON_JOB) && !fake.holds(JOB));
+    assert_eq!(published(&seen)["state"], "Running");
+}
+
+/// `resource-schedule/switch-variant`: removing `spec.schedule` deletes the CronJob, in the
+/// foreground, before the Job is created; the two never coexist.
+#[tokio::test]
+async fn removing_a_schedule_deletes_the_cronjob_before_the_job_is_created() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    assert!(fake.holds(CRON_JOB));
+    fake.take();
+
+    fake.set_lingering(true);
+    let action = reconciled(command_agent(2, "run"), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(30)));
+    let seen = fake.take();
+    assert_eq!(paths(&seen, &Method::DELETE), [CRON_JOB]);
+    let delete = seen
+        .iter()
+        .find(|seen| seen.method == Method::DELETE)
+        .expect("a delete");
+    assert_eq!(delete.body["propagationPolicy"], "Foreground");
+    assert_eq!(delete.body["preconditions"]["uid"], cron_uid());
+    assert!(
+        applies(&seen).is_empty(),
+        "nothing while the CronJob terminates"
+    );
+    assert!(!fake.holds(JOB));
+
+    fake.remove(CRON_JOB);
+    reconciled(command_agent(2, "run"), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    assert!(fake.holds(JOB) && !fake.holds(CRON_JOB));
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert!(status.get("lastRun").is_none(), "{status}");
+    assert_eq!(
+        conditions(&status)[2],
+        triple("Completed", "Unknown", "RunNotFinished")
+    );
+}
+
+/// `resource-schedule/new-generation`: a new generation patches the CronJob's template in place,
+/// deleting nothing, and its `lastRun` is read again from the CronJob's newest finished Job.
+#[tokio::test]
+async fn a_new_generation_patches_the_cronjobs_template() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    let (path, job) = cron_run(
+        "platform-operator-29369780",
+        &cron_uid(),
+        "2026-11-02T00:20:00Z",
+        succeeded(),
+    );
+    fake.put(&path, job);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    fake.take();
+
+    reconciled(
+        scheduled_agent(2, "  schedule: {cron: '0 3 * * *'}\n"),
+        &ctx,
+    )
+    .await;
+    let seen = fake.take();
+    assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
+    assert_eq!(applies(&seen), SCHEDULED_CHILDREN);
+    let cron = &fake.objects()[CRON_JOB];
+    assert_eq!(cron["spec"]["schedule"], "0 3 * * *");
+    assert_eq!(
+        cron["spec"]["jobTemplate"]["spec"]["template"]["metadata"]["annotations"]["loom.beyond10x.dev/generation"],
+        "2"
+    );
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(status["observedGeneration"], 2);
+    assert_eq!(status["lastRun"]["phase"], "Succeeded");
+}
+
+/// A scheduled resource whose new generation is refused deletes its CronJob, as every child.
+#[tokio::test]
+async fn a_refused_generation_deletes_the_cronjob() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    fake.take();
+    let spec = with_secret_literal(
+        &example().replace("protocol: operator-reply@1", "protocol: takt-delivery@1"),
+    );
+    let rest = format!("{DEFAULT_ROUTES}  command: {{args: [run]}}\n{SCHEDULE}");
+    reconciled(agent(2, &spec, &rest), &ctx).await;
+    let seen = fake.take();
+    assert!(
+        paths(&seen, &Method::DELETE).contains(&CRON_JOB),
+        "{seen:?}"
+    );
+    assert_eq!(published(&seen)["state"], "Refused");
 }

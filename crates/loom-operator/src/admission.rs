@@ -88,10 +88,11 @@
 //!     program reads none, it is `Malformed`. Then entry by entry, a name that is not a plain
 //!     file name (`[A-Za-z0-9._-]+`, not `.`, not starting with `..`, at most [`MAX_CONFIG_FILE_NAME`] bytes:
 //!     `ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap already holds
-//!     (`routes.yaml`, `connectors.toml`, and `agent.yaml` when `spec.agent` is present:
-//!     `ConfigFileConflict`).
-//! 12. The ConfigMap, its keys and values together, over Kubernetes's limit of
-//!     [`MAX_CONFIG_MAP_BYTES`] (`TooLarge`), refused rather than failing at apply.
+//!     (`routes.yaml`, `connectors.toml`, `agent.yaml` when `spec.agent` is present, and
+//!     [`SCHEDULE_INPUT_FILE`] when `spec.schedule.input.text` is: `ConfigFileConflict`).
+//! 12. The ConfigMap, its keys and values together (the inline schedule input among them), over
+//!     Kubernetes's limit of [`MAX_CONFIG_MAP_BYTES`] (`TooLarge`), refused rather than failing
+//!     at apply.
 //! 13. Each `spec.configFiles` content, which the controller decodes nothing of, walked for a
 //!     credential (`SecretLiteral`) by every walk step 3 makes and more: the list whole, names
 //!     and contents; each content as a YAML stream, every document in turn and every string the
@@ -109,7 +110,8 @@
 //!     `TooLarge` once the strings read before it stopped hold no credential.
 //! 14. A `spec.workspace.mountPath` or `spec.secretFiles.mountPath` that is not absolute and
 //!     plain, is, holds or lies beneath a directory the controller mounts ([`RESERVED_MOUNTS`])
-//!     or the other one (`MountPathInvalid`).
+//!     or the other one, or, with `spec.schedule.input.configMapKeyRef`, the input's
+//!     [`SCHEDULE_INPUT_DIR`] (`MountPathInvalid`).
 //! 15. A `spec.workspace.claimName` outside the configuration's `allowedClaimNames`
 //!     (`ClaimNotAllowed`).
 //! 16. `spec.seccompProfile` and `spec.appArmorProfile`: on an `AgentServe` resource
@@ -125,6 +127,20 @@
 //!     its `defaultCommandResources`. A `Command` resource that declares none under a
 //!     configuration without `defaultCommandResources` is `ResourcesRequired` at
 //!     `spec.agent.deploy.kubernetes.resources`: Loom cannot size a program it does not know.
+//! 18. `spec.schedule` (story command-schedule), only for `Command`: on an `AgentServe` resource
+//!     `Malformed` at `spec.schedule`. A `cron` Kubernetes does not read (five fields, minute,
+//!     hour, day of month, month and day of week, each a list of `*`, `?`, a value or a range
+//!     with an optional `/step`, months and days of the week also by three-letter name; or one of
+//!     [`CRON_DESCRIPTORS`]; never a `TZ=` prefix or `@every`) is `Malformed` at
+//!     `spec.schedule.cron`; a `timeZone` that is not an IANA name the bundled time zone database
+//!     holds, spelt as it spells it, or `Local`, at `spec.schedule.timeZone`; a negative
+//!     `startingDeadlineSeconds` at that member. An `input` that gives both `text` and
+//!     `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no
+//!     ConfigMap name or whose `key` no ConfigMap key, or an `input` on a resource whose
+//!     `spec.command` names an entrypoint or argument or that gives no `spec.agent` (with an
+//!     input the program is `b10x-loom agent run` over it) is `Malformed` at
+//!     `spec.schedule.input`. Then the schedule is walked for a credential, whole and the text
+//!     word by word as `spec.env` is (`SecretLiteral`).
 //!
 //! The walk of steps 2, 3, 5 and 13 reads a text that is not a `loom.agent/1` document only
 //! within the agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and
@@ -152,10 +168,10 @@ use b10x_loom_resource::model::AgentVariant;
 
 use crate::config::{Config, ModelRoute, Resources};
 use crate::render::{
-    Admits, BOUNDARY_TOKENS_DIR, CONFIG_DIR, CONTROLLER_ENV, RELAYS, Upstream, controller_env,
-    upstreams,
+    Admits, BOUNDARY_TOKENS_DIR, CONFIG_DIR, CONTROLLER_ENV, RELAYS, SCHEDULE_INPUT_DIR,
+    SCHEDULE_INPUT_FILE, Upstream, controller_env, upstreams,
 };
-use crate::resource::{Boundary, CommandSpec, ConfigFile, EnvVar, LoomAgentSpec};
+use crate::resource::{Boundary, CommandSpec, ConfigFile, EnvVar, LoomAgentSpec, Schedule};
 
 /// The exit code a refusal is recorded with, as `b10x-loom agent check` exits on one.
 pub const REFUSED: i64 = 3;
@@ -224,15 +240,19 @@ pub struct Admitted {
     /// The CPU and memory every container of the pod but the boundary sidecar requests and is
     /// limited to (step 17).
     pub resources: Resources,
+    /// `spec.schedule.input.text`, the ConfigMap's [`SCHEDULE_INPUT_FILE`]; absent without one
+    /// (step 18).
+    pub input_text: Option<String>,
 }
 
-/// The data of a `<name>-spec` ConfigMap holding `connectors`, `routes`, `agent` when present
-/// and each of `files`.
+/// The data of a `<name>-spec` ConfigMap holding `connectors`, `routes`, `agent` when present,
+/// each of `files` and, under [`SCHEDULE_INPUT_FILE`], `input` when present.
 fn config_map_data(
     connectors: &str,
     routes: &str,
     agent: Option<&str>,
     files: &[ConfigFile],
+    input: Option<&str>,
 ) -> BTreeMap<String, String> {
     let mut data = BTreeMap::from([
         ("connectors.toml".to_owned(), connectors.to_owned()),
@@ -244,12 +264,16 @@ fn config_map_data(
     for file in files {
         data.insert(file.name.clone(), file.content.clone());
     }
+    if let Some(input) = input {
+        data.insert(SCHEDULE_INPUT_FILE.to_owned(), input.to_owned());
+    }
     data
 }
 
 impl Admitted {
     /// The data of the `<name>-spec` ConfigMap: `routes.yaml`, `connectors.toml`, `agent.yaml`
-    /// when the resource has `spec.agent`, and each of `spec.configFiles`.
+    /// when the resource has `spec.agent`, each of `spec.configFiles`, and the inline input of
+    /// `spec.schedule` when it has one.
     #[must_use]
     pub fn config_map_data(&self) -> BTreeMap<String, String> {
         config_map_data(
@@ -257,6 +281,7 @@ impl Admitted {
             &self.routes,
             self.agent.as_deref(),
             &self.config_files,
+            self.input_text.as_deref(),
         )
     }
 
@@ -348,7 +373,8 @@ fn plain_mount_path(path: &str, at: &str) -> Result<(), Refusal> {
 }
 
 /// Refuses a workspace or Secret mount path that is not plain, overlaps a mount the controller
-/// makes, or overlaps the other.
+/// makes ([`RESERVED_MOUNTS`], and [`SCHEDULE_INPUT_DIR`] for an input from a ConfigMap), or
+/// overlaps the other.
 fn mount_paths(spec: &LoomAgentSpec) -> Result<(), Refusal> {
     let mut paths = Vec::new();
     if let Some(workspace) = &spec.workspace {
@@ -362,6 +388,7 @@ fn mount_paths(spec: &LoomAgentSpec) -> Result<(), Refusal> {
         if RESERVED_MOUNTS
             .iter()
             .any(|reserved| overlaps(path, reserved))
+            || (config_map_input(spec) && overlaps(path, SCHEDULE_INPUT_DIR))
         {
             return Err(Refusal::new(
                 "MountPathInvalid",
@@ -861,11 +888,13 @@ fn plain_file_name(name: &str) -> bool {
 
 /// Refuses `spec.configFiles` on an `AgentServe` resource (`Malformed`), a name that is not a
 /// plain file name (`ConfigFileInvalid`), one an earlier entry gives or one the ConfigMap holds
-/// already (`ConfigFileConflict`), never repeating the name.
+/// already (`ConfigFileConflict`; [`SCHEDULE_INPUT_FILE`] when `inline_input`), never repeating
+/// the name.
 fn config_file_names(
     files: &[ConfigFile],
     variant: AgentVariant,
     has_agent: bool,
+    inline_input: bool,
 ) -> Result<(), Refusal> {
     if variant == AgentVariant::AgentServe {
         return Err(Refusal::new(
@@ -891,6 +920,7 @@ fn config_file_names(
         let held = match file.name.as_str() {
             "routes.yaml" | "connectors.toml" => true,
             "agent.yaml" => has_agent,
+            SCHEDULE_INPUT_FILE => inline_input,
             _ => false,
         };
         if held {
@@ -1612,14 +1642,30 @@ pub fn admit(
     }
     expanded_credential(spec, variant)?;
 
+    let input_text = spec
+        .schedule
+        .as_ref()
+        .and_then(|schedule| schedule.input.as_ref())
+        .and_then(|input| input.text.clone());
     let config_files = spec.config_files.clone().unwrap_or_default();
     if !config_files.is_empty() {
-        config_file_names(&config_files, variant, agent.is_some())?;
+        config_file_names(
+            &config_files,
+            variant,
+            agent.is_some(),
+            input_text.is_some(),
+        )?;
     }
-    let bytes: usize = config_map_data(&connectors, &routes, agent.as_deref(), &config_files)
-        .iter()
-        .map(|(key, value)| key.len().saturating_add(value.len()))
-        .fold(0, usize::saturating_add);
+    let bytes: usize = config_map_data(
+        &connectors,
+        &routes,
+        agent.as_deref(),
+        &config_files,
+        input_text.as_deref(),
+    )
+    .iter()
+    .map(|(key, value)| key.len().saturating_add(value.len()))
+    .fold(0, usize::saturating_add);
     if bytes > MAX_CONFIG_MAP_BYTES {
         return Err(Refusal::new(
             "TooLarge",
@@ -1655,6 +1701,10 @@ pub fn admit(
 
     let resources = pod_resources(decoded.as_ref(), variant, config)?;
 
+    if let Some(given) = &spec.schedule {
+        schedule(given, spec, variant)?;
+    }
+
     Ok(Admitted {
         spec: decoded,
         agent,
@@ -1665,7 +1715,330 @@ pub fn admit(
         checked,
         config_files,
         resources,
+        input_text,
     })
+}
+
+/// Whether `spec.schedule.input` names a ConfigMap key, which the pod mounts at
+/// [`SCHEDULE_INPUT_DIR`].
+fn config_map_input(spec: &LoomAgentSpec) -> bool {
+    spec.schedule
+        .as_ref()
+        .and_then(|schedule| schedule.input.as_ref())
+        .is_some_and(|input| input.config_map_key_ref.is_some())
+}
+
+/// The descriptors a CronJob's schedule may be instead of five fields: the ones Kubernetes's cron
+/// parser reads, but `@every`, whose runs start at intervals from the controller's start rather
+/// than at times of the day.
+pub const CRON_DESCRIPTORS: [&str; 7] = [
+    "@yearly",
+    "@annually",
+    "@monthly",
+    "@weekly",
+    "@daily",
+    "@midnight",
+    "@hourly",
+];
+
+/// One field of a five-field cron expression: its name, its bounds and the names its values may
+/// be given by, the first naming `min`.
+struct CronField {
+    name: &'static str,
+    min: u32,
+    max: u32,
+    names: &'static [&'static str],
+}
+
+/// Minute, hour, day of month, month and day of week, as Kubernetes's cron parser bounds them.
+const CRON_FIELDS: [CronField; 5] = [
+    CronField {
+        name: "minute",
+        min: 0,
+        max: 59,
+        names: &[],
+    },
+    CronField {
+        name: "hour",
+        min: 0,
+        max: 23,
+        names: &[],
+    },
+    CronField {
+        name: "day-of-month",
+        min: 1,
+        max: 31,
+        names: &[],
+    },
+    CronField {
+        name: "month",
+        min: 1,
+        max: 12,
+        names: &[
+            "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+        ],
+    },
+    CronField {
+        name: "day-of-week",
+        min: 0,
+        max: 6,
+        names: &["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
+    },
+];
+
+impl CronField {
+    /// The value `text` names: a number, or one of the field's names in any case.
+    fn value(&self, text: &str) -> Option<u32> {
+        if !text.is_empty() && text.len() <= 9 && text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return text.parse().ok();
+        }
+        self.names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(text))
+            .and_then(|index| u32::try_from(index).ok())
+            .map(|index| self.min + index)
+    }
+
+    /// Why `text`, this field of a cron expression, is not one Kubernetes reads: a list of `*`,
+    /// `?`, a value or a range of two, each with an optional `/step`.
+    fn check(&self, text: &str) -> Result<(), String> {
+        for item in text.split(',') {
+            if item.is_empty() {
+                return Err("holds an empty list item".to_owned());
+            }
+            let (range, step) = match item.split_once('/') {
+                Some((range, step)) => (range, Some(step)),
+                None => (item, None),
+            };
+            let unreadable = || {
+                format!(
+                    "holds an item that is neither `*`, `?`, a value nor a range of two values{}",
+                    if self.names.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (values may be named {})", self.names.join(", "))
+                    }
+                )
+            };
+            let (start, end) = if range == "*" || range == "?" {
+                (self.min, self.max)
+            } else if let Some((start, end)) = range.split_once('-') {
+                (
+                    self.value(start).ok_or_else(unreadable)?,
+                    self.value(end).ok_or_else(unreadable)?,
+                )
+            } else {
+                let start = self.value(range).ok_or_else(unreadable)?;
+                (start, if step.is_some() { self.max } else { start })
+            };
+            if start < self.min || end > self.max {
+                return Err(format!(
+                    "holds a value outside {} to {}",
+                    self.min, self.max
+                ));
+            }
+            if start > end {
+                return Err("holds a range that ends before it starts".to_owned());
+            }
+            if let Some(step) = step
+                && !(!step.is_empty()
+                    && step.len() <= 9
+                    && step.bytes().all(|byte| byte.is_ascii_digit())
+                    && step.parse::<u32>().is_ok_and(|step| step > 0))
+            {
+                return Err("holds a step that is not a positive number".to_owned());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Why `cron` is not a schedule Kubernetes reads, in words that never repeat it: five fields
+/// (minute, hour, day of month, month, day of week) or one of [`CRON_DESCRIPTORS`], with no time
+/// zone of its own.
+fn cron_expression(cron: &str) -> Result<(), String> {
+    let cron = cron.trim();
+    if cron.is_empty() {
+        return Err("it is empty".to_owned());
+    }
+    if cron.starts_with("TZ=") || cron.starts_with("CRON_TZ=") {
+        return Err(
+            "it names a time zone, which Kubernetes refuses there: spec.schedule.timeZone names \
+             one"
+            .to_owned(),
+        );
+    }
+    if cron.starts_with('@') {
+        return if CRON_DESCRIPTORS.contains(&cron) {
+            Ok(())
+        } else {
+            Err(format!(
+                "it is not one of the descriptors {}",
+                CRON_DESCRIPTORS.join(", ")
+            ))
+        };
+    }
+    let fields: Vec<&str> = cron.split_whitespace().collect();
+    if fields.len() != CRON_FIELDS.len() {
+        return Err(format!(
+            "it has {} fields, not the five minute, hour, day-of-month, month and day-of-week",
+            fields.len()
+        ));
+    }
+    for (text, field) in fields.iter().zip(&CRON_FIELDS) {
+        field
+            .check(text)
+            .map_err(|why| format!("its {} field {why}", field.name))?;
+    }
+    Ok(())
+}
+
+/// Why `zone` is not a time zone a CronJob reads: an IANA name the time zone database holds,
+/// spelt as it spells it, never the node's `Local`.
+fn time_zone(zone: &str) -> Result<(), &'static str> {
+    if zone.is_empty() {
+        return Err("it is empty");
+    }
+    if zone.eq_ignore_ascii_case("local") {
+        return Err("it names the node's own time zone, which Kubernetes refuses");
+    }
+    match jiff::tz::TimeZoneDatabase::bundled().get(zone) {
+        Ok(found) if found.iana_name() == Some(zone) => Ok(()),
+        _ => Err("it is not an IANA time zone name as the time zone database spells it"),
+    }
+}
+
+/// Whether `name` is a DNS-1123 subdomain, the form of a ConfigMap's name: at most 253 bytes of
+/// DNS-1123 labels joined by `.`.
+fn dns_subdomain(name: &str) -> bool {
+    name.len() <= 253 && name.split('.').all(dns_label)
+}
+
+/// Step 18: `spec.schedule`, only for `Command`; on an `AgentServe` resource `Malformed`. A cron
+/// expression Kubernetes does not read is `Malformed` at `cron`, a time zone the database does not
+/// hold at `timeZone`, a negative starting deadline at `startingDeadlineSeconds`. An `input` gives
+/// exactly one of a text that is not blank and a `configMapKeyRef` whose name is a ConfigMap name
+/// and whose key a ConfigMap key, and runs `b10x-loom agent run` over `spec.agent`, so the
+/// resource gives `spec.agent` and `spec.command` names no entrypoint and no argument; otherwise
+/// it is `Malformed` at `spec.schedule.input`. Then the schedule is walked for a credential, whole
+/// and the text word by word, as `spec.env` is (`SecretLiteral`). No detail repeats a value.
+fn schedule(
+    schedule: &Schedule,
+    spec: &LoomAgentSpec,
+    variant: AgentVariant,
+) -> Result<(), Refusal> {
+    let malformed = |at: &str, detail: &str| {
+        Err(Refusal::new(
+            spelling(RefusalReason::Malformed),
+            at,
+            detail.to_owned(),
+        ))
+    };
+    if variant == AgentVariant::AgentServe {
+        return malformed(
+            "spec.schedule",
+            "`b10x-loom agent serve` runs until it is stopped; only a Command resource runs on a \
+             schedule",
+        );
+    }
+    if let Err(why) = cron_expression(&schedule.cron) {
+        return malformed("spec.schedule.cron", &why);
+    }
+    if let Some(zone) = &schedule.time_zone
+        && let Err(why) = time_zone(zone)
+    {
+        return malformed("spec.schedule.timeZone", why);
+    }
+    if schedule
+        .starting_deadline_seconds
+        .is_some_and(|seconds| seconds < 0)
+    {
+        return malformed(
+            "spec.schedule.startingDeadlineSeconds",
+            "it is negative; a run may start that many seconds late at most",
+        );
+    }
+    if let Some(input) = &schedule.input {
+        let at = "spec.schedule.input";
+        match (&input.text, &input.config_map_key_ref) {
+            (Some(_), Some(_)) => {
+                return malformed(
+                    at,
+                    "it gives both text and configMapKeyRef; give exactly one",
+                );
+            }
+            (None, None) => {
+                return malformed(
+                    at,
+                    "it gives neither text nor configMapKeyRef; give exactly one",
+                );
+            }
+            (Some(text), None) if text.trim().is_empty() => {
+                return malformed(at, "its text is blank");
+            }
+            (None, Some(key)) if key.name.is_empty() => {
+                return malformed(at, "its configMapKeyRef.name is empty");
+            }
+            (None, Some(key)) if key.key.is_empty() => {
+                return malformed(at, "its configMapKeyRef.key is empty");
+            }
+            (None, Some(key)) if !dns_subdomain(&key.name) => {
+                return malformed(
+                    at,
+                    "its configMapKeyRef.name is not a ConfigMap name, a DNS-1123 subdomain",
+                );
+            }
+            (None, Some(key)) if !plain_file_name(&key.key) => {
+                return malformed(
+                    at,
+                    &format!(
+                        "its configMapKeyRef.key is not a ConfigMap key, [A-Za-z0-9._-]+ other \
+                         than `.` and not starting with `..`, of at most {MAX_CONFIG_FILE_NAME} \
+                         bytes"
+                    ),
+                );
+            }
+            _ => {}
+        }
+        let names_program = spec.command.as_ref().is_some_and(|command| {
+            command
+                .entrypoint
+                .as_ref()
+                .is_some_and(|list| !list.is_empty())
+                || command.args.as_ref().is_some_and(|list| !list.is_empty())
+        });
+        if names_program {
+            return malformed(
+                at,
+                "with an input the program is `b10x-loom agent run`, so spec.command names no \
+                 entrypoint and no args",
+            );
+        }
+        if spec.agent.is_none() {
+            return malformed(
+                at,
+                "with an input the program is `b10x-loom agent run` over spec.agent, which the \
+                 resource does not give",
+            );
+        }
+    }
+    credential(&yaml(schedule, "spec.schedule")?, "spec.schedule")?;
+    let found: Vec<Word> = schedule
+        .input
+        .as_ref()
+        .and_then(|input| input.text.as_deref())
+        .map(|text| {
+            words(text)
+                .into_iter()
+                .map(|text| Word {
+                    text,
+                    member: "spec.schedule.input.text".to_owned(),
+                    line: None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    word_credential(&found, "spec.schedule")
 }
 
 /// Step 17: the resources the spec declares, else the configuration's default for `variant`;
@@ -1837,6 +2210,7 @@ mod tests {
             seccomp_profile: None,
             app_armor_profile: None,
             boundary: None,
+            schedule: None,
         }
     }
 

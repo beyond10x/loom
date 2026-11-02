@@ -69,6 +69,52 @@ pub struct LoomAgentSpec {
     /// holds the pod's only credential; on either variant, and never beside a Secret.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary: Option<Boundary>,
+    /// When the `Command` resource's runs start: a CronJob in the Job's place; only for
+    /// `Command`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<Schedule>,
+}
+
+/// `spec.schedule`: the CronJob's schedule, time zone, kill switch and starting deadline, and
+/// the task text each run is given.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Schedule {
+    /// Five cron fields, or a descriptor such as `@hourly`.
+    pub cron: String,
+    /// An IANA time zone name; absent, the controller's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
+    /// While true, no new run starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suspend: Option<bool>,
+    /// How late after its time a missed run may still start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starting_deadline_seconds: Option<i64>,
+    /// The task text each run is given; present, the program is `b10x-loom agent run`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ScheduleInput>,
+}
+
+/// `spec.schedule.input`: exactly one of an inline text and a key of a ConfigMap.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleInput {
+    /// The task text, written into the resource's ConfigMap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// A key of a ConfigMap in the resource's namespace, mounted read-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_map_key_ref: Option<ConfigMapKeyRef>,
+}
+
+/// `spec.schedule.input.configMapKeyRef`: a ConfigMap's name and one of its keys.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigMapKeyRef {
+    /// The ConfigMap's name, in the resource's namespace.
+    pub name: String,
+    /// The key holding the task text.
+    pub key: String,
 }
 
 /// `spec.boundary`: the upstreams the `boundary` container relays the agent's loopback calls to,
@@ -231,7 +277,11 @@ pub struct LoomAgentStatus {
     /// How a `Command` resource's run ended, once it did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunStatus>,
-    /// The conditions `Checked` and `Available`, and `Completed` for a `Command` resource.
+    /// How a scheduled `Command` resource's most recent finished run ended, once one did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<LastRunStatus>,
+    /// The conditions `Checked` and `Available`, and `Completed` for a `Command` resource or
+    /// `LastRunSucceeded` for a scheduled one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<Condition>>,
 }
@@ -262,6 +312,24 @@ pub struct RunStatus {
     pub reason: Option<String>,
 }
 
+/// `status.lastRun`: the phase of a scheduled resource's most recent finished run, and its
+/// program's exit code, end time and reason, each absent when the run's pod did not say.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastRunStatus {
+    /// `Succeeded` or `Failed`.
+    pub phase: String,
+    /// The program's exit code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    /// When the program ended, RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<String>,
+    /// The terminated container's reason, or the Job's reason when no container ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// `status.deployment`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeploymentStatus {
@@ -272,7 +340,7 @@ pub struct DeploymentStatus {
 /// One entry of `status.conditions`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Condition {
-    /// `Checked`, `Available` or `Completed`.
+    /// `Checked`, `Available`, `Completed` or `LastRunSucceeded`.
     #[serde(rename = "type")]
     pub kind: String,
     /// `True`, `False` or `Unknown`.
@@ -320,6 +388,12 @@ mod tests {
                 finished_at: Some("2026-10-26T12:00:00Z".to_owned()),
                 reason: None,
             }),
+            last_run: Some(LastRunStatus {
+                phase: "Failed".to_owned(),
+                exit_code: Some(3),
+                finished_at: Some("2026-11-02T00:40:09Z".to_owned()),
+                reason: Some("Error".to_owned()),
+            }),
             conditions: Some(vec![Condition {
                 kind: "Checked".to_owned(),
                 status: "True".to_owned(),
@@ -336,6 +410,10 @@ mod tests {
                 "deployment": {"availability": "Available"},
                 "variant": "Command",
                 "run": {"exitCode": 3, "finishedAt": "2026-10-26T12:00:00Z"},
+                "lastRun": {
+                    "phase": "Failed", "exitCode": 3, "finishedAt": "2026-11-02T00:40:09Z",
+                    "reason": "Error",
+                },
                 "conditions": [{
                     "type": "Checked", "status": "True", "reason": "SpecServeable",
                     "message": "checked",

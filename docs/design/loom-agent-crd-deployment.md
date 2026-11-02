@@ -356,3 +356,88 @@ Built (2026-10-26, `story:writable-dirs-mode-0700`): the trial's harness refused
 - MCP read proxy (`loom-kubernetes.md` M6), Agency registration (M7), Substrate confinement (Q6).
 - Multi-tenancy of `LoomAgent` resources across namespaces: one namespace per controller instance.
 - takt deliveries: slice C, built as the `Command` variant (§ 9a, decision 7); nothing in slices A or B runs takt.
+
+## 12. A schedule for a `Command` resource
+
+Implemented by `story:command-schedule` (revision of 2026-10-28, its § 12.2, with a declarative
+input added). A `Command` resource is one `batch/v1` Job that runs once (§ 9a); a program that
+must run again and again, one bounded run at a time, says so with `spec.schedule`.
+
+```yaml
+spec:
+  command: {}                      # no entrypoint, no args: the image's b10x-loom runs
+  schedule:
+    cron: "*/20 * * * *"
+    timeZone: UTC                  # optional, IANA name
+    suspend: false                 # optional: the kill switch, no new run starts while true
+    startingDeadlineSeconds: 300   # optional
+    input:                         # optional: exactly one of text and configMapKeyRef
+      text: "check the queue and report what changed"
+```
+
+With `spec.schedule` the controller renders a `batch/v1` CronJob in the Job's place: the same name,
+the same pod template byte for byte, `jobTemplate.spec.backoffLimit` 0, `concurrencyPolicy: Forbid`
+(fixed, not a field: two runs never share the workspace), `successfulJobsHistoryLimit` 3 and
+`failedJobsHistoryLimit` 3, and `suspend` rendered false when absent, so removing it resumes the
+schedule.
+
+Admission (`crates/loom-operator/src/admission.rs`, step 18):
+
+| Rule | Refusal |
+|---|---|
+| `spec.schedule` on an `AgentServe` resource | `Malformed` at `spec.schedule` |
+| `cron` is not five fields Kubernetes reads (each a list of `*`, `?`, a value or a range, with an optional `/step`; months and days of the week also by three-letter name) or one of `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`; a `TZ=` or `CRON_TZ=` prefix and `@every` are refused | `Malformed` at `spec.schedule.cron` |
+| `timeZone` is not an IANA name the bundled time zone database holds, spelt as it spells it, or is `Local` | `Malformed` at `spec.schedule.timeZone` |
+| `startingDeadlineSeconds` is negative | `Malformed` at `spec.schedule.startingDeadlineSeconds` |
+| `input` gives both `text` and `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no ConfigMap name or whose `key` no ConfigMap key; or the resource names a program in `spec.command` or gives no `spec.agent` | `Malformed` at `spec.schedule.input` |
+| `text` holds a credential, walked as `spec.env` is | `SecretLiteral` at `spec.schedule.input.text` |
+
+No detail repeats the refused value.
+
+The input. Without `input` the pod runs the program `spec.command` names, as the Job would. With
+it the program container runs `b10x-loom agent run --spec /config/agent.yaml --state
+/var/lib/agent --input <file>` (`story:agent-run-once`) from `spec.image`, else the controller's
+default image:
+
+- `text` is written into the resource's ConfigMap as `schedule-input.txt`, so `<file>` is
+  `/config/schedule-input.txt`; a `spec.configFiles` entry of that name is `ConfigFileConflict`,
+  and the text counts toward the ConfigMap's size limit.
+- `configMapKeyRef: {name, key}` mounts that key alone, read-only, from the volume
+  `schedule-input` (`items: [{key, path: input}]`, `optional: false`) at
+  `/var/run/loom/schedule-input`, so `<file>` is `/var/run/loom/schedule-input/input`; only the
+  program container mounts it, and a `spec.workspace` or `spec.secretFiles` mount on that directory
+  is `MountPathInvalid`. The ConfigMap is the operator's to create: a missing ConfigMap or key
+  leaves the run's pod unstarted (the kubelet waits for the volume), the run stays active, and
+  `Forbid` holds every later run until it is there or the run is deleted. The controller neither
+  reads that ConfigMap nor restricts its name.
+
+Lifecycle and status:
+
+- A scheduled resource never reaches `Completed` or `Failed`; it stays `Running` while the CronJob
+  exists, `suspend` included. `Available` is True `Scheduled`, or False `Suspended` while
+  `suspend` is true.
+- `status.lastRun` is the end of the newest finished Job the CronJob owns (by the instance label
+  and the CronJob's uid as controlling owner; a Job still active never speaks), read as
+  `story:command-run-exit-status` reads one: the Job's own pod by owner uid, the program
+  container's `state.terminated`. It is `loom.resource.LastRun`: the `RunEnd` members (exit code,
+  end time, reason) and the run's `phase`, `Succeeded` or `Failed`, since a run that ended without
+  an exit code read still succeeded or failed. The condition `Completed` is not set;
+  `LastRunSucceeded` is True `RunSucceeded`, False `RunFailed` or Unknown `NoRunYet`, its message
+  naming the exit code and end time. Each finished Job is observed once
+  (`loom.resource.ObserveScheduledRun`, event `LoomAgentLastRunObserved`); a new generation clears
+  `lastRun` and the newest finished run is read again.
+- A new generation patches the CronJob's schedule and template in place (a CronJob's template is
+  mutable, unlike a Job's). A run of an older generation that is still active finishes under its
+  old template; `Forbid` keeps the next run from starting beside it.
+- Removing `spec.schedule` deletes the CronJob in the foreground, preconditioned on its uid, and
+  then creates the one Job of § 9a; adding it deletes that Job first. While either still
+  terminates nothing is applied and the reconcile comes again after 30 s. The two never coexist.
+- The Jobs the CronJob starts are Kubernetes's: the controller never applies, deletes or counts
+  them as the resource's children. It watches the CronJob, whose status changes as runs start and
+  end, beside its periodic reconcile.
+- The Role gains `cronjobs` (create, update, patch, get, list, watch, delete).
+
+Rejected: a program that loops forever inside the one Job (its first crash ends it until someone
+respecifies it, and a hung run is never cut by the cluster); a `Deployment` for a `Command`
+resource (it restarts a program that exited 0 and has no notion of a run's end). Not in this
+change: the revision's `spec.sidecars` (its § 12.1).

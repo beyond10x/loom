@@ -402,7 +402,33 @@ place, so the program runs once: when it ends the resource reads `Completed` or 
 nothing starts it again until `spec` changes, which replaces the Job. Its `status.run` holds the
 program's exit code (`exitCode`), when it ended (`finishedAt`) and the `reason`, read from the
 Job's own pod, and the condition `Completed` says the same in its message, so a caller reads how
-the run ended from the resource. `spec.workspace` (`mountPath`, optional `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
+the run ended from the resource.
+
+A `Command` resource that must run again and again, one bounded run at a time, adds
+`spec.schedule`: `cron` (five fields or a descriptor such as `@hourly`), optional `timeZone` (an
+IANA name), `suspend` (no new run starts while true) and `startingDeadlineSeconds`. Its pod is
+then a `batch/v1` CronJob in the Job's place (`concurrencyPolicy: Forbid`, `backoffLimit` 0, three
+finished runs of each outcome kept), the resource stays `Running`, and `status.lastRun` (`phase`,
+`exitCode`, `finishedAt`, `reason`) and the condition `LastRunSucceeded` report the newest finished
+run; a failed run fails no resource. `spec.schedule.input` gives each run its task, exactly one of
+an inline `text` or a `configMapKeyRef` (`name`, `key`) the pod mounts read-only; with it the
+program is `b10x-loom agent run --spec /config/agent.yaml --state /var/lib/agent --input <file>`,
+so the resource gives `spec.agent` and `command: {}`. Adding or removing `spec.schedule` deletes
+the Job or the CronJob before the other is created. The controller refuses a schedule on an
+`AgentServe` resource, a `cron` or `timeZone` Kubernetes does not read, and an `input` that gives
+both forms or neither (`Malformed`), and a credential in the text (`SecretLiteral`).
+
+```yaml
+spec:
+  agent: {...}
+  command: {}
+  schedule:
+    cron: "*/20 * * * *"
+    timeZone: UTC
+    input: {text: "check the queue and report what changed"}
+```
+
+`spec.workspace` (`mountPath`, optional `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
 `allowedClaimNames` or else an emptyDir. A `Command` resource may declare `spec.seccompProfile` and `spec.appArmorProfile` (`RuntimeDefault`, `Localhost` with `localhostProfile`, or `Unconfined`), carried in its program container's `securityContext`; `Unconfined` is refused unless the values set `allowUnconfinedProfiles`, and a `Localhost` name must be in `allowedSeccompLocalhostProfiles` or `allowedAppArmorLocalhostProfiles`. On either variant `spec.secretRef` gives one Secret as
 the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container
 runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,

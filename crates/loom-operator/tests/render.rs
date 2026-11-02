@@ -3155,3 +3155,487 @@ fn a_credential_free_command_resource_renders_as_its_golden_file() {
         golden.display()
     );
 }
+
+/// The schedule `story:command-schedule`'s scenarios name.
+const SCHEDULE: &str = "  schedule: {cron: '*/20 * * * *'}\n";
+
+/// A `Command` resource whose program is `b10x-loom agent run` over its spec: no entrypoint and
+/// no arguments of its own, the controller's default image, and `schedule` after it.
+fn agent_run_with(schedule: &str) -> String {
+    wrapped(
+        &takt_agent(),
+        &format!("  routes: {{}}\n  command: {{}}\n{schedule}"),
+    )
+}
+
+/// The rendered CronJob, the third document.
+fn cron_job_of(rendered: &str) -> Value {
+    let docs = documents(rendered);
+    assert_eq!(text(&docs[2], &["kind"]), "CronJob", "{rendered}");
+    docs[2].clone()
+}
+
+/// The pod template's spec of a rendered CronJob.
+fn scheduled_pod_of(rendered: &str) -> Value {
+    at(
+        &cron_job_of(rendered),
+        &["spec", "jobTemplate", "spec", "template", "spec"],
+    )
+    .clone()
+}
+
+/// `resource-schedule/renders-cronjob`: a scheduled `Command` resource renders a `batch/v1`
+/// CronJob named as the Job would be, `Forbid`, `backoffLimit` 0, history limits 3 and 3, the
+/// Job's pod template byte for byte, and no Job; the other children are the Job's.
+#[test]
+fn a_scheduled_command_resource_renders_a_cronjob_in_the_jobs_place() {
+    let once = documents(&render_document(&takt_resource(), &config()).expect("rendered"));
+    let rendered = render_document(&command_with(SCHEDULE), &config()).expect("rendered");
+    let docs = documents(&rendered);
+    let kinds: Vec<&str> = docs.iter().map(|doc| text(doc, &["kind"])).collect();
+    assert_eq!(
+        kinds,
+        ["ServiceAccount", "ConfigMap", "CronJob", "NetworkPolicy"],
+        "no Job beside the CronJob"
+    );
+    let cron = &docs[2];
+    assert_eq!(text(cron, &["apiVersion"]), "batch/v1");
+    assert_eq!(
+        text(cron, &["metadata", "name"]),
+        text(&once[2], &["metadata", "name"])
+    );
+    assert_eq!(
+        cron["metadata"], once[2]["metadata"],
+        "labels and owner as the Job's"
+    );
+    assert_eq!(text(cron, &["spec", "schedule"]), "*/20 * * * *");
+    assert_eq!(text(cron, &["spec", "concurrencyPolicy"]), "Forbid");
+    assert_eq!(
+        at(cron, &["spec", "successfulJobsHistoryLimit"]).as_i64(),
+        Some(3)
+    );
+    assert_eq!(
+        at(cron, &["spec", "failedJobsHistoryLimit"]).as_i64(),
+        Some(3)
+    );
+    assert_eq!(at(cron, &["spec", "suspend"]).as_bool(), Some(false));
+    assert!(at(cron, &["spec", "timeZone"]).is_null());
+    assert!(at(cron, &["spec", "startingDeadlineSeconds"]).is_null());
+    assert_eq!(
+        at(cron, &["spec", "jobTemplate", "spec", "backoffLimit"]).as_i64(),
+        Some(0)
+    );
+    assert!(
+        at(
+            cron,
+            &["spec", "jobTemplate", "spec", "ttlSecondsAfterFinished"]
+        )
+        .is_null()
+    );
+    assert_eq!(
+        text(
+            cron,
+            &[
+                "spec",
+                "jobTemplate",
+                "metadata",
+                "labels",
+                "app.kubernetes.io/instance"
+            ]
+        ),
+        "platform-operator"
+    );
+    assert_eq!(
+        serde_yaml_ng::to_string(at(cron, &["spec", "jobTemplate", "spec", "template"]))
+            .expect("YAML"),
+        serde_yaml_ng::to_string(at(&once[2], &["spec", "template"])).expect("YAML"),
+        "the Job's pod template, byte for byte"
+    );
+    for index in [0, 1, 3] {
+        assert_eq!(docs[index], once[index], "child {index} is the Job's");
+    }
+}
+
+/// `resource-schedule/renders-cronjob`: the time zone and the starting deadline reach the
+/// CronJob as given.
+#[test]
+fn a_schedules_time_zone_and_starting_deadline_reach_the_cronjob() {
+    let rendered = render_document(
+        &command_with(
+            "  schedule: {cron: '0 3 * * *', timeZone: Europe/Berlin, startingDeadlineSeconds: 300}\n",
+        ),
+        &config(),
+    )
+    .expect("rendered");
+    let cron = cron_job_of(&rendered);
+    assert_eq!(text(&cron, &["spec", "schedule"]), "0 3 * * *");
+    assert_eq!(text(&cron, &["spec", "timeZone"]), "Europe/Berlin");
+    assert_eq!(
+        at(&cron, &["spec", "startingDeadlineSeconds"]).as_i64(),
+        Some(300)
+    );
+}
+
+/// `resource-schedule/suspend-starts-nothing`: `suspend: true` renders the CronJob suspended, so
+/// Kubernetes starts no run; `false` and absent render it running.
+#[test]
+fn a_suspended_schedule_renders_the_cronjob_suspended() {
+    for (schedule, suspended) in [
+        ("  schedule: {cron: '*/20 * * * *', suspend: true}\n", true),
+        (
+            "  schedule: {cron: '*/20 * * * *', suspend: false}\n",
+            false,
+        ),
+        (SCHEDULE, false),
+    ] {
+        let cron =
+            cron_job_of(&render_document(&command_with(schedule), &config()).expect("rendered"));
+        assert_eq!(
+            at(&cron, &["spec", "suspend"]).as_bool(),
+            Some(suspended),
+            "{schedule}"
+        );
+    }
+}
+
+/// `resource-schedule/agent-serve-refused`: `spec.schedule` on an `AgentServe` resource is
+/// refused `Malformed` at `spec.schedule`.
+#[test]
+fn a_schedule_on_an_agent_serve_resource_is_refused_malformed() {
+    let message = refusal(&serve_with(SCHEDULE), &config());
+    assert!(
+        message.starts_with("refused: Malformed at spec.schedule: "),
+        "{message}"
+    );
+}
+
+/// `resource-schedule/agent-serve-refused`: an invalid cron expression is refused `Malformed` at
+/// `spec.schedule.cron`, never repeating it; the five fields Kubernetes reads and its
+/// descriptors are admitted.
+#[test]
+fn an_invalid_cron_expression_is_refused_naming_it_without_repeating_it() {
+    for cron in [
+        "",
+        "   ",
+        "* * * *",
+        "* * * * * *",
+        "61 * * * *",
+        "* 24 * * *",
+        "*/0 * * * *",
+        "17-11 * * * *",
+        "* * 0 * *",
+        "* * 32 * *",
+        "* * * 13 *",
+        "* * * * 7",
+        "* * * JANUARY *",
+        "1,,2 * * * *",
+        "one * * * *",
+        "@every 1h",
+        "@fortnightly",
+        "TZ=UTC 0 3 * * *",
+        "CRON_TZ=UTC 0 3 * * *",
+    ] {
+        let message = refusal(
+            &command_with(&format!("  schedule: {{cron: '{cron}'}}\n")),
+            &config(),
+        );
+        assert!(
+            message.starts_with("refused: Malformed at spec.schedule.cron: "),
+            "{cron:?}: {message}"
+        );
+        let detail = message.trim_start_matches("refused: Malformed at spec.schedule.cron: ");
+        if cron.trim().len() > 3 {
+            assert!(!detail.contains(cron.trim()), "{cron:?}: {message}");
+        }
+    }
+    for cron in [
+        "0 3 * * *",
+        "*/20 * * * *",
+        "0 0 1 JAN *",
+        "0 9 * * mon-fri",
+        "15 2,14 * * 1-5",
+        "0 0 ? * SUN",
+        "0 */2 1-15/3 * *",
+        "5/15 * * * *",
+        "59 23 31 12 6",
+        "@hourly",
+        "@daily",
+        "@midnight",
+        "@weekly",
+        "@monthly",
+        "@yearly",
+        "@annually",
+    ] {
+        let rendered = render_document(
+            &command_with(&format!("  schedule: {{cron: '{cron}'}}\n")),
+            &config(),
+        )
+        .unwrap_or_else(|error| panic!("{cron:?}: {error}"));
+        assert_eq!(text(&cron_job_of(&rendered), &["spec", "schedule"]), cron);
+    }
+}
+
+/// `resource-schedule/agent-serve-refused`: a time zone that is not an IANA name the database
+/// holds, spelt exactly, or the node's `Local`, is refused `Malformed` at `spec.schedule.timeZone`.
+#[test]
+fn an_unknown_or_local_time_zone_is_refused_naming_it() {
+    for zone in [
+        "",
+        "Local",
+        "local",
+        "Mars/Olympus_Mons",
+        "europe/berlin",
+        "../etc/passwd",
+    ] {
+        let message = refusal(
+            &command_with(&format!(
+                "  schedule: {{cron: '0 3 * * *', timeZone: '{zone}'}}\n"
+            )),
+            &config(),
+        );
+        assert!(
+            message.starts_with("refused: Malformed at spec.schedule.timeZone: "),
+            "{zone:?}: {message}"
+        );
+        if zone.len() > 3 {
+            assert!(!message.contains(zone), "{zone:?}: {message}");
+        }
+    }
+    for zone in ["UTC", "Etc/UTC", "Europe/Berlin", "America/New_York"] {
+        render_document(
+            &command_with(&format!(
+                "  schedule: {{cron: '0 3 * * *', timeZone: '{zone}'}}\n"
+            )),
+            &config(),
+        )
+        .unwrap_or_else(|error| panic!("{zone:?}: {error}"));
+    }
+}
+
+/// A negative starting deadline, which Kubernetes refuses at apply, is refused before.
+#[test]
+fn a_negative_starting_deadline_is_refused() {
+    let message = refusal(
+        &command_with("  schedule: {cron: '0 3 * * *', startingDeadlineSeconds: -1}\n"),
+        &config(),
+    );
+    assert!(
+        message.starts_with("refused: Malformed at spec.schedule.startingDeadlineSeconds: "),
+        "{message}"
+    );
+}
+
+/// The program container of a scheduled run of `b10x-loom agent run`, reading `input`.
+fn agent_run(input: &str) -> Vec<String> {
+    [
+        "b10x-loom",
+        "agent",
+        "run",
+        "--spec",
+        "/config/agent.yaml",
+        "--state",
+        "/var/lib/agent",
+        "--input",
+        input,
+    ]
+    .map(str::to_owned)
+    .to_vec()
+}
+
+/// `resource-schedule/input-inline`: `input.text` is written into the resource's ConfigMap,
+/// exactly, and the CronJob's container runs `b10x-loom agent run` with `--input` naming that
+/// file under `/config`; the rest of the pod is the one the schedule without input renders.
+#[test]
+fn an_inline_input_is_written_to_the_config_map_and_passed_to_agent_run() {
+    let rendered = render_document(
+        &agent_run_with("  schedule:\n    cron: '0 3 * * *'\n    input: {text: check the queue}\n"),
+        &config(),
+    )
+    .expect("rendered");
+    let data = config_map_data(&rendered);
+    assert!(
+        data.contains(&(
+            "schedule-input.txt".to_owned(),
+            "check the queue".to_owned()
+        )),
+        "{data:?}"
+    );
+    let pod = scheduled_pod_of(&rendered);
+    let container = &pod["containers"][0];
+    assert_eq!(
+        strings(container, &["command"]),
+        agent_run("/config/schedule-input.txt")
+    );
+    assert!(container["args"].is_null());
+    assert_eq!(
+        text(container, &["image"]),
+        "registry.example/loom-agent:0.40.0"
+    );
+
+    let plain = render_document(
+        &agent_run_with("  schedule: {cron: '0 3 * * *'}\n"),
+        &config(),
+    )
+    .expect("rendered");
+    let mut expected = scheduled_pod_of(&plain);
+    let mut got = pod.clone();
+    for pod in [&mut expected, &mut got] {
+        let container = pod["containers"][0].as_mapping_mut().expect("a container");
+        container.remove("command");
+        container.remove("args");
+    }
+    assert_eq!(got, expected, "only the program differs");
+}
+
+/// `resource-schedule/input-config-map`: `input.configMapKeyRef` mounts that key read-only and
+/// passes its path as `--input`; the controller's ConfigMap holds no input, and a missing
+/// ConfigMap leaves the pod unstarted, since the volume is not optional.
+#[test]
+fn a_config_map_input_mounts_its_key_read_only_and_passes_its_path() {
+    let rendered = render_document(
+        &agent_run_with(
+            "  schedule:\n    cron: '0 3 * * *'\n    input: {configMapKeyRef: {name: tasks, key: nightly}}\n",
+        ),
+        &config(),
+    )
+    .expect("rendered");
+    assert!(
+        !config_map_data(&rendered)
+            .iter()
+            .any(|(key, _)| key == "schedule-input.txt")
+    );
+    let pod = scheduled_pod_of(&rendered);
+    let container = &pod["containers"][0];
+    assert_eq!(
+        strings(container, &["command"]),
+        agent_run("/var/run/loom/schedule-input/input")
+    );
+    let mounts = container["volumeMounts"].as_sequence().expect("mounts");
+    let mount = mounts
+        .iter()
+        .find(|mount| mount["name"].as_str() == Some("schedule-input"))
+        .expect("the input's mount");
+    assert_eq!(text(mount, &["mountPath"]), "/var/run/loom/schedule-input");
+    assert_eq!(mount["readOnly"].as_bool(), Some(true));
+    let volumes = pod["volumes"].as_sequence().expect("volumes");
+    let volume = volumes
+        .iter()
+        .find(|volume| volume["name"].as_str() == Some("schedule-input"))
+        .expect("the input's volume");
+    assert_eq!(text(volume, &["configMap", "name"]), "tasks");
+    assert_eq!(text(volume, &["configMap", "items", "0", "key"]), "nightly");
+    assert_eq!(text(volume, &["configMap", "items", "0", "path"]), "input");
+    assert_eq!(volume["configMap"]["optional"].as_bool(), Some(false));
+    for (index, other) in pod["initContainers"]
+        .as_sequence()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        assert!(
+            !other["volumeMounts"]
+                .as_sequence()
+                .into_iter()
+                .flatten()
+                .any(|mount| mount["name"].as_str() == Some("schedule-input")),
+            "init container {index} does not mount the input"
+        );
+    }
+}
+
+/// `resource-schedule/input-inline` and `input-config-map`: both forms, neither, an empty text,
+/// name or key, a name that is no ConfigMap name and a key that is no ConfigMap key are refused
+/// `Malformed` at `spec.schedule.input`, as is an input for a program that is not `agent run`
+/// (`spec.command` naming one) or without the spec it runs.
+#[test]
+fn a_malformed_input_is_refused_at_spec_schedule_input() {
+    let refused_at_input = |resource: &str| {
+        let message = refusal(resource, &config());
+        assert!(
+            message.starts_with("refused: Malformed at spec.schedule.input: "),
+            "{resource}\n{message}"
+        );
+        message
+    };
+    for input in [
+        "{}",
+        "{text: ''}",
+        "{text: x, configMapKeyRef: {name: tasks, key: nightly}}",
+        "{configMapKeyRef: {name: '', key: nightly}}",
+        "{configMapKeyRef: {name: tasks, key: ''}}",
+        "{configMapKeyRef: {name: Tasks_Of_Night, key: nightly}}",
+        "{configMapKeyRef: {name: tasks, key: 'night/ly'}}",
+        "{configMapKeyRef: {name: tasks, key: '..'}}",
+    ] {
+        let message = refused_at_input(&agent_run_with(&format!(
+            "  schedule:\n    cron: '0 3 * * *'\n    input: {input}\n"
+        )));
+        for value in ["Tasks_Of_Night", "night/ly"] {
+            assert!(!message.contains(value), "{message}");
+        }
+    }
+    refused_at_input(&command_with(
+        "  schedule:\n    cron: '0 3 * * *'\n    input: {text: check the queue}\n",
+    ));
+    refused_at_input(&format!(
+        "{HEAD}  routes: {{}}\n  command: {{}}\n  schedule:\n    cron: '0 3 * * *'\n    input: {{text: check the queue}}\n"
+    ));
+}
+
+/// `resource-schedule/input-inline`: the text is walked for a credential as `spec.env` is.
+#[test]
+fn a_credential_in_the_input_text_is_refused_without_repeating_it() {
+    for (text, expected) in [
+        (
+            "push with ghp_000fake",
+            "refused: SecretLiteral at spec.schedule.input.text: a value with the prefix `ghp_`",
+        ),
+        (
+            "xoxb-000-fake",
+            "refused: SecretLiteral at spec.schedule.input.text: a value with the prefix `xoxb-`",
+        ),
+        (
+            "clone https://u:not-a-real-password@forge.example",
+            "refused: SecretLiteral at spec.schedule.input.text: ",
+        ),
+    ] {
+        let message = refusal(
+            &agent_run_with(&format!(
+                "  schedule:\n    cron: '0 3 * * *'\n    input: {{text: '{text}'}}\n"
+            )),
+            &config(),
+        );
+        assert!(message.starts_with(expected), "{expected} <- {message}");
+        for value in ["000-fake", "000fake", "not-a-real-password"] {
+            assert!(!message.contains(value), "{message}");
+        }
+    }
+}
+
+/// `resource-schedule/input-inline`: the inline input's file is the controller's, so a
+/// configuration file of that name is a conflict; and the mount of a ConfigMap input is the
+/// controller's, so a workspace on it is refused.
+#[test]
+fn the_inputs_file_and_mount_are_the_controllers() {
+    let message = refusal(
+        &agent_run_with(&format!(
+            "{}  schedule:\n    cron: '0 3 * * *'\n    input: {{text: check the queue}}\n",
+            config_files(&[("schedule-input.txt", "other")])
+        )),
+        &config(),
+    );
+    assert!(
+        message.starts_with("refused: ConfigFileConflict at spec.configFiles[0].name: "),
+        "{message}"
+    );
+    let message = refusal(
+        &agent_run_with(
+            "  workspace: {mountPath: /var/run/loom/schedule-input}\n  schedule:\n    cron: '0 3 * * *'\n    input: {configMapKeyRef: {name: tasks, key: nightly}}\n",
+        ),
+        &config(),
+    );
+    assert!(
+        message.starts_with("refused: MountPathInvalid at spec.workspace.mountPath: "),
+        "{message}"
+    );
+}

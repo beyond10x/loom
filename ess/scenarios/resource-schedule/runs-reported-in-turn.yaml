@@ -1,0 +1,32 @@
+# story command-schedule: a scheduled `Command` resource stays Running while its CronJob starts
+# runs; each finished run is recorded as `last_run` in turn, the newest last, and a run that
+# failed does not move the resource to Failed.
+type: ess-scenario/4
+domain: loom.resource
+scenario: runs-reported-in-turn
+summary: Two finished scheduled runs, one succeeded and one failed, are reported in turn while the resource stays Running.
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.resource.ApplyLoomAgent
+    input: {name: nightly, generation: 1}
+    outcome: created
+  - at: 2026-11-02T00:00:01Z
+    command: loom.resource.RecordCheck
+    input: {name: nightly, generation: 1, exit_code: 0, message: admitted, variant: Command}
+    outcome: running
+  - at: 2026-11-02T00:20:07Z
+    command: loom.resource.ObserveScheduledRun
+    input: {name: nightly, phase: Succeeded, exit_code: 0, reason: Completed}
+    outcome: last-run-succeeded
+  - at: 2026-11-02T00:40:09Z
+    command: loom.resource.ObserveScheduledRun
+    input: {name: nightly, phase: Failed, exit_code: 3, reason: Error}
+    outcome: last-run-failed
+
+assert:
+  - view: loom.resource.LoomAgents
+    contains:
+      name: nightly
+      state: Running
+      last_run: {phase: Failed, exit_code: 3, reason: Error}

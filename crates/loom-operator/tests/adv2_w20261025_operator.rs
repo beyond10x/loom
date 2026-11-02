@@ -722,6 +722,7 @@ fn adv2_every_states_status_is_admitted_by_the_crds_status_schema() {
                         variant,
                         conditions: None,
                         run: None,
+                        last_run: None,
                         state,
                     };
                     let value = serde_json::to_value(status::status(&row)).expect("JSON");

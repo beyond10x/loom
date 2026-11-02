@@ -1,13 +1,13 @@
 //! The `loom.resource` domain, answered by `b10x-loom-resource`.
 //!
-//! `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`, `ObserveRun` and `DeleteLoomAgent` are
-//! answered by the scenario's [`LoomAgentRecord`], which runs the generated behaviour of
-//! `loom.resource` over itself, and the view `LoomAgents` by its generated query. This module
-//! decodes the suite's input into the generated types, publishes the event each outcome carries
-//! and encodes each answer back; it decides no outcome. The suite names members by their declared
-//! names (`observed_generation`, `exit_code`), not by their wire names. The view's `conditions` is
-//! encoded as the record holds it; no command sets it (ESS 0.69.0 admits no list under `sets:`),
-//! so every row reads it absent.
+//! `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`, `ObserveRun`, `ObserveScheduledRun` and
+//! `DeleteLoomAgent` are answered by the scenario's [`LoomAgentRecord`], which runs the generated
+//! behaviour of `loom.resource` over itself, and the view `LoomAgents` by its generated query.
+//! This module decodes the suite's input into the generated types, publishes the event each
+//! outcome carries and encodes each answer back; it decides no outcome. The suite names members
+//! by their declared names (`observed_generation`, `exit_code`), not by their wire names. The
+//! view's `conditions` is encoded as the record holds it; no command sets it (ESS 0.69.0 admits
+//! no list under `sets:`), so every row reads it absent.
 
 use std::collections::BTreeMap;
 
@@ -16,9 +16,10 @@ use b10x_loom_resource::Timestamp;
 use b10x_loom_resource::model::{
     AgentVariant, ApplyLoomAgent, ApplyLoomAgentOutcome, CheckResult, Condition, ConditionStatus,
     ConditionType, DeleteLoomAgent, DeleteLoomAgentOutcome, DeploymentAvailability,
-    DeploymentStatus, LoomAgentObserved, LoomAgentState, LoomAgents, ObserveDeployment,
-    ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome,
-    ResourceName, RunEnd, RunPhase, StaleGeneration,
+    DeploymentStatus, LastRun, LoomAgentLastRunObserved, LoomAgentObserved, LoomAgentState,
+    LoomAgents, ObserveDeployment, ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome,
+    ObserveScheduledRun, ObserveScheduledRunOutcome, RecordCheck, RecordCheckOutcome, ResourceName,
+    RunEnd, RunPhase, StaleGeneration,
 };
 use ess_conformance::target::{ObservedEvent, SemanticCommandResult, ViewRow};
 use ess_primitives::ids::CorrelationId;
@@ -31,6 +32,7 @@ pub(crate) const APPLY_LOOM_AGENT: &str = "loom.resource.ApplyLoomAgent";
 pub(crate) const RECORD_CHECK: &str = "loom.resource.RecordCheck";
 pub(crate) const OBSERVE_DEPLOYMENT: &str = "loom.resource.ObserveDeployment";
 pub(crate) const OBSERVE_RUN: &str = "loom.resource.ObserveRun";
+pub(crate) const OBSERVE_SCHEDULED_RUN: &str = "loom.resource.ObserveScheduledRun";
 pub(crate) const DELETE_LOOM_AGENT: &str = "loom.resource.DeleteLoomAgent";
 pub(crate) const LOOM_AGENTS: &str = "loom.resource.LoomAgents";
 
@@ -41,6 +43,7 @@ const LOOM_AGENT_DEGRADED: &str = "loom.resource.LoomAgentDegraded";
 const LOOM_AGENT_RECOVERED: &str = "loom.resource.LoomAgentRecovered";
 const LOOM_AGENT_OBSERVED: &str = "loom.resource.LoomAgentObserved";
 const LOOM_AGENT_RUN_OBSERVED: &str = "loom.resource.LoomAgentRunObserved";
+const LOOM_AGENT_LAST_RUN_OBSERVED: &str = "loom.resource.LoomAgentLastRunObserved";
 const LOOM_AGENT_COMPLETED: &str = "loom.resource.LoomAgentCompleted";
 const LOOM_AGENT_FAILED: &str = "loom.resource.LoomAgentFailed";
 const LOOM_AGENT_DELETED: &str = "loom.resource.LoomAgentDeleted";
@@ -337,6 +340,74 @@ pub(crate) fn observe_run(
     })
 }
 
+/// The declared name of a `loom.resource.RunPhase`.
+fn phase_node(phase: RunPhase) -> Node {
+    codec::text_node(match phase {
+        RunPhase::Active => "Active",
+        RunPhase::Succeeded => "Succeeded",
+        RunPhase::Failed => "Failed",
+    })
+}
+
+/// Publishes `LoomAgentLastRunObserved`, the event of `last-run-succeeded` and
+/// `last-run-failed`.
+fn last_run_observed(
+    live: &mut Live,
+    observed: &LoomAgentLastRunObserved,
+    correlation: &CorrelationId,
+) -> ObservedEvent {
+    live.publish(
+        event(LOOM_AGENT_LAST_RUN_OBSERVED)
+            .with("name", name_node(&observed.name))
+            .with("generation", codec::number(observed.generation))
+            .with("phase", phase_node(observed.phase))
+            .with("exit_code", optional_number(observed.exit_code)),
+        correlation,
+    )
+}
+
+/// `ObserveScheduledRun`, by the record's generated behaviour.
+pub(crate) fn observe_scheduled_run(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let command = ObserveScheduledRun {
+        name: name(input)?,
+        phase: phase(input, "phase")?,
+        exit_code: optional_integer(input, "exit_code")?,
+        finished_at: codec::optional_text(input, "finished_at")?.map(Timestamp),
+        reason: codec::optional_text(input, "reason")?,
+    };
+    Some(match live.resources.observe_scheduled_run(command).ok()? {
+        ObserveScheduledRunOutcome::Unknown { error } => refused(
+            OBSERVE_SCHEDULED_RUN,
+            "unknown",
+            LOOM_AGENT_NOT_FOUND,
+            &error.name,
+        ),
+        ObserveScheduledRunOutcome::LastRunSucceeded {
+            loom_agent_last_run_observed,
+        } => {
+            let published = last_run_observed(live, &loom_agent_last_run_observed, correlation);
+            took(OBSERVE_SCHEDULED_RUN, "last-run-succeeded").emitting(published)
+        }
+        ObserveScheduledRunOutcome::LastRunFailed {
+            loom_agent_last_run_observed,
+        } => {
+            let published = last_run_observed(live, &loom_agent_last_run_observed, correlation);
+            took(OBSERVE_SCHEDULED_RUN, "last-run-failed").emitting(published)
+        }
+        ObserveScheduledRunOutcome::RunActive => took(OBSERVE_SCHEDULED_RUN, "run-active"),
+        ObserveScheduledRunOutcome::NotRunning { error } => refused(
+            OBSERVE_SCHEDULED_RUN,
+            "not-running",
+            LOOM_AGENT_STATE_CONFLICT,
+            &error.name,
+        ),
+    })
+}
+
 /// `DeleteLoomAgent`, by the record's generated behaviour.
 pub(crate) fn delete_loom_agent(
     live: &mut Live,
@@ -392,8 +463,30 @@ fn row(held: &LoomAgents) -> ViewRow {
             held.variant.map_or(Node::Null, variant_node),
         ),
         ("run".to_owned(), held.run.as_ref().map_or(Node::Null, run)),
+        (
+            "last_run".to_owned(),
+            held.last_run.as_ref().map_or(Node::Null, last_run),
+        ),
         ("state".to_owned(), state(held.state)),
     ])
+}
+
+/// A `loom.resource.LastRun` as a suite value, an absent member as null.
+fn last_run(last: &LastRun) -> Node {
+    Node::Map(BTreeMap::from([
+        ("phase".to_owned(), phase_node(last.phase)),
+        ("exit_code".to_owned(), optional_number(last.exit_code)),
+        (
+            "finished_at".to_owned(),
+            last.finished_at
+                .as_ref()
+                .map_or(Node::Null, |at| codec::text_node(&at.0)),
+        ),
+        (
+            "reason".to_owned(),
+            last.reason.as_deref().map_or(Node::Null, codec::text_node),
+        ),
+    ]))
 }
 
 /// A `loom.resource.CheckResult` as a suite value.
@@ -452,6 +545,7 @@ fn condition(condition: &Condition) -> Node {
                 ConditionType::Checked => "Checked",
                 ConditionType::Available => "Available",
                 ConditionType::Completed => "Completed",
+                ConditionType::LastRunSucceeded => "LastRunSucceeded",
             }),
         ),
         (

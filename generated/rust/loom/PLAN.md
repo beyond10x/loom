@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 3a16f4a5548f9ba707a0272811b688cc4ec7e5a5d7df32da0698ee33df0a7d9b
-  contract digest 94ddf04eaa0edba7434fd7d5286684b791f8683f254a464b49d5b667ab02e2e2
+  model digest a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00
+  contract digest 2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-277 capabilities: **274 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+284 capabilities: **281 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -133,6 +133,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.ConditionStatus` |
 | domain type | `loom.resource.ConditionType` |
 | domain type | `loom.resource.ConfigFile` |
+| domain type | `loom.resource.ConfigMapKeyRef` |
 | domain type | `loom.resource.ConfinementProfile` |
 | domain type | `loom.resource.ConfinementProfileKind` |
 | domain type | `loom.resource.ConnectorsBoundary` |
@@ -141,11 +142,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.EnvVar` |
 | domain type | `loom.resource.GitBoundary` |
 | domain type | `loom.resource.ImageRef` |
+| domain type | `loom.resource.LastRun` |
 | domain type | `loom.resource.LoomAgent.State` |
 | domain type | `loom.resource.LoomAgentSpec` |
 | domain type | `loom.resource.ResourceName` |
 | domain type | `loom.resource.RunEnd` |
 | domain type | `loom.resource.RunPhase` |
+| domain type | `loom.resource.ScheduleInput` |
+| domain type | `loom.resource.ScheduleSpec` |
 | domain type | `loom.resource.SecretFiles` |
 | domain type | `loom.resource.SecretRef` |
 | domain type | `loom.resource.Workspace` |
@@ -222,6 +226,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.resource.ObserveDeployment` |
 | command contract | `loom.resource.ObserveRun` |
 | command behaviour | `loom.resource.ObserveRun` |
+| command contract | `loom.resource.ObserveScheduledRun` |
+| command behaviour | `loom.resource.ObserveScheduledRun` |
 | command contract | `loom.resource.RecordCheck` |
 | command behaviour | `loom.resource.RecordCheck` |
 | command contract | `loom.run.OverruleSelection` |
@@ -243,6 +249,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.resource.LoomAgentDegraded` |
 | event type | `loom.resource.LoomAgentDeleted` |
 | event type | `loom.resource.LoomAgentFailed` |
+| event type | `loom.resource.LoomAgentLastRunObserved` |
 | event type | `loom.resource.LoomAgentObserved` |
 | event type | `loom.resource.LoomAgentRecovered` |
 | event type | `loom.resource.LoomAgentRefused` |

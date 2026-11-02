@@ -147,6 +147,8 @@ fn the_chart_and_its_images_carry_the_workspace_version() {
     assert_eq!(values["agentImage"]["tag"], "");
 }
 
+/// `story:command-schedule`: the child kinds include `cronjobs`, which a scheduled `Command`
+/// resource runs as.
 #[test]
 fn the_role_grants_the_designs_verbs_and_nothing_on_secrets() {
     let documents = template(&[]);
@@ -189,6 +191,7 @@ fn the_role_grants_the_designs_verbs_and_nothing_on_secrets() {
             children.clone(),
         ),
         ("batch".to_owned(), "jobs".to_owned(), children.clone()),
+        ("batch".to_owned(), "cronjobs".to_owned(), children.clone()),
         (
             "loom.beyond10x.dev".to_owned(),
             "loomagents".to_owned(),

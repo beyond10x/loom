@@ -626,6 +626,34 @@ spec:
                 type: object
               routes:
                 x-kubernetes-preserve-unknown-fields: true
+              schedule:
+                properties:
+                  cron:
+                    type: string
+                  input:
+                    properties:
+                      configMapKeyRef:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - name
+                        - key
+                        type: object
+                      text:
+                        type: string
+                    type: object
+                  startingDeadlineSeconds:
+                    type: integer
+                  suspend:
+                    type: boolean
+                  timeZone:
+                    type: string
+                required:
+                - cron
+                type: object
               seccompProfile:
                 properties:
                   localhostProfile:
@@ -698,6 +726,7 @@ spec:
                       - Checked
                       - Available
                       - Completed
+                      - LastRunSucceeded
                       type: string
                   required:
                   - type
@@ -715,6 +744,24 @@ spec:
                     type: string
                 required:
                 - availability
+                type: object
+              lastRun:
+                properties:
+                  exitCode:
+                    type: integer
+                  finishedAt:
+                    format: date-time
+                    type: string
+                  phase:
+                    enum:
+                    - Active
+                    - Succeeded
+                    - Failed
+                    type: string
+                  reason:
+                    type: string
+                required:
+                - phase
                 type: object
               observedGeneration:
                 type: integer

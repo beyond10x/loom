@@ -63,3 +63,4 @@ scenarios:
   - scenarios/agent-run-once/input-missing.yaml
   - scenarios/agent-run-once/refused-spec.yaml
   - scenarios/agent-run-once/budgets-hold.yaml
+  - scenarios/resource-schedule/runs-reported-in-turn.yaml

@@ -95,6 +95,7 @@ fn observed(
         variant: check.map(|_| AgentVariant::AgentServe),
         run: None,
         conditions: None,
+        last_run: None,
         state,
     })
 }
@@ -439,6 +440,7 @@ fn two_resources_are_held_apart() {
                 variant: Some(AgentVariant::AgentServe),
                 run: None,
                 conditions: None,
+                last_run: None,
                 state: LoomAgentState::Running,
             },
             LoomAgents {
@@ -449,6 +451,7 @@ fn two_resources_are_held_apart() {
                 variant: None,
                 run: None,
                 conditions: None,
+                last_run: None,
                 state: LoomAgentState::Pending,
             },
         ]
