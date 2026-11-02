@@ -1137,14 +1137,18 @@ sidecar get the declared size, else `defaultResources` for `AgentServe` and
 `crates/loom-operator/tests/command_resources.rs`); after that, `spec.schedule` (step 18,
 `story:command-schedule`): on an `AgentServe` resource `Malformed` at `spec.schedule`, a `cron`
 Kubernetes does not read (five fields or `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
-`@midnight`, `@hourly`; no `TZ=` prefix, no `@every`) at `spec.schedule.cron`, a `timeZone` the
+`@midnight`, `@hourly`; no `TZ=` prefix, no `@every`, no whitespace around it, since the CronJob
+carries it as written) at `spec.schedule.cron`, a `timeZone` the
 bundled IANA database (jiff, `tzdb-bundle-always`) does not hold as spelt, or `Local`, at
 `spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, an `input` with
 both or neither of `text` and `configMapKeyRef`, a blank text, a name that is no ConfigMap name, a
 key that is no ConfigMap key, or beside a `spec.command` entrypoint or argument or without
 `spec.agent` at `spec.schedule.input`, all `Malformed` without repeating the value; then the
 schedule is walked for a credential, the text word by word (`SecretLiteral` at
-`spec.schedule.input.text`). The inline text is the ConfigMap key `schedule-input.txt`, so a
+`spec.schedule.input.text`); then (step 19, `admission::schedule_name`, called after `admit` by
+`render_document` and the controller, since the spec does not hold the name) a scheduled
+resource named longer than 52 characters, which its CronJob cannot carry, is `Malformed` at
+`metadata.name`. The inline text is the ConfigMap key `schedule-input.txt`, so a
 `spec.configFiles` entry of that name is `ConfigFileConflict` and the text counts toward the
 1 MiB; a `configMapKeyRef` input's mount `/var/run/loom/schedule-input` is reserved
 (`MountPathInvalid`). A `Command` resource's `spec.agent` passes only the credential walk and the
@@ -1210,8 +1214,9 @@ a new generation patches its schedule and template. The Jobs it starts are Kuber
 controller is the CronJob, so the sweep never counts them): of those labelled
 `app.kubernetes.io/instance=<name>` whose controlling owner is the CronJob's uid, the newest
 finished one (by `creationTimestamp`, then name) is `ObserveScheduledRun`, read by `observation`
-as a single run is, once per Job uid (`Held::last_job`) and again after a new generation cleared
-`last_run`. The resource stays Running: `Available` True `Scheduled` or False `Suspended`,
+as a single run is, once per Job uid and never one older than the last observed (`Held::last_job`
+holds its uid and order, so deleting the newest Job leaves `last_run`), and again after a new
+generation cleared `last_run`. The resource stays Running: `Available` True `Scheduled` or False `Suspended`,
 `LastRunSucceeded` Unknown `NoRunYet`, True `RunSucceeded` or False `RunFailed` with the exit
 code and end time, `status.lastRun` the row's `last_run` (`status::status_of`,
 `status::scheduled_conditions`).

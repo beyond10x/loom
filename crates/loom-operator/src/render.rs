@@ -1389,6 +1389,7 @@ pub fn render_document(text: &str, config: &Config) -> Result<String, RenderErro
     let catalog = ProtocolCatalog::plugins().map_err(RenderError::Catalog)?;
     let actions = |protocol: &str| catalog.get(protocol).map(|entry| entry.actions());
     let admitted = admission::admit(&agent.spec, &namespace, config, &actions)
+        .and_then(|admitted| admission::schedule_name(&name, &agent.spec).map(|()| admitted))
         .map_err(RenderError::Refused)?;
     Ok(to_yaml(&children(
         &agent, &name, &namespace, &admitted, config,

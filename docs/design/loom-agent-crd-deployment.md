@@ -386,7 +386,8 @@ Admission (`crates/loom-operator/src/admission.rs`, step 18):
 | Rule | Refusal |
 |---|---|
 | `spec.schedule` on an `AgentServe` resource | `Malformed` at `spec.schedule` |
-| `cron` is not five fields Kubernetes reads (each a list of `*`, `?`, a value or a range, with an optional `/step`; months and days of the week also by three-letter name) or one of `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`; a `TZ=` or `CRON_TZ=` prefix and `@every` are refused | `Malformed` at `spec.schedule.cron` |
+| `cron` is not five fields Kubernetes reads (each a list of `*`, `?`, a value or a range, with an optional `/step`; months and days of the week also by three-letter name) or one of `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`; a `TZ=` or `CRON_TZ=` prefix, `@every` and whitespace around the expression, which the CronJob would carry as written, are refused | `Malformed` at `spec.schedule.cron` |
+| the resource's name is longer than 52 characters, which its CronJob cannot carry since each Job it starts appends 11 (unscheduled, the name runs as a Job) | `Malformed` at `metadata.name` |
 | `timeZone` is not an IANA name the bundled time zone database holds, spelt as it spells it, or is `Local` | `Malformed` at `spec.schedule.timeZone` |
 | `startingDeadlineSeconds` is negative | `Malformed` at `spec.schedule.startingDeadlineSeconds` |
 | `input` gives both `text` and `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no ConfigMap name or whose `key` no ConfigMap key; or the resource names a program in `spec.command` or gives no `spec.agent` | `Malformed` at `spec.schedule.input` |
@@ -424,7 +425,8 @@ Lifecycle and status:
   an exit code read still succeeded or failed. The condition `Completed` is not set;
   `LastRunSucceeded` is True `RunSucceeded`, False `RunFailed` or Unknown `NoRunYet`, its message
   naming the exit code and end time. Each finished Job is observed once
-  (`loom.resource.ObserveScheduledRun`, event `LoomAgentLastRunObserved`); a new generation clears
+  (`loom.resource.ObserveScheduledRun`, event `LoomAgentLastRunObserved`), and never one older
+  than the run last observed, so deleting the newest Job leaves `lastRun`; a new generation clears
   `lastRun` and the newest finished run is read again.
 - A new generation patches the CronJob's schedule and template in place (a CronJob's template is
   mutable, unlike a Job's). A run of an older generation that is still active finishes under its
