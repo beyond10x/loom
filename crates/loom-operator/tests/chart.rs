@@ -5,6 +5,10 @@
 //! which `blockOwnerDeletion` needs), `get` and `list` on Pods (a finished run's exit code) and
 //! nothing on Secrets or Events, and the controller's image and `config.yaml` follow the values,
 //! with the defaults and with the overrides `task chart-check` renders.
+//!
+//! `story:chart-defaults-to-published-images`: the values name the published images
+//! `ghcr.io/beyond10x/loom-operator` and `ghcr.io/beyond10x/loom-agent` with empty tags, and both
+//! render at the chart's `appVersion` unless a tag is set.
 
 use std::fs;
 use std::path::PathBuf;
@@ -129,8 +133,12 @@ fn the_chart_and_its_images_carry_the_workspace_version() {
         "values.yaml carries no comments"
     );
     let values: Value = serde_yaml_ng::from_str(&text).expect("values.yaml is YAML");
-    assert_eq!(values["image"]["tag"], VERSION);
-    assert_eq!(values["agentImage"]["tag"], VERSION);
+    // `story:chart-defaults-to-published-images`: the published images, their tags following
+    // `appVersion`, so a release moves only `Chart.yaml`.
+    assert_eq!(values["image"]["repository"], "ghcr.io/beyond10x/loom-operator");
+    assert_eq!(values["image"]["tag"], "");
+    assert_eq!(values["agentImage"]["repository"], "ghcr.io/beyond10x/loom-agent");
+    assert_eq!(values["agentImage"]["tag"], "");
 }
 
 #[test]
@@ -224,7 +232,7 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
     let container = &pod["containers"][0];
     assert_eq!(
         container["image"],
-        format!("registry.example/loom-operator:{VERSION}").as_str()
+        format!("ghcr.io/beyond10x/loom-operator:{VERSION}").as_str()
     );
     assert_eq!(
         strings(&container["args"]),
@@ -252,7 +260,7 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
         Config {
             namespace: "agents".to_owned(),
             default_image: Image {
-                repository: "registry.example/loom-agent".to_owned(),
+                repository: "ghcr.io/beyond10x/loom-agent".to_owned(),
                 tag: VERSION.to_owned(),
             },
             default_resources: Resources {
@@ -281,7 +289,7 @@ fn overrides_reach_the_controller_image_and_config() {
     let deployment = kind(&documents, "Deployment");
     assert_eq!(
         deployment["spec"]["template"]["spec"]["containers"][0]["image"],
-        "registry.example/loom-operator:0.0.1-test"
+        "ghcr.io/beyond10x/loom-operator:0.0.1-test"
     );
     assert_eq!(
         config(&documents),
