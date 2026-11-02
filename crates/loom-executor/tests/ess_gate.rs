@@ -286,11 +286,10 @@ fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
 }
 
 // Item 3: the whole gate over a copy that synthesize refuses fails at step 3, after steps 1 and 2
-// held. `Optional<Binary64>` validates and compiles, and the conformance suite refuses it. Every
-// confidence is retyped: `SelectAction` copies its input into `Selection.confidence`, and
-// retyping one side alone fails validation instead. The copy lists no authored scenarios
-// (`scenarios: []`): validate checks the codecs the authored scenarios need, and refuses
-// `Binary64` for them (`ESS-AUTHOR-036`) at step 1, before synthesize is reached.
+// held. The copy lists no authored scenarios (`scenarios: []`): ess 0.82.0 validates and compiles
+// it, and `ess verify conform synthesize` refuses an explicit list that selects no file and exits
+// non-zero. (Up to ess 0.77.0 this test retyped the confidence to `Optional<Binary64>`, which the
+// suite refused as `UnsupportedPrimitive`; 0.82.0 synthesizes `Binary64`.)
 #[test]
 fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
     let copy = scratch("gate_refused_copy").join("ess");
@@ -302,25 +301,13 @@ fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
         .expect("ess-inputs.yaml has a top-level `scenarios:` list");
     fs::write(&inputs, format!("{}\nscenarios: []\n", &listed[..at]))
         .expect("write ess-inputs.yaml copy");
-    let run = copy.join("domains/run.yaml");
-    let text = fs::read_to_string(&run).expect("read run.yaml copy");
-    assert!(
-        text.contains("type: Optional<Decimal>"),
-        "run.yaml declares the confidence as Optional<Decimal>"
-    );
-    fs::write(
-        &run,
-        text.replace("type: Optional<Decimal>", "type: Optional<Binary64>"),
-    )
-    .expect("write run.yaml copy");
-
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {
         panic!("the gate passed a specification synthesize refuses");
     };
     assert_eq!(failure.step, Step::Synthesize, "{failure}");
     assert!(
-        failure.detail.contains("UnsupportedPrimitive"),
+        failure.detail.contains("selected no authored files"),
         "the failure carries the refusal: {failure}"
     );
 }
@@ -404,7 +391,7 @@ fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
 #[test]
 fn gate_over_a_copy_requiring_an_older_ess_fails_at_validate() {
     let copy = copy_with_edit("gate_requires_older", "ess-inputs.yaml", |text| {
-        text.replacen("requires: ess 0.77.0", "requires: ess 0.51.0", 1)
+        text.replacen("requires: ess 0.82.0", "requires: ess 0.51.0", 1)
     });
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {

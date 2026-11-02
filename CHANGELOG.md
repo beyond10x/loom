@@ -2,7 +2,7 @@
 
 All notable changes to Loom are recorded here, in the format of
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). Loom releases from source at bare-version tags
-such as `0.1.0`; nothing is on a registry, and consumers pin a tag (`tag = "0.1.0"`). Changes collect under
+such as `0.1.0`; no crate is on a registry, and consumers pin a tag (`tag = "0.1.0"`). Changes collect under
 `[Unreleased]` until the next release; the detail of each change is in its story and commit history.
 
 Every release names what breaks for a consumer in `**Breaking:**` bullets, or says `No breaking changes.` on a line.
@@ -11,6 +11,19 @@ Every release names what breaks for a consumer in `**Breaking:**` bullets, or sa
 before 0.22.0 predate that rule: there, `No breaking changes.` means the original entry named no break.
 
 ## [Unreleased]
+
+## [0.54.0] - 2026-11-02
+
+No breaking changes.
+
+### Added
+
+- Every release publishes `ghcr.io/beyond10x/loom-agent:<version>` (`b10x-loom`) and `ghcr.io/beyond10x/loom-operator:<version>` (`b10x-loom-operator`) for `linux/amd64`, each running as user 10001, and the chart as `oci://ghcr.io/beyond10x/charts/loom-agents` (story:release-publishes-images)
+
+### Changed
+
+- The `loom-agents` chart's `image` and `agentImage` default to `ghcr.io/beyond10x/loom-operator` and `ghcr.io/beyond10x/loom-agent`, their tags empty and rendered as the chart's `appVersion`; a tag or repository set at install still wins (story:chart-defaults-to-published-images)
+- ESS moves from 0.77.0 to 0.82.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); the generated decoders read a whole number spelt with a fraction or an exponent (`3.0`, `30e-1`) as an integer
 
 ## [0.53.0] - 2026-10-30
 
@@ -1287,7 +1300,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.53.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.54.0...HEAD
+[0.54.0]: https://github.com/beyond10x/loom/releases/tag/0.54.0
 [0.53.0]: https://github.com/beyond10x/loom/releases/tag/0.53.0
 [0.52.0]: https://github.com/beyond10x/loom/releases/tag/0.52.0
 [0.51.0]: https://github.com/beyond10x/loom/releases/tag/0.51.0

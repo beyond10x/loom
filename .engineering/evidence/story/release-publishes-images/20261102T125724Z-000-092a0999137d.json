@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-02T12:57:24Z",
+  "actor": "human:timo",
+  "artifact": "story:release-publishes-images",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p loom-xtask --locked --test release_check",
+    "reference": "wave 2026-11-02-w1 head 9a0dd61b plus release-prepare, ESS 0.82.0: 22 passed, EXIT=0 (scratch loom-d377/g6.log); CI full gate on the bot PR decides (D385)"
+  }
+}

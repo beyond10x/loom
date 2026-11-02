@@ -694,20 +694,85 @@ pub fn text_at<'a>(value: &'a Value, at: &str, expected: &str) -> Result<&'a str
 
 /// The integer at this path.
 ///
+/// A whole number is read however it is spelt — `3`, `3.0`, `30e-1`, `-0.0` — as the published
+/// schema's `integer` reads it, and decided on its decimal digits, never through a float.
+///
 /// # Errors
 ///
-/// [`DecodeError`] when the value is not a number, or is one no `Integer` can hold — a fraction,
-/// an exponent, or a magnitude past 64 bits. Refused rather than rounded: a silently truncated
-/// identifier is worse than a rejected command.
+/// [`DecodeError`] when the value is not a number, or is one no `Integer` can hold — a fraction
+/// or a magnitude past 64 bits. Refused rather than rounded: a silently truncated identifier is
+/// worse than a rejected command.
 pub fn integer_at(value: &Value, at: &str, expected: &str) -> Result<i64, DecodeError> {
     match value {
-        Value::Number(number) => number.parse::<i64>().map_err(|_| DecodeError {
-            at: at.to_owned(),
-            expected: expected.to_owned(),
-            found: format!("the number {number}"),
-        }),
+        Value::Number(number) => number
+            .parse::<i64>()
+            .ok()
+            .or_else(|| whole_number(number))
+            .ok_or_else(|| DecodeError {
+                at: at.to_owned(),
+                expected: expected.to_owned(),
+                found: format!("the number {number}"),
+            }),
         other => Err(DecodeError::of(at, expected, other)),
     }
+}
+
+/// The `i64` a number spelt with a fraction or an exponent denotes, when it denotes one exactly.
+///
+/// `spelling` is what [`number`] admits: an optional `-`, digits, an optional `.` and digits,
+/// and an optional exponent. A number built by hand may hold anything, so a spelling outside that
+/// grammar (a byte that is not a digit where a digit belongs, an empty group of digits) is
+/// refused. The significant digits and their power of ten are read off the text, so a hostile
+/// exponent (`1e999999999`) is refused by counting, without building digits.
+fn whole_number(spelling: &str) -> Option<i64> {
+    let digits = |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+    let (negative, unsigned) = match spelling.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, spelling),
+    };
+    let (mantissa, exponent) = match unsigned.find(|c: char| c == 'e' || c == 'E') {
+        Some(index) => (&unsigned[..index], &unsigned[index + 1..]),
+        None => (unsigned, "0"),
+    };
+    let (whole, fraction) = match mantissa.split_once('.') {
+        Some((whole, fraction)) => (whole, Some(fraction)),
+        None => (mantissa, None),
+    };
+    let (sign, magnitude) = match exponent.strip_prefix('-') {
+        Some(rest) => (-1, rest),
+        None => (1, exponent.strip_prefix('+').unwrap_or(exponent)),
+    };
+    if !digits(whole) || fraction.is_some_and(|part| !digits(part)) || !digits(magnitude) {
+        return None;
+    }
+    let fraction = fraction.unwrap_or("");
+    // Saturated: past any bound an `i64` cares about, a larger exponent says nothing new.
+    let mut scale: i64 = 0;
+    for digit in magnitude.bytes() {
+        scale = scale.saturating_mul(10).saturating_add(i64::from(digit - b'0'));
+    }
+    let digits = format!("{whole}{fraction}");
+    let digits = digits.trim_start_matches('0');
+    let significant = digits.trim_end_matches('0');
+    if significant.is_empty() {
+        return Some(0);
+    }
+    // The number is `significant` times ten to the power `shift`.
+    let shift = scale
+        .saturating_mul(sign)
+        .saturating_sub(i64::try_from(fraction.len()).ok()?)
+        .saturating_add(i64::try_from(digits.len() - significant.len()).ok()?);
+    if shift < 0 || i64::try_from(significant.len()).ok()?.saturating_add(shift) > 19 {
+        return None;
+    }
+    let mut held: i128 = 0;
+    for digit in significant.bytes() {
+        held = held * 10 + i128::from(digit - b'0');
+    }
+    for _ in 0..shift {
+        held *= 10;
+    }
+    i64::try_from(if negative { -held } else { held }).ok()
 }
 
 /// The decimal string at this path, in the published pattern: an optional `-`, digits without a
