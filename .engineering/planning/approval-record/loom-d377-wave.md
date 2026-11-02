@@ -9,7 +9,7 @@ tags:
 relations:
 - decides: story:release-publishes-images
 - decides: story:chart-defaults-to-published-images
-revision: 2
+revision: 3
 transitions:
 - {from: "draft", to: "approved", at: "2026-11-02T10:20:24Z", actor: "human:timo", revision: 2}
 ---
@@ -70,3 +70,9 @@ Loom 0.53.0). Release 0.54.0, no breaking change.
 
 The opening store commit, the unit commits, the release-prepare commit (0.54.0), one bot PR to
 main, its merge on green. The release tag waits for the orchestrator's go.
+
+## D385 (orchestrator, 2026-11-02)
+
+"(b) accepted: no local full gate; CI's full gate on the bot PR decides. ESS pin 0.77.0 -> 0.82.0:
+include. (a) targeted tests: wait" for the disk floor host-monitor sets. Package visibility: b10x-atlas
+sets the packages public after the first publish.
