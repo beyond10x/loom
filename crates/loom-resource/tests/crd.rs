@@ -876,6 +876,7 @@ fn spec_agent_is_the_agent_document_and_optional() {
             "env",
             "image",
             "routes",
+            "schedule",
             "seccompProfile",
             "secretFiles",
             "secretRef",
@@ -1129,6 +1130,7 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
             "check",
             "conditions",
             "deployment",
+            "lastRun",
             "observedGeneration",
             "run",
             "state",
@@ -1154,7 +1156,7 @@ fn status_is_the_entity_without_its_name_and_its_state_enumerates_the_lifecycle(
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": ["Checked", "Available", "Completed"]},
+                    "type": {"type": "string", "enum": ["Checked", "Available", "Completed", "LastRunSucceeded"]},
                     "status": {"type": "string", "enum": ["True", "False", "Unknown"]},
                     "reason": {"type": "string"},
                     "message": {"type": "string"},
