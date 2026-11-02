@@ -19,7 +19,7 @@ No breaking changes.
 ### Added
 
 - `b10x-loom agent run --spec <FILE> --state <DIR> --input <FILE>` runs one turn of a `loom.agent/1` spec on the input's text, records it as `agent serve` records an item, performs at most the sends `writes` admits and exits: 0 answered, 4 no answer, 3 refused, 1 input refused (story:agent-run-once)
-- `LoomAgent` `spec.schedule` (`cron`, `timeZone`, `suspend`, `startingDeadlineSeconds`) runs a `Command` resource as a `batch/v1` CronJob, `Forbid` (story:command-schedule)
+- `LoomAgent` `spec.schedule` (`cron`, `timeZone`, `suspend`, `startingDeadlineSeconds`) runs a `Command` resource as a `batch/v1` CronJob, `Forbid`; a scheduled resource's name is at most 52 characters (story:command-schedule)
 - `status.lastRun` and the condition `LastRunSucceeded` report a scheduled resource's newest finished run; it stays `Running` (story:command-schedule)
 - `spec.schedule.input` (`text` or `configMapKeyRef`) makes each scheduled run `b10x-loom agent run --input <file>` (story:command-schedule)
 - `loom.resource` command `ObserveScheduledRun`, event `LoomAgentLastRunObserved`, view member `last_run` (story:command-schedule)

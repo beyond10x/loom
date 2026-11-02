@@ -53,8 +53,9 @@
 //!    CronJob is applied on every reconcile, so a new generation patches its schedule and job
 //!    template in place. The runs it starts are Kubernetes's: never applied, deleted or counted
 //!    as the resource's children. The newest finished one whose controlling owner is the
-//!    CronJob's uid is `ObserveScheduledRun`, read as a single run's end is, once per Job, and
-//!    again after a new generation cleared the record's `last_run`; the resource stays Running.
+//!    CronJob's uid is `ObserveScheduledRun`, read as a single run's end is, once per Job and
+//!    never one older than the last observed, and again after a new generation cleared the
+//!    record's `last_run`; the resource stays Running.
 //!    A run whose pod is still ending is waited for after [`RETRY`].
 //! 6. A `Completed` or `Failed` resource has no child applied, read or deleted: its run is over
 //!    until a new generation respecifies it.
@@ -178,7 +179,27 @@ struct Held {
     applied: BTreeSet<(Kind, String)>,
     pods_refused: Option<u16>,
     over: Option<JobRun>,
-    last_job: Option<String>,
+    last_job: Option<ScheduledRun>,
+}
+
+/// A scheduled run last observed as a resource's `last_run`: its Job's uid and where it stands
+/// among the CronJob's runs ([`run_order`]), so a run older than it is never observed after it.
+#[derive(Clone, Debug)]
+struct ScheduledRun {
+    uid: String,
+    order: RunOrder,
+}
+
+/// Where a Job stands among its CronJob's runs: its creation time, then its name between two
+/// created within one second (the CronJob suffixes each with its scheduled minute).
+type RunOrder = (Option<JiffTimestamp>, String);
+
+/// The place of the run `job` among its CronJob's runs.
+fn run_order(job: &Job) -> RunOrder {
+    (
+        job.metadata.creation_timestamp.as_ref().map(|time| time.0),
+        job.name_any(),
+    )
 }
 
 /// What every reconcile shares: the client, the configuration, the plugin catalog the check
@@ -306,16 +327,15 @@ impl Context {
         held.over.clone()
     }
 
-    /// The uid of the scheduled run of the resource `name` last observed as its `last_run`.
-    fn last_job(&self, name: &str) -> Option<String> {
+    /// The scheduled run of the resource `name` last observed as its `last_run`.
+    fn last_job(&self, name: &str) -> Option<ScheduledRun> {
         self.held().get(name).and_then(|held| held.last_job.clone())
     }
 
-    /// Notes that the scheduled run whose Job has `uid` is the last observed of the resource
-    /// `name`.
-    fn saw_last_job(&self, name: &str, uid: &str) {
+    /// Notes that the scheduled run `run` is the last observed of the resource `name`.
+    fn saw_last_job(&self, name: &str, run: ScheduledRun) {
         if let Some(held) = self.held().get_mut(name) {
-            held.last_job = Some(uid.to_owned());
+            held.last_job = Some(run);
         }
     }
 
@@ -347,7 +367,9 @@ impl Context {
 
     fn admit(&self, agent: &LoomAgent, namespace: &str) -> Result<Admitted, admission::Refusal> {
         let actions = |protocol: &str| self.catalog.get(protocol).map(|entry| entry.actions());
-        admission::admit(&agent.spec, namespace, &self.config, &actions)
+        admission::admit(&agent.spec, namespace, &self.config, &actions).and_then(|admitted| {
+            admission::schedule_name(&agent.name_any(), &agent.spec).map(|()| admitted)
+        })
     }
 }
 
@@ -845,12 +867,6 @@ async fn newest_run(
         Err(kube::Error::Api(status)) if status.code == 404 => return Ok(None),
         Err(error) => return Err(error),
     };
-    let key = |job: &Job| {
-        (
-            job.metadata.creation_timestamp.as_ref().map(|time| time.0),
-            job.name_any(),
-        )
-    };
     Ok(jobs
         .into_iter()
         .filter(|job| {
@@ -861,7 +877,7 @@ async fn newest_run(
                 .any(|reference| reference.controller == Some(true) && reference.uid == uid)
         })
         .filter(|job| run_phase(job) != RunPhase::Active)
-        .max_by(|left, right| key(left).cmp(&key(right))))
+        .max_by_key(run_order))
 }
 
 /// What a Job reports of its run: Succeeded once its condition `Complete` is True or a pod
@@ -1185,9 +1201,11 @@ async fn apply_children(
 }
 
 /// Observes the newest finished run of the scheduled resource `resource`'s CronJob, `applied`
-/// ([`newest_run`]), as `ObserveScheduledRun` with how it ended ([`observation`]), when it is not
-/// the run last observed or the record holds no `last_run` (a new generation clears it). Answers
-/// true while that run's pod is still ending, so the caller comes again after [`RETRY`].
+/// ([`newest_run`]), as `ObserveScheduledRun` with how it ended ([`observation`]), when the record
+/// holds no `last_run` (a new generation clears it) or the run is newer than the one last
+/// observed: neither that run again nor one older, which is what [`newest_run`] finds once the
+/// newer Job is deleted, moves `last_run`. Answers true while that run's pod is still ending, so
+/// the caller comes again after [`RETRY`].
 async fn observe_scheduled(
     ctx: &Context,
     namespace: &str,
@@ -1197,9 +1215,16 @@ async fn observe_scheduled(
     let Some(run) = newest_run(&ctx.client, namespace, &resource.0, applied).await? else {
         return Ok(false);
     };
-    let uid = run.metadata.uid.clone().unwrap_or_default();
+    let seen = ScheduledRun {
+        uid: run.metadata.uid.clone().unwrap_or_default(),
+        order: run_order(&run),
+    };
     let recorded = row(ctx, resource).is_some_and(|row| row.last_run.is_some());
-    if recorded && ctx.last_job(&resource.0).as_deref() == Some(uid.as_str()) {
+    if recorded
+        && ctx
+            .last_job(&resource.0)
+            .is_some_and(|last| last.uid == seen.uid || seen.order <= last.order)
+    {
         return Ok(false);
     }
     let Some(observed) =
@@ -1214,7 +1239,7 @@ async fn observe_scheduled(
         finished_at: observed.finished_at,
         reason: observed.reason,
     })?;
-    ctx.saw_last_job(&resource.0, &uid);
+    ctx.saw_last_job(&resource.0, seen);
     Ok(false)
 }
 

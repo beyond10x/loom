@@ -3310,8 +3310,9 @@ fn a_schedule_on_an_agent_serve_resource_is_refused_malformed() {
 }
 
 /// `resource-schedule/agent-serve-refused`: an invalid cron expression is refused `Malformed` at
-/// `spec.schedule.cron`, never repeating it; the five fields Kubernetes reads and its
-/// descriptors are admitted.
+/// `spec.schedule.cron`, never repeating it, one with whitespace around it among them, since the
+/// CronJob carries it as written; the five fields Kubernetes reads and its descriptors are
+/// admitted.
 #[test]
 fn an_invalid_cron_expression_is_refused_naming_it_without_repeating_it() {
     for cron in [
@@ -3334,6 +3335,8 @@ fn an_invalid_cron_expression_is_refused_naming_it_without_repeating_it() {
         "@fortnightly",
         "TZ=UTC 0 3 * * *",
         "CRON_TZ=UTC 0 3 * * *",
+        " 0 3 * * *",
+        "@hourly ",
     ] {
         let message = refusal(
             &command_with(&format!("  schedule: {{cron: '{cron}'}}\n")),

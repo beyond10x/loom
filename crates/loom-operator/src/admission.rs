@@ -141,6 +141,10 @@
 //!     input the program is `b10x-loom agent run` over it) is `Malformed` at
 //!     `spec.schedule.input`. Then the schedule is walked for a credential, whole and the text
 //!     word by word as `spec.env` is (`SecretLiteral`).
+//! 19. The resource's name, by [`schedule_name`] after [`admit`], since the spec does not hold
+//!     it: a scheduled `Command` resource named longer than [`MAX_CRON_JOB_NAME`] characters,
+//!     which its CronJob cannot carry, is `Malformed` at `metadata.name`. Unscheduled, the same
+//!     name runs as a Job.
 //!
 //! The walk of steps 2, 3, 5 and 13 reads a text that is not a `loom.agent/1` document only
 //! within the agent decoder's bounds, [`MAX_WALKED_OPENERS`] `[` or `{` bytes and
@@ -1437,6 +1441,31 @@ fn relay(upstream: &Upstream<'_>, url: BoundaryUrl, at: &str) -> Result<(), Refu
     })
 }
 
+/// The longest name a CronJob takes: each Job it starts is named after it with `-` and its
+/// scheduled minute appended, 11 characters, and a Job name is at most 63.
+pub const MAX_CRON_JOB_NAME: usize = 52;
+
+/// Refuses the scheduled resource `name`, whose spec `spec` [`admit`] admitted, when its CronJob,
+/// which carries that name, cannot (step 19): `Malformed` at `metadata.name`. A resource without
+/// `spec.schedule` runs as a Job, which takes the name.
+///
+/// # Errors
+/// The refusal, naming the limit and not the name.
+pub fn schedule_name(name: &str, spec: &LoomAgentSpec) -> Result<(), Refusal> {
+    if spec.schedule.is_none() || name.chars().count() <= MAX_CRON_JOB_NAME {
+        return Ok(());
+    }
+    Err(Refusal::new(
+        spelling(RefusalReason::Malformed),
+        "metadata.name",
+        format!(
+            "a scheduled resource's CronJob carries its name, which Kubernetes limits to \
+             {MAX_CRON_JOB_NAME} characters since each Job it starts appends 11; this one is \
+             longer"
+        ),
+    ))
+}
+
 /// Admits `spec`, a `LoomAgent` in `namespace`, under `config`, checking `spec.agent` against
 /// `actions` (the action ids of a catalog protocol by its `name@major`).
 ///
@@ -1855,11 +1884,17 @@ impl CronField {
 
 /// Why `cron` is not a schedule Kubernetes reads, in words that never repeat it: five fields
 /// (minute, hour, day of month, month, day of week) or one of [`CRON_DESCRIPTORS`], with no time
-/// zone of its own.
+/// zone of its own and no whitespace around it, since the CronJob carries it exactly as checked.
 fn cron_expression(cron: &str) -> Result<(), String> {
-    let cron = cron.trim();
-    if cron.is_empty() {
+    if cron.trim().is_empty() {
         return Err("it is empty".to_owned());
+    }
+    if cron.trim() != cron {
+        return Err(
+            "it starts or ends with whitespace, which the CronJob would carry as written and \
+             Kubernetes does not read around a descriptor; write it without"
+                .to_owned(),
+        );
     }
     if cron.starts_with("TZ=") || cron.starts_with("CRON_TZ=") {
         return Err(
