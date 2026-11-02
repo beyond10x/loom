@@ -32,7 +32,9 @@
 //!   send, and the sends of the last hour (the policy's counter file, one line per send) against
 //!   `max_per_hour`. A final refusal ends the run (`ends_run: true`); a send before a proposal does
 //!   not. Arguments that are not the item's channel and the recorded proposal are refused. A
-//!   performed send is counted and submits one `reply_sent` evidence.
+//!   performed send is counted and submits one `reply_sent` evidence. A write Connectors answers
+//!   `refused` or `not_attempted` (its answer to a write without a valid approval) is a final
+//!   refusal like a refused invocation: nothing is counted and no evidence is submitted.
 //!
 //! Evidence comes from what this port did, never from what the model said: the record names the
 //! item and its revision, and an observation of the port's own step backs it.
@@ -726,14 +728,28 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
                 }
                 Err(WriteError::Failed(why)) => return Err(EffectError::new(why)),
             };
-        count_send(&policy.counter, now, &result.idempotency_key)
-            .map_err(|why| EffectError::new(format!("the send counter: {why}")))?;
         let classification = match result.classification {
             loom::datasource::MutationClassification::NotAttempted => "not_attempted",
             loom::datasource::MutationClassification::Refused => "refused",
             loom::datasource::MutationClassification::Applied => "applied",
             loom::datasource::MutationClassification::Unknown => "unknown",
         };
+        if matches!(
+            result.classification,
+            loom::datasource::MutationClassification::NotAttempted
+                | loom::datasource::MutationClassification::Refused
+        ) {
+            let code = result.code.as_deref().unwrap_or("no code");
+            return Ok(self.refused_ending(
+                format!(
+                    "the send was refused ({code}): Connectors classified the write \
+                     `{classification}`, nothing was sent"
+                ),
+                true,
+            ));
+        }
+        count_send(&policy.counter, now, &result.idempotency_key)
+            .map_err(|why| EffectError::new(format!("the send counter: {why}")))?;
         let mut payload = vec![
             ("action".to_owned(), Value::Text(SEND.to_owned())),
             ("sent".to_owned(), Value::Bool(true)),
