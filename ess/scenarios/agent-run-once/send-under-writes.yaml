@@ -1,0 +1,31 @@
+# story agent-run-once: with `writes: {mode: auto, max_per_hour: 1}` the first run's send is
+# admitted and performed; a second run inside the hour is refused `RateLimited`, records it and
+# ends refused.
+type: ess-scenario/4
+domain: loom.agent
+scenario: send-under-writes
+summary: "Under `writes: {mode: auto, max_per_hour: 1}` the first run sends; the second inside the hour is refused."
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: auto, channel_allowed: true, proposed: true, granted: false, sent_in_window: 0, max_per_hour: 1}
+    outcome: admitted
+  - at: 2026-11-02T00:00:01Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: false, send_refused: false, answered: true}
+    outcome: answered
+  - at: 2026-11-02T00:10:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: auto, channel_allowed: true, proposed: true, granted: false, sent_in_window: 1, max_per_hour: 1}
+    outcome: rate-limited
+    error:
+      name: loom.agent.SendRefused
+      fields: {reason: RateLimited, final: true}
+  - at: 2026-11-02T00:10:01Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: false, send_refused: true, answered: true}
+    outcome: send-refused
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: SendRefused}

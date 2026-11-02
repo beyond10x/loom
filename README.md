@@ -276,7 +276,7 @@ to the item's channel, at most `writes.max_per_hour` an hour. In `writes.mode: a
 held: the turn ends proposed naming its commission, `b10x-loom approve <COMMISSION> reply.send
 --state <DIR>` grants it, and the host performs it at its next poll, or `b10x-loom agent resume
 <COMMISSION> --spec <FILE> --state <DIR>` performs it now, once. `writes.mode: none` sends nothing
-and `auto` is not served yet. The models are the spec's `model` section, or `--catalog` route
+and `auto` is served by `agent run` only. The models are the spec's `model` section, or `--catalog` route
 aliases as `plugin run` takes them. SIGTERM ends the host after the item it is handling. An
 `http` binding of the spec is read by `source.read` with `kind: get` and `input: {path, query?}`:
 one GET of a path exactly in its `allow_paths` under its `base_url`, carrying the bearer the
@@ -291,6 +291,17 @@ naming the variable, never printing the file, when it cannot be read, holds more
 bytes, holds no certificate or holds any block a TLS client does not take as a root (all or
 nothing: one such block refuses the whole file); model calls, the Connectors command line and the
 A2A listener are not given these roots.
+
+`b10x-loom agent run --spec <FILE> --state <DIR> --input <FILE>` runs one turn of a checked spec on
+the text of the input file and exits, as a scheduled job does: the turn is classified, projected and
+governed as `agent serve` governs a polled item, and one line is appended to `record.jsonl` in the
+state directory. It polls nothing and opens no listener, so the spec needs neither `channel` nor
+`expose.a2a`. A spec whose channel binding declares a write sends to the first channel of
+`channel.allow` under `writes`, `auto` included, at most `writes.max_per_hour` an hour; any other
+spec ends on its proposal and sends nothing. It prints one line for the turn and exits 0 when the
+turn answered, 4 when it ended without an answer, 3 when the spec or the send was refused (a
+`RateLimited` send is recorded first), and 1 when `--input` is absent, unreadable, larger than
+1048576 bytes or blank, before any model is called.
 
 `b10x-loom agent stage-files --from <DIR> --to <DIR>` copies each key of a mounted Kubernetes
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run

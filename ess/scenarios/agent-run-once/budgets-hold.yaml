@@ -1,0 +1,12 @@
+# story agent-run-once: the turn stops at the spec's inner-loop budgets as a served turn does; it
+# is recorded stopped and the run ends with no answer.
+type: ess-scenario/4
+domain: loom.agent
+scenario: budgets-hold
+summary: A turn that spends its budget is recorded stopped and the run ends with no answer.
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: false, send_refused: false, answered: false}
+    outcome: no-answer

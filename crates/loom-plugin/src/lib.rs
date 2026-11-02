@@ -23,7 +23,8 @@
 //! failure for the whole host: the cycle records nothing for it and saves no cursor, and the host
 //! polls again after its interval; only a host that is stopping returns the failure. Every handled
 //! item adds one line to the record and its id to the state; an id already handled is skipped, so
-//! polling the same items again adds no line.
+//! polling the same items again adds no line. [`run_item`] handles one item the caller gives the
+//! same way, polling nothing, with one attempt only.
 //!
 //! The turn is a thin caller of Commission's `run_until_blocked` through `loom_sdk`: a
 //! `CanonGovernor` over [`ProtocolCatalog::plugins`](loom_sdk::ProtocolCatalog::plugins) on
@@ -395,6 +396,7 @@ pub fn run_plugin_on<P: Plugin + ?Sized>(
         // A stop already set is `once`: its one cycle runs whole. One set later ends the host
         // after the item being handled.
         stop: (!stop.load(Ordering::SeqCst)).then_some(stop),
+        max_failures: MAX_FAILURES,
     };
     loop {
         let outage = cycle.run()?;
@@ -407,13 +409,59 @@ pub fn run_plugin_on<P: Plugin + ?Sized>(
     }
 }
 
+/// Runs `plugin` on `item` alone, once (`b10x-loom agent run`, `story:agent-run-once`): the state
+/// directory `state` is checked against the configuration and held as [`run_plugin`] holds it,
+/// nothing is polled and no failing item the state keeps is tried. The attempt is counted in the
+/// state before it starts and handled as a polling host handles an item (classify, then, at or
+/// above the threshold, project, turn and result); its line is appended to the record and the item
+/// saved as handled. Unlike a polling host, which tries an item [`MAX_FAILURES`] times, the one
+/// attempt is final: a classify or turn hook that fails records the item `stopped` naming the
+/// failure.
+///
+/// # Errors
+/// As [`run_plugin`], for the state directory and the configuration; a state that has `item`
+/// handled already; and [`PluginError::Unavailable`] when a service the attempt needs is
+/// unavailable, which records nothing and keeps nothing of the item, as a polling host does.
+pub fn run_item<P: Plugin + ?Sized>(
+    plugin: &P,
+    host: &Host<'_>,
+    state: &Path,
+    item: &InboundItem,
+) -> Result<RecordLine, PluginError> {
+    let held = state::StateDir::open(state, host.config())?;
+    let threshold = host.threshold()?;
+    let mut current = held.load()?;
+    if current.handled.contains(&item.id) {
+        return Err(PluginError::State(format!(
+            "the item `{}` is handled already",
+            item.id.0
+        )));
+    }
+    let mut cycle = Cycle {
+        plugin,
+        host,
+        held: &held,
+        threshold,
+        recorded: Vec::new(),
+        stop: None,
+        max_failures: 1,
+    };
+    match cycle.attempt(&mut current, item)? {
+        Attempted::Unavailable(error) => Err(error),
+        Attempted::Done => cycle
+            .recorded
+            .pop()
+            .ok_or_else(|| PluginError::State("the attempt recorded no line".to_owned())),
+    }
+}
+
 /// What one attempt on an item came to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Attempted {
     /// The item was recorded, or its failure counted.
     Done,
-    /// A service the host needs was unavailable: the cycle ends.
-    Unavailable,
+    /// A service the host needs was unavailable, as the error says: the cycle ends.
+    Unavailable(PluginError),
 }
 
 /// The cycles of one [`run_plugin_on`] call.
@@ -425,6 +473,9 @@ struct Cycle<'c, 'h, P: ?Sized> {
     recorded: Vec<RecordLine>,
     /// The stop that ends a cycle between two items; `None` for `once`.
     stop: Option<&'c AtomicBool>,
+    /// The attempts on an item after which it is recorded `stopped`: [`MAX_FAILURES`] for a
+    /// polling host, 1 for [`run_item`].
+    max_failures: i64,
 }
 
 impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
@@ -444,7 +495,7 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
                 return Ok(None);
             }
             tried.push(item.id.clone());
-            if self.attempt(&mut current, item)? == Attempted::Unavailable {
+            if matches!(self.attempt(&mut current, item)?, Attempted::Unavailable(_)) {
                 return Ok(None);
             }
         }
@@ -462,7 +513,7 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
                 return Ok(None);
             }
             tried.push(item.id.clone());
-            if self.attempt(&mut current, item)? == Attempted::Unavailable {
+            if matches!(self.attempt(&mut current, item)?, Attempted::Unavailable(_)) {
                 // The poll's cursors are not saved, so the next poll answers what this one did.
                 return Ok(None);
             }
@@ -498,7 +549,7 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
             .position(|failing| failing.item.id == item.id)
             .map(|at| current.failing.remove(at));
         let before = previous.as_ref().map_or(0, |failing| failing.failures);
-        if before >= MAX_FAILURES {
+        if before >= self.max_failures {
             // Attempts that never returned, a crash among them: no further one is made.
             let last = previous
                 .map(|failing| failing.last_failure)
@@ -519,14 +570,14 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
         self.held.save(current)?;
         match handle(self.plugin, self.host, item, self.threshold) {
             Ok(line) => self.finish(current, item, line)?,
-            Err((_, PluginError::Unavailable(_))) => {
+            Err((_, unavailable @ PluginError::Unavailable(_))) => {
                 current.failing.retain(|failing| failing.item.id != item.id);
                 current.failing.extend(previous);
                 self.held.save(current)?;
-                return Ok(Attempted::Unavailable);
+                return Ok(Attempted::Unavailable(unavailable));
             }
             Err((classification, error)) => {
-                if failures < MAX_FAILURES {
+                if failures < self.max_failures {
                     if let Some(failing) = current
                         .failing
                         .iter_mut()
@@ -537,10 +588,12 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
                     self.held.save(current)?;
                     return Ok(Attempted::Done);
                 }
-                let turn = turn::stopped(
-                    Vec::new(),
-                    &format!("{failures} attempts failed; the last: {error}"),
-                );
+                let why = if failures == 1 {
+                    format!("the one attempt failed: {error}")
+                } else {
+                    format!("{failures} attempts failed; the last: {error}")
+                };
+                let turn = turn::stopped(Vec::new(), &why);
                 let line = match &classification {
                     Some(classification) => self.plugin.result(item, classification, turn),
                     None => record_line(item, None, turn),

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
-// contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
+// model digest 3a16f4a5548f9ba707a0272811b688cc4ec7e5a5d7df32da0698ee33df0a7d9b
+// contract digest 94ddf04eaa0edba7434fd7d5286684b791f8683f254a464b49d5b667ab02e2e2
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -439,6 +439,21 @@ pub struct RunBudget {
     pub per_action: Vec<ActionBudget>,
 }
 
+/// RunRefusalReason — `loom.agent.RunRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunRefusalReason {
+    /// `SpecRefused`.
+    SpecRefused,
+    /// `InputAbsent`.
+    InputAbsent,
+    /// `InputUnreadable`.
+    InputUnreadable,
+    /// `InputEmpty`.
+    InputEmpty,
+    /// `SendRefused`.
+    SendRefused,
+}
+
 /// RuntimeSpec — `loom.agent.RuntimeSpec`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSpec {
@@ -873,6 +888,63 @@ pub enum CheckAgentSpecOutcome {
     Serveable,
 }
 
+/// RunOnce — the input of `loom.agent.RunOnce`.
+///
+/// Everything it can result in is [`RunOnceOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOnce {
+    /// `spec_refused` — `Boolean`.
+    pub spec_refused: bool,
+    /// `input_given` — `Boolean`.
+    pub input_given: bool,
+    /// `input_read` — `Boolean`.
+    pub input_read: bool,
+    /// `input_blank` — `Boolean`.
+    pub input_blank: bool,
+    /// `send_refused` — `Boolean`.
+    pub send_refused: bool,
+    /// `answered` — `Boolean`.
+    pub answered: bool,
+}
+
+/// Everything `loom.agent.RunOnce` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunOnceOutcome {
+    /// `spec-refused` — when `spec_refused == true`.
+    SpecRefused {
+        /// Why it was refused: `loom.agent.RunRefused`.
+        error: RunRefused,
+    },
+    /// `input-absent` — when `input_given == false`.
+    InputAbsent {
+        /// Why it was refused: `loom.agent.RunRefused`.
+        error: RunRefused,
+    },
+    /// `input-unreadable` — when `input_read == false`.
+    InputUnreadable {
+        /// Why it was refused: `loom.agent.RunRefused`.
+        error: RunRefused,
+    },
+    /// `input-empty` — when `input_blank == true`.
+    InputEmpty {
+        /// Why it was refused: `loom.agent.RunRefused`.
+        error: RunRefused,
+    },
+    /// `send-refused` — when `send_refused == true`.
+    SendRefused {
+        /// Why it was refused: `loom.agent.RunRefused`.
+        error: RunRefused,
+    },
+    /// `no-answer` — when `answered == false`.
+    NoAnswer,
+    /// `answered` — otherwise.
+    Answered,
+}
+
 /// The declared error `loom.agent.A2aRefused`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct A2aRefused {
@@ -892,6 +964,13 @@ pub struct HttpReadRefused {
 pub struct HttpTrustRefused {
     /// `reason` — `loom.agent.HttpTrustRefusalReason`.
     pub reason: HttpTrustRefusalReason,
+}
+
+/// The declared error `loom.agent.RunRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRefused {
+    /// `reason` — `loom.agent.RunRefusalReason`.
+    pub reason: RunRefusalReason,
 }
 
 /// The declared error `loom.agent.SendRefused`.
@@ -1004,6 +1083,17 @@ pub mod obligations {
         /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
         /// implementation never returns it.
         fn check_agent_spec(&mut self, input: super::CheckAgentSpec) -> Result<super::CheckAgentSpecOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.RunOnce` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait RunOnceBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.RunOnce`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn run_once(&mut self, input: super::RunOnce) -> Result<super::RunOnceOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// Every obligation of this bounded context, refused in the type system.

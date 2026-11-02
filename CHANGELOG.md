@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-loom agent run --spec <FILE> --state <DIR> --input <FILE>` runs one turn of a `loom.agent/1` spec on the input's text, records it as `agent serve` records an item, performs at most the sends `writes` admits and exits: 0 answered, 4 no answer, 3 refused, 1 input refused (story:agent-run-once)
+
 ## [0.54.0] - 2026-11-02
 
 No breaking changes.

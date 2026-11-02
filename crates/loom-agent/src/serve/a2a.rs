@@ -190,21 +190,22 @@ impl Answerer for Answering<'_> {
         }
         let projection = answer_projection(plugin.project(host, item, &classification));
         let turn = plugin
-            .answer_turn(host, item, &classification, &projection, events)
+            .answer_turn(host, item, &classification, &projection, Some(events))
             .map_err(error)?;
         Ok(plugin.result(item, &classification, turn))
     }
 }
 
 impl SpecPlugin {
-    /// One turn of an A2A message (see the module documentation).
-    fn answer_turn(
+    /// One turn of an A2A message (see the module documentation), each `RuntimeEvent` to
+    /// `events`; also the turn of one run that cannot send (`crate::run`).
+    pub(crate) fn answer_turn(
         &self,
         host: &Host<'_>,
         item: &InboundItem,
         classification: &Classification,
         projection: &Projection,
-        events: &mut dyn EventSink,
+        events: Option<&mut dyn EventSink>,
     ) -> Result<TurnResult, PluginError> {
         if projection.actions.is_empty() {
             return Ok(stopped(
@@ -243,7 +244,10 @@ impl SpecPlugin {
                 commission: Some(self.commission_of(item)),
                 step_budget,
                 model_budget,
-                events: Some(events),
+                events: match events {
+                    Some(sink) => Some(&mut *sink),
+                    None => None,
+                },
             },
         )?;
         Ok(turned.result)

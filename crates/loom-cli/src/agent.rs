@@ -1,7 +1,9 @@
 //! What `b10x-loom agent check` reads and prints: the spec from a regular file, checked by
 //! `b10x_loom_agent::check_text` against the plugin catalog, and one line for either answer; and
 //! what `agent serve` and `agent resume` read: the checked spec decoded ([`read_spec`]) and the
-//! models its `model` section names ([`spec_models`]).
+//! models its `model` section names ([`spec_models`]); and what `agent run` reads and how it
+//! exits: the task text of `--input` ([`read_input`]) and the status of `loom.agent.RunOnce`'s
+//! outcome ([`run_exit_status`]).
 //!
 //! A serveable spec is `checked <agent>: <n> states, <m> bindings, protocol <protocol>` on
 //! standard output (`protocol none` without loops); a refused one is
@@ -12,6 +14,7 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use b10x_loom_agent::run::{RunOnce, RunOnceOutcome};
 use b10x_loom_agent::{Checked, ResumeFailure, SpecRefused, check_text, describe};
 use b10x_loom_intake_slice::run::printable;
 use llm_core::Model;
@@ -152,6 +155,82 @@ impl Model for ArcModel {
     ) -> llm_core::BoxFuture<'a, Result<llm_core::TurnOutcome, llm_core::Error>> {
         self.0.turn(request, sink, cancel)
     }
+}
+
+/// The most bytes of `agent run --input` read: a larger file is refused as unreadable.
+pub const MAX_INPUT_BYTES: u64 = 1_048_576;
+
+/// The exit status of `agent run`, as [`crate::AGENT_RUN_HELP`] states it, from how
+/// `loom.agent.RunOnce` decided the run ended.
+pub fn run_exit_status(outcome: &RunOnceOutcome) -> u8 {
+    match outcome {
+        RunOnceOutcome::Answered => 0,
+        RunOnceOutcome::NoAnswer => 4,
+        RunOnceOutcome::SpecRefused { .. } | RunOnceOutcome::SendRefused { .. } => REFUSED,
+        RunOnceOutcome::InputAbsent { .. }
+        | RunOnceOutcome::InputUnreadable { .. }
+        | RunOnceOutcome::InputEmpty { .. } => 1,
+    }
+}
+
+/// The task text of `agent run --input <path>`.
+///
+/// # Errors
+/// The `loom.agent.RunOnce` input that says why the input was refused (`input_given`,
+/// `input_read` and `input_blank`; the rest false) and the line naming the flag or the file: no
+/// path; a file that is no regular file, cannot be read, holds more than [`MAX_INPUT_BYTES`] or is
+/// not UTF-8; a text that is empty or only whitespace.
+pub fn read_input(path: Option<&Path>) -> Result<String, (RunOnce, String)> {
+    let refused = |given: bool, read: bool, blank: bool, why: String| {
+        (
+            RunOnce {
+                spec_refused: false,
+                input_given: given,
+                input_read: read,
+                input_blank: blank,
+                send_refused: false,
+                answered: false,
+            },
+            why,
+        )
+    };
+    let Some(path) = path else {
+        return Err(refused(
+            false,
+            false,
+            false,
+            "--input is absent; it names the file holding the turn's task text".to_owned(),
+        ));
+    };
+    let unreadable = |why: &str| {
+        refused(
+            true,
+            false,
+            false,
+            format!("--input {}: {why}", path.display()),
+        )
+    };
+    let mut bytes = Vec::new();
+    regular_file::open(path)
+        .map_err(|why| unreadable(&why))?
+        .take(MAX_INPUT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| unreadable(&format!("cannot be read: {error}")))?;
+    if bytes.len() as u64 > MAX_INPUT_BYTES {
+        return Err(unreadable(&format!(
+            "holds more than {MAX_INPUT_BYTES} bytes"
+        )));
+    }
+    let text = String::from_utf8(bytes).map_err(|_| unreadable("is not UTF-8"))?;
+    if text.trim().is_empty() {
+        return Err(refused(
+            true,
+            true,
+            true,
+            format!("--input {}: holds no text", path.display()),
+        ));
+    }
+    Ok(text)
 }
 
 /// The exit status of a failed `agent resume`, as [`crate::AGENT_RESUME_HELP`] states it.

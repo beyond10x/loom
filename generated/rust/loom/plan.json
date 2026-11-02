@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5",
-    "contract_digest": "5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec"
+    "source_digest": "3a16f4a5548f9ba707a0272811b688cc4ec7e5a5d7df32da0698ee33df0a7d9b",
+    "contract_digest": "94ddf04eaa0edba7434fd7d5286684b791f8683f254a464b49d5b667ab02e2e2"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -237,6 +237,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.RunBudget",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.RunRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -1403,6 +1410,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.RunOnce",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.RunOnce",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.resource.ApplyLoomAgent",
       "disposition": {
         "disposition": "generated"
@@ -1750,6 +1771,13 @@
     {
       "kind": "error_type",
       "source": "loom.agent.HttpTrustRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.RunRefused",
       "disposition": {
         "disposition": "generated"
       }

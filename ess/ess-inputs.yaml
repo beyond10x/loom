@@ -57,3 +57,9 @@ scenarios:
   - scenarios/http-binding-cluster-ca/a-ca-file-over-one-mebibyte-is-refused.yaml
   - scenarios/http-binding-cluster-ca/a-ca-file-with-no-certificate-is-refused.yaml
   - scenarios/http-binding-cluster-ca/a-ca-file-with-a-certificate-extends-the-roots.yaml
+  - scenarios/agent-run-once/one-turn-recorded.yaml
+  - scenarios/agent-run-once/send-under-writes.yaml
+  - scenarios/agent-run-once/writes-zero-sends-nothing.yaml
+  - scenarios/agent-run-once/input-missing.yaml
+  - scenarios/agent-run-once/refused-spec.yaml
+  - scenarios/agent-run-once/budgets-hold.yaml

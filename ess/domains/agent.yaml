@@ -546,6 +546,15 @@ types:
     kind: enum
     variants: [Unreadable, TooLarge, NoCertificate]
 
+  # Why `b10x-loom agent run` ends refused (story agent-run-once), one reason per refusal of
+  # `RunOnce`: `CheckAgentSpec` refused the spec (`SpecRefused`); no `--input` was given
+  # (`InputAbsent`); the file `--input` names cannot be read whole as a regular UTF-8 file of at
+  # most 1048576 bytes (`InputUnreadable`); its text is empty or only whitespace (`InputEmpty`); the
+  # turn proposed a reply and a final refusal stopped its send (`SendRefused`).
+  - name: loom.agent.RunRefusalReason
+    kind: enum
+    variants: [SpecRefused, InputAbsent, InputUnreadable, InputEmpty, SendRefused]
+
 errors:
   # The refusal of `AdmitSend`: why, and whether it is final. A final refusal ends the turn's run
   # (Commission's `EffectOutcomeRefused.ends_run`): the item is handled and its reply never sent. A
@@ -595,6 +604,13 @@ errors:
     fields:
       - name: reason
         type: loom.agent.HttpTrustRefusalReason
+
+  # The refusal of `RunOnce`: why. A refused spec or input ends the command before any model call,
+  # read or record; a refused send ends it after the turn is recorded.
+  - name: loom.agent.RunRefused
+    fields:
+      - name: reason
+        type: loom.agent.RunRefusalReason
 
 commands:
   # Whether the `loom.agent/1` document at `path` can be served: `b10x-loom agent check --spec`.
@@ -937,4 +953,63 @@ commands:
         when: named == false
         accepts: nothing
       - name: extended
+        accepts: nothing
+
+  # How `b10x-loom agent run --spec --state --input` ends (story agent-run-once): one turn of a spec
+  # on the task text the caller gives, without a `channel` or `expose.a2a`, recorded in the state
+  # directory as `agent serve` records a handled item, its send admitted by `AdmitSend` as a served
+  # turn's is. `spec_refused` is whether `CheckAgentSpec` refused the spec; `input_given` whether
+  # `--input` names a file; `input_read` whether that file was read whole as a regular UTF-8 file
+  # of at most 1048576 bytes; `input_blank` whether its text is empty or only whitespace;
+  # `send_refused` whether the turn proposed a reply and a final refusal stopped its send
+  # (`AdmitSend` refused it, or Connectors refused the write); `answered` whether the turn ended
+  # with a proposal, a decline or a proposed case rather than stopped (a budget spent, no state for
+  # the intent) or unclassified. The first refusal in declaration order is the answer. A refused
+  # spec or input is decided before any model call, read or record. The exit status follows the
+  # outcome: `answered` 0, `no-answer` 4, `spec-refused` and `send-refused` 3, the input's three
+  # refusals 1. Nothing is held between two runs but the state directory.
+  - name: loom.agent.RunOnce
+    input:
+      - name: spec_refused
+        type: Boolean
+      - name: input_given
+        type: Boolean
+      - name: input_read
+        type: Boolean
+      - name: input_blank
+        type: Boolean
+      - name: send_refused
+        type: Boolean
+      - name: answered
+        type: Boolean
+    outcomes:
+      - name: spec-refused
+        when: spec_refused == true
+        error: loom.agent.RunRefused
+        payload:
+          loom.agent.RunRefused: {reason: SpecRefused}
+      - name: input-absent
+        when: input_given == false
+        error: loom.agent.RunRefused
+        payload:
+          loom.agent.RunRefused: {reason: InputAbsent}
+      - name: input-unreadable
+        when: input_read == false
+        error: loom.agent.RunRefused
+        payload:
+          loom.agent.RunRefused: {reason: InputUnreadable}
+      - name: input-empty
+        when: input_blank == true
+        error: loom.agent.RunRefused
+        payload:
+          loom.agent.RunRefused: {reason: InputEmpty}
+      - name: send-refused
+        when: send_refused == true
+        error: loom.agent.RunRefused
+        payload:
+          loom.agent.RunRefused: {reason: SendRefused}
+      - name: no-answer
+        when: answered == false
+        accepts: nothing
+      - name: answered
         accepts: nothing

@@ -1,0 +1,22 @@
+# story agent-run-once: `writes.max_per_hour: 0` admits no send: the turn's send is refused
+# `RateLimited`, recorded, and the run ends refused.
+type: ess-scenario/4
+domain: loom.agent
+scenario: writes-zero-sends-nothing
+summary: "With `writes.max_per_hour: 0` the run performs no send and is refused `RateLimited`."
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.agent.AdmitSend
+    input: {mode: auto, channel_allowed: true, proposed: true, granted: false, sent_in_window: 0, max_per_hour: 0}
+    outcome: rate-limited
+    error:
+      name: loom.agent.SendRefused
+      fields: {reason: RateLimited, final: true}
+  - at: 2026-11-02T00:00:01Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: false, send_refused: true, answered: true}
+    outcome: send-refused
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: SendRefused}

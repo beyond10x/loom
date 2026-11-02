@@ -1,0 +1,22 @@
+# story agent-run-once: a spec `agent check` refuses is refused by the run too, with the same
+# refusal and before any model call; the spec is decided before the input.
+type: ess-scenario/4
+domain: loom.agent
+scenario: refused-spec
+summary: A spec `CheckAgentSpec` refuses ends the run refused before any model call.
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: true, input_given: true, input_read: true, input_blank: false, send_refused: false, answered: false}
+    outcome: spec-refused
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: SpecRefused}
+  - at: 2026-11-02T00:00:01Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: true, input_given: false, input_read: false, input_blank: false, send_refused: false, answered: false}
+    outcome: spec-refused
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: SpecRefused}

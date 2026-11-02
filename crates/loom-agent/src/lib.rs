@@ -73,6 +73,7 @@ pub use serve::{
 mod credentials;
 pub use credentials::StreamWalk;
 pub mod http;
+pub mod run;
 pub mod serve;
 
 /// What a serveable spec was checked as: its agent id, the inner loop's protocol (none without

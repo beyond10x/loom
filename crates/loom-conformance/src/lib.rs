@@ -61,6 +61,7 @@ mod a2a;
 mod agent;
 pub mod codec;
 mod resource;
+mod run;
 mod session;
 
 use std::cell::RefCell;
@@ -237,6 +238,7 @@ impl ConformanceTarget for LoomTarget {
             agent::ADMIT_HTTP_TRUST => agent::admit_http_trust_command(input),
             a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
             a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
+            run::RUN_ONCE => run::run_once_command(input),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),

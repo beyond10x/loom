@@ -1,0 +1,12 @@
+# story agent-run-once: a spec with no `channel` and no `expose.a2a`, given an `--input` file,
+# runs one turn, records it, prints its proposal and exits 0.
+type: ess-scenario/4
+domain: loom.agent
+scenario: one-turn-recorded
+summary: A spec served by neither a channel nor A2A runs one turn on the given task text and ends answered.
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: false, send_refused: false, answered: true}
+    outcome: answered

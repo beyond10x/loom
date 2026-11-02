@@ -14,9 +14,9 @@ use b10x_loom_cli::plugin::{is_proposal, recorded, report_line, turn_models};
 use b10x_loom_cli::regular_file;
 use b10x_loom_cli::{
     AgentBoundaryArgs, AgentBoundaryReadyArgs, AgentCheckArgs, AgentCommand, AgentPrepareDirsArgs,
-    AgentResumeArgs, AgentServeArgs, AgentStageFilesArgs, ApproveArgs, Cli, Command, Confinement,
-    DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand, ResumeArgs,
-    RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
+    AgentResumeArgs, AgentRunArgs, AgentServeArgs, AgentStageFilesArgs, ApproveArgs, Cli, Command,
+    Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
+    ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_cli::{a2a, agent};
 use b10x_loom_intake_slice::bindings::ActionBindings;
@@ -73,6 +73,7 @@ fn main() -> ExitCode {
         Command::Agent(arguments) => match arguments.command {
             AgentCommand::Check(arguments) => agent_check_command(&arguments),
             AgentCommand::Serve(arguments) => agent_serve_command(&arguments),
+            AgentCommand::Run(arguments) => agent_run_command(&arguments),
             AgentCommand::Resume(arguments) => agent_resume_command(&arguments),
             AgentCommand::StageFiles(arguments) => agent_stage_files_command(&arguments),
             AgentCommand::PrepareDirs(arguments) => agent_prepare_dirs_command(&arguments),
@@ -262,27 +263,13 @@ fn agent_serve(
         b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
             .map_err(|refused| refused.to_string())?;
     // Both models are settled here, before any model call or read.
-    let (classifier, model): (Box<dyn Model>, Arc<dyn Model>) = match &arguments.catalog {
-        Some(path) => {
-            let models = ModelCatalog::read(path)?;
-            fn alias<'a>(flag: &str, given: Option<&'a str>) -> Result<&'a str, String> {
-                given.ok_or_else(|| format!("{flag} names no route alias of --catalog"))
-            }
-            let classifier = alias("--classifier-model", arguments.classifier_model.as_deref())?;
-            let model = alias("--model", arguments.model.as_deref())?;
-            (
-                Box::new(models.model("--classifier-model", classifier)?),
-                Arc::new(models.model("--model", model)?),
-            )
-        }
-        None => agent::spec_models(
-            &spec,
-            &arguments.spec,
-            arguments.model.as_deref(),
-            arguments.classifier_model.as_deref(),
-        )?,
-    };
-    let classifier: Arc<dyn Model> = Arc::from(classifier);
+    let (classifier, model) = served_models(
+        &spec,
+        &arguments.spec,
+        arguments.catalog.as_deref(),
+        arguments.model.as_deref(),
+        arguments.classifier_model.as_deref(),
+    )?;
     let a2a_spec = spec.clone();
     let plugin = b10x_loom_agent::SpecPlugin::new(spec, state)
         .map_err(|e| e.to_string())?
@@ -345,6 +332,135 @@ fn agent_serve(
         eprintln!("b10x-loom: {}", printable(&note));
     }
     print_proposals(&lines)
+}
+
+/// The classifier and the turn model of a served spec, each shared.
+type ServedModels = (Arc<dyn Model>, Arc<dyn Model>);
+
+/// The classifier and the turn model of a served spec at `path`: with `catalog`, the route
+/// aliases `model` and `classifier` name in it; without, the spec's `model` section.
+fn served_models(
+    spec: &loom_sdk::agent::AgentSpec,
+    path: &Path,
+    catalog: Option<&Path>,
+    model: Option<&str>,
+    classifier: Option<&str>,
+) -> Result<ServedModels, String> {
+    let (classifier, model): (Box<dyn Model>, Arc<dyn Model>) = match catalog {
+        Some(catalog) => {
+            let models = ModelCatalog::read(catalog)?;
+            fn alias<'a>(flag: &str, given: Option<&'a str>) -> Result<&'a str, String> {
+                given.ok_or_else(|| format!("{flag} names no route alias of --catalog"))
+            }
+            let classifier = alias("--classifier-model", classifier)?;
+            let model = alias("--model", model)?;
+            (
+                Box::new(models.model("--classifier-model", classifier)?),
+                Arc::new(models.model("--model", model)?),
+            )
+        }
+        None => agent::spec_models(spec, path, model, classifier)?,
+    };
+    Ok((Arc::from(classifier), model))
+}
+
+/// The exit status of `agent run` for `input`, as `loom.agent.RunOnce` decides it.
+fn run_status(input: &b10x_loom_agent::run::RunOnce) -> ExitCode {
+    ExitCode::from(agent::run_exit_status(&b10x_loom_agent::run::run_once(
+        input,
+    )))
+}
+
+/// Runs `agent run`, as `AGENT_RUN_HELP` states: the spec, then the input, each refused before
+/// any model call; then one turn on the input's text, recorded, its proposal printed, and the exit
+/// status `loom.agent.RunOnce` decides from the record line.
+fn agent_run_command(arguments: &AgentRunArgs) -> ExitCode {
+    use b10x_loom_agent::run::{RunOnce, RunOnceOutcome, ended, run_once};
+    let spec = match agent::read_spec(&arguments.spec) {
+        Ok(spec) => spec,
+        Err(agent::CheckFailure::Refused(refusal)) => {
+            eprintln!("b10x-loom: {}", agent::refused_line(&refusal));
+            return run_status(&RunOnce {
+                spec_refused: true,
+                input_given: arguments.input.is_some(),
+                input_read: false,
+                input_blank: false,
+                send_refused: false,
+                answered: false,
+            });
+        }
+        Err(agent::CheckFailure::Unreadable(why)) => return failed(&why),
+    };
+    let text = match agent::read_input(arguments.input.as_deref()) {
+        Ok(text) => text,
+        Err((input, why)) => {
+            eprintln!("b10x-loom: {}", printable(&why));
+            return run_status(&input);
+        }
+    };
+    let state = match agent::state_root(arguments.state.as_deref(), &spec) {
+        Ok(state) => state,
+        Err(error) => return failed(&error),
+    };
+    let line = match agent_run(arguments, spec, &state, &text) {
+        Ok(line) => line,
+        Err(error) => return failed(&error),
+    };
+    if let Err(error) = print_proposals(std::slice::from_ref(&line)) {
+        return failed(&error);
+    }
+    let input = ended(&line);
+    let detail = line.detail.as_deref().unwrap_or("-");
+    match run_once(&input) {
+        RunOnceOutcome::SendRefused { .. } => {
+            eprintln!("b10x-loom: refused: SendRefused: {}", printable(detail));
+        }
+        RunOnceOutcome::NoAnswer => {
+            let ended = match line.outcome {
+                b10x_loom_plugin::RecordOutcome::Unclassified => "unclassified",
+                _ => "stopped",
+            };
+            eprintln!(
+                "b10x-loom: the turn ended {ended} without an answer: {}",
+                printable(detail)
+            );
+        }
+        _ => {}
+    }
+    run_status(&input)
+}
+
+fn agent_run(
+    arguments: &AgentRunArgs,
+    spec: loom_sdk::agent::AgentSpec,
+    state: &Path,
+    text: &str,
+) -> Result<b10x_loom_plugin::RecordLine, String> {
+    // The roots of `http` binding reads are settled first, before any model, read or record.
+    let trust =
+        b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
+            .map_err(|refused| refused.to_string())?;
+    let (classifier, model) = served_models(
+        &spec,
+        &arguments.spec,
+        arguments.catalog.as_deref(),
+        arguments.model.as_deref(),
+        arguments.classifier_model.as_deref(),
+    )?;
+    let item = b10x_loom_agent::run::run_item_now(&spec, text);
+    let plugin = b10x_loom_agent::SpecPlugin::for_run(spec, state)
+        .map_err(|e| e.to_string())?
+        .with_classifier(Box::new(a2a::SharedModel(classifier)))
+        .with_turn_models(turn_models(model))
+        .with_http_trust(trust);
+    let host = b10x_loom_plugin::Host::new(plugin.config());
+    b10x_loom_plugin::run_item(
+        &b10x_loom_agent::run::RunItem::new(&plugin),
+        &host,
+        state,
+        &item,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Runs `agent resume`, as `AGENT_RESUME_HELP` states.

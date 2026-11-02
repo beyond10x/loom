@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
-// contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
+// model digest 3a16f4a5548f9ba707a0272811b688cc4ec7e5a5d7df32da0698ee33df0a7d9b
+// contract digest 94ddf04eaa0edba7434fd7d5286684b791f8683f254a464b49d5b667ab02e2e2
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -333,6 +333,40 @@ impl<P> crate::agent::obligations::BoundHttpAnswerBehavior for Generated<P>
 impl<P: crate::agent::obligations::CheckAgentSpecBehavior> crate::agent::obligations::CheckAgentSpecBehavior for Generated<P> {
     fn check_agent_spec(&mut self, input: crate::agent::CheckAgentSpec) -> Result<crate::agent::CheckAgentSpecOutcome, UnmetObligation> {
         crate::agent::obligations::CheckAgentSpecBehavior::check_agent_spec(&mut self.ports, input)
+    }
+}
+
+/// `loom.agent.RunOnce`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::RunOnceBehavior for Generated<P>
+{
+    fn run_once(&mut self, input: crate::agent::RunOnce) -> Result<crate::agent::RunOnceOutcome, UnmetObligation> {
+        let _ = &input;
+        // `spec-refused`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.spec_refused).map(|value| *value), Some(true)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::SpecRefused { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::SpecRefused } });
+        }
+        // `input-absent`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.input_given).map(|value| *value), Some(false)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::InputAbsent { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::InputAbsent } });
+        }
+        // `input-unreadable`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.input_read).map(|value| *value), Some(false)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::InputUnreadable { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::InputUnreadable } });
+        }
+        // `input-empty`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.input_blank).map(|value| *value), Some(true)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::InputEmpty { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::InputEmpty } });
+        }
+        // `send-refused`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.send_refused).map(|value| *value), Some(true)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::SendRefused { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::SendRefused } });
+        }
+        // `no-answer`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.answered).map(|value| *value), Some(false)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::NoAnswer);
+        }
+        // `answered`: the default.
+        return Ok(crate::agent::RunOnceOutcome::Answered);
     }
 }
 
