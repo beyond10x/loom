@@ -184,7 +184,7 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
 // Gate code mutant, step 3. ess 0.69.0 exits 0 while refusing (see UNSATISFIABLE_COMMAND), so the
 // refusal count is what holds step 3 for every refusal that is not an admission error. No case in
 // ess_gate.rs runs the gate over a specification that synthesize refuses with exit 0: the only
-// refusing copy (Optional<Binary64>) exits 1. A gate that accepts any count passes the suite.
+// refusing copy (an empty scenarios list) exits 1. A gate that accepts any count passes the suite.
 #[test]
 fn mutant_gate_accepting_any_refusal_count_is_killed() {
     mutant_is_killed(
