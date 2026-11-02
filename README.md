@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.54.0`, released from source at the tag `0.54.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.54.0)). No crate is on a registry: you
-install from the tag or depend on it with `tag = "0.54.0"`. `b10x-loom run` completed a live run
+Version `0.55.0`, released from source at the tag `0.55.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.55.0)). No crate is on a registry: you
+install from the tag or depend on it with `tag = "0.55.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -156,14 +156,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.54.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.55.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.54.0
+b10x-loom 0.55.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -276,7 +276,7 @@ to the item's channel, at most `writes.max_per_hour` an hour. In `writes.mode: a
 held: the turn ends proposed naming its commission, `b10x-loom approve <COMMISSION> reply.send
 --state <DIR>` grants it, and the host performs it at its next poll, or `b10x-loom agent resume
 <COMMISSION> --spec <FILE> --state <DIR>` performs it now, once. `writes.mode: none` sends nothing
-and `auto` is not served yet. The models are the spec's `model` section, or `--catalog` route
+and `auto` is served by `agent run` only. The models are the spec's `model` section, or `--catalog` route
 aliases as `plugin run` takes them. SIGTERM ends the host after the item it is handling. An
 `http` binding of the spec is read by `source.read` with `kind: get` and `input: {path, query?}`:
 one GET of a path exactly in its `allow_paths` under its `base_url`, carrying the bearer the
@@ -291,6 +291,17 @@ naming the variable, never printing the file, when it cannot be read, holds more
 bytes, holds no certificate or holds any block a TLS client does not take as a root (all or
 nothing: one such block refuses the whole file); model calls, the Connectors command line and the
 A2A listener are not given these roots.
+
+`b10x-loom agent run --spec <FILE> --state <DIR> --input <FILE>` runs one turn of a checked spec on
+the text of the input file and exits, as a scheduled job does: the turn is classified, projected and
+governed as `agent serve` governs a polled item, and one line is appended to `record.jsonl` in the
+state directory. It polls nothing and opens no listener, so the spec needs neither `channel` nor
+`expose.a2a`. A spec whose channel binding declares a write sends to the first channel of
+`channel.allow` under `writes`, `auto` included, at most `writes.max_per_hour` an hour; any other
+spec ends on its proposal and sends nothing. It prints one line for the turn and exits 0 when the
+turn answered, 4 when it ended without an answer, 3 when the spec or the send was refused (a
+`RateLimited` send is recorded first), and 1 when `--input` is absent, unreadable, larger than
+1048576 bytes or blank, before any model is called.
 
 `b10x-loom agent stage-files --from <DIR> --to <DIR>` copies each key of a mounted Kubernetes
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run
@@ -391,7 +402,33 @@ place, so the program runs once: when it ends the resource reads `Completed` or 
 nothing starts it again until `spec` changes, which replaces the Job. Its `status.run` holds the
 program's exit code (`exitCode`), when it ended (`finishedAt`) and the `reason`, read from the
 Job's own pod, and the condition `Completed` says the same in its message, so a caller reads how
-the run ended from the resource. `spec.workspace` (`mountPath`, optional `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
+the run ended from the resource.
+
+A `Command` resource that must run again and again, one bounded run at a time, adds
+`spec.schedule`: `cron` (five fields or a descriptor such as `@hourly`), optional `timeZone` (an
+IANA name), `suspend` (no new run starts while true) and `startingDeadlineSeconds`. Its pod is
+then a `batch/v1` CronJob in the Job's place (`concurrencyPolicy: Forbid`, `backoffLimit` 0, three
+finished runs of each outcome kept), the resource stays `Running`, and `status.lastRun` (`phase`,
+`exitCode`, `finishedAt`, `reason`) and the condition `LastRunSucceeded` report the newest finished
+run; a failed run fails no resource. `spec.schedule.input` gives each run its task, exactly one of
+an inline `text` or a `configMapKeyRef` (`name`, `key`) the pod mounts read-only; with it the
+program is `b10x-loom agent run --spec /config/agent.yaml --state /var/lib/agent --input <file>`,
+so the resource gives `spec.agent` and `command: {}`. Adding or removing `spec.schedule` deletes
+the Job or the CronJob before the other is created. The controller refuses a schedule on an
+`AgentServe` resource, a `cron` or `timeZone` Kubernetes does not read, and an `input` that gives
+both forms or neither (`Malformed`), and a credential in the text (`SecretLiteral`).
+
+```yaml
+spec:
+  agent: {...}
+  command: {}
+  schedule:
+    cron: "*/20 * * * *"
+    timeZone: UTC
+    input: {text: "check the queue and report what changed"}
+```
+
+`spec.workspace` (`mountPath`, optional `claimName`) adds a read-write volume, a PersistentVolumeClaim the values allow in
 `allowedClaimNames` or else an emptyDir. A `Command` resource may declare `spec.seccompProfile` and `spec.appArmorProfile` (`RuntimeDefault`, `Localhost` with `localhostProfile`, or `Unconfined`), carried in its program container's `securityContext`; `Unconfined` is refused unless the values set `allowUnconfinedProfiles`, and a `Localhost` name must be in `allowedSeccompLocalhostProfiles` or `allowedAppArmorLocalhostProfiles`. On either variant `spec.secretRef` gives one Secret as
 the environment and `spec.secretFiles` (`name`, `mountPath`) another as files: an init container
 runs `b10x-loom agent stage-files` to copy its keys into a directory the pod user owns (mode 0700,
@@ -492,7 +529,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.54.0'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.55.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
@@ -560,7 +597,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.54.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.55.0" }
 ```
 
 The example below

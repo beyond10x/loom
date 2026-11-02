@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-02T16:59:08Z",
+  "actor": "human:timo",
+  "artifact": "story:command-schedule",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-operator --locked --no-fail-fast --lib --test render --test reconcile --test adversary_w20261102w2_b --test adversary_w20261102w2_b_reconcile",
+    "reference": "wave 2026-11-02-w2 fix f05cc6ee: lib 34, render 62, reconcile 49, adversary 10 and 7 passed, EXIT=0; conformance 186 scenarios at 4825b46b (scratch loom-w2/b-fix); CI full gate on the PR decides"
+  }
+}

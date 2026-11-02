@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-02T16:59:08Z",
+  "actor": "human:timo",
+  "artifact": "story:agent-run-once",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-cli --locked --no-fail-fast --test agent_run --test adversary_w20261102w2_a",
+    "reference": "wave 2026-11-02-w2 fix 0b71f162: agent_run 6, adversary 18 passed, EXIT=0; plugin, serve and resume test files pass (scratch loom-w2/a-fix); CI full gate on the PR decides"
+  }
+}

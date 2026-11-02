@@ -1,0 +1,29 @@
+# story agent-run-once: without `--input`, or with a file that cannot be read or holds no text,
+# the run is refused before any model call, naming the file.
+type: ess-scenario/4
+domain: loom.agent
+scenario: input-missing
+summary: An absent, unreadable or empty `--input` is refused before any model call.
+
+timeline:
+  - at: 2026-11-02T00:00:00Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: false, input_read: false, input_blank: false, send_refused: false, answered: false}
+    outcome: input-absent
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: InputAbsent}
+  - at: 2026-11-02T00:00:01Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: false, input_blank: false, send_refused: false, answered: false}
+    outcome: input-unreadable
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: InputUnreadable}
+  - at: 2026-11-02T00:00:02Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: true, send_refused: false, answered: false}
+    outcome: input-empty
+    error:
+      name: loom.agent.RunRefused
+      fields: {reason: InputEmpty}

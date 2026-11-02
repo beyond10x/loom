@@ -20,8 +20,8 @@ summary: >-
   `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller
   reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by
   the child Deployment's availability, Completed or Failed when the child Job's run ends, with the
-  program's exit code and the time it ended, Pending again on a new generation, and gone on
-  delete.
+  program's exit code and the time it ended, or, on a schedule, Running with each finished
+  run's end recorded in turn, Pending again on a new generation, and gone on delete.
 
 naming:
   wire: resource
@@ -165,10 +165,11 @@ types:
   # The Kubernetes condition types the controller publishes: `Checked`, whether the spec check
   # passed for the observed generation; `Available`, whether the child Deployment is; and, for a
   # `Command` resource only, `Completed`, whether its run ended with exit code 0 (story
-  # command-run-exit-status).
+  # command-run-exit-status), or, for a scheduled one, `LastRunSucceeded`, whether its most recent
+  # finished run did (story command-schedule).
   - name: loom.resource.ConditionType
     kind: enum
-    variants: [Checked, Available, Completed]
+    variants: [Checked, Available, Completed, LastRunSucceeded]
 
   # A condition's status as Kubernetes spells it, quoted so YAML reads text and not a boolean.
   - name: loom.resource.ConditionStatus
@@ -269,6 +270,72 @@ types:
       - name: git
         type: Optional<loom.resource.GitBoundary>
 
+  # A key of a ConfigMap in the resource's namespace (story command-schedule, amendment "a
+  # declarative input"). The controller never reads that ConfigMap: the pod mounts the key
+  # read-only, and a missing ConfigMap leaves the pod unstarted.
+  - name: loom.resource.ConfigMapKeyRef
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: key
+        type: String
+
+  # The task text each scheduled run is given, passed to `b10x-loom agent run` as `--input
+  # <file>`: exactly one of `text`, written into the resource's own ConfigMap and read from
+  # `/config`, or `config_map_key_ref`, a key of another ConfigMap mounted read-only. The
+  # controller refuses both, neither, and an empty text, name or key, and walks `text` for a
+  # credential as it walks `spec.env`.
+  - name: loom.resource.ScheduleInput
+    kind: struct
+    fields:
+      - name: text
+        type: Optional<String>
+      - name: config_map_key_ref
+        type: Optional<loom.resource.ConfigMapKeyRef>
+        naming: {wire: configMapKeyRef}
+
+  # When a `Command` resource runs (story command-schedule, design § 12.2): a `batch/v1` CronJob
+  # in the Job's place, on the five-field `cron` expression (or a descriptor such as `@hourly`),
+  # in the IANA `time_zone` (the controller's when absent), no new run starting while `suspend`
+  # holds, and none starting later than `starting_deadline_seconds` after its time. `input`, when
+  # present, makes the program `b10x-loom agent run` over the resource's spec with that task
+  # text; without it the CronJob runs `spec.command` as the Job would.
+  - name: loom.resource.ScheduleSpec
+    kind: struct
+    fields:
+      - name: cron
+        type: String
+      - name: time_zone
+        type: Optional<String>
+        naming: {wire: timeZone}
+      - name: suspend
+        type: Optional<Boolean>
+      - name: starting_deadline_seconds
+        type: Optional<Integer>
+        naming: {wire: startingDeadlineSeconds}
+      - name: input
+        type: Optional<loom.resource.ScheduleInput>
+
+  # How the most recent finished run of a scheduled resource ended (story command-schedule): the
+  # newest finished Job the CronJob owns, read as `RunEnd` is (the Job's own pod, the program
+  # container's `state.terminated`). Unlike `RunEnd` it carries the phase, because the resource
+  # stays Running and the condition `LastRunSucceeded` needs to know whether a run whose
+  # container's end was never read succeeded.
+  - name: loom.resource.LastRun
+    kind: struct
+    fields:
+      - name: phase
+        type: loom.resource.RunPhase
+      - name: exit_code
+        type: Optional<Integer>
+        naming: {wire: exitCode}
+      - name: finished_at
+        type: Optional<Timestamp>
+        naming: {wire: finishedAt}
+      - name: reason
+        type: Optional<String>
+
   # The resource's `spec`: the `loom.agent/1` document verbatim, required for `AgentServe` and
   # optional for `Command`; the llm `routes.yaml` inline, a
   # document of llm's own format that Loom passes through, so it is untyped here and holds secrets
@@ -278,8 +345,9 @@ types:
   # controller's default; the program the pod runs instead of `agent serve`; a workspace
   # volume, the program's own configuration files, and the seccomp and AppArmor profiles of its
   # container (a resource that declares none keeps `RuntimeDefault` seccomp and the runtime's
-  # AppArmor default), only for `Command`; and, on either variant, the boundary that holds a
-  # credential-free agent's only credential. Wire names are Kubernetes's.
+  # AppArmor default), only for `Command`; on either variant, the boundary that holds a
+  # credential-free agent's only credential; and, only for `Command`, the schedule its runs
+  # start on. Wire names are Kubernetes's.
   - name: loom.resource.LoomAgentSpec
     kind: struct
     fields:
@@ -315,6 +383,8 @@ types:
         naming: {wire: appArmorProfile}
       - name: boundary
         type: Optional<loom.resource.Boundary>
+      - name: schedule
+        type: Optional<loom.resource.ScheduleSpec>
 
 entities:
   # One `LoomAgent` resource as the controller holds it. `observed_generation` is the
@@ -325,8 +395,10 @@ entities:
   # Deployment is unavailable, Running again when it is. A `Command` resource's pod is a Job that
   # runs once: Completed when its run succeeded, Failed when it did not, and either stays as it is
   # until a new generation, so the controller never starts a finished run again (story
-  # command-variant-runs-once). A new generation returns every state to Pending with the check
-  # cleared. Nothing is terminal: a resource leaves by deletion.
+  # command-variant-runs-once). A scheduled `Command` resource's pod is a CronJob's: it stays
+  # Running and records each finished run as `last_run` (story command-schedule). A new
+  # generation returns every state to Pending with the check cleared. Nothing is terminal: a
+  # resource leaves by deletion.
   # `deployment` is what the controller last read of the child Deployment, absent until it read
   # one and cleared by a new generation, whose Deployment is not yet read. An observation that
   # leaves Running or Degraded as it is moves over a self-transition (`observe-running`,
@@ -354,6 +426,12 @@ entities:
       # code from the resource and not from the pod (story command-run-exit-status).
       - name: run
         type: Optional<loom.resource.RunEnd>
+      # How the most recent finished run of a scheduled `Command` resource ended, recorded each
+      # time the controller reads a newer finished run while the resource stays Running, and
+      # cleared by a new generation (story command-schedule).
+      - name: last_run
+        type: Optional<loom.resource.LastRun>
+        naming: {wire: lastRun}
       # The controller's projection of `state`, `check` and `deployment` as Kubernetes conditions,
       # computed when it publishes the status. No command sets it, because a `sets:` value on ESS
       # 0.69.0 admits no list (a list is read only as the `via:` of a related read, and `[]` needs
@@ -495,6 +573,19 @@ events:
       - name: generation
         type: Integer
 
+  # A finished run of a scheduled resource's CronJob, newer than the one the record held: its
+  # phase and the program's exit code, absent when no container of the run terminated.
+  - name: loom.resource.LoomAgentLastRunObserved
+    fields:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: generation
+        type: Integer
+      - name: phase
+        type: loom.resource.RunPhase
+      - name: exit_code
+        type: Optional<Integer>
+
 commands:
   # The controller saw the resource at a generation: created, or changed. A generation the
   # controller already holds is a reconcile of what it has and changes nothing; an older one is
@@ -542,6 +633,7 @@ commands:
           deployment: {cleared: true}
           variant: {cleared: true}
           run: {cleared: true}
+          last_run: {cleared: true}
         emits: [loom.resource.LoomAgentApplied]
         payload:
           loom.resource.LoomAgentApplied:
@@ -759,6 +851,79 @@ commands:
           loom.resource.LoomAgentStateConflict:
             name: input.name
 
+  # The controller read the most recent finished Job of a scheduled `Command` resource's CronJob
+  # (story command-schedule, design § 12.2). A scheduled resource never reaches Completed or
+  # Failed: it stays Running, over the self-transition `observe-running`, and records how that run
+  # ended as `last_run`, so each finished run is reported in turn, the newest last. The controller
+  # observes a Job only when it is newer than the one it last recorded, so an unchanged Job emits
+  # no second event. A run read before it ended changes nothing. A resource that is not Running
+  # (Pending, Refused, and the Job variant's Completed and Failed) answers a state conflict.
+  - name: loom.resource.ObserveScheduledRun
+    input:
+      - name: name
+        type: loom.resource.ResourceName
+      - name: phase
+        type: loom.resource.RunPhase
+      - name: exit_code
+        type: Optional<Integer>
+      - name: finished_at
+        type: Optional<Timestamp>
+      - name: reason
+        type: Optional<String>
+    outcomes:
+      - name: unknown
+        unknown_instance: true
+        error: loom.resource.LoomAgentNotFound
+        payload:
+          loom.resource.LoomAgentNotFound:
+            name: input.name
+      - name: last-run-succeeded
+        when_subject_state: Running
+        when: phase == Succeeded
+        moves: loom.resource.LoomAgent.observe-running
+        instance: name
+        sets:
+          last_run:
+            phase: input.phase
+            exit_code: input.exit_code
+            finished_at: input.finished_at
+            reason: input.reason
+        emits: [loom.resource.LoomAgentLastRunObserved]
+        payload:
+          loom.resource.LoomAgentLastRunObserved:
+            name: input.name
+            generation: {subject: observed_generation}
+            phase: input.phase
+            exit_code: input.exit_code
+      - name: last-run-failed
+        when_subject_state: Running
+        when: phase == Failed
+        moves: loom.resource.LoomAgent.observe-running
+        instance: name
+        sets:
+          last_run:
+            phase: input.phase
+            exit_code: input.exit_code
+            finished_at: input.finished_at
+            reason: input.reason
+        emits: [loom.resource.LoomAgentLastRunObserved]
+        payload:
+          loom.resource.LoomAgentLastRunObserved:
+            name: input.name
+            generation: {subject: observed_generation}
+            phase: input.phase
+            exit_code: input.exit_code
+      - name: run-active
+        when_subject_state: Running
+        when: phase == Active
+        preserves: loom.resource.LoomAgent
+        instance: name
+      - name: not-running
+        error: loom.resource.LoomAgentStateConflict
+        payload:
+          loom.resource.LoomAgentStateConflict:
+            name: input.name
+
   # The resource is gone from the cluster: the controller forgets it. Its children go with it by
   # owner reference (design § 5.2), which is Kubernetes's, not this domain's.
   - name: loom.resource.DeleteLoomAgent
@@ -800,6 +965,8 @@ views:
         type: Optional<loom.resource.AgentVariant>
       - name: run
         type: Optional<loom.resource.RunEnd>
+      - name: last_run
+        type: Optional<loom.resource.LastRun>
       - name: conditions
         type: Optional<List<loom.resource.Condition>>
       - name: state

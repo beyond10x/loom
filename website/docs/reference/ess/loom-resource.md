@@ -10,7 +10,7 @@ custom_edit_url: null
 
 # Resource
 
-The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, Pending again on a new generation, and gone on delete.
+The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, or, on a schedule, Running with each finished run's end recorded in turn, Pending again on a new generation, and gone on delete.
 
 `loom.resource` is one of loom's bounded contexts. [All domains](./index.mdx).
 
@@ -64,7 +64,7 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ### `ConditionType`
 
-`loom.resource.ConditionType` is one of `Checked`, `Available` and `Completed`.
+`loom.resource.ConditionType` is one of `Checked`, `Available`, `Completed` and `LastRunSucceeded`.
 
 ### `ConfigFile`
 
@@ -72,6 +72,13 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 - `name` — `String`
 - `content` — `String`
+
+### `ConfigMapKeyRef`
+
+`loom.resource.ConfigMapKeyRef` is a record of two fields:
+
+- `name` — `String`
+- `key` — `String`
 
 ### `ConfinementProfile`
 
@@ -124,9 +131,18 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 - `repository` — `String`
 - `tag` — `String`
 
+### `LastRun`
+
+`loom.resource.LastRun` is a record of four fields:
+
+- `phase` — `loom.resource.RunPhase`
+- `exit_code` — `Optional<Integer>`, which may be absent, called `exitCode` on the wire
+- `finished_at` — `Optional<Timestamp>`, which may be absent, called `finishedAt` on the wire
+- `reason` — `Optional<String>`, which may be absent
+
 ### `LoomAgentSpec`
 
-`loom.resource.LoomAgentSpec` is a record of 13 fields:
+`loom.resource.LoomAgentSpec` is a record of 14 fields:
 
 - `agent` — `Optional<loom.agent.AgentSpec>`, which may be absent
 - `routes` — `Json`
@@ -141,6 +157,7 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 - `seccomp_profile` — `Optional<loom.resource.ConfinementProfile>`, which may be absent, called `seccompProfile` on the wire
 - `app_armor_profile` — `Optional<loom.resource.ConfinementProfile>`, which may be absent, called `appArmorProfile` on the wire
 - `boundary` — `Optional<loom.resource.Boundary>`, which may be absent
+- `schedule` — `Optional<loom.resource.ScheduleSpec>`, which may be absent
 
 ### `ResourceName`
 
@@ -157,6 +174,23 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 ### `RunPhase`
 
 `loom.resource.RunPhase` is one of `Active`, `Succeeded` and `Failed`.
+
+### `ScheduleInput`
+
+`loom.resource.ScheduleInput` is a record of two fields:
+
+- `text` — `Optional<String>`, which may be absent
+- `config_map_key_ref` — `Optional<loom.resource.ConfigMapKeyRef>`, which may be absent, called `configMapKeyRef` on the wire
+
+### `ScheduleSpec`
+
+`loom.resource.ScheduleSpec` is a record of five fields:
+
+- `cron` — `String`
+- `time_zone` — `Optional<String>`, which may be absent, called `timeZone` on the wire
+- `suspend` — `Optional<Boolean>`, which may be absent
+- `starting_deadline_seconds` — `Optional<Integer>`, which may be absent, called `startingDeadlineSeconds` on the wire
+- `input` — `Optional<loom.resource.ScheduleInput>`, which may be absent
 
 ### `SecretFiles`
 
@@ -197,6 +231,7 @@ It holds:
 - `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
 - `variant` — `Optional<loom.resource.AgentVariant>`, which may be absent
 - `run` — `Optional<loom.resource.RunEnd>`, which may be absent
+- `last_run` — `Optional<loom.resource.LastRun>`, which may be absent, called `lastRun` on the wire
 - `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 
 It declares no relation to another entity, and no other entity names it.
@@ -214,7 +249,7 @@ stateDiagram-v2
     Pending --> Refused: refuse (RecordCheck)
     Running --> Degraded: degrade (ObserveDeployment)
     Degraded --> Running: recover (ObserveDeployment)
-    Running --> Running: observe-running (ObserveDeployment, ObserveRun)
+    Running --> Running: observe-running (ObserveDeployment, ObserveRun, ObserveScheduledRun)
     Degraded --> Degraded: observe-degraded (ObserveDeployment)
     Running --> Completed: complete (ObserveRun)
     Running --> Failed: fail (ObserveRun)
@@ -232,7 +267,7 @@ Each move is taken by a declared command outcome, and a move nothing takes is re
 - `refuse` — taken by `loom.resource.RecordCheck` on its `refused` outcome
 - `degrade` — taken by `loom.resource.ObserveDeployment` on its `degraded` outcome
 - `recover` — taken by `loom.resource.ObserveDeployment` on its `recovered` outcome
-- `observe-running` — taken by `loom.resource.ObserveDeployment` on its `still-running` outcome and `loom.resource.ObserveRun` on its `still-active` outcome
+- `observe-running` — taken by `loom.resource.ObserveDeployment` on its `still-running` outcome, `loom.resource.ObserveRun` on its `still-active` outcome, `loom.resource.ObserveScheduledRun` on its `last-run-succeeded` outcome and `loom.resource.ObserveScheduledRun` on its `last-run-failed` outcome
 - `observe-degraded` — taken by `loom.resource.ObserveDeployment` on its `still-degraded` outcome
 - `complete` — taken by `loom.resource.ObserveRun` on its `completed` outcome
 - `fail` — taken by `loom.resource.ObserveRun` on its `failed` outcome
@@ -284,6 +319,7 @@ It exposes:
 - `deployment` — `Optional<loom.resource.DeploymentStatus>`, which may be absent
 - `variant` — `Optional<loom.resource.AgentVariant>`, which may be absent
 - `run` — `Optional<loom.resource.RunEnd>`, which may be absent
+- `last_run` — `Optional<loom.resource.LastRun>`, which may be absent
 - `conditions` — `Optional<List<loom.resource.Condition>>`, which may be absent
 - `state` — `loom.resource.LoomAgent.State`
 
@@ -312,7 +348,7 @@ It has four outcomes.
 
 **`unchanged`** — Taken when the existing subject's stored fields satisfy `observed_generation == input.generation`. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes and independently observes the subject enum fact before selecting this branch.
 
-**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Completed`, `Degraded`, `Failed`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared, `variant` cleared and `run` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`respecified`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Completed`, `Degraded`, `Failed`, `Pending`, `Refused` and `Running` to `Pending`, along the declared move `respecify`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentApplied`. It sets `observed_generation` from `input.generation`, `check` cleared, `deployment` cleared, `variant` cleared, `run` cleared and `last_run` cleared. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `DeleteLoomAgent`
 
@@ -376,6 +412,30 @@ It has six outcomes.
 **`finished`** — Taken when the existing subject is in Completed or Failed. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes the declared subject state and constructs input selecting this branch in that state.
 
 **`no-run`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `ObserveScheduledRun`
+
+`loom.resource.ObserveScheduledRun`.
+
+It takes:
+
+- `name` — `loom.resource.ResourceName`
+- `phase` — `loom.resource.RunPhase`
+- `exit_code` — `Optional<Integer>`, which may be absent
+- `finished_at` — `Optional<Timestamp>`, which may be absent
+- `reason` — `Optional<String>`, which may be absent
+
+It has five outcomes.
+
+**`unknown`** — Taken when the identity the command names is one no record carries, before any other answer for it. No entity in this specification changes. It reports `loom.resource.LoomAgentNotFound`, carrying `name`. It emits nothing. A test reaches it by sending an identity no record carries, arranging nothing.
+
+**`last-run-succeeded`** — Taken when the existing subject is in Running and `phase == Succeeded` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Running`, along the declared move `observe-running`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentLastRunObserved`. It sets `last_run` from `{phase: input.phase, exit_code: input.exit_code, finished_at: input.finished_at, reason: input.reason}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`last-run-failed`** — Taken when the existing subject is in Running and `phase == Failed` holds of the input. It moves a `loom.resource.LoomAgent` from `Running` to `Running`, along the declared move `observe-running`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentLastRunObserved`. It sets `last_run` from `{phase: input.phase, exit_code: input.exit_code, finished_at: input.finished_at, reason: input.reason}`. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`run-active`** — Taken when the existing subject is in Running and `phase == Active` holds of the input. It preserves the existing subject, without an error or event. The instance is the one named by the input field `name`. It emits nothing. A test establishes the declared subject state and constructs input selecting this branch in that state.
+
+**`not-running`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `RecordCheck`
 
@@ -468,6 +528,21 @@ Emitted by `loom.resource.ObserveRun` on its `failed` outcome.
 
 Nothing in this system reacts to it.
 
+### `LoomAgentLastRunObserved`
+
+`loom.resource.LoomAgentLastRunObserved`.
+
+It carries:
+
+- `name` — `loom.resource.ResourceName`
+- `generation` — `Integer`
+- `phase` — `loom.resource.RunPhase`
+- `exit_code` — `Optional<Integer>`, which may be absent
+
+Emitted by `loom.resource.ObserveScheduledRun` on its `last-run-succeeded` and `last-run-failed` outcomes.
+
+Nothing in this system reacts to it.
+
 ### `LoomAgentObserved`
 
 `loom.resource.LoomAgentObserved`.
@@ -547,6 +622,8 @@ Reported by `loom.resource.ObserveDeployment` on its `unknown` outcome.
 
 Reported by `loom.resource.ObserveRun` on its `unknown` outcome.
 
+Reported by `loom.resource.ObserveScheduledRun` on its `unknown` outcome.
+
 Reported by `loom.resource.RecordCheck` on its `unknown` outcome.
 
 ### `LoomAgentStateConflict`
@@ -558,6 +635,8 @@ It carries:
 Reported by `loom.resource.ObserveDeployment` on its `no-deployment` outcome.
 
 Reported by `loom.resource.ObserveRun` on its `no-run` outcome.
+
+Reported by `loom.resource.ObserveScheduledRun` on its `not-running` outcome.
 
 Reported by `loom.resource.RecordCheck` on its `out-of-order` outcome.
 
@@ -576,4 +655,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · model digest `e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5` · contract digest `slice-sha256/2:76379b0f0e24b715fcd786896f928805beda60566da0c6768cc5b5a784df48a8`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00` · contract digest `slice-sha256/2:4284169b94aba7a687a97c29410fb7bcbce1451632db7b87a8c59edd0a3ae6fd`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

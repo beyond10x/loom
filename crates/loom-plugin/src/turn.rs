@@ -205,6 +205,10 @@ pub struct Turned {
     pub awaiting_approval: bool,
 }
 
+/// How the detail of a turn starts that proposed a reply whose send a final refusal stopped (the
+/// effect port refused it with `ends_run`): the refusal follows.
+pub const NOT_SENT: &str = "not sent: ";
+
 /// The tag that opens the data block of what a turn did so far.
 pub const EARLIER_OPEN: &str = "<earlier-steps>";
 
@@ -512,7 +516,7 @@ pub fn turn_with<S: FallibleCaseStore>(
             )
         }
         RunOutcome::EffectRefused(refused) if effects.proposal().is_some() => turned(
-            proposed(reads, Some(format!("not sent: {}", refused.reason))),
+            proposed(reads, Some(format!("{NOT_SENT}{}", refused.reason))),
             false,
         ),
         RunOutcome::Suspended(_) if asked >= model_budget => turned(

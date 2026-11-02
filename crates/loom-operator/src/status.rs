@@ -2,13 +2,15 @@
 //! controller computes for it.
 //!
 //! No `loom.resource` command sets `conditions` (ESS 0.69.0 admits no list under `sets:`), so the
-//! controller projects them from the row's `state`, `check`, `deployment`, `variant` and `run`:
+//! controller projects them from the row's `state`, `check`, `deployment`, `variant`, `run` and
+//! `last_run`:
 //!
 //! | state | `Checked` | `Available` | `Completed` |
 //! |---|---|---|---|
 //! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` | none |
 //! | Running, `AgentServe` | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read | none |
 //! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished` | Unknown, `RunNotFinished` |
+//! | Running, `Command`, `spec.schedule` | True, `SpecAdmitted` | True, `Scheduled`; False, `Suspended` while suspended | none; `LastRunSucceeded`: Unknown, `NoRunYet`; True, `RunSucceeded`; False, `RunFailed` |
 //! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` | none |
 //! | Completed | True, `SpecAdmitted` | False, `RunSucceeded` | True, `RunSucceeded` |
 //! | Failed | True, `SpecAdmitted` | False, `RunFailed` | False, `RunFailed` |
@@ -22,12 +24,14 @@
 //! gone first, or ended before the container ran), that no exit code was read and the Job's
 //! reason; [`pods_unread`] adds that the pod could not be read when the API server refused the
 //! list. Only an `AgentServe` resource reaches Degraded, since only its Deployment is observed
-//! for availability. A row that carries conditions is published
-//! with its own.
+//! for availability. A scheduled `Command` resource (story command-schedule) stays Running: its
+//! CronJob starts each run, `Available` says whether it does, and `LastRunSucceeded` how the
+//! newest finished run ended, from the row's `last_run`, published as `status.lastRun`. A row
+//! that carries conditions is published with its own.
 
 use b10x_loom_resource::model::{
     AgentVariant, CheckResult, Condition, ConditionStatus, ConditionType, DeploymentAvailability,
-    DeploymentStatus, LoomAgentState, LoomAgents, RunEnd,
+    DeploymentStatus, LastRun, LoomAgentState, LoomAgents, RunEnd, RunPhase,
 };
 
 use crate::resource;
@@ -68,6 +72,7 @@ fn condition_type(kind: ConditionType) -> &'static str {
         ConditionType::Checked => "Checked",
         ConditionType::Available => "Available",
         ConditionType::Completed => "Completed",
+        ConditionType::LastRunSucceeded => "LastRunSucceeded",
     }
 }
 
@@ -239,12 +244,15 @@ pub fn conditions(
     }
 }
 
-/// Says in the message of a decided `Completed` condition of `status` that the run's pod could
-/// not be read: the API server answered the list of the Job's pods with `code` (403 or 404), so
-/// the run has no exit code for that reason, not because its pod was gone.
+/// Says in the message of a decided `Completed` or `LastRunSucceeded` condition of `status` that
+/// the run's pod could not be read: the API server answered the list of the Job's pods with
+/// `code` (403 or 404), so the run has no exit code for that reason, not because its pod was
+/// gone.
 pub fn pods_unread(status: &mut resource::LoomAgentStatus, code: u16) {
     for condition in status.conditions.iter_mut().flatten() {
-        if condition.kind == "Completed" && condition.status != "Unknown" {
+        if matches!(condition.kind.as_str(), "Completed" | "LastRunSucceeded")
+            && condition.status != "Unknown"
+        {
             condition.message.push_str(&format!(
                 "; its pod could not be read (the list was answered {code})"
             ));
@@ -252,17 +260,115 @@ pub fn pods_unread(status: &mut resource::LoomAgentStatus, code: u16) {
     }
 }
 
-/// The status a row of `LoomAgents` publishes.
+/// What the status of a resource with `spec.schedule` reads of it: whether it is suspended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scheduled {
+    /// `spec.schedule.suspend` is true: the CronJob starts no run.
+    pub suspended: bool,
+}
+
+/// The phase as the CRD's `status.lastRun.phase` spells it.
+#[must_use]
+pub fn run_phase(phase: RunPhase) -> &'static str {
+    match phase {
+        RunPhase::Active => "Active",
+        RunPhase::Succeeded => "Succeeded",
+        RunPhase::Failed => "Failed",
+    }
+}
+
+/// The conditions of a running `Command` resource with `spec.schedule` (story command-schedule):
+/// `Checked` as any `Command` resource's; `Available` True `Scheduled`, or False `Suspended`
+/// while `spec.schedule.suspend` holds, since the CronJob then starts nothing; and
+/// `LastRunSucceeded` from the newest finished run, `last_run`: Unknown `NoRunYet` before one,
+/// True `RunSucceeded` or False `RunFailed`, its message naming the exit code and end time as
+/// `Completed` does for a single run. A failed run moves the resource to no other state: the next
+/// run may succeed.
+#[must_use]
+pub fn scheduled_conditions(
+    check: Option<&CheckResult>,
+    last_run: Option<&LastRun>,
+    scheduled: Scheduled,
+) -> Vec<Condition> {
+    let message = check.map(|check| check.message.clone()).unwrap_or_default();
+    let available = if scheduled.suspended {
+        condition(
+            ConditionType::Available,
+            ConditionStatus::False,
+            "Suspended",
+            "the schedule is suspended; the CronJob starts no run",
+        )
+    } else {
+        condition(
+            ConditionType::Available,
+            ConditionStatus::True,
+            "Scheduled",
+            "the CronJob starts a run on the schedule",
+        )
+    };
+    let last = match last_run {
+        None => condition(
+            ConditionType::LastRunSucceeded,
+            ConditionStatus::Unknown,
+            "NoRunYet",
+            "no scheduled run has finished yet",
+        ),
+        Some(run) => {
+            let (status, reason, ended) = if run.phase == RunPhase::Succeeded {
+                (ConditionStatus::True, "RunSucceeded", "succeeded")
+            } else {
+                (ConditionStatus::False, "RunFailed", "failed")
+            };
+            let end = RunEnd {
+                exit_code: run.exit_code,
+                finished_at: run.finished_at.clone(),
+                reason: run.reason.clone(),
+            };
+            condition(
+                ConditionType::LastRunSucceeded,
+                status,
+                reason,
+                run_message(ended, Some(&end)),
+            )
+        }
+    };
+    vec![
+        condition(
+            ConditionType::Checked,
+            ConditionStatus::True,
+            "SpecAdmitted",
+            message,
+        ),
+        available,
+        last,
+    ]
+}
+
+/// The status a row of `LoomAgents` publishes, for a resource without `spec.schedule`.
 #[must_use]
 pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
-    let conditions = row.conditions.clone().unwrap_or_else(|| {
-        conditions(
+    status_of(row, None)
+}
+
+/// The status a row of `LoomAgents` publishes; `scheduled` is present for a resource with
+/// `spec.schedule`, whose conditions, while it runs as a `Command` resource, are
+/// [`scheduled_conditions`].
+#[must_use]
+pub fn status_of(row: &LoomAgents, scheduled: Option<Scheduled>) -> resource::LoomAgentStatus {
+    let conditions = row.conditions.clone().unwrap_or_else(|| match scheduled {
+        Some(scheduled)
+            if row.state == LoomAgentState::Running
+                && row.variant == Some(AgentVariant::Command) =>
+        {
+            scheduled_conditions(row.check.as_ref(), row.last_run.as_ref(), scheduled)
+        }
+        _ => conditions(
             row.state,
             row.check.as_ref(),
             row.deployment.as_ref(),
             row.variant,
             row.run.as_ref(),
-        )
+        ),
     });
     resource::LoomAgentStatus {
         observed_generation: row.observed_generation,
@@ -279,6 +385,12 @@ pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
             }),
         variant: row.variant.map(|variant| variant_name(variant).to_owned()),
         run: row.run.as_ref().map(|run| resource::RunStatus {
+            exit_code: run.exit_code,
+            finished_at: run.finished_at.as_ref().map(|at| at.0.clone()),
+            reason: run.reason.clone(),
+        }),
+        last_run: row.last_run.as_ref().map(|run| resource::LastRunStatus {
+            phase: run_phase(run.phase).to_owned(),
             exit_code: run.exit_code,
             finished_at: run.finished_at.as_ref().map(|at| at.0.clone()),
             reason: run.reason.clone(),
@@ -516,6 +628,7 @@ mod tests {
             deployment: Some(read(DeploymentAvailability::Unavailable)),
             variant: Some(AgentVariant::Command),
             run: None,
+            last_run: None,
             conditions: None,
             state: LoomAgentState::Degraded,
         };
@@ -578,6 +691,7 @@ mod tests {
             deployment: None,
             variant: command,
             run: Some(exited),
+            last_run: None,
             conditions: None,
             state: LoomAgentState::Failed,
         };

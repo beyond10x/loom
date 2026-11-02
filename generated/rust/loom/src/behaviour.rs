@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
-// contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
+// model digest a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00
+// contract digest 2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -336,6 +336,40 @@ impl<P: crate::agent::obligations::CheckAgentSpecBehavior> crate::agent::obligat
     }
 }
 
+/// `loom.agent.RunOnce`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::RunOnceBehavior for Generated<P>
+{
+    fn run_once(&mut self, input: crate::agent::RunOnce) -> Result<crate::agent::RunOnceOutcome, UnmetObligation> {
+        let _ = &input;
+        // `spec-refused`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.spec_refused).map(|value| *value), Some(true)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::SpecRefused { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::SpecRefused } });
+        }
+        // `input-absent`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.input_given).map(|value| *value), Some(false)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::InputAbsent { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::InputAbsent } });
+        }
+        // `input-unreadable`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.input_read).map(|value| *value), Some(false)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::InputUnreadable { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::InputUnreadable } });
+        }
+        // `input-empty`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.input_blank).map(|value| *value), Some(true)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::InputEmpty { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::InputEmpty } });
+        }
+        // `send-refused`: an input-guarded refusal, before the addressed subject is loaded.
+        if decided(equal(Some(&input.send_refused).map(|value| *value), Some(true)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::SendRefused { error: crate::agent::RunRefused { reason: crate::agent::RunRefusalReason::SendRefused } });
+        }
+        // `no-answer`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.answered).map(|value| *value), Some(false)), "loom.agent.RunOnce")? {
+            return Ok(crate::agent::RunOnceOutcome::NoAnswer);
+        }
+        // `answered`: the default.
+        return Ok(crate::agent::RunOnceOutcome::Answered);
+    }
+}
+
 /// `loom.resource.ApplyLoomAgent`, generated: every outcome is one the specification fully determines.
 impl<P> crate::resource::obligations::ApplyLoomAgentBehavior for Generated<P>
 where
@@ -353,6 +387,7 @@ where
                 deployment: None,
                 variant: None,
                 run: None,
+                last_run: None,
                 conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -375,6 +410,7 @@ where
                     deployment: None,
                     variant: None,
                     run: None,
+                    last_run: None,
                     conditions: None,
                 };
                 let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -395,6 +431,7 @@ where
                 deployment: None,
                 variant: None,
                 run: None,
+                last_run: None,
                 conditions: None,
             };
             let answer = crate::resource::ApplyLoomAgentOutcome::Created { loom_agent_applied: crate::resource::LoomAgentApplied { name: identity.clone(), generation: input.generation.clone() } };
@@ -416,6 +453,7 @@ where
         next.data.deployment = None;
         next.data.variant = None;
         next.data.run = None;
+        next.data.last_run = None;
         let answer = crate::resource::ApplyLoomAgentOutcome::Respecified { loom_agent_applied: crate::resource::LoomAgentApplied { name: input.name.clone(), generation: input.generation.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
@@ -594,6 +632,66 @@ where
         }
         // `no-run`: the default.
         return Ok(crate::resource::ObserveRunOutcome::NoRun { error: crate::resource::LoomAgentStateConflict { name: input.name.clone() } });
+    }
+}
+
+/// `loom.resource.ObserveScheduledRun`, generated: every outcome is one the specification fully determines.
+impl<P> crate::resource::obligations::ObserveScheduledRunBehavior for Generated<P>
+where
+    P: LoomAgentStorage,
+{
+    fn observe_scheduled_run(&mut self, input: crate::resource::ObserveScheduledRun) -> Result<crate::resource::ObserveScheduledRunOutcome, UnmetObligation> {
+        let _ = &input;
+        // The addressed row, read before the branches that select by it.
+        let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+            return Ok(crate::resource::ObserveScheduledRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        };
+        let _ = &held;
+        // `last-run-succeeded`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Running)), equal(Some(&input.phase).map(|value| match value { crate::resource::RunPhase::Active => "Active", crate::resource::RunPhase::Succeeded => "Succeeded", crate::resource::RunPhase::Failed => "Failed" }.to_owned()), Some("Succeeded".to_owned()))]), "loom.resource.ObserveScheduledRun")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveScheduledRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let before = held.data.clone();
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Running(instance.observe_running()),
+                _ => return Err(undeclared("loom.resource.ObserveScheduledRun")),
+            };
+            let mut next = moved.snapshot();
+            next.data.last_run = Some(crate::resource::LastRun { phase: input.phase.clone(), exit_code: input.exit_code.clone(), finished_at: input.finished_at.clone(), reason: input.reason.clone() });
+            let answer = crate::resource::ObserveScheduledRunOutcome::LastRunSucceeded { loom_agent_last_run_observed: crate::resource::LoomAgentLastRunObserved { name: input.name.clone(), generation: before.observed_generation.clone(), phase: input.phase.clone(), exit_code: input.exit_code.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
+            return Ok(answer);
+        }
+        // `last-run-failed`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Running)), equal(Some(&input.phase).map(|value| match value { crate::resource::RunPhase::Active => "Active", crate::resource::RunPhase::Succeeded => "Succeeded", crate::resource::RunPhase::Failed => "Failed" }.to_owned()), Some("Failed".to_owned()))]), "loom.resource.ObserveScheduledRun")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveScheduledRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let before = held.data.clone();
+            let moved = match held.refine() {
+                crate::resource::AnyLoomAgent::Running(instance) => crate::resource::AnyLoomAgent::Running(instance.observe_running()),
+                _ => return Err(undeclared("loom.resource.ObserveScheduledRun")),
+            };
+            let mut next = moved.snapshot();
+            next.data.last_run = Some(crate::resource::LastRun { phase: input.phase.clone(), exit_code: input.exit_code.clone(), finished_at: input.finished_at.clone(), reason: input.reason.clone() });
+            let answer = crate::resource::ObserveScheduledRunOutcome::LastRunFailed { loom_agent_last_run_observed: crate::resource::LoomAgentLastRunObserved { name: input.name.clone(), generation: before.observed_generation.clone(), phase: input.phase.clone(), exit_code: input.exit_code.clone() } };
+            LoomAgentStorage::put(&mut self.ports, next);
+            return Ok(answer);
+        }
+        // `run-active`: selected by the addressed row.
+        if decided(all(&[Some(matches!(held.state, crate::resource::LoomAgentState::Running)), equal(Some(&input.phase).map(|value| match value { crate::resource::RunPhase::Active => "Active", crate::resource::RunPhase::Succeeded => "Succeeded", crate::resource::RunPhase::Failed => "Failed" }.to_owned()), Some("Active".to_owned()))]), "loom.resource.ObserveScheduledRun")? {
+            let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
+                return Ok(crate::resource::ObserveScheduledRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+            };
+            let _ = &held;
+            let answer = crate::resource::ObserveScheduledRunOutcome::RunActive;
+            return Ok(answer);
+        }
+        // `not-running`: the default.
+        return Ok(crate::resource::ObserveScheduledRunOutcome::NotRunning { error: crate::resource::LoomAgentStateConflict { name: input.name.clone() } });
     }
 }
 
@@ -891,6 +989,7 @@ where
                 deployment: held.data.deployment,
                 variant: held.data.variant,
                 run: held.data.run,
+                last_run: held.data.last_run,
                 conditions: held.data.conditions,
                 state: held.state,
             })

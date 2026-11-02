@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
-  contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
+  model digest a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00
+  contract digest 2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-273 capabilities: **270 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+284 capabilities: **281 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -47,6 +47,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.agent.PolicySpec` |
 | domain type | `loom.agent.RefusalReason` |
 | domain type | `loom.agent.RunBudget` |
+| domain type | `loom.agent.RunRefusalReason` |
 | domain type | `loom.agent.RuntimeSpec` |
 | domain type | `loom.agent.SendRefusalReason` |
 | domain type | `loom.agent.ServeRefusalReason` |
@@ -132,6 +133,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.ConditionStatus` |
 | domain type | `loom.resource.ConditionType` |
 | domain type | `loom.resource.ConfigFile` |
+| domain type | `loom.resource.ConfigMapKeyRef` |
 | domain type | `loom.resource.ConfinementProfile` |
 | domain type | `loom.resource.ConfinementProfileKind` |
 | domain type | `loom.resource.ConnectorsBoundary` |
@@ -140,11 +142,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.resource.EnvVar` |
 | domain type | `loom.resource.GitBoundary` |
 | domain type | `loom.resource.ImageRef` |
+| domain type | `loom.resource.LastRun` |
 | domain type | `loom.resource.LoomAgent.State` |
 | domain type | `loom.resource.LoomAgentSpec` |
 | domain type | `loom.resource.ResourceName` |
 | domain type | `loom.resource.RunEnd` |
 | domain type | `loom.resource.RunPhase` |
+| domain type | `loom.resource.ScheduleInput` |
+| domain type | `loom.resource.ScheduleSpec` |
 | domain type | `loom.resource.SecretFiles` |
 | domain type | `loom.resource.SecretRef` |
 | domain type | `loom.resource.Workspace` |
@@ -211,6 +216,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.agent.BoundHttpAnswer` |
 | command behaviour | `loom.agent.BoundHttpAnswer` |
 | command contract | `loom.agent.CheckAgentSpec` |
+| command contract | `loom.agent.RunOnce` |
+| command behaviour | `loom.agent.RunOnce` |
 | command contract | `loom.resource.ApplyLoomAgent` |
 | command behaviour | `loom.resource.ApplyLoomAgent` |
 | command contract | `loom.resource.DeleteLoomAgent` |
@@ -219,6 +226,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.resource.ObserveDeployment` |
 | command contract | `loom.resource.ObserveRun` |
 | command behaviour | `loom.resource.ObserveRun` |
+| command contract | `loom.resource.ObserveScheduledRun` |
+| command behaviour | `loom.resource.ObserveScheduledRun` |
 | command contract | `loom.resource.RecordCheck` |
 | command behaviour | `loom.resource.RecordCheck` |
 | command contract | `loom.run.OverruleSelection` |
@@ -240,6 +249,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.resource.LoomAgentDegraded` |
 | event type | `loom.resource.LoomAgentDeleted` |
 | event type | `loom.resource.LoomAgentFailed` |
+| event type | `loom.resource.LoomAgentLastRunObserved` |
 | event type | `loom.resource.LoomAgentObserved` |
 | event type | `loom.resource.LoomAgentRecovered` |
 | event type | `loom.resource.LoomAgentRefused` |
@@ -258,6 +268,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.agent.A2aRefused` |
 | error type | `loom.agent.HttpReadRefused` |
 | error type | `loom.agent.HttpTrustRefused` |
+| error type | `loom.agent.RunRefused` |
 | error type | `loom.agent.SendRefused` |
 | error type | `loom.agent.ServeRefused` |
 | error type | `loom.agent.SpecRefused` |

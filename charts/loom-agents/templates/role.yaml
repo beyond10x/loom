@@ -22,7 +22,7 @@ rules:
     resources: [deployments]
     verbs: [create, update, patch, get, list, watch, delete]
   - apiGroups: [batch]
-    resources: [jobs]
+    resources: [jobs, cronjobs]
     verbs: [create, update, patch, get, list, watch, delete]
   - apiGroups: [networking.k8s.io]
     resources: [networkpolicies]

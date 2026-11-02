@@ -23,10 +23,10 @@
 //! through it, and the view `AgentSessions` reads the sessions it recorded (the `session` module
 //! says how).
 //!
-//! The `loom.resource` domain's `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`, `ObserveRun`
-//! and `DeleteLoomAgent`, and its view `LoomAgents`, are answered by `b10x-loom-resource`'s
-//! `LoomAgentRecord`, which runs the generated behaviour of `loom.resource` over itself (the
-//! `resource` module).
+//! The `loom.resource` domain's `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`,
+//! `ObserveRun`, `ObserveScheduledRun` and `DeleteLoomAgent`, and its view `LoomAgents`, are
+//! answered by `b10x-loom-resource`'s `LoomAgentRecord`, which runs the generated behaviour of
+//! `loom.resource` over itself (the `resource` module).
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the executor returned, and each event is the one it returned.
@@ -61,6 +61,7 @@ mod a2a;
 mod agent;
 pub mod codec;
 mod resource;
+mod run;
 mod session;
 
 use std::cell::RefCell;
@@ -227,6 +228,9 @@ impl ConformanceTarget for LoomTarget {
                 resource::observe_deployment(&mut live, input, correlation)
             }
             resource::OBSERVE_RUN => resource::observe_run(&mut live, input, correlation),
+            resource::OBSERVE_SCHEDULED_RUN => {
+                resource::observe_scheduled_run(&mut live, input, correlation)
+            }
             resource::DELETE_LOOM_AGENT => {
                 resource::delete_loom_agent(&mut live, input, correlation)
             }
@@ -237,6 +241,7 @@ impl ConformanceTarget for LoomTarget {
             agent::ADMIT_HTTP_TRUST => agent::admit_http_trust_command(input),
             a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
             a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
+            run::RUN_ONCE => run::run_once_command(input),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),

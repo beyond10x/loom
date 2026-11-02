@@ -22,8 +22,9 @@
 //!   <COMMISSION> reply.send --state <DIR>` writes the grant; [`SpecPlugin::resume`] (`b10x-loom
 //!   agent resume`, and every poll of a serving host) then performs the send once through
 //!   `resume_after_grant` with the grant file as the write's proof, and releases the Suspension.
-//!   `writes.mode: auto` is not served yet and is refused before anything runs; `none` sends
-//!   nothing, as the effect port refuses every send with `WritesNone`.
+//!   `writes.mode: auto` is not served yet and is refused before anything runs, but by one run
+//!   ([`SpecPlugin::for_run`], `b10x-loom agent run`), whose send is performed in its turn; `none`
+//!   sends nothing, as the effect port refuses every send with `WritesNone`.
 //! - An `http` binding is a source of the states that name it, read by the effect port through
 //!   [`HttpGet`] (`crate::http`, `story:agent-http-binding`): one bounded GET of an allow-listed
 //!   path, no redirect followed, the bearer from the variable `bearer_env` names, an `https`
@@ -123,6 +124,22 @@ impl SpecPlugin {
     /// a connectors binding with `list`, `get` and `search`, or `writes.mode: auto`. A spec with
     /// `expose.a2a` and no `channel` polls nothing ([`a2a::admit_serve`]).
     pub fn new(spec: AgentSpec, state: &Path) -> Result<Self, PluginError> {
+        Self::build(spec, state, false)
+    }
+
+    /// The plugin of `spec` for one turn on one item the caller gives (`b10x-loom agent run`,
+    /// `story:agent-run-once`, [`crate::run`]): as [`SpecPlugin::new`], but it needs neither
+    /// `channel` nor `expose.a2a`, and it serves `writes.mode: auto`, in which a send the
+    /// authority grants and `AdmitSend` admits is performed in the turn, under `max_per_hour`.
+    ///
+    /// # Errors
+    /// As [`SpecPlugin::new`], but for `writes.mode: auto` and a spec with neither a channel nor
+    /// `expose.a2a`.
+    pub fn for_run(spec: AgentSpec, state: &Path) -> Result<Self, PluginError> {
+        Self::build(spec, state, true)
+    }
+
+    fn build(spec: AgentSpec, state: &Path, run: bool) -> Result<Self, PluginError> {
         let config = |why: String| PluginError::Config(format!("the agent spec: {why}"));
         let catalog = ProtocolCatalog::plugins().map_err(PluginError::Config)?;
         let actions = |name: &str| catalog.get(name).map(|entry| entry.actions());
@@ -140,14 +157,15 @@ impl SpecPlugin {
             .writes
             .as_ref()
             .map_or(WriteMode::None, |writes| writes.mode);
-        if mode == WriteMode::Auto {
+        if mode == WriteMode::Auto && !run {
             return Err(config(
                 "`writes.mode: auto` is not served yet; declare `approval` or `none`".to_owned(),
             ));
         }
-        // `expose.a2a` alone is served too: nothing is polled, the host answers A2A only.
+        // `expose.a2a` alone is served too: nothing is polled, the host answers A2A only. A run
+        // polls nothing and answers no A2A, so it needs neither.
         let channel = match a2a::admit_serve(&a2a::serve_input(&spec)) {
-            a2a::AdmitServeOutcome::NothingToServe { .. } => {
+            a2a::AdmitServeOutcome::NothingToServe { .. } if !run => {
                 return Err(config(a2a::NOTHING_TO_SERVE.to_owned()));
             }
             _ => spec.channel.as_ref(),
@@ -252,6 +270,11 @@ impl SpecPlugin {
     /// The state directory.
     pub fn state(&self) -> &Path {
         &self.state
+    }
+
+    /// Whether a turn can send: the spec's channel binding declares a `write`.
+    pub fn sends(&self) -> bool {
+        self.send.is_some()
     }
 
     /// What the host did beside the record, one line each: the sends it performed or refused at

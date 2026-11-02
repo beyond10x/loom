@@ -9,7 +9,7 @@ tags:
 relations:
 - decides: story:agent-run-once
 - decides: story:command-schedule
-revision: 2
+revision: 3
 transitions:
 - {from: "draft", to: "approved", at: "2026-11-02T12:40:55Z", actor: "human:timo", revision: 2}
 ---
@@ -36,3 +36,14 @@ Findings recorded with the filing:
   `docs/command-sidecars-and-schedule` (`c7073278`); its § 12.1 (sidecars) is not needed here.
 - "Task prompt" names no member of `loom.agent/1`; `story:agent-run-once` takes the task text
   from `--input`. Whether the downstream means a spec member is to be asked before the wave opens.
+
+## Wave 2026-11-02-w2 opened (orchestrator, 2026-11-02)
+
+The orchestrator opened the wave under its grant (D389, D390): "loom wave 0.55.0, delivered as one wave per the delivery rule. Units: story:agent-run-once and story:command-schedule, including the declarative input (inline text or configMapKeyRef, passed as --input). Accept both in the store." The consumer blocked today is a downstream adopter's first scheduled operator-agent run, so the pull request names it.
+
+The task text question above is settled by that word: the text comes from `--input` (unit A) and, on a scheduled resource, from `spec.schedule.input` (unit B); `loom.agent/1` gains no member.
+
+- Integration branch `wave/2026-11-02-w2`, from `plan/after-0-54-0` (7d547085).
+- Unit A: story:agent-run-once. Unit B: story:command-schedule, with its declarative input amendment.
+- Builds: one targeted run at a time across the orchestrator's waves, no other cargo, `/` at least 68G free before a run, stopped below 60G, the tree at most 15G. The CI full gate on the pull request stands in for a local one that does not fit.
+- Release: 0.55.0, the release commit inside the wave.

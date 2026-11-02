@@ -443,6 +443,36 @@ Exit status:
   3  the spec cannot be served
   130  a second SIGTERM or SIGINT ended it at once";
 
+/// What `agent run --help` says about the run and its exit status; `agent::run_exit_status`
+/// decides the status from `loom.agent.RunOnce`.
+pub const AGENT_RUN_HELP: &str = "The spec is checked as `agent check` does, then --input is read: a regular file of UTF-8 text, at
+most 1048576 bytes, not empty or only whitespace. Both are decided before any model call, read or
+record. The spec needs neither a channel nor expose.a2a: nothing is polled and no A2A is answered.
+
+The text is one item, classified and answered in one governed turn as `agent serve` answers a polled
+item: the state whose `when` names its intent is the projection, the spec's capabilities are the
+authority and its inner loop's step_budget and model_budget bound the turn. The item's id is `run-`
+and the run's instant, so each run is an item of its own. The turn is recorded as one line in
+record.jsonl in the state directory, the item kept as handled, and one line per proposal is printed.
+
+When the channel binding declares a write, a proposed reply may be sent to the first channel of
+channel.allow, as reply.send of a served turn: writes.mode auto sends it in the turn, approval holds it
+for `b10x-loom approve` and `agent resume`, none sends nothing, and at most writes.max_per_hour sends
+are made an hour (sends.jsonl). Without a write the turn runs on inbound-answer@1 and sends nothing.
+
+The state directory is --state, or without it the spec's runtime.state_dir. The models are the spec's
+`model` section, or with --catalog the route aliases --model and --classifier-model name.
+
+Exit status:
+  0  the turn answered: it proposed (and sent or held its reply), declined, or proposed a case
+  4  the turn ended without an answer: stopped (a budget spent, no state for the intent) or unclassified
+  3  refused: the spec cannot be served (standard error carries the refusal `agent check` gives), or
+     the turn's send was refused (SendRefused, naming RateLimited, WritesNone, OutsideAllowList or the
+     write's refusal); the turn is recorded
+  1  --input is absent, cannot be read or holds no text; or the spec, the models, LOOM_HTTP_CA_FILE,
+     the state directory or a service the turn needs cannot be used
+  2  the command line is not valid";
+
 /// What `agent resume --help` says about the send and its exit status.
 pub const AGENT_RESUME_HELP: &str = "Performs the send the commission's Suspension holds, once, after `b10x-loom approve <COMMISSION>
 reply.send --state <DIR>` wrote its grant: the write goes through the connectors command line with the
@@ -470,6 +500,10 @@ pub enum AgentCommand {
     /// governed turn, and send a reply only as the spec's writes admit.
     #[command(after_help = AGENT_SERVE_HELP)]
     Serve(AgentServeArgs),
+    /// Run one turn of a loom.agent/1 spec on a task text, record it as `agent serve` records an
+    /// item, send only as the spec's writes admit, and exit with how the turn ended.
+    #[command(after_help = AGENT_RUN_HELP)]
+    Run(AgentRunArgs),
     /// Perform a held send after its approval, once.
     #[command(after_help = AGENT_RESUME_HELP)]
     Resume(AgentResumeArgs),
@@ -651,6 +685,35 @@ pub struct AgentServeArgs {
     /// The address the A2A listener binds when the spec declares `expose.a2a`, on its port.
     #[arg(long, value_name = "IP", default_value = a2a::DEFAULT_ADDRESS)]
     pub a2a_address: std::net::IpAddr,
+}
+
+/// The arguments of `b10x-loom agent run`.
+#[derive(Debug, Args)]
+pub struct AgentRunArgs {
+    /// The loom.agent/1 document, YAML or JSON, in a regular file.
+    #[arg(long, value_name = "FILE")]
+    pub spec: PathBuf,
+    /// The state directory: the record, cases, Suspensions, grants and send counter, as `agent
+    /// serve` keeps them. One host holds it at a time. Without it, the spec's
+    /// `runtime.state_dir`.
+    #[arg(long, value_name = "DIR")]
+    pub state: Option<PathBuf>,
+    /// The task text of the turn, in a regular UTF-8 file. Without it the run is refused (exit
+    /// status 1).
+    #[arg(long, value_name = "FILE")]
+    pub input: Option<PathBuf>,
+    /// An llm catalog (`llm.catalog/1` TOML) in a regular file, instead of the spec's models:
+    /// `--model` and `--classifier-model` then each name a route alias of it.
+    #[arg(long, value_name = "PATH", requires_all = ["model", "classifier_model"])]
+    pub catalog: Option<PathBuf>,
+    /// The model the turn runs on: a name the spec's routes document serves, or with `--catalog`
+    /// a route alias. By default the spec's `agent` role.
+    #[arg(long, value_name = "ID")]
+    pub model: Option<String>,
+    /// The model that classifies the task text: a name the spec's routes document serves, or
+    /// with `--catalog` a route alias. By default the spec's `classifier` role.
+    #[arg(long, value_name = "ID")]
+    pub classifier_model: Option<String>,
 }
 
 /// The arguments of `b10x-loom agent resume`.

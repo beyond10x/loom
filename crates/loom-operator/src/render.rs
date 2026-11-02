@@ -12,7 +12,8 @@
 //!   token mounted.
 //! * ConfigMap `<resource>-spec`: `agent.yaml` (absent for a `Command` resource without
 //!   `spec.agent`), `routes.yaml`, `connectors.toml` and, for a `Command` resource, each of
-//!   `spec.configFiles` by its name, its content verbatim.
+//!   `spec.configFiles` by its name, its content verbatim, and `spec.schedule.input.text` as
+//!   [`SCHEDULE_INPUT_FILE`].
 //! * Deployment `<resource>`: replicas 1, `Recreate`; the init container `check` runs
 //!   `b10x-loom agent check --spec /etc/agent/agent.yaml`, the container `loom-agent` runs
 //!   `b10x-loom agent serve --spec /etc/agent/agent.yaml --state /var/lib/agent` from
@@ -44,6 +45,18 @@
 //!   seccomp profile, and the init containers keep the pod's. The controller's configuration
 //!   decides which it admits ([`crate::admission`] step 16); a resource that declares none renders
 //!   as before.
+//!
+//!   A `Command` resource with `spec.schedule` (story command-schedule, design § 12.2) renders
+//!   the `batch/v1` CronJob `<resource>` in the Job's place and no Job: `spec.schedule.cron`,
+//!   `timeZone` and `startingDeadlineSeconds` as given, `suspend` (false when absent),
+//!   `concurrencyPolicy: Forbid`, [`SCHEDULE_HISTORY`] finished runs of each outcome kept, and as
+//!   its job template the Job's spec, the same pod template byte for byte. With
+//!   `spec.schedule.input` the program container runs `b10x-loom agent run --spec
+//!   /config/agent.yaml --state /var/lib/agent --input <file>` from `spec.image` (else the
+//!   configured default), with no argument of `spec.command`: `<file>` is
+//!   `/config/schedule-input.txt` for an inline text, else `<dir>/input` for `configMapKeyRef`,
+//!   whose key alone the program container mounts read-only at [`SCHEDULE_INPUT_DIR`] (`<dir>`)
+//!   from the volume `schedule-input`, not optional.
 //!
 //!   On either variant `spec.env` is the agent container's `env` after the controller's own
 //!   ([`CONTROLLER_ENV`]), in declaration order, beside the `spec.secretRef` environment; no init
@@ -96,10 +109,10 @@ use std::num::NonZeroU16;
 
 use b10x_loom_resource::model::AgentVariant;
 use k8s_openapi::api::apps::v1::{Deployment, DeploymentSpec, DeploymentStrategy};
-use k8s_openapi::api::batch::v1::{Job, JobSpec};
+use k8s_openapi::api::batch::v1::{CronJob, CronJobSpec, Job, JobSpec, JobTemplateSpec};
 use k8s_openapi::api::core::v1::{
     AppArmorProfile, Capabilities, ConfigMap, ConfigMapVolumeSource, Container, ContainerPort,
-    EmptyDirVolumeSource, EnvFromSource, EnvVar, ExecAction, HTTPGetAction,
+    EmptyDirVolumeSource, EnvFromSource, EnvVar, ExecAction, HTTPGetAction, KeyToPath,
     PersistentVolumeClaimVolumeSource, PodSecurityContext, PodSpec, PodTemplateSpec, Probe,
     ProjectedVolumeSource, ResourceRequirements, SeccompProfile, SecretEnvSource,
     SecretVolumeSource, SecurityContext, Service, ServiceAccount, ServiceAccountTokenProjection,
@@ -147,6 +160,18 @@ pub const HOME_SUBDIR: &str = "home";
 pub const TMP_VOLUME_DIR: &str = "/var/run/loom/tmp";
 /// Where `prepare-writable-dirs` mounts the emptyDir `state`.
 pub const STATE_VOLUME_DIR: &str = "/var/run/loom/state";
+/// The key of the resource's ConfigMap that holds `spec.schedule.input.text`, read at
+/// `/config/schedule-input.txt`.
+pub const SCHEDULE_INPUT_FILE: &str = "schedule-input.txt";
+/// Where the program container mounts the ConfigMap key `spec.schedule.input.configMapKeyRef`
+/// names, read-only.
+pub const SCHEDULE_INPUT_DIR: &str = "/var/run/loom/schedule-input";
+/// The volume that mounts it, and the one file it holds there.
+pub const SCHEDULE_INPUT_VOLUME: &str = "schedule-input";
+/// The file in [`SCHEDULE_INPUT_DIR`] the key is projected to.
+pub const SCHEDULE_INPUT_KEY_FILE: &str = "input";
+/// How many finished runs of each outcome a scheduled resource's CronJob keeps.
+pub const SCHEDULE_HISTORY: i32 = 3;
 /// The mode of the `spec.secretFiles` Secret volume's files: read by the owner and by `fsGroup`,
 /// so the staging init container, running as [`USER`] in that group, reads them.
 pub const SECRET_FILE_MODE: i32 = 0o440;
@@ -315,13 +340,16 @@ pub fn controller_env(
 /// The label that names the namespace a peer stands in, which Kubernetes sets on every namespace.
 const NAMESPACE_LABEL: &str = "kubernetes.io/metadata.name";
 
-/// What runs the pod: a Deployment for `AgentServe`, a Job that runs once for `Command`.
+/// What runs the pod: a Deployment for `AgentServe`, a Job that runs once for `Command`, a
+/// CronJob for a `Command` resource with `spec.schedule`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Workload {
     /// The `AgentServe` variant's Deployment, which keeps its pod running.
     Deployment(Deployment),
     /// The `Command` variant's Job, which runs its pod to completion once.
     Job(Job),
+    /// A scheduled `Command` resource's CronJob, which starts that Job on each tick.
+    CronJob(Box<CronJob>),
 }
 
 impl Workload {
@@ -331,6 +359,7 @@ impl Workload {
         match self {
             Self::Deployment(deployment) => deployment.metadata.name.clone(),
             Self::Job(job) => job.metadata.name.clone(),
+            Self::CronJob(cron_job) => cron_job.metadata.name.clone(),
         }
         .unwrap_or_default()
     }
@@ -869,7 +898,26 @@ impl Renderer<'_> {
                 ),
                 None,
             ),
-            Some(command) => (command.entrypoint.clone(), command.args.clone()),
+            Some(command) => match self.schedule_input() {
+                Some(input) => (
+                    Some(
+                        [
+                            "b10x-loom".to_owned(),
+                            "agent".to_owned(),
+                            "run".to_owned(),
+                            "--spec".to_owned(),
+                            format!("{CONFIG_DIR}/agent.yaml"),
+                            "--state".to_owned(),
+                            STATE_DIR.to_owned(),
+                            "--input".to_owned(),
+                            input,
+                        ]
+                        .to_vec(),
+                    ),
+                    None,
+                ),
+                None => (command.entrypoint.clone(), command.args.clone()),
+            },
         };
         let mut mounts = vec![
             self.spec_mount(),
@@ -882,6 +930,8 @@ impl Renderer<'_> {
             },
         ];
         mounts.extend(extra_mounts);
+        let (input_mount, input_volume) = self.schedule_input_volume().unzip();
+        mounts.extend(input_mount);
         let serve = Container {
             name: CONTAINER.to_owned(),
             image: Some(self.image()),
@@ -969,6 +1019,7 @@ impl Renderer<'_> {
                     .into_iter()
                     .chain(extra_volumes)
                     .chain(self.boundary_volume())
+                    .chain(input_volume)
                     .collect(),
                 ),
                 ..PodSpec::default()
@@ -1012,10 +1063,91 @@ impl Renderer<'_> {
         }
     }
 
+    /// The file a scheduled run of `b10x-loom agent run` reads its task from: the inline text's
+    /// key under `/config`, else the ConfigMap key's projection under [`SCHEDULE_INPUT_DIR`];
+    /// none without `spec.schedule.input`.
+    fn schedule_input(&self) -> Option<String> {
+        let input = self.agent.spec.schedule.as_ref()?.input.as_ref()?;
+        if input.config_map_key_ref.is_some() {
+            Some(format!("{SCHEDULE_INPUT_DIR}/{SCHEDULE_INPUT_KEY_FILE}"))
+        } else {
+            Some(format!("{CONFIG_DIR}/{SCHEDULE_INPUT_FILE}"))
+        }
+    }
+
+    /// With `spec.schedule.input.configMapKeyRef`, the program container's read-only mount at
+    /// [`SCHEDULE_INPUT_DIR`] and its volume: that key alone, projected as
+    /// [`SCHEDULE_INPUT_KEY_FILE`], not optional, so a missing ConfigMap or key leaves the pod
+    /// unstarted rather than running without its task.
+    fn schedule_input_volume(&self) -> Option<(VolumeMount, Volume)> {
+        let key = self
+            .agent
+            .spec
+            .schedule
+            .as_ref()?
+            .input
+            .as_ref()?
+            .config_map_key_ref
+            .as_ref()?;
+        Some((
+            VolumeMount {
+                name: SCHEDULE_INPUT_VOLUME.to_owned(),
+                mount_path: SCHEDULE_INPUT_DIR.to_owned(),
+                read_only: Some(true),
+                ..VolumeMount::default()
+            },
+            Volume {
+                name: SCHEDULE_INPUT_VOLUME.to_owned(),
+                config_map: Some(ConfigMapVolumeSource {
+                    name: key.name.clone(),
+                    items: Some(vec![KeyToPath {
+                        key: key.key.clone(),
+                        path: SCHEDULE_INPUT_KEY_FILE.to_owned(),
+                        mode: None,
+                    }]),
+                    optional: Some(false),
+                    default_mode: None,
+                }),
+                ..Volume::default()
+            },
+        ))
+    }
+
+    /// A scheduled `Command` resource's CronJob (story command-schedule): named as the Job would
+    /// be, its job template the Job's spec (`backoffLimit: 0`, the same pod template byte for
+    /// byte), `concurrencyPolicy: Forbid`, so a run still going holds the next, and three finished
+    /// runs of each outcome kept, so the newest stays readable. `suspend` is rendered explicitly,
+    /// so removing it from the resource resumes the schedule.
+    fn cron_job(&self, schedule: &crate::resource::Schedule) -> CronJob {
+        CronJob {
+            metadata: self.meta(self.name.to_owned()),
+            spec: Some(CronJobSpec {
+                schedule: schedule.cron.clone(),
+                time_zone: schedule.time_zone.clone(),
+                suspend: Some(schedule.suspend.unwrap_or(false)),
+                starting_deadline_seconds: schedule.starting_deadline_seconds,
+                concurrency_policy: Some("Forbid".to_owned()),
+                successful_jobs_history_limit: Some(SCHEDULE_HISTORY),
+                failed_jobs_history_limit: Some(SCHEDULE_HISTORY),
+                job_template: JobTemplateSpec {
+                    metadata: Some(ObjectMeta {
+                        labels: Some(labels(self.name)),
+                        ..ObjectMeta::default()
+                    }),
+                    spec: self.job().spec,
+                },
+            }),
+            ..CronJob::default()
+        }
+    }
+
     fn workload(&self) -> Workload {
-        match self.admitted.variant {
-            AgentVariant::AgentServe => Workload::Deployment(self.deployment()),
-            AgentVariant::Command => Workload::Job(self.job()),
+        match (self.admitted.variant, &self.agent.spec.schedule) {
+            (AgentVariant::AgentServe, _) => Workload::Deployment(self.deployment()),
+            (AgentVariant::Command, None) => Workload::Job(self.job()),
+            (AgentVariant::Command, Some(schedule)) => {
+                Workload::CronJob(Box::new(self.cron_job(schedule)))
+            }
         }
     }
 
@@ -1179,6 +1311,7 @@ pub fn to_yaml(children: &Children) -> String {
     match &children.workload {
         Workload::Deployment(deployment) => document(&mut out, deployment),
         Workload::Job(job) => document(&mut out, job),
+        Workload::CronJob(cron_job) => document(&mut out, cron_job),
     }
     document(&mut out, &children.network_policy);
     if let Some(service) = &children.service {
@@ -1256,6 +1389,7 @@ pub fn render_document(text: &str, config: &Config) -> Result<String, RenderErro
     let catalog = ProtocolCatalog::plugins().map_err(RenderError::Catalog)?;
     let actions = |protocol: &str| catalog.get(protocol).map(|entry| entry.actions());
     let admitted = admission::admit(&agent.spec, &namespace, config, &actions)
+        .and_then(|admitted| admission::schedule_name(&name, &agent.spec).map(|()| admitted))
         .map_err(RenderError::Refused)?;
     Ok(to_yaml(&children(
         &agent, &name, &namespace, &admitted, config,

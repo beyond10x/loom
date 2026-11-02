@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5",
-    "contract_digest": "5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec"
+    "source_digest": "a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00",
+    "contract_digest": "2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -237,6 +237,13 @@
     {
       "kind": "domain_type",
       "source": "loom.agent.RunBudget",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.agent.RunRefusalReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -838,6 +845,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.ConfigMapKeyRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.resource.ConfinementProfile",
       "disposition": {
         "disposition": "generated"
@@ -894,6 +908,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.resource.LastRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.resource.LoomAgent.State",
       "disposition": {
         "disposition": "generated"
@@ -923,6 +944,20 @@
     {
       "kind": "domain_type",
       "source": "loom.resource.RunPhase",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.ScheduleInput",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.resource.ScheduleSpec",
       "disposition": {
         "disposition": "generated"
       }
@@ -1403,6 +1438,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.agent.RunOnce",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.agent.RunOnce",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.resource.ApplyLoomAgent",
       "disposition": {
         "disposition": "generated"
@@ -1453,6 +1502,20 @@
     {
       "kind": "command_behavior",
       "source": "loom.resource.ObserveRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.resource.ObserveScheduledRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.resource.ObserveScheduledRun",
       "disposition": {
         "disposition": "generated"
       }
@@ -1630,6 +1693,13 @@
     },
     {
       "kind": "event_type",
+      "source": "loom.resource.LoomAgentLastRunObserved",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
       "source": "loom.resource.LoomAgentObserved",
       "disposition": {
         "disposition": "generated"
@@ -1750,6 +1820,13 @@
     {
       "kind": "error_type",
       "source": "loom.agent.HttpTrustRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.agent.RunRefused",
       "disposition": {
         "disposition": "generated"
       }

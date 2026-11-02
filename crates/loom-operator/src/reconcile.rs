@@ -45,6 +45,18 @@
 //!    render (a Service once `expose.a2a` is gone, the ServiceAccount an earlier generation named)
 //!    is deleted. Every delete propagates in the foreground: what the child owns, a Job's pod
 //!    included, goes before it does.
+//!
+//!    A `Command` resource with `spec.schedule` (story command-schedule) has a CronJob in its
+//!    Job's place. Before it is created, the resource's Job and a Deployment of its name are
+//!    deleted, and before a Job is created the resource's CronJob, so the two never coexist; while
+//!    one still terminates nothing is applied and the reconcile comes again after [`RETRY`]. The
+//!    CronJob is applied on every reconcile, so a new generation patches its schedule and job
+//!    template in place. The runs it starts are Kubernetes's: never applied, deleted or counted
+//!    as the resource's children. The newest finished one whose controlling owner is the
+//!    CronJob's uid is `ObserveScheduledRun`, read as a single run's end is, once per Job and
+//!    never one older than the last observed, and again after a new generation cleared the
+//!    record's `last_run`; the resource stays Running.
+//!    A run whose pod is still ending is waited for after [`RETRY`].
 //! 6. A `Completed` or `Failed` resource has no child applied, read or deleted: its run is over
 //!    until a new generation respecifies it.
 //! 7. The record's row is published as the status by server-side apply on the status
@@ -56,9 +68,11 @@
 //! only when its controlling owner reference names the resource's uid. A kind the API server
 //! does not serve (a list answered 404) holds none.
 //!
-//! The next reconcile comes after [`REQUEUE`], on any change to the resource or to a Deployment
-//! or Job it owns, and after [`RETRY`] when one fails. After a restart the record is empty: every
-//! resource is created again at its cluster generation, checked again, and its status rewritten.
+//! The next reconcile comes after [`REQUEUE`], on any change to the resource or to a Deployment,
+//! Job or CronJob it owns, and after [`RETRY`] when one fails. After a restart the record is
+//! empty: every resource is created again at its cluster generation, checked again, and its
+//! status rewritten; a scheduled resource reads its `last_run` again from the CronJob's newest
+//! finished run.
 //! A `Command` resource whose finished Job is still there reads its run from it and does not run
 //! again; one whose Job was deleted while the controller was down runs once more.
 //! The controller reads and writes no Secret, and reads a Pod only to learn how a finished run
@@ -72,13 +86,14 @@ use std::time::Duration;
 
 use b10x_loom_resource::model::{
     ApplyLoomAgent, ApplyLoomAgentOutcome, DeleteLoomAgent, DeploymentAvailability, LoomAgentState,
-    LoomAgents, ObserveDeployment, ObserveRun, RecordCheck, ResourceName, RunPhase,
+    LoomAgents, ObserveDeployment, ObserveRun, ObserveScheduledRun, RecordCheck, ResourceName,
+    RunPhase,
 };
 use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, Timestamp, UnmetObligation};
 use futures::StreamExt;
 use k8s_openapi::NamespaceResourceScope;
 use k8s_openapi::api::apps::v1::Deployment;
-use k8s_openapi::api::batch::v1::Job;
+use k8s_openapi::api::batch::v1::{CronJob, Job};
 use k8s_openapi::api::core::v1::{
     ConfigMap, ContainerStateTerminated, ContainerStatus, Pod, Service, ServiceAccount,
 };
@@ -164,6 +179,27 @@ struct Held {
     applied: BTreeSet<(Kind, String)>,
     pods_refused: Option<u16>,
     over: Option<JobRun>,
+    last_job: Option<ScheduledRun>,
+}
+
+/// A scheduled run last observed as a resource's `last_run`: its Job's uid and where it stands
+/// among the CronJob's runs ([`run_order`]), so a run older than it is never observed after it.
+#[derive(Clone, Debug)]
+struct ScheduledRun {
+    uid: String,
+    order: RunOrder,
+}
+
+/// Where a Job stands among its CronJob's runs: its creation time, then its name between two
+/// created within one second (the CronJob suffixes each with its scheduled minute).
+type RunOrder = (Option<JiffTimestamp>, String);
+
+/// The place of the run `job` among its CronJob's runs.
+fn run_order(job: &Job) -> RunOrder {
+    (
+        job.metadata.creation_timestamp.as_ref().map(|time| time.0),
+        job.name_any(),
+    )
 }
 
 /// What every reconcile shares: the client, the configuration, the plugin catalog the check
@@ -220,6 +256,7 @@ impl Context {
             applied: BTreeSet::new(),
             pods_refused: None,
             over: None,
+            last_job: None,
         };
         let replaced = {
             let mut held = self.held();
@@ -290,6 +327,18 @@ impl Context {
         held.over.clone()
     }
 
+    /// The scheduled run of the resource `name` last observed as its `last_run`.
+    fn last_job(&self, name: &str) -> Option<ScheduledRun> {
+        self.held().get(name).and_then(|held| held.last_job.clone())
+    }
+
+    /// Notes that the scheduled run `run` is the last observed of the resource `name`.
+    fn saw_last_job(&self, name: &str, run: ScheduledRun) {
+        if let Some(held) = self.held().get_mut(name) {
+            held.last_job = Some(run);
+        }
+    }
+
     /// The code the last list of the pods of the resource `name` was refused with, if it was.
     fn pods_refused(&self, name: &str) -> Option<u16> {
         self.held().get(name).and_then(|held| held.pods_refused)
@@ -318,7 +367,9 @@ impl Context {
 
     fn admit(&self, agent: &LoomAgent, namespace: &str) -> Result<Admitted, admission::Refusal> {
         let actions = |protocol: &str| self.catalog.get(protocol).map(|entry| entry.actions());
-        admission::admit(&agent.spec, namespace, &self.config, &actions)
+        admission::admit(&agent.spec, namespace, &self.config, &actions).and_then(|admitted| {
+            admission::schedule_name(&agent.name_any(), &agent.spec).map(|()| admitted)
+        })
     }
 }
 
@@ -351,16 +402,18 @@ enum Kind {
     ConfigMap,
     Deployment,
     Job,
+    CronJob,
     NetworkPolicy,
     Service,
 }
 
 impl Kind {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::ServiceAccount,
         Self::ConfigMap,
         Self::Deployment,
         Self::Job,
+        Self::CronJob,
         Self::NetworkPolicy,
         Self::Service,
     ];
@@ -371,6 +424,7 @@ impl Kind {
             Self::ConfigMap => "ConfigMap",
             Self::Deployment => "Deployment",
             Self::Job => "Job",
+            Self::CronJob => "CronJob",
             Self::NetworkPolicy => "NetworkPolicy",
             Self::Service => "Service",
         }
@@ -495,6 +549,7 @@ async fn held_kind(
         Kind::ConfigMap => held::<ConfigMap>(client, namespace, name, resource, owner).await,
         Kind::Deployment => held::<Deployment>(client, namespace, name, resource, owner).await,
         Kind::Job => held::<Job>(client, namespace, name, resource, owner).await,
+        Kind::CronJob => held::<CronJob>(client, namespace, name, resource, owner).await,
         Kind::NetworkPolicy => {
             held::<NetworkPolicy>(client, namespace, name, resource, owner).await
         }
@@ -515,6 +570,7 @@ async fn delete_kind(
         Kind::ConfigMap => delete_uid::<ConfigMap>(client, namespace, name, uid).await,
         Kind::Deployment => delete_uid::<Deployment>(client, namespace, name, uid).await,
         Kind::Job => delete_uid::<Job>(client, namespace, name, uid).await,
+        Kind::CronJob => delete_uid::<CronJob>(client, namespace, name, uid).await,
         Kind::NetworkPolicy => delete_uid::<NetworkPolicy>(client, namespace, name, uid).await,
         Kind::Service => delete_uid::<Service>(client, namespace, name, uid).await,
     }
@@ -572,6 +628,7 @@ async fn listed_kind(
         Kind::ConfigMap => listed::<ConfigMap>(client, namespace, resource, owner).await,
         Kind::Deployment => listed::<Deployment>(client, namespace, resource, owner).await,
         Kind::Job => listed::<Job>(client, namespace, resource, owner).await,
+        Kind::CronJob => listed::<CronJob>(client, namespace, resource, owner).await,
         Kind::NetworkPolicy => listed::<NetworkPolicy>(client, namespace, resource, owner).await,
         Kind::Service => listed::<Service>(client, namespace, resource, owner).await,
     }
@@ -646,6 +703,7 @@ fn wanted(children: &Children) -> Vec<(Kind, String)> {
         match &children.workload {
             Workload::Deployment(deployment) => (Kind::Deployment, deployment.name_any()),
             Workload::Job(job) => (Kind::Job, job.name_any()),
+            Workload::CronJob(cron_job) => (Kind::CronJob, cron_job.name_any()),
         },
         (Kind::NetworkPolicy, children.network_policy.name_any()),
     ];
@@ -785,6 +843,41 @@ fn job_generation(job: &Job) -> Option<i64> {
         .get(GENERATION_ANNOTATION)?
         .parse()
         .ok()
+}
+
+/// The newest finished run of the CronJob `cron_job` of the resource `resource`: of the Jobs
+/// labelled as its children whose controlling owner reference is the CronJob's uid, the one
+/// created last (by name between two of one second) that is no longer active. A Job someone else
+/// controls, or one still running, never speaks for it.
+async fn newest_run(
+    client: &Client,
+    namespace: &str,
+    resource: &str,
+    cron_job: &CronJob,
+) -> Result<Option<Job>, kube::Error> {
+    let Some(uid) = cron_job.metadata.uid.as_deref() else {
+        return Ok(None);
+    };
+    let api: Api<Job> = Api::namespaced(client.clone(), namespace);
+    let jobs = match api
+        .list(&ListParams::default().labels(&instance(resource)))
+        .await
+    {
+        Ok(list) => list.items,
+        Err(kube::Error::Api(status)) if status.code == 404 => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(jobs
+        .into_iter()
+        .filter(|job| {
+            job.metadata
+                .owner_references
+                .iter()
+                .flatten()
+                .any(|reference| reference.controller == Some(true) && reference.uid == uid)
+        })
+        .filter(|job| run_phase(job) != RunPhase::Active)
+        .max_by_key(run_order))
 }
 
 /// What a Job reports of its run: Succeeded once its condition `Complete` is True or a pod
@@ -1024,17 +1117,21 @@ fn job_reason(job: &Job, phase: RunPhase) -> Option<String> {
 }
 
 /// What the applied workload reports: the Deployment's availability, once its status observed
-/// its generation, or the Job's run.
+/// its generation, the Job's run, or the CronJob as applied, whose uid owns the runs it starts.
 enum Observed {
     Deployment(Option<DeploymentAvailability>),
     Job(RunPhase, Option<Box<Job>>),
+    CronJob(Box<CronJob>),
 }
 
 /// Before a `Command` resource's Job is created: deletes the Job of another generation `stale`
-/// names, and a Deployment of the Job's name the resource or a predecessor controls (one an
-/// earlier release made for a `Command` resource), and answers whether both are gone. Until they
-/// are, the Job waits, so the old pod and the new run never share the workspace. An `AgentServe`
-/// resource's Deployment waits for nothing: it is updated in place, `Recreate`.
+/// names, the CronJob of the Job's name (the resource was scheduled before), and a Deployment of
+/// that name (one an earlier release made for a `Command` resource), each one the resource or a
+/// predecessor controls, and answers whether all are gone. Before a scheduled resource's CronJob
+/// is created, the same for the Job and the Deployment of its name. Until they are, nothing is
+/// applied, so an old pod and the new run never share the workspace, and a Job and a CronJob of
+/// one resource never coexist. An `AgentServe` resource's Deployment waits for nothing: it is
+/// updated in place, `Recreate`.
 async fn workloads_gone(
     ctx: &Context,
     namespace: &str,
@@ -1043,9 +1140,11 @@ async fn workloads_gone(
     children: &Children,
     stale: Option<(&Surveyed, &String, &JobRun)>,
 ) -> Result<bool, kube::Error> {
-    if !matches!(children.workload, Workload::Job(_)) {
-        return Ok(true);
-    }
+    let others: &[Kind] = match children.workload {
+        Workload::Deployment(_) => return Ok(true),
+        Workload::Job(_) => &[Kind::CronJob, Kind::Deployment],
+        Workload::CronJob(_) => &[Kind::Job, Kind::Deployment],
+    };
     let mut gone = true;
     if let Some((job, uid, _)) = stale {
         if delete_kind(job.kind, &ctx.client, namespace, &job.name, uid).await? {
@@ -1054,15 +1153,16 @@ async fn workloads_gone(
             gone = false;
         }
     }
-    let deployment = children.workload.name();
-    let kind = Kind::Deployment;
-    if let Holding::Ours(uid) | Holding::Predecessor(uid) =
-        held_kind(kind, &ctx.client, namespace, &deployment, resource, owner).await?
-    {
-        if delete_kind(kind, &ctx.client, namespace, &deployment, &uid).await? {
-            ctx.unremember(resource, kind, &deployment);
-        } else {
-            gone = false;
+    let workload = children.workload.name();
+    for &kind in others {
+        if let Holding::Ours(uid) | Holding::Predecessor(uid) =
+            held_kind(kind, &ctx.client, namespace, &workload, resource, owner).await?
+        {
+            if delete_kind(kind, &ctx.client, namespace, &workload, &uid).await? {
+                ctx.unremember(resource, kind, &workload);
+            } else {
+                gone = false;
+            }
         }
     }
     Ok(gone)
@@ -1089,6 +1189,9 @@ async fn apply_children(
             let applied = apply(client, namespace, job).await?;
             Observed::Job(run_phase(&applied), Some(Box::new(applied)))
         }
+        (Workload::CronJob(cron_job), _) => {
+            Observed::CronJob(Box::new(apply(client, namespace, &**cron_job).await?))
+        }
     };
     apply(client, namespace, &children.network_policy).await?;
     if let Some(service) = &children.service {
@@ -1097,15 +1200,67 @@ async fn apply_children(
     Ok(observed)
 }
 
-/// Publishes `row` as the status of the resource `name`, unless `current` already reads so.
+/// Observes the newest finished run of the scheduled resource `resource`'s CronJob, `applied`
+/// ([`newest_run`]), as `ObserveScheduledRun` with how it ended ([`observation`]), when the record
+/// holds no `last_run` (a new generation clears it) or the run is newer than the one last
+/// observed: neither that run again nor one older, which is what [`newest_run`] finds once the
+/// newer Job is deleted, moves `last_run`. Answers true while that run's pod is still ending, so
+/// the caller comes again after [`RETRY`].
+async fn observe_scheduled(
+    ctx: &Context,
+    namespace: &str,
+    resource: &ResourceName,
+    applied: &CronJob,
+) -> Result<bool, Error> {
+    let Some(run) = newest_run(&ctx.client, namespace, &resource.0, applied).await? else {
+        return Ok(false);
+    };
+    let seen = ScheduledRun {
+        uid: run.metadata.uid.clone().unwrap_or_default(),
+        order: run_order(&run),
+    };
+    let recorded = row(ctx, resource).is_some_and(|row| row.last_run.is_some());
+    if recorded
+        && ctx
+            .last_job(&resource.0)
+            .is_some_and(|last| last.uid == seen.uid || seen.order <= last.order)
+    {
+        return Ok(false);
+    }
+    let Some(observed) =
+        observation(ctx, namespace, resource, Some(&run), run_phase(&run), true).await?
+    else {
+        return Ok(true);
+    };
+    ctx.record().observe_scheduled_run(ObserveScheduledRun {
+        name: observed.name,
+        phase: observed.phase,
+        exit_code: observed.exit_code,
+        finished_at: observed.finished_at,
+        reason: observed.reason,
+    })?;
+    ctx.saw_last_job(&resource.0, seen);
+    Ok(false)
+}
+
+/// Publishes `row` as the status of the resource `agent`, named `name`, unless its status already
+/// reads so.
 async fn publish(
     ctx: &Context,
     namespace: &str,
     name: &str,
-    current: Option<&crate::resource::LoomAgentStatus>,
+    agent: &LoomAgent,
     row: &LoomAgents,
 ) -> Result<(), kube::Error> {
-    let mut status = status::status(row);
+    let current = agent.status.as_ref();
+    let scheduled = agent
+        .spec
+        .schedule
+        .as_ref()
+        .map(|schedule| status::Scheduled {
+            suspended: schedule.suspend.unwrap_or(false),
+        });
+    let mut status = status::status_of(row, scheduled);
     if let Some(code) = ctx.pods_refused(name) {
         status::pods_unread(&mut status, code);
     }
@@ -1243,7 +1398,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     }
                 }
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row).await?;
                 }
                 return Ok(Action::requeue(RETRY));
             }
@@ -1259,7 +1414,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     ctx.record().observe_run(observed)?;
                 }
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row).await?;
                 }
                 return Ok(Action::requeue(REQUEUE));
             }
@@ -1267,7 +1422,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 && !workloads_gone(&ctx, &namespace, &name, &owner, children, job).await?
             {
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row).await?;
                 }
                 return Ok(Action::requeue(RETRY));
             }
@@ -1307,6 +1462,9 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                                 None => ending = true,
                             }
                         }
+                        Observed::CronJob(applied) => {
+                            ending = observe_scheduled(&ctx, &namespace, &key, &applied).await?;
+                        }
                     }
                     if !owner.is_empty() {
                         delete_owned(&ctx, &namespace, &name, &owner, &current).await?;
@@ -1315,7 +1473,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
             }
             if ending {
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row).await?;
                 }
                 return Ok(Action::requeue(RETRY));
             }
@@ -1324,7 +1482,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
     }
 
     if let Some(row) = row(&ctx, &key) {
-        publish(&ctx, &namespace, &name, agent.status.as_ref(), &row).await?;
+        publish(&ctx, &namespace, &name, &agent, &row).await?;
     }
     Ok(Action::requeue(REQUEUE))
 }
@@ -1336,7 +1494,8 @@ pub fn error_policy(_agent: Arc<LoomAgent>, _error: &Error, _ctx: Arc<Context>) 
 }
 
 /// Runs the controller over `client` under `config` until its watch ends: every `LoomAgent` of
-/// the configured namespace and every Deployment and Job they own.
+/// the configured namespace and every Deployment, Job and CronJob they own. A CronJob's status
+/// changes when a run it started begins or ends, so its runs need no watch of their own.
 ///
 /// # Errors
 /// The plugin catalog cannot be loaded.
@@ -1345,11 +1504,13 @@ pub async fn run(client: Client, config: Config) -> Result<(), String> {
     let ctx = Arc::new(Context::new(client.clone(), config)?);
     let agents: Api<LoomAgent> = Api::namespaced(client.clone(), &namespace);
     let deployments: Api<Deployment> = Api::namespaced(client.clone(), &namespace);
-    let jobs: Api<Job> = Api::namespaced(client, &namespace);
+    let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace);
+    let cron_jobs: Api<CronJob> = Api::namespaced(client, &namespace);
     let forget = Arc::clone(&ctx);
     Controller::new(agents, watcher::Config::default())
         .owns(deployments, watcher::Config::default())
         .owns(jobs, watcher::Config::default())
+        .owns(cron_jobs, watcher::Config::default())
         .shutdown_on_signal()
         .run(reconcile, error_policy, ctx)
         .for_each(|result| {

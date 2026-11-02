@@ -12,6 +12,23 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-11-02
+
+No breaking changes.
+
+### Added
+
+- `b10x-loom agent run --spec <FILE> --state <DIR> --input <FILE>` runs one turn of a `loom.agent/1` spec on the input's text, records it as `agent serve` records an item, performs at most the sends `writes` admits and exits: 0 answered, 4 no answer, 3 refused, 1 input refused (story:agent-run-once)
+- `LoomAgent` `spec.schedule` (`cron`, `timeZone`, `suspend`, `startingDeadlineSeconds`) runs a `Command` resource as a `batch/v1` CronJob, `Forbid`; a scheduled resource's name is at most 52 characters (story:command-schedule)
+- `status.lastRun` and the condition `LastRunSucceeded` report a scheduled resource's newest finished run; it stays `Running` (story:command-schedule)
+- `spec.schedule.input` (`text` or `configMapKeyRef`) makes each scheduled run `b10x-loom agent run --input <file>` (story:command-schedule)
+- `loom.resource` command `ObserveScheduledRun`, event `LoomAgentLastRunObserved`, view member `last_run` (story:command-schedule)
+- The chart's Role grants `cronjobs` (create, update, patch, get, list, watch, delete) (story:command-schedule)
+
+### Fixed
+
+- `b10x-loom agent resume` of a write Connectors classifies `refused` or `not_attempted` exits 5 with the refusal and counts no send, where it reported success (story:agent-run-once)
+
 ## [0.54.0] - 2026-11-02
 
 No breaking changes.
@@ -1300,7 +1317,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.54.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.0...HEAD
+[0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0
 [0.54.0]: https://github.com/beyond10x/loom/releases/tag/0.54.0
 [0.53.0]: https://github.com/beyond10x/loom/releases/tag/0.53.0
 [0.52.0]: https://github.com/beyond10x/loom/releases/tag/0.52.0

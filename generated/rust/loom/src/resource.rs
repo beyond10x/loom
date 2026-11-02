@@ -1,11 +1,11 @@
 // generated from loom v1
-// model digest e883ecf8aa8c92fc237aff37e49a22699aa6dba3413a77b12bff9ec18761b3c5
-// contract digest 5ec5809f43da391294b5693cf6e5bcfda79f13e095c209af03255ff237cdd2ec
+// model digest a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00
+// contract digest 2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
 //!
-//! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, Pending again on a new generation, and gone on delete.
+//! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, or, on a schedule, Running with each finished run's end recorded in turn, Pending again on a new generation, and gone on delete.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -89,6 +89,8 @@ pub enum ConditionType {
     Available,
     /// `Completed`.
     Completed,
+    /// `LastRunSucceeded`.
+    LastRunSucceeded,
 }
 
 /// ConfigFile — `loom.resource.ConfigFile`.
@@ -98,6 +100,15 @@ pub struct ConfigFile {
     pub name: String,
     /// `content` — `String`.
     pub content: String,
+}
+
+/// ConfigMapKeyRef — `loom.resource.ConfigMapKeyRef`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigMapKeyRef {
+    /// `name` — `String`.
+    pub name: String,
+    /// `key` — `String`.
+    pub key: String,
 }
 
 /// ConfinementProfile — `loom.resource.ConfinementProfile`.
@@ -176,6 +187,19 @@ pub struct ImageRef {
     pub tag: String,
 }
 
+/// LastRun — `loom.resource.LastRun`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LastRun {
+    /// `phase` — `loom.resource.RunPhase`.
+    pub phase: RunPhase,
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
+    /// `finished_at` — `Optional<Timestamp>`.
+    pub finished_at: Option<crate::primitives::Timestamp>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
+}
+
 /// The states of `loom.resource.LoomAgent`, as runtime values.
 ///
 /// Synthesised from the lifecycle, so the two cannot disagree. Which *moves* are legal is not
@@ -225,6 +249,8 @@ pub struct LoomAgentSpec {
     pub app_armor_profile: Option<ConfinementProfile>,
     /// `boundary` — `Optional<loom.resource.Boundary>`.
     pub boundary: Option<Boundary>,
+    /// `schedule` — `Optional<loom.resource.ScheduleSpec>`.
+    pub schedule: Option<ScheduleSpec>,
 }
 
 /// ResourceName — `loom.resource.ResourceName`: a distinct wrapper around `String`.
@@ -251,6 +277,30 @@ pub enum RunPhase {
     Succeeded,
     /// `Failed`.
     Failed,
+}
+
+/// ScheduleInput — `loom.resource.ScheduleInput`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleInput {
+    /// `text` — `Optional<String>`.
+    pub text: Option<String>,
+    /// `config_map_key_ref` — `Optional<loom.resource.ConfigMapKeyRef>`.
+    pub config_map_key_ref: Option<ConfigMapKeyRef>,
+}
+
+/// ScheduleSpec — `loom.resource.ScheduleSpec`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduleSpec {
+    /// `cron` — `String`.
+    pub cron: String,
+    /// `time_zone` — `Optional<String>`.
+    pub time_zone: Option<String>,
+    /// `suspend` — `Optional<Boolean>`.
+    pub suspend: Option<bool>,
+    /// `starting_deadline_seconds` — `Optional<Integer>`.
+    pub starting_deadline_seconds: Option<i64>,
+    /// `input` — `Optional<loom.resource.ScheduleInput>`.
+    pub input: Option<ScheduleInput>,
 }
 
 /// SecretFiles — `loom.resource.SecretFiles`.
@@ -296,6 +346,8 @@ pub struct LoomAgentData {
     pub variant: Option<AgentVariant>,
     /// `run` — `Optional<loom.resource.RunEnd>`.
     pub run: Option<RunEnd>,
+    /// `last_run` — `Optional<loom.resource.LastRun>`.
+    pub last_run: Option<LastRun>,
     /// `conditions` — `Optional<List<loom.resource.Condition>>`.
     pub conditions: Option<Vec<Condition>>,
 }
@@ -495,7 +547,7 @@ impl LoomAgent<loom_agent_state::Running> {
         }
     }
 
-    /// `observe-running` — `Running` → `Running`. Taken by the `still-running` outcome of `loom.resource.ObserveDeployment`, the `still-active` outcome of `loom.resource.ObserveRun`.
+    /// `observe-running` — `Running` → `Running`. Taken by the `still-running` outcome of `loom.resource.ObserveDeployment`, the `still-active` outcome of `loom.resource.ObserveRun`, the `last-run-succeeded` outcome of `loom.resource.ObserveScheduledRun`, the `last-run-failed` outcome of `loom.resource.ObserveScheduledRun`.
     pub fn observe_running(self) -> LoomAgent<loom_agent_state::Running> {
         LoomAgent {
             data: self.data,
@@ -803,6 +855,54 @@ pub enum ObserveRunOutcome {
     },
 }
 
+/// ObserveScheduledRun — the input of `loom.resource.ObserveScheduledRun`.
+///
+/// Everything it can result in is [`ObserveScheduledRunOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObserveScheduledRun {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `phase` — `loom.resource.RunPhase`.
+    pub phase: RunPhase,
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
+    /// `finished_at` — `Optional<Timestamp>`.
+    pub finished_at: Option<crate::primitives::Timestamp>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
+}
+
+/// Everything `loom.resource.ObserveScheduledRun` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObserveScheduledRunOutcome {
+    /// `unknown` — for an identity no record carries.
+    Unknown {
+        /// Why it was refused: `loom.resource.LoomAgentNotFound`.
+        error: LoomAgentNotFound,
+    },
+    /// `last-run-succeeded` — when the existing subject is in Running and `phase == Succeeded`.
+    LastRunSucceeded {
+        /// The `loom.resource.LoomAgentLastRunObserved` this outcome publishes.
+        loom_agent_last_run_observed: LoomAgentLastRunObserved,
+    },
+    /// `last-run-failed` — when the existing subject is in Running and `phase == Failed`.
+    LastRunFailed {
+        /// The `loom.resource.LoomAgentLastRunObserved` this outcome publishes.
+        loom_agent_last_run_observed: LoomAgentLastRunObserved,
+    },
+    /// `run-active` — when the existing subject is in Running and `phase == Active`.
+    RunActive,
+    /// `not-running` — otherwise.
+    NotRunning {
+        /// Why it was refused: `loom.resource.LoomAgentStateConflict`.
+        error: LoomAgentStateConflict,
+    },
+}
+
 /// RecordCheck — the input of `loom.resource.RecordCheck`.
 ///
 /// Everything it can result in is [`RecordCheckOutcome`].
@@ -899,6 +999,19 @@ pub struct LoomAgentFailed {
     pub exit_code: Option<i64>,
 }
 
+/// LoomAgentLastRunObserved — the event `loom.resource.LoomAgentLastRunObserved`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoomAgentLastRunObserved {
+    /// `name` — `loom.resource.ResourceName`.
+    pub name: ResourceName,
+    /// `generation` — `Integer`.
+    pub generation: i64,
+    /// `phase` — `loom.resource.RunPhase`.
+    pub phase: RunPhase,
+    /// `exit_code` — `Optional<Integer>`.
+    pub exit_code: Option<i64>,
+}
+
 /// LoomAgentObserved — the event `loom.resource.LoomAgentObserved`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoomAgentObserved {
@@ -988,6 +1101,8 @@ pub struct LoomAgents {
     pub variant: Option<AgentVariant>,
     /// `run` — `Optional<loom.resource.RunEnd>`.
     pub run: Option<RunEnd>,
+    /// `last_run` — `Optional<loom.resource.LastRun>`.
+    pub last_run: Option<LastRun>,
     /// `conditions` — `Optional<List<loom.resource.Condition>>`.
     pub conditions: Option<Vec<Condition>>,
     /// `state` — `loom.resource.LoomAgent.State`.
@@ -1041,6 +1156,17 @@ pub mod obligations {
         ///
         /// `Err` is the typed refusal of a request the model declares no outcome for.
         fn observe_run(&mut self, input: super::ObserveRun) -> Result<super::ObserveRunOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.resource.ObserveScheduledRun` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait ObserveScheduledRunBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.resource.ObserveScheduledRun`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn observe_scheduled_run(&mut self, input: super::ObserveScheduledRun) -> Result<super::ObserveScheduledRunOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.resource.RecordCheck` — generated.

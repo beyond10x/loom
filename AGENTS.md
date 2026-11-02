@@ -760,7 +760,7 @@ holds (`Decimal`, `Timestamp`, `SessionKind`, `Intent`, the datasource ids and
 Serving a checked spec is `SpecPlugin` (`crates/loom-agent/src/serve.rs`, `story:agent-serve`), the
 `Plugin` `b10x-loom agent serve --spec --state [--once]` runs through `run_plugin`. `SpecPlugin::new`
 runs `check` again, needs `runtime`, `loops` and `channel`, a `connectors` channel binding with
-`list`, `get` and `search`, and refuses `writes.mode: auto` (not served yet); it lowers the spec
+`list`, `get` and `search`, and refuses `writes.mode: auto` (served by `agent run` only); it lowers the spec
 to the host's `PluginConfig` (connectors from `runtime`, sources from the `connectors` bindings,
 the outer loop's interval and the inner loop's threshold) and to a `SlackHandler` over the channel
 binding, `with_channel_allow(channel.allow)`, so a message outside the allow list is no item. The
@@ -795,6 +795,20 @@ plugin, the authority, the admission and the approval flow on the fake `connecto
 `crates/loom-cli/tests/agent_serve.rs` (the binary, `sigterm_ends_the_host_after_the_item`).
 No live run against a channel was made for this story; `docs/qualification/2026-10-25-agent-serve.md`
 says what one is.
+
+One turn and exit is `b10x-loom agent run --spec --state --input` (`crates/loom-agent/src/run.rs`,
+`story:agent-run-once`). `SpecPlugin::for_run` builds the plugin without the needs of polling: no
+`channel`, no `expose.a2a`, and `writes.mode: auto` served (`agent serve` still refuses it).
+`b10x_loom_plugin::run_item` hands the one item (`run::run_item`: the input's text, id `run-` and the
+instant, the first channel of `channel.allow` as its `channel`) to the host's `Cycle::attempt` with
+one attempt, under the state directory's record lock, and returns the line it appended. `RunItem`
+picks the turn: the served one with the send policy when the spec's channel binding declares a
+write (`SpecPlugin::sends`), else the A2A answer turn on `inbound-answer@1`. A send refused under
+the process ends the run with the line's detail starting `not sent: ` (`turn::NOT_SENT`). How the
+run ends and its exit status are `loom.agent.RunOnce` (`run::run_once`, `run::ended`; the
+conformance target answers it in `crates/loom-conformance/src/run.rs`); `--input` is read before
+any model is settled. Each scenario of `ess/scenarios/agent-run-once/` has the test of its name in
+`crates/loom-cli/tests/agent_run.rs`, on the fake `connectors` and recorded model responses.
 
 An `http` binding is read by a served turn (`story:agent-http-binding`): `source.read {source,
 kind: get, input: {path, query?}}`, `get` only. The effect port dispatches a read by the binding's
@@ -893,7 +907,8 @@ plain environment values, an image override, an optional command, an optional wo
 and, for `Command`, the program's own configuration files. The entity `LoomAgent` is the
 controller's view of one resource: `observedGeneration`, the spec check's result `check`, and
 the state Pending, Running, Refused, Degraded, Completed or Failed. `ApplyLoomAgent`, `RecordCheck`,
-`ObserveDeployment`, `ObserveRun` and `DeleteLoomAgent` move it, and the view `LoomAgents` lists it.
+`ObserveDeployment`, `ObserveRun`, `ObserveScheduledRun` and `DeleteLoomAgent` move it, and the view
+`LoomAgents` lists it.
 
 A resource is one of two variants (`AgentVariant`, `story:loom-agent-command-variant`, design § 9a):
 `AgentServe` when `spec.command` is absent, the pod running `b10x-loom agent serve`; `Command` when
@@ -925,6 +940,20 @@ placeholder `spec.agent`. Its refusals are the controller's too. `runtime.connec
 spec without `runtime.connectors`. `RecordCheck`
 records the variant the controller admitted; `respecified` clears it, and the view and
 `status.variant` carry it.
+
+`spec.schedule` (`ScheduleSpec`: `cron`, optional `time_zone`, `suspend`,
+`starting_deadline_seconds` and `input`, `story:command-schedule`, design § 12) runs a `Command`
+resource as a CronJob, one bounded run at a time, instead of once. `input` (`ScheduleInput`) is
+exactly one of `text` and `config_map_key_ref` (`ConfigMapKeyRef`: `name`, `key`); with it each
+run is `b10x-loom agent run` over `spec.agent` with that task text (`story:agent-run-once`).
+`ObserveScheduledRun` (input `name`, `phase` and the optional `exit_code`, `finished_at`,
+`reason`) records the newest finished run as `last_run` (`LastRun`: `phase` and the `RunEnd`
+members): `last-run-succeeded` and `last-run-failed` keep a Running resource Running
+(`observe-running`, `LoomAgentLastRunObserved` naming `generation`, `phase` and `exit_code`),
+`run-active` changes nothing, `not-running` is a `StateConflict` from any other state, and
+`unknown` is `NotFound`. A failed scheduled run fails no resource; `respecified` clears `last_run`.
+The condition type `LastRunSucceeded` is the controller's projection of it (§ Operator). The
+schedule's refusals are the controller's (§ Operator), as for `spec.env`.
 
 `spec.boundary` (`Boundary`, `story:boundary-container-projected-token`, design D243) makes an
 agent credential-free on either variant: optional `model`, `connectors` and `git` upstreams, each
@@ -1105,7 +1134,24 @@ with no `spec.agent.deploy.kubernetes.resources` under a configuration without
 controller refusal like `BoundaryEgressHost`; the pod's containers but the fixed-size boundary
 sidecar get the declared size, else `defaultResources` for `AgentServe` and
 `defaultCommandResources` for `Command`, requests equal to limits;
-`crates/loom-operator/tests/command_resources.rs`). A `Command` resource's `spec.agent` passes only the credential walk and the
+`crates/loom-operator/tests/command_resources.rs`); after that, `spec.schedule` (step 18,
+`story:command-schedule`): on an `AgentServe` resource `Malformed` at `spec.schedule`, a `cron`
+Kubernetes does not read (five fields or `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`,
+`@midnight`, `@hourly`; no `TZ=` prefix, no `@every`, no whitespace around it, since the CronJob
+carries it as written) at `spec.schedule.cron`, a `timeZone` the
+bundled IANA database (jiff, `tzdb-bundle-always`) does not hold as spelt, or `Local`, at
+`spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, an `input` with
+both or neither of `text` and `configMapKeyRef`, a blank text, a name that is no ConfigMap name, a
+key that is no ConfigMap key, or beside a `spec.command` entrypoint or argument or without
+`spec.agent` at `spec.schedule.input`, all `Malformed` without repeating the value; then the
+schedule is walked for a credential, the text word by word (`SecretLiteral` at
+`spec.schedule.input.text`); then (step 19, `admission::schedule_name`, called after `admit` by
+`render_document` and the controller, since the spec does not hold the name) a scheduled
+resource named longer than 52 characters, which its CronJob cannot carry, is `Malformed` at
+`metadata.name`. The inline text is the ConfigMap key `schedule-input.txt`, so a
+`spec.configFiles` entry of that name is `ConfigFileConflict` and the text counts toward the
+1 MiB; a `configMapKeyRef` input's mount `/var/run/loom/schedule-input` is reserved
+(`MountPathInvalid`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
 `agent serve` does not; with no routes and no `modelRoute`, or no routes beside a boundary
 without `model`, it gets an empty `routes.yaml`, and
@@ -1160,8 +1206,22 @@ status goes out by server-side apply on `/status`, only when it changed; conditi
 `RunNotFinished`, `RunSucceeded` or `RunFailed`, its `Completed` reads Unknown `RunNotFinished`,
 True `RunSucceeded` or False `RunFailed` with the exit code and end time in its message, and only
 an AgentServe resource is ever Degraded).
-Requeue after 300 s, retry after 30 s; `.owns(Deployment)` and `.owns(Job)` wake it on a change to
-either. Deletion is the
+A `Command` resource with `spec.schedule` has a CronJob in its Job's place: before it is created
+the resource's Job and a Deployment of its name are deleted, and before a Job is created the
+resource's CronJob, each in the foreground with a uid precondition, nothing applied while one
+terminates (requeue 30 s), so the two never coexist. The CronJob is applied on every reconcile, so
+a new generation patches its schedule and template. The Jobs it starts are Kubernetes's (their
+controller is the CronJob, so the sweep never counts them): of those labelled
+`app.kubernetes.io/instance=<name>` whose controlling owner is the CronJob's uid, the newest
+finished one (by `creationTimestamp`, then name) is `ObserveScheduledRun`, read by `observation`
+as a single run is, once per Job uid and never one older than the last observed (`Held::last_job`
+holds its uid and order, so deleting the newest Job leaves `last_run`), and again after a new
+generation cleared `last_run`. The resource stays Running: `Available` True `Scheduled` or False `Suspended`,
+`LastRunSucceeded` Unknown `NoRunYet`, True `RunSucceeded` or False `RunFailed` with the exit
+code and end time, `status.lastRun` the row's `last_run` (`status::status_of`,
+`status::scheduled_conditions`).
+Requeue after 300 s, retry after 30 s; `.owns(Deployment)`, `.owns(Job)` and `.owns(CronJob)`
+wake it on a change to any (a CronJob's status changes as its runs start and end). Deletion is the
 garbage collector's (owner references with `controller` and `blockOwnerDeletion`); the controller
 forgets the record. Each value serialized to YAML goes through JSON text (`admission::yaml`):
 serde_json's `arbitrary_precision`, on in this workspace, breaks a `Value` number written to YAML
@@ -1205,7 +1265,15 @@ the agent container mounts that subdirectory (`subPath: files`) read-only at `mo
 reason: a reader such as `b10x-gates` refuses a file another user owns or that group or others
 may read, and the kubelet owns a Secret volume's files. The copy is taken when the pod starts, so
 a changed Secret reaches the agent only in a new pod, and `stage-files` removes a staged file no
-current key names. Either sets `fsGroup` 10001. The golden files
+current key names. Either sets `fsGroup` 10001. A scheduled `Command` resource renders a
+`batch/v1` CronJob named like the Job (`schedule`, `timeZone`, `startingDeadlineSeconds` as given,
+`suspend` false when absent, `concurrencyPolicy: Forbid`, history limits 3 and 3, job template
+labels the children's, job template spec the Job's spec byte for byte) and no Job. With
+`spec.schedule.input` the program container runs `b10x-loom agent run --spec /config/agent.yaml
+--state /var/lib/agent --input <file>` with no `args`: `<file>` is `/config/schedule-input.txt`
+for `text`, or `/var/run/loom/schedule-input/input` for `configMapKeyRef`, whose key alone the
+program container mounts read-only from the volume `schedule-input` (`optional: false`, so a
+missing ConfigMap leaves the run unstarted and `Forbid` holds later runs). The golden files
 `tests/golden/platform-operator.yaml`, `tests/golden/takt-delivery.yaml` and
 `tests/golden/credential-free.yaml` are rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
@@ -1246,8 +1314,8 @@ Deployment (`command: [b10x-loom-operator]`, `args: [run, --config, /etc/loom-op
 its ServiceAccount, a namespaced Role and RoleBinding, and the ConfigMap holding `config.yaml` from
 the values. The Role grants `get`, `list`, `watch`, `update`, `patch` on `loomagents` and
 `loomagents/status`, `update` on `loomagents/finalizers` (which `blockOwnerDeletion` needs), and
-`create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the six child kinds (Job among
-them), and `get` and `list` on `pods` (a finished run's exit code; no watch); nothing on Secrets
+`create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the seven child kinds (Job and
+CronJob among them), and `get` and `list` on `pods` (a finished run's exit code; no watch); nothing on Secrets
 or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
 are the workspace version, so a release bumps both (`tests/chart.rs` fails otherwise). The values
 name the published images `ghcr.io/beyond10x/loom-operator` (`image`) and
