@@ -9,7 +9,7 @@ tags:
 relations:
 - decides: story:release-publishes-images
 - decides: story:chart-defaults-to-published-images
-revision: 3
+revision: 5
 transitions:
 - {from: "draft", to: "approved", at: "2026-11-02T10:20:24Z", actor: "human:timo", revision: 2}
 ---
@@ -76,3 +76,11 @@ main, its merge on green. The release tag waits for the orchestrator's go.
 "(b) accepted: no local full gate; CI's full gate on the bot PR decides. ESS pin 0.77.0 -> 0.82.0:
 include. (a) targeted tests: wait" for the disk floor host-monitor sets. Package visibility: b10x-atlas
 sets the packages public after the first publish.
+
+## Go for merge and tag (orchestrator, 2026-11-02)
+
+The orchestrator gave the go for merge and tag on 2026-11-02, under the grant (D377, D383), after every check of pull request 154 passed at fcd9b4a2 (the macOS build re-run once: its first attempt got no hosted runner).
+
+- Merged through the bot: https://github.com/beyond10x/loom/pull/154, merge commit 0dff39169b7d58f8fd951ef173b6eb28cf3a12cb, tree equal to fcd9b4a2.
+- Tag 0.54.0, annotated by the bot on that commit, pushed; release run https://github.com/beyond10x/loom/actions/runs/41460610672.
+- Image and chart visibility: the operator's own words, relayed 12:54Z: "Yes, tagged and the chart and loom can be public. Yeah, so option A." The packages are set public after the first publish.
