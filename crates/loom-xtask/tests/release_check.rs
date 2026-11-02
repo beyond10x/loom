@@ -899,7 +899,10 @@ fn images_workflow_builds_on_pull_requests_and_publishes_only_when_called_to_pus
         ".github/workflows/images.yml",
         "Cargo.lock",
     ] {
-        assert!(paths.contains(&path), "images.yml does not build on a change to {path}");
+        assert!(
+            paths.contains(&path),
+            "images.yml does not build on a change to {path}"
+        );
     }
     assert_eq!(
         images["on"]["workflow_call"]["inputs"]["push"]["type"].as_str(),
@@ -910,7 +913,10 @@ fn images_workflow_builds_on_pull_requests_and_publishes_only_when_called_to_pus
         images["on"]["push"].is_null(),
         "images.yml runs on a push of its own"
     );
-    assert_eq!(images["env"]["REGISTRY"].as_str(), Some("ghcr.io/beyond10x"));
+    assert_eq!(
+        images["env"]["REGISTRY"].as_str(),
+        Some("ghcr.io/beyond10x")
+    );
     assert_eq!(images["env"]["CHART"].as_str(), Some("charts/loom-agents"));
 
     let jobs = &images["jobs"];
@@ -980,7 +986,10 @@ fn each_image_runs_its_locked_release_binary_as_a_non_root_user_on_pinned_bases(
         ("loom-agent", "b10x-loom", "b10x-loom-cli"),
         ("loom-operator", "b10x-loom-operator", "b10x-loom-operator"),
     ] {
-        let path = repository().join("deploy/images").join(image).join("Dockerfile");
+        let path = repository()
+            .join("deploy/images")
+            .join(image)
+            .join("Dockerfile");
         let text = read(&path);
         for line in text.lines().filter(|line| line.starts_with("FROM ")) {
             assert!(
@@ -1009,7 +1018,7 @@ fn each_image_runs_its_locked_release_binary_as_a_non_root_user_on_pinned_bases(
         let user = text
             .lines()
             .filter_map(|line| line.strip_prefix("USER "))
-            .last();
+            .next_back();
         assert_eq!(
             user,
             Some("10001:10001"),

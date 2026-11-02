@@ -135,9 +135,15 @@ fn the_chart_and_its_images_carry_the_workspace_version() {
     let values: Value = serde_yaml_ng::from_str(&text).expect("values.yaml is YAML");
     // `story:chart-defaults-to-published-images`: the published images, their tags following
     // `appVersion`, so a release moves only `Chart.yaml`.
-    assert_eq!(values["image"]["repository"], "ghcr.io/beyond10x/loom-operator");
+    assert_eq!(
+        values["image"]["repository"],
+        "ghcr.io/beyond10x/loom-operator"
+    );
     assert_eq!(values["image"]["tag"], "");
-    assert_eq!(values["agentImage"]["repository"], "ghcr.io/beyond10x/loom-agent");
+    assert_eq!(
+        values["agentImage"]["repository"],
+        "ghcr.io/beyond10x/loom-agent"
+    );
     assert_eq!(values["agentImage"]["tag"], "");
 }
 
