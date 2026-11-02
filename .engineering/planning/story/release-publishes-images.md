@@ -7,7 +7,7 @@ title: A release tag publishes the loom-agent and loom-operator images and the l
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:O1
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-02T10:20:24Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-02T10:20:24Z", actor: "human:timo", revision: 3}
@@ -52,3 +52,12 @@ names the chart already used (`loom-agent`, `loom-operator`; D383).
 
 - An `arm64` image (the operator asked for `linux/amd64`).
 - Making a new package public: a package's visibility is a registry setting outside the repository.
+
+## ESS first
+
+Exempt (AGENTS.md § ESS): no behaviour of Loom changes. The story adds Dockerfiles and release
+workflow jobs around the existing binaries; no noun, command or view enters `ess/`. Its red test
+is `every_action_of_the_release_and_images_workflows_is_pinned_by_commit`,
+`images_workflow_builds_on_pull_requests_and_publishes_only_when_called_to_push` and
+`each_image_runs_its_locked_release_binary_as_a_non_root_user_on_pinned_bases` in
+`crates/loom-xtask/tests/release_check.rs`, which fail before the files exist.

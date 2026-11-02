@@ -1,0 +1,151 @@
+name: images
+
+on:
+  pull_request:
+    paths:
+      - deploy/images/**
+      - .dockerignore
+      - .github/workflows/images.yml
+      - .github/workflows/release.yml
+      - Cargo.toml
+      - Cargo.lock
+  workflow_call:
+    inputs:
+      push:
+        type: boolean
+        required: true
+
+concurrency:
+  group: images-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io/beyond10x
+  CHART: charts/loom-agents
+
+jobs:
+  absent:
+    name: images / the version is new
+    if: ${{ inputs.push }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Refuse a version the registry already holds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::$VERSION is not a release version"
+            exit 1
+          fi
+          for package in loom-agent loom-operator charts/loom-agents; do
+            encoded=${package//\//%2F}
+            answer=$(gh api --paginate "/orgs/beyond10x/packages/container/$encoded/versions" \
+              --jq '.[].metadata.container.tags[]' 2>&1) && status=0 || status=$?
+            if [ "$status" -ne 0 ]; then
+              case "$answer" in
+                *"HTTP 404"*)
+                  echo "$REGISTRY/$package has no version yet"
+                  continue ;;
+              esac
+              echo "$answer"
+              echo "::error::the registry did not say whether $REGISTRY/$package:$VERSION exists"
+              exit 1
+            fi
+            if printf '%s\n' "$answer" | grep -Fqx "$VERSION"; then
+              echo "::error::$REGISTRY/$package:$VERSION exists; a release never replaces a published version"
+              exit 1
+            fi
+            echo "$REGISTRY/$package:$VERSION is not in the registry yet"
+          done
+
+  image:
+    name: images / ${{ matrix.image }}
+    needs: absent
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        image: [loom-agent, loom-operator]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: The commit
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+
+      - name: Log in to ghcr.io
+        if: ${{ inputs.push }}
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build the image, and push it on a release
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: .
+          file: deploy/images/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            SOURCE_SHA=${{ steps.revision.outputs.sha }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.image }}:${{ inputs.push && github.ref_name || 'candidate' }}
+          push: ${{ inputs.push == true }}
+
+  chart:
+    name: images / chart
+    needs: image
+    if: ${{ inputs.push }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Install helm
+        env:
+          HELM_VERSION: "3.19.0"
+          HELM_SHA256: a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/helm.tar.gz" \
+            "https://get.helm.sh/helm-v$HELM_VERSION-linux-amd64.tar.gz"
+          echo "$HELM_SHA256  $RUNNER_TEMP/helm.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/helm-bin"
+          tar -xzf "$RUNNER_TEMP/helm.tar.gz" -C "$RUNNER_TEMP/helm-bin" --strip-components=1 linux-amd64/helm
+          echo "$RUNNER_TEMP/helm-bin" >> "$GITHUB_PATH"
+
+      - name: Package the chart and push it as an OCI artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          helm package charts/loom-agents --destination "$RUNNER_TEMP/chart"
+          archive="$RUNNER_TEMP/chart/loom-agents-$VERSION.tgz"
+          test -f "$archive"
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "$archive" "oci://$REGISTRY/charts"
+          helm show chart "oci://$REGISTRY/$CHART" --version "$VERSION"

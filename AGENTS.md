@@ -1249,8 +1249,10 @@ the values. The Role grants `get`, `list`, `watch`, `update`, `patch` on `loomag
 `create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the six child kinds (Job among
 them), and `get` and `list` on `pods` (a finished run's exit code; no watch); nothing on Secrets
 or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
-and the values' `image.tag` and `agentImage.tag` are the workspace version, so a release bumps all
-four (`tests/chart.rs` fails otherwise). `task chart-check` compares the CRD copy, then runs
+are the workspace version, so a release bumps both (`tests/chart.rs` fails otherwise). The values
+name the published images `ghcr.io/beyond10x/loom-operator` (`image`) and
+`ghcr.io/beyond10x/loom-agent` (`agentImage`) with empty tags, which render as `appVersion`
+(`story:chart-defaults-to-published-images`). `task chart-check` compares the CRD copy, then runs
 `helm lint` and `helm template` with the defaults and with the overrides `tests/chart.rs` asserts.
 CI installs Helm 3.19.0 by checksum (`check.yml`). No Event is recorded, and a ServiceAccount a
 later generation renames stays until the resource is deleted.
@@ -1954,7 +1956,8 @@ clone (`blob:none`) needs `git backfill` first.
 ## Releases
 
 Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
-workspace version and nothing is on a registry. Consumers pin `tag = "<version>"`.
+workspace version and no crate is on a registry. Consumers pin `tag = "<version>"`. A release
+publishes two container images and the chart to ghcr (step 4).
 
 `CHANGELOG.md` follows Keep a Changelog 1.1.0 and collects under `## [Unreleased]` between
 releases. A change adds one bullet per change a consumer sees under `### Added`, `### Changed`,
@@ -1973,8 +1976,8 @@ moves the minor version before 1.0, never only the patch version. A release is:
    the line `No breaking changes.` under the heading; the link references at the bottom move with
    it (`[Unreleased]` compares from the new tag, and a `[<version>]` line links its tag). README,
    AGENTS.md and the site pages that name the version or a dependency line move with it, and so
-   do `charts/loom-agents/Chart.yaml` (`version`, `appVersion`) and the two image tags in its
-   `values.yaml` (`crates/loom-operator/tests/chart.rs` holds them to the workspace version). A
+   do `charts/loom-agents/Chart.yaml` (`version`, `appVersion`; `crates/loom-operator/tests/chart.rs`
+   holds them to the workspace version, and the values' image tags follow `appVersion`). A
    release moves the `ess` pin (§ ESS) to the newest ESS release in that same release.
    `cargo run -q --locked -p loom-xtask -- release-check --tag <version>` passes on it.
 2. `check` and `Shared source gates` green on that commit.
@@ -1984,7 +1987,14 @@ moves the minor version before 1.0, never only the patch version. A release is:
    (the tag equals the workspace version and `CHANGELOG.md` has its entry, with a `**Breaking:**`
    bullet, or `No breaking changes.` only when no stable surface changed since the previous tag,
    so the job checks out the full history and its tags) and then `check.yml` on the tagged
-   commit. It is read-only, needs no secret and creates no release.
+   commit, then `images.yml` with `push: true`, the one job granted `packages: write`
+   (`story:release-publishes-images`): it refuses a version ghcr already holds, builds
+   `deploy/images/loom-agent` (`b10x-loom`) and `deploy/images/loom-operator`
+   (`b10x-loom-operator`) for `linux/amd64`, pushes `ghcr.io/beyond10x/<image>:<version>`, then
+   packages `charts/loom-agents` and pushes it to `oci://ghcr.io/beyond10x/charts`. It needs no
+   secret beyond the workflow token and creates no GitHub Release. On a pull request that touches
+   the Dockerfiles, the workflows or the lock file, `images.yml` builds both images without
+   pushing.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
    /repos/beyond10x/loom/releases`), named `<version>`, with short notes built from the entry's
    bullets: one or two summary lines drawn from them, a **Breaking** list of its `**Breaking:**`
@@ -1992,8 +2002,8 @@ moves the minor version before 1.0, never only the patch version. A release is:
    item and at most 8 each, and a link to the version's section of `CHANGELOG.md` at the tag. The
    entry keeps every bullet; every line of the notes is taken from it.
 
-A release is finished when the tag, the green `release` run and the bot's GitHub Release with its
-notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
+A release is finished when the tag, the green `release` run (with its images and chart in ghcr)
+and the bot's GitHub Release with its notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
 move or delete a pushed tag, fix forward with the next version.
 `crates/loom-xtask/tests/release_check.rs` holds the check, the workflow's shape, and that the
 README and site pin the workspace version as a tag.
