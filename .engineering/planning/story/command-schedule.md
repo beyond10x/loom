@@ -7,7 +7,8 @@ title: A Command LoomAgent with spec.schedule runs as a CronJob and reports each
 relations:
 - decomposes: epic:loom-agent-command-variant
 - serves: vision:O1
-revision: 2
+- depends_on: story:agent-run-once
+revision: 3
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-02T12:40:55Z", actor: "human:timo", revision: 2}
 ---
@@ -53,3 +54,23 @@ in `ess/domains/resource.yaml`, the CRD is regenerated, then code):
 
 Sidecars (§ 12.1 of the design); the one-shot command a scheduled run executes
 (`story:agent-run-once`).
+
+## Amendment: a declarative input
+
+Item D389 (2026-11-02), scope addition from the downstream platform: `spec.schedule` carries the
+run's task text declaratively, so the downstream sets values only, with no wrapper script, and no
+member is added to `loom.agent/1`.
+
+- `spec.schedule.input` is exactly one of `text` (inline) or `configMapKeyRef: {name, key}`; the
+  rendered CronJob's program runs `b10x-loom agent run` (`story:agent-run-once`) with
+  `--input <file>`, the file holding that text. Both forms absent, both present, or an empty
+  `text`, `name` or `key` are refused `Malformed` at `spec.schedule.input`; `text` is walked for
+  a credential as `spec.env` is.
+- `resource-schedule/input-inline`: `input.text: "check the queue"` renders the text into the
+  resource's ConfigMap and the CronJob's container runs `agent run` with `--input` naming that
+  file under `/config`; the run reads exactly that text.
+- `resource-schedule/input-config-map`: `input.configMapKeyRef: {name: tasks, key: nightly}`
+  mounts that key read-only and passes its path as `--input`; the controller reads neither the
+  ConfigMap nor its content, and a missing ConfigMap leaves the run's pod unstarted, reported
+  by `status.lastRun` as Kubernetes reports it.
+- `story:command-schedule` now depends on `story:agent-run-once`.
