@@ -959,11 +959,7 @@ fn answer(mut socket: TcpStream, response: Option<Vec<u8>>) -> String {
         .unwrap();
     let mut request = Vec::new();
     let mut buffer = vec![0_u8; 1 << 16];
-    loop {
-        let read = match socket.read(&mut buffer) {
-            Ok(read) => read,
-            Err(_) => break,
-        };
+    while let Ok(read) = socket.read(&mut buffer) {
         request.extend_from_slice(&buffer[..read]);
         if read == 0 || complete(&request) {
             break;
