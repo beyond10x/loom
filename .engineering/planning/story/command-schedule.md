@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:command-schedule
 kind: story
-status: proposed
+status: active
 title: A Command LoomAgent with spec.schedule runs as a CronJob and reports each run
 relations:
 - decomposes: epic:loom-agent-command-variant
 - serves: vision:O1
 - depends_on: story:agent-run-once
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-02T12:40:55Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-02T14:49:13Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
