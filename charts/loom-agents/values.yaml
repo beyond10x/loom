@@ -1,9 +1,9 @@
 image:
-  repository: registry.example/loom-operator
-  tag: "0.53.0"
+  repository: ghcr.io/beyond10x/loom-operator
+  tag: ""
 agentImage:
-  repository: registry.example/loom-agent
-  tag: "0.53.0"
+  repository: ghcr.io/beyond10x/loom-agent
+  tag: ""
 modelRoute:
   url: ""
   protocol: ""

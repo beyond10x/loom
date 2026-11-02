@@ -10,7 +10,7 @@ data:
     namespace: {{ .Release.Namespace | quote }}
     defaultImage:
       repository: {{ .Values.agentImage.repository | quote }}
-      tag: {{ .Values.agentImage.tag | quote }}
+      tag: {{ .Values.agentImage.tag | default .Chart.AppVersion | quote }}
     defaultResources:
       cpu: {{ .Values.defaultAgentResources.cpu | quote }}
       memory: {{ .Values.defaultAgentResources.memory | quote }}

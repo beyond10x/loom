@@ -8,6 +8,13 @@
 //! * `.github/workflows/release.yml` runs on a bare-version tag with read-only permissions, calls
 //!   only `release-check` in its own steps, and reuses `check.yml` on the tagged commit.
 //!
+//! `story:release-publishes-images`: after `check.yml` passes on the tag, `release.yml` calls
+//! `images.yml` with `push: true`, the one job granted `packages: write`; `images.yml` refuses a
+//! version the registry holds, pushes the `loom-agent` and `loom-operator` images and the
+//! `loom-agents` chart, and on a pull request builds the images without pushing. Every action is
+//! pinned by commit, and each Dockerfile builds its locked release binary onto a digest-pinned
+//! base that runs it as user 10001.
+//!
 //! `story:release-names-embedder-breaks`, as `story:changelog-keep-a-changelog` moved it to Keep a
 //! Changelog: the tag's entry names each break in a `- **Breaking:** …` bullet or carries the line
 //! `No breaking changes.`, never both, and no `**Breaking:**` bullet names nothing or says `none`;
@@ -738,10 +745,34 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
     let jobs = release["jobs"]
         .as_mapping()
         .unwrap_or_else(|| panic!("release.yml has no jobs"));
+    let publish: serde_yaml_ng::Value =
+        serde_yaml_ng::from_str("contents: read\npackages: write").unwrap();
     let mut verifies = false;
     let mut checks = false;
+    let mut publishes = false;
     for (name, job) in jobs {
         let name = name.as_str().unwrap_or_default();
+        if job["uses"].as_str() == Some("./.github/workflows/images.yml") {
+            // `story:release-publishes-images`: the one job that may write packages, and only
+            // after the tag is verified and checked.
+            assert_eq!(
+                job["permissions"], publish,
+                "job {name} must be granted exactly contents: read and packages: write"
+            );
+            assert_eq!(
+                job["needs"].as_str(),
+                Some("check"),
+                "job {name} publishes before the tagged commit passed check.yml"
+            );
+            assert_eq!(
+                job["with"]["push"].as_bool(),
+                Some(true),
+                "job {name} must call images.yml with push: true"
+            );
+            assert!(job.get("secrets").is_none(), "job {name} passes secrets");
+            publishes = true;
+            continue;
+        }
         if let Some(permissions) = job.get("permissions") {
             assert_eq!(permissions, &read_only, "job {name} widens permissions");
         }
@@ -771,6 +802,10 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
         "no job runs `loom-xtask release-check --tag` on the pushed tag"
     );
     assert!(checks, "no job reuses ./.github/workflows/check.yml");
+    assert!(
+        publishes,
+        "no job of release.yml calls ./.github/workflows/images.yml"
+    );
 
     // `release-check` diffs the stable surfaces against the previous tag, so the job that runs it
     // checks out the full history with its tags; a shallow clone has no previous tag to diff.
@@ -812,4 +847,182 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
             .is_some_and(|on| on.contains_key("workflow_call")),
         "check.yml cannot be called by release.yml: no workflow_call trigger"
     );
+}
+
+/// The images a release publishes, each built from `deploy/images/<image>/Dockerfile`.
+const IMAGES: [&str; 2] = ["loom-agent", "loom-operator"];
+
+/// Every `uses:` of a workflow's jobs and steps.
+fn uses(workflow: &serde_yaml_ng::Value) -> Vec<String> {
+    let mut out = Vec::new();
+    for job in workflow["jobs"]
+        .as_mapping()
+        .into_iter()
+        .flat_map(|jobs| jobs.values())
+    {
+        out.extend(job["uses"].as_str().map(str::to_owned));
+        for step in job["steps"].as_sequence().into_iter().flatten() {
+            out.extend(step["uses"].as_str().map(str::to_owned));
+        }
+    }
+    out
+}
+
+#[test]
+fn every_action_of_the_release_and_images_workflows_is_pinned_by_commit() {
+    for name in ["release.yml", "images.yml"] {
+        for action in uses(&workflow(name)) {
+            if action.starts_with("./") {
+                continue;
+            }
+            let pin = action.rsplit_once('@').map(|(_, pin)| pin).unwrap_or("");
+            assert!(
+                pin.len() == 40 && pin.bytes().all(|b| b.is_ascii_hexdigit()),
+                "{name}: {action} is not pinned by a commit SHA"
+            );
+        }
+    }
+}
+
+#[test]
+fn images_workflow_builds_on_pull_requests_and_publishes_only_when_called_to_push() {
+    // `story:release-publishes-images`.
+    let images = workflow("images.yml");
+    let paths: Vec<&str> = images["on"]["pull_request"]["paths"]
+        .as_sequence()
+        .unwrap_or_else(|| panic!("images.yml has no on.pull_request.paths"))
+        .iter()
+        .filter_map(serde_yaml_ng::Value::as_str)
+        .collect();
+    for path in [
+        "deploy/images/**",
+        ".github/workflows/images.yml",
+        "Cargo.lock",
+    ] {
+        assert!(
+            paths.contains(&path),
+            "images.yml does not build on a change to {path}"
+        );
+    }
+    assert_eq!(
+        images["on"]["workflow_call"]["inputs"]["push"]["type"].as_str(),
+        Some("boolean"),
+        "images.yml takes no boolean input push"
+    );
+    assert!(
+        images["on"]["push"].is_null(),
+        "images.yml runs on a push of its own"
+    );
+    assert_eq!(
+        images["env"]["REGISTRY"].as_str(),
+        Some("ghcr.io/beyond10x")
+    );
+    assert_eq!(images["env"]["CHART"].as_str(), Some("charts/loom-agents"));
+
+    let jobs = &images["jobs"];
+    let absent = jobs["absent"]["steps"]
+        .as_sequence()
+        .and_then(|steps| steps.iter().find_map(|step| step["run"].as_str()))
+        .unwrap_or_else(|| panic!("images.yml has no job `absent` that runs a check"));
+    for package in IMAGES.iter().copied().chain(["charts/loom-agents"]) {
+        assert!(
+            absent.contains(package),
+            "the job `absent` does not check that {package} lacks the version"
+        );
+    }
+    assert_eq!(jobs["absent"]["if"].as_str(), Some("${{ inputs.push }}"));
+
+    let image = &jobs["image"];
+    assert_eq!(image["needs"].as_str(), Some("absent"));
+    let matrix: Vec<&str> = image["strategy"]["matrix"]["image"]
+        .as_sequence()
+        .unwrap_or_else(|| panic!("the job `image` has no matrix of images"))
+        .iter()
+        .filter_map(serde_yaml_ng::Value::as_str)
+        .collect();
+    assert_eq!(matrix, IMAGES, "the images a release publishes");
+    let build = image["steps"]
+        .as_sequence()
+        .and_then(|steps| {
+            steps.iter().find(|step| {
+                step["uses"]
+                    .as_str()
+                    .is_some_and(|uses| uses.starts_with("docker/build-push-action@"))
+            })
+        })
+        .unwrap_or_else(|| panic!("the job `image` has no docker/build-push-action step"));
+    assert_eq!(build["with"]["platforms"].as_str(), Some("linux/amd64"));
+    assert_eq!(
+        build["with"]["push"].as_str(),
+        Some("${{ inputs.push == true }}"),
+        "an image is pushed only when images.yml is called with push: true"
+    );
+    assert_eq!(
+        build["with"]["file"].as_str(),
+        Some("deploy/images/${{ matrix.image }}/Dockerfile")
+    );
+
+    let chart = &jobs["chart"];
+    assert_eq!(chart["needs"].as_str(), Some("image"));
+    assert_eq!(chart["if"].as_str(), Some("${{ inputs.push }}"));
+    let push = chart["steps"]
+        .as_sequence()
+        .into_iter()
+        .flatten()
+        .filter_map(|step| step["run"].as_str())
+        .find(|run| run.contains("helm push"))
+        .unwrap_or_else(|| panic!("the job `chart` runs no helm push"));
+    assert!(
+        push.contains("helm package charts/loom-agents")
+            && push.contains("helm push \"$archive\" \"oci://$REGISTRY/charts\""),
+        "the chart is pushed to oci://ghcr.io/beyond10x/charts: {push}"
+    );
+}
+
+#[test]
+fn each_image_runs_its_locked_release_binary_as_a_non_root_user_on_pinned_bases() {
+    // `story:release-publishes-images`.
+    for (image, binary, package) in [
+        ("loom-agent", "b10x-loom", "b10x-loom-cli"),
+        ("loom-operator", "b10x-loom-operator", "b10x-loom-operator"),
+    ] {
+        let path = repository()
+            .join("deploy/images")
+            .join(image)
+            .join("Dockerfile");
+        let text = read(&path);
+        for line in text.lines().filter(|line| line.starts_with("FROM ")) {
+            assert!(
+                line.contains("@sha256:"),
+                "{image}: base not pinned by digest: {line}"
+            );
+        }
+        assert!(
+            text.contains(&format!(
+                "cargo build --release --locked -p {package} --bin {binary}"
+            )),
+            "{image}: does not build {binary} from {package} with --locked"
+        );
+        assert!(
+            text.contains(&format!("ENTRYPOINT [\"/usr/local/bin/{binary}\"]")),
+            "{image}: does not run {binary}"
+        );
+        assert!(
+            text.contains(&format!("/usr/local/bin/{binary} --version")),
+            "{image}: does not run {binary} --version at build time"
+        );
+        assert!(
+            text.contains("grep 'not found'"),
+            "{image}: does not fail on an unresolved shared library"
+        );
+        let user = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("USER "))
+            .next_back();
+        assert_eq!(
+            user,
+            Some("10001:10001"),
+            "{image}: must end as the numeric user the chart and the controller's pods run as"
+        );
+    }
 }
