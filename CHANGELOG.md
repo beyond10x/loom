@@ -12,6 +12,24 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.55.2] - 2026-11-03
+
+No breaking changes.
+
+### Added
+
+- `TurnResult.steps` and the record line's `steps`: each step's action, outcome, refusal and budget left (story:turn-records-each-step)
+- `b10x-loom agent run` prints one `step <n>: …` line per step on standard error (story:turn-records-each-step)
+
+### Changed
+
+- `TurnResult` and `RecordLine` (generated, outside the SDK promise) gain `steps`; a struct literal adds `steps: Vec::new()`
+
+### Fixed
+
+- A turn that has read offers its last step only the answer; one that still selects none ends `the turn ran out before answering` (story:turn-answers-before-its-budget-ends)
+- An `http` read whose transport fails is retried once, then is a refused step the model sees, not the end of the run (story:http-read-transport-failure-goes-back)
+
 ## [0.55.1] - 2026-11-03
 
 No breaking changes.
@@ -1332,7 +1350,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.2...HEAD
+[0.55.2]: https://github.com/beyond10x/loom/releases/tag/0.55.2
 [0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1
 [0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0
 [0.54.0]: https://github.com/beyond10x/loom/releases/tag/0.54.0

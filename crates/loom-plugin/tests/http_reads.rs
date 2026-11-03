@@ -13,9 +13,7 @@ use b10x_loom_plugin::datasource::{ReadKind, SourceName};
 use b10x_loom_plugin::effects::{HttpAnswer, HttpReadError, HttpReader, HttpSources};
 use b10x_loom_plugin::project::project;
 use b10x_loom_plugin::turn::{TurnOptions, turn_with};
-use b10x_loom_plugin::{
-    DataSourceEffects, Intent, PluginError, Projection, RecordOutcome, SourceRead,
-};
+use b10x_loom_plugin::{DataSourceEffects, Intent, Projection, RecordOutcome, SourceRead};
 use loom::agent::HttpBinding;
 use loom_sdk::commission::model::responsibility::EffectOutcome;
 use serde_json::json;
@@ -252,7 +250,7 @@ fn an_http_read_outside_the_projection_or_of_another_kind_runs_no_read() {
 }
 
 #[test]
-fn a_refusal_of_the_reader_is_a_refused_step_and_an_unreachable_endpoint_stops_the_run() {
+fn a_refusal_of_the_reader_is_a_refused_step_and_so_is_an_endpoint_out_of_reach_twice() {
     let fixture = Fixture::new("http_reads", "reader_errors");
     let config = fixture.config(Vec::new());
     let host = fixture.host(&config);
@@ -300,16 +298,17 @@ fn a_refusal_of_the_reader_is_a_refused_step_and_an_unreachable_endpoint_stops_t
         effects.transcript()
     );
 
-    // An endpoint out of reach stops the run, and the turn reports it as `Unavailable`, counted
-    // against no item, as a Connectors timeout is.
+    // An endpoint out of reach, also when asked again, is a refused step the model sees; the turn
+    // goes on and stops at its budget naming it (`story:http-read-transport-failure-goes-back`).
     let down = Fake::answering(Err(HttpReadError::Unavailable(
         "the request failed: connection refused".to_owned(),
     )));
     let classified = classification(Intent::Ask, &["logs"], "0.9");
-    let (model, _seen) = Scripted::new(vec![(
+    let get_logs = (
         "source_read",
         json!({"source": "logs", "kind": "get", "input": {"path": "/api/v1/query"}}),
-    )]);
+    );
+    let (model, _seen) = Scripted::new(vec![get_logs.clone(), get_logs]);
     let turned = turn_with(
         &host,
         model.into_turn_model(),
@@ -321,12 +320,22 @@ fn a_refusal_of_the_reader_is_a_refused_step_and_an_unreachable_endpoint_stops_t
                 bindings: vec![logs()],
                 reader: &down,
             }),
+            step_budget: 2,
+            model_budget: 4,
             ..TurnOptions::defaults()
         },
     );
+    let turned = turned
+        .expect("an endpoint out of reach does not end the turn")
+        .result;
+    assert_eq!(turned.outcome, RecordOutcome::Stopped, "{turned:?}");
     assert!(
-        matches!(&turned, Err(PluginError::Unavailable(why))
-            if why == "the read of `logs` found the endpoint unavailable: the request failed: connection refused"),
+        turned.detail.as_deref().is_some_and(|detail| {
+            detail.ends_with(
+            "; the last effect was refused: the read of `logs` (path `/api/v1/query`) found the \
+             endpoint unavailable, also when retried: the request failed: connection refused"
+        )
+        }),
         "{turned:?}"
     );
 }

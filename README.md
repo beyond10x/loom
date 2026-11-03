@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.55.1`, released from source at the tag `0.55.1`
-([release](https://github.com/beyond10x/loom/releases/tag/0.55.1)). No crate is on a registry: you
-install from the tag or depend on it with `tag = "0.55.1"`. `b10x-loom run` completed a live run
+Version `0.55.2`, released from source at the tag `0.55.2`
+([release](https://github.com/beyond10x/loom/releases/tag/0.55.2)). No crate is on a registry: you
+install from the tag or depend on it with `tag = "0.55.2"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -130,6 +130,12 @@ the approval gate too: the executor is told the refusal and may correct the requ
 that matched `AwaitingApproval` after such a refusal now gets the step budget's or the idle bound's
 end. A plugin or agent turn names the budget that stopped it.
 
+Since `0.55.2` a plugin or agent turn that has read something offers its last step only the
+answer, so it answers before its budget ends; an `http` read whose connection fails is asked once
+more and then goes back to the model as a refusal instead of ending the run; and the turn's result
+and record line carry `steps`, one entry per step with its action, outcome, refusal and the budget
+left. A plugin that builds a `TurnResult` or `RecordLine` literal adds `steps: Vec::new()`.
+
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
@@ -161,14 +167,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.55.1 https://github.com/beyond10x/loom.git
+git clone --branch 0.55.2 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.55.1
+b10x-loom 0.55.2
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -534,7 +540,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.55.1'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.55.2'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
@@ -602,7 +608,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.55.1" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.55.2" }
 ```
 
 The example below

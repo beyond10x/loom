@@ -406,6 +406,9 @@ fn agent_run_command(arguments: &AgentRunArgs) -> ExitCode {
         Ok(line) => line,
         Err(error) => return failed(&error),
     };
+    for (at, step) in line.steps.iter().enumerate() {
+        eprintln!("b10x-loom: {}", agent::step_line(at + 1, step));
+    }
     if let Err(error) = print_proposals(std::slice::from_ref(&line)) {
         return failed(&error);
     }

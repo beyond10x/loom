@@ -54,7 +54,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{SecondsFormat, Utc};
@@ -65,7 +65,8 @@ use llm_core::{
 use loom::agent::HttpBinding;
 use loom::datasource::{DataSource, ReadKind, SourceEntity};
 use loom::plugin::{
-    Classification, InboundItem, Projection, ProposedCase, RecordOutcome, SourceRead, TurnResult,
+    Classification, InboundItem, Projection, ProposedCase, RecordOutcome, SourceRead, StepOutcome,
+    TurnResult, TurnStep,
 };
 use loom::primitives::Decimal;
 use loom_sdk::commission::model::behaviour::Generated;
@@ -79,6 +80,7 @@ use loom_sdk::commission::model::responsibility::{
 };
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::authority::AuthorityProvider;
+use loom_sdk::commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use loom_sdk::commission::ports::executor::AgentExecutor;
 use loom_sdk::commission::ports::suspension::SuspensionPort;
 use loom_sdk::commission::runtime::run_with_suspension;
@@ -238,6 +240,7 @@ pub fn stopped(reads: Vec<SourceRead>, detail: &str) -> TurnResult {
         proposal: None,
         proposed_case: None,
         detail: Some(detail.to_owned()),
+        steps: Vec::new(),
     }
 }
 
@@ -273,6 +276,7 @@ pub fn propose_case(
                 reasons: pick.reasons,
             }),
             detail: None,
+            steps: Vec::new(),
         }),
         Err(
             error @ (RouterError::Model(_) | RouterError::Catalog(_) | RouterError::Registry(_)),
@@ -364,10 +368,14 @@ pub fn turn_with<S: FallibleCaseStore>(
         .as_ref()
         .map_or_else(Ids::default, Ids::seeded);
     let commission_id = options.commission.unwrap_or_else(|| ids.next('c'));
-    let turned = |result: TurnResult, awaiting_approval: bool| Turned {
-        result,
-        commission: commission_id.clone(),
-        awaiting_approval,
+    let ledger = Ledger::default();
+    let turned = |mut result: TurnResult, awaiting_approval: bool| {
+        result.steps = ledger.steps();
+        Turned {
+            result,
+            commission: commission_id.clone(),
+            awaiting_approval,
+        }
     };
     let revisions = BTreeMap::from([(ITEM.to_owned(), item.revision.clone())]);
     let case = match governor.open(options.protocol, revisions, loom_sdk::CaseInputs::none()) {
@@ -417,6 +425,10 @@ pub fn turn_with<S: FallibleCaseStore>(
         sends,
         item,
     };
+    let recorded = Recorded {
+        port: &effects,
+        ledger: &ledger,
+    };
     let executor = Steps {
         loom: Loom::new(
             ModelSelector::new(&lent, briefing),
@@ -428,6 +440,10 @@ pub fn turn_with<S: FallibleCaseStore>(
         asked: &asked,
         unusable: &unusable,
         budget: options.model_budget,
+        step_budget: options.step_budget,
+        stepped: AtomicUsize::new(0),
+        ledger: &ledger,
+        missed: Mutex::new(None),
     };
     let commission = Commission::<commission_state::Assigned>::new(CommissionData {
         commission_id: CommissionId(commission_id.clone()),
@@ -451,7 +467,7 @@ pub fn turn_with<S: FallibleCaseStore>(
             &governor,
             &executor,
             options.authority,
-            &effects,
+            &recorded,
             &commission,
             &mut runs,
             suspensions,
@@ -461,12 +477,13 @@ pub fn turn_with<S: FallibleCaseStore>(
             &governor,
             &executor,
             options.authority,
-            &effects,
+            &recorded,
             &commission,
             &mut runs,
             &mut clock,
         ),
     };
+    let (missed, stepped) = (executor.missed(), executor.stepped.load(Ordering::SeqCst));
     drop(executor);
     let asked = asked.load(Ordering::SeqCst);
     let reads = effects.reads();
@@ -480,12 +497,27 @@ pub fn turn_with<S: FallibleCaseStore>(
     if let Some(answer) = unusable.answer() {
         return Ok(turned(stopped(reads, &answer), false));
     }
+    if let Some(answers) = missed {
+        let detail = format!(
+            "the turn ran out before answering: its last step was offered only the answer ({}) \
+             and the model selected none, after {} of its {} (step_budget), {asked} of its {} \
+             (model_budget) and {}{}",
+            answers.join(", "),
+            stepped,
+            counted(options.step_budget, "step"),
+            counted(options.model_budget, "model call"),
+            counted(reads.len(), "read"),
+            last_refusal(&end.effects),
+        );
+        return Ok(turned(stopped(reads, &detail), false));
+    }
     let proposed = |reads: Vec<SourceRead>, detail: Option<String>| TurnResult {
         outcome: RecordOutcome::Proposed,
         reads,
         proposal: effects.proposal().map(|proposal| proposal.text),
         proposed_case: None,
         detail,
+        steps: Vec::new(),
     };
     let model_budget = options.model_budget;
     Ok(match end.outcome {
@@ -506,6 +538,7 @@ pub fn turn_with<S: FallibleCaseStore>(
                 proposal: None,
                 proposed_case: None,
                 detail: effects.declined(),
+                steps: Vec::new(),
             },
             false,
         ),
@@ -966,6 +999,14 @@ impl Unusable {
 /// while the turn has model requests left and its model has answered every request with a usable
 /// call. Once one held none, every call is no useful action and asks no model: Commission ends the
 /// Run as it ends one on that outcome.
+///
+/// A step the turn's remaining steps or model calls cover only once more (one step left, or fewer
+/// than the four model calls of two steps) is offered only the frontier's answers, its actions
+/// other than [`READ`], once the turn has performed a read, so a turn that read or was refused
+/// until then still answers (`story:turn-answers-before-its-budget-ends`). A turn that has read
+/// nothing is still offered its reads: a proposal completes the case only from a source read
+/// (`inbound-answer@1` `proposed`), so that turn ends naming the budget it ran out of. A frontier
+/// that lists no answer is offered as it is.
 struct Steps<'s, L> {
     loom: L,
     admits: &'s [String],
@@ -974,6 +1015,107 @@ struct Steps<'s, L> {
     unusable: &'s Unusable,
     /// The most model requests of the turn.
     budget: u64,
+    /// The most executor steps of the turn.
+    step_budget: usize,
+    /// The executor steps taken so far.
+    stepped: AtomicUsize,
+    /// Each step's entry, its outcome filled in by [`Recorded`].
+    ledger: &'s Ledger,
+    /// The answers a step offered alone, when the model selected none of them.
+    missed: Mutex<Option<Vec<String>>>,
+}
+
+impl<L> Steps<'_, L> {
+    /// The answers the last step offered alone, when the model selected none of them: the turn
+    /// ran out before answering.
+    fn missed(&self) -> Option<Vec<String>> {
+        self.missed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// The model requests one step sends: a selection and its arguments.
+const CALLS_PER_STEP: u64 = 2;
+
+/// Each step of a turn, in order (`story:turn-records-each-step`): [`Steps`] opens an entry for
+/// each step with what the turn has left after it, and [`Recorded`] fills in how the effect port
+/// answered it.
+#[derive(Default)]
+struct Ledger {
+    steps: Mutex<Vec<TurnStep>>,
+}
+
+impl Ledger {
+    fn open(&self, action: Option<String>, steps_left: usize, model_calls_left: u64) {
+        self.slot().push(TurnStep {
+            action,
+            outcome: StepOutcome::NotInvoked,
+            reason: None,
+            steps_left: i64::try_from(steps_left).unwrap_or(i64::MAX),
+            model_calls_left: i64::try_from(model_calls_left).unwrap_or(i64::MAX),
+        });
+    }
+
+    /// Fills in the newest open entry of `action` with what the effect port answered.
+    fn answer(&self, action: &str, answered: &Result<EffectOutcome, EffectError>) {
+        let mut steps = self.slot();
+        let Some(step) = steps.iter_mut().rev().find(|step| {
+            step.outcome == StepOutcome::NotInvoked && step.action.as_deref() == Some(action)
+        }) else {
+            return;
+        };
+        (step.outcome, step.reason) = match answered {
+            Ok(EffectOutcome::Performed(_)) => (StepOutcome::Performed, None),
+            Ok(EffectOutcome::Pending(_)) => (StepOutcome::Pending, None),
+            Ok(EffectOutcome::Refused(refused)) => {
+                (StepOutcome::Refused, Some(refused.reason.clone()))
+            }
+            Err(error) => (StepOutcome::Failed, Some(error.to_string())),
+        };
+    }
+
+    /// Whether a step of `action` was performed.
+    fn performed(&self, action: &str) -> bool {
+        self.slot().iter().any(|step| {
+            step.outcome == StepOutcome::Performed && step.action.as_deref() == Some(action)
+        })
+    }
+
+    fn steps(&self) -> Vec<TurnStep> {
+        self.slot().clone()
+    }
+
+    fn slot(&self) -> MutexGuard<'_, Vec<TurnStep>> {
+        self.steps.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// The turn's effect port, recording what it answered for each step in the [`Ledger`].
+struct Recorded<'r, P> {
+    port: &'r P,
+    ledger: &'r Ledger,
+}
+
+impl<P: EffectPort> EffectPort for Recorded<'_, P> {
+    fn performs(&self, action: &str) -> bool {
+        self.port.performs(action)
+    }
+
+    fn reads(&self, action: &str) -> bool {
+        self.port.reads(action)
+    }
+
+    fn invoke(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        let answered = self.port.invoke(commission, request);
+        self.ledger.answer(&request.data().action, &answered);
+        answered
+    }
 }
 
 impl<L: AgentExecutor> AgentExecutor for Steps<'_, L> {
@@ -994,13 +1136,28 @@ impl<L: AgentExecutor> AgentExecutor for Steps<'_, L> {
             });
         }
         let issued = frontier.data();
+        let admitted: Vec<_> = issued
+            .actions
+            .iter()
+            .filter(|listed| self.admits.contains(&listed.action))
+            .cloned()
+            .collect();
+        let stepped = self.stepped.load(Ordering::SeqCst);
+        let calls_left = self
+            .budget
+            .saturating_sub(self.asked.load(Ordering::SeqCst));
+        let last = self.ledger.performed(READ)
+            && (self.step_budget.saturating_sub(stepped) <= 1 || calls_left < 2 * CALLS_PER_STEP);
+        let answers: Vec<_> = admitted
+            .iter()
+            .filter(|listed| listed.action != READ)
+            .cloned()
+            .collect();
+        let answering = last && !answers.is_empty();
+        let offered: Vec<String> = answers.iter().map(|listed| listed.action.clone()).collect();
+        let actions = if answering { answers } else { admitted };
         let narrowed = Frontier::new(FrontierData {
-            actions: issued
-                .actions
-                .iter()
-                .filter(|listed| self.admits.contains(&listed.action))
-                .cloned()
-                .collect(),
+            actions,
             ..issued.clone()
         });
         let outcome = self.loom.run(commission, &narrowed);
@@ -1008,6 +1165,28 @@ impl<L: AgentExecutor> AgentExecutor for Steps<'_, L> {
             // Loom suspends on the unusable answer as on a model out of reach; the answer is about
             // the item, so nothing is proposed and the run ends as on no useful action.
             return ExecutorOutcome::NoUsefulAction(Unit(true));
+        }
+        *self.missed.lock().unwrap_or_else(PoisonError::into_inner) =
+            (answering && matches!(outcome, ExecutorOutcome::NoUsefulAction(_))).then_some(offered);
+        let proposed: Vec<Option<String>> = match &outcome {
+            ExecutorOutcome::ProposedAction(proposed) => vec![Some(proposed.action.clone())],
+            ExecutorOutcome::ProposedReads(proposed) => proposed
+                .reads
+                .iter()
+                .map(|read| Some(read.action.clone()))
+                .collect(),
+            ExecutorOutcome::NoUsefulAction(_) => vec![None],
+            _ => Vec::new(),
+        };
+        if !proposed.is_empty() {
+            self.stepped.store(stepped + 1, Ordering::SeqCst);
+            let steps_left = self.step_budget.saturating_sub(stepped + 1);
+            let calls_left = self
+                .budget
+                .saturating_sub(self.asked.load(Ordering::SeqCst));
+            for action in proposed {
+                self.ledger.open(action, steps_left, calls_left);
+            }
         }
         outcome
     }

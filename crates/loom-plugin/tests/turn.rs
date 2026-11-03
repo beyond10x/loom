@@ -91,8 +91,9 @@ fn turn_reaches_proposed_on_a_fixture_source() {
 }
 
 /// A read performed under `PluginAuthority`'s grant passes the gate of `source.read` and
-/// `reply.propose`, so the turn's one Run goes on; a model that only reads still stops, at the
-/// turn's step budget.
+/// `reply.propose`, so the turn's one Run goes on; a model that only reads still stops at the
+/// turn's step budget: its last step is offered only the answer, and a model that selects a read
+/// there ends the turn without one (`story:turn-answers-before-its-budget-ends`).
 #[test]
 fn a_turn_that_only_reads_stops_at_its_budget() {
     let fixture = Fixture::new("turn", "budget");
@@ -117,12 +118,19 @@ fn a_turn_that_only_reads_stops_at_its_budget() {
     .expect("the turn runs");
 
     assert_eq!(ended.outcome, RecordOutcome::Stopped, "{ended:?}");
-    assert_eq!(ended.reads.len(), TURN_STEP_BUDGET, "{ended:?}");
-    assert_eq!(fixture.runs("invoke").len(), TURN_STEP_BUDGET);
+    assert_eq!(ended.reads.len(), TURN_STEP_BUDGET - 1, "{ended:?}");
+    assert_eq!(fixture.runs("invoke").len(), TURN_STEP_BUDGET - 1);
     assert_eq!(
         seen.lock().unwrap().len(),
-        2 * TURN_STEP_BUDGET,
-        "two model requests per step, none past the budget"
+        2 * TURN_STEP_BUDGET - 1,
+        "two model requests per step, and none for the arguments of a read the last step did not offer"
+    );
+    assert!(
+        ended
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.starts_with("the turn ran out before answering")),
+        "{ended:?}"
     );
 }
 

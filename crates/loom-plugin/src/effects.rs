@@ -17,7 +17,10 @@
 //!   [`HttpReader`] the host supplied, which decides `loom.agent.AdmitHttpRead` and
 //!   `loom.agent.BoundHttpAnswer` and opens the one connection. The port itself opens none. A
 //!   read the reader refuses (the method, the path, the bearer, a redirect, a failing status) is
-//!   refused and submits none; an endpoint it cannot reach stops the run as Connectors down does.
+//!   refused and submits none. A read whose transport fails (connect, send, timeout) is asked
+//!   once more; failing again, it is refused naming the source, the path and the error, and the
+//!   run goes on (`story:http-read-transport-failure-goes-back`). A `get` is the only effect
+//!   retried.
 //!   An answer cut at the binding's `max_bytes` reaches the transcript marked as cut. Adding an
 //!   `http` binding changes no `connectors` read: the two lists are disjoint by construction.
 //! - `reply.propose {text}` appends the proposal to the turn's record and submits
@@ -117,8 +120,10 @@ pub enum HttpReadError {
     /// status). The step is refused and the run goes on; the text names the reason in the enum's
     /// spelling.
     Refused(String),
-    /// The endpoint could not be reached, or did not answer in time: the run stops with an effect
-    /// error, and the host counts it against no item.
+    /// The transport failed: the endpoint could not be reached, the request could not be sent,
+    /// or no answer came in time. The port asks the reader once more; a second failure is a
+    /// refused step naming the source, the path and the error, and the run goes on, so the model
+    /// sees it as it sees any refusal.
     Unavailable(String),
 }
 
@@ -548,14 +553,19 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             )));
         };
         let input_text = text_of(input);
-        let answer = match reader.read(binding, path, &query) {
+        let answered = match reader.read(binding, path, &query) {
+            Err(HttpReadError::Unavailable(_)) => reader.read(binding, path, &query),
+            answered => answered,
+        };
+        let answer = match answered {
             Ok(answer) => answer,
             Err(HttpReadError::Refused(why)) => {
                 return Ok(self.refused(format!("the read of `{name}` was refused: {why}")));
             }
             Err(HttpReadError::Unavailable(why)) => {
-                return Err(self.unavailable_error(format!(
-                    "the read of `{name}` found the endpoint unavailable: {why}"
+                return Ok(self.refused(format!(
+                    "the read of `{name}` (path `{path}`) found the endpoint unavailable, also \
+                     when retried: {why}"
                 )));
             }
         };

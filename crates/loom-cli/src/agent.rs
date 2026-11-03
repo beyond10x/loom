@@ -254,6 +254,28 @@ pub fn checked_line(checked: &Checked) -> String {
     ))
 }
 
+/// The line `agent run` prints on standard error for the turn's step `at` (from 1), as
+/// [`crate::AGENT_RUN_HELP`] states it (`story:turn-records-each-step`).
+pub fn step_line(at: usize, step: &b10x_loom_plugin::TurnStep) -> String {
+    use b10x_loom_plugin::StepOutcome;
+    let outcome = match step.outcome {
+        StepOutcome::Performed => "performed",
+        StepOutcome::Pending => "pending",
+        StepOutcome::Refused => "refused",
+        StepOutcome::Failed => "failed",
+        StepOutcome::NotInvoked => "not_invoked",
+    };
+    let action = step.action.as_deref().unwrap_or("no action");
+    let reason = step
+        .reason
+        .as_deref()
+        .map_or_else(String::new, |reason| format!(": {reason}"));
+    printable(&format!(
+        "step {at}: {action} {outcome}{reason}; {} steps and {} model calls left",
+        step.steps_left, step.model_calls_left
+    ))
+}
+
 /// The line a refused spec prints on standard error.
 pub fn refused_line(refusal: &SpecRefused) -> String {
     printable(&format!("refused: {}", describe(refusal)))

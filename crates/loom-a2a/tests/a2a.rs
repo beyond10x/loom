@@ -130,6 +130,7 @@ impl Answerer for Fake {
             proposal: Some(ANSWER.to_owned()),
             proposed_case: None,
             detail: None,
+            steps: Vec::new(),
         })
     }
 }

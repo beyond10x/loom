@@ -4,8 +4,11 @@
 //! `confidence` when classified, `outcome` (`proposed`, `declined`, `proposed_case`,
 //! `unclassified`, `stopped`), `reads` (`[{"source", "kind"}]`, `kind` `list`, `search` or `get`),
 //! and `proposal`, `proposed_case` (`{"protocol", "confidence", "reasons"}`) and `detail` when
-//! present. An absent optional field is omitted. The state is `{"cursors": [{"name", "value"}],
-//! "handled": [<item id>], "failing": [{"item", "failures", "last_failure"}]}`, a failing item
+//! present, then `steps` (`[{"action", "outcome", "reason", "steps_left", "model_calls_left"}]`,
+//! `outcome` `performed`, `pending`, `refused`, `failed` or `not_invoked`) when the turn took a
+//! step, last; a line written before 0.55.2 has none and reads back with no steps. An absent
+//! optional field is omitted. The state is `{"cursors": [{"name", "value"}], "handled": [<item
+//! id>], "failing": [{"item", "failures", "last_failure"}]}`, a failing item
 //! whole: `{"id", "revision", "text", "details"}`, `details` the JSON value it is. A decimal is
 //! written as the JSON number it spells, or as a string when it spells none.
 
@@ -13,7 +16,7 @@ use loom::datasource::{ReadKind, SourceName};
 use loom::json::{self, DecodeError, Value, member};
 use loom::plugin::{
     Cursor, InboundItem, Intent, ItemFailures, ItemId, PluginState, ProposedCase, RecordLine,
-    RecordOutcome, SourceRead,
+    RecordOutcome, SourceRead, StepOutcome, TurnStep,
 };
 use loom::primitives::Decimal;
 
@@ -36,6 +39,14 @@ const KINDS: [(&str, ReadKind); 3] = [
     ("list", ReadKind::List),
     ("search", ReadKind::Search),
     ("get", ReadKind::Get),
+];
+
+const STEP_OUTCOMES: [(&str, StepOutcome); 5] = [
+    ("performed", StepOutcome::Performed),
+    ("pending", StepOutcome::Pending),
+    ("refused", StepOutcome::Refused),
+    ("failed", StepOutcome::Failed),
+    ("not_invoked", StepOutcome::NotInvoked),
 ];
 
 /// The name `table` gives `value`.
@@ -145,8 +156,65 @@ pub fn encode_record_line(line: &RecordLine) -> String {
         member(&mut out, "detail");
         json::push_text(&mut out, detail);
     }
+    if !line.steps.is_empty() {
+        member(&mut out, "steps");
+        out.push('[');
+        for (at, step) in line.steps.iter().enumerate() {
+            if at > 0 {
+                out.push(',');
+            }
+            push_step(&mut out, step);
+        }
+        out.push(']');
+    }
     out.push('}');
     out
+}
+
+fn push_step(out: &mut String, step: &TurnStep) {
+    out.push('{');
+    if let Some(action) = &step.action {
+        member(out, "action");
+        json::push_text(out, action);
+    }
+    member(out, "outcome");
+    json::push_text(out, name_of(&STEP_OUTCOMES, step.outcome));
+    if let Some(reason) = &step.reason {
+        member(out, "reason");
+        json::push_text(out, reason);
+    }
+    member(out, "steps_left");
+    json::push_integer(out, step.steps_left);
+    member(out, "model_calls_left");
+    json::push_integer(out, step.model_calls_left);
+    out.push('}');
+}
+
+fn step_at(value: &Value) -> Result<TurnStep, DecodeError> {
+    let at = "steps";
+    Ok(TurnStep {
+        action: optional(value, "action")
+            .map(|text| json::text_at(text, "action", "an action").map(str::to_owned))
+            .transpose()?,
+        outcome: named(
+            &STEP_OUTCOMES,
+            json::member_at(value, at, "outcome")?,
+            "outcome",
+        )?,
+        reason: optional(value, "reason")
+            .map(|text| json::text_at(text, "reason", "a string").map(str::to_owned))
+            .transpose()?,
+        steps_left: json::integer_at(
+            json::member_at(value, at, "steps_left")?,
+            "steps_left",
+            "an integer",
+        )?,
+        model_calls_left: json::integer_at(
+            json::member_at(value, at, "model_calls_left")?,
+            "model_calls_left",
+            "an integer",
+        )?,
+    })
 }
 
 /// One record line read back from its JSON.
@@ -226,6 +294,15 @@ fn record_line(value: &Value) -> Result<RecordLine, DecodeError> {
         detail: optional(value, "detail")
             .map(|text| json::text_at(text, "detail", "a string").map(str::to_owned))
             .transpose()?,
+        steps: optional(value, "steps")
+            .map(|steps| {
+                json::items_at(steps, "steps", "a list")?
+                    .iter()
+                    .map(step_at)
+                    .collect::<Result<Vec<_>, DecodeError>>()
+            })
+            .transpose()?
+            .unwrap_or_default(),
     })
 }
 
