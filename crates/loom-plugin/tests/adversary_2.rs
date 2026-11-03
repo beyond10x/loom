@@ -114,10 +114,14 @@ fn retried_wire_attempts_count_against_the_turn_model_budget() {
     );
     let ended = ended.expect("a spent budget is no failure of the turn");
     assert_eq!(ended.outcome, RecordOutcome::Stopped, "{ended:?}");
-    assert_eq!(
-        ended.detail.as_deref(),
-        Some(format!("the turn used its {TURN_MODEL_BUDGET} model calls").as_str()),
-        "{ended:?}"
+    assert!(
+        ended
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.starts_with(&format!(
+                "the turn used its {TURN_MODEL_BUDGET} model calls (model_budget) after "
+            ))),
+        "story:turn-budget-stop-names-the-arithmetic: the model budget ended the turn: {ended:?}"
     );
 }
 
