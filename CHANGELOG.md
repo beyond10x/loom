@@ -12,6 +12,19 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- An `http` read whose transport fails (connect, send, timeout) is asked once more; failing again it is a refused step naming the source, the path and the error, the model sees it and the run goes on, where one failure ended the run as `Unavailable`. A read the reader refuses is not retried, and no other effect is (story:http-read-transport-failure-goes-back)
+- A turn that has performed a read and whose steps or model calls cover only one more step offers that step only the answer (the frontier's actions other than `source.read`); a model that selects none there ends the turn `stopped`, its detail starting `the turn ran out before answering` and naming the answers offered and the budgets used (story:turn-answers-before-its-budget-ends)
+
+### Added
+
+- A turn's `TurnResult` and its record line carry `steps`, one entry per step in order: the action, its outcome (`performed`, `pending`, `refused`, `failed`, `not_invoked`), the refusal or error, and the steps and model calls left after it. `record.jsonl` writes the member last and only when the turn took a step; a line written before 0.55.2 reads back with none (story:turn-records-each-step)
+
+### Changed
+
+- `loom.plugin.TurnResult` and `loom.plugin.RecordLine` (generated types of `b10x-loom-plugin`, outside the SDK promise) gain the field `steps`; a struct literal of either adds `steps: Vec::new()` (story:turn-records-each-step)
+
 ## [0.55.1] - 2026-11-03
 
 No breaking changes.

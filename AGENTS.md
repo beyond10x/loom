@@ -219,7 +219,10 @@ change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
 with the tests open. CI installs `ess` 0.84.0 (`.github/workflows/check.yml`); move that pin when a
-newer ESS ships.
+newer ESS ships. The pin is two lines in each of `check.yml` and `pages.yml`: `ESS_VERSION` and
+`ESS_SHA256`. Move both in both files in one commit; the digest is the
+`ess-<version>-x86_64-unknown-linux-gnu.tar.gz` line of that release's `SHA256SUMS`. A version
+moved without its digest fails the install step of every job in under 30 s.
 
 ## Gate
 
@@ -1370,7 +1373,16 @@ retries (`loom_sdk::intake::slice::selector::send_with_retries`) included; the m
 refuses any past it. A turn the budgets end is `stopped` naming the budget that ended it and the two
 calls a step, and a stop after a refused effect names the refusal
 (`story:turn-budget-stop-names-the-arithmetic`,
-`crates/loom-plugin/tests/budget_stop_names_arithmetic.rs`). Every forced request asks for one call
+`crates/loom-plugin/tests/budget_stop_names_arithmetic.rs`). Once a read was performed, a step the
+steps or model calls left cover only once more is offered only the answer, the actions other than
+`source.read`, and a model that selects none there ends the turn `stopped` with `the turn ran out
+before answering` (`story:turn-answers-before-its-budget-ends`,
+`crates/loom-plugin/tests/answer_before_budget_ends.rs`). The result and the record line carry
+`steps`, one entry per step: the action, its outcome, the refusal or error, the steps and model
+calls left (`story:turn-records-each-step`, `crates/loom-plugin/tests/turn_records_each_step.rs`).
+An `http` read whose transport fails is asked once more and, failing again, is a refused step the
+model sees, never the end of the run (`story:http-read-transport-failure-goes-back`,
+`crates/loom-plugin/tests/http_read_transport.rs`). Every forced request asks for one call
 (`parallel_tool_calls: Some(false)`), and several calls of the tool are one answer only when their
 arguments are equal (`story:forced-call-asks-for-one-call`,
 `crates/loom-executor/tests/forced_single_call.rs`). A model that answered a request without a usable call is about the item, and

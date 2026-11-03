@@ -130,6 +130,12 @@ the approval gate too: the executor is told the refusal and may correct the requ
 that matched `AwaitingApproval` after such a refusal now gets the step budget's or the idle bound's
 end. A plugin or agent turn names the budget that stopped it.
 
+Since `0.55.2` a plugin or agent turn that has read something offers its last step only the
+answer, so it answers before its budget ends; an `http` read whose connection fails is asked once
+more and then goes back to the model as a refusal instead of ending the run; and the turn's result
+and record line carry `steps`, one entry per step with its action, outcome, refusal and the budget
+left. A plugin that builds a `TurnResult` or `RecordLine` literal adds `steps: Vec::new()`.
+
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
