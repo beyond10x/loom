@@ -13,8 +13,17 @@ and runs the executor. A granted and performed step passes the whole gate for th
 whichever actions the gate lists, and the gate forms again after the next step that is not
 granted.
 
+A step whose request the provider allowed passes the gate once the port answered it, also with an
+ordinary `EffectOutcome::Refused` (`ends_run: false`), since 0.55.1
+(`story:refused-effect-goes-back-to-the-model`): the refusal changed nothing, it is recorded and
+observed, and the executor runs again, told why, so a model can correct the arguments it gave. The
+refusal counts idle toward the idle bound, and the step budget still ends the run. A refusal marked
+final ends the run `EffectRefused`, as before. Before 0.55.1 such a step read the gate, and a plugin
+turn whose read the port refused for one argument ended `AwaitingApproval` before the model saw the
+refusal.
+
 Every other step reads the gate as before: one that performed an action needing no authority, one
-that proposed nothing, and one whose request was refused, stale, denied or not performed. After
+that proposed nothing, and one whose request was not admitted, stale, denied or not invoked. After
 the provider allows a request, the case's revision is read again: on a move, which somebody else
 made while the provider decided, the request is stale, it is not performed and the step is no
 grant; the next iteration judges the move. A move after that read, while the effect itself runs,
@@ -49,13 +58,15 @@ stops described above; the intake slice, plugin turns and `b10x-loom` use that d
 | --- | --- | --- |
 | Performed an action needing no authority, beside actions that need approval | reads the gate; ends `AwaitingApproval` | `a_step_that_leaves_the_approval_gate_unchanged_ends_awaiting_approval` |
 | Performed an action needing authority the provider allowed | does not read the gate; runs the executor | `a_step_performed_under_a_grant_passes_the_gate` |
+| Proposed an action needing authority the provider allowed, which the port refused without `ends_run` | does not read the gate; runs the executor, told the refusal | `an_allowed_but_refused_step_goes_back_to_the_executor` (`adversary_granted_gate.rs`) |
+| Proposed an action needing authority the provider allowed, which the port refused with `ends_run` | ends `EffectRefused` | `an_allowed_step_refused_as_final_ends_the_run` (`adversary_granted_gate.rs`) |
 | Proposed an action needing authority the provider denied | reads the gate; ends `AwaitingApproval` on the other actions, the denied one not awaited | `a_step_performed_under_a_grant_passes_the_gate` (control), `a_denied_action_is_not_awaited` |
 | Performed, on the last budgeted step, an action needing authority the provider allowed, which completes the case | loads the case; ends `Completed` | `a_granted_step_that_completes_the_case_at_the_budget_ends_completed` (`adversary_granted_gate.rs`) |
 | Proposed an action needing authority the provider allowed, on a case that moved while it decided | performs nothing; loads the case and judges the move | `adversary_the_run_loop_does_not_perform_a_request_whose_case_moved_while_the_provider_decided` (`adversary_w20261020_u2.rs`) |
 | Proposed nothing, beside actions that need approval, with the gate off | runs the executor; an idle iteration, ending `IdleBound` at the policy's bound | `an_unchanged_frontier_without_the_gate_is_an_idle_iteration` (`stop_policy.rs`) |
 | Proposed an action needing approval the provider withheld, with the gate off | ends `NeedsAuthority`, or holds a Suspension; nothing is invoked | `an_ungranted_approval_required_action_is_still_refused_without_the_gate` (`stop_policy.rs`) |
 
-The first three tests are in `runtime_effect.rs`. The budget rule is held by
+The tests of the first two rows and of the denied row are in `runtime_effect.rs`. The budget rule is held by
 `the_approval_gate_is_checked_before_the_step_budget` for an ungated step, by the budget case of
 `a_step_performed_under_a_grant_passes_the_gate` for a granted one that leaves the case open, and
 by `a_granted_step_that_completes_the_case_at_the_budget_ends_completed` for a granted one that
