@@ -12,6 +12,13 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `model_selector::request` asks for one call (`parallel_tool_calls: Some(false)`); equal repeated calls are one answer (story:forced-call-asks-for-one-call)
+- An allowed request the effect port refuses without `ends_run` passes the approval gate: the model sees the refusal and may correct it (story:refused-effect-goes-back-to-the-model)
+- A turn that stops after a refused effect names the refusal in its detail, never only `AwaitingApproval` (story:refused-effect-goes-back-to-the-model)
+- A turn the budgets end names the budget that ended it and the two model calls a step (story:turn-budget-stop-names-the-arithmetic)
+
 ## [0.55.0] - 2026-11-02
 
 No breaking changes.

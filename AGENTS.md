@@ -1359,12 +1359,21 @@ can close, introduced as data and never as instructions; every other value a req
 item's text, id and revision, what `operations describe` reports) has those escaped too, so none
 opens or closes a block (`crates/loom-plugin/tests/earlier_reads.rs`,
 `a_later_step_sees_an_earlier_read_as_data`, `no_value_a_turn_quotes_spells_the_data_block`). A
-turn is one Run, bounded by `TURN_STEP_BUDGET`: a step Commission performed under a grant passes
-its approval gate (`docs/commission/design/approval-gate.md`), so the Run goes on after each
-granted read, and an `AwaitingApproval` ends the turn `stopped`. Model requests are bounded per
+turn is one Run, bounded by `TURN_STEP_BUDGET`: a step Commission performed under a grant, or whose
+allowed request the effect port refused without `ends_run`, passes its approval gate
+(`docs/commission/design/approval-gate.md`), so the Run goes on after each granted read, and a
+refused read reaches the next request as `refused: <reason>` for the model to correct
+(`story:refused-effect-goes-back-to-the-model`, `crates/loom-plugin/tests/refused_read_goes_back.rs`);
+an `AwaitingApproval` ends the turn `stopped`. Model requests are bounded per
 turn: `TURN_MODEL_BUDGET` (two per step) counts every request sent, each attempt of Loom's caller
 retries (`loom_sdk::intake::slice::selector::send_with_retries`) included; the model the turn lends
-refuses any past it. A model that answered a request without a usable call is about the item, and
+refuses any past it. A turn the budgets end is `stopped` naming the budget that ended it and the two
+calls a step, and a stop after a refused effect names the refusal
+(`story:turn-budget-stop-names-the-arithmetic`,
+`crates/loom-plugin/tests/budget_stop_names_arithmetic.rs`). Every forced request asks for one call
+(`parallel_tool_calls: Some(false)`), and several calls of the tool are one answer only when their
+arguments are equal (`story:forced-call-asks-for-one-call`,
+`crates/loom-executor/tests/forced_single_call.rs`). A model that answered a request without a usable call is about the item, and
 one that could not answer is not: an answer with no call of the forced tool (a provider's refusal
 or content filter, which llm decodes as `Incomplete`, or text only), an answer llm refuses for the
 request, a selection naming no action and arguments Commission's JSON cannot carry

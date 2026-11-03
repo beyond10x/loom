@@ -125,6 +125,11 @@ approval and `resume_after_grant` performs the pending request once, after the g
 revision it was suspended at. Callers of `run_until_blocked` see no change; callers that match
 `ResumeRunOutcome` or `LoopFailure` exhaustively add the new arms.
 
+Since `0.55.1` a step whose allowed request the effect port refused, without ending the run, passes
+the approval gate too: the executor is told the refusal and may correct the request, so a caller
+that matched `AwaitingApproval` after such a refusal now gets the step budget's or the idle bound's
+end. A plugin or agent turn names the budget that stopped it.
+
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
