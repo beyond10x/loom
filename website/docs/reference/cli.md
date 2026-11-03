@@ -356,6 +356,9 @@ item: the state whose `when` names its intent is the projection, the spec's capa
 authority and its inner loop's step_budget and model_budget bound the turn. The item's id is `run-`
 and the run's instant, so each run is an item of its own. The turn is recorded as one line in
 record.jsonl in the state directory, the item kept as handled, and one line per proposal is printed.
+Standard error carries one line per step, before any other: `step <n>: <action> <outcome>[:
+<reason>]; <s> steps and <m> model calls left`, the outcome performed, pending, refused, failed or
+not_invoked, and `no action` when the model selected none.
 
 When the channel binding declares a write, a proposed reply may be sent to the first channel of
 channel.allow, as reply.send of a served turn: writes.mode auto sends it in the turn, approval holds it

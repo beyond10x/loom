@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00
-  contract digest 2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd
+  model digest 687ce3d39bdb34d56d1fe0c221f558534fa9c3e8eda9e34862b5b742d61331e9
+  contract digest 3a8aa766c8bb9ebca0e67279c2e64d75442a59c32dac9ff9524c320274ed5bed
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-284 capabilities: **281 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+286 capabilities: **283 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -123,7 +123,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.plugin.RecordLine` |
 | domain type | `loom.plugin.RecordOutcome` |
 | domain type | `loom.plugin.SourceRead` |
+| domain type | `loom.plugin.StepOutcome` |
 | domain type | `loom.plugin.TurnResult` |
+| domain type | `loom.plugin.TurnStep` |
 | domain type | `loom.resource.AgentVariant` |
 | domain type | `loom.resource.Boundary` |
 | domain type | `loom.resource.BoundaryUpstream` |

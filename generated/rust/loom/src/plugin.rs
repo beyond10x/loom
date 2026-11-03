@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest a0d795943fe75e9ce07e6c70e7258f40e52dede75f7d71029e05de60fa5fad00
-// contract digest 2a4b923b7fa46b3160beca2a0c09dbb6fd2f39df82e8c9393ce0408020d931cd
+// model digest 687ce3d39bdb34d56d1fe0c221f558534fa9c3e8eda9e34862b5b742d61331e9
+// contract digest 3a8aa766c8bb9ebca0e67279c2e64d75442a59c32dac9ff9524c320274ed5bed
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Plugin — `loom.plugin`.
@@ -166,6 +166,8 @@ pub struct RecordLine {
     pub proposed_case: Option<ProposedCase>,
     /// `detail` — `Optional<String>`.
     pub detail: Option<String>,
+    /// `steps` — `List<loom.plugin.TurnStep>`.
+    pub steps: Vec<TurnStep>,
 }
 
 /// RecordOutcome — `loom.plugin.RecordOutcome`: one of a closed set of names.
@@ -192,6 +194,21 @@ pub struct SourceRead {
     pub kind: crate::datasource::ReadKind,
 }
 
+/// StepOutcome — `loom.plugin.StepOutcome`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepOutcome {
+    /// `Performed`.
+    Performed,
+    /// `Pending`.
+    Pending,
+    /// `Refused`.
+    Refused,
+    /// `Failed`.
+    Failed,
+    /// `NotInvoked`.
+    NotInvoked,
+}
+
 /// TurnResult — `loom.plugin.TurnResult`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TurnResult {
@@ -205,4 +222,21 @@ pub struct TurnResult {
     pub proposed_case: Option<ProposedCase>,
     /// `detail` — `Optional<String>`.
     pub detail: Option<String>,
+    /// `steps` — `List<loom.plugin.TurnStep>`.
+    pub steps: Vec<TurnStep>,
+}
+
+/// TurnStep — `loom.plugin.TurnStep`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurnStep {
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `outcome` — `loom.plugin.StepOutcome`.
+    pub outcome: StepOutcome,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
+    /// `steps_left` — `Integer`.
+    pub steps_left: i64,
+    /// `model_calls_left` — `Integer`.
+    pub model_calls_left: i64,
 }

@@ -263,6 +263,7 @@ mod tests {
             proposal: (outcome == RecordOutcome::Proposed).then(|| "yes".to_owned()),
             proposed_case: None,
             detail: Some("why".to_owned()),
+            steps: Vec::new(),
         }
     }
 

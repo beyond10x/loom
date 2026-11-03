@@ -185,6 +185,7 @@ impl Answerer for Answering<'_> {
                     "confidence {} is below the threshold {threshold}",
                     classification.confidence.0
                 )),
+                steps: Vec::new(),
             };
             return Ok(plugin.result(item, &classification, turn));
         }

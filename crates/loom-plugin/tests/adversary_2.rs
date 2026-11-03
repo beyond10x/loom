@@ -227,6 +227,7 @@ fn a_torn_last_record_line_does_not_stop_the_host_for_good() {
         proposal: None,
         proposed_case: None,
         detail: None,
+        steps: Vec::new(),
     };
     let torn = RecordLine {
         item: ItemId("item-2".to_owned()),

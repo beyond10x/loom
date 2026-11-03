@@ -600,6 +600,10 @@ fn adversary_the_record_line_is_the_one_a_handled_item_gets() {
             "outcome": "proposed",
             "reads": [{"source": "docs", "kind": "search"}],
             "proposal": REPLY,
+            "steps": [
+                {"action": "source.read", "outcome": "performed", "steps_left": 7, "model_calls_left": 14},
+                {"action": "reply.propose", "outcome": "performed", "steps_left": 6, "model_calls_left": 12},
+            ],
         }),
     );
     let state: Value =

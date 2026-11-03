@@ -12,7 +12,8 @@ use b10x_loom_plugin::datasource::{ReadKind, SourceName};
 use b10x_loom_plugin::state::{RECORD_FILE, STATE_FILE, StateDir};
 use b10x_loom_plugin::{
     Cursor, Decimal, Intent, ItemId, PluginError, PluginState, RecordLine, RecordOutcome,
-    SourceRead, decode_record_line, encode_record_line, run_plugin, run_plugin_on,
+    SourceRead, StepOutcome, TurnStep, decode_record_line, encode_record_line, run_plugin,
+    run_plugin_on,
 };
 use serde_json::json;
 use support::{FakePlugin, Fixture, Recorded, chat, install_program, item};
@@ -104,7 +105,11 @@ fn record_line_carries_reads() {
             "confidence": 0.9,
             "outcome": "proposed",
             "reads": [{"source": "chat", "kind": "list"}],
-            "proposal": "Yes: the deploy finished."
+            "proposal": "Yes: the deploy finished.",
+            "steps": [
+                {"action": "source.read", "outcome": "performed", "steps_left": 7, "model_calls_left": 14},
+                {"action": "reply.propose", "outcome": "performed", "steps_left": 6, "model_calls_left": 12}
+            ]
         })
     );
     let read = decode_record_line(lines[0]).expect("a record line");
@@ -122,6 +127,22 @@ fn record_line_carries_reads() {
             proposal: Some("Yes: the deploy finished.".to_owned()),
             proposed_case: None,
             detail: None,
+            steps: vec![
+                TurnStep {
+                    action: Some("source.read".to_owned()),
+                    outcome: StepOutcome::Performed,
+                    reason: None,
+                    steps_left: 7,
+                    model_calls_left: 14,
+                },
+                TurnStep {
+                    action: Some("reply.propose".to_owned()),
+                    outcome: StepOutcome::Performed,
+                    reason: None,
+                    steps_left: 6,
+                    model_calls_left: 12,
+                },
+            ],
         }
     );
     assert_eq!(encode_record_line(&read), lines[0], "the codec round-trips");

@@ -91,6 +91,14 @@ fn one_turn_recorded() {
         "{stdout}"
     );
     assert!(printed[0].contains(REPLY), "{stdout}");
+    assert_eq!(
+        stderr.lines().collect::<Vec<_>>(),
+        [
+            "b10x-loom: step 1: source.read performed; 7 steps and 14 model calls left",
+            "b10x-loom: step 2: reply.propose performed; 6 steps and 12 model calls left",
+        ],
+        "story:turn-records-each-step: one line per step on standard error"
+    );
     let requests = server.join().expect("the server finished");
     assert_eq!(requests.len(), 5, "classified, read, proposed");
     assert!(

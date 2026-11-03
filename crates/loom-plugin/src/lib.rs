@@ -70,7 +70,7 @@ pub use loom::datasource;
 pub use loom::plugin::{
     Classification, Cursor, InboundItem, Intent, ItemFailures, ItemId, Objective, PluginConfig,
     PluginState, Poll, Projection, Proposal, ProposedCase, RecordLine, RecordOutcome, SourceRead,
-    TurnResult,
+    StepOutcome, TurnResult, TurnStep,
 };
 pub use loom::primitives::Decimal;
 pub use turn::{TurnOptions, Turned, turn_with};
@@ -335,6 +335,7 @@ pub fn record_line(
         proposal: turn.proposal,
         proposed_case: turn.proposed_case,
         detail: turn.detail,
+        steps: turn.steps,
     }
 }
 
@@ -656,6 +657,7 @@ fn handle<P: Plugin + ?Sized>(
                 "confidence {} is below the threshold {threshold}",
                 classification.confidence.0
             )),
+            steps: Vec::new(),
         };
         return Ok(plugin.result(item, &classification, turn));
     }

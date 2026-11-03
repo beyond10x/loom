@@ -2,6 +2,9 @@
 //! without an answer says which budget ended it and why the two run out together, since each step
 //! asks the model twice (a selection and its arguments). Before the story a turn whose eight steps
 //! all read was recorded "the turn used its 16 model calls" although its step budget ended it.
+//! Since 0.55.2 a turn that has performed a read is offered only the answer on its last step
+//! (`story:turn-answers-before-its-budget-ends`), so a budget ends a turn whose reads were all
+//! refused, as here.
 
 mod support;
 
@@ -11,14 +14,17 @@ use b10x_loom_plugin::{Intent, RecordOutcome};
 use serde_json::json;
 use support::{Fixture, Scripted, chat, classification, item};
 
+/// The refusal the effect port answers for a read whose `input` is no object.
+const REFUSAL: &str = "source.read of `chat` has an `input` that is not an object";
+
 fn read() -> (&'static str, serde_json::Value) {
     (
         "source_read",
-        json!({"source": "chat", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
+        json!({"source": "chat", "kind": "list", "input": "C0FIXTURE1"}),
     )
 }
 
-/// Eight reads under the default budgets (8 steps, 16 model calls): the step budget ends the
+/// Eight refused reads under the default budgets (8 steps, 16 model calls): the step budget ends the
 /// turn, and the detail names both budgets and the two calls a step.
 #[test]
 fn a_turn_ended_by_its_step_budget_names_both_budgets() {
@@ -41,15 +47,15 @@ fn a_turn_ended_by_its_step_budget_names_both_budgets() {
 
     assert_eq!(seen.lock().unwrap().len(), 2 * TURN_STEP_BUDGET);
     assert_eq!(ended.outcome, RecordOutcome::Stopped);
-    assert_eq!(ended.reads.len(), TURN_STEP_BUDGET);
+    assert!(ended.reads.is_empty());
     assert_eq!(
         ended.detail.as_deref(),
         Some(
             format!(
                 "the turn used its {TURN_STEP_BUDGET} steps (step_budget) and \
                  {TURN_MODEL_BUDGET} of its {TURN_MODEL_BUDGET} model calls (model_budget) \
-                 without an answer, after {TURN_STEP_BUDGET} reads; each step asks the model \
-                 twice, a selection and its arguments"
+                 without an answer, after 0 reads; each step asks the model twice, a \
+                 selection and its arguments; the last effect was refused: {REFUSAL}"
             )
             .as_str()
         ),
@@ -92,7 +98,8 @@ fn a_turn_ended_by_its_model_budget_names_the_steps_it_allows() {
         Some(
             "the turn used its 4 model calls (model_budget) after 2 of its 4 steps \
              (step_budget) without an answer; each step asks the model twice, a selection and \
-             its arguments, so 4 model calls allow 2 steps"
+             its arguments, so 4 model calls allow 2 steps; the last effect was refused: \
+             source.read of `chat` has an `input` that is not an object"
         ),
         "story:turn-budget-stop-names-the-arithmetic"
     );
