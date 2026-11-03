@@ -286,7 +286,7 @@ fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
 }
 
 // Item 3: the whole gate over a copy that synthesize refuses fails at step 3, after steps 1 and 2
-// held. The copy lists no authored scenarios (`scenarios: []`): ess 0.82.0 validates and compiles
+// held. The copy lists no authored scenarios (`scenarios: []`): ess 0.84.0 validates and compiles
 // it, and `ess verify conform synthesize` refuses an explicit list that selects no file and exits
 // non-zero. (Up to ess 0.77.0 this test retyped the confidence to `Optional<Binary64>`, which the
 // suite refused as `UnsupportedPrimitive`; 0.82.0 synthesizes `Binary64`.)
@@ -391,7 +391,7 @@ fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
 #[test]
 fn gate_over_a_copy_requiring_an_older_ess_fails_at_validate() {
     let copy = copy_with_edit("gate_requires_older", "ess-inputs.yaml", |text| {
-        text.replacen("requires: ess 0.82.0", "requires: ess 0.51.0", 1)
+        text.replacen("requires: ess 0.84.0", "requires: ess 0.51.0", 1)
     });
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {

@@ -314,8 +314,9 @@ fn budgets_hold() {
     assert_eq!(record.len(), 1, "{record:?}");
     assert_eq!(record[0]["outcome"], "stopped", "{record:?}");
     assert_eq!(
-        record[0]["detail"], "the turn used its 2 model calls",
-        "{record:?}"
+        record[0]["detail"],
+        "the turn used its 2 model calls (model_budget) after 1 of its 8 steps (step_budget) without an answer; each step asks the model twice, a selection and its arguments, so 2 model calls allow 1 step",
+        "story:turn-budget-stop-names-the-arithmetic: {record:?}"
     );
 
     let by_steps = Scratch::new(

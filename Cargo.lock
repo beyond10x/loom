@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-a2a"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "a2a",
  "b10x-loom-plugin",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-agent"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-a2a",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-boundary"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -542,14 +542,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-commission",
@@ -572,7 +572,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-conformance"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-agent",
  "b10x-loom-commission",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-connectors"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-commission",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-conformance"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-intake-slice",
  "ess-conformance",
@@ -645,14 +645,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -664,7 +664,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-mandate"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -711,7 +711,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-operator"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-models",
  "b10x-loom-agent",
@@ -737,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin-slack"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-plugin",
@@ -761,7 +761,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-protocols"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -774,7 +774,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-resource"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "jsonschema 0.52.1",
  "loom",
@@ -784,7 +784,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-sdk"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-selector-laya"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-session-executor"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -1632,8 +1632,8 @@ dependencies = [
 
 [[package]]
 name = "ess-compiler"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-domain",
  "ess-primitives",
@@ -1644,8 +1644,8 @@ dependencies = [
 
 [[package]]
 name = "ess-conformance"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1659,8 +1659,8 @@ dependencies = [
 
 [[package]]
 name = "ess-domain"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-primitives",
  "ess-yaml",
@@ -1672,8 +1672,8 @@ dependencies = [
 
 [[package]]
 name = "ess-gen"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1689,8 +1689,8 @@ dependencies = [
 
 [[package]]
 name = "ess-http"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1703,8 +1703,8 @@ dependencies = [
 
 [[package]]
 name = "ess-primitives"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-yaml",
  "schemars 0.8.22",
@@ -1715,8 +1715,8 @@ dependencies = [
 
 [[package]]
 name = "ess-transport"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1727,8 +1727,8 @@ dependencies = [
 
 [[package]]
 name = "ess-yaml"
-version = "0.82.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.82.0#6437975cb8bf474b001e13eb6c2bc9f2b9db9d7f"
+version = "0.84.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.84.0#b89faaa411bdc6cbcdb9791777e36baded3bc278"
 dependencies = [
  "serde",
  "serde_norway",
@@ -3698,7 +3698,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "clap",
  "serde_json",
@@ -3706,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -3716,7 +3716,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "anyhow",
  "b10x-llm-models",
@@ -3729,7 +3729,7 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.55.0"
+version = "0.55.1"
 dependencies = [
  "b10x-loom-resource",
  "clap",

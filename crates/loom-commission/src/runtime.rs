@@ -51,10 +51,12 @@
 //!    executor is not run. An action an authority verdict denied in this Run is not awaited; a
 //!    frontier whose only actions needing approval were denied is no gate. A step performed under
 //!    a grant passes the gate: when the previous step's request needed authority (8), the provider
-//!    allowed it and the effect port reported it `Performed`, the gate is not read and the
-//!    executor runs. Every other step leaves the gate to be read: one that performed an action
-//!    needing no authority, one that proposed nothing, and one whose request was refused, stale,
-//!    denied or not performed. The step budget (0) and the idle bound still end a run that only
+//!    allowed it and the effect port reported it `Performed`, or `Refused` without `ends_run`, the
+//!    gate is not read and the executor runs, so a refused request goes back to the executor,
+//!    which is told why and may correct it (`story:refused-effect-goes-back-to-the-model`).
+//!    Every other step leaves the gate to be read: one that performed an action needing no
+//!    authority, one that proposed nothing, and one whose request was not admitted, stale, denied
+//!    or not invoked. The step budget (0) and the idle bound still end a run that only
 //!    repeats granted steps; at the budget, the case a granted step leaves is loaded first (0), so
 //!    a case it completed ends the run completed. While a request is pending (8b) the gate is not
 //!    read: the step that admitted it is the one the gate is read after, once the port answered
@@ -1943,7 +1945,8 @@ where
         let mut stale = false;
         let mut verdict: Option<(String, AuthorityVerdict)> = None;
         // Whether this step's request needed authority, the provider allowed it and the effect
-        // port performed it: such a step passes the approval gate (5).
+        // port performed it or refused it without ending the run: such a step passes the approval
+        // gate (5).
         let mut granted = false;
         // This step's request, when its revalidation answered that it needs authority.
         let mut pending: Option<ActionRequestData> = None;
@@ -2078,7 +2081,14 @@ where
                 // Only an effect that took place may have moved the case; after a refusal, a move
                 // is somebody else's.
                 effected = matches!(effect, EffectOutcome::Performed(_));
-                granted = effected && matches!(verdict, Some((_, AuthorityVerdict::Allow(_))));
+                // A request the provider allowed passes the gate once the port answered it, also
+                // with an ordinary refusal: the executor is told why and may correct the request,
+                // within the step budget and the idle bound, a refusal counting idle
+                // (`story:refused-effect-goes-back-to-the-model`).
+                granted = matches!(
+                    effect,
+                    EffectOutcome::Performed(_) | EffectOutcome::Refused(_)
+                ) && matches!(verdict, Some((_, AuthorityVerdict::Allow(_))));
             }
         }
         // A fan-out of reads (8a): refused whole unless every read is admissible on the handed

@@ -12,6 +12,21 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-11-03
+
+No breaking changes.
+
+### Fixed
+
+- `model_selector::request` asks for one call (`parallel_tool_calls: Some(false)`); equal repeated calls are one answer (story:forced-call-asks-for-one-call)
+- An allowed request the effect port refuses without `ends_run` passes the approval gate: the model sees the refusal and may correct it (story:refused-effect-goes-back-to-the-model)
+- A turn that stops after a refused effect names the refusal in its detail, never only `AwaitingApproval` (story:refused-effect-goes-back-to-the-model)
+- A turn the budgets end names the budget that ended it and the two model calls a step (story:turn-budget-stop-names-the-arithmetic)
+
+### Changed
+
+- ESS moves from 0.82.0 to 0.84.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); the generated `json.rs` of each model gains `timestamp_at`, an RFC 3339 `date-time` reader, and the commission domain graph names `0.84.0`
+
 ## [0.55.0] - 2026-11-02
 
 No breaking changes.
@@ -1317,7 +1332,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.1...HEAD
+[0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1
 [0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0
 [0.54.0]: https://github.com/beyond10x/loom/releases/tag/0.54.0
 [0.53.0]: https://github.com/beyond10x/loom/releases/tag/0.53.0

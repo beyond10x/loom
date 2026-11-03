@@ -18,9 +18,18 @@
 //!
 //! A turn is one Run, bounded by [`TURN_STEP_BUDGET`]. On `inbound-answer@1` `source.read` and
 //! `reply.propose` always need a capability; [`PluginAuthority`] grants both, and a step Commission
-//! performed under that grant passes its approval gate, so the Run goes on after each read. An
-//! `AwaitingApproval` ends the turn `stopped`. Its model requests are bounded by
-//! [`TURN_MODEL_BUDGET`].
+//! performed under that grant, or that its effect port refused without ending the run, passes
+//! its approval gate, so the Run goes on after each read: a refused read reaches the model's next
+//! request as `refused: <reason>` in the earlier-steps block, and the model may correct it
+//! (`story:refused-effect-goes-back-to-the-model`). An `AwaitingApproval` ends the turn `stopped`.
+//! Its model requests are bounded by [`TURN_MODEL_BUDGET`].
+//!
+//! A turn the budgets end without an answer is `stopped`, naming the budget that ended it and
+//! that each step asks the model twice (`story:turn-budget-stop-names-the-arithmetic`): "the turn
+//! used its N steps (step_budget) and M of its B model calls (model_budget) …" when the step
+//! budget ended it, "the turn used its B model calls (model_budget) after S of its N steps …,
+//! so B model calls allow B/2 steps" when the model budget ended it first. A stop after a refused
+//! effect ends with "; the last effect was refused: <reason>".
 //!
 //! A model that answers a request without a usable call is about the item, and a model that could
 //! not answer is not. An answer with no call of the forced tool (a provider's refusal or content
@@ -64,8 +73,9 @@ use loom_sdk::commission::model::json::Value;
 use loom_sdk::commission::model::primitives::{Timestamp, Uuid};
 use loom_sdk::commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, Commission, CommissionData, CommissionId,
-    ExecutorOutcome, ExecutorOutcomeSuspended, Frontier, FrontierData, ObservationId, PrincipalId,
-    RunId, RunOutcome, SuspensionReason, Unit, commission_state, frontier_state,
+    EffectOutcome, ExecutorOutcome, ExecutorOutcomeSuspended, Frontier, FrontierData,
+    ObservationId, PrincipalId, RunId, RunOutcome, SuspensionReason, Unit, commission_state,
+    frontier_state,
 };
 use loom_sdk::commission::outcome::RunStore;
 use loom_sdk::commission::ports::authority::AuthorityProvider;
@@ -519,13 +529,33 @@ pub fn turn_with<S: FallibleCaseStore>(
             proposed(reads, Some(format!("{NOT_SENT}{}", refused.reason))),
             false,
         ),
-        RunOutcome::Suspended(_) if asked >= model_budget => turned(
-            stopped(
-                reads,
-                &format!("the turn used its {model_budget} model calls"),
-            ),
-            false,
-        ),
+        RunOutcome::Suspended(suspended)
+            if matches!(suspended.reason, SuspensionReason::Budget(_))
+                && end.steps >= options.step_budget =>
+        {
+            let detail = format!(
+                "the turn used its {} (step_budget) and {asked} of its {} (model_budget) without \
+                 an answer, after {}; {PER_STEP}{}",
+                counted(options.step_budget, "step"),
+                counted(model_budget, "model call"),
+                counted(reads.len(), "read"),
+                last_refusal(&end.effects),
+            );
+            turned(stopped(reads, &detail), false)
+        }
+        RunOutcome::Suspended(_) if asked >= model_budget => {
+            let detail = format!(
+                "the turn used its {} (model_budget) after {} of its {} (step_budget) without an \
+                 answer; {PER_STEP}, so {} allow {}{}",
+                counted(model_budget, "model call"),
+                end.steps,
+                counted(options.step_budget, "step"),
+                counted(model_budget, "model call"),
+                counted(model_budget / 2, "step"),
+                last_refusal(&end.effects),
+            );
+            turned(stopped(reads, &detail), false)
+        }
         RunOutcome::Suspended(suspended)
             if matches!(suspended.reason, SuspensionReason::ExternalAvailability(_)) =>
         {
@@ -534,8 +564,38 @@ pub fn turn_with<S: FallibleCaseStore>(
                 suspended.reason
             )));
         }
-        other => turned(stopped(reads, &format!("the run ended {other:?}")), false),
+        other => turned(
+            stopped(
+                reads,
+                &format!("the run ended {other:?}{}", last_refusal(&end.effects)),
+            ),
+            false,
+        ),
     })
+}
+
+/// What a budget stop's detail says about the cost of a step.
+const PER_STEP: &str = "each step asks the model twice, a selection and its arguments";
+
+/// `n` and `noun`, the noun with an `s` unless `n` is 1.
+fn counted(n: impl TryInto<u64>, noun: &str) -> String {
+    let n: u64 = n.try_into().unwrap_or(u64::MAX);
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
+/// The end of a stop's detail when the run's last effect was refused, naming the refusal
+/// (`story:refused-effect-goes-back-to-the-model`); empty otherwise.
+fn last_refusal(effects: &[EffectOutcome]) -> String {
+    match effects.last() {
+        Some(EffectOutcome::Refused(refused)) => {
+            format!("; the last effect was refused: {}", refused.reason)
+        }
+        _ => String::new(),
+    }
 }
 
 /// The part of every step's context that does not change: the item, its classification and the

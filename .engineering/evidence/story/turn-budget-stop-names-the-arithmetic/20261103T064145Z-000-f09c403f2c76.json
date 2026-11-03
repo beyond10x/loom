@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-03T06:41:45Z",
+  "actor": "human:timo",
+  "artifact": "story:turn-budget-stop-names-the-arithmetic",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked -p b10x-loom-plugin -p b10x-loom-cli --no-fail-fast",
+    "reference": "0.55.1 local gate at ceffeb0f: budget_stop_names_arithmetic 2 passed (red 0 of 2 on 0.55.0), plugin 52 and cli 229 passed, EXIT=0; CI full gate on the PR decides"
+  }
+}

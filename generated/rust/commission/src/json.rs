@@ -797,6 +797,110 @@ pub fn decimal_at<'a>(value: &'a Value, at: &str, expected: &str) -> Result<&'a 
     }
 }
 
+/// The instant at this path, as the published schema's `format: date-time` reads one: an RFC 3339
+/// `date-time` (§5.6), whose date exists, whose `T` and `Z` may be lower-case, whose fraction is
+/// any number of digits, and whose leap second falls on the last minute of a UTC day.
+///
+/// # Errors
+///
+/// [`DecodeError`] when the value is not a string, or is one RFC 3339 does not spell — refused as
+/// the contract refuses it. An admitted text is what `format: date-time` admits, which is not
+/// always an instant the server can order: a leap second (`23:59:60`) and a fraction past nine
+/// digits are admitted, and a guard comparing either reads it as unknown.
+pub fn timestamp_at<'a>(value: &'a Value, at: &str, expected: &str) -> Result<&'a str, DecodeError> {
+    let text = text_at(value, at, expected)?;
+    if date_time(text) {
+        Ok(text)
+    } else {
+        Err(DecodeError { at: at.to_owned(), expected: expected.to_owned(), found: format!("`{text}`") })
+    }
+}
+
+/// `true` where `text` is an RFC 3339 `date-time`, as [`timestamp_at`] reads one.
+fn date_time(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let digits = |from: usize, to: usize| -> Option<u32> {
+        let part = bytes.get(from..to)?;
+        part.iter()
+            .all(u8::is_ascii_digit)
+            .then(|| part.iter().fold(0, |held, digit| held * 10 + u32::from(digit - b'0')))
+    };
+    if bytes.len() < 20
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !matches!(bytes[10], b'T' | b't')
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return false;
+    }
+    let (Some(year), Some(month), Some(day)) = (digits(0, 4), digits(5, 7), digits(8, 10)) else {
+        return false;
+    };
+    let (Some(hour), Some(minute), Some(second)) = (digits(11, 13), digits(14, 16), digits(17, 19)) else {
+        return false;
+    };
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    if day == 0 || day > days || hour > 23 || minute > 59 || second > 60 {
+        return false;
+    }
+    let mut at = 19;
+    if bytes[at] == b'.' {
+        at += 1;
+        let fraction = at;
+        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+            at += 1;
+        }
+        if at == fraction {
+            return false;
+        }
+    }
+    // The minute of the UTC day the offset names, for the one second that depends on it.
+    let day_minutes = 24 * 60;
+    let utc = match bytes.get(at) {
+        Some(b'Z' | b'z') if at + 1 == bytes.len() => hour * 60 + minute,
+        Some(sign @ (b'+' | b'-')) if at + 6 == bytes.len() && bytes[at + 3] == b':' => {
+            let (Some(offset_hour), Some(offset_minute)) = (digits(at + 1, at + 3), digits(at + 4, at + 6)) else {
+                return false;
+            };
+            if offset_hour > 23 || offset_minute > 59 {
+                return false;
+            }
+            let local = hour * 60 + minute + day_minutes;
+            let offset = offset_hour * 60 + offset_minute;
+            if *sign == b'+' { (local - offset) % day_minutes } else { (local + offset) % day_minutes }
+        }
+        _ => return false,
+    };
+    second < 60 || utc == day_minutes - 1
+}
+
+/// Refuses a member of the object at this path that no declared field names.
+///
+/// The published schema closes the object (`additionalProperties: false`), so a member it does not
+/// declare is one the sender meant something by and nothing here would read: refused, never
+/// dropped.
+///
+/// # Errors
+///
+/// [`DecodeError`] at the first such member, in the order the members arrived, or when the value
+/// is not an object.
+pub fn closed_at(value: &Value, at: &str, declared: &[&str]) -> Result<(), DecodeError> {
+    for (name, member) in members_at(value, at, "an object")? {
+        if !declared.contains(&name.as_str()) {
+            return Err(DecodeError::of(&nested(at, name), "no member: no field is named so", member));
+        }
+    }
+    Ok(())
+}
+
 /// The UUID at this path, in the published pattern: the canonical hyphenated form, in either case.
 ///
 /// # Errors
@@ -930,6 +1034,24 @@ pub fn key_bool(key: &str, at: &str) -> Result<bool, DecodeError> {
             expected: "a key spelling `true` or `false`".to_owned(),
             found: format!("the key `{other}`"),
         }),
+    }
+}
+
+/// The instant a map key spells, as the published `propertyNames` reads one: an RFC 3339
+/// `date-time`, as [`timestamp_at`] reads one.
+///
+/// # Errors
+///
+/// [`DecodeError`] when the key is not one.
+pub fn key_timestamp(key: &str, at: &str) -> Result<String, DecodeError> {
+    if date_time(key) {
+        Ok(key.to_owned())
+    } else {
+        Err(DecodeError {
+            at: at.to_owned(),
+            expected: "a key spelling an RFC 3339 instant".to_owned(),
+            found: format!("the key `{key}`"),
+        })
     }
 }
 

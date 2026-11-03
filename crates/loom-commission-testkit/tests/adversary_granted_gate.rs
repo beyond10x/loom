@@ -241,11 +241,13 @@ fn a_granted_step_that_completes_the_case_at_the_budget_ends_completed() {
     );
 }
 
-/// An allowed request whose effect the port refused reads the gate as before (design note: "one
-/// whose request was refused ... or not performed"): the next iteration ends `AwaitingApproval`
-/// and the executor is not run again. Kills the mutant that drops `effected &&` from `granted`.
+/// An allowed request whose effect the port refused without ending the run passes the gate
+/// (`story:refused-effect-goes-back-to-the-model`; design note: "A step whose request the provider
+/// allowed passes the gate once the port answered it"): the executor runs again, told of the
+/// refusal through its observation, and its corrected request is performed. The step budget still
+/// ends the run.
 #[test]
-fn an_allowed_but_refused_step_reads_the_gate() {
+fn an_allowed_but_refused_step_goes_back_to_the_executor() {
     let case = CaseId("case-allowed-refused".to_owned());
     let governor = FakeGovernor::new();
     governor.script(
@@ -259,20 +261,60 @@ fn an_allowed_but_refused_step_reads_the_gate() {
             ],
         )],
     );
-    let executor = ScriptedExecutor::new([proposal("read")]);
+    let executor = ScriptedExecutor::new([proposal("read"), proposal("read")]);
     let effects = Effects::answering(vec![EffectOutcome::Refused(EffectOutcomeRefused {
         reason: "no such source".to_owned(),
         ends_run: false,
     })]);
     let authority = StaticAuthorityProvider::new().answer("datasource.read", allow());
+    let end = run(&governor, &executor, &authority, &effects, &case, Some(2));
+    assert_eq!(
+        effects.invoked(),
+        ["read", "read"],
+        "story:refused-effect-goes-back-to-the-model: the refused read and the next one"
+    );
+    assert_eq!(
+        executor.calls().len(),
+        2,
+        "story:refused-effect-goes-back-to-the-model: the executor ran again after the refusal"
+    );
+    assert!(
+        matches!(end.outcome, RunOutcome::Suspended(_)),
+        "story:refused-effect-goes-back-to-the-model: the step budget ends the run: {:?}",
+        end.outcome
+    );
+}
+
+/// An allowed request the port refused as final (`ends_run`) still ends the run `EffectRefused`,
+/// naming the request and the reason, and the executor is not run again.
+#[test]
+fn an_allowed_step_refused_as_final_ends_the_run() {
+    let case = CaseId("case-allowed-refused-final".to_owned());
+    let governor = FakeGovernor::new();
+    governor.script(
+        case.clone(),
+        [listing(
+            4,
+            vec![
+                admissible("inspect"),
+                gated("read", "datasource.read"),
+                gated("propose", "reply.propose"),
+            ],
+        )],
+    );
+    let executor = ScriptedExecutor::new([proposal("read"), proposal("read")]);
+    let effects = Effects::answering(vec![EffectOutcome::Refused(EffectOutcomeRefused {
+        reason: "no such source".to_owned(),
+        ends_run: true,
+    })]);
+    let authority = StaticAuthorityProvider::new().answer("datasource.read", allow());
     let end = run(&governor, &executor, &authority, &effects, &case, Some(10));
     assert_eq!(effects.invoked(), ["read"], "the allowed read was invoked");
     assert_eq!(executor.calls().len(), 1, "the executor ran once");
-    assert_eq!(
-        end.outcome,
-        RunOutcome::AwaitingApproval(RunOutcomeAwaitingApproval {
-            actions: vec!["read".to_owned(), "propose".to_owned()],
-        })
+    assert!(
+        matches!(&end.outcome, RunOutcome::EffectRefused(refused) if refused.reason == "no such source"),
+        "{:?}",
+        end.outcome
     );
 }
 
