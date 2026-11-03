@@ -13,9 +13,12 @@
 //!   ([`Briefing::arguments_schema`]), and returns the call's arguments as the briefing gives them
 //!   ([`Briefing::arguments`]).
 //!
-//! An answer that calls the tool more than once is unusable ([`AskError::Unusable`]): which of its
-//! calls the model meant is not stated, so neither is taken, and a selection naming two actions,
-//! one of them outside the candidates or not, is no selection. Whatever else the model says, text
+//! Each request asks for one call (`parallel_tool_calls: Some(false)`, which llm's Messages codec
+//! sends as `disable_parallel_tool_use`; `story:forced-call-asks-for-one-call`). An answer that
+//! still calls the tool more than once is taken only when every call carries the same arguments;
+//! calls that differ are unusable ([`AskError::Unusable`]): which of them the model meant is not
+//! stated, so none is taken, and a selection naming two actions, one of them outside the
+//! candidates or not, is no selection. Whatever else the model says, text
 //! beside the call included, is dropped: a model answer is never evidence. Every request is sent through [`Briefing::send`]: one attempt, unless the host
 //! retries. The intake slice's briefing (`b10x_loom_intake_slice::selector::Briefing`) tells the
 //! model the intent and the transcript of a software change; a plugin turn's tells it the item and
@@ -339,19 +342,23 @@ pub fn request(
         input_schema: schema,
     }];
     request.tool_choice = ToolChoice::Named(name);
+    // One call is asked for: without it a Messages model may answer the forced tool twice
+    // (`disable_parallel_tool_use` is sent only when the control is set).
+    request.controls.parallel_tool_calls = Some(false);
     Ok(request)
 }
 
 /// The arguments of the model's one call of `tool` in its answer to `request`, sent through
 /// `briefing` on a current-thread runtime made for it. The stream is dropped.
 ///
-/// An answer that calls `tool` more than once names more than one choice, and which it meant is
-/// not stated: it is unusable, never a guess at one of them, whatever each call names.
+/// An answer that calls `tool` more than once with the same arguments names one choice, and those
+/// arguments are taken. Calls whose arguments differ name more than one choice, and which the
+/// model meant is not stated: the answer is unusable, never a guess at one of them.
 ///
 /// # Errors
 /// [`AskError::Unanswered`] for a tool name that is no valid id, no runtime, or the model's error;
-/// [`AskError::Unusable`] for an outcome llm refuses for `request`, no call of `tool`, or more
-/// than one.
+/// [`AskError::Unusable`] for an outcome llm refuses for `request`, no call of `tool`, or calls of
+/// it whose arguments differ.
 pub fn answer<B: Briefing + ?Sized>(
     model: &dyn Model,
     briefing: &B,
@@ -372,15 +379,17 @@ pub fn answer<B: Briefing + ?Sized>(
         .validate_for(request, model.provenance())
         .map_err(|error| AskError::Unusable(error.to_string()))?;
     let mut calls = outcome.tool_calls().filter(|call| call.name == name);
-    match (calls.next(), calls.next()) {
-        (Some(call), None) => Ok(call.arguments.clone()),
-        (None, _) => Err(AskError::Unusable(format!(
+    let Some(first) = calls.next() else {
+        return Err(AskError::Unusable(format!(
             "the model did not call `{tool}`"
-        ))),
-        (Some(_), Some(_)) => Err(AskError::Unusable(format!(
-            "the model called `{tool}` more than once"
-        ))),
+        )));
+    };
+    if calls.any(|call| call.arguments != first.arguments) {
+        return Err(AskError::Unusable(format!(
+            "the model called `{tool}` more than once, with different arguments"
+        )));
     }
+    Ok(first.arguments.clone())
 }
 
 /// A sink that drops the stream: only the turn's outcome is read.
