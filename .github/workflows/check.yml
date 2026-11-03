@@ -57,7 +57,7 @@ jobs:
 
       - name: Install ess
         env:
-          ESS_VERSION: "0.82.0"
+          ESS_VERSION: "0.84.0"
           ESS_SHA256: 54f1434c60eb03776342c1c6a7fd2c3fb3f84e075dbacb6d9219281f86343285
         run: |
           set -euo pipefail

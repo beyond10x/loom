@@ -19,6 +19,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - A turn that stops after a refused effect names the refusal in its detail, never only `AwaitingApproval` (story:refused-effect-goes-back-to-the-model)
 - A turn the budgets end names the budget that ended it and the two model calls a step (story:turn-budget-stop-names-the-arithmetic)
 
+### Changed
+
+- ESS moves from 0.82.0 to 0.84.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); the generated `json.rs` of each model gains `timestamp_at`, an RFC 3339 `date-time` reader, and the commission domain graph names `0.84.0`
+
 ## [0.55.0] - 2026-11-02
 
 No breaking changes.
