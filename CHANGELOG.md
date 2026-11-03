@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.55.1] - 2026-11-03
+
+No breaking changes.
+
 ### Fixed
 
 - `model_selector::request` asks for one call (`parallel_tool_calls: Some(false)`); equal repeated calls are one answer (story:forced-call-asks-for-one-call)
@@ -1328,7 +1332,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.1...HEAD
+[0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1
 [0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0
 [0.54.0]: https://github.com/beyond10x/loom/releases/tag/0.54.0
 [0.53.0]: https://github.com/beyond10x/loom/releases/tag/0.53.0
