@@ -12,18 +12,23 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
-### Fixed
+## [0.55.2] - 2026-11-03
 
-- An `http` read whose transport fails (connect, send, timeout) is asked once more; failing again it is a refused step naming the source, the path and the error, the model sees it and the run goes on, where one failure ended the run as `Unavailable`. A read the reader refuses is not retried, and no other effect is (story:http-read-transport-failure-goes-back)
-- A turn that has performed a read and whose steps or model calls cover only one more step offers that step only the answer (the frontier's actions other than `source.read`); a model that selects none there ends the turn `stopped`, its detail starting `the turn ran out before answering` and naming the answers offered and the budgets used (story:turn-answers-before-its-budget-ends)
+No breaking changes.
 
 ### Added
 
-- A turn's `TurnResult` and its record line carry `steps`, one entry per step in order: the action, its outcome (`performed`, `pending`, `refused`, `failed`, `not_invoked`), the refusal or error, and the steps and model calls left after it. `record.jsonl` writes the member last and only when the turn took a step; a line written before 0.55.2 reads back with none (story:turn-records-each-step)
+- `TurnResult.steps` and the record line's `steps`: each step's action, outcome, refusal and budget left (story:turn-records-each-step)
+- `b10x-loom agent run` prints one `step <n>: …` line per step on standard error (story:turn-records-each-step)
 
 ### Changed
 
-- `loom.plugin.TurnResult` and `loom.plugin.RecordLine` (generated types of `b10x-loom-plugin`, outside the SDK promise) gain the field `steps`; a struct literal of either adds `steps: Vec::new()` (story:turn-records-each-step)
+- `TurnResult` and `RecordLine` (generated, outside the SDK promise) gain `steps`; a struct literal adds `steps: Vec::new()`
+
+### Fixed
+
+- A turn that has read offers its last step only the answer; one that still selects none ends `the turn ran out before answering` (story:turn-answers-before-its-budget-ends)
+- An `http` read whose transport fails is retried once, then is a refused step the model sees, not the end of the run (story:http-read-transport-failure-goes-back)
 
 ## [0.55.1] - 2026-11-03
 
@@ -1345,7 +1350,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.2...HEAD
+[0.55.2]: https://github.com/beyond10x/loom/releases/tag/0.55.2
 [0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1
 [0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0
 [0.54.0]: https://github.com/beyond10x/loom/releases/tag/0.54.0
