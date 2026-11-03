@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:session-executor-keyless-loopback
 kind: story
-status: active
+status: implemented
 title: A b10x-harness session executor admits a keyless endpoint on a loopback address
 relations:
 - decomposes: epic:credential-free-agent-pod
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-30T06:45:42Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-10-30T06:45:42Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-10-30T08:00:35Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1,"review_outcome":2}}}
 ---
 ## Outcome
 
