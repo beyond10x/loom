@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-03T06:41:45Z",
+  "actor": "human:timo",
+  "artifact": "story:refused-effect-goes-back-to-the-model",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked -p b10x-loom-commission-testkit -p b10x-loom-plugin --no-fail-fast",
+    "reference": "0.55.1 local gate at ceffeb0f: adversary_granted_gate 6 passed (red 5 of 6 on 0.55.0), refused_read_goes_back 2 passed (red 0 of 2), testkit 421 and plugin 52 passed, EXIT=0; CI full gate on the PR decides"
+  }
+}

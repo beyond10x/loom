@@ -2,15 +2,16 @@
 format: aep.planning-md/3
 id: story:turn-budget-stop-names-the-arithmetic
 kind: story
-status: active
+status: implemented
 title: A turn that ends on its budgets names which one and the two model calls a step
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:O1
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-03T06:23:11Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-03T06:23:11Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-03T06:41:46Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
