@@ -148,6 +148,30 @@ types:
       - name: kind
         type: loom.datasource.ReadKind
 
+  # How the effect port answered one step of a turn: performed, pending, refused (the reason
+  # follows), failed (the error follows: the run could not go on), or not invoked (the step
+  # proposed nothing, or its request was not admitted).
+  - name: loom.plugin.StepOutcome
+    kind: enum
+    variants: [Performed, Pending, Refused, Failed, NotInvoked]
+
+  # One step of a turn, in order: the action selected (absent when the step proposed none), how
+  # the effect port answered it, the refusal reason or the error, and the steps and model calls
+  # the turn had left after it (story:turn-records-each-step).
+  - name: loom.plugin.TurnStep
+    kind: struct
+    fields:
+      - name: action
+        type: Optional<String>
+      - name: outcome
+        type: loom.plugin.StepOutcome
+      - name: reason
+        type: Optional<String>
+      - name: steps_left
+        type: Integer
+      - name: model_calls_left
+        type: Integer
+
   # How the host handled an item: a reply proposed, the item declined, a case proposed for a task,
   # a classification below the threshold (no turn ran), or a turn or hook that stopped without
   # either.
@@ -156,7 +180,7 @@ types:
     variants: [Proposed, Declined, ProposedCase, Unclassified, Stopped]
 
   # What one turn ended with: its outcome, the reads it performed, the proposal's text or the
-  # proposed case, and the detail of a decline or a stop.
+  # proposed case, the detail of a decline or a stop, and each step it took, in order.
   - name: loom.plugin.TurnResult
     kind: struct
     fields:
@@ -170,10 +194,13 @@ types:
         type: Optional<loom.plugin.ProposedCase>
       - name: detail
         type: Optional<String>
+      - name: steps
+        type: List<loom.plugin.TurnStep>
 
   # One line of the plugin's record, one per handled item: the item, the classified intent and
   # confidence (absent when classification failed), the outcome, the reads performed, the
-  # proposal's text or the proposed case, and the detail of a decline or a stop.
+  # proposal's text or the proposed case, the detail of a decline or a stop, and the turn's steps
+  # (none for an item no turn ran on; a line written before 0.55.2 carries none).
   - name: loom.plugin.RecordLine
     kind: struct
     fields:
@@ -193,6 +220,8 @@ types:
         type: Optional<loom.plugin.ProposedCase>
       - name: detail
         type: Optional<String>
+      - name: steps
+        type: List<loom.plugin.TurnStep>
 
   # How often handling one item was attempted and did not finish, and the last failure's text. The
   # item itself is kept, so the host retries it from the state whatever its poll answers next. The
