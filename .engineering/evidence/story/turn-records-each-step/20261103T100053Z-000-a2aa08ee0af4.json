@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-03T10:00:53Z",
+  "actor": "human:timo",
+  "artifact": "story:turn-records-each-step",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked -p b10x-loom-plugin -p b10x-loom-cli --no-fail-fast",
+    "reference": "0.55.2 local gate at b7ec86da: turn_records_each_step 2 passed (red on the ESS commit a9433318: task drift failed and the test did not compile), agent_run one_turn_recorded asserts the step lines, plugin 60 and cli 229 passed, EXIT=0; CI full gate on the PR decides"
+  }
+}

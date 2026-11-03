@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-03T10:00:54Z",
+  "actor": "human:timo",
+  "artifact": "story:http-read-transport-failure-goes-back",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked -p b10x-loom-plugin --no-fail-fast",
+    "reference": "0.55.2 local gate at b7ec86da: http_read_transport 3 passed (red 1 of 3 on 0.55.1: one transport failure ended the turn as Unavailable), http_reads 5 passed, plugin 60 passed, EXIT=0; CI full gate on the PR decides"
+  }
+}

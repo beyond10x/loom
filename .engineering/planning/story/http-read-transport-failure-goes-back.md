@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:http-read-transport-failure-goes-back
 kind: story
-status: active
+status: implemented
 title: An http read that fails in transport is retried once, then goes back to the model as a refusal
 tags:
 - from-consumer-report
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:O1
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-03T09:24:08Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-03T09:24:08Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-03T10:00:54Z", actor: "human:timo", revision: 4, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

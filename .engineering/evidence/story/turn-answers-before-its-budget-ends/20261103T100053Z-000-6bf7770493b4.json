@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-03T10:00:53Z",
+  "actor": "human:timo",
+  "artifact": "story:turn-answers-before-its-budget-ends",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test --locked -p b10x-loom-plugin --no-fail-fast",
+    "reference": "0.55.2 local gate at b7ec86da: answer_before_budget_ends 3 passed (red 0 of 2 on 0.55.1: the last step was offered source.read), plugin 60 passed, EXIT=0; CI full gate on the PR decides"
+  }
+}
