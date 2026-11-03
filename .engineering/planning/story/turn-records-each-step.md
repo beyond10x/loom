@@ -2,14 +2,17 @@
 format: aep.planning-md/3
 id: story:turn-records-each-step
 kind: story
-status: draft
+status: active
 title: 'A turn records each step: action, effect outcome, refusal reason and the budget left'
 tags:
 - from-consumer-report
 relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:O1
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-03T09:24:07Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-03T09:24:07Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
@@ -33,9 +36,13 @@ no step being reserved for the answer. The runtime already holds the data in mem
 
 ## ESS first
 
-To be decided when the story is accepted: whether the per-step entries are a declared member of
-the `loom.agent` run record (an `ess/` change and a conformance scenario first) or only a log line
-(no `ess/` change).
+Decided at acceptance (D412): the steps are a declared member, in `ess/` first. The ESS commit
+adds `loom.plugin.StepOutcome` (Performed, Pending, Refused, Failed, NotInvoked), and
+`loom.plugin.TurnStep` with the members `action` (optional), `outcome`, `reason` (optional),
+`steps_left` and `model_calls_left`. It also adds `steps: List<loom.plugin.TurnStep>` to
+`loom.plugin.TurnResult` and to `loom.plugin.RecordLine`. On that commit `task drift` fails, and
+`crates/loom-plugin/tests/turn_records_each_step.rs` does not compile. A record line written
+before 0.55.2 has no `steps` and is read with none.
 
 ## Acceptance
 

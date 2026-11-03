@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:turn-answers-before-its-budget-ends
 kind: story
-status: draft
+status: active
 title: A turn with one step left asks for the answer, or ends naming that it ran out before answering
 tags:
 - from-consumer-report
@@ -10,7 +10,10 @@ relations:
 - decomposes: epic:loom-foundation-for-consumers
 - serves: vision:O1
 - depends_on: story:turn-records-each-step
-revision: 1
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-03T09:24:07Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-03T09:24:07Z", actor: "human:timo", revision: 3}
 ---
 ## Outcome
 
@@ -31,9 +34,11 @@ unverified, because the run's per-step record does not exist yet
 
 ## ESS first
 
-To be decided when the story is accepted: whether "the last step asks for the answer" is a
-declared rule of `loom.agent` (an `ess/` change and a scenario first) or plugin-turn behaviour with
-its own red test (no `ess/` change).
+Decided at acceptance (D412): no change to `ess/`. Which actions a step offers is the plugin
+turn's narrowing of the frontier, and `loom.agent` declares the two budgets but not that
+narrowing. The red test is `crates/loom-plugin/tests/answer_before_budget_ends.rs`, run on the
+base. The 0.55.1 tests whose last step was a read (`budget_stop_names_arithmetic.rs`,
+`refused_read_goes_back.rs`) now expect that step to be offered only the answer.
 
 ## Acceptance
 
