@@ -12,6 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `SendStreamingMessage` (alias `message/stream`) on the A2A listener: a `text/event-stream` of the task, one `statusUpdate` per runtime event, then the record and the end; a caller that takes no event for 10 s is cut off while the turn goes on; the card says `capabilities.streaming: true` (story:a2a-record-and-streaming)
+- An A2A turn's line goes to the state directory's `record.jsonl` beside the poll's, and a repeated `messageId` is answered with that line and runs no second turn (`loom.agent.RecordA2aTurn`); `StateDir::held` and `HeldRecord` share the held record within the process (story:a2a-record-and-streaming)
+
+### Changed
+
+- `loom.agent.AdmitA2aRequest` gains the input `stream` and the outcome `streamed`; `AdmitA2aRequest` (generated) gains `stream`, so a struct literal adds `stream: false` (story:a2a-record-and-streaming)
+- An A2A message needs a `messageId` (`-32602` without one), and its item is `a2a:<revision>` of it rather than `a2a:<task>` (story:a2a-record-and-streaming)
+
 ## [0.55.2] - 2026-11-03
 
 No breaking changes.
