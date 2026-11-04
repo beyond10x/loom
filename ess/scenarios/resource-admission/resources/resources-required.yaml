@@ -1,0 +1,8 @@
+# story operator-constraints-in-ess: a Command resource without spec.agent, so it declares no
+# size, under a configuration without defaultCommandResources.
+apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata: {name: nightly, namespace: agents}
+spec:
+  routes: {}
+  command: {args: [--once]}

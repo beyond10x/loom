@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: each egress host of spec.agent is one the controller's
+# allowedEgressHosts holds.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-egress-host-the-configuration-does-not-allow-is-refused
+summary: An egress host allowedEgressHosts does not hold is refused EgressHostNotAllowed.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/egress-host-not-allowed.yaml}
+    outcome: egress-host-not-allowed
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: EgressHostNotAllowed
+        member: spec.agent.deploy.kubernetes.egress[0].host
+        detail: "the controller's allowedEgressHosts does not hold it"

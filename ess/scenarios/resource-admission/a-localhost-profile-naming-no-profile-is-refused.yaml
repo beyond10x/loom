@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: a Localhost confinement profile names its profile; one
+# that does not is refused.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-localhost-profile-naming-no-profile-is-refused
+summary: A Localhost seccomp profile that names no profile is refused ProfileInvalid.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/profile-invalid.yaml}
+    outcome: profile-invalid
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: ProfileInvalid
+        member: spec.seccompProfile.localhostProfile
+        detail: "a Localhost profile needs the name of the profile"

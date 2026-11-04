@@ -1,0 +1,14 @@
+# story operator-constraints-in-ess: the controller configuration every `AdmitLoomAgent`
+# scenario is admitted under. No model route and no `defaultCommandResources`, so an `AgentServe`
+# resource gives its routes and a `Command` resource its size; each allow-list holds one name
+# the admitted fixtures use and the refused ones do not.
+namespace: agents
+defaultImage: {repository: registry.example/loom-agent, tag: '0.0.0'}
+defaultResources: {cpu: 250m, memory: 256Mi}
+allowedSecretNames: [agent-env, agent-files]
+allowedEgressHosts: [chat.example, models.example]
+allowedClaimNames: [agent-workspace]
+allowedSeccompLocalhostProfiles: [profiles/agent.json]
+allowedAppArmorLocalhostProfiles: [agent]
+allowedBoundaryUpstreams:
+  - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}

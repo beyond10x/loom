@@ -1,0 +1,17 @@
+# story operator-constraints-in-ess: spec.env cannot set a name the controller sets itself.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-environment-name-the-controller-sets-is-refused
+summary: A spec.env entry naming HOME, which the controller sets, is refused EnvNameConflict.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/env-name-conflict.yaml}
+    outcome: env-name-conflict
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: EnvNameConflict
+        member: spec.env[0].name
+        detail: "the controller sets it on the container"

@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 687ce3d39bdb34d56d1fe0c221f558534fa9c3e8eda9e34862b5b742d61331e9
-// contract digest 3a8aa766c8bb9ebca0e67279c2e64d75442a59c32dac9ff9524c320274ed5bed
+// model digest 6ee58c7e138136366044c4f43f53ef36d67d7b072496de73e913df57f6133b3b
+// contract digest 0fbdeee9f72de9fd6e7f4adbd5b63b02c4570ed9a5dc6255cd1286dff2e13cb0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -367,6 +367,12 @@ impl<P> crate::agent::obligations::RunOnceBehavior for Generated<P>
         }
         // `answered`: the default.
         return Ok(crate::agent::RunOnceOutcome::Answered);
+    }
+}
+
+impl<P: crate::resource::obligations::AdmitLoomAgentBehavior> crate::resource::obligations::AdmitLoomAgentBehavior for Generated<P> {
+    fn admit_loom_agent(&mut self, input: crate::resource::AdmitLoomAgent) -> Result<crate::resource::AdmitLoomAgentOutcome, UnmetObligation> {
+        crate::resource::obligations::AdmitLoomAgentBehavior::admit_loom_agent(&mut self.ports, input)
     }
 }
 
@@ -743,6 +749,12 @@ where
         let answer = crate::resource::RecordCheckOutcome::Refused { loom_agent_refused: crate::resource::LoomAgentRefused { name: input.name.clone(), generation: input.generation.clone(), message: input.message.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
+    }
+}
+
+impl<P: crate::resource::obligations::StageFilesBehavior> crate::resource::obligations::StageFilesBehavior for Generated<P> {
+    fn stage_files(&mut self, input: crate::resource::StageFiles) -> Result<crate::resource::StageFilesOutcome, UnmetObligation> {
+        crate::resource::obligations::StageFilesBehavior::stage_files(&mut self.ports, input)
     }
 }
 

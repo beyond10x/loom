@@ -1,0 +1,15 @@
+# story operator-constraints-in-ess: a Secret key whose file name is not UTF-8 is refused,
+# since its copy could not be named.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-key-whose-name-is-not-utf8-is-refused
+summary: A key whose name is not UTF-8 is refused.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.StageFiles
+    input: {destination: Directory, names_utf8: false, keys_inside: true, stale_directory: false}
+    outcome: name-not-utf8
+    error:
+      name: loom.resource.StageRefused
+      fields: {reason: NameNotUtf8}

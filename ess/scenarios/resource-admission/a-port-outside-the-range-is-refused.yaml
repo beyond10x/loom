@@ -1,0 +1,30 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent. The second step holds
+# the same spec.agent in a Command resource, which only the decoder reads: it answers the
+# decoder's own reason, not Malformed (carried from the adversary pass of wave 2026-10-26-q13).
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-port-outside-the-range-is-refused
+summary: An A2A port of 0 is refused PortOutOfRange, for an AgentServe and for a Command resource.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/port-out-of-range.yaml}
+    outcome: port-out-of-range
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: PortOutOfRange
+        member: spec.agent.expose.a2a.port
+        detail: "`expose.a2a.port` is not a port from 1 to 65535"
+  - at: 2026-11-04T00:00:01Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/command-port-out-of-range.yaml}
+    outcome: port-out-of-range
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: PortOutOfRange
+        member: spec.agent.expose.a2a.port
+        detail: "`expose.a2a.port` is not a port from 1 to 65535"
