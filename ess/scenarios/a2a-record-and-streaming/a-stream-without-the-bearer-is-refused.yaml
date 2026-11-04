@@ -1,0 +1,22 @@
+# story a2a-record-and-streaming: a streaming request without the agent's bearer, or with another,
+# is refused as any other request is, before its body is read, so no event is sent and no turn runs.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-stream-without-the-bearer-is-refused
+summary: A streaming request without the bearer is refused `MissingBearer`, one with another bearer `WrongBearer`.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: false, bearer_presented: false, bearer_matches: false, stream: true}
+    outcome: missing-bearer
+    error:
+      name: loom.agent.A2aRefused
+      fields: {reason: MissingBearer}
+  - at: 2026-11-04T00:01:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: false, bearer_presented: true, bearer_matches: false, stream: true}
+    outcome: wrong-bearer
+    error:
+      name: loom.agent.A2aRefused
+      fields: {reason: WrongBearer}
