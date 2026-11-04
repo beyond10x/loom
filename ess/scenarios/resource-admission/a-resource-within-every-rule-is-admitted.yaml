@@ -1,0 +1,16 @@
+# story operator-constraints-in-ess: the controller admits an AgentServe resource whose spec.agent
+# the check serves and a sized Command resource using each allow-list of the configuration once.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-resource-within-every-rule-is-admitted
+summary: An AgentServe and a Command resource the configuration allows are admitted.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/admitted.yaml}
+    outcome: admitted
+  - at: 2026-11-04T00:00:01Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/admitted-command.yaml}
+    outcome: admitted

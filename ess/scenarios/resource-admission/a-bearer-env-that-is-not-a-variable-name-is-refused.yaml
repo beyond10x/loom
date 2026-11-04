@@ -1,0 +1,30 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent. The second step holds
+# the same spec.agent in a Command resource, which only the decoder reads: it answers the
+# decoder's own reason, not Malformed (carried from the adversary pass of wave 2026-10-26-q13).
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-bearer-env-that-is-not-a-variable-name-is-refused
+summary: A bearer_env that is not a variable name is refused NotAVariableName, for an AgentServe and for a Command resource.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/not-a-variable-name.yaml}
+    outcome: not-a-variable-name
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NotAVariableName
+        member: spec.agent.bindings[2].bearer_env
+        detail: "`bindings[2].bearer_env` is not an environment variable name"
+  - at: 2026-11-04T00:00:01Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/command-not-a-variable-name.yaml}
+    outcome: not-a-variable-name
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NotAVariableName
+        member: spec.agent.bindings[2].bearer_env
+        detail: "`bindings[2].bearer_env` is not an environment variable name"

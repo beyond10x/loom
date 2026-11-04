@@ -1,0 +1,25 @@
+# story operator-constraints-in-ess: a sized Command resource using every allow-list of
+# the configuration once: a Secret as files, a claimed workspace, an environment value, a
+# configuration file and two Localhost profiles.
+apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata: {name: nightly, namespace: agents}
+spec:
+  agent:
+    format: loom.agent/1
+    agent: {id: nightly, name: Nightly, brief: Runs the nightly check.}
+    model: {routes: routes.yaml, roles: [{role: agent, model: small}]}
+    deploy:
+      kubernetes:
+        namespace: agents
+        service_account: nightly
+        resources: {cpu: 500m, memory: 512Mi}
+        egress: [{name: chat-api, host: chat.example, port: 443}]
+  routes: {}
+  command: {args: [--once]}
+  secretFiles: {name: agent-files, mountPath: /var/run/secrets/agent}
+  workspace: {mountPath: /workspace, claimName: agent-workspace}
+  env: [{name: CACHE_DIR, value: /workspace/.cache}]
+  configFiles: [{name: run.toml, content: "mode = 'once'\n"}]
+  seccompProfile: {type: Localhost, localhostProfile: profiles/agent.json}
+  appArmorProfile: {type: Localhost, localhostProfile: agent}

@@ -318,8 +318,11 @@ turn answered, 4 when it ended without an answer, 3 when the spec or the send wa
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run
 left replaced, never followed, a file no current key names removed). The controller runs it in
 an init container for `spec.secretFiles`, so the files are those of the Secret when the pod
-started; a changed Secret reaches the agent in a new pod. Exit 1 names the path it could not read
-or write.
+started; a changed Secret reaches the agent in a new pod. It decides before writing anything
+(`loom.resource.StageFiles`): a destination that is a link or not a directory, a key whose name
+is not UTF-8 or that resolves outside the volume, and a directory in the destination no key names
+are refused, and a refused stage writes nothing. Exit 1 names the path it refused or could not
+read or write.
 
 `b10x-loom agent prepare-dirs --dir <DIR>...` makes each directory one the caller owns with mode
 exactly 0700, setgid and sticky cleared, keeping what it holds when it exists and refusing a link

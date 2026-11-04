@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-agent-state-naming-an-unbound-source-is-refused
+summary: A state naming a source no binding declares is refused UnboundSource.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/unbound-source.yaml}
+    outcome: unbound-source
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: UnboundSource
+        member: spec.agent.states[0].sources[2]
+        detail: "tickets"

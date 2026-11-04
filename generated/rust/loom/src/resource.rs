@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 687ce3d39bdb34d56d1fe0c221f558534fa9c3e8eda9e34862b5b742d61331e9
-// contract digest 3a8aa766c8bb9ebca0e67279c2e64d75442a59c32dac9ff9524c320274ed5bed
+// model digest 6ee58c7e138136366044c4f43f53ef36d67d7b072496de73e913df57f6133b3b
+// contract digest 0fbdeee9f72de9fd6e7f4adbd5b63b02c4570ed9a5dc6255cd1286dff2e13cb0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -8,6 +8,75 @@
 //! The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`): its spec, the `loom.agent/1` document and what the pod needs beside it, and its lifecycle as the controller reconciles it: applied into Pending, Running or Refused by the spec check, Degraded and back by the child Deployment's availability, Completed or Failed when the child Job's run ends, with the program's exit code and the time it ended, or, on a schedule, Running with each finished run's end recorded in turn, Pending again on a new generation, and gone on delete.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// AdmissionRefusalReason — `loom.resource.AdmissionRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionRefusalReason {
+    /// `Malformed`.
+    Malformed,
+    /// `SecretLiteral`.
+    SecretLiteral,
+    /// `UnknownFormat`.
+    UnknownFormat,
+    /// `BlankText`.
+    BlankText,
+    /// `NotAVariableName`.
+    NotAVariableName,
+    /// `PortOutOfRange`.
+    PortOutOfRange,
+    /// `NotAPlainPath`.
+    NotAPlainPath,
+    /// `NotAnInstant`.
+    NotAnInstant,
+    /// `UnknownProtocol`.
+    UnknownProtocol,
+    /// `UnknownAction`.
+    UnknownAction,
+    /// `UnboundSource`.
+    UnboundSource,
+    /// `HttpMethod`.
+    HttpMethod,
+    /// `SendWithoutWrites`.
+    SendWithoutWrites,
+    /// `EmptyChannelAllow`.
+    EmptyChannelAllow,
+    /// `NoModelRoute`.
+    NoModelRoute,
+    /// `TooLarge`.
+    TooLarge,
+    /// `BoundaryWithSecret`.
+    BoundaryWithSecret,
+    /// `BoundaryUpstreamInvalid`.
+    BoundaryUpstreamInvalid,
+    /// `BoundaryUpstreamNotAllowed`.
+    BoundaryUpstreamNotAllowed,
+    /// `BoundaryEgressHost`.
+    BoundaryEgressHost,
+    /// `BoundaryEgressNamespace`.
+    BoundaryEgressNamespace,
+    /// `SecretNotAllowed`.
+    SecretNotAllowed,
+    /// `NamespaceMismatch`.
+    NamespaceMismatch,
+    /// `EgressHostNotAllowed`.
+    EgressHostNotAllowed,
+    /// `EnvNameConflict`.
+    EnvNameConflict,
+    /// `ConfigFileInvalid`.
+    ConfigFileInvalid,
+    /// `ConfigFileConflict`.
+    ConfigFileConflict,
+    /// `MountPathInvalid`.
+    MountPathInvalid,
+    /// `ClaimNotAllowed`.
+    ClaimNotAllowed,
+    /// `ProfileInvalid`.
+    ProfileInvalid,
+    /// `ProfileNotAllowed`.
+    ProfileNotAllowed,
+    /// `ResourcesRequired`.
+    ResourcesRequired,
+}
 
 /// AgentVariant — `loom.resource.AgentVariant`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,6 +386,34 @@ pub struct SecretFiles {
 pub struct SecretRef {
     /// `name` — `String`.
     pub name: String,
+}
+
+/// StageDestination — `loom.resource.StageDestination`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageDestination {
+    /// `Absent`.
+    Absent,
+    /// `Directory`.
+    Directory,
+    /// `Link`.
+    Link,
+    /// `Other`.
+    Other,
+}
+
+/// StageRefusalReason — `loom.resource.StageRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageRefusalReason {
+    /// `DestinationIsALink`.
+    DestinationIsALink,
+    /// `DestinationNotADirectory`.
+    DestinationNotADirectory,
+    /// `NameNotUtf8`.
+    NameNotUtf8,
+    /// `KeyOutsideVolume`.
+    KeyOutsideVolume,
+    /// `StaleDirectory`.
+    StaleDirectory,
 }
 
 /// Workspace — `loom.resource.Workspace`.
@@ -687,6 +784,186 @@ impl AnyLoomAgent {
     }
 }
 
+/// AdmitLoomAgent — the input of `loom.resource.AdmitLoomAgent`.
+///
+/// Everything it can result in is [`AdmitLoomAgentOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitLoomAgent {
+    /// `path` — `String`.
+    pub path: String,
+}
+
+/// Everything `loom.resource.AdmitLoomAgent` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitLoomAgentOutcome {
+    /// `malformed` — externally decided (a member of the resource does not decode, or breaks a rule no other reason names).
+    Malformed {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `secret-literal` — externally decided (a member of the resource holds a credential).
+    SecretLiteral {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `unknown-format` — externally decided (spec.agent's format is not loom.agent/1).
+    UnknownFormat {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `blank-text` — externally decided (a text member of spec.agent is empty or only whitespace).
+    BlankText {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `not-a-variable-name` — externally decided (a bearer_env of spec.agent, or a spec.env name, is not an environment variable name).
+    NotAVariableName {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `port-out-of-range` — externally decided (a port of spec.agent is outside 1 to 65535).
+    PortOutOfRange {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `not-a-plain-path` — externally decided (an allow_paths entry of an http binding of spec.agent is not a plain path).
+    NotAPlainPath {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `not-an-instant` — externally decided (a Timestamp member of spec.agent is not an RFC 3339 instant).
+    NotAnInstant {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `unknown-protocol` — externally decided (the inner loop of an AgentServe resource's spec.agent names a protocol the plugin catalog does not hold).
+    UnknownProtocol {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `unknown-action` — externally decided (a state of an AgentServe resource's spec.agent names an action its protocol does not declare).
+    UnknownAction {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `unbound-source` — externally decided (a state, the outer loop or the channel of an AgentServe resource's spec.agent names a source no binding declares).
+    UnboundSource {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `http-method` — externally decided (an http binding of an AgentServe resource's spec.agent has a method other than GET).
+    HttpMethod {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `send-without-writes` — externally decided (an AgentServe resource's spec.agent has reply.send among its capabilities while writes are none or undeclared).
+    SendWithoutWrites {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `empty-channel-allow` — externally decided (the channel of an AgentServe resource's spec.agent allows no channel id).
+    EmptyChannelAllow {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `no-model-route` — externally decided (spec.routes is empty and the pod would reach no model).
+    NoModelRoute {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `too-large` — externally decided (a member is beyond what the credential walk reads, or the ConfigMap beyond 1 MiB).
+    TooLarge {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `boundary-with-secret` — externally decided (spec.boundary stands beside spec.secretRef or spec.secretFiles).
+    BoundaryWithSecret {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `boundary-upstream-invalid` — externally decided (a boundary upstream is no plain http URL of a cluster service).
+    BoundaryUpstreamInvalid {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `boundary-upstream-not-allowed` — externally decided (no allowedBoundaryUpstreams entry gives a boundary upstream's kind, URL and audience exactly).
+    BoundaryUpstreamNotAllowed {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `boundary-egress-host` — externally decided (beside spec.boundary, an egress entry of spec.agent names a host).
+    BoundaryEgressHost {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `boundary-egress-namespace` — externally decided (beside spec.boundary, an egress entry of spec.agent names a namespace).
+    BoundaryEgressNamespace {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `secret-not-allowed` — externally decided (spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames).
+    SecretNotAllowed {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `namespace-mismatch` — externally decided (spec.agent's deploy.kubernetes.namespace is not the resource's namespace).
+    NamespaceMismatch {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `egress-host-not-allowed` — externally decided (an egress entry of spec.agent names no destination, or a host outside allowedEgressHosts).
+    EgressHostNotAllowed {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `env-name-conflict` — externally decided (a spec.env name is one the controller sets, or one an earlier entry gives).
+    EnvNameConflict {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `config-file-invalid` — externally decided (a spec.configFiles name is no plain file name).
+    ConfigFileInvalid {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `config-file-conflict` — externally decided (a spec.configFiles name is one an earlier entry gives, or one the ConfigMap already holds).
+    ConfigFileConflict {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `mount-path-invalid` — externally decided (a workspace or Secret mount path is not absolute and plain, or overlaps a mount the controller makes or the other one).
+    MountPathInvalid {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `claim-not-allowed` — externally decided (spec.workspace names a claim outside allowedClaimNames).
+    ClaimNotAllowed {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `profile-invalid` — externally decided (a seccomp or AppArmor profile is out of form).
+    ProfileInvalid {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `profile-not-allowed` — externally decided (a seccomp or AppArmor profile is Unconfined or Localhost without the configuration allowing it).
+    ProfileNotAllowed {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `resources-required` — externally decided (a Command resource declares no size and the configuration gives no defaultCommandResources).
+    ResourcesRequired {
+        /// Why it was refused: `loom.resource.AdmissionRefused`.
+        error: AdmissionRefused,
+    },
+    /// `admitted` — otherwise.
+    Admitted,
+}
+
 /// ApplyLoomAgent — the input of `loom.resource.ApplyLoomAgent`.
 ///
 /// Everything it can result in is [`ApplyLoomAgentOutcome`].
@@ -954,6 +1231,69 @@ pub enum RecordCheckOutcome {
     },
 }
 
+/// StageFiles — the input of `loom.resource.StageFiles`.
+///
+/// Everything it can result in is [`StageFilesOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageFiles {
+    /// `destination` — `loom.resource.StageDestination`.
+    pub destination: StageDestination,
+    /// `names_utf8` — `Boolean`.
+    pub names_utf8: bool,
+    /// `keys_inside` — `Boolean`.
+    pub keys_inside: bool,
+    /// `stale_directory` — `Boolean`.
+    pub stale_directory: bool,
+}
+
+/// Actual typed response of `loom.resource.StageFiles`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageFilesResponse {
+    /// `directory_mode` — `Integer`.
+    pub directory_mode: i64,
+    /// `file_mode` — `Integer`.
+    pub file_mode: i64,
+}
+
+/// Everything `loom.resource.StageFiles` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StageFilesOutcome {
+    /// `destination-is-a-link` — when `destination == Link`.
+    DestinationIsALink {
+        /// Why it was refused: `loom.resource.StageRefused`.
+        error: StageRefused,
+    },
+    /// `destination-not-a-directory` — when `destination == Other`.
+    DestinationNotADirectory {
+        /// Why it was refused: `loom.resource.StageRefused`.
+        error: StageRefused,
+    },
+    /// `name-not-utf8` — when `names_utf8 == false`.
+    NameNotUtf8 {
+        /// Why it was refused: `loom.resource.StageRefused`.
+        error: StageRefused,
+    },
+    /// `key-outside-volume` — when `keys_inside == false`.
+    KeyOutsideVolume {
+        /// Why it was refused: `loom.resource.StageRefused`.
+        error: StageRefused,
+    },
+    /// `stale-directory` — when `stale_directory == true`.
+    StaleDirectory {
+        /// Why it was refused: `loom.resource.StageRefused`.
+        error: StageRefused,
+    },
+    /// `staged` — otherwise.
+    Staged {
+        /// Actual response returned by this branch.
+        response: StageFilesResponse,
+    },
+}
+
 /// LoomAgentApplied — the event `loom.resource.LoomAgentApplied`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoomAgentApplied {
@@ -1057,6 +1397,17 @@ pub struct LoomAgentRunning {
     pub generation: i64,
 }
 
+/// The declared error `loom.resource.AdmissionRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmissionRefused {
+    /// `reason` — `loom.resource.AdmissionRefusalReason`.
+    pub reason: AdmissionRefusalReason,
+    /// `member` — `String`.
+    pub member: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
 /// The declared error `loom.resource.LoomAgentNotFound`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoomAgentNotFound {
@@ -1069,6 +1420,13 @@ pub struct LoomAgentNotFound {
 pub struct LoomAgentStateConflict {
     /// `name` — `loom.resource.ResourceName`.
     pub name: ResourceName,
+}
+
+/// The declared error `loom.resource.StageRefused`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageRefused {
+    /// `reason` — `loom.resource.StageRefusalReason`.
+    pub reason: StageRefusalReason,
 }
 
 /// The declared error `loom.resource.StaleGeneration`.
@@ -1113,7 +1471,21 @@ pub struct LoomAgents {
 ///
 /// One trait per obligation in the synthesis plan, each carrying the plan's own contract, and one
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
+    /// The behaviour `loom.resource.AdmitLoomAgent` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by the fields of error `loom.resource.AdmissionRefused`, which the specification gives no source, in `malformed`.
+    ///
+    /// Contract: given `loom.resource.AdmitLoomAgent` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (a member of the resource does not decode, or breaks a rule no other reason names), error `loom.resource.AdmissionRefused`; `secret-literal` externally decided (a member of the resource holds a credential), error `loom.resource.AdmissionRefused`; `unknown-format` externally decided (spec.agent's format is not loom.agent/1), error `loom.resource.AdmissionRefused`; `blank-text` externally decided (a text member of spec.agent is empty or only whitespace), error `loom.resource.AdmissionRefused`; `not-a-variable-name` externally decided (a bearer_env of spec.agent, or a spec.env name, is not an environment variable name), error `loom.resource.AdmissionRefused`; `port-out-of-range` externally decided (a port of spec.agent is outside 1 to 65535), error `loom.resource.AdmissionRefused`; `not-a-plain-path` externally decided (an allow_paths entry of an http binding of spec.agent is not a plain path), error `loom.resource.AdmissionRefused`; `not-an-instant` externally decided (a Timestamp member of spec.agent is not an RFC 3339 instant), error `loom.resource.AdmissionRefused`; `unknown-protocol` externally decided (the inner loop of an AgentServe resource's spec.agent names a protocol the plugin catalog does not hold), error `loom.resource.AdmissionRefused`; `unknown-action` externally decided (a state of an AgentServe resource's spec.agent names an action its protocol does not declare), error `loom.resource.AdmissionRefused`; `unbound-source` externally decided (a state, the outer loop or the channel of an AgentServe resource's spec.agent names a source no binding declares), error `loom.resource.AdmissionRefused`; `http-method` externally decided (an http binding of an AgentServe resource's spec.agent has a method other than GET), error `loom.resource.AdmissionRefused`; `send-without-writes` externally decided (an AgentServe resource's spec.agent has reply.send among its capabilities while writes are none or undeclared), error `loom.resource.AdmissionRefused`; `empty-channel-allow` externally decided (the channel of an AgentServe resource's spec.agent allows no channel id), error `loom.resource.AdmissionRefused`; `no-model-route` externally decided (spec.routes is empty and the pod would reach no model), error `loom.resource.AdmissionRefused`; `too-large` externally decided (a member is beyond what the credential walk reads, or the ConfigMap beyond 1 MiB), error `loom.resource.AdmissionRefused`; `boundary-with-secret` externally decided (spec.boundary stands beside spec.secretRef or spec.secretFiles), error `loom.resource.AdmissionRefused`; `boundary-upstream-invalid` externally decided (a boundary upstream is no plain http URL of a cluster service), error `loom.resource.AdmissionRefused`; `boundary-upstream-not-allowed` externally decided (no allowedBoundaryUpstreams entry gives a boundary upstream's kind, URL and audience exactly), error `loom.resource.AdmissionRefused`; `boundary-egress-host` externally decided (beside spec.boundary, an egress entry of spec.agent names a host), error `loom.resource.AdmissionRefused`; `boundary-egress-namespace` externally decided (beside spec.boundary, an egress entry of spec.agent names a namespace), error `loom.resource.AdmissionRefused`; `secret-not-allowed` externally decided (spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames), error `loom.resource.AdmissionRefused`; `namespace-mismatch` externally decided (spec.agent's deploy.kubernetes.namespace is not the resource's namespace), error `loom.resource.AdmissionRefused`; `egress-host-not-allowed` externally decided (an egress entry of spec.agent names no destination, or a host outside allowedEgressHosts), error `loom.resource.AdmissionRefused`; `env-name-conflict` externally decided (a spec.env name is one the controller sets, or one an earlier entry gives), error `loom.resource.AdmissionRefused`; `config-file-invalid` externally decided (a spec.configFiles name is no plain file name), error `loom.resource.AdmissionRefused`; `config-file-conflict` externally decided (a spec.configFiles name is one an earlier entry gives, or one the ConfigMap already holds), error `loom.resource.AdmissionRefused`; `mount-path-invalid` externally decided (a workspace or Secret mount path is not absolute and plain, or overlaps a mount the controller makes or the other one), error `loom.resource.AdmissionRefused`; `claim-not-allowed` externally decided (spec.workspace names a claim outside allowedClaimNames), error `loom.resource.AdmissionRefused`; `profile-invalid` externally decided (a seccomp or AppArmor profile is out of form), error `loom.resource.AdmissionRefused`; `profile-not-allowed` externally decided (a seccomp or AppArmor profile is Unconfined or Localhost without the configuration allowing it), error `loom.resource.AdmissionRefused`; `resources-required` externally decided (a Command resource declares no size and the configuration gives no defaultCommandResources), error `loom.resource.AdmissionRefused`; `admitted` otherwise.
+    pub trait AdmitLoomAgentBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.resource.AdmitLoomAgent`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn admit_loom_agent(&mut self, input: super::AdmitLoomAgent) -> Result<super::AdmitLoomAgentOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.resource.ApplyLoomAgent` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -1180,6 +1552,19 @@ pub mod obligations {
         fn record_check(&mut self, input: super::RecordCheck) -> Result<super::RecordCheckOutcome, crate::obligation::UnmetObligation>;
     }
 
+    /// The behaviour `loom.resource.StageFiles` — an implementation obligation.
+    ///
+    /// Why it is not generated: kept an obligation by a typed response (`response:`).
+    ///
+    /// Contract: given `loom.resource.StageFiles` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `destination-is-a-link` when `destination == Link`, error `loom.resource.StageRefused`; `destination-not-a-directory` when `destination == Other`, error `loom.resource.StageRefused`; `name-not-utf8` when `names_utf8 == false`, error `loom.resource.StageRefused`; `key-outside-volume` when `keys_inside == false`, error `loom.resource.StageRefused`; `stale-directory` when `stale_directory == true`, error `loom.resource.StageRefused`; `staged` otherwise.
+    pub trait StageFilesBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.resource.StageFiles`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn stage_files(&mut self, input: super::StageFiles) -> Result<super::StageFilesOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The query `loom.resource.LoomAgents` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -1191,4 +1576,21 @@ pub mod obligations {
         fn loom_agents(&self) -> Result<Vec<super::LoomAgents>, crate::obligation::UnmetObligation>;
     }
 
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl AdmitLoomAgentBehavior for Unimplemented {
+        fn admit_loom_agent(&mut self, _input: super::AdmitLoomAgent) -> Result<super::AdmitLoomAgentOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.resource.AdmitLoomAgent" })
+        }
+    }
+
+    impl StageFilesBehavior for Unimplemented {
+        fn stage_files(&mut self, _input: super::StageFiles) -> Result<super::StageFilesOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "loom.resource.StageFiles" })
+        }
+    }
 }

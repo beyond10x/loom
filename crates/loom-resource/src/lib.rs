@@ -12,6 +12,8 @@
 //! * [`crd`] projects the `CustomResourceDefinition` from the JSON Schema documents
 //!   `ess generate --kind schema` writes; `loom-xtask crd-generate` writes it to
 //!   `deploy/crd/loomagents.loom.beyond10x.dev.yaml`.
+//! * [`stage`] decides `StageFiles`, the stateless `b10x-loom agent stage-files` decision: the
+//!   refusals and the modes of the staged directory and files, from facts the command read.
 //! * [`model`] is the generated `loom.resource` module, so a caller names one path for the types;
 //!   [`Timestamp`], the generated primitive its `run.finished_at` holds, is re-exported beside it.
 //!
@@ -25,6 +27,7 @@
 //! publishes the status.
 
 pub mod crd;
+pub mod stage;
 
 pub use loom::obligation::UnmetObligation;
 pub use loom::primitives::Timestamp;

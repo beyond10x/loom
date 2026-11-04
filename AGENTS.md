@@ -154,6 +154,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A confined child starts in the working directory the host names, at or beneath `/workspace` or a read-only root's mount, and nowhere else: one outside them (`/scratch`, `/runtime` and `/` included), relative, with a `.`, `..` or empty component, not UTF-8, past 4096 bytes, at or beneath a read-only file, holding a control character (named escaped), absent, no directory, reached through a link or not searchable is refused `ScopeInvalid` before launch, naming it; a run whose output carries bubblewrap's `Can't chdir to` diagnostic for it is refused, never a program's exit; a driver without `exec.workdir` refuses it `CapabilityUnserved`; the applied confinement names it and a record naming another is refused; a child naming none keeps its wire, record and digest | `crates/loom-intake-slice/tests/confined_child.rs` (`a_child_starts_in_its_named_workdir`, `a_child_starts_in_a_workdir_under_its_read_only_root`, `a_workdir_outside_the_childs_mounts_is_refused_before_launch`), `crates/loom-intake-slice/src/confinement/workdir.rs` (`a_driver_without_the_workdir_fact_refuses_a_workdir_unserved`, `a_record_naming_another_workdir_is_refused`, `a_workdir_changes_the_digest_and_its_absence_does_not`, `a_workdir_holding_a_control_character_is_refused_escaped`, `a_workdir_the_process_cannot_search_is_refused_naming_it`, `a_run_bubblewrap_could_not_enter_its_workdir_is_refused`), `crates/loom-intake-slice/tests/adversary_w20261023w2_u2.rs` (`adversary_a_workdir_the_child_cannot_enter_is_refused_before_launch`, `adversary_a_child_that_cannot_enter_its_workdir_reports_no_exit_of_its_own`) |
 | A confined child given up to four egress apertures reaches each by its host's name and no other host; the applied confinement lists every aperture, and a record naming another set, order or listen address is refused; the shared driver is keyed by the whole set in order; more than four, a name given twice, two apertures naming one host, and a later aperture naming a numeric host in any spelling `inet_aton` reads (hexadecimal, octal, fewer than four labels) or `localhost` are refused `ScopeInvalid` before launch, naming the apertures and their hosts; the first aperture admits no numeric host but `127.0.0.1` spelled so; an unconfined run's `network` is absent, never an empty list | `crates/loom-intake-slice/tests/confined_child.rs` (`a_child_reaches_each_named_aperture_and_nothing_else`), `crates/loom-intake-slice/src/confinement/several_apertures.rs` (`more_than_four_apertures_are_refused_naming_the_count`, `one_aperture_name_given_twice_is_refused_naming_it`, `a_later_aperture_naming_an_ipv4_literal_or_localhost_is_refused_naming_the_host`, `two_apertures_naming_one_host_are_refused_naming_it`, `a_numeric_host_in_any_spelling_inet_aton_reads_is_numeric`, `a_later_aperture_naming_a_numeric_host_in_any_spelling_is_refused_naming_it`, `the_first_aperture_allows_no_numeric_host_but_127_0_0_1_spelled_so`, `a_record_must_list_exactly_the_apertures_requested_in_order`, `a_driver_is_keyed_by_the_whole_set_and_declares_each_aperture`), `crates/loom-intake-slice/tests/adversary_w20261023w2_u1.rs`, `crates/loom-intake-slice/tests/security_w20261023w2_u1.rs` (`security_an_unconfined_run_does_not_report_no_network`) |
 | The executor answers the commands of `ess/` as their synthesized scenarios specify, except `not-in-frontier`, which the conformance target answers; the session executor answers `loom.session.ProposeSessionChange` over a scripted Claude Code session | `task conform` (`crates/loom-conformance/tests/conform.rs`, `ess_conformance_report`); the membership rule: `crates/loom-executor/tests/adversary_run_revalidation.rs` (`not_in_frontier_follows_the_frontier_actions`) |
+| Every reason the operator refuses a `LoomAgent` with is an outcome of `loom.resource.AdmitLoomAgent`, and its authored fixture is refused by the operator's own `admit` with that reason at its member; a `Command` resource answers the decoder's reason, not `Malformed`; `b10x-loom agent stage-files` refuses and stages as `loom.resource.StageFiles` decides, before writing anything | `task conform` (`ess/scenarios/resource-admission/`, `ess/scenarios/resource-stage-files/`); `crates/loom-operator/tests/admission_reasons.rs` (`each_fixture_is_refused_with_its_reason_at_its_member`, `adv_q13_the_serve_variant_answers_the_new_reason_at_the_member`, `a_command_resource_answers_the_decoders_reason_at_the_member`); `crates/loom-cli/src/stage.rs` tests; `crates/loom-cli/tests/adv_stage.rs` |
 | The intake slice answers the commands of `ess/intake/` as their synthesized scenarios specify: a resume context is kept once (`KeepResumeContext`) and dropped (`DropResumeContext`), a merge hand-off is recorded once per request and per `HEAD` (`RecordMergeHandoff`), and the stores read back what the views `ResumeContexts` and `MergeHandoffs` publish | `task intake-conform` (`crates/loom-intake-conformance/tests/conform.rs`, `ess_conformance_report`) |
 | The router refuses a pick outside the registry or below the threshold | `crates/loom-intake-router/tests/adversary_classify.rs` |
 | A metered run reports one model call per `turn` of an llm `Model` wrapped in `MeteredModel`, failed turns included and a model wrapped again on its meter counted once, one step per executor call, holding the turns made on its thread or on another while it ran, and tokens and cost per step that sum to the run's, each turn priced with `metering::RateCard`; a cost no rate card priced is absent, never zero, as is the cost of a turn whose usage is not final or names no input or output tokens; the usage an executor that is not a model loop reports (`AgentExecutor::run_with_usage`) is its step's usage and no model call, never in the report's effects, and is in the meter only when the call came through `run_with_usage`, so the meter and the run's charges agree; an executor metered at its model port reports none, so nothing is counted twice | `crates/loom-executor/tests/run_metering.rs` (`the_reported_calls_equal_the_turns_the_model_port_saw`, `a_step_counts_the_selector_and_argument_calls_made_in_it`, `cost_is_absent_without_a_rate_card_and_for_an_unlisted_model`, `a_non_model_executor_usage_is_its_step_usage`, `a_step_sums_its_metered_turns_and_the_usage_its_executor_reports`, `an_executor_metered_at_its_model_port_reports_no_usage_and_is_counted_once`), `crates/loom-executor/tests/adversary_w11_u1_metering.rs` (`an_answer_whose_usage_is_partial_is_a_call_whose_cost_is_absent`, `a_model_metered_again_on_one_meter_counts_each_turn_once_however_it_is_reached`, `a_turn_on_another_thread_while_executor_calls_overlap_counts_in_the_last_opened`), `crates/loom-executor/tests/adversary_w20261020w4_u4.rs`, `crates/loom-executor/tests/adversary_w20261020w3_u3.rs` (`a_wrapper_that_does_not_forward_leaves_the_meter_and_the_budget_agreeing`) |
@@ -966,6 +967,28 @@ it admits (`operations`) and `git` the `<owner>/<repo>` repositories (`repositor
 that declares it holds no Secret. Its refusals are the controller's (§ Operator), as for
 `spec.env`, not the domain's.
 
+The controller's refusals are declared all the same (`story:operator-constraints-in-ess`): two
+stateless commands, which move no `LoomAgent` and publish nothing, name what the controller and
+`b10x-loom agent stage-files` decide. `AdmitLoomAgent` (input `path`, the resource's file) has one
+`external:` outcome per reason admission refuses a resource with, each carrying `AdmissionRefused`
+(`reason` of `AdmissionRefusalReason`, `member`, `detail`), and `admitted`. The reasons are
+`loom.agent.RefusalReason`'s fourteen, which admission passes through from the check and the
+decoder, and the controller's eighteen; `ChildNotOwned`, which a reconcile reads from the cluster
+after admission, is none of them. The resource, the controller configuration and the plugin
+catalog are outside the input, so `task conform` plays them (`crates/loom-conformance/src/admission.rs`):
+it admits the file the path names, or the forced branch's
+`ess/scenarios/resource-admission/resources/<branch>.yaml`, under
+`ess/scenarios/resource-admission/config.yaml` with `b10x_loom_operator::admission::admit`, the
+controller's own function, and one authored scenario per reason asserts its reason, member and
+detail. `StageFiles` decides from what `stage-files` read before writing anything:
+`destination` (`StageDestination`: Absent, Directory, Link, Other), `names_utf8`, `keys_inside`
+and `stale_directory`. It refuses, in that order, `destination-is-a-link`,
+`destination-not-a-directory`, `name-not-utf8`, `key-outside-volume` and `stale-directory`
+(`StageRefused`), and otherwise `staged` returns `directory_mode` 448 and `file_mode` 384 (0700,
+0600). `b10x_loom_resource::stage::stage_files` decides it, for the command and for `task conform`
+alike; which keys are regular files (the rest are skipped) and the removal of a staged file no
+key names are the command's, held by its tests.
+
 The spec lives in the cluster, in the resource; the record keeps only the generation it applied
 and the check for that generation, and a controller re-reads the spec on every reconcile. A stored
 `AgentSpec` would hold a `Decimal` (`loops.inner.classify_threshold`) that no ESS 0.69.0 view
@@ -1156,11 +1179,17 @@ resource named longer than 52 characters, which its CronJob cannot carry, is `Ma
 1 MiB; a `configMapKeyRef` input's mount `/var/run/loom/schedule-input` is reserved
 (`MountPathInvalid`). A `Command` resource's `spec.agent` passes only the credential walk and the
 `loom.agent/1` decoder, not the plugin catalog, since the image's program reads it and
-`agent serve` does not; with no routes and no `modelRoute`, or no routes beside a boundary
+`agent serve` does not; a value the decoder refuses answers the decoder's own reason at its
+member under `spec.agent`, as the check does for `AgentServe` (`PortOutOfRange` at
+`spec.agent.expose.a2a.port`; through 0.55 it was `Malformed` at `spec.agent`,
+`story:operator-constraints-in-ess`); with no routes and no `modelRoute`, or no routes beside a boundary
 without `model`, it gets an empty `routes.yaml`, and
 without `spec.agent` the default routes document routes no model (no role names one); with
 `spec.boundary.model` its endpoint is the model relay, `http://127.0.0.1:8401/v1`, with the model
-route's protocol and model. Then
+route's protocol and model. Every reason above is a `loom.resource.AdmissionRefusalReason`
+(§ Resource): `admission::Refusal::new` takes the declared reason, so admission cannot refuse
+with one the specification does not declare, and `task conform` holds each to its authored
+scenario (`crates/loom-operator/tests/admission_reasons.rs` names each reason's member). Then
 each child it would render is read, and one that exists without this resource as controller is
 `ChildNotOwned`, naming its kind and name. That refusal is the cluster's, not the spec's: each later
 reconcile at that generation reads the children again, and once none is someone else's the record
@@ -1268,7 +1297,8 @@ the agent container mounts that subdirectory (`subPath: files`) read-only at `mo
 reason: a reader such as `b10x-gates` refuses a file another user owns or that group or others
 may read, and the kubelet owns a Secret volume's files. The copy is taken when the pod starts, so
 a changed Secret reaches the agent only in a new pod, and `stage-files` removes a staged file no
-current key names. Either sets `fsGroup` 10001. A scheduled `Command` resource renders a
+current key names. `stage-files` decides by `loom.resource.StageFiles` (§ Resource) from what it
+read before writing, so a refused stage leaves the destination as it was. Either sets `fsGroup` 10001. A scheduled `Command` resource renders a
 `batch/v1` CronJob named like the Job (`schedule`, `timeZone`, `startingDeadlineSeconds` as given,
 `suspend` false when absent, `concurrencyPolicy: Forbid`, history limits 3 and 3, job template
 labels the children's, job template spec the Job's spec byte for byte) and no Job. With

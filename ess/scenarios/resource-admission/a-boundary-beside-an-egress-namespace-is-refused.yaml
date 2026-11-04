@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: a pod behind a boundary reaches no other namespace; an
+# egress namespace in spec.agent is refused at that entry.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-egress-namespace-is-refused
+summary: A model boundary beside an egress namespace in spec.agent is refused BoundaryEgressNamespace.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-egress-namespace.yaml}
+    outcome: boundary-egress-namespace
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryEgressNamespace
+        member: spec.agent.deploy.kubernetes.egress[0].namespace
+        detail: "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its NetworkPolicy opens no namespace"

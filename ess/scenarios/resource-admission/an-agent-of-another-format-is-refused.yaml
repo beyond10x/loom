@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-agent-of-another-format-is-refused
+summary: A spec.agent of format loom.agent/2 is refused UnknownFormat.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/unknown-format.yaml}
+    outcome: unknown-format
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: UnknownFormat
+        member: spec.agent.format
+        detail: "`format` is `loom.agent/2`, not `loom.agent/1`"

@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-agent-naming-an-unknown-protocol-is-refused
+summary: An inner loop naming a protocol the plugin catalog does not hold is refused UnknownProtocol.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/unknown-protocol.yaml}
+    outcome: unknown-protocol
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: UnknownProtocol
+        member: spec.agent.loops.inner.protocol
+        detail: "operator-escalate@1"

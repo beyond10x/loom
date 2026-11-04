@@ -19,6 +19,7 @@ b10x-loom-a2a = { path = "../loom-a2a" }
 b10x-loom-agent = { path = "../loom-agent" }
 b10x-loom-boundary = { path = "../loom-boundary" }
 b10x-loom-protocols = { path = "../loom-protocols" }
+b10x-loom-resource = { path = "../loom-resource" }
 serde_json = "1"
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-llm-tool-call = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }

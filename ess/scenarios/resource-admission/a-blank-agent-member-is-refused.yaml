@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-blank-agent-member-is-refused
+summary: A spec.agent whose agent.name is blank is refused BlankText.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/blank-text.yaml}
+    outcome: blank-text
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BlankText
+        member: spec.agent.agent.name
+        detail: "`agent.name` is empty"

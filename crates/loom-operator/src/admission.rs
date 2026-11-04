@@ -2,14 +2,18 @@
 //! is the answer:
 //!
 //! 1. `spec.agent`, as YAML, through `b10x_loom_agent::check_text` against the plugin catalog:
-//!    the check `b10x-loom agent check` runs, in-process (`Malformed`, `SecretLiteral`,
-//!    `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
+//!    the check `b10x-loom agent check` runs, in-process, its reason passed through at its member
+//!    under `spec.agent` (`Malformed`, `SecretLiteral`, `UnknownFormat`, `BlankText`,
+//!    `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`,
+//!    `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
 //!    `EmptyChannelAllow`), then a `runtime` without `connectors`, which `agent serve` needs and
 //!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0; an
 //!    `AgentServe` resource without `spec.agent` is `Malformed` at `spec.agent`. For the
 //!    `Command` variant (`spec.command` present), whose
 //!    document the image's program reads and `agent serve` does not, only the credential walk
-//!    of that library (`SecretLiteral`) and the `loom.agent/1` decoder (`Malformed`), and only
+//!    of that library (`SecretLiteral`) and the `loom.agent/1` decoder, its reason passed through
+//!    at its member as the check's is (`Malformed` at `spec.agent`, `UnknownFormat`, `BlankText`,
+//!    `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`), and only
 //!    when the resource has one: a `Command` resource may leave `spec.agent` out.
 //! 2. `spec.routes` walked for a credential by the same library (`SecretLiteral`); a routes
 //!    document that is not a mapping is `Malformed`, and so is one llm's strict `llm.routes/1`
@@ -156,19 +160,23 @@
 //! repeats a value of the resource. An admitted spec reads as the check's line, `checked <agent>:
 //! <n> states, <m> bindings, protocol <protocol>`; an admitted `Command` spec as `admitted <agent>
 //! for its own command: …`, or `admitted for its own command: …` without `spec.agent`.
+//!
+//! Every reason is a `loom.resource.AdmissionRefusalReason` (`ess/domains/resource.yaml`), each
+//! an outcome of `loom.resource.AdmitLoomAgent`, whose authored scenarios `task conform` runs
+//! through [`admit`]: [`Refusal`] is built only from the declared reason, so a reason the
+//! specification does not declare does not compile.
 
 use std::collections::{BTreeMap, HashMap};
 
 use b10x_loom_agent::{
-    Checked, RefusalReason, StreamWalk, TOKEN_PREFIXES, check_text, spelling,
-    yaml_stream_credential,
+    Checked, RefusalReason, StreamWalk, TOKEN_PREFIXES, check_text, yaml_stream_credential,
 };
 use b10x_loom_boundary::{Relay as BoundaryRelay, Upstream as BoundaryUrl};
 use llm_models::routes::Routes;
 use loom_sdk::agent::{AgentSpec, parse};
 use serde_yaml_ng::{Mapping, Value};
 
-use b10x_loom_resource::model::AgentVariant;
+use b10x_loom_resource::model::{AdmissionRefusalReason as Reason, AgentVariant};
 
 use crate::config::{Config, ModelRoute, Resources};
 use crate::render::{
@@ -194,7 +202,8 @@ pub const MODEL_ROUTE_ENDPOINT: &str = "model-route";
 /// Why a resource is refused: the reason, the member of the resource and what is wrong with it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
-    /// The reason, in CamelCase: a `loom.agent.RefusalReason` or one of the controller's.
+    /// The reason, as `loom.resource.AdmissionRefusalReason` spells it ([`reason_spelling`]);
+    /// the reconcile spells one of its own, `ChildNotOwned`, which is not admission's.
     pub reason: String,
     /// The member, spelt from the resource: `spec.agent.deploy.kubernetes.namespace`.
     pub member: String,
@@ -203,9 +212,9 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    fn new(reason: &str, member: impl Into<String>, detail: impl Into<String>) -> Self {
+    fn new(reason: Reason, member: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
-            reason: reason.to_owned(),
+            reason: reason_spelling(reason).to_owned(),
             member: member.into(),
             detail: detail.into(),
         }
@@ -218,6 +227,66 @@ impl Refusal {
             "refused: {} at {}: {}",
             self.reason, self.member, self.detail
         )
+    }
+}
+
+/// `reason` as the enum `loom.resource.AdmissionRefusalReason` spells it.
+#[must_use]
+pub fn reason_spelling(reason: Reason) -> &'static str {
+    match reason {
+        Reason::Malformed => "Malformed",
+        Reason::SecretLiteral => "SecretLiteral",
+        Reason::UnknownFormat => "UnknownFormat",
+        Reason::BlankText => "BlankText",
+        Reason::NotAVariableName => "NotAVariableName",
+        Reason::PortOutOfRange => "PortOutOfRange",
+        Reason::NotAPlainPath => "NotAPlainPath",
+        Reason::NotAnInstant => "NotAnInstant",
+        Reason::UnknownProtocol => "UnknownProtocol",
+        Reason::UnknownAction => "UnknownAction",
+        Reason::UnboundSource => "UnboundSource",
+        Reason::HttpMethod => "HttpMethod",
+        Reason::SendWithoutWrites => "SendWithoutWrites",
+        Reason::EmptyChannelAllow => "EmptyChannelAllow",
+        Reason::NoModelRoute => "NoModelRoute",
+        Reason::TooLarge => "TooLarge",
+        Reason::BoundaryWithSecret => "BoundaryWithSecret",
+        Reason::BoundaryUpstreamInvalid => "BoundaryUpstreamInvalid",
+        Reason::BoundaryUpstreamNotAllowed => "BoundaryUpstreamNotAllowed",
+        Reason::BoundaryEgressHost => "BoundaryEgressHost",
+        Reason::BoundaryEgressNamespace => "BoundaryEgressNamespace",
+        Reason::SecretNotAllowed => "SecretNotAllowed",
+        Reason::NamespaceMismatch => "NamespaceMismatch",
+        Reason::EgressHostNotAllowed => "EgressHostNotAllowed",
+        Reason::EnvNameConflict => "EnvNameConflict",
+        Reason::ConfigFileInvalid => "ConfigFileInvalid",
+        Reason::ConfigFileConflict => "ConfigFileConflict",
+        Reason::MountPathInvalid => "MountPathInvalid",
+        Reason::ClaimNotAllowed => "ClaimNotAllowed",
+        Reason::ProfileInvalid => "ProfileInvalid",
+        Reason::ProfileNotAllowed => "ProfileNotAllowed",
+        Reason::ResourcesRequired => "ResourcesRequired",
+    }
+}
+
+/// The admission reason of the `loom.agent` check's or decoder's `reason`, which admission passes
+/// through: `loom.resource.AdmissionRefusalReason` declares each of `loom.agent.RefusalReason`.
+fn from_agent(reason: RefusalReason) -> Reason {
+    match reason {
+        RefusalReason::Malformed => Reason::Malformed,
+        RefusalReason::SecretLiteral => Reason::SecretLiteral,
+        RefusalReason::UnknownFormat => Reason::UnknownFormat,
+        RefusalReason::BlankText => Reason::BlankText,
+        RefusalReason::NotAVariableName => Reason::NotAVariableName,
+        RefusalReason::PortOutOfRange => Reason::PortOutOfRange,
+        RefusalReason::NotAPlainPath => Reason::NotAPlainPath,
+        RefusalReason::NotAnInstant => Reason::NotAnInstant,
+        RefusalReason::UnknownProtocol => Reason::UnknownProtocol,
+        RefusalReason::UnknownAction => Reason::UnknownAction,
+        RefusalReason::UnboundSource => Reason::UnboundSource,
+        RefusalReason::HttpMethod => Reason::HttpMethod,
+        RefusalReason::SendWithoutWrites => Reason::SendWithoutWrites,
+        RefusalReason::EmptyChannelAllow => Reason::EmptyChannelAllow,
     }
 }
 
@@ -354,7 +423,7 @@ fn overlaps(a: &str, b: &str) -> bool {
 /// Refuses `path`, the member `at`, unless it is absolute and plain: no control character, no
 /// empty, `.` or `..` component, not `/`, no trailing `/`, at most [`MAX_MOUNT_PATH`] bytes.
 fn plain_mount_path(path: &str, at: &str) -> Result<(), Refusal> {
-    let refused = |why: &str| Err(Refusal::new("MountPathInvalid", at, why));
+    let refused = |why: &str| Err(Refusal::new(Reason::MountPathInvalid, at, why));
     if path.len() > MAX_MOUNT_PATH {
         return refused("it is longer than the controller accepts");
     }
@@ -395,7 +464,7 @@ fn mount_paths(spec: &LoomAgentSpec) -> Result<(), Refusal> {
             || (config_map_input(spec) && overlaps(path, SCHEDULE_INPUT_DIR))
         {
             return Err(Refusal::new(
-                "MountPathInvalid",
+                Reason::MountPathInvalid,
                 *at,
                 "it is or overlaps a directory the controller mounts",
             ));
@@ -405,7 +474,7 @@ fn mount_paths(spec: &LoomAgentSpec) -> Result<(), Refusal> {
         && overlaps(first, second)
     {
         return Err(Refusal::new(
-            "MountPathInvalid",
+            Reason::MountPathInvalid,
             *at,
             "it is or overlaps spec.workspace.mountPath",
         ));
@@ -466,21 +535,21 @@ fn env_names(env: &[EnvVar]) -> Result<(), Refusal> {
         let at = format!("spec.env[{index}].name");
         if !variable_name(&entry.name) {
             return Err(Refusal::new(
-                spelling(RefusalReason::NotAVariableName),
+                Reason::NotAVariableName,
                 at,
                 "it is not an environment variable name, [A-Za-z_][A-Za-z0-9_]*",
             ));
         }
         if CONTROLLER_ENV.contains(&entry.name.as_str()) {
             return Err(Refusal::new(
-                "EnvNameConflict",
+                Reason::EnvNameConflict,
                 at,
                 "the controller sets it on the container",
             ));
         }
         if let Some(first) = seen.insert(entry.name.as_str(), index) {
             return Err(Refusal::new(
-                "EnvNameConflict",
+                Reason::EnvNameConflict,
                 at,
                 format!("it repeats spec.env[{first}].name"),
             ));
@@ -605,7 +674,7 @@ fn expanded_credential(spec: &LoomAgentSpec, variant: AgentVariant) -> Result<()
     });
     let too_large = |member: &str| {
         Refusal::new(
-            "TooLarge",
+            Reason::TooLarge,
             member,
             format!(
                 "its `$(VAR)` references, expanded, add more than {MAX_EXPANDED_BYTES} bytes, \
@@ -640,7 +709,7 @@ fn expanded_credential(spec: &LoomAgentSpec, variant: AgentVariant) -> Result<()
         }
     }
     word_credential(&found, "spec.env").map_err(|refusal| {
-        if refusal.reason == spelling(RefusalReason::SecretLiteral) {
+        if refusal.reason == reason_spelling(Reason::SecretLiteral) {
             Refusal {
                 detail: format!("{}, after `$(VAR)` expansion", refusal.detail),
                 ..refusal
@@ -675,7 +744,7 @@ fn openers(text: &str) -> usize {
 fn first_credential(text: &str, at: &str) -> Result<Option<(String, String)>, Refusal> {
     if openers(text) > MAX_WALKED_OPENERS {
         return Err(Refusal::new(
-            "TooLarge",
+            Reason::TooLarge,
             at,
             format!(
                 "it holds more than {MAX_WALKED_OPENERS} `[` or `{{` bytes, more than the \
@@ -685,7 +754,7 @@ fn first_credential(text: &str, at: &str) -> Result<Option<(String, String)>, Re
     }
     if text.len() > MAX_WALKED_BYTES {
         return Err(Refusal::new(
-            "TooLarge",
+            Reason::TooLarge,
             at,
             format!(
                 "it is longer than {MAX_WALKED_BYTES} bytes as YAML, more than the credential \
@@ -706,7 +775,7 @@ fn first_credential(text: &str, at: &str) -> Result<Option<(String, String)>, Re
 fn credential(text: &str, at: &str) -> Result<(), Refusal> {
     match first_credential(text, at)? {
         Some((member, detail)) => Err(Refusal::new(
-            spelling(RefusalReason::SecretLiteral),
+            Reason::SecretLiteral,
             within(at, &member),
             detail,
         )),
@@ -824,13 +893,8 @@ fn word_credential(words: &[Word], at: &str) -> Result<(), Refusal> {
         }
         let chunk = &words[start..end];
         let texts: Vec<&str> = chunk.iter().map(|word| word.text.as_str()).collect();
-        let text = serde_yaml_ng::to_string(&texts).map_err(|_| {
-            Refusal::new(
-                spelling(RefusalReason::Malformed),
-                at,
-                "cannot be written as YAML",
-            )
-        })?;
+        let text = serde_yaml_ng::to_string(&texts)
+            .map_err(|_| Refusal::new(Reason::Malformed, at, "cannot be written as YAML"))?;
         if let Some((member, detail)) = first_credential(&text, &chunk[0].member)? {
             let found = member
                 .strip_prefix('[')
@@ -839,14 +903,14 @@ fn word_credential(words: &[Word], at: &str) -> Result<(), Refusal> {
                 .and_then(|index| chunk.get(index));
             return Err(match found {
                 Some(word) => Refusal::new(
-                    spelling(RefusalReason::SecretLiteral),
+                    Reason::SecretLiteral,
                     word.member.clone(),
                     match word.line {
                         Some(line) => format!("{detail} (line {line})"),
                         None => detail,
                     },
                 ),
-                None => Refusal::new(spelling(RefusalReason::SecretLiteral), at, detail),
+                None => Refusal::new(Reason::SecretLiteral, at, detail),
             });
         }
         start = end;
@@ -902,7 +966,7 @@ fn config_file_names(
 ) -> Result<(), Refusal> {
     if variant == AgentVariant::AgentServe {
         return Err(Refusal::new(
-            spelling(RefusalReason::Malformed),
+            Reason::Malformed,
             "spec.configFiles",
             "`b10x-loom agent serve` reads no configuration file; only a Command resource may \
              give them",
@@ -913,7 +977,7 @@ fn config_file_names(
         let at = format!("spec.configFiles[{index}].name");
         if !plain_file_name(&file.name) {
             return Err(Refusal::new(
-                "ConfigFileInvalid",
+                Reason::ConfigFileInvalid,
                 at,
                 format!(
                     "it is not a plain file name, [A-Za-z0-9._-]+ other than `.` and not starting with `..`, of at \
@@ -929,14 +993,14 @@ fn config_file_names(
         };
         if held {
             return Err(Refusal::new(
-                "ConfigFileConflict",
+                Reason::ConfigFileConflict,
                 at,
                 "the controller writes a file of that name under /config itself",
             ));
         }
         if let Some(first) = seen.insert(file.name.as_str(), index) {
             return Err(Refusal::new(
-                "ConfigFileConflict",
+                Reason::ConfigFileConflict,
                 at,
                 format!("it repeats spec.configFiles[{first}].name"),
             ));
@@ -971,7 +1035,7 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
     for (index, file) in files.iter().enumerate() {
         let at = format!("spec.configFiles[{index}].content");
         let inside = |refusal: Refusal| {
-            if refusal.reason == spelling(RefusalReason::SecretLiteral) {
+            if refusal.reason == reason_spelling(Reason::SecretLiteral) {
                 Refusal {
                     member: at.clone(),
                     ..refusal
@@ -983,7 +1047,7 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
         let (strings, whole) = match yaml_stream_credential(&file.content) {
             StreamWalk::Found { shape, .. } => {
                 return Err(Refusal::new(
-                    spelling(RefusalReason::SecretLiteral),
+                    Reason::SecretLiteral,
                     at,
                     format!("{shape}, read as YAML"),
                 ));
@@ -992,7 +1056,7 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
             StreamWalk::Clean { strings } => (strings, true),
         };
         word_credential(&stream_words(&strings, &at), &at).map_err(|refusal| {
-            if refusal.reason == spelling(RefusalReason::SecretLiteral) {
+            if refusal.reason == reason_spelling(Reason::SecretLiteral) {
                 Refusal {
                     detail: format!("{}, read as YAML", refusal.detail),
                     ..refusal
@@ -1003,7 +1067,7 @@ fn config_files_credential(files: &[ConfigFile]) -> Result<(), Refusal> {
         })?;
         if !whole {
             return Err(Refusal::new(
-                "TooLarge",
+                Reason::TooLarge,
                 at,
                 "read as YAML, it costs more than the credential walk reads (its size, `[` or \
                  `{` bytes, aliases or nesting)",
@@ -1039,11 +1103,7 @@ fn connectors_table(text: &str) -> Result<toml::Table, Refusal> {
                 format!("it is not a TOML document (line {line})")
             },
         );
-        Refusal::new(
-            spelling(RefusalReason::Malformed),
-            "spec.connectorsConfig",
-            detail,
-        )
+        Refusal::new(Reason::Malformed, "spec.connectorsConfig", detail)
     })
 }
 
@@ -1053,13 +1113,7 @@ fn connectors_table(text: &str) -> Result<toml::Table, Refusal> {
 /// number to another format when `serde_json`'s `arbitrary_precision` is on, as it is in this
 /// workspace, and JSON text reads as YAML.
 pub fn yaml(value: &impl serde::Serialize, at: &str) -> Result<String, Refusal> {
-    let refused = || {
-        Refusal::new(
-            spelling(RefusalReason::Malformed),
-            at,
-            "cannot be written as YAML",
-        )
-    };
+    let refused = || Refusal::new(Reason::Malformed, at, "cannot be written as YAML");
     let json = serde_json::to_string(value).map_err(|_| refused())?;
     let value: Value = serde_yaml_ng::from_str(&json).map_err(|_| refused())?;
     serde_yaml_ng::to_string(&value).map_err(|_| refused())
@@ -1229,7 +1283,7 @@ fn boundary_list(
 ) -> Result<(), Refusal> {
     if items.is_empty() {
         return Err(Refusal::new(
-            spelling(RefusalReason::Malformed),
+            Reason::Malformed,
             at,
             "it is empty, so the boundary would admit nothing on this upstream",
         ));
@@ -1239,14 +1293,14 @@ fn boundary_list(
         let member = format!("{at}[{index}]");
         if !plain(item) {
             return Err(Refusal::new(
-                spelling(RefusalReason::Malformed),
+                Reason::Malformed,
                 member,
                 format!("it is not {form}"),
             ));
         }
         if let Some(first) = seen.insert(item.as_str(), index) {
             return Err(Refusal::new(
-                spelling(RefusalReason::Malformed),
+                Reason::Malformed,
                 member,
                 format!("it repeats {at}[{first}]"),
             ));
@@ -1309,7 +1363,7 @@ fn boundary(
     let declared = upstreams(boundary);
     if declared.is_empty() {
         return Err(Refusal::new(
-            spelling(RefusalReason::Malformed),
+            Reason::Malformed,
             "spec.boundary",
             "it declares none of model, connectors and git, so it relays nothing",
         ));
@@ -1320,7 +1374,7 @@ fn boundary(
     ] {
         if present {
             return Err(Refusal::new(
-                "BoundaryWithSecret",
+                Reason::BoundaryWithSecret,
                 member,
                 "a resource with spec.boundary holds no credential in its pod; its boundary's \
                  projected tokens stand in for a Secret",
@@ -1331,7 +1385,11 @@ fn boundary(
         let kind = upstream.relay.kind;
         let at = format!("spec.boundary.{kind}");
         let invalid = |detail: String| {
-            Refusal::new("BoundaryUpstreamInvalid", format!("{at}.upstream"), detail)
+            Refusal::new(
+                Reason::BoundaryUpstreamInvalid,
+                format!("{at}.upstream"),
+                detail,
+            )
         };
         cluster_service(upstream.url).map_err(|detail| invalid(detail.to_owned()))?;
         let url = BoundaryUrl::parse(upstream.url).map_err(|refused| {
@@ -1341,7 +1399,7 @@ fn boundary(
         })?;
         if !config.allows_upstream_url(kind, upstream.url) {
             return Err(Refusal::new(
-                "BoundaryUpstreamNotAllowed",
+                Reason::BoundaryUpstreamNotAllowed,
                 format!("{at}.upstream"),
                 "the controller's allowedBoundaryUpstreams does not hold it for this relay",
             ));
@@ -1353,7 +1411,7 @@ fn boundary(
                 .any(|c| c.is_whitespace() || c.is_control())
         {
             return Err(Refusal::new(
-                spelling(RefusalReason::Malformed),
+                Reason::Malformed,
                 format!("{at}.audience"),
                 "a token audience is one word: not empty, without whitespace or a control \
                  character",
@@ -1384,7 +1442,7 @@ fn boundary(
             .is_none()
         {
             return Err(Refusal::new(
-                "BoundaryUpstreamNotAllowed",
+                Reason::BoundaryUpstreamNotAllowed,
                 format!("spec.boundary.{}.audience", upstream.relay.kind),
                 "the controller's allowedBoundaryUpstreams does not hold this upstream with this \
                  audience",
@@ -1400,7 +1458,7 @@ fn boundary(
         let at = format!("spec.agent.deploy.kubernetes.egress[{index}]");
         if entry.host.is_some() {
             return Err(Refusal::new(
-                "BoundaryEgressHost",
+                Reason::BoundaryEgressHost,
                 format!("{at}.host"),
                 "a resource with spec.boundary reaches the outside only through its boundary's \
                  upstreams, so its NetworkPolicy opens no host",
@@ -1408,7 +1466,7 @@ fn boundary(
         }
         if entry.namespace.is_some() {
             return Err(Refusal::new(
-                "BoundaryEgressNamespace",
+                Reason::BoundaryEgressNamespace,
                 format!("{at}.namespace"),
                 "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so \
                  its NetworkPolicy opens no namespace",
@@ -1434,7 +1492,7 @@ fn relay(upstream: &Upstream<'_>, url: BoundaryUrl, at: &str) -> Result<(), Refu
     };
     built.map(|_| ()).map_err(|(list, refused)| {
         Refusal::new(
-            spelling(RefusalReason::Malformed),
+            Reason::Malformed,
             format!("{at}.{list}"),
             format!("`b10x-loom agent boundary` refuses it: {refused}"),
         )
@@ -1456,7 +1514,7 @@ pub fn schedule_name(name: &str, spec: &LoomAgentSpec) -> Result<(), Refusal> {
         return Ok(());
     }
     Err(Refusal::new(
-        spelling(RefusalReason::Malformed),
+        Reason::Malformed,
         "metadata.name",
         format!(
             "a scheduled resource's CronJob carries its name, which Kubernetes limits to \
@@ -1483,7 +1541,7 @@ pub fn admit(
         (None, AgentVariant::Command) => None,
         (None, AgentVariant::AgentServe) => {
             return Err(Refusal::new(
-                spelling(RefusalReason::Malformed),
+                Reason::Malformed,
                 "spec.agent",
                 "`b10x-loom agent serve` needs a loom.agent/1 document; only a Command resource \
                  may leave it out",
@@ -1494,7 +1552,7 @@ pub fn admit(
         (AgentVariant::AgentServe, Some(agent)) => {
             Some(check_text(agent, actions).map_err(|refused| {
                 Refusal::new(
-                    spelling(refused.reason),
+                    from_agent(refused.reason),
                     within("spec.agent", &refused.member),
                     refused.detail,
                 )
@@ -1502,9 +1560,9 @@ pub fn admit(
         }
         (_, Some(agent)) => {
             credential(agent, "spec.agent").map_err(|refusal| {
-                if refusal.reason == "TooLarge" {
+                if refusal.reason == reason_spelling(Reason::TooLarge) {
                     Refusal::new(
-                        spelling(RefusalReason::Malformed),
+                        Reason::Malformed,
                         "spec.agent",
                         "it is beyond the loom.agent/1 decoder's bound",
                     )
@@ -1519,10 +1577,12 @@ pub fn admit(
     let decoded = agent
         .as_deref()
         .map(|agent| {
+            // The decoder's own reason and member, as `check_text` passes them through for an
+            // `AgentServe` resource: a `Command` resource's `spec.agent` reaches only the decoder.
             parse(agent).map_err(|error| {
                 Refusal::new(
-                    spelling(RefusalReason::Malformed),
-                    "spec.agent",
+                    from_agent(error.reason()),
+                    within("spec.agent", error.member().unwrap_or("document")),
                     error.to_string(),
                 )
             })
@@ -1535,7 +1595,7 @@ pub fn admit(
             .is_some_and(|runtime| runtime.connectors.is_none())
     {
         return Err(Refusal::new(
-            spelling(RefusalReason::Malformed),
+            Reason::Malformed,
             "spec.agent.runtime.connectors",
             "`b10x-loom agent serve` needs a connectors command line; only a Command resource \
              may leave it out",
@@ -1549,18 +1609,13 @@ pub fn admit(
         credential(text, "spec.routes")?;
         if !spec.routes.is_object() {
             return Err(Refusal::new(
-                spelling(RefusalReason::Malformed),
+                Reason::Malformed,
                 "spec.routes",
                 "an llm.routes/1 document is a mapping",
             ));
         }
-        Routes::parse(text).map_err(|error| {
-            Refusal::new(
-                spelling(RefusalReason::Malformed),
-                "spec.routes",
-                error.message,
-            )
-        })?;
+        Routes::parse(text)
+            .map_err(|error| Refusal::new(Reason::Malformed, "spec.routes", error.message))?;
     }
 
     let connectors = spec.connectors_config.clone().unwrap_or_default();
@@ -1575,7 +1630,7 @@ pub fn admit(
         (None, _) if boundary_without_model => {
             if variant == AgentVariant::AgentServe {
                 return Err(Refusal::new(
-                    "NoModelRoute",
+                    Reason::NoModelRoute,
                     "spec.boundary.model",
                     "spec.routes is empty and the boundary declares no model relay, the only \
                      model a credential-free pod reaches",
@@ -1600,7 +1655,7 @@ pub fn admit(
         (None, None) if variant == AgentVariant::Command => (String::new(), false),
         (None, None) => {
             return Err(Refusal::new(
-                "NoModelRoute",
+                Reason::NoModelRoute,
                 "spec.routes",
                 "it is empty and the controller configures no model route",
             ));
@@ -1613,7 +1668,7 @@ pub fn admit(
         && !config.allowed_secret_names.contains(&secret.name)
     {
         return Err(Refusal::new(
-            "SecretNotAllowed",
+            Reason::SecretNotAllowed,
             "spec.secretRef.name",
             "the controller's allowedSecretNames does not hold it",
         ));
@@ -1622,7 +1677,7 @@ pub fn admit(
         && !config.allowed_secret_names.contains(&files.name)
     {
         return Err(Refusal::new(
-            "SecretNotAllowed",
+            Reason::SecretNotAllowed,
             "spec.secretFiles.name",
             "the controller's allowedSecretNames does not hold it",
         ));
@@ -1635,7 +1690,7 @@ pub fn admit(
     {
         if kubernetes.namespace != namespace {
             return Err(Refusal::new(
-                "NamespaceMismatch",
+                Reason::NamespaceMismatch,
                 "spec.agent.deploy.kubernetes.namespace",
                 "it names another namespace than the resource's",
             ));
@@ -1643,7 +1698,7 @@ pub fn admit(
         for (index, egress) in kubernetes.egress.iter().enumerate() {
             if egress.host.is_none() && egress.namespace.is_none() {
                 return Err(Refusal::new(
-                    "EgressHostNotAllowed",
+                    Reason::EgressHostNotAllowed,
                     format!("spec.agent.deploy.kubernetes.egress[{index}]"),
                     "it names neither a host nor a namespace, so its rule would admit every \
                      destination on its port",
@@ -1653,7 +1708,7 @@ pub fn admit(
                 && !config.allowed_egress_hosts.contains(host)
             {
                 return Err(Refusal::new(
-                    "EgressHostNotAllowed",
+                    Reason::EgressHostNotAllowed,
                     format!("spec.agent.deploy.kubernetes.egress[{index}].host"),
                     "the controller's allowedEgressHosts does not hold it",
                 ));
@@ -1697,7 +1752,7 @@ pub fn admit(
     .fold(0, usize::saturating_add);
     if bytes > MAX_CONFIG_MAP_BYTES {
         return Err(Refusal::new(
-            "TooLarge",
+            Reason::TooLarge,
             if config_files.is_empty() {
                 "spec"
             } else {
@@ -1720,7 +1775,7 @@ pub fn admit(
         && !config.allowed_claim_names.contains(claim)
     {
         return Err(Refusal::new(
-            "ClaimNotAllowed",
+            Reason::ClaimNotAllowed,
             "spec.workspace.claimName",
             "the controller's allowedClaimNames does not hold it",
         ));
@@ -1962,13 +2017,8 @@ fn schedule(
     spec: &LoomAgentSpec,
     variant: AgentVariant,
 ) -> Result<(), Refusal> {
-    let malformed = |at: &str, detail: &str| {
-        Err(Refusal::new(
-            spelling(RefusalReason::Malformed),
-            at,
-            detail.to_owned(),
-        ))
-    };
+    let malformed =
+        |at: &str, detail: &str| Err(Refusal::new(Reason::Malformed, at, detail.to_owned()));
     if variant == AgentVariant::AgentServe {
         return malformed(
             "spec.schedule",
@@ -2097,7 +2147,7 @@ fn pod_resources(
         AgentVariant::AgentServe => Ok(config.default_resources.clone()),
         AgentVariant::Command => config.default_command_resources.clone().ok_or_else(|| {
             Refusal::new(
-                "ResourcesRequired",
+                Reason::ResourcesRequired,
                 "spec.agent.deploy.kubernetes.resources",
                 "Loom cannot size a program it does not know: declare its cpu and memory in \
                  spec.agent.deploy.kubernetes.resources, or set defaultCommandResources in the \
@@ -2148,7 +2198,7 @@ fn confinement_profiles(
         let Some(profile) = profile else { continue };
         if variant != AgentVariant::Command {
             return Err(Refusal::new(
-                "Malformed",
+                Reason::Malformed,
                 member,
                 "only a Command resource declares a profile; an AgentServe pod keeps \
                  RuntimeDefault",
@@ -2159,7 +2209,7 @@ fn confinement_profiles(
             ("Unconfined", None) => {
                 if !config.allow_unconfined_profiles {
                     return Err(Refusal::new(
-                        "ProfileNotAllowed",
+                        Reason::ProfileNotAllowed,
                         format!("{member}.type"),
                         "the controller's allowUnconfinedProfiles does not allow Unconfined",
                     ));
@@ -2168,7 +2218,7 @@ fn confinement_profiles(
             ("Localhost", Some(name)) => {
                 if !plain_profile_name(name) {
                     return Err(Refusal::new(
-                        "ProfileInvalid",
+                        Reason::ProfileInvalid,
                         format!("{member}.localhostProfile"),
                         format!(
                             "a profile name is [A-Za-z0-9._/-], not absolute, with no empty or \
@@ -2178,7 +2228,7 @@ fn confinement_profiles(
                 }
                 if !allowed.contains(name) {
                     return Err(Refusal::new(
-                        "ProfileNotAllowed",
+                        Reason::ProfileNotAllowed,
                         format!("{member}.localhostProfile"),
                         format!("the controller's {list} does not hold it"),
                     ));
@@ -2186,21 +2236,21 @@ fn confinement_profiles(
             }
             ("RuntimeDefault" | "Unconfined", Some(_)) => {
                 return Err(Refusal::new(
-                    "ProfileInvalid",
+                    Reason::ProfileInvalid,
                     format!("{member}.localhostProfile"),
                     "only a Localhost profile names one",
                 ));
             }
             ("Localhost", None) => {
                 return Err(Refusal::new(
-                    "ProfileInvalid",
+                    Reason::ProfileInvalid,
                     format!("{member}.localhostProfile"),
                     "a Localhost profile needs the name of the profile",
                 ));
             }
             _ => {
                 return Err(Refusal::new(
-                    "ProfileInvalid",
+                    Reason::ProfileInvalid,
                     format!("{member}.type"),
                     "a profile is RuntimeDefault, Localhost or Unconfined",
                 ));

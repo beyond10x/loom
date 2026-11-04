@@ -12,9 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `loom.resource.AdmitLoomAgent` declares each of the 32 reasons the operator refuses a `LoomAgent` with as an outcome, and `task conform` admits one authored fixture per reason with the operator's own `admit`, asserting its reason, member and detail (story:operator-constraints-in-ess)
+- `loom.resource.StageFiles` declares what `b10x-loom agent stage-files` refuses and the modes it stages with; `b10x_loom_resource::stage::stage_files` decides it for the command and the conformance target (story:operator-constraints-in-ess)
+
 ### Changed
 
 - ESS moves from 0.84.0 to 0.85.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); generated Rust, the CRD and the reference pages are unchanged, and the commission domain graph names `0.85.0`
+- A `Command` resource whose `spec.agent` the `loom.agent/1` decoder refuses is refused with the decoder's reason at its member (`PortOutOfRange at spec.agent.expose.a2a.port`), not `Malformed at spec.agent`, as an `AgentServe` resource already was (story:operator-constraints-in-ess)
+- `b10x-loom agent stage-files` decides before writing anything: a refused stage leaves the destination as it was, where it could create it or copy keys before the refusal (story:operator-constraints-in-ess)
 
 ## [0.55.2] - 2026-11-03
 

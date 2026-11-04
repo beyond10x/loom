@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: a workspace or Secret mount path cannot lie in or above
+# a directory the controller mounts.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-mount-path-under-a-controller-mount-is-refused
+summary: A workspace mounted under /config is refused MountPathInvalid.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/mount-path-invalid.yaml}
+    outcome: mount-path-invalid
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: MountPathInvalid
+        member: spec.workspace.mountPath
+        detail: "it is or overlaps a directory the controller mounts"

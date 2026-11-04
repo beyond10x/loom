@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-http-binding-whose-method-is-not-get-is-refused
+summary: An http binding whose method is POST is refused HttpMethod.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/http-method.yaml}
+    outcome: http-method
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: HttpMethod
+        member: spec.agent.bindings[2].method
+        detail: "POST"
