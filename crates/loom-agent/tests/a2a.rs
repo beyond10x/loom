@@ -1,6 +1,8 @@
 //! Acceptance for `story:agent-a2a` on a served spec: an A2A message runs one governed turn of the
 //! spec's agent on `inbound-answer@1`, answered with the turn's record, and nothing is sent through
 //! A2A even when the spec grants `reply.send`. The listener refuses to start without its bearer.
+//! The turn's line is appended to the state directory's `record.jsonl` once per `messageId`
+//! (`story:a2a-record-and-streaming`).
 //!
 //! The listener runs on a loopback port this file binds; every read goes to the fake `connectors`
 //! of `loom-connectors`, answering the slack-handler's `docs` fixtures; the models are recorded.
@@ -198,11 +200,7 @@ fn a_message_runs_one_governed_turn_and_sends_nothing() {
     assert_eq!(record["outcome"], "proposed", "{record}");
     assert_eq!(record["intent"], "ask", "{record}");
     assert_eq!(record["reads"][0]["source"], "docs", "{record}");
-    assert_eq!(
-        record["item"],
-        format!("a2a:{}", task["id"].as_str().unwrap()),
-        "{record}"
-    );
+    assert_eq!(record["item"], "a2a:m-1", "{record}");
     assert!(
         fixture
             .runs("invoke")
@@ -392,6 +390,146 @@ fn an_a2a_turn_is_never_offered_reply_send() {
         ["source.read", "reply.propose", "reply.decline"],
         "the A2A projection keeps every action but reply.send"
     );
+}
+
+// ---- story:a2a-record-and-streaming --------------------------------------------------------------
+
+/// One POST of `body` with the bearer; the answer's head and body, read whole.
+fn post_raw(address: SocketAddr, body: &Value) -> (String, String) {
+    let mut stream = TcpStream::connect(address).expect("the listener accepts");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let body = body.to_string();
+    let head = format!(
+        "POST {PATH} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).unwrap();
+    stream.write_all(body.as_bytes()).unwrap();
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).expect("the answer is read");
+    let (head, body) = raw.split_once("\r\n\r\n").expect("a head and a body");
+    (head.to_owned(), body.to_owned())
+}
+
+fn send(method: &str, message_id: &str, text: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": {"message": {
+        "messageId": message_id, "role": "ROLE_USER", "parts": [{"text": text}]}}})
+}
+
+/// A `SendMessage` turn appends one line to the state directory's `record.jsonl`, its item keyed
+/// by the revision the `messageId` gives (`loom.agent.RecordA2aTurn`, `turned`); the same
+/// `messageId` again, sent or streamed, runs no second turn and is answered with that line
+/// (`replayed`). A turn that could not run records nothing.
+#[test]
+fn an_a2a_turn_is_recorded_once() {
+    let fixture = fixture("a2a-recorded-once");
+    let (turns, made): (TurnModels, _) = support::turns(vec![vec![
+        (
+            "source_read",
+            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+        ),
+        ("reply_propose", json!({"text": REPLY})),
+    ]]);
+    let plugin = SpecPlugin::new(spec(&fixture, 8080), &fixture.plugin_state())
+        .expect("the spec is served")
+        .with_classifier(Box::new(Recorded::classifying("ask", &["docs"], 0.9)))
+        .with_turn_models(turns);
+    let exposure = plugin.spec().expose.clone().unwrap().a2a.unwrap();
+    let server = listener(&exposure, Bearer::new(TOKEN).unwrap()).expect("the listener is built");
+    let host = Host::new(plugin.config()).with_environment(fixture.environment());
+    let agent = Answering::with_host(&plugin, host);
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = socket.local_addr().unwrap();
+    let stop = AtomicBool::new(false);
+    let made_after = |made: &std::sync::Arc<std::sync::Mutex<usize>>| *made.lock().unwrap();
+
+    let (first, again, streamed, other, made_before_other) = std::thread::scope(|scope| {
+        let asking = scope.spawn(|| {
+            let _stop = StopOnDrop(&stop);
+            let first = post(
+                address,
+                &send("SendMessage", "m-1", "Is the deploy finished?"),
+            );
+            let again = post(address, &send("SendMessage", "m-1", "Is it finished now?"));
+            let streamed = post_raw(
+                address,
+                &send("SendStreamingMessage", "m-1", "Is the deploy finished?"),
+            );
+            let made_before_other = made_after(&made);
+            let other = post(address, &send("SendMessage", "m-2", "And the logs?"));
+            (first, again, streamed, other, made_before_other)
+        });
+        server
+            .serve(socket, &agent, &stop)
+            .expect("the listener ends cleanly");
+        asking.join().expect("the client asked")
+    });
+    drop(agent);
+
+    let record_of =
+        |answer: &Value| answer["result"]["task"]["artifacts"][0]["parts"][1]["data"].clone();
+    let recorded = record_of(&first);
+    assert_eq!(
+        first["result"]["task"]["status"]["state"], "TASK_STATE_COMPLETED",
+        "{first}"
+    );
+    assert_eq!(recorded["item"], "a2a:m-1", "{recorded}");
+    assert_eq!(recorded["proposal"], REPLY, "{recorded}");
+    assert_eq!(
+        again["result"]["task"]["status"]["state"], "TASK_STATE_COMPLETED",
+        "{again}"
+    );
+    assert_eq!(
+        record_of(&again),
+        recorded,
+        "the repeat is answered with the line"
+    );
+    assert_ne!(
+        again["result"]["task"]["id"], first["result"]["task"]["id"],
+        "each message is its own task"
+    );
+
+    let (head, body) = streamed;
+    assert!(head.contains("text/event-stream"), "{head}");
+    let events: Vec<Value> = body
+        .split("\n\n")
+        .filter(|event| !event.is_empty())
+        .map(|event| serde_json::from_str(event.trim_start_matches("data: ")).unwrap())
+        .collect();
+    assert_eq!(
+        events.len(),
+        3,
+        "submitted, the record, the end; no turn: {body}"
+    );
+    assert_eq!(
+        events[1]["result"]["artifactUpdate"]["artifact"]["parts"][1]["data"], recorded,
+        "{body}"
+    );
+    assert_eq!(
+        events[2]["result"]["statusUpdate"]["status"]["state"], "TASK_STATE_COMPLETED",
+        "{body}"
+    );
+    assert_eq!(made_before_other, 1, "one turn for one messageId");
+
+    assert_eq!(
+        other["result"]["task"]["status"]["state"], "TASK_STATE_FAILED",
+        "no second turn is scripted: {other}"
+    );
+    assert_eq!(made_after(&made), 2, "a new messageId runs a turn");
+
+    let lines: Vec<Value> = fs::read_to_string(fixture.plugin_state().join("record.jsonl"))
+        .expect("the record is written")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a JSON line"))
+        .collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "one line, and none for a turn that could not run: {lines:?}"
+    );
+    assert_eq!(lines[0], recorded);
 }
 
 /// A spec with neither a `channel` nor `expose.a2a` is not served: `nothing-to-serve`

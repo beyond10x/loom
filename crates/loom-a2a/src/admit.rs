@@ -1,14 +1,16 @@
-//! Whether the listener answers a request: `loom.agent.AdmitA2aRequest`
-//! (`ess/domains/agent.yaml`), decided on the request line and its headers before the body is
-//! read, and the [`Bearer`] it compares against.
+//! Whether the listener answers a request, and how: `loom.agent.AdmitA2aRequest`
+//! (`ess/domains/agent.yaml`), and the [`Bearer`] it compares against. No refusal and no probe
+//! depends on whether the request asks for a stream, so the listener decides them on the request
+//! line and its headers, before the body is read ([`admit`]); once an admitted request's body
+//! names its method, [`Presented::decide`] answers `streamed` or `admitted`.
 
 use std::fmt;
 
 pub use loom::agent::{A2aRefusalReason, A2aRefused, AdmitA2aRequest, AdmitA2aRequestOutcome};
 
 /// Decides `loom.agent.AdmitA2aRequest`: the first refusal in declaration order (a request that is
-/// no probe and carries no bearer, then one whose bearer is not the agent's), then `probe`, else
-/// `admitted`.
+/// no probe and carries no bearer, then one whose bearer is not the agent's), then `probe`, then
+/// `streamed` for `SendStreamingMessage`, else `admitted`.
 pub fn admit_a2a_request(input: &AdmitA2aRequest) -> AdmitA2aRequestOutcome {
     let refused = |reason| A2aRefused { reason };
     if !input.probe && !input.bearer_presented {
@@ -23,6 +25,9 @@ pub fn admit_a2a_request(input: &AdmitA2aRequest) -> AdmitA2aRequestOutcome {
     }
     if input.probe {
         return AdmitA2aRequestOutcome::Probe;
+    }
+    if input.stream {
+        return AdmitA2aRequestOutcome::Streamed;
     }
     AdmitA2aRequestOutcome::Admitted
 }
@@ -76,22 +81,50 @@ impl fmt::Debug for Bearer {
     }
 }
 
-/// The decision for one request: `probe` whether it is `GET /ready` or `GET /live`,
-/// `authorization` the value of its `Authorization` header, when it carries one. A header that is
-/// not `Bearer <token>` (another scheme, or no token) presents no bearer.
+/// What the request line and headers of one request present to [`admit_a2a_request`]: whether it
+/// is a probe and what bearer it carries. The method its body names is decided later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Presented {
+    probe: bool,
+    bearer_presented: bool,
+    bearer_matches: bool,
+}
+
+impl Presented {
+    /// `probe` whether the request is `GET /ready` or `GET /live`, `authorization` the value of
+    /// its `Authorization` header, when it carries one. A header that is not `Bearer <token>`
+    /// (another scheme, or no token) presents no bearer.
+    pub fn new(bearer: &Bearer, probe: bool, authorization: Option<&str>) -> Self {
+        let presented = authorization.and_then(|value| {
+            let (scheme, token) = value.trim().split_once(' ')?;
+            scheme
+                .eq_ignore_ascii_case("bearer")
+                .then(|| token.trim())
+                .filter(|token| !token.is_empty())
+        });
+        Self {
+            probe,
+            bearer_presented: presented.is_some(),
+            bearer_matches: presented.is_some_and(|token| bearer.matches(token.as_bytes())),
+        }
+    }
+
+    /// The decision for the request, `stream` whether its method is `SendStreamingMessage`.
+    pub fn decide(self, stream: bool) -> AdmitA2aRequestOutcome {
+        admit_a2a_request(&AdmitA2aRequest {
+            probe: self.probe,
+            bearer_presented: self.bearer_presented,
+            bearer_matches: self.bearer_matches,
+            stream,
+        })
+    }
+}
+
+/// The decision for one request on its request line and headers, before its body is read (see
+/// [`Presented::new`]): a refusal, `probe`, or `admitted` for a request whose method is not known
+/// yet.
 pub fn admit(bearer: &Bearer, probe: bool, authorization: Option<&str>) -> AdmitA2aRequestOutcome {
-    let presented = authorization.and_then(|value| {
-        let (scheme, token) = value.trim().split_once(' ')?;
-        scheme
-            .eq_ignore_ascii_case("bearer")
-            .then(|| token.trim())
-            .filter(|token| !token.is_empty())
-    });
-    admit_a2a_request(&AdmitA2aRequest {
-        probe,
-        bearer_presented: presented.is_some(),
-        bearer_matches: presented.is_some_and(|token| bearer.matches(token.as_bytes())),
-    })
+    Presented::new(bearer, probe, authorization).decide(false)
 }
 
 #[cfg(test)]
@@ -160,6 +193,33 @@ mod tests {
                 }
             }
         );
+    }
+
+    /// The listener refuses on the head, before it knows the method; that is sound only while no
+    /// refusal and no probe depends on `stream`, for every input.
+    #[test]
+    fn no_refusal_and_no_probe_depends_on_the_stream() {
+        for probe in [false, true] {
+            for bearer_presented in [false, true] {
+                for bearer_matches in [false, true] {
+                    let decide = |stream| {
+                        admit_a2a_request(&AdmitA2aRequest {
+                            probe,
+                            bearer_presented,
+                            bearer_matches,
+                            stream,
+                        })
+                    };
+                    let (head, streamed) = (decide(false), decide(true));
+                    match head {
+                        AdmitA2aRequestOutcome::Admitted => {
+                            assert_eq!(streamed, AdmitA2aRequestOutcome::Streamed);
+                        }
+                        other => assert_eq!(streamed, other),
+                    }
+                }
+            }
+        }
     }
 
     #[test]
