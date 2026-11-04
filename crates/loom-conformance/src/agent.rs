@@ -73,7 +73,7 @@ pub(crate) fn is_branch(branch: &str) -> bool {
 
 /// The repository root, read when the target runs: a test binary may be reused across worktrees
 /// that share one build directory.
-fn root() -> Result<PathBuf, TargetError> {
+pub(crate) fn root() -> Result<PathBuf, TargetError> {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR").ok_or_else(|| {
         TargetError::unavailable(
             "locating the repository",
