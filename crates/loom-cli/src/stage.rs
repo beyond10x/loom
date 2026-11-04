@@ -6,7 +6,7 @@
 //! reads everything it decides on and writes nothing: whether `--to` is absent, a directory, a
 //! link or something else; the entries of `--from` whose names do not start with `..`, whether
 //! each name is UTF-8 and whether each resolves inside `--from`; and whether `--to` holds a
-//! directory no key names. `loom.resource.StageFiles` (`ess/domains/resource.yaml`), decided by
+//! directory, keyed or not. `loom.resource.StageFiles` (`ess/domains/resource.yaml`), decided by
 //! `b10x_loom_resource::stage::stage_files`, answers from those facts: the first refusal in
 //! declaration order, or the modes to stage with. Only then does it write: `--to` is created when
 //! absent and set to the directory mode, 0700; each key that resolves to a regular file is copied,
@@ -38,7 +38,7 @@ struct Read {
     not_utf8: Option<PathBuf>,
     /// The key that resolves outside `from`, the first in name order.
     outside: Option<PathBuf>,
-    /// The directory in `to` no key names, the first in directory order.
+    /// A directory in `to`, the first in directory order: staging neither removes nor replaces one.
     stale: Option<PathBuf>,
     /// Each key that resolves to a regular file inside `from`, in name order, with that file.
     files: Vec<(String, PathBuf)>,
@@ -48,7 +48,8 @@ struct Read {
 fn read(from: &Path, to: &Path) -> Result<Read, String> {
     let named = |path: &Path, why: &dyn std::fmt::Display| format!("{}: {why}", path.display());
     let root = fs::canonicalize(from).map_err(|why| named(from, &why))?;
-    let destination = match fs::symlink_metadata(to) {
+    // `lstat("link/")` follows the link; its components drop the trailing separators.
+    let destination = match fs::symlink_metadata(to.components().as_path()) {
         Ok(meta) if meta.file_type().is_symlink() => StageDestination::Link,
         Ok(meta) if meta.is_dir() => StageDestination::Directory,
         Ok(_) => StageDestination::Other,
@@ -89,18 +90,12 @@ fn read(from: &Path, to: &Path) -> Result<Read, String> {
 
     let mut stale = None;
     if destination == StageDestination::Directory {
-        let kept: BTreeSet<&str> = files.iter().map(|(name, _)| name.as_str()).collect();
         for entry in fs::read_dir(to).map_err(|why| named(to, &why))? {
             let entry = entry.map_err(|why| named(to, &why))?;
-            let current = entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| kept.contains(name));
-            if !current
-                && entry
-                    .file_type()
-                    .map_err(|why| named(&entry.path(), &why))?
-                    .is_dir()
+            if entry
+                .file_type()
+                .map_err(|why| named(&entry.path(), &why))?
+                .is_dir()
             {
                 stale.get_or_insert_with(|| entry.path());
             }
@@ -150,7 +145,7 @@ pub fn stage(from: &Path, to: &Path) -> Result<usize, String> {
         StageFilesOutcome::StaleDirectory { .. } => {
             return Err(named_or_to(
                 read.stale.as_ref(),
-                "is a directory no key of the Secret names",
+                "is a directory, which staging neither removes nor replaces",
             ));
         }
         StageFilesOutcome::Staged { response } => response,
@@ -361,7 +356,7 @@ mod tests {
 
     /// `loom.resource.StageFiles` decides from what was read before anything is written: a key
     /// linked outside the volume refuses the stage before the destination is created, and a
-    /// directory no key names refuses it before any key is copied or stale file removed.
+    /// directory in the destination refuses it before any key is copied or stale file removed.
     #[test]
     fn a_refused_stage_writes_nothing() {
         let scratch = tempfile::tempdir().expect("scratch");
@@ -390,9 +385,9 @@ mod tests {
         fs::set_permissions(&to, fs::Permissions::from_mode(0o755)).expect("mode");
         fs::write(to.join("dropped"), "old").expect("stale file");
         fs::create_dir(to.join("left-over")).expect("stale directory");
-        let refused = stage(&from, &to).expect_err("a directory no key names");
+        let refused = stage(&from, &to).expect_err("a directory in the destination");
         assert!(
-            refused.ends_with("is a directory no key of the Secret names"),
+            refused.ends_with("is a directory, which staging neither removes nor replaces"),
             "{refused}"
         );
         assert!(
