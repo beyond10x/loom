@@ -2,14 +2,15 @@
 format: aep.planning-md/3
 id: story:operator-constraints-in-ess
 kind: story
-status: proposed
+status: active
 title: The LoomAgent controller's admission and rendering rules and agent stage-files are declared in ESS
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-04T07:33:04Z", actor: "human:timo", revision: 4}
 ---
 ## Outcome
 
