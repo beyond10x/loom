@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- ESS moves from 0.84.0 to 0.85.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); generated Rust, the CRD and the reference pages are unchanged, and the commission domain graph names `0.85.0`
+
 ## [0.55.2] - 2026-11-03
 
 No breaking changes.

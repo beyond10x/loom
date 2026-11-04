@@ -218,7 +218,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.84.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.85.0 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships. The pin is two lines in each of `check.yml` and `pages.yml`: `ESS_VERSION` and
 `ESS_SHA256`. Move both in both files in one commit; the digest is the
 `ess-<version>-x86_64-unknown-linux-gnu.tar.gz` line of that release's `SHA256SUMS`. A version
