@@ -427,8 +427,8 @@ types:
   # reason per refusal of `StageFiles`: `--to` is a link, which a copy would follow
   # (`DestinationIsALink`), or neither absent nor a directory (`DestinationNotADirectory`); a name
   # in the Secret volume is not UTF-8 (`NameNotUtf8`); a key resolves to a path outside the volume
-  # (`KeyOutsideVolume`); `--to` holds a directory no key names, which removing a stale key would
-  # have to recurse into (`StaleDirectory`).
+  # (`KeyOutsideVolume`); `--to` holds a directory, keyed or not, which staging would have to
+  # recurse into or replace (`StaleDirectory`).
   - name: loom.resource.StageRefusalReason
     kind: enum
     variants:
@@ -1194,7 +1194,7 @@ commands:
   # operator-constraints-in-ess), decided before it writes anything: `destination` is what `--to`
   # is; `names_utf8` whether every name in the Secret volume `--from` is UTF-8; `keys_inside`
   # whether every key (a name not starting with `..`) resolves to a path inside the volume;
-  # `stale_directory` whether `--to` holds a directory no key that is a regular file names. The
+  # `stale_directory` whether `--to` holds any directory, keyed or not. The
   # first refusal in declaration order is the answer, and a refused staging writes nothing.
   # Otherwise `--to` is created when absent, its mode set to `directory_mode` and each key that is
   # a regular file copied, in name order, to a new file of mode `file_mode` (never through what
