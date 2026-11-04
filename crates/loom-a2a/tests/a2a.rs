@@ -1,7 +1,8 @@
 //! Acceptance for the A2A listener of a served agent: the agent card lists the spec's skills, a
 //! message runs one turn and is answered with the turn's record, the task's status follows the
-//! turn's runtime events, the probes answer without a bearer, and every other request without
-//! the agent's bearer, or with another one, is refused before any turn.
+//! turn's runtime events, a streamed message sends each of them as an event and then the record,
+//! the probes answer without a bearer, and every other request without the agent's bearer, or
+//! with another one, is refused before any turn and any event.
 //!
 //! Every case runs the listener on a loopback port this file binds and talks HTTP/1.1 to it over a
 //! plain socket. The agent behind it is a fake [`Answerer`] that records each item it is handed,
@@ -118,20 +119,25 @@ impl Answerer for Fake {
             })),
             failure: None,
         }));
-        Ok(RecordLine {
-            item: item.id.clone(),
-            intent: None,
-            confidence: None,
-            outcome: RecordOutcome::Proposed,
-            reads: vec![SourceRead {
-                source: SourceName("docs".to_owned()),
-                kind: ReadKind::Search,
-            }],
-            proposal: Some(ANSWER.to_owned()),
-            proposed_case: None,
-            detail: None,
-            steps: Vec::new(),
-        })
+        Ok(proposed(item))
+    }
+}
+
+/// The record of a turn on `item` that proposed [`ANSWER`] after reading the docs.
+fn proposed(item: &InboundItem) -> RecordLine {
+    RecordLine {
+        item: item.id.clone(),
+        intent: None,
+        confidence: None,
+        outcome: RecordOutcome::Proposed,
+        reads: vec![SourceRead {
+            source: SourceName("docs".to_owned()),
+            kind: ReadKind::Search,
+        }],
+        proposal: Some(ANSWER.to_owned()),
+        proposed_case: None,
+        detail: None,
+        steps: Vec::new(),
     }
 }
 
@@ -204,6 +210,14 @@ fn request(
     }
 }
 
+/// The task an item's details name.
+fn task_of(item: &InboundItem) -> String {
+    match item.details.member("task") {
+        Some(loom::json::Value::Text(task)) => task.clone(),
+        other => panic!("the item names no task: {other:?}"),
+    }
+}
+
 fn rpc(method: &str, params: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": 7, "method": method, "params": params})
 }
@@ -270,6 +284,8 @@ fn agent_card_lists_the_spec_skills() {
             card["securityRequirements"][0]["schemes"]["bearer"].is_object(),
             "{card}"
         );
+        assert_eq!(card["capabilities"]["streaming"], true, "{card}");
+        assert_eq!(card["capabilities"]["pushNotifications"], false, "{card}");
     });
     assert!(agent.items().is_empty(), "the card runs no turn");
 }
@@ -297,8 +313,10 @@ fn a_message_runs_one_turn_and_returns_its_record() {
         assert_eq!(record["outcome"], "proposed", "{reply}");
         assert_eq!(record["proposal"], ANSWER);
         assert_eq!(record["reads"][0]["source"], "docs");
-        let task_id = task["id"].as_str().expect("a task id");
-        assert_eq!(record["item"], format!("a2a:{task_id}"));
+        assert_eq!(
+            record["item"], "a2a:m-1",
+            "the item is keyed by the revision the messageId gives"
+        );
 
         // The same answer under the method name of A2A 1.0.
         let again = request(
@@ -403,12 +421,7 @@ fn task_status_follows_the_turns_runtime_events() {
                 "an undeclared method is no method: {}",
                 tasks.body
             );
-            let task_id = agent.items()[0]
-                .id
-                .0
-                .strip_prefix("a2a:")
-                .expect("the item names its task")
-                .to_owned();
+            let task_id = task_of(&agent.items()[0]);
             let during = request(
                 address,
                 "POST",
@@ -657,4 +670,299 @@ fn the_liveness_probe_is_answered_while_admitted_messages_hold_every_slot() {
         });
     });
     assert_eq!(agent.items().len(), slots);
+}
+
+// ---- story:a2a-record-and-streaming --------------------------------------------------------------
+
+/// The `data` of each server-sent event of `body`, parsed as JSON.
+fn events(body: &str) -> Vec<Value> {
+    body.split("\n\n")
+        .filter(|event| !event.is_empty())
+        .map(|event| {
+            let data = event
+                .strip_prefix("data: ")
+                .unwrap_or_else(|| panic!("an event that is no data line: {event:?}"));
+            serde_json::from_str(data).unwrap_or_else(|error| panic!("{error}: {data}"))
+        })
+        .collect()
+}
+
+/// `SendStreamingMessage` answers `text/event-stream`: the task as submitted, one `statusUpdate`
+/// per runtime event of the turn, then the record as an `artifactUpdate` and, last, the state the
+/// task ended in; `message/stream` is the same method.
+#[test]
+fn a_streamed_message_sends_status_updates_then_the_record() {
+    let agent = Fake::new();
+    with_listener(&agent, |address| {
+        let answer = request(
+            address,
+            "POST",
+            PATH,
+            Some(TOKEN),
+            Some(&rpc(
+                "SendStreamingMessage",
+                message("Is the deploy finished?"),
+            )),
+        );
+        assert_eq!(answer.status, 200, "{}", answer.body);
+        assert_eq!(answer.header("content-type"), Some("text/event-stream"));
+        assert_eq!(answer.header("content-length"), None);
+        let sent = events(&answer.body);
+        for event in &sent {
+            assert_eq!(event["jsonrpc"], "2.0", "{event}");
+            assert_eq!(event["id"], 7, "{event}");
+        }
+        let results: Vec<&Value> = sent.iter().map(|event| &event["result"]).collect();
+        let task = &results[0]["task"];
+        assert_eq!(task["status"]["state"], "TASK_STATE_SUBMITTED", "{task}");
+        let task_id = task["id"].as_str().expect("a task id");
+        let context = task["contextId"].as_str().expect("a context");
+
+        let updates: Vec<&Value> = results[1..results.len() - 2]
+            .iter()
+            .map(|result| &result["statusUpdate"])
+            .collect();
+        let texts: Vec<&str> = updates
+            .iter()
+            .map(|update| {
+                assert_eq!(update["taskId"], task_id, "{update}");
+                assert_eq!(update["contextId"], context, "{update}");
+                assert_eq!(update["status"]["state"], "TASK_STATE_WORKING", "{update}");
+                update["status"]["message"]["parts"][0]["text"]
+                    .as_str()
+                    .expect("a status text")
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "step 1 started",
+                "reply.propose selected",
+                "the run stopped: Completed"
+            ],
+            "one event per runtime event, in order"
+        );
+
+        let artifact = &results[results.len() - 2]["artifactUpdate"];
+        assert_eq!(artifact["taskId"], task_id, "{artifact}");
+        assert_eq!(artifact["lastChunk"], true, "{artifact}");
+        let record = &artifact["artifact"]["parts"][1]["data"];
+        assert_eq!(record["item"], "a2a:m-1", "{artifact}");
+        assert_eq!(record["outcome"], "proposed");
+        assert_eq!(record["proposal"], ANSWER);
+
+        let last = &results[results.len() - 1]["statusUpdate"];
+        assert_eq!(last["taskId"], task_id, "{last}");
+        assert_eq!(last["status"]["state"], "TASK_STATE_COMPLETED", "{last}");
+        assert_eq!(last["status"]["message"]["parts"][0]["text"], ANSWER);
+
+        let ended = request(
+            address,
+            "POST",
+            PATH,
+            Some(TOKEN),
+            Some(&rpc("GetTask", json!({"id": task_id}))),
+        );
+        assert_eq!(
+            ended.json()["result"]["status"]["state"],
+            "TASK_STATE_COMPLETED"
+        );
+
+        let alias = request(
+            address,
+            "POST",
+            PATH,
+            Some(TOKEN),
+            Some(&rpc("message/stream", message("And the logs?"))),
+        );
+        let aliased = events(&alias.body);
+        assert_eq!(
+            aliased.last().expect("events")["result"]["statusUpdate"]["status"]["state"],
+            "TASK_STATE_COMPLETED",
+            "{}",
+            alias.body
+        );
+    });
+    assert_eq!(agent.items().len(), 2, "one turn per streamed message");
+}
+
+/// A stream without the agent's bearer, or with another, is refused `401` on its head, as JSON,
+/// before any event and before any turn.
+#[test]
+fn a_stream_without_the_bearer_is_refused() {
+    let agent = Fake::new();
+    with_listener(&agent, |address| {
+        let stream = rpc("SendStreamingMessage", message("Is the deploy finished?"));
+        for (bearer, reason) in [
+            (None, "MissingBearer"),
+            (Some("a2a-test-bearer-7f3d"), "WrongBearer"),
+        ] {
+            let answer = request(address, "POST", PATH, bearer, Some(&stream));
+            assert_eq!(answer.status, 401, "{bearer:?}: {}", answer.body);
+            assert_eq!(answer.header("content-type"), Some("application/json"));
+            assert!(!answer.body.contains("data:"), "{}", answer.body);
+            assert_eq!(answer.json()["reason"], reason);
+        }
+    });
+    assert!(agent.items().is_empty(), "no turn ran");
+}
+
+/// A turn whose every runtime event names an action of `size` bytes, `events` times: its status
+/// updates are larger than any socket buffer between the listener and a caller.
+struct Flood {
+    events: usize,
+    size: usize,
+    /// Where the turn names its task once it emitted every event.
+    done: Mutex<Sender<String>>,
+}
+
+impl Answerer for Flood {
+    fn answer(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String> {
+        let action = "a".repeat(self.size);
+        for _ in 0..self.events {
+            events.emit(&RuntimeEvent::ActionSelected(RuntimeEventActionSelected {
+                run_id: run_id(),
+                action: action.clone(),
+                arguments: ProposedActionArguments(CommissionJson::Null),
+            }));
+        }
+        let _ = self
+            .done
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(task_of(item));
+        Ok(proposed(item))
+    }
+}
+
+/// A stream whose caller takes nothing is cut once an event waited the answer's bound: the caller
+/// later reads what the buffers held and then the end, never the task's end; the turn went on
+/// regardless, and its task ended completed.
+#[test]
+fn an_idle_stream_is_cut_at_the_answer_bound() {
+    use std::time::Instant;
+
+    let (done, turned) = channel();
+    let agent = Flood {
+        events: 48,
+        size: 1024 * 1024,
+        done: Mutex::new(done),
+    };
+    with_listener(&agent, |address| {
+        let mut idle = TcpStream::connect(address).expect("the listener accepts");
+        let body = rpc("SendStreamingMessage", message("Is the deploy finished?")).to_string();
+        idle.write_all(
+            format!(
+                "POST {PATH} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {TOKEN}\r\n\
+                 Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let started = Instant::now();
+        let task_id = turned
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the turn ran on while its stream was not read");
+        // Past the bound, with a margin for the event that was being written when it started.
+        std::thread::sleep(
+            b10x_loom_a2a::WRITE_DEADLINE.saturating_sub(started.elapsed())
+                + Duration::from_secs(5),
+        );
+
+        let ended = request(
+            address,
+            "POST",
+            PATH,
+            Some(TOKEN),
+            Some(&rpc("GetTask", json!({"id": task_id}))),
+        );
+        assert_eq!(
+            ended.json()["result"]["status"]["state"],
+            "TASK_STATE_COMPLETED",
+            "the turn went on: {}",
+            ended.body
+        );
+
+        idle.set_read_timeout(Some(Duration::from_secs(20)))
+            .unwrap();
+        let mut held = Vec::new();
+        let read = idle.read_to_end(&mut held);
+        assert!(
+            read.is_ok()
+                || read
+                    .as_ref()
+                    .is_err_and(|error| { error.kind() == std::io::ErrorKind::ConnectionReset }),
+            "the stream ended: {read:?}"
+        );
+        let held = String::from_utf8_lossy(&held);
+        assert!(
+            held.starts_with("HTTP/1.1 200 OK"),
+            "{}",
+            held.chars().take(64).collect::<String>()
+        );
+        assert!(
+            held.len() < 48 * 1024 * 1024,
+            "every event reached a caller that read nothing: {} bytes",
+            held.len()
+        );
+        assert!(
+            !held.contains("TASK_STATE_COMPLETED"),
+            "the stream was not cut"
+        );
+    });
+}
+
+/// The card advertises streaming because the listener streams: a `SendStreamingMessage` to the
+/// interface the card names is answered with events.
+#[test]
+fn the_card_advertises_streaming_and_the_listener_streams() {
+    let agent = Fake::new();
+    with_listener(&agent, |address| {
+        let card = request(address, "GET", CARD_PATH, Some(TOKEN), None).json();
+        assert_eq!(card["capabilities"]["streaming"], true, "{card}");
+        let url = card["supportedInterfaces"][0]["url"]
+            .as_str()
+            .expect("an interface url");
+        let path = url
+            .strip_prefix(&format!("http://{address}"))
+            .expect("the interface is this listener");
+        let answer = request(
+            address,
+            "POST",
+            path,
+            Some(TOKEN),
+            Some(&rpc("SendStreamingMessage", message("Is it?"))),
+        );
+        assert_eq!(answer.header("content-type"), Some("text/event-stream"));
+        assert!(events(&answer.body).len() >= 3, "{}", answer.body);
+    });
+}
+
+/// The record keys an A2A turn by the revision its `messageId` gives, so a message without one is
+/// refused before any turn rather than taken for another.
+#[test]
+fn a_message_without_a_message_id_is_refused() {
+    let agent = Fake::new();
+    with_listener(&agent, |address| {
+        for method in ["SendMessage", "SendStreamingMessage"] {
+            for message in [
+                json!({"message": {"role": "ROLE_USER", "parts": [{"text": "Is it?"}]}}),
+                json!({"message": {"messageId": "", "role": "ROLE_USER",
+                    "parts": [{"text": "Is it?"}]}}),
+            ] {
+                let answer = request(
+                    address,
+                    "POST",
+                    PATH,
+                    Some(TOKEN),
+                    Some(&rpc(method, message)),
+                );
+                assert_eq!(answer.status, 200, "{}", answer.body);
+                assert_eq!(answer.header("content-type"), Some("application/json"));
+                assert_eq!(answer.json()["error"]["code"], -32602, "{}", answer.body);
+            }
+        }
+    });
+    assert!(agent.items().is_empty(), "no turn ran");
 }

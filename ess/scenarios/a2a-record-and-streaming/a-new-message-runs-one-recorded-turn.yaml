@@ -1,0 +1,12 @@
+# story a2a-record-and-streaming: a message whose item the record holds no line for runs one turn,
+# and the turn's line is appended to `record.jsonl` once, before its task ends.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-new-message-runs-one-recorded-turn
+summary: A message whose item is not recorded runs one turn, recorded once.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.agent.RecordA2aTurn
+    input: {recorded: false}
+    outcome: turned

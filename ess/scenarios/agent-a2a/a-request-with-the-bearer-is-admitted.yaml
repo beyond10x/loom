@@ -8,5 +8,5 @@ summary: A request carrying the agent's bearer is admitted.
 timeline:
   - at: 2026-10-25T00:00:00Z
     command: loom.agent.AdmitA2aRequest
-    input: {probe: false, bearer_presented: true, bearer_matches: true}
+    input: {probe: false, bearer_presented: true, bearer_matches: true, stream: false}
     outcome: admitted

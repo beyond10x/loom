@@ -8,5 +8,5 @@ summary: A request without an `Authorization` bearer is refused `MissingBearer`.
 timeline:
   - at: 2026-10-25T00:00:00Z
     command: loom.agent.AdmitA2aRequest
-    input: {probe: false, bearer_presented: false, bearer_matches: false}
+    input: {probe: false, bearer_presented: false, bearer_matches: false, stream: false}
     outcome: missing-bearer

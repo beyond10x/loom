@@ -1,0 +1,13 @@
+# story a2a-record-and-streaming: `SendStreamingMessage` (alias `message/stream`) carrying the
+# agent's bearer is answered `text/event-stream`, one event per status change of its task and the
+# task's end last.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-streamed-message-is-answered-as-an-event-stream
+summary: A streaming request carrying the agent's bearer is streamed.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.agent.AdmitA2aRequest
+    input: {probe: false, bearer_presented: true, bearer_matches: true, stream: true}
+    outcome: streamed

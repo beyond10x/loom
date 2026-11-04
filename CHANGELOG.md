@@ -16,12 +16,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - `loom.resource.AdmitLoomAgent` declares each of the 32 reasons the operator refuses a `LoomAgent` with as an outcome, and `task conform` admits one authored fixture per reason with the operator's own `admit`, asserting its reason, member and detail (story:operator-constraints-in-ess)
 - `loom.resource.StageFiles` declares what `b10x-loom agent stage-files` refuses and the modes it stages with; `b10x_loom_resource::stage::stage_files` decides it for the command and the conformance target (story:operator-constraints-in-ess)
+- `SendStreamingMessage` (alias `message/stream`) on the A2A listener: a `text/event-stream` of the task, one `statusUpdate` per runtime event, then the record and the end; a caller that takes no event for 10 s is cut off while the turn goes on; the card says `capabilities.streaming: true` (story:a2a-record-and-streaming)
+- An A2A turn's line goes to the state directory's `record.jsonl` beside the poll's, and a repeated `messageId` is answered with that line and runs no second turn (`loom.agent.RecordA2aTurn`); `StateDir::held` and `HeldRecord` share the held record within the process (story:a2a-record-and-streaming)
 
 ### Changed
 
 - ESS moves from 0.84.0 to 0.85.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); generated Rust, the CRD and the reference pages are unchanged, and the commission domain graph names `0.85.0`
 - A `Command` resource whose `spec.agent` the `loom.agent/1` decoder refuses is refused with the decoder's reason at its member (`PortOutOfRange at spec.agent.expose.a2a.port`), not `Malformed at spec.agent`, as an `AgentServe` resource already was (story:operator-constraints-in-ess)
 - `b10x-loom agent stage-files` decides before writing anything: a refused stage leaves the destination as it was, where it could create it or copy keys before the refusal (story:operator-constraints-in-ess)
+- `loom.agent.AdmitA2aRequest` gains the input `stream` and the outcome `streamed`; `AdmitA2aRequest` (generated) gains `stream`, so a struct literal adds `stream: false` (story:a2a-record-and-streaming)
+- An A2A message needs a `messageId` (`-32602` without one), and its item is `a2a:<revision>` of it rather than `a2a:<task>` (story:a2a-record-and-streaming)
 
 ## [0.55.2] - 2026-11-03
 

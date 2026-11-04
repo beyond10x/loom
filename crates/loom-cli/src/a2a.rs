@@ -5,17 +5,24 @@
 //! listener's thread, so the host's agent is never shared between threads. A spec with
 //! `expose.a2a` and no `channel` polls nothing ([`answers_only`]): the listener is the host's main
 //! loop, and SIGTERM ends it as it ends the poll.
+//!
+//! The listener's turns are recorded in the state directory's `record.jsonl` under the lock the
+//! host holds: [`serve`] answers once the host of this process holds the directory (the polling
+//! host, or `agent serve` itself for a spec that polls nothing), and appends to the record it
+//! holds rather than opening the directory a second time.
 
 use std::net::{IpAddr, SocketAddr, TcpListener};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use b10x_loom_a2a::A2aServer;
 use b10x_loom_agent::serve::a2a::{
     AdmitServeOutcome, Answering, admit_serve, bearer, listener, port, serve_input,
 };
 use b10x_loom_agent::{HttpTrust, SpecPlugin};
+use b10x_loom_plugin::state::HeldRecord;
 use llm_core::{BoxFuture, Cancel, Capabilities, Model, Provenance, StreamSink, TurnRequest};
 use loom_sdk::agent::AgentSpec;
 
@@ -94,8 +101,27 @@ pub struct Agent<'a> {
     pub trust: HttpTrust,
 }
 
+/// How often [`serve`] looks whether the host holds the state directory yet.
+const HOLD_POLL: Duration = Duration::from_millis(20);
+
+/// The record of the state directory `state` once a host of this process holds it, or `None`
+/// when `stop` is set first.
+fn held_record(state: &Path, stop: &AtomicBool) -> Option<HeldRecord> {
+    loop {
+        if let Some(record) = HeldRecord::of(state) {
+            return Some(record);
+        }
+        if stop.load(Ordering::SeqCst) {
+            return None;
+        }
+        std::thread::sleep(HOLD_POLL);
+    }
+}
+
 /// Answers on `socket` until `stop` is set, building the listener's agent from `agent` on this
-/// thread. When the listener fails, `host_stop` is set, so the host ends after its current item.
+/// thread, once the host holds the state directory; its turns go to the record the host holds.
+/// When the listener fails, `host_stop` is set, so the host ends after its current item. A `stop`
+/// set before the host holds the directory ends this without answering.
 ///
 /// # Errors
 /// The agent cannot be built or the listener failed.
@@ -112,12 +138,15 @@ pub fn serve(
             .with_classifier(Box::new(SharedModel(agent.classifier)))
             .with_turn_models(turn_models(agent.model))
             .with_http_trust(agent.trust);
+        let Some(record) = held_record(agent.state, stop) else {
+            return Ok(());
+        };
         let at = socket
             .local_addr()
             .map_err(|error| format!("the A2A listener has no address: {error}"))?;
         eprintln!("b10x-loom: A2A listening on {at}");
         server
-            .serve(socket, &Answering::new(&plugin), stop)
+            .serve(socket, &Answering::new(&plugin).with_record(record), stop)
             .map_err(|error| format!("the A2A listener failed: {error}"))
     })();
     if served.is_err() {

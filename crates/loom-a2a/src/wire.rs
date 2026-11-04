@@ -8,7 +8,10 @@ use a2a::discovery::{
     AgentCapabilities, AgentCard, AgentInterface, AgentSkill, HTTPAuthSecurityScheme,
     SecurityRequirement, SecurityScheme,
 };
-use a2a::tasks::{Artifact, Message, Part, Role, TaskSnapshot, TaskStatus, WireTaskState};
+use a2a::tasks::{
+    Artifact, Message, Part, Role, TaskArtifactUpdateEvent, TaskSnapshot, TaskStatus,
+    TaskStatusUpdateEvent, WireTaskState,
+};
 use serde_json::{Map, Value, json};
 
 /// Inserts `value` under `name` when it is present.
@@ -211,6 +214,36 @@ pub fn task(task: &TaskSnapshot) -> Value {
         &mut object,
         "metadata",
         task.metadata.as_ref().map(json_value),
+    );
+    Value::Object(object)
+}
+
+/// A status update of a streamed task (`statusUpdate` of a `StreamResponse`).
+pub fn status_update(event: &TaskStatusUpdateEvent) -> Value {
+    let mut object = Map::new();
+    object.insert("taskId".to_owned(), json!(event.task_id.0));
+    object.insert("contextId".to_owned(), json!(event.context_id.0));
+    object.insert("status".to_owned(), status(&event.status));
+    optional(
+        &mut object,
+        "metadata",
+        event.metadata.as_ref().map(json_value),
+    );
+    Value::Object(object)
+}
+
+/// An artifact update of a streamed task (`artifactUpdate` of a `StreamResponse`).
+pub fn artifact_update(event: &TaskArtifactUpdateEvent) -> Value {
+    let mut object = Map::new();
+    object.insert("taskId".to_owned(), json!(event.task_id.0));
+    object.insert("contextId".to_owned(), json!(event.context_id.0));
+    object.insert("artifact".to_owned(), artifact(&event.artifact));
+    optional(&mut object, "append", event.append.map(Value::Bool));
+    optional(&mut object, "lastChunk", event.last_chunk.map(Value::Bool));
+    optional(
+        &mut object,
+        "metadata",
+        event.metadata.as_ref().map(json_value),
     );
     Value::Object(object)
 }

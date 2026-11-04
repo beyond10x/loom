@@ -13,13 +13,21 @@
 //!
 //! Each `RuntimeEvent` of the turn's run reaches the task as it happens. The case and its records
 //! are kept in the state directory as every turn's are, under the commission of the item
-//! `a2a:<task>` and the revision `b10x_loom_a2a::item_revision` derives from the message id.
+//! `a2a:<revision>`, the revision `b10x_loom_a2a::item_revision` derives from the message id.
+//!
+//! The turn's line goes to the state directory's `record.jsonl`, as a polled item's does, under
+//! the lock of the host that holds the directory ([`HeldRecord`]): the polling host of the same
+//! process, the one `agent serve` holds for a spec that polls nothing, or, when neither holds it,
+//! one [`Answering`] opens. Before a turn, `loom.agent.RecordA2aTurn` ([`record_a2a_turn`]) asks
+//! whether the record has a line for the item already: then the message was answered, no turn
+//! runs and the task ends with that line. A turn that could not run records nothing.
 //!
 //! The listener needs a bearer: [`bearer`] reads it from [`BEARER_ENV`], which the agent's Secret
 //! sets; serving refuses to start without it. A spec with `expose.a2a` and no `channel` is served
 //! too, polling nothing ([`admit_serve`]).
 
 use std::fmt;
+use std::sync::OnceLock;
 
 use b10x_loom_a2a::{A2aServer, Answerer, Bearer};
 
@@ -29,6 +37,7 @@ pub use b10x_loom_a2a::admit::{
 pub use b10x_loom_a2a::{a2a_refusal_spelling, admit_a2a_request};
 use b10x_loom_plugin::effects::HttpSources;
 use b10x_loom_plugin::project::SEND;
+use b10x_loom_plugin::state::{HeldRecord, StateDir};
 use b10x_loom_plugin::turn::{TURN_MODEL_BUDGET, TURN_STEP_BUDGET, stopped};
 use b10x_loom_plugin::{
     Classification, Host, InboundItem, PROTOCOL, Plugin, PluginError, Projection, RecordLine,
@@ -40,7 +49,21 @@ use loom_sdk::governor::{FileCaseStore, FileSuspensionStore};
 
 use super::SpecPlugin;
 
-pub use loom::agent::{AdmitServe, AdmitServeOutcome, ServeRefusalReason, ServeRefused};
+pub use loom::agent::{
+    AdmitServe, AdmitServeOutcome, RecordA2aTurn, RecordA2aTurnOutcome, ServeRefusalReason,
+    ServeRefused,
+};
+
+/// Decides `loom.agent.RecordA2aTurn` (`ess/domains/agent.yaml`): a message whose item the record
+/// has a line for already is `replayed`, answered with that line and no turn; any other is
+/// `turned`, its turn's line appended once.
+pub fn record_a2a_turn(input: &RecordA2aTurn) -> RecordA2aTurnOutcome {
+    if input.recorded {
+        RecordA2aTurnOutcome::Replayed
+    } else {
+        RecordA2aTurnOutcome::Turned
+    }
+}
 
 /// The environment variable holding the bearer every A2A request but a probe carries.
 pub const BEARER_ENV: &str = "LOOM_A2A_BEARER";
@@ -141,29 +164,52 @@ pub fn answer_projection(mut projection: Projection) -> Projection {
     projection
 }
 
-/// A served agent answering A2A messages: [`SpecPlugin`] under a host.
+/// A served agent answering A2A messages: [`SpecPlugin`] under a host, its turns recorded in the
+/// state directory's record (see the module documentation).
 pub struct Answering<'a> {
     plugin: &'a SpecPlugin,
     host: Host<'a>,
+    record: OnceLock<HeldRecord>,
 }
 
 impl<'a> Answering<'a> {
     /// `plugin` under the host of its configuration, as `run_plugin` builds it.
     pub fn new(plugin: &'a SpecPlugin) -> Self {
-        Self {
-            plugin,
-            host: Host::new(&plugin.config),
-        }
+        Self::with_host(plugin, Host::new(&plugin.config))
     }
 
     /// `plugin` under `host`.
     pub fn with_host(plugin: &'a SpecPlugin, host: Host<'a>) -> Self {
-        Self { plugin, host }
+        Self {
+            plugin,
+            host,
+            record: OnceLock::new(),
+        }
     }
-}
 
-impl Answerer for Answering<'_> {
-    fn answer(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String> {
+    /// Records every turn in `record`, the record of `plugin`'s state directory a host of this
+    /// process holds.
+    #[must_use]
+    pub fn with_record(self, record: HeldRecord) -> Self {
+        let _ = self.record.set(record);
+        self
+    }
+
+    /// The record turns go to: the one given, else the one a host of this process holds for the
+    /// state directory, else the directory opened and held here, until this is dropped.
+    fn record(&self) -> Result<&HeldRecord, PluginError> {
+        if let Some(record) = self.record.get() {
+            return Ok(record);
+        }
+        let record = match HeldRecord::of(&self.plugin.state) {
+            Some(record) => record,
+            None => StateDir::open(&self.plugin.state, &self.plugin.config)?.held(),
+        };
+        Ok(self.record.get_or_init(|| record))
+    }
+
+    /// The governed turn on `item` (see the module documentation) and its record line.
+    fn turn(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String> {
         let error = |error: PluginError| error.to_string();
         let (plugin, host) = (self.plugin, &self.host);
         let threshold = host.threshold().map_err(error)?;
@@ -194,6 +240,23 @@ impl Answerer for Answering<'_> {
             .answer_turn(host, item, &classification, &projection, Some(events))
             .map_err(error)?;
         Ok(plugin.result(item, &classification, turn))
+    }
+}
+
+impl Answerer for Answering<'_> {
+    fn answer(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String> {
+        let error = |error: PluginError| error.to_string();
+        let record = self.record().map_err(error)?;
+        let recorded = record.line_of(&item.id).map_err(error)?;
+        let decided = record_a2a_turn(&RecordA2aTurn {
+            recorded: recorded.is_some(),
+        });
+        if let (RecordA2aTurnOutcome::Replayed, Some(line)) = (decided, recorded) {
+            return Ok(line);
+        }
+        let line = self.turn(item, events)?;
+        record.append(&line).map_err(error)?;
+        Ok(line)
     }
 }
 
