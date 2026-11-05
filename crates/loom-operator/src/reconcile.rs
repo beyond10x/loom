@@ -53,8 +53,12 @@
 //!    Its own CronJob still being deleted is waited for the same way. Meanwhile, and while a
 //!    predecessor's children go with no live CronJob of its own, a scheduled resource's
 //!    `Available` reads False `WorkloadTerminating` naming them (story
-//!    schedule-available-after-cronjob), never `Scheduled` before its CronJob exists; a reconcile
-//!    that fails after the CronJob's apply returned publishes the status without the wait. The
+//!    schedule-available-after-cronjob), never `Scheduled` before its CronJob exists. A resource
+//!    without `spec.schedule` whose Job waits so for a CronJob of its name (the schedule removed,
+//!    or a scheduled predecessor's) reads `Available` False `WorkloadTerminating` naming it (story
+//!    job-available-after-cronjob), and its Job's run once the Job is created. A reconcile that
+//!    fails after the CronJob's or the Job's apply returned publishes the status without the
+//!    wait. The
 //!    CronJob is applied on every reconcile, so a new generation patches its schedule and job
 //!    template in place. The runs it starts are Kubernetes's: never applied, deleted or counted
 //!    as the resource's children. The newest finished one whose controlling owner is the
@@ -1165,15 +1169,16 @@ enum Observed {
 /// Before a `Command` resource's Job is created: deletes the Job of another generation `stale`
 /// names, the CronJob of the Job's name (the resource was scheduled before), and a Deployment of
 /// that name (one an earlier release made for a `Command` resource), each one the resource or a
-/// predecessor controls, and answers those not yet gone, each as kind and name
-/// (`Job platform-operator`). Before a scheduled resource's CronJob is created, the same for the
-/// Job and the Deployment of its name, and the resource's own CronJob when `found`, the survey,
-/// reads it being deleted (the schedule removed and given back while it terminates): an apply
-/// would land on a CronJob that starts no run and is about to go. Until all are gone, nothing is
-/// applied, so an old pod and
-/// the new run never share the workspace, and a Job and a CronJob of one resource never coexist;
-/// a scheduled resource's status names them meanwhile ([`status::Scheduled::terminating`]). An
-/// `AgentServe` resource's Deployment waits for nothing: it is updated in place, `Recreate`.
+/// predecessor controls, and answers those not yet gone, each as kind and name. Before a
+/// scheduled resource's CronJob is created, the same for the Job and the Deployment of its name,
+/// and the resource's own CronJob when `found`, the survey, reads it being deleted (the schedule
+/// removed and given back while it terminates): an apply would land on a CronJob that starts no
+/// run and is about to go. Until all are gone, nothing is applied, so an old pod and the new run
+/// never share the workspace, and a Job and a CronJob of one resource never coexist; a scheduled
+/// resource's status names them meanwhile ([`status::Scheduled::terminating`]), and so does a
+/// single-run resource's while a CronJob is among them (story job-available-after-cronjob,
+/// [`publish`]). An `AgentServe` resource's Deployment waits for nothing: it is updated in place,
+/// `Recreate`.
 async fn workloads_terminating(
     ctx: &Context,
     namespace: &str,
@@ -1182,7 +1187,7 @@ async fn workloads_terminating(
     children: &Children,
     stale: Option<(&Surveyed, &String, &JobRun)>,
     found: &[Surveyed],
-) -> Result<Vec<String>, kube::Error> {
+) -> Result<Vec<(Kind, String)>, kube::Error> {
     let others: &[Kind] = match children.workload {
         Workload::Deployment(_) => return Ok(Vec::new()),
         Workload::Job(_) => &[Kind::CronJob, Kind::Deployment],
@@ -1193,7 +1198,7 @@ async fn workloads_terminating(
         if delete_kind(job.kind, &ctx.client, namespace, &job.name, uid).await? {
             ctx.unremember(resource, job.kind, &job.name);
         } else {
-            terminating.push(named(job.kind, &job.name));
+            terminating.push((job.kind, job.name.clone()));
         }
     }
     let workload = children.workload.name();
@@ -1204,12 +1209,12 @@ async fn workloads_terminating(
             if delete_kind(kind, &ctx.client, namespace, &workload, &uid).await? {
                 ctx.unremember(resource, kind, &workload);
             } else {
-                terminating.push(named(kind, &workload));
+                terminating.push((kind, workload.clone()));
             }
         }
     }
     if matches!(children.workload, Workload::CronJob(_)) && own_cron_job(found, true) {
-        terminating.push(named(Kind::CronJob, &workload));
+        terminating.push((Kind::CronJob, workload));
     }
     Ok(terminating)
 }
@@ -1222,14 +1227,15 @@ fn named(kind: Kind, name: &str) -> String {
 /// Applies `children`, and answers what the applied workload reports. A Job of this generation
 /// that already runs (`running`, the phase it was read with) is not sent again: its pod template
 /// cannot change, and one rendered since (a new default image, new default resources) would be
-/// refused as immutable for as long as the run lasts. `cron_job_applied` turns true once a
-/// CronJob's apply has returned, so a caller whose later apply fails knows the CronJob exists.
+/// refused as immutable for as long as the run lasts. `workload_applied` turns true once a
+/// CronJob's or a created Job's apply has returned, so a caller whose later apply fails knows the
+/// workload exists.
 async fn apply_children(
     client: &Client,
     namespace: &str,
     children: &Children,
     running: Option<RunPhase>,
-    cron_job_applied: &mut bool,
+    workload_applied: &mut bool,
 ) -> Result<Observed, kube::Error> {
     apply(client, namespace, &children.service_account).await?;
     apply(client, namespace, &children.config_map).await?;
@@ -1240,11 +1246,12 @@ async fn apply_children(
         (Workload::Job(_), Some(phase)) => Observed::Job(phase, None),
         (Workload::Job(job), None) => {
             let applied = apply(client, namespace, job).await?;
+            *workload_applied = true;
             Observed::Job(run_phase(&applied), Some(Box::new(applied)))
         }
         (Workload::CronJob(cron_job), _) => {
             let applied = apply(client, namespace, &**cron_job).await?;
-            *cron_job_applied = true;
+            *workload_applied = true;
             Observed::CronJob(Box::new(applied))
         }
     };
@@ -1300,26 +1307,41 @@ async fn observe_scheduled(
 
 /// Publishes `row` as the status of the resource `agent`, named `name`, unless its status already
 /// reads so. `terminating` names the children this reconcile waits for before it applies any
-/// (empty when it applied them): a scheduled resource then has no CronJob yet, and its
-/// `Available` says so ([`status::Scheduled::terminating`]).
+/// (empty when it applied them), each as kind and name: a scheduled resource then has no CronJob
+/// yet, and its `Available` says so ([`status::Scheduled::terminating`]); nor has a resource
+/// without `spec.schedule` a Job while a CronJob is among them, the switch back from a schedule
+/// or a scheduled predecessor's (story job-available-after-cronjob, `switching` of
+/// [`status::status_of`]). A Job that waits only for an older Job or Deployment keeps reading its
+/// run.
 async fn publish(
     ctx: &Context,
     namespace: &str,
     name: &str,
     agent: &LoomAgent,
     row: &LoomAgents,
-    terminating: &[String],
+    terminating: &[(Kind, String)],
 ) -> Result<(), kube::Error> {
     let current = agent.status.as_ref();
+    let waits: Vec<String> = terminating
+        .iter()
+        .map(|(kind, child)| named(*kind, child))
+        .collect();
+    let switching = if agent.spec.schedule.is_none()
+        && terminating.iter().any(|(kind, _)| *kind == Kind::CronJob)
+    {
+        waits.clone()
+    } else {
+        Vec::new()
+    };
     let scheduled = agent
         .spec
         .schedule
         .as_ref()
         .map(|schedule| status::Scheduled {
             suspended: schedule.suspend.unwrap_or(false),
-            terminating: terminating.to_vec(),
+            terminating: waits,
         });
-    let mut status = status::status_of(row, scheduled);
+    let mut status = status::status_of(row, scheduled, &switching);
     if let Some(code) = ctx.pods_refused(name) {
         status::pods_unread(&mut status, code);
     }
@@ -1338,13 +1360,13 @@ async fn publish(
     Ok(())
 }
 
-/// Publishes the status of the scheduled resource `agent`, named `name`, waiting for nothing, for
-/// a reconcile that failed after its CronJob was applied (story
-/// schedule-available-after-cronjob): the CronJob exists and starts runs, so a status an earlier
-/// round published while it waited (`Available` False `WorkloadTerminating`) no longer stands,
-/// though the reconcile itself fails and comes again. A publish that fails too is logged; the
-/// reconcile's own error is the one returned.
-async fn cron_job_failed_after_apply(
+/// Publishes the status of the `Command` resource `agent`, named `name`, waiting for nothing, for
+/// a reconcile that failed after its CronJob's or its Job's apply returned (stories
+/// schedule-available-after-cronjob, job-available-after-cronjob): the workload exists and runs,
+/// so a status an earlier round published while it waited (`Available` False
+/// `WorkloadTerminating`) no longer stands, though the reconcile itself fails and comes again. A
+/// publish that fails too is logged; the reconcile's own error is the one returned.
+async fn workload_failed_after_apply(
     ctx: &Context,
     namespace: &str,
     name: &str,
@@ -1354,7 +1376,7 @@ async fn cron_job_failed_after_apply(
     if let Some(row) = row(ctx, key)
         && let Err(error) = publish(ctx, namespace, name, agent, &row, &[]).await
     {
-        eprintln!("b10x-loom-operator: {name}: the status after the CronJob's apply: {error}");
+        eprintln!("b10x-loom-operator: {name}: the status after the workload's apply: {error}");
     }
 }
 
@@ -1475,7 +1497,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 for child in predecessors {
                     if let Holding::Predecessor(uid) = &child.holding {
                         delete_kind(child.kind, &ctx.client, &namespace, &child.name, uid).await?;
-                        deleted.push(named(child.kind, &child.name));
+                        deleted.push((child.kind, child.name.clone()));
                     }
                 }
                 if own_cron_job(&found, false) {
@@ -1532,7 +1554,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                         ctx.remember(&name, *kind, child);
                     }
                     let phase = running.map(|run| run.phase);
-                    let mut cron_job_applied = false;
+                    let mut workload_applied = false;
                     let round = async {
                         let mut ending = false;
                         match apply_children(
@@ -1540,7 +1562,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                             &namespace,
                             children,
                             phase,
-                            &mut cron_job_applied,
+                            &mut workload_applied,
                         )
                         .await?
                         {
@@ -1574,8 +1596,8 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     match round {
                         Ok(end) => ending = end,
                         Err(error) => {
-                            if cron_job_applied {
-                                cron_job_failed_after_apply(&ctx, &namespace, &name, &agent, &key)
+                            if workload_applied {
+                                workload_failed_after_apply(&ctx, &namespace, &name, &agent, &key)
                                     .await;
                             }
                             return Err(error);
