@@ -1503,6 +1503,26 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                 if own_cron_job(&found, false) {
                     deleted.clear();
                 }
+                // A single-run resource's survey reads no CronJob (`wanted` names the Job), yet a
+                // CronJob of the Job's name, a scheduled predecessor's or its own, holds the Job
+                // back as much as the children just deleted (story job-available-after-cronjob).
+                // It is named here so `Available` reads the wait in this round, and deleted by
+                // `workloads_terminating` once the predecessor's children are gone.
+                if matches!(children.workload, Workload::Job(_)) {
+                    let workload = children.workload.name();
+                    if let Holding::Ours(_) | Holding::Predecessor(_) = held_kind(
+                        Kind::CronJob,
+                        &ctx.client,
+                        &namespace,
+                        &workload,
+                        &name,
+                        &owner,
+                    )
+                    .await?
+                    {
+                        deleted.push((Kind::CronJob, workload));
+                    }
+                }
                 if let Some(row) = row(&ctx, &key) {
                     publish(&ctx, &namespace, &name, &agent, &row, &deleted).await?;
                 }
