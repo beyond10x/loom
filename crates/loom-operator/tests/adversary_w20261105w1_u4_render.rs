@@ -141,7 +141,9 @@ fn adv_u4_the_starting_deadline_bound_keeps_its_order_and_its_edge() {
         Some(9_223_372_036)
     );
     let past = render_document(
-        &command_with("  schedule: {cron: '0 3 * * *', startingDeadlineSeconds: 9223372036854775808}\n"),
+        &command_with(
+            "  schedule: {cron: '0 3 * * *', startingDeadlineSeconds: 9223372036854775808}\n",
+        ),
         &config(),
     );
     assert!(past.is_err(), "{past:?}");

@@ -441,7 +441,10 @@ async fn adv_u4_a_reconcile_failing_after_the_cronjob_is_applied_leaves_workload
     fake.refuse(NETWORK_POLICY);
     for round in 0..2 {
         let answer = reconcile(Arc::new(scheduled_agent(2)), Arc::clone(&ctx)).await;
-        assert!(answer.is_err(), "{round}: the NetworkPolicy apply is refused");
+        assert!(
+            answer.is_err(),
+            "{round}: the NetworkPolicy apply is refused"
+        );
         assert!(fake.holds_live(CRON_JOB), "{round}: the CronJob is applied");
     }
     let (status, reason, message) = condition(&last_published(&statuses), "Available");
@@ -458,8 +461,7 @@ async fn adv_u4_a_reconcile_failing_after_the_cronjob_is_applied_leaves_workload
 /// holds: `Available` reads False `WorkloadTerminating` "before the CronJob is created; no run
 /// starts until then", though the CronJob exists, is not touched, and starts runs.
 #[tokio::test]
-async fn adv_u4_a_predecessors_account_beside_a_live_cronjob_does_not_read_workload_terminating()
-{
+async fn adv_u4_a_predecessors_account_beside_a_live_cronjob_does_not_read_workload_terminating() {
     let (client, fake, statuses) = fake();
     let ctx = context(client);
     reconciled(scheduled_agent(1), &ctx).await;
@@ -482,7 +484,10 @@ async fn adv_u4_a_predecessors_account_beside_a_live_cronjob_does_not_read_workl
         "service_account: platform-operator-runner",
     );
     reconciled(agent(2, &renamed, &rest(SCHEDULE)), &ctx).await;
-    assert!(fake.holds_live(CRON_JOB), "the CronJob of generation 1 stays");
+    assert!(
+        fake.holds_live(CRON_JOB),
+        "the CronJob of generation 1 stays"
+    );
     let (status, reason, message) = condition(&last_published(&statuses), "Available");
     assert!(
         !message.contains("before the CronJob is created"),
@@ -516,12 +521,17 @@ async fn adv_u4_a_deletion_that_never_completes_keeps_one_stable_message() {
         assert_eq!(action, Action::requeue(Duration::from_secs(30)));
         assert!(!fake.holds(CRON_JOB));
         let (status, reason, message) = condition(&last_published(&statuses), "Available");
-        assert_eq!((status.as_str(), reason.as_str()), ("False", "WorkloadTerminating"));
+        assert_eq!(
+            (status.as_str(), reason.as_str()),
+            ("False", "WorkloadTerminating")
+        );
         messages.insert(message);
     }
     assert_eq!(
         messages.into_iter().collect::<Vec<_>>(),
-        ["waiting for Job platform-operator, Deployment platform-operator to be deleted before \
-          the CronJob is created; no run starts until then"]
+        [
+            "waiting for Job platform-operator, Deployment platform-operator to be deleted before \
+          the CronJob is created; no run starts until then"
+        ]
     );
 }
