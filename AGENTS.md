@@ -1280,10 +1280,14 @@ an AgentServe resource is ever Degraded).
 A `Command` resource with `spec.schedule` has a CronJob in its Job's place: before it is created
 the resource's Job and a Deployment of its name are deleted, and before a Job is created the
 resource's CronJob, each in the foreground with a uid precondition, nothing applied while one
-terminates (requeue 30 s), so the two never coexist. While a scheduled resource waits so, or for
-a predecessor's child, `Available` reads False `WorkloadTerminating` naming the children it waits
-for (`status::Scheduled::terminating`, `story:schedule-available-after-cronjob`), and True
-`Scheduled` only once the CronJob is created. The CronJob is applied on every reconcile, so
+terminates (requeue 30 s), so the two never coexist. Its own CronJob still being deleted (the
+schedule removed and given back meanwhile) is waited for too, never applied to. While a
+scheduled resource waits so, or, with no live CronJob of its own, for a predecessor's child,
+`Available` reads False `WorkloadTerminating` naming the children it waits for
+(`status::Scheduled::terminating`, `story:schedule-available-after-cronjob`), and True
+`Scheduled` only once the CronJob is created; a reconcile that fails after the CronJob's apply
+returned still publishes the status without the wait before it returns the error. The CronJob is
+applied on every reconcile, so
 a new generation patches its schedule and template. The Jobs it starts are Kubernetes's (their
 controller is the CronJob, so the sweep never counts them): of those labelled
 `app.kubernetes.io/instance=<name>` whose controlling owner is the CronJob's uid, the newest
