@@ -386,6 +386,55 @@ types:
       - name: schedule
         type: Optional<loom.resource.ScheduleSpec>
 
+  # Why the controller refuses a resource before any child exists (story
+  # operator-constraints-in-ess), one reason per refusal of `AdmitLoomAgent`. The first fourteen
+  # are `loom.agent.RefusalReason`'s, answered for `spec.agent` by the check `b10x-loom agent
+  # check` runs on an `AgentServe` resource, and by its credential walk and its decoder on a
+  # `Command` resource; `Malformed` and `SecretLiteral` also answer the controller's own reading
+  # of the other members. The rest are the controller's: empty routes and no model the pod can
+  # reach (`NoModelRoute`); a text beyond what the credential walk reads, or a ConfigMap beyond
+  # Kubernetes's 1 MiB (`TooLarge`); a `spec.boundary` beside a Secret (`BoundaryWithSecret`), an
+  # upstream that is no plain `http://` URL of a cluster service (`BoundaryUpstreamInvalid`), an
+  # upstream or audience no `allowedBoundaryUpstreams` entry gives (`BoundaryUpstreamNotAllowed`),
+  # an egress entry naming a host or a namespace beside it (`BoundaryEgressHost`,
+  # `BoundaryEgressNamespace`); a Secret outside `allowedSecretNames` (`SecretNotAllowed`); a
+  # `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`); an egress entry
+  # naming no destination or a host outside `allowedEgressHosts` (`EgressHostNotAllowed`); a
+  # `spec.env` name the controller sets or an earlier entry gives (`EnvNameConflict`); a
+  # `spec.configFiles` name that is no plain file name (`ConfigFileInvalid`) or one the ConfigMap
+  # already holds (`ConfigFileConflict`); a mount path that is not absolute and plain or overlaps
+  # one the controller mounts (`MountPathInvalid`); a claim outside `allowedClaimNames`
+  # (`ClaimNotAllowed`); a seccomp or AppArmor profile out of form (`ProfileInvalid`) or not allowed
+  # (`ProfileNotAllowed`); a `Command` resource nobody sized (`ResourcesRequired`).
+  - name: loom.resource.AdmissionRefusalReason
+    kind: enum
+    variants:
+      [Malformed, SecretLiteral, UnknownFormat, BlankText, NotAVariableName, PortOutOfRange,
+       NotAPlainPath, NotAnInstant, UnknownProtocol, UnknownAction, UnboundSource, HttpMethod,
+       SendWithoutWrites, EmptyChannelAllow, NoModelRoute, TooLarge, BoundaryWithSecret,
+       BoundaryUpstreamInvalid, BoundaryUpstreamNotAllowed, BoundaryEgressHost,
+       BoundaryEgressNamespace, SecretNotAllowed, NamespaceMismatch, EgressHostNotAllowed,
+       EnvNameConflict, ConfigFileInvalid, ConfigFileConflict, MountPathInvalid, ClaimNotAllowed,
+       ProfileInvalid, ProfileNotAllowed, ResourcesRequired]
+
+  # What `b10x-loom agent stage-files --to` names when it starts (story
+  # operator-constraints-in-ess): nothing, a directory, a symbolic link, or anything else.
+  - name: loom.resource.StageDestination
+    kind: enum
+    variants: [Absent, Directory, Link, Other]
+
+  # Why `b10x-loom agent stage-files` stages nothing (story operator-constraints-in-ess), one
+  # reason per refusal of `StageFiles`: `--to` is a link, which a copy would follow
+  # (`DestinationIsALink`), or neither absent nor a directory (`DestinationNotADirectory`); a name
+  # in the Secret volume is not UTF-8 (`NameNotUtf8`); a key resolves to a path outside the volume
+  # (`KeyOutsideVolume`); `--to` holds a directory, keyed or not, which staging would have to
+  # recurse into or replace (`StaleDirectory`).
+  - name: loom.resource.StageRefusalReason
+    kind: enum
+    variants:
+      [DestinationIsALink, DestinationNotADirectory, NameNotUtf8, KeyOutsideVolume,
+       StaleDirectory]
+
 entities:
   # One `LoomAgent` resource as the controller holds it. `observed_generation` is the
   # `metadata.generation` of the spec the controller last applied, the spec staying in the cluster;
@@ -496,6 +545,25 @@ errors:
     fields:
       - name: name
         type: loom.resource.ResourceName
+
+  # The refusal of `AdmitLoomAgent`: why, which member of the resource (spelt from it, such as
+  # `spec.agent.bindings[1].base_url` or `spec.workspace.mountPath`), and what is wrong with it,
+  # never repeating a value of the resource. The controller records it as `RecordCheck`'s message,
+  # `refused: <reason> at <member>: <detail>`.
+  - name: loom.resource.AdmissionRefused
+    fields:
+      - name: reason
+        type: loom.resource.AdmissionRefusalReason
+      - name: member
+        type: String
+      - name: detail
+        type: String
+
+  # The refusal of `StageFiles`: why. The command exits 1 naming the path, and stages nothing.
+  - name: loom.resource.StageRefused
+    fields:
+      - name: reason
+        type: loom.resource.StageRefusalReason
 
 events:
   - name: loom.resource.LoomAgentApplied
@@ -944,6 +1012,237 @@ commands:
         payload:
           loom.resource.LoomAgentNotFound:
             name: input.name
+
+  # Whether the controller admits the `LoomAgent` document at `path` (story
+  # operator-constraints-in-ess): the checks before any child is rendered, whose answer
+  # `RecordCheck` records for the generation (`b10x-loom-operator`'s `admission::admit`, then the
+  # name a scheduled resource's CronJob carries). The resource and the controller's configuration
+  # it is admitted under (its allowed Secrets, egress hosts, claims, profiles and boundary
+  # upstreams, its model route and its default sizes) are outside the input, so every refusal is
+  # external. The first refusal is the answer, in the order the operator's admission module
+  # documents; a resource none of them claims is admitted. Nothing is rendered, nothing is read but
+  # the resource and the configuration, and nothing is held between two admissions.
+  - name: loom.resource.AdmitLoomAgent
+    input:
+      - name: path
+        type: String
+    outcomes:
+      - name: malformed
+        external: a member of the resource does not decode, or breaks a rule no other reason names
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: Malformed}
+      - name: secret-literal
+        external: a member of the resource holds a credential
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: SecretLiteral}
+      - name: unknown-format
+        external: spec.agent's format is not loom.agent/1
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: UnknownFormat}
+      - name: blank-text
+        external: a text member of spec.agent is empty or only whitespace
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BlankText}
+      - name: not-a-variable-name
+        external: a bearer_env of spec.agent, or a spec.env name, is not an environment variable name
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: NotAVariableName}
+      - name: port-out-of-range
+        external: a port of spec.agent is outside 1 to 65535
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: PortOutOfRange}
+      - name: not-a-plain-path
+        external: an allow_paths entry of an http binding of spec.agent is not a plain path
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: NotAPlainPath}
+      - name: not-an-instant
+        external: a Timestamp member of spec.agent is not an RFC 3339 instant
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: NotAnInstant}
+      - name: unknown-protocol
+        external: the inner loop of an AgentServe resource's spec.agent names a protocol the plugin catalog does not hold
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: UnknownProtocol}
+      - name: unknown-action
+        external: a state of an AgentServe resource's spec.agent names an action its protocol does not declare
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: UnknownAction}
+      - name: unbound-source
+        external: a state, the outer loop or the channel of an AgentServe resource's spec.agent names a source no binding declares
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: UnboundSource}
+      - name: http-method
+        external: an http binding of an AgentServe resource's spec.agent has a method other than GET
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: HttpMethod}
+      - name: send-without-writes
+        external: an AgentServe resource's spec.agent has reply.send among its capabilities while writes are none or undeclared
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: SendWithoutWrites}
+      - name: empty-channel-allow
+        external: the channel of an AgentServe resource's spec.agent allows no channel id
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: EmptyChannelAllow}
+      - name: no-model-route
+        external: spec.routes is empty and the pod would reach no model
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: NoModelRoute}
+      - name: too-large
+        external: a member is beyond what the credential walk reads, or the ConfigMap beyond 1 MiB
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: TooLarge}
+      - name: boundary-with-secret
+        external: spec.boundary stands beside spec.secretRef or spec.secretFiles
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryWithSecret}
+      - name: boundary-upstream-invalid
+        external: a boundary upstream is no plain http URL of a cluster service
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryUpstreamInvalid}
+      - name: boundary-upstream-not-allowed
+        external: no allowedBoundaryUpstreams entry gives a boundary upstream's kind, URL and audience exactly
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryUpstreamNotAllowed}
+      - name: boundary-egress-host
+        external: beside spec.boundary, an egress entry of spec.agent names a host
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryEgressHost}
+      - name: boundary-egress-namespace
+        external: beside spec.boundary, an egress entry of spec.agent names a namespace
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryEgressNamespace}
+      - name: secret-not-allowed
+        external: spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: SecretNotAllowed}
+      - name: namespace-mismatch
+        external: spec.agent's deploy.kubernetes.namespace is not the resource's namespace
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: NamespaceMismatch}
+      - name: egress-host-not-allowed
+        external: an egress entry of spec.agent names no destination, or a host outside allowedEgressHosts
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: EgressHostNotAllowed}
+      - name: env-name-conflict
+        external: a spec.env name is one the controller sets, or one an earlier entry gives
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: EnvNameConflict}
+      - name: config-file-invalid
+        external: a spec.configFiles name is no plain file name
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: ConfigFileInvalid}
+      - name: config-file-conflict
+        external: a spec.configFiles name is one an earlier entry gives, or one the ConfigMap already holds
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: ConfigFileConflict}
+      - name: mount-path-invalid
+        external: a workspace or Secret mount path is not absolute and plain, or overlaps a mount the controller makes or the other one
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: MountPathInvalid}
+      - name: claim-not-allowed
+        external: spec.workspace names a claim outside allowedClaimNames
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: ClaimNotAllowed}
+      - name: profile-invalid
+        external: a seccomp or AppArmor profile is out of form
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: ProfileInvalid}
+      - name: profile-not-allowed
+        external: a seccomp or AppArmor profile is Unconfined or Localhost without the configuration allowing it
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: ProfileNotAllowed}
+      - name: resources-required
+        external: a Command resource declares no size and the configuration gives no defaultCommandResources
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: ResourcesRequired}
+      - name: admitted
+        accepts: nothing
+
+  # What `b10x-loom agent stage-files --from <volume> --to <dir>` does with what it found (story
+  # operator-constraints-in-ess), decided before it writes anything: `destination` is what `--to`
+  # is; `names_utf8` whether every name in the Secret volume `--from` is UTF-8; `keys_inside`
+  # whether every key (a name not starting with `..`) resolves to a path inside the volume;
+  # `stale_directory` whether `--to` holds any directory, keyed or not. The
+  # first refusal in declaration order is the answer, and a refused staging writes nothing.
+  # Otherwise `--to` is created when absent, its mode set to `directory_mode` and each key that is
+  # a regular file copied, in name order, to a new file of mode `file_mode` (never through what
+  # stood there before), and each other entry of `--to` removed, so a key dropped from the Secret
+  # does not stay staged. Both are owned by the user the command runs as, the pod's.
+  - name: loom.resource.StageFiles
+    input:
+      - name: destination
+        type: loom.resource.StageDestination
+      - name: names_utf8
+        type: Boolean
+      - name: keys_inside
+        type: Boolean
+      - name: stale_directory
+        type: Boolean
+    response:
+      - name: directory_mode
+        type: Integer
+      - name: file_mode
+        type: Integer
+    outcomes:
+      - name: destination-is-a-link
+        when: destination == Link
+        error: loom.resource.StageRefused
+        payload:
+          loom.resource.StageRefused: {reason: DestinationIsALink}
+      - name: destination-not-a-directory
+        when: destination == Other
+        error: loom.resource.StageRefused
+        payload:
+          loom.resource.StageRefused: {reason: DestinationNotADirectory}
+      - name: name-not-utf8
+        when: names_utf8 == false
+        error: loom.resource.StageRefused
+        payload:
+          loom.resource.StageRefused: {reason: NameNotUtf8}
+      - name: key-outside-volume
+        when: keys_inside == false
+        error: loom.resource.StageRefused
+        payload:
+          loom.resource.StageRefused: {reason: KeyOutsideVolume}
+      - name: stale-directory
+        when: stale_directory == true
+        error: loom.resource.StageRefused
+        payload:
+          loom.resource.StageRefused: {reason: StaleDirectory}
+      - name: staged
+        returns: true
 
 views:
   # Every resource the controller holds, one row each, with the fields its status publishes. It

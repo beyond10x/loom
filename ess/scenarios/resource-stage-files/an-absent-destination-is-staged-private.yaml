@@ -1,0 +1,13 @@
+# story operator-constraints-in-ess: an absent destination is created; the directory is 0700
+# and every copied file 0600, readable by the agent's user only.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-absent-destination-is-staged-private
+summary: An absent destination is staged with mode 0700 and its files with 0600.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.StageFiles
+    input: {destination: Absent, names_utf8: true, keys_inside: true, stale_directory: false}
+    outcome: staged
+    response: {directory_mode: 448, file_mode: 384}

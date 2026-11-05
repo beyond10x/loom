@@ -4,7 +4,11 @@
 //! and in time as a whole, not only per read: the head must arrive within [`HEAD_DEADLINE`] of the
 //! connection's start, the body within [`BODY_DEADLINE`] of the head's end, the answer be written
 //! within [`WRITE_DEADLINE`], so a caller trickling a byte at a time cannot hold memory or a
-//! connection without end.
+//! connection without end. An answer of server-sent events ([`Connection::stream`]) has no length:
+//! it ends when the connection closes, and its head and each of its events must be written within
+//! [`WRITE_DEADLINE`]: a write the connection's buffers cannot take that long fails. A caller that
+//! stops reading is noticed only once its buffers are full, so the listener also cuts a stream
+//! that carries no event for its idle bound (`crate::STREAM_IDLE`, 300 s).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -301,15 +305,44 @@ impl Connection {
         }
         text.push_str("\r\n");
         text.push_str(&response.body);
-        let deadlines = self.deadlines;
+        let _ = self.write(text.as_bytes());
+        self.close();
+    }
+
+    /// Starts an answer of server-sent events: the head of a `200` `text/event-stream` answer,
+    /// its body delimited by closing the connection. The head and then each event is written
+    /// within [`WRITE_DEADLINE`] of its start ([`EventStream::event`]).
+    ///
+    /// # Errors
+    /// The head could not be written in time: the connection is cut.
+    pub fn stream(mut self) -> io::Result<EventStream> {
+        let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+        match self.write(head.as_bytes()) {
+            Ok(()) => Ok(EventStream { connection: self }),
+            Err(error) => {
+                self.cut();
+                Err(error)
+            }
+        }
+    }
+
+    /// Writes `bytes` whole within the answer's bound, from now.
+    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let write = self.deadlines.write;
         let timed = self.reader.get_mut();
-        timed.deadline = Instant::now() + deadlines.write;
-        let _ = timed.write_all(text.as_bytes());
-        let _ = timed.flush();
+        timed.deadline = Instant::now() + write;
+        timed.write_all(bytes)?;
+        timed.flush()
+    }
+
+    /// Ends the answer and closes the connection, draining what the caller still sends.
+    fn close(mut self) {
+        let drain = self.deadlines.drain;
+        let timed = self.reader.get_mut();
         let _ = timed.stream.shutdown(std::net::Shutdown::Write);
         // Whatever the caller still sends is drained, briefly and for a bounded time as a whole,
         // so closing does not reset the connection before the caller has read the answer.
-        timed.deadline = Instant::now() + deadlines.drain;
+        timed.deadline = Instant::now() + drain;
         let mut rest = [0_u8; 1024];
         let mut drained = 0;
         while drained < MAX_BODY {
@@ -318,6 +351,44 @@ impl Connection {
                 Ok(read) => drained += read,
             }
         }
+    }
+
+    /// Cuts the connection at once: nothing more is written or read.
+    fn cut(self) {
+        let _ = self
+            .reader
+            .get_ref()
+            .stream
+            .shutdown(std::net::Shutdown::Both);
+    }
+}
+
+/// An answer of server-sent events (see [`Connection::stream`]).
+pub struct EventStream {
+    connection: Connection,
+}
+
+impl EventStream {
+    /// Writes one event whose data is `data`, one line of JSON, within [`WRITE_DEADLINE`] from
+    /// now: once the buffers between the listener and the caller are full and stay full that long,
+    /// this fails, and the stream is then [`EventStream::cut`].
+    ///
+    /// # Errors
+    /// The event could not be written whole in time, or the caller went away.
+    pub fn event(&mut self, data: &str) -> io::Result<()> {
+        self.connection
+            .write(format!("data: {data}\n\n").as_bytes())
+    }
+
+    /// Ends the stream after its last event and closes the connection as [`Connection::answer`]
+    /// does.
+    pub fn end(self) {
+        self.connection.close();
+    }
+
+    /// Cuts the stream: the connection is shut at once, its last event perhaps unsent.
+    pub fn cut(self) {
+        self.connection.cut();
     }
 }
 
@@ -399,6 +470,36 @@ mod tests {
             "{:?}",
             started.elapsed()
         );
+    }
+
+    /// A caller that takes nothing of a stream is cut off once one event waited the answer's
+    /// bound: the events before it fill the buffers between the two, and the next cannot be
+    /// written.
+    #[test]
+    fn an_event_stream_its_caller_does_not_read_is_cut_at_the_answer_bound() {
+        let (connection, caller) = pair();
+        let mut stream = connection.stream().expect("the head is written");
+        let event = format!("\"{}\"", "x".repeat(1024 * 1024));
+        let started = Instant::now();
+        let mut written = 0_usize;
+        let failed = loop {
+            if let Err(error) = stream.event(&event) {
+                break error;
+            }
+            written += 1;
+            assert!(written < 512, "512 MiB went to a caller that reads nothing");
+        };
+        let waited = started.elapsed();
+        stream.cut();
+        assert!(
+            matches!(
+                failed.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            ),
+            "{failed:?}"
+        );
+        assert!(waited < Duration::from_secs(10), "{waited:?}");
+        drop(caller);
     }
 
     #[test]

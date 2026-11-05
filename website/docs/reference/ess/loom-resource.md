@@ -16,6 +16,10 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ## Types
 
+### `AdmissionRefusalReason`
+
+`loom.resource.AdmissionRefusalReason` is one of `Malformed`, `SecretLiteral`, `UnknownFormat`, `BlankText`, `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`, `EmptyChannelAllow`, `NoModelRoute`, `TooLarge`, `BoundaryWithSecret`, `BoundaryUpstreamInvalid`, `BoundaryUpstreamNotAllowed`, `BoundaryEgressHost`, `BoundaryEgressNamespace`, `SecretNotAllowed`, `NamespaceMismatch`, `EgressHostNotAllowed`, `EnvNameConflict`, `ConfigFileInvalid`, `ConfigFileConflict`, `MountPathInvalid`, `ClaimNotAllowed`, `ProfileInvalid`, `ProfileNotAllowed` and `ResourcesRequired`.
+
 ### `AgentVariant`
 
 `loom.resource.AgentVariant` is one of `AgentServe` and `Command`.
@@ -205,6 +209,14 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 - `name` — `String`
 
+### `StageDestination`
+
+`loom.resource.StageDestination` is one of `Absent`, `Directory`, `Link` and `Other`.
+
+### `StageRefusalReason`
+
+`loom.resource.StageRefusalReason` is one of `DestinationIsALink`, `DestinationNotADirectory`, `NameNotUtf8`, `KeyOutsideVolume` and `StaleDirectory`.
+
 ### `Workspace`
 
 `loom.resource.Workspace` is a record of two fields:
@@ -330,6 +342,82 @@ It declares no order, so the rows come back in whatever order the implementation
 A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
 
 ## Commands
+
+### `AdmitLoomAgent`
+
+`loom.resource.AdmitLoomAgent`.
+
+It takes:
+
+- `path` — `String`
+
+It has 33 outcomes.
+
+**`malformed`** — Decided outside the input: a member of the resource does not decode, or breaks a rule no other reason names. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`secret-literal`** — Decided outside the input: a member of the resource holds a credential. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-format`** — Decided outside the input: spec.agent's format is not loom.agent/1. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`blank-text`** — Decided outside the input: a text member of spec.agent is empty or only whitespace. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-a-variable-name`** — Decided outside the input: a bearer_env of spec.agent, or a spec.env name, is not an environment variable name. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`port-out-of-range`** — Decided outside the input: a port of spec.agent is outside 1 to 65535. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-a-plain-path`** — Decided outside the input: an allow_paths entry of an http binding of spec.agent is not a plain path. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-an-instant`** — Decided outside the input: a Timestamp member of spec.agent is not an RFC 3339 instant. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-protocol`** — Decided outside the input: the inner loop of an AgentServe resource's spec.agent names a protocol the plugin catalog does not hold. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-action`** — Decided outside the input: a state of an AgentServe resource's spec.agent names an action its protocol does not declare. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unbound-source`** — Decided outside the input: a state, the outer loop or the channel of an AgentServe resource's spec.agent names a source no binding declares. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`http-method`** — Decided outside the input: an http binding of an AgentServe resource's spec.agent has a method other than GET. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`send-without-writes`** — Decided outside the input: an AgentServe resource's spec.agent has reply.send among its capabilities while writes are none or undeclared. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`empty-channel-allow`** — Decided outside the input: the channel of an AgentServe resource's spec.agent allows no channel id. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`no-model-route`** — Decided outside the input: spec.routes is empty and the pod would reach no model. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`too-large`** — Decided outside the input: a member is beyond what the credential walk reads, or the ConfigMap beyond 1 MiB. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-with-secret`** — Decided outside the input: spec.boundary stands beside spec.secretRef or spec.secretFiles. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-upstream-invalid`** — Decided outside the input: a boundary upstream is no plain http URL of a cluster service. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-upstream-not-allowed`** — Decided outside the input: no allowedBoundaryUpstreams entry gives a boundary upstream's kind, URL and audience exactly. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-egress-host`** — Decided outside the input: beside spec.boundary, an egress entry of spec.agent names a host. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-egress-namespace`** — Decided outside the input: beside spec.boundary, an egress entry of spec.agent names a namespace. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`secret-not-allowed`** — Decided outside the input: spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`namespace-mismatch`** — Decided outside the input: spec.agent's deploy.kubernetes.namespace is not the resource's namespace. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`egress-host-not-allowed`** — Decided outside the input: an egress entry of spec.agent names no destination, or a host outside allowedEgressHosts. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`env-name-conflict`** — Decided outside the input: a spec.env name is one the controller sets, or one an earlier entry gives. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`config-file-invalid`** — Decided outside the input: a spec.configFiles name is no plain file name. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`config-file-conflict`** — Decided outside the input: a spec.configFiles name is one an earlier entry gives, or one the ConfigMap already holds. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`mount-path-invalid`** — Decided outside the input: a workspace or Secret mount path is not absolute and plain, or overlaps a mount the controller makes or the other one. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`claim-not-allowed`** — Decided outside the input: spec.workspace names a claim outside allowedClaimNames. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`profile-invalid`** — Decided outside the input: a seccomp or AppArmor profile is out of form. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`profile-not-allowed`** — Decided outside the input: a seccomp or AppArmor profile is Unconfined or Localhost without the configuration allowing it. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`resources-required`** — Decided outside the input: a Command resource declares no size and the configuration gives no defaultCommandResources. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`admitted`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `ApplyLoomAgent`
 
@@ -460,6 +548,31 @@ It has five outcomes.
 **`refused`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.resource.LoomAgent` from `Pending` to `Refused`, along the declared move `refuse`. The instance is the one named by the input field `name`. It emits `loom.resource.LoomAgentRefused`. It sets `check` from `{exit_code: input.exit_code, message: input.message}` and `variant` from `input.variant`. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 **`out-of-order`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.resource.LoomAgent` in `Completed`, `Degraded`, `Failed`, `Refused` and `Running`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.resource.LoomAgentStateConflict`, carrying `name`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
+
+### `StageFiles`
+
+`loom.resource.StageFiles`.
+
+It takes:
+
+- `destination` — `loom.resource.StageDestination`
+- `names_utf8` — `Boolean`
+- `keys_inside` — `Boolean`
+- `stale_directory` — `Boolean`
+
+It has six outcomes.
+
+**`destination-is-a-link`** — Taken when `destination == Link` holds of the input. No entity in this specification changes. It reports `loom.resource.StageRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`destination-not-a-directory`** — Taken when `destination == Other` holds of the input. No entity in this specification changes. It reports `loom.resource.StageRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`name-not-utf8`** — Taken when `names_utf8 == false` holds of the input. No entity in this specification changes. It reports `loom.resource.StageRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`key-outside-volume`** — Taken when `keys_inside == false` holds of the input. No entity in this specification changes. It reports `loom.resource.StageRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`stale-directory`** — Taken when `stale_directory == true` holds of the input. No entity in this specification changes. It reports `loom.resource.StageRefused`, carrying `reason`. It emits nothing. A test reaches it by constructing an input that satisfies that condition.
+
+**`staged`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ## Events
 
@@ -610,6 +723,16 @@ Nothing in this system reacts to it.
 
 ## Errors
 
+### `AdmissionRefused`
+
+It carries:
+
+- `reason` — `loom.resource.AdmissionRefusalReason`
+- `member` — `String`
+- `detail` — `String`
+
+Reported by `loom.resource.AdmitLoomAgent` on its `malformed`, `secret-literal`, `unknown-format`, `blank-text`, `not-a-variable-name`, `port-out-of-range`, `not-a-plain-path`, `not-an-instant`, `unknown-protocol`, `unknown-action`, `unbound-source`, `http-method`, `send-without-writes`, `empty-channel-allow`, `no-model-route`, `too-large`, `boundary-with-secret`, `boundary-upstream-invalid`, `boundary-upstream-not-allowed`, `boundary-egress-host`, `boundary-egress-namespace`, `secret-not-allowed`, `namespace-mismatch`, `egress-host-not-allowed`, `env-name-conflict`, `config-file-invalid`, `config-file-conflict`, `mount-path-invalid`, `claim-not-allowed`, `profile-invalid`, `profile-not-allowed` and `resources-required` outcomes.
+
 ### `LoomAgentNotFound`
 
 It carries:
@@ -640,6 +763,14 @@ Reported by `loom.resource.ObserveScheduledRun` on its `not-running` outcome.
 
 Reported by `loom.resource.RecordCheck` on its `out-of-order` outcome.
 
+### `StageRefused`
+
+It carries:
+
+- `reason` — `loom.resource.StageRefusalReason`
+
+Reported by `loom.resource.StageFiles` on its `destination-is-a-link`, `destination-not-a-directory`, `name-not-utf8`, `key-outside-volume` and `stale-directory` outcomes.
+
 ### `StaleGeneration`
 
 It carries:
@@ -655,4 +786,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · model digest `687ce3d39bdb34d56d1fe0c221f558534fa9c3e8eda9e34862b5b742d61331e9` · contract digest `slice-sha256/2:7aaf446d8a61487e36a4a52f241ce788dc118c849135ab1e8de4401e221d154b`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · model digest `a6a8775b24fe51bb303398cc3be0edd676a829580c27a084398e10490ecc2f83` · contract digest `slice-sha256/2:32c727709036662201a2c6a8503c824819e187b8dac979649d493d47a8035186`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

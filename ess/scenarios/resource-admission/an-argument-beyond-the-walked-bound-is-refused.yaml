@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: a text the credential walk cannot read whole is refused
+# rather than passed unread: one argument of 4097 `{` bytes.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-argument-beyond-the-walked-bound-is-refused
+summary: A Command argument holding more openers than the credential walk reads is refused TooLarge at spec.command.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/too-large.yaml}
+    outcome: too-large
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: TooLarge
+        member: spec.command
+        detail: "it holds more than 4096 `[` or `{` bytes, more than the credential walk reads"

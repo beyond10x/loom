@@ -1,0 +1,17 @@
+# story operator-constraints-in-ess: a configuration file name is one plain file name, never a path.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-configuration-file-name-that-is-not-a-plain-name-is-refused
+summary: A configuration file named ../run.toml is refused ConfigFileInvalid.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/config-file-invalid.yaml}
+    outcome: config-file-invalid
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: ConfigFileInvalid
+        member: spec.configFiles[0].name
+        detail: "it is not a plain file name, [A-Za-z0-9._-]+ other than `.` and not starting with `..`, of at most 253 bytes"

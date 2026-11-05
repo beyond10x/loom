@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: a boundary upstream is one the controller's
+# allowedBoundaryUpstreams gives for its kind, with its audience.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-upstream-the-configuration-does-not-give-is-refused
+summary: A model boundary upstream no allowedBoundaryUpstreams entry gives is refused BoundaryUpstreamNotAllowed.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-upstream-not-allowed.yaml}
+    outcome: boundary-upstream-not-allowed
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryUpstreamNotAllowed
+        member: spec.boundary.model.upstream
+        detail: "the controller's allowedBoundaryUpstreams does not hold it for this relay"

@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: spec.agent deploys to the namespace of the resource that
+# holds it.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-agent-deploying-to-another-namespace-is-refused
+summary: A spec.agent deploying to another namespace than the resource's is refused NamespaceMismatch.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/namespace-mismatch.yaml}
+    outcome: namespace-mismatch
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NamespaceMismatch
+        member: spec.agent.deploy.kubernetes.namespace
+        detail: "it names another namespace than the resource's"

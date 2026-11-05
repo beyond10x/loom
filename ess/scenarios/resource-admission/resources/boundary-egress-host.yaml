@@ -1,0 +1,20 @@
+# story operator-constraints-in-ess: a Command resource with an allowed model boundary whose
+# spec.agent names an egress host.
+apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata: {name: nightly, namespace: agents}
+spec:
+  agent:
+    format: loom.agent/1
+    agent: {id: nightly, name: Nightly, brief: Runs the nightly check.}
+    model: {routes: routes.yaml, roles: [{role: agent, model: small}]}
+    deploy:
+      kubernetes:
+        namespace: agents
+        service_account: nightly
+        resources: {cpu: 500m, memory: 512Mi}
+        egress: [{name: chat-api, host: chat.example, port: 443}]
+  routes: {}
+  command: {args: [--once]}
+  boundary:
+    model: {upstream: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}

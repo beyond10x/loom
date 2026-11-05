@@ -12,6 +12,26 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-11-05
+
+No breaking changes.
+
+### Added
+
+- `loom.resource.AdmitLoomAgent` declares each of the 32 reasons the operator refuses a `LoomAgent` with as an outcome, and `task conform` admits one authored fixture per reason with the operator's own `admit`, asserting its reason, member and detail (story:operator-constraints-in-ess)
+- `loom.resource.StageFiles` declares what `b10x-loom agent stage-files` refuses and the modes it stages with; `b10x_loom_resource::stage::stage_files` decides it for the command and the conformance target (story:operator-constraints-in-ess)
+- `SendStreamingMessage` (alias `message/stream`) on the A2A listener: a `text/event-stream` of the task, one `statusUpdate` per runtime event, then the record and the end; a stream whose event was not written whole within 10 s, or on which no event was written for the idle bound of 300 s (`STREAM_IDLE`; `A2aServer::with_stream_idle` sets another for a test), is cut, freeing its admitted slot, while the turn goes on and `GetTask` reads its end; the card says `capabilities.streaming: true` (story:a2a-record-and-streaming)
+- An A2A turn's line goes to the state directory's `record.jsonl` beside the poll's, and a repeated `messageId` is answered with that line and runs no second turn (`loom.agent.RecordA2aTurn`), nor does a repeat of one whose turn ran and whose line could not be appended (outcome `unrecorded`; the last 1024 such items, in memory); a record that cannot be read or written fails the task with a fixed reason naming no path, the full error on standard error; `StateDir::held` and `HeldRecord` share the held record within the process (story:a2a-record-and-streaming)
+
+### Changed
+
+- ESS moves from 0.84.0 to 0.86.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); the commission domain graph names `0.86.0`
+- A `Command` resource whose `spec.agent` the `loom.agent/1` decoder refuses is refused with the decoder's reason at its member (`PortOutOfRange at spec.agent.expose.a2a.port`), not `Malformed at spec.agent`, as an `AgentServe` resource already was (story:operator-constraints-in-ess)
+- `b10x-loom agent stage-files` decides before writing anything: a refused stage leaves the destination as it was, where it could create it or copy keys before the refusal (story:operator-constraints-in-ess)
+- `loom.agent.AdmitA2aRequest` gains the input `stream` and the outcome `streamed`; `AdmitA2aRequest` (generated) gains `stream`, so a struct literal adds `stream: false` (story:a2a-record-and-streaming)
+- An A2A message needs a `messageId` (`-32602` without one), and its item is `a2a:<revision>` of it rather than `a2a:<task>` (story:a2a-record-and-streaming)
+- `item_revision` hashes a `messageId` that is no plain token, or is spelt as a hashed revision (`m-` and 32 lowercase hex digits), to `m-` and the first 32 hex digits of its SHA-256 rather than a 128-bit FNV-1a, so two different `messageId`s never give one item (story:a2a-record-and-streaming)
+
 ## [0.55.2] - 2026-11-03
 
 No breaking changes.
@@ -1350,7 +1370,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.2...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.56.0...HEAD
+[0.56.0]: https://github.com/beyond10x/loom/releases/tag/0.56.0
 [0.55.2]: https://github.com/beyond10x/loom/releases/tag/0.55.2
 [0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1
 [0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0

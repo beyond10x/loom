@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: an AgentServe resource whose spec.routes is empty, while
+# the controller configures no model route, would reach no model.
+type: ess-scenario/4
+domain: loom.resource
+scenario: empty-routes-without-a-model-route-are-refused
+summary: An AgentServe resource with empty spec.routes under a configuration with no model route is refused NoModelRoute.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/no-model-route.yaml}
+    outcome: no-model-route
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NoModelRoute
+        member: spec.routes
+        detail: "it is empty and the controller configures no model route"

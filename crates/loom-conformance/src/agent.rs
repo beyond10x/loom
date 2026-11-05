@@ -73,7 +73,7 @@ pub(crate) fn is_branch(branch: &str) -> bool {
 
 /// The repository root, read when the target runs: a test binary may be reused across worktrees
 /// that share one build directory.
-fn root() -> Result<PathBuf, TargetError> {
+pub(crate) fn root() -> Result<PathBuf, TargetError> {
     let manifest = std::env::var_os("CARGO_MANIFEST_DIR").ok_or_else(|| {
         TargetError::unavailable(
             "locating the repository",
@@ -84,10 +84,18 @@ fn root() -> Result<PathBuf, TargetError> {
     Ok(root.canonicalize().unwrap_or(root))
 }
 
+/// The regular file `path` names under `root`, resolved: none for an absolute path, a `..` or a
+/// link that leaves `root`, or anything that is no regular file, so a target never reads a file
+/// outside the repository through its input.
+pub(crate) fn file_under(root: &Path, path: &str) -> Option<PathBuf> {
+    let root = root.canonicalize().ok()?;
+    let resolved = root.join(path).canonicalize().ok()?;
+    (resolved.starts_with(&root) && resolved.is_file()).then_some(resolved)
+}
+
 /// The document the check reads for `path`, as the module documentation says.
 fn document(root: &Path, path: &str, forced: Option<&str>) -> Result<String, TargetError> {
-    let named = root.join(path);
-    let read = if named.is_file() {
+    let read = if let Some(named) = file_under(root, path) {
         named
     } else if let Some(branch) = forced {
         root.join(FIXTURES).join(format!("{branch}.yaml"))

@@ -1,0 +1,12 @@
+# story a2a-record-and-streaming: a message whose `messageId` gives an item the record holds a line
+# for already runs no turn; its task ends with the recorded line.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-repeated-message-runs-no-second-turn
+summary: A message whose item is recorded already is answered with the recorded line and runs no turn.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.agent.RecordA2aTurn
+    input: {recorded: true, ran_unrecorded: false}
+    outcome: replayed

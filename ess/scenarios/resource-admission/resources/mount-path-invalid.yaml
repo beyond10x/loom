@@ -1,0 +1,19 @@
+# story operator-constraints-in-ess: a Command resource whose workspace is mounted under /config,
+# which the controller mounts.
+apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata: {name: nightly, namespace: agents}
+spec:
+  agent:
+    format: loom.agent/1
+    agent: {id: nightly, name: Nightly, brief: Runs the nightly check.}
+    model: {routes: routes.yaml, roles: [{role: agent, model: small}]}
+    deploy:
+      kubernetes:
+        namespace: agents
+        service_account: nightly
+        resources: {cpu: 500m, memory: 512Mi}
+        egress: []
+  routes: {}
+  command: {args: [--once]}
+  workspace: {mountPath: /config/work}

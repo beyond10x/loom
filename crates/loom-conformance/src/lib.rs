@@ -26,7 +26,10 @@
 //! The `loom.resource` domain's `ApplyLoomAgent`, `RecordCheck`, `ObserveDeployment`,
 //! `ObserveRun`, `ObserveScheduledRun` and `DeleteLoomAgent`, and its view `LoomAgents`, are
 //! answered by `b10x-loom-resource`'s `LoomAgentRecord`, which runs the generated behaviour of
-//! `loom.resource` over itself (the `resource` module).
+//! `loom.resource` over itself (the `resource` module). Its stateless `AdmitLoomAgent` is
+//! answered by `b10x-loom-operator`'s admission, the controller's own, over a fixture resource and
+//! configuration, and `StageFiles` by `b10x_loom_resource::stage::stage_files`, the decision
+//! `b10x-loom agent stage-files` makes (the `admission` module).
 //!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the executor returned, and each event is the one it returned.
@@ -42,7 +45,8 @@
 //! # The external outcomes
 //!
 //! `CheckAgentSpec`'s eight refusals are `external:`; a scenario forcing one of them hands the
-//! check the fixture holding that refusal's one defect (the `agent` module).
+//! check the fixture holding that refusal's one defect (the `agent` module). So are
+//! `AdmitLoomAgent`'s refusals, one per reason, each forced the same way (the `admission` module).
 //!
 //! `RevalidateSelection`'s `not-in-frontier` is `external:` in the specification, and the executor
 //! answers it from the frontier action ids in the command's input, which a Loom reads from the
@@ -58,6 +62,7 @@
 //! runs of one suite report the same thing.
 
 mod a2a;
+mod admission;
 mod agent;
 pub mod codec;
 mod resource;
@@ -146,6 +151,9 @@ struct Live {
     /// The refusal branch of `CheckAgentSpec` the scenario forced for the next check, whose
     /// fixture the target reads when the input's path names no file (the `agent` module).
     forced_check: Option<String>,
+    /// The refusal branch of `AdmitLoomAgent` the scenario forced for the next admission, whose
+    /// fixture the target reads when the input's path names no file (the `admission` module).
+    forced_admission: Option<String>,
     /// The invocations performed, which consistency tokens are minted from.
     sequence: u64,
     /// The sessions the session executor recorded, one `AgentSessions` row each.
@@ -234,12 +242,15 @@ impl ConformanceTarget for LoomTarget {
             resource::DELETE_LOOM_AGENT => {
                 resource::delete_loom_agent(&mut live, input, correlation)
             }
+            admission::ADMIT_LOOM_AGENT => admission::admit_loom_agent(&mut live, input)?,
+            admission::STAGE_FILES => admission::stage_files_command(input),
             agent::CHECK_AGENT_SPEC => agent::check_agent_spec(&mut live, input)?,
             agent::ADMIT_SEND => agent::admit_send_command(input),
             agent::ADMIT_HTTP_READ => agent::admit_http_read_command(input),
             agent::BOUND_HTTP_ANSWER => agent::bound_http_answer_command(input),
             agent::ADMIT_HTTP_TRUST => agent::admit_http_trust_command(input),
             a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
+            a2a::RECORD_A2A_TURN => a2a::record_a2a_turn_command(input),
             a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
             run::RUN_ONCE => run::run_once_command(input),
             other => {
@@ -406,6 +417,14 @@ impl ConformanceTarget for LoomTarget {
             .filter(|branch| agent::is_branch(branch))
         {
             self.live.borrow_mut().forced_check = Some(branch.to_owned());
+            return Ok(());
+        }
+        if let Some(branch) = forced
+            .strip_prefix(admission::ADMIT_LOOM_AGENT)
+            .and_then(|rest| rest.strip_prefix('/'))
+            .filter(|branch| admission::is_branch(branch))
+        {
+            self.live.borrow_mut().forced_admission = Some(branch.to_owned());
             return Ok(());
         }
         Err(TargetError::unavailable(

@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-allow-path-with-a-dot-dot-segment-is-refused
+summary: An allow path holding a dot-dot segment is refused NotAPlainPath.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/not-a-plain-path.yaml}
+    outcome: not-a-plain-path
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NotAPlainPath
+        member: spec.agent.bindings[2].allow_paths[1]
+        detail: "`bindings[2].allow_paths[1]` is not a plain path, one that starts with `/` and holds no `\\`, no `.` or `..` segment, no encoded separator or dot, no `?` or `#` and no whitespace"

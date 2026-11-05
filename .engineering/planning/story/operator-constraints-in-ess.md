@@ -2,14 +2,49 @@
 format: aep.planning-md/3
 id: story:operator-constraints-in-ess
 kind: story
-status: proposed
+status: implemented
 title: The LoomAgent controller's admission and rendering rules and agent stage-files are declared in ESS
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: inferred
+  path: Cargo.lock
+- confidence: cited
+  path: crates/loom-cli/src/stage.rs
+- confidence: inferred
+  path: crates/loom-conformance/Cargo.toml
+- confidence: inferred
+  path: crates/loom-conformance/src/admission.rs
+- confidence: cited
+  path: crates/loom-conformance/src/lib.rs
+- confidence: cited
+  path: crates/loom-operator/src/admission.rs
+- confidence: inferred
+  path: crates/loom-operator/tests/admission_reasons.rs
+- confidence: cited
+  path: docs/design/loom-agent-crd-deployment.md
+- confidence: cited
+  path: ess/domains/resource.yaml
+- confidence: inferred
+  path: ess/scenarios
+- confidence: cited
+  path: generated/rust/loom
+- confidence: cited
+  path: website/data/ess/loom-resource.domain-graph.json
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
+  path: website/docs/reference/ess/loom-resource.md
+revision: 22
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-04T07:33:04Z", actor: "human:timo", revision: 4}
+- {from: "active", to: "implemented", at: "2026-11-05T01:30:28Z", actor: "human:timo", revision: 22, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 
@@ -41,16 +76,37 @@ while the kind trial runs; the trial may file further stories against the same f
 
 ## Scope
 
-Derived 2026-10-26 by the coordinator; the trial agent's own list was not available to it.
-**cited** = read in the tree, **inferred** = could be wrong.
+Derived 2026-11-04 by `story-scoper` at `9bd79bcd`; replaces the 2026-10-26 section. **cited** = read in the
+tree, **inferred** = could be wrong.
 
-- **Primary surface:** `ess/domains/resource.yaml` (`ApplyLoomAgent`, `RecordCheck`) — cited
-- **Files:** `crates/loom-operator/src/admission.rs`, `crates/loom-operator/src/render.rs` — cited
-- **Files:** `crates/loom-cli/src/stage.rs` — cited
-- **Files:** `crates/loom-conformance/src/resource.rs` — inferred
-- **Generated:** `generated/rust/loom/`, `website/docs/reference/ess/`; `deploy/crd/` only if status changes — inferred
-- **Documents:** AGENTS.md § Resource, `docs/design/loom-agent-crd-deployment.md` § 9a, CHANGELOG.md — cited
-- **Confidence:** low (which rules the trial agent meant is not established)
+- **Primary surface:** `ess/domains/resource.yaml`: a new admission decision (reason enum, error, one outcome per
+  reason) beside `RecordCheck` (:646), and the `stage-files` decision, declared in `loom.resource` so this story does
+  not edit `ess/domains/agent.yaml` — cited (the file), decided by the coordinator (the domain)
+- **Files:** `crates/loom-operator/src/admission.rs` (`admit` :1474, the one admission entry point; module doc
+  :1-158; the carried item: a `Command` spec answers the decoder's named reason, not `Malformed`, :1517-1528) — cited
+- **Files:** `crates/loom-cli/src/stage.rs` (`stage` :33; link :37, not a directory :40, 0700 :42/:48, non-UTF-8
+  :54, outside the volume :68, non-regular skipped :70-75, 0600 :82-89, stale directory :110, stale file :112) — cited
+- **Files:** `crates/loom-conformance/src/lib.rs` (dispatch :225-243), `crates/loom-conformance/Cargo.toml`
+  (gains `b10x-loom-operator`, so kube and k8s-openapi join the `conform` build), `Cargo.lock` — cited (dispatch,
+  missing dependency), inferred (the dependency is added)
+- **Files:** a new `crates/loom-conformance/src/admission.rs` adapter over `admit` with resource fixtures, and a
+  pure stage decision function that conformance can call without `b10x-loom-cli` — inferred
+- **Files:** `ess/scenarios/` for admission and stage-files, with resource fixtures — inferred
+- **Files:** an operator test for the carried adversary case, e.g. `crates/loom-operator/tests/admission_reasons.rs`
+  — inferred
+- **Generated:** `generated/rust/loom/` (`task generate`), `website/docs/reference/ess/loom-resource.md`,
+  `website/data/ess/loom-resource.domain-graph.json` (`task docs-generate`); `deploy/crd/` only if
+  `LoomAgentSpec` or its status changes — cited (generator table), inferred (which files)
+- **Documents:** AGENTS.md § Resource and § Operator, `docs/design/loom-agent-crd-deployment.md` § 9a (:327),
+  CHANGELOG.md, `website/data/status.json` — cited
+- **Out of this story:** what rendering derives (`render.rs`: variant, init containers, mounts, security context)
+  has no acceptance line, so it is not declared here; `ChildNotOwned` (`reconcile.rs:776`) is decided at
+  reconcile time from the cluster, not from the spec, and is left out — decided by the coordinator
+- **Shared with story:a2a-record-and-streaming:** the regenerated `generated/rust/loom/src/behaviour.rs`,
+  `plan.json`, `PLAN.md`, CHANGELOG.md, AGENTS.md (other sections), possibly `crates/loom-conformance/src/lib.rs`
+  and `website/data/status.json`; merged one after the other and regenerated after the second merge
+- **Confidence:** medium (every refusal and stage check is located at a line; the declaration shape is the
+  implementor's)
 
 ## Carried from wave 2026-10-26-q13
 

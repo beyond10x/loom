@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 687ce3d39bdb34d56d1fe0c221f558534fa9c3e8eda9e34862b5b742d61331e9
-// contract digest 3a8aa766c8bb9ebca0e67279c2e64d75442a59c32dac9ff9524c320274ed5bed
+// model digest a6a8775b24fe51bb303398cc3be0edd676a829580c27a084398e10490ecc2f83
+// contract digest db241eebea7e49b099edd51a612d4b03ad7dc018bf9323320426cdf17e63334e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -203,6 +203,10 @@ impl<P> crate::agent::obligations::AdmitA2aRequestBehavior for Generated<P>
         if decided(equal(Some(&input.probe).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
             return Ok(crate::agent::AdmitA2aRequestOutcome::Probe);
         }
+        // `streamed`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.stream).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::Streamed);
+        }
         // `admitted`: the default.
         return Ok(crate::agent::AdmitA2aRequestOutcome::Admitted);
     }
@@ -336,6 +340,24 @@ impl<P: crate::agent::obligations::CheckAgentSpecBehavior> crate::agent::obligat
     }
 }
 
+/// `loom.agent.RecordA2aTurn`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::RecordA2aTurnBehavior for Generated<P>
+{
+    fn record_a2a_turn(&mut self, input: crate::agent::RecordA2aTurn) -> Result<crate::agent::RecordA2aTurnOutcome, UnmetObligation> {
+        let _ = &input;
+        // `replayed`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.recorded).map(|value| *value), Some(true)), "loom.agent.RecordA2aTurn")? {
+            return Ok(crate::agent::RecordA2aTurnOutcome::Replayed);
+        }
+        // `unrecorded`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.ran_unrecorded).map(|value| *value), Some(true)), "loom.agent.RecordA2aTurn")? {
+            return Ok(crate::agent::RecordA2aTurnOutcome::Unrecorded);
+        }
+        // `turned`: the default.
+        return Ok(crate::agent::RecordA2aTurnOutcome::Turned);
+    }
+}
+
 /// `loom.agent.RunOnce`, generated: every outcome is one the specification fully determines.
 impl<P> crate::agent::obligations::RunOnceBehavior for Generated<P>
 {
@@ -367,6 +389,12 @@ impl<P> crate::agent::obligations::RunOnceBehavior for Generated<P>
         }
         // `answered`: the default.
         return Ok(crate::agent::RunOnceOutcome::Answered);
+    }
+}
+
+impl<P: crate::resource::obligations::AdmitLoomAgentBehavior> crate::resource::obligations::AdmitLoomAgentBehavior for Generated<P> {
+    fn admit_loom_agent(&mut self, input: crate::resource::AdmitLoomAgent) -> Result<crate::resource::AdmitLoomAgentOutcome, UnmetObligation> {
+        crate::resource::obligations::AdmitLoomAgentBehavior::admit_loom_agent(&mut self.ports, input)
     }
 }
 
@@ -743,6 +771,12 @@ where
         let answer = crate::resource::RecordCheckOutcome::Refused { loom_agent_refused: crate::resource::LoomAgentRefused { name: input.name.clone(), generation: input.generation.clone(), message: input.message.clone() } };
         LoomAgentStorage::put(&mut self.ports, next);
         return Ok(answer);
+    }
+}
+
+impl<P: crate::resource::obligations::StageFilesBehavior> crate::resource::obligations::StageFilesBehavior for Generated<P> {
+    fn stage_files(&mut self, input: crate::resource::StageFiles) -> Result<crate::resource::StageFilesOutcome, UnmetObligation> {
+        crate::resource::obligations::StageFilesBehavior::stage_files(&mut self.ports, input)
     }
 }
 

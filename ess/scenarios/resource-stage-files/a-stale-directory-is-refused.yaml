@@ -1,0 +1,15 @@
+# story operator-constraints-in-ess: a directory in the destination that no key of the Secret
+# names is refused, rather than removed with what it holds.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-stale-directory-is-refused
+summary: A directory no key names is refused.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.StageFiles
+    input: {destination: Directory, names_utf8: true, keys_inside: true, stale_directory: true}
+    outcome: stale-directory
+    error:
+      name: loom.resource.StageRefused
+      fields: {reason: StaleDirectory}

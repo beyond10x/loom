@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: reply-send-without-writes-is-refused
+summary: A spec.agent allowing reply.send without writes is refused SendWithoutWrites.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/send-without-writes.yaml}
+    outcome: send-without-writes
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: SendWithoutWrites
+        member: spec.agent.policy.capabilities[2]
+        detail: "reply.send"

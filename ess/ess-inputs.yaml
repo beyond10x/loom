@@ -1,5 +1,5 @@
 format: ess-inputs/2
-requires: ess 0.84.0
+requires: ess 0.86.0
 specification:
   - system.yaml
   - domains/run.yaml
@@ -52,6 +52,11 @@ scenarios:
   - scenarios/agent-a2a/a-spec-exposing-a2a-without-a-channel-is-served.yaml
   - scenarios/agent-a2a/a-spec-with-nothing-to-serve-is-refused.yaml
   - scenarios/agent-a2a/a-spec-with-a-channel-is-polled.yaml
+  - scenarios/a2a-record-and-streaming/a-streamed-message-is-answered-as-an-event-stream.yaml
+  - scenarios/a2a-record-and-streaming/a-stream-without-the-bearer-is-refused.yaml
+  - scenarios/a2a-record-and-streaming/a-new-message-runs-one-recorded-turn.yaml
+  - scenarios/a2a-record-and-streaming/a-repeated-message-runs-no-second-turn.yaml
+  - scenarios/a2a-record-and-streaming/a-message-whose-turn-ran-unrecorded-runs-no-second-turn.yaml
   - scenarios/http-binding-cluster-ca/an-unset-ca-file-keeps-the-webpki-roots.yaml
   - scenarios/http-binding-cluster-ca/an-unreadable-ca-file-is-refused.yaml
   - scenarios/http-binding-cluster-ca/a-ca-file-over-one-mebibyte-is-refused.yaml
@@ -64,3 +69,43 @@ scenarios:
   - scenarios/agent-run-once/refused-spec.yaml
   - scenarios/agent-run-once/budgets-hold.yaml
   - scenarios/resource-schedule/runs-reported-in-turn.yaml
+  - scenarios/resource-admission/a-resource-within-every-rule-is-admitted.yaml
+  - scenarios/resource-admission/an-agent-the-decoder-cannot-read-is-refused.yaml
+  - scenarios/resource-admission/a-secret-literal-in-the-agent-is-refused.yaml
+  - scenarios/resource-admission/an-agent-of-another-format-is-refused.yaml
+  - scenarios/resource-admission/a-blank-agent-member-is-refused.yaml
+  - scenarios/resource-admission/a-bearer-env-that-is-not-a-variable-name-is-refused.yaml
+  - scenarios/resource-admission/a-port-outside-the-range-is-refused.yaml
+  - scenarios/resource-admission/an-allow-path-with-a-dot-dot-segment-is-refused.yaml
+  - scenarios/resource-admission/a-deadline-that-is-not-an-instant-is-refused.yaml
+  - scenarios/resource-admission/an-agent-naming-an-unknown-protocol-is-refused.yaml
+  - scenarios/resource-admission/an-agent-state-naming-an-unknown-action-is-refused.yaml
+  - scenarios/resource-admission/an-agent-state-naming-an-unbound-source-is-refused.yaml
+  - scenarios/resource-admission/an-http-binding-whose-method-is-not-get-is-refused.yaml
+  - scenarios/resource-admission/reply-send-without-writes-is-refused.yaml
+  - scenarios/resource-admission/an-empty-channel-allow-is-refused.yaml
+  - scenarios/resource-admission/empty-routes-without-a-model-route-are-refused.yaml
+  - scenarios/resource-admission/an-argument-beyond-the-walked-bound-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-beside-a-secret-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-upstream-that-is-not-a-cluster-service-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-upstream-the-configuration-does-not-give-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-beside-an-egress-host-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-beside-an-egress-namespace-is-refused.yaml
+  - scenarios/resource-admission/a-secret-the-configuration-does-not-allow-is-refused.yaml
+  - scenarios/resource-admission/an-agent-deploying-to-another-namespace-is-refused.yaml
+  - scenarios/resource-admission/an-egress-host-the-configuration-does-not-allow-is-refused.yaml
+  - scenarios/resource-admission/an-environment-name-the-controller-sets-is-refused.yaml
+  - scenarios/resource-admission/a-configuration-file-name-that-is-not-a-plain-name-is-refused.yaml
+  - scenarios/resource-admission/a-configuration-file-name-the-config-map-holds-is-refused.yaml
+  - scenarios/resource-admission/a-mount-path-under-a-controller-mount-is-refused.yaml
+  - scenarios/resource-admission/a-claim-the-configuration-does-not-allow-is-refused.yaml
+  - scenarios/resource-admission/a-localhost-profile-naming-no-profile-is-refused.yaml
+  - scenarios/resource-admission/an-unconfined-profile-is-refused.yaml
+  - scenarios/resource-admission/an-unsized-command-resource-is-refused.yaml
+  - scenarios/resource-stage-files/a-destination-that-is-a-link-is-refused.yaml
+  - scenarios/resource-stage-files/a-destination-that-is-not-a-directory-is-refused.yaml
+  - scenarios/resource-stage-files/a-key-whose-name-is-not-utf8-is-refused.yaml
+  - scenarios/resource-stage-files/a-key-resolving-outside-the-volume-is-refused.yaml
+  - scenarios/resource-stage-files/a-stale-directory-is-refused.yaml
+  - scenarios/resource-stage-files/an-absent-destination-is-staged-private.yaml
+  - scenarios/resource-stage-files/an-existing-directory-is-staged-private.yaml

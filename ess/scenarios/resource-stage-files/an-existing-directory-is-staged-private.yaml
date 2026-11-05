@@ -1,0 +1,13 @@
+# story operator-constraints-in-ess: an existing destination directory, which a rerun finds,
+# is staged again: its mode is set to 0700 whatever it was, and each file is written anew with 0600.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-existing-directory-is-staged-private
+summary: An existing directory is staged with mode 0700 and its files with 0600.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.StageFiles
+    input: {destination: Directory, names_utf8: true, keys_inside: true, stale_directory: false}
+    outcome: staged
+    response: {directory_mode: 448, file_mode: 384}

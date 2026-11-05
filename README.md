@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.55.2`, released from source at the tag `0.55.2`
-([release](https://github.com/beyond10x/loom/releases/tag/0.55.2)). No crate is on a registry: you
-install from the tag or depend on it with `tag = "0.55.2"`. `b10x-loom run` completed a live run
+Version `0.56.0`, released from source at the tag `0.56.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.56.0)). No crate is on a registry: you
+install from the tag or depend on it with `tag = "0.56.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -66,7 +66,7 @@ variant.
 Since `0.6.0` a run whose case moved to a revision whose frontier still admits an action ends
 `RunOutcome::CaseMovedOn`, naming the Run's revision and the current one; start a new Run at the
 current revision. Callers that match `RunOutcome` exhaustively handle the new variant. Loom
-requires ESS 0.84.0.
+requires ESS 0.86.0.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog
@@ -139,7 +139,7 @@ left. A plugin that builds a `TurnResult` or `RecordLine` literal adds `steps: V
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
-plugin turn is one Run. Loom requires ESS 0.84.0.
+plugin turn is one Run. Loom requires ESS 0.86.0.
 
 Since `0.15.0` a confidence fallback is recorded as two selections, the overruled fast one
 naming its replacement, each with the strategy of the selector that made it, and every
@@ -167,14 +167,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.55.2 https://github.com/beyond10x/loom.git
+git clone --branch 0.56.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.55.2
+b10x-loom 0.56.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -318,8 +318,11 @@ turn answered, 4 when it ended without an answer, 3 when the spec or the send wa
 Secret volume into a directory the caller owns (mode 0700, each file 0600, a file an earlier run
 left replaced, never followed, a file no current key names removed). The controller runs it in
 an init container for `spec.secretFiles`, so the files are those of the Secret when the pod
-started; a changed Secret reaches the agent in a new pod. Exit 1 names the path it could not read
-or write.
+started; a changed Secret reaches the agent in a new pod. It decides before writing anything
+(`loom.resource.StageFiles`): a destination that is a link or not a directory, a key whose name
+is not UTF-8 or that resolves outside the volume, and a directory in the destination no key names
+are refused, and a refused stage writes nothing. Exit 1 names the path it refused or could not
+read or write.
 
 `b10x-loom agent prepare-dirs --dir <DIR>...` makes each directory one the caller owns with mode
 exactly 0700, setgid and sticky cleared, keeping what it holds when it exists and refusing a link
@@ -540,7 +543,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.55.2'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.56.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
@@ -608,7 +611,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.55.2" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.56.0" }
 ```
 
 The example below
@@ -686,7 +689,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-protocols` | The shared protocol catalog and verified offline installations |
 | `b10x-loom-cli` | The `b10x-loom` command line |
 | `b10x-loom-agent` | Checks a `loom.agent/1` spec before anything runs: the first reason it cannot be served, naming the member; `b10x-loom agent check` runs it. `SpecPlugin` serves a checked spec on the plugin host, holding each `reply.send` for approval and reading its `http` bindings by bounded GET (`HttpGet`); `b10x-loom agent serve` hosts it |
-| `b10x-loom-a2a` | The A2A listener of a served agent (`expose.a2a`): its agent card, one governed turn per `SendMessage` answered with the turn's record, `GetTask` following the turn's runtime events, readiness and liveness probes, and a refusal of every other request without the agent's bearer; `b10x-loom agent serve` opens it |
+| `b10x-loom-a2a` | The A2A listener of a served agent (`expose.a2a`): its agent card, one governed turn per `SendMessage` answered with the turn's record and recorded once per `messageId` in the host's `record.jsonl`, `SendStreamingMessage` streaming the task's status updates and then its record, `GetTask` following the turn's runtime events, readiness and liveness probes, and a refusal of every other request without the agent's bearer; `b10x-loom agent serve` opens it |
 | `b10x-loom-boundary` | The credential boundary of a credential-free agent pod: loopback relays for the model (8401), the Connectors wire (8402, declared operations only) and git smart-HTTP (8403, declared repositories only), each adding the pod's projected service-account token and dropping the agent's credential headers; `b10x-loom agent boundary` runs it |
 | `b10x-loom-sdk` | The one crate an embedding depends on |
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |

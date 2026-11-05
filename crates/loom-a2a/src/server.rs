@@ -5,19 +5,23 @@
 //! slot of the oldest, which is cut off, so peers that send nothing, or nothing whole, cannot keep
 //! a probe from being read. An admitted request holds one of [`MAX_CONNECTIONS`] admitted slots
 //! until it is answered; past them it is answered `503`. A probe or a refusal takes no admitted
-//! slot. Every request is admitted first ([`crate::admit::admit`]), on its
+//! slot. Every request is admitted first ([`crate::admit::Presented`]), on its
 //! request line and headers: a probe is answered whatever it carries, every other request needs
-//! the bearer and is refused `401` before its body is read. Turns run one at a time on the thread
-//! that called [`A2aServer::serve`], which is the only one that touches the [`Answerer`], so an
-//! answerer need not be shared between threads; a connection hands its message over and waits for
-//! the record. A probe, the card and a task's status never wait for a turn.
+//! the bearer and is refused `401` before its body is read. Once the body names its method, a
+//! `SendStreamingMessage` is decided `streamed`, any other method `admitted`. Turns run one at a
+//! time on the thread that called [`A2aServer::serve`], which is the only one that touches the
+//! [`Answerer`], so an answerer need not be shared between threads; a connection hands its message
+//! over and waits for the turn's end, and a streamed one writes each status change of the task as
+//! the turn makes it. That thread ends the task, so a stream cut off mid-turn leaves the turn
+//! running and its task readable by `GetTask`. A probe, the card and a task's status never wait
+//! for a turn.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -25,13 +29,18 @@ use a2a::discovery::{
     AgentCapabilities, AgentCard, AgentInterface, AgentSkill, HTTPAuthSecurityScheme,
     SecurityRequirement, SecurityScheme, StringList,
 };
-use a2a::tasks::{ContextId, Message, Role, TaskSnapshot};
+use a2a::tasks::{
+    ContextId, Message, Role, TaskArtifactUpdateEvent, TaskSnapshot, TaskStatus,
+    TaskStatusUpdateEvent,
+};
 use b10x_loom_plugin::{InboundItem, ItemId, RecordLine};
 use loom::agent::{A2aExposure, A2aRefused};
 use loom_sdk::EventSink;
+use loom_sdk::commission::model::responsibility::RuntimeEvent;
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 
-use crate::admit::{AdmitA2aRequestOutcome, Bearer, a2a_refusal_spelling, admit};
+use crate::admit::{AdmitA2aRequestOutcome, Bearer, Presented, a2a_refusal_spelling};
 use crate::http::{Connection, Head, Response};
 use crate::tasks::{TaskEvents, Tasks};
 use crate::wire;
@@ -48,6 +57,13 @@ pub const LIVE_PATH: &str = "/live";
 /// The most connections read at once before their request is admitted, and the most admitted
 /// requests answered at once (see the module documentation).
 pub const MAX_CONNECTIONS: usize = 32;
+
+/// How long a stream may carry no event before it is cut: the idle bound, 300 s. A caller that
+/// stopped reading cannot be told from one that reads while the events fit the connection's
+/// buffers, so a stream idle that long is cut either way, freeing its admitted slot. It is longer
+/// than the answer's bound ([`crate::WRITE_DEADLINE`]), which cuts an event not written whole, so
+/// that a turn quiet between events, as a model call is, keeps its stream.
+pub const STREAM_IDLE: Duration = Duration::from_secs(300);
 
 /// The A2A protocol version the card names.
 pub const PROTOCOL_VERSION: &str = "1.0";
@@ -72,19 +88,66 @@ pub trait Answerer {
     fn answer(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String>;
 }
 
-/// The A2A listener of one agent: its exposure, the bearer every request but a probe carries, and
-/// its tasks.
+/// The A2A listener of one agent: its exposure, the bearer every request but a probe carries, its
+/// tasks, and how long a stream may carry no event.
 pub struct A2aServer {
     exposure: A2aExposure,
     bearer: Bearer,
     tasks: Tasks,
+    stream_idle: Duration,
 }
 
-/// One message handed to the thread that runs turns.
+/// One message handed to the thread that runs turns: its task, its item, whether its connection
+/// streams, and where the task's changes go.
 struct Job {
     task: String,
     item: InboundItem,
-    reply: Sender<Result<RecordLine, String>>,
+    stream: bool,
+    updates: Sender<Update>,
+}
+
+/// A change of a task, as the thread running its turn hands it to the task's connection.
+enum Update {
+    /// The task's status after a runtime event of its turn; sent only to a streaming connection.
+    Status(TaskStatus),
+    /// The task as its turn ended it, `None` when it is no longer held.
+    Ended(Option<TaskSnapshot>),
+}
+
+/// What a connection answers to its JSON-RPC request.
+enum Answer {
+    /// One JSON answer.
+    Whole(Response),
+    /// The events of a streamed task (see [`A2aServer::stream`]).
+    Stream(Box<Streamed>),
+}
+
+/// A streamed task: the request's id, the task as it was submitted, and its changes.
+struct Streamed {
+    id: Value,
+    task: TaskSnapshot,
+    updates: Receiver<Update>,
+}
+
+/// The sink of a turn: each event moves the task ([`TaskEvents`]) and, when the task's connection
+/// streams, hands the task's new status to it.
+struct Following<'a> {
+    events: TaskEvents<'a>,
+    tasks: &'a Tasks,
+    task: &'a str,
+    updates: Option<&'a Sender<Update>>,
+}
+
+impl EventSink for Following<'_> {
+    fn emit(&mut self, event: &RuntimeEvent) {
+        self.events.emit(event);
+        if let Some(updates) = self.updates
+            && let Some(task) = self.tasks.get(self.task)
+        {
+            // A stream cut off has dropped its end: the turn goes on without it.
+            let _ = updates.send(Update::Status(task.status));
+        }
+    }
 }
 
 /// The connection slots of one listener (see the module documentation).
@@ -178,7 +241,16 @@ impl A2aServer {
             exposure,
             bearer,
             tasks: Tasks::default(),
+            stream_idle: STREAM_IDLE,
         })
+    }
+
+    /// This listener with `idle` as its idle bound in place of [`STREAM_IDLE`]. A host keeps
+    /// [`STREAM_IDLE`]; a test sets a short bound so that it does not wait 300 s for a cut.
+    #[must_use]
+    pub fn with_stream_idle(mut self, idle: Duration) -> Self {
+        self.stream_idle = idle;
+        self
     }
 
     /// The agent card, its interface at `base` (`http://<host>`) and `expose.a2a.path`: the
@@ -199,7 +271,8 @@ impl A2aServer {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             documentation_url: None,
             capabilities: AgentCapabilities {
-                streaming: Some(false),
+                // Every listener answers `SendStreamingMessage` ([`A2aServer::stream`]).
+                streaming: Some(true),
                 push_notifications: Some(false),
                 extensions: None,
                 extended_agent_card: Some(false),
@@ -308,12 +381,24 @@ impl A2aServer {
         })
     }
 
-    /// Runs one turn and hands its record back. A turn that panics fails its task.
+    /// Runs one turn, ends its task with the turn's record and hands the ended task back. A turn
+    /// that could not run, or panicked, fails its task.
     fn run<A: Answerer + ?Sized>(&self, agent: &A, job: Job) {
-        let mut events = TaskEvents::new(&self.tasks, &job.task);
+        let mut events = Following {
+            events: TaskEvents::new(&self.tasks, &job.task),
+            tasks: &self.tasks,
+            task: &job.task,
+            updates: job.stream.then_some(&job.updates),
+        };
         let result = catch_unwind(AssertUnwindSafe(|| agent.answer(&job.item, &mut events)))
             .unwrap_or_else(|_| Err("the turn panicked".to_owned()));
-        let _ = job.reply.send(result);
+        let ended = match result {
+            Ok(record) => self.tasks.end(&job.task, &record),
+            Err(why) => self
+                .tasks
+                .fail(&job.task, &format!("the turn could not run: {why}")),
+        };
+        let _ = job.updates.send(Update::Ended(ended));
     }
 
     /// Reads, admits and answers one request, `id` its unadmitted slot.
@@ -332,7 +417,8 @@ impl A2aServer {
             Err(response) => return connection.answer(&response),
         };
         let probe = head.method == "GET" && (head.path == READY_PATH || head.path == LIVE_PATH);
-        match admit(&self.bearer, probe, head.header("authorization")) {
+        let presented = Presented::new(&self.bearer, probe, head.header("authorization"));
+        match presented.decide(false) {
             AdmitA2aRequestOutcome::MissingBearer { error }
             | AdmitA2aRequestOutcome::WrongBearer { error } => {
                 return connection.answer(&refused(&error));
@@ -346,7 +432,7 @@ impl A2aServer {
                     Response::json(200, &json!({"ready": true}))
                 });
             }
-            AdmitA2aRequestOutcome::Admitted => {}
+            AdmitA2aRequestOutcome::Admitted | AdmitA2aRequestOutcome::Streamed => {}
         }
         let Some(_admitted) = slots.admitted() else {
             return connection.answer(&Response::error(503, "too many requests at once"));
@@ -361,7 +447,10 @@ impl A2aServer {
         } else if head.path == self.exposure.path {
             if head.method == "POST" {
                 match connection.body(&head) {
-                    Ok(body) => self.rpc(&body, jobs),
+                    Ok(body) => match self.rpc(&body, presented, jobs) {
+                        Answer::Whole(response) => response,
+                        Answer::Stream(streamed) => return self.stream(connection, *streamed),
+                    },
                     Err(response) => response,
                 }
             } else {
@@ -373,60 +462,92 @@ impl A2aServer {
         connection.answer(&response);
     }
 
-    /// One JSON-RPC 2.0 request.
-    fn rpc(&self, body: &[u8], jobs: &Sender<Job>) -> Response {
+    /// One JSON-RPC 2.0 request, `presented` what its head presented.
+    fn rpc(&self, body: &[u8], presented: Presented, jobs: &Sender<Job>) -> Answer {
+        let whole = Answer::Whole;
         let Ok(request) = serde_json::from_slice::<Value>(body) else {
-            return rpc_error(&Value::Null, -32700, "the body is no JSON");
+            return whole(rpc_error(&Value::Null, -32700, "the body is no JSON"));
         };
         let id = request.get("id").cloned().unwrap_or(Value::Null);
         if !matches!(id, Value::Null | Value::String(_) | Value::Number(_)) {
-            return rpc_error(&Value::Null, -32600, "`id` is no string or number");
+            return whole(rpc_error(
+                &Value::Null,
+                -32600,
+                "`id` is no string or number",
+            ));
         }
         if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
-            return rpc_error(&id, -32600, "the request is no JSON-RPC 2.0 request");
+            return whole(rpc_error(
+                &id,
+                -32600,
+                "the request is no JSON-RPC 2.0 request",
+            ));
         }
         let Some(method) = request.get("method").and_then(Value::as_str) else {
-            return rpc_error(&id, -32600, "the request names no method");
+            return whole(rpc_error(&id, -32600, "the request names no method"));
         };
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
+        let stream = matches!(method, "SendStreamingMessage" | "message/stream");
+        match presented.decide(stream) {
+            AdmitA2aRequestOutcome::MissingBearer { error }
+            | AdmitA2aRequestOutcome::WrongBearer { error } => {
+                return whole(refused(&error));
+            }
+            AdmitA2aRequestOutcome::Probe => {
+                return whole(rpc_error(&id, -32600, "a probe names no method"));
+            }
+            AdmitA2aRequestOutcome::Streamed => return self.send(&id, &params, jobs, true),
+            AdmitA2aRequestOutcome::Admitted => {}
+        }
         match method {
-            "SendMessage" | "message/send" => self.send(&id, &params, jobs),
-            "GetTask" | "tasks/get" => self.get_task(&id, &params),
-            _ => rpc_error(
+            "SendMessage" | "message/send" => self.send(&id, &params, jobs, false),
+            "GetTask" | "tasks/get" => whole(self.get_task(&id, &params)),
+            _ => whole(rpc_error(
                 &id,
                 -32601,
-                "the method is not served: SendMessage (message/send) and GetTask (tasks/get) are",
-            ),
+                "the method is not served: SendMessage (message/send), SendStreamingMessage \
+                 (message/stream) and GetTask (tasks/get) are",
+            )),
         }
     }
 
-    /// `SendMessage`: one turn on the message's text, answered with the task it ended.
-    fn send(&self, id: &Value, params: &Value, jobs: &Sender<Job>) -> Response {
+    /// `SendMessage`: one turn on the message's text, answered with the task it ended; with
+    /// `stream`, `SendStreamingMessage`: the same turn, its task streamed ([`Self::stream`]).
+    fn send(&self, id: &Value, params: &Value, jobs: &Sender<Job>, stream: bool) -> Answer {
+        let whole = Answer::Whole;
         let Some(message) = params.get("message").filter(|message| message.is_object()) else {
-            return rpc_error(id, -32602, "`params.message` is required");
+            return whole(rpc_error(id, -32602, "`params.message` is required"));
         };
         if message
             .get("taskId")
             .is_some_and(|task| !task.is_null() && task != "")
         {
-            return rpc_error(
+            return whole(rpc_error(
                 id,
                 -32602,
                 "each message is one turn: a message continuing a task is not answered",
-            );
+            ));
         }
         let Some(text) = message
             .get("parts")
             .and_then(Value::as_array)
             .and_then(|parts| wire::request_text(parts))
         else {
-            return rpc_error(id, -32602, "the message carries no text part");
+            return whole(rpc_error(id, -32602, "the message carries no text part"));
         };
-        let message_id = message
+        // The record keys the turn by it, so a message without one could not be told from another.
+        let Some(message_id) = message
             .get("messageId")
             .and_then(Value::as_str)
             .filter(|given| !given.is_empty())
-            .map_or_else(|| "message".to_owned(), str::to_owned);
+            .map(str::to_owned)
+        else {
+            return whole(rpc_error(
+                id,
+                -32602,
+                "`params.message.messageId` is required",
+            ));
+        };
         let request = Message {
             message_id: message_id.clone(),
             context_id: message
@@ -449,37 +570,124 @@ impl A2aServer {
             "context": task.context_id.as_ref().map(|context| context.0.clone()),
             "message": message_id,
         });
+        let revision = item_revision(&message_id);
         let item = InboundItem {
-            id: ItemId(format!("a2a:{task_id}")),
-            revision: item_revision(&message_id),
+            id: ItemId(format!("a2a:{revision}")),
+            revision,
             text,
             details: loom::json::parse(&details.to_string()).unwrap_or(loom::json::Value::Null),
         };
-        let (reply, answer) = mpsc::channel();
-        let ended = if jobs
-            .send(Job {
-                task: task_id.clone(),
-                item,
-                reply,
-            })
+        let (updates, received) = mpsc::channel();
+        if let Err(mpsc::SendError(job)) = jobs.send(Job {
+            task: task_id.clone(),
+            item,
+            stream,
+            updates,
+        }) {
+            let failed = self.tasks.fail(&task_id, "the agent is stopping");
+            let _ = job.updates.send(Update::Ended(failed));
+        }
+        if stream {
+            return Answer::Stream(Box::new(Streamed {
+                id: id.clone(),
+                task,
+                updates: received,
+            }));
+        }
+        match self.ended(&task_id, &received) {
+            Some(task) => whole(rpc_result(id, &json!({"task": wire::task(&task)}))),
+            None => whole(rpc_error(id, TASK_NOT_FOUND, "the task is no longer held")),
+        }
+    }
+
+    /// The task `task` once its turn ended: the end `updates` brings, every status before it
+    /// passed over; failed when the thread running turns went away without one.
+    fn ended(&self, task: &str, updates: &Receiver<Update>) -> Option<TaskSnapshot> {
+        loop {
+            match updates.recv() {
+                Ok(Update::Status(_)) => {}
+                Ok(Update::Ended(ended)) => return ended,
+                Err(_) => {
+                    return self.tasks.fail(task, "the agent stopped before the turn");
+                }
+            }
+        }
+    }
+
+    /// Answers a streamed task with server-sent events, each a JSON-RPC response to the request
+    /// whose result is a `StreamResponse`: the task as it was submitted, a `statusUpdate` for
+    /// each status change its turn makes, then the task's end: an `artifactUpdate` for its record
+    /// and a last `statusUpdate` with the state it ended in. Two things cut the stream: an event
+    /// not written whole within the answer's bound ([`crate::http::EventStream::event`]), and the
+    /// idle bound ([`STREAM_IDLE`] unless [`A2aServer::with_stream_idle`] set another) without an
+    /// event, since a caller that stopped reading cannot be told from one that reads while the
+    /// events fit the connection's buffers. A cut frees the admitted slot; the turn goes on, its
+    /// task ended as it would be and readable by `GetTask`.
+    fn stream(&self, connection: Connection, streamed: Streamed) {
+        let Streamed { id, task, updates } = streamed;
+        let Ok(mut events) = connection.stream() else {
+            return;
+        };
+        let event = |result: Value| json!({"jsonrpc": "2.0", "id": id, "result": result});
+        if events
+            .event(&event(json!({"task": wire::task(&task)})).to_string())
             .is_err()
         {
-            self.tasks.fail(&task_id, "the agent is stopping")
-        } else {
-            match answer.recv() {
-                Ok(Ok(record)) => self.tasks.end(&task_id, &record),
-                Ok(Err(why)) => self
-                    .tasks
-                    .fail(&task_id, &format!("the turn could not run: {why}")),
-                Err(_) => self
-                    .tasks
-                    .fail(&task_id, "the agent stopped before the turn"),
+            return events.cut();
+        }
+        let ended = loop {
+            match updates.recv_timeout(self.stream_idle) {
+                Ok(Update::Status(status)) => {
+                    let update = status_update(&task, status);
+                    if events
+                        .event(&event(json!({"statusUpdate": update})).to_string())
+                        .is_err()
+                    {
+                        return events.cut();
+                    }
+                }
+                Ok(Update::Ended(ended)) => break ended,
+                // Idle for the idle bound: the caller took no event within it.
+                Err(RecvTimeoutError::Timeout) => return events.cut(),
+                Err(RecvTimeoutError::Disconnected) => {
+                    break self
+                        .tasks
+                        .fail(&task.id.0, "the agent stopped before the turn");
+                }
             }
         };
-        match ended {
-            Some(task) => rpc_result(id, &json!({"task": wire::task(&task)})),
-            None => rpc_error(id, TASK_NOT_FOUND, "the task is no longer held"),
+        let last: Vec<Value> = match ended {
+            Some(ended) => {
+                let mut last: Vec<Value> = ended
+                    .artifacts
+                    .iter()
+                    .flatten()
+                    .map(|artifact| {
+                        event(json!({"artifactUpdate": wire::artifact_update(
+                            &TaskArtifactUpdateEvent {
+                                task_id: ended.id.clone(),
+                                context_id: context(&ended),
+                                artifact: artifact.clone(),
+                                append: None,
+                                last_chunk: Some(true),
+                                metadata: None,
+                            },
+                        )}))
+                    })
+                    .collect();
+                let status = status_update(&ended, ended.status.clone());
+                last.push(event(json!({ "statusUpdate": status })));
+                last
+            }
+            None => vec![json!({"jsonrpc": "2.0", "id": id, "error": {
+                "code": TASK_NOT_FOUND, "message": "the task is no longer held"}})],
+        };
+        for answer in last {
+            if events.event(&answer.to_string()).is_err() {
+                return events.cut();
+            }
         }
+        events.end();
     }
 
     /// `GetTask`: the task's current status, its record once it ended.
@@ -498,29 +706,62 @@ impl A2aServer {
 pub const MAX_REVISION: usize = 128;
 
 /// The item revision of a message whose `messageId` is `message_id`: the id itself when it is a
-/// plain token (ASCII letters and digits, `-`, `_` and `.`, at most [`MAX_REVISION`] bytes),
-/// otherwise `m-` and 32 hex digits hashed from it. The revision reaches the turn's context
-/// outside the quoted item text, so no caller text that could end its quoting (a backtick, a line
-/// break) or carry an instruction is ever kept in it.
+/// plain token (ASCII letters and digits, `-`, `_` and `.`, at most [`MAX_REVISION`] bytes) not
+/// spelt as a hashed revision, otherwise the hashed revision: `m-` and the first 32 hex digits of
+/// its SHA-256. No kept id has the hashed spelling, so two different ids share a revision only
+/// when SHA-256 collides on them: the mapping keys the record's duplicate check, and a message is
+/// never answered with another's line. The revision reaches the turn's context outside the quoted
+/// item text, so no caller text that could end its quoting (a backtick, a line break) or carry an
+/// instruction is ever kept in it.
 pub fn item_revision(message_id: &str) -> String {
     let plain = !message_id.is_empty()
         && message_id.len() <= MAX_REVISION
         && message_id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
-    if plain {
+    if plain && !hashed_spelling(message_id) {
         return message_id.to_owned();
     }
-    let fnv1a = |basis: u64| {
-        message_id.bytes().fold(basis, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        })
-    };
-    format!(
-        "m-{:016x}{:016x}",
-        fnv1a(0xcbf2_9ce4_8422_2325),
-        fnv1a(0x8422_2325_cbf2_9ce4)
-    )
+    let digest = Sha256::digest(message_id.as_bytes());
+    let mut revision = String::with_capacity(HASHED_PREFIX.len() + HASHED_DIGITS);
+    revision.push_str(HASHED_PREFIX);
+    for byte in &digest[..HASHED_DIGITS / 2] {
+        revision.push_str(&format!("{byte:02x}"));
+    }
+    revision
+}
+
+/// What a hashed revision starts with.
+const HASHED_PREFIX: &str = "m-";
+
+/// The hex digits of a hashed revision after its prefix.
+const HASHED_DIGITS: usize = 32;
+
+/// Whether `token` is spelt as a hashed revision: `m-` and 32 lowercase hex digits.
+fn hashed_spelling(token: &str) -> bool {
+    token.strip_prefix(HASHED_PREFIX).is_some_and(|digits| {
+        digits.len() == HASHED_DIGITS
+            && digits
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+/// The context of `task`; every task the listener holds has one ([`Tasks::submit`]).
+fn context(task: &TaskSnapshot) -> ContextId {
+    task.context_id
+        .clone()
+        .unwrap_or_else(|| ContextId(String::new()))
+}
+
+/// The `statusUpdate` of `task` moving to `status`.
+fn status_update(task: &TaskSnapshot, status: TaskStatus) -> Value {
+    wire::status_update(&TaskStatusUpdateEvent {
+        task_id: task.id.clone(),
+        context_id: context(task),
+        status,
+        metadata: None,
+    })
 }
 
 /// `http://<host>` from the request's `Host` header, when it names a host and port only;

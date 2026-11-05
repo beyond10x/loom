@@ -15,13 +15,20 @@
 //! save that failed is never followed by a second line for the same item.
 //!
 //! One host holds a state directory at a time: [`StateDir::open`] takes an exclusive lock on the
-//! record (`File::try_lock`), held until the [`StateDir`] is dropped, and refuses a directory
-//! another host holds with [`PluginError::StateInUse`], naming it, once the lock stayed held for
-//! [`LOCK_WAIT`].
+//! record (`File::try_lock`), held until the [`StateDir`] and every [`HeldRecord`] of it are
+//! dropped, and refuses a directory another host holds with [`PluginError::StateInUse`], naming
+//! it, once the lock stayed held for [`LOCK_WAIT`].
+//!
+//! A host that answers beside its poll (`b10x-loom agent serve` with `expose.a2a`) records the
+//! answers in the same record, from another thread: [`HeldRecord::of`] finds the record this
+//! process holds for a directory, and appends through it are serialized with the holder's own,
+//! under the holder's lock, which the handle keeps held while it lives. No second lock is taken,
+//! so a second host, in this process or another, is still refused.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use loom::plugin::{ItemId, PluginConfig, PluginState, RecordLine};
@@ -37,12 +44,97 @@ pub const RECORD_FILE: &str = "record.jsonl";
 /// How long [`StateDir::open`] waits for a held lock before it refuses the directory.
 pub const LOCK_WAIT: Duration = Duration::from_secs(2);
 
+/// The records this process holds, by their directory as the file system resolves it.
+static HELD: Mutex<Vec<(PathBuf, Weak<Held>)>> = Mutex::new(Vec::new());
+
+fn held_records() -> MutexGuard<'static, Vec<(PathBuf, Weak<Held>)>> {
+    HELD.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A record this process holds: the file, opened for appending and exclusively locked until the
+/// last handle on it is dropped, and the lock its appends and reads take in this process.
+#[derive(Debug)]
+struct Held {
+    root: PathBuf,
+    file: File,
+    appending: Mutex<()>,
+}
+
+impl Held {
+    fn appending(&self) -> MutexGuard<'_, ()> {
+        self.appending
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn append(&self, line: &RecordLine) -> Result<(), PluginError> {
+        let mut text = encode_record_line(line);
+        text.push('\n');
+        let _one = self.appending();
+        (&self.file)
+            .write_all(text.as_bytes())
+            .and_then(|()| self.file.sync_data())
+            .map_err(|error| {
+                PluginError::State(format!(
+                    "{} cannot be appended to: {error}",
+                    self.root.join(RECORD_FILE).display()
+                ))
+            })
+    }
+}
+
 /// A plugin's state directory, checked, created and held by this host.
 #[derive(Debug)]
 pub struct StateDir {
     root: PathBuf,
-    /// The record, opened for appending and exclusively locked while this value lives.
-    record: File,
+    /// The record, opened for appending and exclusively locked while this value or a
+    /// [`HeldRecord`] of it lives.
+    record: Arc<Held>,
+}
+
+/// The record of a state directory this process holds, shared with the [`StateDir`] that holds
+/// it: lines appended through it are serialized with the holder's own, and the record stays
+/// locked while it lives, even once the [`StateDir`] is dropped.
+#[derive(Debug, Clone)]
+pub struct HeldRecord(Arc<Held>);
+
+impl HeldRecord {
+    /// The record this process holds for the directory `state`, when a [`StateDir`] of it, or a
+    /// handle on its record, is alive; `None` otherwise, and for a directory that does not exist.
+    /// Paths are compared as the file system resolves them.
+    pub fn of(state: &Path) -> Option<Self> {
+        let resolved = fs::canonicalize(state).ok()?;
+        let mut held = held_records();
+        held.retain(|(_, record)| record.strong_count() > 0);
+        held.iter()
+            .filter(|(root, _)| *root == resolved)
+            .find_map(|(_, record)| record.upgrade())
+            .map(Self)
+    }
+
+    /// The state directory, as its holder was given it.
+    pub fn path(&self) -> &Path {
+        &self.0.root
+    }
+
+    /// The first line the record holds for `item`, when it holds one.
+    ///
+    /// # Errors
+    /// The record cannot be read, or a line of it is not a record line.
+    pub fn line_of(&self, item: &ItemId) -> Result<Option<RecordLine>, PluginError> {
+        let _one = self.0.appending();
+        Ok(read_record(&self.0.root)?
+            .into_iter()
+            .find(|line| line.item == *item))
+    }
+
+    /// Appends `line` to the record, after any line this process is appending.
+    ///
+    /// # Errors
+    /// The record cannot be written.
+    pub fn append(&self, line: &RecordLine) -> Result<(), PluginError> {
+        self.0.append(line)
+    }
 }
 
 impl StateDir {
@@ -92,9 +184,19 @@ impl StateDir {
             }
         }
         repair(&record, &record_path)?;
+        let held = Arc::new(Held {
+            root: path.to_path_buf(),
+            file: record,
+            appending: Mutex::new(()),
+        });
+        if let Ok(resolved) = fs::canonicalize(path) {
+            let mut records = held_records();
+            records.retain(|(_, record)| record.strong_count() > 0);
+            records.push((resolved, Arc::downgrade(&held)));
+        }
         Ok(Self {
             root: path.to_path_buf(),
-            record,
+            record: held,
         })
     }
 
@@ -103,12 +205,20 @@ impl StateDir {
         &self.root
     }
 
+    /// A handle on the record this host holds, for another thread of this process to append
+    /// through (see the module documentation).
+    pub fn held(&self) -> HeldRecord {
+        HeldRecord(Arc::clone(&self.record))
+    }
+
     /// The saved state, with every item the record holds a line for counted as handled; an empty
     /// state when nothing is saved or recorded yet.
     ///
     /// # Errors
     /// A state file or record that cannot be read or is not one.
     pub fn load(&self) -> Result<PluginState, PluginError> {
+        // A line another thread of this process is appending is read whole or not at all.
+        let _one = self.record.appending();
         read(&self.root)
     }
 
@@ -162,17 +272,7 @@ impl StateDir {
     /// # Errors
     /// The record cannot be opened or written.
     pub fn append(&self, line: &RecordLine) -> Result<(), PluginError> {
-        let mut text = encode_record_line(line);
-        text.push('\n');
-        (&self.record)
-            .write_all(text.as_bytes())
-            .and_then(|()| self.record.sync_data())
-            .map_err(|error| {
-                PluginError::State(format!(
-                    "{} cannot be appended to: {error}",
-                    self.root.join(RECORD_FILE).display()
-                ))
-            })
+        self.record.append(line)
     }
 
     /// Every record line, in order; none when nothing is recorded yet.
@@ -180,6 +280,7 @@ impl StateDir {
     /// # Errors
     /// A record that cannot be read, or a line that is not a record line.
     pub fn record(&self) -> Result<Vec<RecordLine>, PluginError> {
+        let _one = self.record.appending();
         read_record(&self.root)
     }
 }

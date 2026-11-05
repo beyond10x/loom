@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: a workspace claims only a volume the controller's
+# allowedClaimNames holds.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-claim-the-configuration-does-not-allow-is-refused
+summary: A workspace claim allowedClaimNames does not hold is refused ClaimNotAllowed.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/claim-not-allowed.yaml}
+    outcome: claim-not-allowed
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: ClaimNotAllowed
+        member: spec.workspace.claimName
+        detail: "the controller's allowedClaimNames does not hold it"

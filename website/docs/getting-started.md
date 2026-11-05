@@ -9,19 +9,19 @@ source: crates/loom-cli, crates/loom-sdk/examples/software_change.rs, docs/quali
 # Getting started
 
 You need a Rust toolchain (edition 2024) and `git`. Nothing is on a registry, so you build from
-the repository at the release tag, `0.55.2`.
+the repository at the release tag, `0.56.0`.
 
 ## Build the command line
 
 ```console
-git clone --branch 0.55.2 https://github.com/beyond10x/loom.git
+git clone --branch 0.56.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.55.2
+b10x-loom 0.56.0
 ```
 
 `b10x-loom run --help` lists its flags and exit statuses; the [CLI reference](./reference/cli.md)

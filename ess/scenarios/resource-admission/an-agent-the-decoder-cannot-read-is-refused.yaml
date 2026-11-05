@@ -1,0 +1,19 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent; the decoder names no
+# member for an undeclared one, so the member is spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-agent-the-decoder-cannot-read-is-refused
+summary: A spec.agent with an undeclared member is refused Malformed at spec.agent.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/malformed.yaml}
+    outcome: malformed
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: Malformed
+        member: spec.agent
+        detail: "unknown member `agent.team`"

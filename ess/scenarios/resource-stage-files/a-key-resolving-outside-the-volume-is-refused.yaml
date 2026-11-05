@@ -1,0 +1,15 @@
+# story operator-constraints-in-ess: a Secret key whose file resolves outside the Secret volume,
+# through a link, is refused, so the copy reads nothing but the Secret.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-key-resolving-outside-the-volume-is-refused
+summary: A key that resolves outside the Secret volume is refused.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.StageFiles
+    input: {destination: Directory, names_utf8: true, keys_inside: false, stale_directory: false}
+    outcome: key-outside-volume
+    error:
+      name: loom.resource.StageRefused
+      fields: {reason: KeyOutsideVolume}

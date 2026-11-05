@@ -8,5 +8,5 @@ summary: A request whose bearer is not the agent's is refused `WrongBearer`.
 timeline:
   - at: 2026-10-25T00:00:00Z
     command: loom.agent.AdmitA2aRequest
-    input: {probe: false, bearer_presented: true, bearer_matches: false}
+    input: {probe: false, bearer_presented: true, bearer_matches: false, stream: false}
     outcome: wrong-bearer

@@ -1,0 +1,30 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent. The second step holds
+# the same spec.agent in a Command resource, which only the decoder reads: it answers the
+# decoder's own reason, not Malformed (carried from the adversary pass of wave 2026-10-26-q13).
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-deadline-that-is-not-an-instant-is-refused
+summary: A budget deadline that is no RFC 3339 instant is refused NotAnInstant, for an AgentServe and for a Command resource.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/not-an-instant.yaml}
+    outcome: not-an-instant
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NotAnInstant
+        member: spec.agent.session.budget.deadline
+        detail: "`session.budget.deadline` is not an RFC 3339 instant"
+  - at: 2026-11-04T00:00:01Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/command-not-an-instant.yaml}
+    outcome: not-an-instant
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: NotAnInstant
+        member: spec.agent.session.budget.deadline
+        detail: "`session.budget.deadline` is not an RFC 3339 instant"

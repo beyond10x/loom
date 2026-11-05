@@ -1,0 +1,18 @@
+# story operator-constraints-in-ess: the agent-check fixture of the same reason, held as
+# spec.agent, is refused for that reason at its member under spec.agent.
+type: ess-scenario/4
+domain: loom.resource
+scenario: an-empty-channel-allow-is-refused
+summary: A channel that allows no channel id is refused EmptyChannelAllow.
+
+timeline:
+  - at: 2026-11-04T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/empty-channel-allow.yaml}
+    outcome: empty-channel-allow
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: EmptyChannelAllow
+        member: spec.agent.channel.allow
+        detail: "no channel id is allowed"

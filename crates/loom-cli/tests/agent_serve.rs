@@ -1018,6 +1018,9 @@ fn agent_serve_takes_a_blank_http_ca_file_as_no_setting() {
 /// With `expose.a2a` and its bearer the served agent answers A2A beside the poll: the probes
 /// without a bearer, the card and every message only with it, and a message is one turn on
 /// `inbound-answer@1` answered with its record. Nothing is sent through A2A; SIGTERM ends both.
+/// Each turn's line lands in the polling host's `record.jsonl`, a repeated `messageId` runs no
+/// second turn, and a streamed message sends its run's status changes, then its end
+/// (`story:a2a-record-and-streaming`).
 #[test]
 fn agent_serve_answers_a2a_beside_the_poll() {
     let scratch = Scratch::new("a2a-serve", 3600);
@@ -1025,21 +1028,25 @@ fn agent_serve_answers_a2a_beside_the_poll() {
     let port = free_port();
     scratch.expose_a2a(port);
     let select = |action: &str| sse(AGENT, "select_action", json!({ "action": action }));
-    let (base_url, models) = serve(vec![
-        sse(
-            CLASSIFIER,
-            "classify_item",
-            json!({"intent": "ask", "hints": ["docs"], "confidence": 0.9}),
-        ),
-        select("source.read"),
-        sse(
-            AGENT,
-            "action_arguments",
-            json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
-        ),
-        select("reply.propose"),
-        sse(AGENT, "action_arguments", json!({"text": REPLY})),
-    ]);
+    let turn = || {
+        vec![
+            sse(
+                CLASSIFIER,
+                "classify_item",
+                json!({"intent": "ask", "hints": ["docs"], "confidence": 0.9}),
+            ),
+            select("source.read"),
+            sse(
+                AGENT,
+                "action_arguments",
+                json!({"source": "docs", "kind": "search", "input": {"query": "deploy"}}),
+            ),
+            select("reply.propose"),
+            sse(AGENT, "action_arguments", json!({"text": REPLY})),
+        ]
+    };
+    // Two turns: the message `m-1` once, however often it is sent, and the streamed `m-2`.
+    let (base_url, models) = serve([turn(), turn()].concat());
     let catalog = scratch.catalog(&base_url);
     let mut child = Reaped(
         scratch
@@ -1098,6 +1105,47 @@ fn agent_serve_answers_a2a_beside_the_poll() {
         "{got}"
     );
 
+    let (status, again) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&send)).unwrap();
+    assert_eq!(status, 200, "{again}");
+    let again: Value = serde_json::from_str(&again).unwrap();
+    assert_eq!(
+        again["result"]["task"]["artifacts"][0]["parts"][1]["data"], *record,
+        "the repeated messageId is answered with the recorded line: {again}"
+    );
+    let stream = json!({"jsonrpc": "2.0", "id": "q-3", "method": "SendStreamingMessage",
+        "params": {"message": {"messageId": "m-2", "role": "ROLE_USER",
+            "parts": [{"text": "And the logs?"}]}}});
+    let (status, streamed) =
+        a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&stream)).unwrap();
+    assert_eq!(status, 200, "{streamed}");
+    let events: Vec<Value> = streamed
+        .split("\n\n")
+        .filter(|event| !event.is_empty())
+        .map(|event| {
+            let data = event.strip_prefix("data: ").expect("a data line");
+            serde_json::from_str(data).expect("an event is JSON")
+        })
+        .collect();
+    assert_eq!(
+        events[0]["result"]["task"]["status"]["state"], "TASK_STATE_SUBMITTED",
+        "{streamed}"
+    );
+    let working: Vec<&str> = events
+        .iter()
+        .filter_map(|event| {
+            event["result"]["statusUpdate"]["status"]["message"]["parts"][0]["text"].as_str()
+        })
+        .collect();
+    assert!(
+        working.contains(&"step 1 started") && working.contains(&"reply.propose selected"),
+        "{working:?}"
+    );
+    let last = &events.last().expect("events")["result"]["statusUpdate"];
+    assert_eq!(
+        last["status"]["state"], "TASK_STATE_COMPLETED",
+        "{streamed}"
+    );
+
     let killed = Command::new("kill")
         .args(["-TERM", &child.0.id().to_string()])
         .status()
@@ -1125,7 +1173,24 @@ fn agent_serve_answers_a2a_beside_the_poll() {
     assert_eq!(status.code(), Some(0), "{stderr}");
     assert!(stderr.contains("A2A listening on 127.0.0.1:"), "{stderr}");
     assert!(!stderr.contains(A2A_TOKEN), "the bearer is never printed");
-    assert_eq!(models.join().expect("the models answered").len(), 5);
+    assert_eq!(
+        models.join().expect("the models answered").len(),
+        10,
+        "two turns: none for the repeated messageId"
+    );
+    let items: Vec<String> = fs::read_to_string(scratch.state().join("record.jsonl"))
+        .expect("the host's record")
+        .lines()
+        .map(|line| {
+            let line: Value = serde_json::from_str(line).expect("a JSON line");
+            line["item"].as_str().expect("an item").to_owned()
+        })
+        .collect();
+    assert_eq!(
+        items,
+        ["a2a:m-1", "a2a:m-2"],
+        "one line per A2A turn in the polling host's record"
+    );
     assert!(
         scratch.invoked(WRITE).is_empty(),
         "nothing is sent through A2A"
@@ -1269,6 +1334,10 @@ fn agent_serve_answers_a2a_without_a_channel() {
     assert_eq!(status.code(), Some(0), "{stderr}");
     assert!(stderr.contains("A2A listening on 127.0.0.1:"), "{stderr}");
     assert_eq!(models.join().expect("the models answered").len(), 5);
+    let record = fs::read_to_string(scratch.state().join("record.jsonl")).expect("the record");
+    assert_eq!(record.lines().count(), 1, "{record}");
+    let line: Value = serde_json::from_str(record.trim_end()).expect("a JSON line");
+    assert_eq!(line["item"], "a2a:m-1", "{record}");
     assert!(
         scratch
             .argv()
