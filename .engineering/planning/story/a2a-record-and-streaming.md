@@ -8,7 +8,7 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-a2a
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-04T07:33:04Z", actor: "human:timo", revision: 3}
@@ -34,8 +34,8 @@ task store and the record format's reader.
   the item revision the `messageId` gives, and a repeated `messageId` does not run a second turn.
 - `a_streamed_message_sends_status_updates_then_the_record`: `SendStreamingMessage` answers
   `text/event-stream`, one event per `RuntimeEvent` status change, the last carrying the task's end.
-- `a_stream_without_the_bearer_is_refused` before any event; an idle stream is cut at the answer
-  bound.
+- `a_stream_without_the_bearer_is_refused` before any event; an idle stream is cut at the 300 s idle
+  bound, and an event not written whole is cut at the 10 s answer bound.
 - The agent card advertises `capabilities.streaming: true` only when the listener streams.
 - ESS first: the decision the listener takes per request (`AdmitA2aRequest`) gains the streaming
   method, and the record's line for an A2A turn is declared before the code; scenarios red first.
