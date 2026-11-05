@@ -301,10 +301,13 @@ types:
   # holds, and none starting later than `starting_deadline_seconds` after its time.
   # `run_deadline_seconds` (story schedule-run-deadline) bounds how long one run may last once it
   # started: a run still going after that many seconds is ended and reported as a failed run
-  # (`last-run-failed`), so a hung run does not hold the later ones; the controller refuses zero
-  # and a negative value. `input`, when present, makes the program `b10x-loom agent run` over the
-  # resource's spec with that task text; without it the CronJob runs `spec.command` as the Job
-  # would.
+  # (`last-run-failed`, reason `DeadlineExceeded`), so a hung run does not hold the later ones.
+  # It lies in 1 to 9223372036: the controller refuses zero and a negative value, and a value
+  # above 9223372036, which Kubernetes' Job controller holds as nanoseconds in a signed 64-bit
+  # duration and wraps negative, so either would end every run as it starts. ESS declares no
+  # bound on an `Integer` field, so the bound is written here and the controller holds it.
+  # `input`, when present, makes the program `b10x-loom agent run` over the resource's spec with
+  # that task text; without it the CronJob runs `spec.command` as the Job would.
   - name: loom.resource.ScheduleSpec
     kind: struct
     fields:
