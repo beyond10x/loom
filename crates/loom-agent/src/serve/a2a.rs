@@ -55,6 +55,7 @@ use b10x_loom_plugin::{
 use loom_sdk::EventSink;
 use loom_sdk::agent::{A2aExposure, AgentSpec};
 use loom_sdk::governor::{FileCaseStore, FileSuspensionStore};
+use loom_sdk::intake::slice::run::printable;
 
 use super::SpecPlugin;
 
@@ -166,9 +167,13 @@ impl TurnRecord for HeldRecord {
     }
 }
 
-/// `reason` for the caller; `error`, which may name a path of the host, to standard error.
+/// `reason` for the caller; `error`, which may name a path of the host, to standard error. The
+/// error's text can hold model output, so each of its control characters but the tab (a newline,
+/// a carriage return, the rest of C0, DEL and C1) is printed as a visible escape by the slice's
+/// `printable`, and the line stays one line (`story:a2a-stderr-line-escapes-error-text`).
 fn failed(reason: &str, error: &PluginError) -> String {
-    eprintln!("b10x-loom: A2A: {reason}: {error}");
+    let shown = printable(&error.to_string());
+    eprintln!("b10x-loom: A2A: {reason}: {shown}");
     reason.to_owned()
 }
 
