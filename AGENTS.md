@@ -763,7 +763,8 @@ holds (`Decimal`, `Timestamp`, `SessionKind`, `Intent`, the datasource ids and
 
 Serving a checked spec is `SpecPlugin` (`crates/loom-agent/src/serve.rs`, `story:agent-serve`), the
 `Plugin` `b10x-loom agent serve --spec --state [--once]` runs through `run_plugin`. `SpecPlugin::new`
-runs `check` again, needs `runtime`, `loops` and `channel`, a `connectors` channel binding with
+runs `check` again, needs `runtime`, `loops` (a spec without them is `agent run`'s only:
+"nothing would poll") and `channel`, a `connectors` channel binding with
 `list`, `get` and `search`, and refuses `writes.mode: auto` (served by `agent run` only); it lowers the spec
 to the host's `PluginConfig` (connectors from `runtime`, sources from the `connectors` bindings,
 the outer loop's interval and the inner loop's threshold) and to a `SlackHandler` over the channel
@@ -802,12 +803,21 @@ says what one is.
 
 One turn and exit is `b10x-loom agent run --spec --state --input` (`crates/loom-agent/src/run.rs`,
 `story:agent-run-once`). `SpecPlugin::for_run` builds the plugin without the needs of polling: no
-`channel`, no `expose.a2a`, and `writes.mode: auto` served (`agent serve` still refuses it).
+`channel`, no `expose.a2a`, no `list`, `get` or `search` on the channel binding (only its `write`
+is read, as the send), and `writes.mode: auto` served (`agent serve` still refuses it).
 `b10x_loom_plugin::run_item` hands the one item (`run::run_item`: the input's text, id `run-` and the
 instant, the first channel of `channel.allow` as its `channel`) to the host's `Cycle::attempt` with
 one attempt, under the state directory's record lock, and returns the line it appended. `RunItem`
-picks the turn: the served one with the send policy when the spec's channel binding declares a
-write (`SpecPlugin::sends`), else the A2A answer turn on `inbound-answer@1`. A send refused under
+picks the turn: the served one with the send policy when the spec has `loops` and its channel
+binding declares a write (`SpecPlugin::sends`), else the A2A answer turn on `inbound-answer@1`. A
+spec with no `loops` (`story:agent-run-without-loops`) has its states checked against
+`inbound-answer@1` (`check`: a state naming an action it does not declare is `UnknownProtocol` at
+`states`) and is built by `for_run` with no poll and no send, on that protocol under the host's
+defaults (`turn::TURN_STEP_BUDGET` 8, `turn::TURN_MODEL_BUDGET` 16, `DEFAULT_THRESHOLD` 0.5), so a
+`write` sends nothing; `SpecPlugin::new` still refuses it
+(`a_spec_with_no_loops_is_refused_by_serve_and_built_for_a_run`), `agent serve` exits 1 naming
+`loops` (3 is for a spec `check` refuses), and the operator refuses an `AgentServe` resource
+without them as `Malformed` at `spec.agent.loops`. A send refused under
 the process ends the run with the line's detail starting `not sent: ` (`turn::NOT_SENT`). How the
 run ends and its exit status are `loom.agent.RunOnce` (`run::run_once`, `run::ended`; the
 conformance target answers it in `crates/loom-conformance/src/run.rs`); `--input` is read before

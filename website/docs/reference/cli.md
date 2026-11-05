@@ -252,7 +252,8 @@ of the document: format is not loom.agent/1 (UnknownFormat), a text member is em
 port is outside 1 to 65535 (PortOutOfRange), an allow_paths entry is not a plain path
 (NotAPlainPath), a deadline is not an RFC 3339 instant (NotAnInstant), or the document does not
 decode otherwise (Malformed); the inner loop's protocol is not in the catalog, or
-states are declared with no inner loop (UnknownProtocol); a state names an action its protocol lacks
+a spec with no loops declares states inbound-answer@1, which `agent run` runs it on, does not admit
+(UnknownProtocol at states); a state names an action its protocol lacks
 (UnknownAction); a state, the outer loop or the channel names a source no binding declares
 (UnboundSource); an http binding's method is not GET (HttpMethod); reply.send is a capability while
 writes are none or undeclared (SendWithoutWrites); the channel allows no channel id
@@ -322,10 +323,12 @@ refused.
 
 Exit status:
   0  the cycles ran
-  1  the spec, the models, LOOM_HTTP_CA_FILE or the state directory cannot be used, or the last
-     cycle's poll failed
+  1  the spec `agent check` accepts is not one the host serves (no loops, so nothing would poll;
+     neither a channel nor expose.a2a; writes.mode auto; no connectors command line or channel
+     poll operations), or the models, LOOM_HTTP_CA_FILE or the state directory cannot be used, or
+     the last cycle's poll failed; standard error names why
   2  the command line is not valid
-  3  the spec cannot be served
+  3  the spec `agent check` refuses (standard error carries its refusal)
   130  a second SIGTERM or SIGINT ended it at once
 ```
 
@@ -350,6 +353,12 @@ Usage: b10x-loom agent run [OPTIONS] --spec <FILE>
 The spec is checked as `agent check` does, then --input is read: a regular file of UTF-8 text, at
 most 1048576 bytes, not empty or only whitespace. Both are decided before any model call, read or
 record. The spec needs neither a channel nor expose.a2a: nothing is polled and no A2A is answered.
+It needs no loops either: a spec without them runs on inbound-answer@1, the protocol `agent check`
+holds its states to, under the host's defaults in place of the inner loop's (8 steps and 16 model
+calls, TURN_STEP_BUDGET and TURN_MODEL_BUDGET of b10x-loom-plugin's turn, and classify_threshold
+0.5, its DEFAULT_THRESHOLD), and sends nothing, whatever its channel binding declares. A run polls
+nothing, so the channel binding needs no list, get or search either way. `agent serve` refuses a
+spec with no loops.
 
 The text is one item, classified and answered in one governed turn as `agent serve` answers a polled
 item: the state whose `when` names its intent is the projection, the spec's capabilities are the
@@ -360,10 +369,11 @@ Standard error carries one line per step, before any other: `step <n>: <action> 
 <reason>]; <s> steps and <m> model calls left`, the outcome performed, pending, refused, failed or
 not_invoked, and `no action` when the model selected none.
 
-When the channel binding declares a write, a proposed reply may be sent to the first channel of
-channel.allow, as reply.send of a served turn: writes.mode auto sends it in the turn, approval holds it
-for `b10x-loom approve` and `agent resume`, none sends nothing, and at most writes.max_per_hour sends
-are made an hour (sends.jsonl). Without a write the turn runs on inbound-answer@1 and sends nothing.
+When the spec has loops and its channel binding declares a write, a proposed reply may be sent to
+the first channel of channel.allow, as reply.send of a served turn: writes.mode auto sends it in the
+turn, approval holds it for `b10x-loom approve` and `agent resume`, none sends nothing, and at most
+writes.max_per_hour sends are made an hour (sends.jsonl). Without a write the turn runs on
+inbound-answer@1 and sends nothing.
 
 The state directory is --state, or without it the spec's runtime.state_dir. The models are the spec's
 `model` section, or with --catalog the route aliases --model and --classifier-model name.

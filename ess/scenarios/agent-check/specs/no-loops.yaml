@@ -1,0 +1,25 @@
+format: loom.agent/1
+agent:
+  id: scheduled-operator
+  name: Scheduled operator
+  brief: >-
+    You answer one task a scheduled job hands you about the platform. Read logs before you answer;
+    say what you read. Never claim a fix you did not observe.
+model:
+  routes: routes.yaml
+  roles:
+    - {role: agent, model: small}
+    - {role: classifier, model: small}
+states:
+  - {name: answer, when: {intent: Ask}, actions: [source.read, reply.propose, reply.decline], sources: [logs]}
+  - {name: hand-off, when: {intent: Task}, actions: [reply.decline], sources: []}
+bindings:
+  - {name: chat, kind: connectors, adapter: chat, connection: ops, write: chat.postMessage}
+  - {name: logs, kind: http, base_url: http://logs.monitoring.svc:3100, allow_paths: [/api/v1/query_range], method: GET, max_bytes: 262144}
+channel: {binding: chat, allow: [C0000000001], bot_user_id: U0000000001}
+writes: {mode: auto, max_per_hour: 30}
+policy: {capabilities: [datasource.read, reply.propose, reply.send]}
+runtime:
+  state_dir: /var/lib/agent
+  connectors: {program: /usr/local/bin/connectors, config: /etc/agent/connectors.toml, state_dir: /var/lib/agent/connectors, timeout_seconds: 30}
+  confinement: none

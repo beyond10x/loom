@@ -7,7 +7,9 @@
 //!    `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`,
 //!    `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
 //!    `EmptyChannelAllow`), then a `runtime` without `connectors`, which `agent serve` needs and
-//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0; an
+//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0, then a spec
+//!    with no `loops`, which the check admits for `agent run` and `agent serve` refuses at start
+//!    (`Malformed` at `spec.agent.loops`, `story:agent-run-without-loops`); an
 //!    `AgentServe` resource without `spec.agent` is `Malformed` at `spec.agent`. For the
 //!    `Command` variant (`spec.command` present), whose
 //!    document the image's program reads and `agent serve` does not, only the credential walk
@@ -1612,6 +1614,20 @@ pub fn admit(
              may leave it out",
         ));
     }
+    // `check` admits a spec with no `loops` for `agent run` (`story:agent-run-without-loops`);
+    // `agent serve` refuses it at start, since nothing would poll.
+    if variant == AgentVariant::AgentServe
+        && decoded
+            .as_ref()
+            .is_some_and(|decoded| decoded.loops.is_none())
+    {
+        return Err(Refusal::new(
+            Reason::Malformed,
+            "spec.agent.loops",
+            "`b10x-loom agent serve` needs `loops`, since with none nothing would poll; only a \
+             Command resource, which may run `agent run`, may leave them out",
+        ));
+    }
 
     let given = (!empty(&spec.routes))
         .then(|| yaml(&spec.routes, "spec.routes"))
@@ -2326,6 +2342,11 @@ mod tests {
                 "format": "loom.agent/1",
                 "agent": {"id": "a", "name": "A", "brief": "answers"},
                 "model": {"routes": "routes.yaml", "roles": [{"role": "agent", "model": "small"}]},
+                "loops": {
+                    "outer": {"poll_interval_seconds": 60, "sources": [], "min_age_minutes": 0,
+                              "lookback_minutes": 120},
+                    "inner": {"protocol": "inbound-answer@1", "step_budget": 8, "model_budget": 16},
+                },
             })),
             routes: serde_json::json!({
                 "format": "llm.routes/1",
@@ -2348,16 +2369,21 @@ mod tests {
         }
     }
 
+    /// `spec` admitted against a catalog holding every protocol with no action: the fixture's
+    /// loops name one and it declares no state.
     fn admitted(spec: &LoomAgentSpec) -> Result<Admitted, Refusal> {
-        admit(spec, "agents", &config(), &|_| None)
+        admit(spec, "agents", &config(), &|_| Some(Vec::new()))
     }
 
+    /// An `AgentServe` spec needs `loops` (`story:agent-run-without-loops`; one without them is
+    /// refused at `spec.agent.loops`, `tests/adversary_w20261105w1_u2_admission.rs`), and one
+    /// with loops and no states is admitted with the check's line.
     #[test]
-    fn a_spec_without_loops_is_admitted_with_the_checks_line() {
+    fn a_spec_without_states_is_admitted_with_the_checks_line() {
         let admitted = admitted(&spec(None)).expect("admitted");
         assert_eq!(
             admitted.message(),
-            "checked a: 0 states, 0 bindings, protocol none"
+            "checked a: 0 states, 0 bindings, protocol inbound-answer@1"
         );
         assert!(!admitted.default_routes);
         assert_eq!(admitted.connectors, "");

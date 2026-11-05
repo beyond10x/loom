@@ -16,6 +16,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - `spec.schedule.runDeadlineSeconds` renders the CronJob job template's `activeDeadlineSeconds`; a run past it is a failed `status.lastRun` with reason `DeadlineExceeded`; zero or less, or above 9223372036, is `Malformed` (story:schedule-run-deadline)
 
+### Changed
+
+- `b10x-loom agent run` runs a spec with no `loops` as an `inbound-answer@1` turn that never sends; `agent serve` still refuses it (story:agent-run-without-loops)
+- `b10x-loom agent run` needs no `list`, `get` or `search` on the channel binding; only its `write` is read (story:agent-run-without-loops)
+- The operator refuses an `AgentServe` `LoomAgent` whose spec has no `loops`, `Malformed` at `spec.agent.loops` (story:agent-run-without-loops)
+
 ### Fixed
 
 - An A2A turn that cannot run gives its caller a fixed reason per kind (`serve::a2a::TURN_*`), naming no host path (story:a2a-turn-error-names-no-host-path)

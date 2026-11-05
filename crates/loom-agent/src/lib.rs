@@ -27,7 +27,9 @@
 //!    tag anywhere first, then each mapping's undeclared members before its declared ones, in the
 //!    order the domain declares them;
 //! 4. [`RefusalReason::UnknownProtocol`]: the catalog does not hold the inner loop's protocol, or
-//!    states are declared with no inner loop;
+//!    a spec with no loops declares states [`RUN_PROTOCOL`] (`inbound-answer@1`), the protocol
+//!    `agent run` runs it on, does not admit: a state naming an action it does not declare, or a
+//!    catalog without it, at `states`;
 //! 5. [`RefusalReason::UnknownAction`]: a state names an action its protocol does not declare;
 //! 6. [`RefusalReason::UnboundSource`]: a state, the outer loop or the channel names a source no
 //!    binding declares, in that order;
@@ -113,6 +115,10 @@ pub const TOKEN_PREFIXES: [&str; 15] = [
 
 /// The capability that sends a reply, which needs writes.
 const SEND: &str = "reply.send";
+
+/// The protocol a spec with no `loops` is checked against and `agent run` runs it on
+/// (`story:agent-run-without-loops`); it declares no `reply.send`, so such a run never sends.
+pub const RUN_PROTOCOL: &str = b10x_loom_plugin::PROTOCOL;
 
 /// Checks `text`, one `loom.agent/1` document, against `actions`, which answers the action ids of
 /// a plugin-catalog protocol by its `name@major` or `None` when the catalog does not hold it.
@@ -281,27 +287,45 @@ fn urls(value: &str) -> Vec<&str> {
     found
 }
 
-/// The actions the inner loop's protocol declares, `None` when the spec has neither loops nor
-/// states.
+/// The actions the states are checked against: the inner loop's protocol's, or with no loops
+/// those of [`RUN_PROTOCOL`], the protocol `agent run` runs such a spec on; `None` when the spec
+/// has neither loops nor states. With no loops a state naming an action that protocol does not
+/// declare, or a catalog without it, is [`RefusalReason::UnknownProtocol`] at `states`.
 fn protocol(
     spec: &AgentSpec,
     actions: &dyn Fn(&str) -> Option<Vec<String>>,
 ) -> Result<Option<Vec<String>>, SpecRefused> {
-    match &spec.loops {
-        Some(loops) => actions(&loops.inner.protocol).map(Some).ok_or_else(|| {
+    let Some(loops) = &spec.loops else {
+        if spec.states.is_empty() {
+            return Ok(None);
+        }
+        let no_loops = |detail: String| {
             refused(
                 RefusalReason::UnknownProtocol,
-                "loops.inner.protocol",
-                loops.inner.protocol.clone(),
+                "states",
+                format!("with no loops the states run on {RUN_PROTOCOL}, which {detail}"),
             )
-        }),
-        None if spec.states.is_empty() => Ok(None),
-        None => Err(refused(
+        };
+        let declared = actions(RUN_PROTOCOL)
+            .ok_or_else(|| no_loops("the catalog does not hold".to_owned()))?;
+        for (i, state) in spec.states.iter().enumerate() {
+            for (j, action) in state.actions.iter().enumerate() {
+                if !declared.contains(action) {
+                    return Err(no_loops(format!(
+                        "does not declare {action} (states[{i}].actions[{j}])"
+                    )));
+                }
+            }
+        }
+        return Ok(Some(declared));
+    };
+    actions(&loops.inner.protocol).map(Some).ok_or_else(|| {
+        refused(
             RefusalReason::UnknownProtocol,
-            "states",
-            "no inner loop names a protocol to check the states against",
-        )),
-    }
+            "loops.inner.protocol",
+            loops.inner.protocol.clone(),
+        )
+    })
 }
 
 fn state_actions(spec: &AgentSpec, declared: &Option<Vec<String>>) -> Result<(), SpecRefused> {

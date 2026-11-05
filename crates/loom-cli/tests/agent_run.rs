@@ -16,6 +16,7 @@
 //! | `agent-run-once/input-missing` | [`input_missing`] |
 //! | `agent-run-once/refused-spec` | [`refused_spec`] |
 //! | `agent-run-once/budgets-hold` | [`budgets_hold`] |
+//! | `agent-run-once/no-loops-runs-one-turn` | [`no_loops_runs_one_turn`] |
 //!
 //! Every case runs the binary. Reads and writes go to the fake `connectors` of `loom-connectors`,
 //! answering from `loom-plugin-slack`'s and `loom-connectors`' fixtures. The models are the fixture
@@ -110,6 +111,91 @@ fn one_turn_recorded() {
     assert_eq!(record.len(), 1, "one line recorded: {record:?}");
     assert_eq!(record[0]["outcome"], "proposed", "{record:?}");
     assert!(scratch.invoked(WRITE).is_empty(), "nothing is sent");
+}
+
+/// `agent-run-once/no-loops-runs-one-turn` (`story:agent-run-without-loops`): a spec with no
+/// `loops`, whose channel binding declares a `write` and no `list`, `get` or `search`, under
+/// `writes.mode: auto` with `reply.send` among its capabilities, is checked against
+/// `inbound-answer@1` and runs as that protocol's turn: one turn on the input's text, one line
+/// recorded, one proposal printed, exit 0, and nothing sent. `agent serve` refuses the same spec
+/// before anything is read: nothing would poll.
+#[test]
+fn no_loops_runs_one_turn() {
+    let scratch = Scratch::new(
+        "no-loops",
+        &Spec {
+            no_loops: true,
+            max_per_hour: 5,
+            ..Spec::default()
+        },
+    );
+    let checked = scratch
+        .command()
+        .args(["agent", "check", "--spec"])
+        .arg(scratch.spec())
+        .output()
+        .unwrap();
+    let (stdout, stderr) = texts(&checked);
+    assert_eq!(checked.status.code(), Some(0), "{stdout}\n{stderr}");
+    let (base_url, server) = serve(answered(false));
+
+    let output = scratch.run(&base_url, Some(&scratch.input(TASK)));
+
+    let (stdout, stderr) = texts(&output);
+    assert_eq!(output.status.code(), Some(0), "{stdout}\n{stderr}");
+    let printed: Vec<&str> = stdout.lines().collect();
+    assert_eq!(printed.len(), 1, "one line for the proposal:\n{stdout}");
+    assert!(
+        printed[0].contains(" proposed ask reads=docs/search "),
+        "{stdout}"
+    );
+    assert!(printed[0].contains(REPLY), "{stdout}");
+    assert_eq!(
+        server.join().expect("the server finished").len(),
+        5,
+        "classified, read, proposed"
+    );
+    let record = scratch.record();
+    assert_eq!(record.len(), 1, "one line recorded: {record:?}");
+    assert_eq!(record[0]["outcome"], "proposed", "{record:?}");
+    assert!(scratch.invoked(WRITE).is_empty(), "nothing is sent");
+    assert!(
+        !scratch.state().join("sends.jsonl").exists(),
+        "no send counted"
+    );
+
+    let (base_url, listener) = silent();
+    fs::write(
+        scratch.root.join("catalog.toml"),
+        CATALOG.replace("http://127.0.0.1:1/v1", &base_url),
+    )
+    .unwrap();
+    let served = scratch
+        .command()
+        .args(["agent", "serve", "--once", "--spec"])
+        .arg(scratch.spec())
+        .arg("--state")
+        .arg(scratch.root.join("serve-state"))
+        .arg("--catalog")
+        .arg(scratch.root.join("catalog.toml"))
+        .args([
+            "--classifier-model",
+            "lab-classifier",
+            "--model",
+            "lab-agent",
+        ])
+        .output()
+        .unwrap();
+    let (stdout, stderr) = texts(&served);
+    assert_eq!(served.status.code(), Some(1), "{stdout}\n{stderr}");
+    assert!(stderr.contains("`loops` is undeclared"), "{stderr}");
+    assert!(stdout.is_empty(), "{stdout}");
+    assert!(
+        !scratch.root.join("serve-state").exists(),
+        "no state directory"
+    );
+    assert!(listener.accept().is_err(), "no model was called");
+    assert_eq!(scratch.invoked(WRITE).len(), 0, "nothing is sent");
 }
 
 /// `agent-run-once/send-under-writes`: with `writes: {mode: auto, max_per_hour: 1}` the turn
@@ -356,6 +442,10 @@ struct Spec {
     /// `reply.send` among the capabilities; without it the spec declares no channel and sends
     /// nothing.
     channel: bool,
+    /// No `loops` (`story:agent-run-without-loops`), and a channel binding declaring only a
+    /// `write`, the channel allowing [`CHANNEL`], `writes.mode: auto` and `reply.send` among the
+    /// capabilities; the states name only actions `inbound-answer@1` declares.
+    no_loops: bool,
     max_per_hour: i64,
     step_budget: i64,
     model_budget: i64,
@@ -365,6 +455,7 @@ impl Default for Spec {
     fn default() -> Self {
         Self {
             channel: false,
+            no_loops: false,
             max_per_hour: 0,
             step_budget: 8,
             model_budget: 16,
@@ -432,6 +523,19 @@ impl Scratch {
                 ),
                 "[datasource.read, reply.propose, reply.send]",
             )
+        } else if spec.no_loops {
+            (
+                "[source.read, reply.propose, reply.decline]",
+                format!(
+                    "  - {{name: chat, kind: connectors, adapter: slack, connection: slack-fixture, write: {WRITE}}}\n"
+                ),
+                format!("channel: {{binding: chat, allow: [{CHANNEL}], bot_user_id: U0BOT}}\n"),
+                format!(
+                    "writes: {{mode: auto, max_per_hour: {}}}\n",
+                    spec.max_per_hour
+                ),
+                "[datasource.read, reply.propose, reply.send]",
+            )
         } else {
             (
                 "[source.read, reply.propose, reply.decline]",
@@ -441,16 +545,24 @@ impl Scratch {
                 "[datasource.read, reply.propose]",
             )
         };
+        let loops = if spec.no_loops {
+            String::new()
+        } else {
+            format!(
+                "loops:
+  outer: {{poll_interval_seconds: 60, sources: [docs], min_age_minutes: 0, lookback_minutes: 120}}
+  inner: {{protocol: operator-reply@1, step_budget: {}, model_budget: {}, classify_threshold: 0.5}}
+",
+                spec.step_budget, spec.model_budget
+            )
+        };
         let text = format!(
             "format: loom.agent/1
 agent: {{id: test-operator, name: Test operator, brief: Answer questions about the deploy.}}
 model:
   routes: routes.yaml
   roles: [{{role: agent, model: small}}, {{role: classifier, model: small}}]
-loops:
-  outer: {{poll_interval_seconds: 60, sources: [docs], min_age_minutes: 0, lookback_minutes: 120}}
-  inner: {{protocol: operator-reply@1, step_budget: {step_budget}, model_budget: {model_budget}, classify_threshold: 0.5}}
-states:
+{loops}states:
   - {{name: answer, when: {{intent: Ask}}, actions: {actions}, sources: [docs]}}
   - {{name: hand-off, when: {{intent: Task}}, actions: [reply.decline], sources: []}}
 bindings:
@@ -461,8 +573,6 @@ runtime:
   connectors: {{program: {program}, state_dir: {connectors}}}
   confinement: none
 ",
-            step_budget = spec.step_budget,
-            model_budget = spec.model_budget,
             state = scratch.state().display(),
             program = fake.display(),
             connectors = connectors_state.display(),

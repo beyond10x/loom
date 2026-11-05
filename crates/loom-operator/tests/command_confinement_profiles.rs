@@ -56,6 +56,9 @@ spec:
     format: loom.agent/1
     agent: {{id: a, name: A, brief: answers}}
     model: {{routes: routes.yaml, roles: [{{role: agent, model: small}}]}}
+    loops:
+      outer: {{poll_interval_seconds: 60, sources: [], min_age_minutes: 0, lookback_minutes: 120}}
+      inner: {{protocol: inbound-answer@1, step_budget: 8, model_budget: 16}}
     runtime:
       state_dir: /var/lib/agent
       connectors: {{program: connectors}}
