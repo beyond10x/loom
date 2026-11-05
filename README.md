@@ -265,7 +265,8 @@ the domain answering its own reason at the first member the decoder refuses (`Un
 `BlankText`, `NotAVariableName` for a `bearer_env`, `PortOutOfRange`, `NotAPlainPath` for an
 `allow_paths` entry, `NotAnInstant` for a deadline that is not an RFC 3339 instant) and anything
 else `Malformed`; the inner loop's
-protocol is not in the catalog, or states have no inner loop; a state names an action its
+protocol is not in the catalog, or a spec with no loops declares states `inbound-answer@1` does
+not admit; a state names an action its
 protocol lacks; a state, the outer loop or the channel names a source no binding declares; an
 `http` binding's method is not `GET`; `reply.send` is a capability while writes are `none`; the
 channel allows no channel id. It exits 0 when the spec is serveable, 3 when it is refused, 1 when
