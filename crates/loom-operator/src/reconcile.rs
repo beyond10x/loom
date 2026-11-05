@@ -49,7 +49,10 @@
 //!    A `Command` resource with `spec.schedule` (story command-schedule) has a CronJob in its
 //!    Job's place. Before it is created, the resource's Job and a Deployment of its name are
 //!    deleted, and before a Job is created the resource's CronJob, so the two never coexist; while
-//!    one still terminates nothing is applied and the reconcile comes again after [`RETRY`]. The
+//!    one still terminates nothing is applied and the reconcile comes again after [`RETRY`].
+//!    Meanwhile, and while a predecessor's children go, a scheduled resource's `Available` reads
+//!    False `WorkloadTerminating` naming them (story schedule-available-after-cronjob), never
+//!    `Scheduled` before its CronJob exists. The
 //!    CronJob is applied on every reconcile, so a new generation patches its schedule and job
 //!    template in place. The runs it starts are Kubernetes's: never applied, deleted or counted
 //!    as the resource's children. The newest finished one whose controlling owner is the
@@ -1138,30 +1141,31 @@ enum Observed {
 /// Before a `Command` resource's Job is created: deletes the Job of another generation `stale`
 /// names, the CronJob of the Job's name (the resource was scheduled before), and a Deployment of
 /// that name (one an earlier release made for a `Command` resource), each one the resource or a
-/// predecessor controls, and answers whether all are gone. Before a scheduled resource's CronJob
-/// is created, the same for the Job and the Deployment of its name. Until they are, nothing is
-/// applied, so an old pod and the new run never share the workspace, and a Job and a CronJob of
-/// one resource never coexist. An `AgentServe` resource's Deployment waits for nothing: it is
-/// updated in place, `Recreate`.
-async fn workloads_gone(
+/// predecessor controls, and answers those not yet gone, each as kind and name
+/// (`Job platform-operator`). Before a scheduled resource's CronJob is created, the same for the
+/// Job and the Deployment of its name. Until all are gone, nothing is applied, so an old pod and
+/// the new run never share the workspace, and a Job and a CronJob of one resource never coexist;
+/// a scheduled resource's status names them meanwhile ([`status::Scheduled::terminating`]). An
+/// `AgentServe` resource's Deployment waits for nothing: it is updated in place, `Recreate`.
+async fn workloads_terminating(
     ctx: &Context,
     namespace: &str,
     resource: &str,
     owner: &str,
     children: &Children,
     stale: Option<(&Surveyed, &String, &JobRun)>,
-) -> Result<bool, kube::Error> {
+) -> Result<Vec<String>, kube::Error> {
     let others: &[Kind] = match children.workload {
-        Workload::Deployment(_) => return Ok(true),
+        Workload::Deployment(_) => return Ok(Vec::new()),
         Workload::Job(_) => &[Kind::CronJob, Kind::Deployment],
         Workload::CronJob(_) => &[Kind::Job, Kind::Deployment],
     };
-    let mut gone = true;
+    let mut terminating = Vec::new();
     if let Some((job, uid, _)) = stale {
         if delete_kind(job.kind, &ctx.client, namespace, &job.name, uid).await? {
             ctx.unremember(resource, job.kind, &job.name);
         } else {
-            gone = false;
+            terminating.push(named(job.kind, &job.name));
         }
     }
     let workload = children.workload.name();
@@ -1172,11 +1176,16 @@ async fn workloads_gone(
             if delete_kind(kind, &ctx.client, namespace, &workload, &uid).await? {
                 ctx.unremember(resource, kind, &workload);
             } else {
-                gone = false;
+                terminating.push(named(kind, &workload));
             }
         }
     }
-    Ok(gone)
+    Ok(terminating)
+}
+
+/// A child as a status message names it: its kind and name.
+fn named(kind: Kind, name: &str) -> String {
+    format!("{} {name}", kind.as_str())
 }
 
 /// Applies `children`, and answers what the applied workload reports. A Job of this generation
@@ -1255,13 +1264,16 @@ async fn observe_scheduled(
 }
 
 /// Publishes `row` as the status of the resource `agent`, named `name`, unless its status already
-/// reads so.
+/// reads so. `terminating` names the children this reconcile waits for before it applies any
+/// (empty when it applied them): a scheduled resource then has no CronJob yet, and its
+/// `Available` says so ([`status::Scheduled::terminating`]).
 async fn publish(
     ctx: &Context,
     namespace: &str,
     name: &str,
     agent: &LoomAgent,
     row: &LoomAgents,
+    terminating: &[String],
 ) -> Result<(), kube::Error> {
     let current = agent.status.as_ref();
     let scheduled = agent
@@ -1270,6 +1282,7 @@ async fn publish(
         .as_ref()
         .map(|schedule| status::Scheduled {
             suspended: schedule.suspend.unwrap_or(false),
+            terminating: terminating.to_vec(),
         });
     let mut status = status::status_of(row, scheduled);
     if let Some(code) = ctx.pods_refused(name) {
@@ -1403,13 +1416,15 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     _ => None,
                 });
             if !predecessors.is_empty() {
+                let mut deleted = Vec::new();
                 for child in predecessors {
                     if let Holding::Predecessor(uid) = &child.holding {
                         delete_kind(child.kind, &ctx.client, &namespace, &child.name, uid).await?;
+                        deleted.push(named(child.kind, &child.name));
                     }
                 }
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, &agent, &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row, &deleted).await?;
                 }
                 return Ok(Action::requeue(RETRY));
             }
@@ -1425,17 +1440,19 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
                     ctx.record().observe_run(observed)?;
                 }
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, &agent, &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row, &[]).await?;
                 }
                 return Ok(Action::requeue(REQUEUE));
             }
-            if running.is_none()
-                && !workloads_gone(&ctx, &namespace, &name, &owner, children, job).await?
-            {
-                if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, &agent, &row).await?;
+            if running.is_none() {
+                let terminating =
+                    workloads_terminating(&ctx, &namespace, &name, &owner, children, job).await?;
+                if !terminating.is_empty() {
+                    if let Some(row) = row(&ctx, &key) {
+                        publish(&ctx, &namespace, &name, &agent, &row, &terminating).await?;
+                    }
+                    return Ok(Action::requeue(RETRY));
                 }
-                return Ok(Action::requeue(RETRY));
             }
             let mut ending = false;
             match running {
@@ -1484,7 +1501,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
             }
             if ending {
                 if let Some(row) = row(&ctx, &key) {
-                    publish(&ctx, &namespace, &name, &agent, &row).await?;
+                    publish(&ctx, &namespace, &name, &agent, &row, &[]).await?;
                 }
                 return Ok(Action::requeue(RETRY));
             }
@@ -1493,7 +1510,7 @@ pub async fn reconcile(agent: Arc<LoomAgent>, ctx: Arc<Context>) -> Result<Actio
     }
 
     if let Some(row) = row(&ctx, &key) {
-        publish(&ctx, &namespace, &name, &agent, &row).await?;
+        publish(&ctx, &namespace, &name, &agent, &row, &[]).await?;
     }
     Ok(Action::requeue(REQUEUE))
 }

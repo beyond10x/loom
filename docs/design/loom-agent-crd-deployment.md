@@ -424,7 +424,7 @@ Lifecycle and status:
 
 - A scheduled resource never reaches `Completed` or `Failed`; it stays `Running` while the CronJob
   exists, `suspend` included. `Available` is True `Scheduled`, or False `Suspended` while
-  `suspend` is true.
+  `suspend` is true, and False `WorkloadTerminating` before the CronJob exists (below).
 - `status.lastRun` is the end of the newest finished Job the CronJob owns (by the instance label
   and the CronJob's uid as controlling owner; a Job still active never speaks), read as
   `story:command-run-exit-status` reads one: the Job's own pod by owner uid, the program
@@ -448,6 +448,10 @@ Lifecycle and status:
 - Removing `spec.schedule` deletes the CronJob in the foreground, preconditioned on its uid, and
   then creates the one Job of § 9a; adding it deletes that Job first. While either still
   terminates nothing is applied and the reconcile comes again after 30 s. The two never coexist.
+  While a scheduled resource waits so for a Job, a Deployment (a switch from `AgentServe`) or a
+  predecessor's child to go, `Available` is False `WorkloadTerminating`, its message naming
+  what it waits for; it reads `Scheduled` (or `Suspended`) only once the CronJob is created
+  (`story:schedule-available-after-cronjob`).
 - The Jobs the CronJob starts are Kubernetes's: the controller never applies, deletes or counts
   them as the resource's children. It watches the CronJob, whose status changes as runs start and
   end, beside its periodic reconcile.

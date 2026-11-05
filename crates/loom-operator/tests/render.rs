@@ -3496,6 +3496,35 @@ fn a_negative_starting_deadline_is_refused() {
     );
 }
 
+/// A starting deadline above `MAX_RUN_DEADLINE_SECONDS`, which Kubernetes' CronJob controller
+/// holds as nanoseconds in a signed 64-bit duration and which wraps negative past it, is refused
+/// at its member; the largest it holds is admitted and rendered as given.
+#[test]
+fn a_starting_deadline_past_what_kubernetes_holds_as_a_duration_is_refused() {
+    for seconds in ["9223372037", "9223372036854775807"] {
+        let message = refusal(
+            &command_with(&format!(
+                "  schedule: {{cron: '0 3 * * *', startingDeadlineSeconds: {seconds}}}\n"
+            )),
+            &config(),
+        );
+        assert!(
+            message.starts_with("refused: Malformed at spec.schedule.startingDeadlineSeconds: "),
+            "{seconds}: {message}"
+        );
+        assert!(!message.contains(seconds), "{seconds}: {message}");
+    }
+    let rendered = render_document(
+        &command_with("  schedule: {cron: '0 3 * * *', startingDeadlineSeconds: 9223372036}\n"),
+        &config(),
+    )
+    .expect("rendered");
+    assert_eq!(
+        cron_job_of(&rendered)["spec"]["startingDeadlineSeconds"].as_i64(),
+        Some(9_223_372_036)
+    );
+}
+
 /// The program container of a scheduled run of `b10x-loom agent run`, reading `input`.
 fn agent_run(input: &str) -> Vec<String> {
     [
