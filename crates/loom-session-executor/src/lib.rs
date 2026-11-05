@@ -554,8 +554,8 @@ pub struct SessionReport {
     /// The directory the session worked in, the scratch copy; removed when the call returns.
     pub cwd: Option<PathBuf>,
     /// Every event metaharness delivered, one JSON line each; its `NO_TERMINAL_RECORD` warning
-    /// with each line of the child's stderr that holds a credential's shape withheld, as the
-    /// error's stderr tail withholds it.
+    /// with the child's whole stderr walked as the error's stderr tail is, at least each line the
+    /// tail withholds withheld.
     pub transcript: Vec<u8>,
     /// Each gating row of metaharness's hermetic floor that was not `ok`, as
     /// `<row> <verdict>: <detail>`.
@@ -3087,12 +3087,34 @@ fn holds_credential(line: &str) -> bool {
                 .is_none_or(|before| !before.is_alphanumeric())
         })
     });
-    prefixed || line_urls(line).iter().any(|url| url_holds_credential(url))
+    prefixed || holds_credential_url(line)
 }
 
-/// Whether `url` carries user information or a query component. Its authority runs from after
-/// `://` to the first `/`, or to its end: a `#` or a `?` does not end it, so a password holding
-/// either is user information all the same.
+/// Whether `line` holds a URL that carries user information or a query component. A URL is each
+/// `://` with at least one scheme character before it (a letter, a digit, `+`, `-`, `.`) and
+/// everything after it up to whitespace, so it lies in one word of the line. Its authority runs
+/// from after `://` to the first `/`, or to the word's end: a `#` or a `?` does not end it, so a
+/// password holding either is user information all the same. Each word is read in one pass: an
+/// authority ends at the latest at the next `://`, whose `/` ends it, and a `?` after a `://` is
+/// the word's last `?` after it, found once per word.
+fn holds_credential_url(line: &str) -> bool {
+    let is_scheme = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.');
+    line.split(char::is_whitespace).any(|word| {
+        let last_query = word.rfind('?');
+        word.match_indices("://").any(|(at, _)| {
+            if !word[..at].chars().next_back().is_some_and(is_scheme) {
+                return false;
+            }
+            let rest = &word[at + 3..];
+            last_query.is_some_and(|query| query >= at + 3)
+                || rest[..rest.find('/').unwrap_or(rest.len())].contains('@')
+        })
+    })
+}
+
+/// Whether `url` carries user information or a query component, as the walk read it before
+/// [`holds_credential_url`]: the equivalence its unit test holds it to.
+#[cfg(test)]
 fn url_holds_credential(url: &str) -> bool {
     let rest = &url[url.find("://").map_or(0, |at| at + 3)..];
     let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
@@ -3100,7 +3122,9 @@ fn url_holds_credential(url: &str) -> bool {
 }
 
 /// Every URL `line` holds: each `://` with the scheme before it (letters, digits, `+`, `-`, `.`,
-/// at least one) and everything after it up to whitespace.
+/// at least one) and everything after it up to whitespace; the reading before
+/// [`holds_credential_url`], kept for its unit test.
+#[cfg(test)]
 fn line_urls(line: &str) -> Vec<&str> {
     let is_scheme = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.');
     let mut found = Vec::new();
@@ -3726,6 +3750,51 @@ mod tests {
         assert_eq!(
             credential_lines(&lines),
             [true, true, true, true, true, false]
+        );
+    }
+
+    #[test]
+    fn the_one_pass_url_reading_withholds_what_the_earlier_reading_withheld() {
+        let pieces = [
+            "a",
+            "Z",
+            "9",
+            ":",
+            "/",
+            "//",
+            "://",
+            "@",
+            "?",
+            "#",
+            " ",
+            "\t",
+            "+",
+            "-",
+            ".",
+            "é",
+            "\u{3000}",
+            "https",
+            "user:pw@",
+            "h.example",
+            "?q=1",
+        ];
+        let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut next = |bound: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(seed >> 33).expect("31 bits fit") % bound
+        };
+        let mut held = 0;
+        for _ in 0..20_000 {
+            let line: String = (0..next(24)).map(|_| pieces[next(pieces.len())]).collect();
+            let earlier = line_urls(&line).iter().any(|url| url_holds_credential(url));
+            assert_eq!(holds_credential_url(&line), earlier, "{line:?}");
+            held += usize::from(earlier);
+        }
+        assert!(
+            held > 1_000,
+            "the lines drawn hold credentials often enough: {held}"
         );
     }
 
