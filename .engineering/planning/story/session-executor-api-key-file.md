@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:session-executor-api-key-file
 kind: story
-status: draft
+status: archived
 title: A session executor reads its endpoint's API key from a file
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -10,7 +10,9 @@ relations:
 scope:
 - confidence: inferred
   path: crates/loom-session-executor/src/lib.rs
-revision: 2
+revision: 4
+transitions:
+- {from: "draft", to: "archived", at: "2026-11-05T06:22:05Z", actor: "human:timo", revision: 4, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-w2-loom"}
 ---
 ## Outcome
 
@@ -41,3 +43,10 @@ Derived 2026-10-26 by the coordinator from the release note quoted above; not re
 - `crates/loom-session-executor/src/lib.rs` (`Endpoint`, `SessionExecutor::spec`) — inferred
 - metaharness `RunSpec` (whether it carries a key file today) — inferred, may need a metaharness story
 - README.md, AGENTS.md § Session executor, CHANGELOG.md — inferred
+
+## Archived
+
+Rejected on 2026-11-05 by the orchestrator, on the operator's decision of 2026-10-21 recorded when
+the metaharness twin `story:b10x-api-key-from-file` was archived: "the key lives in the secret
+store, never in a file". A session executor keeps reading its endpoint's key from the secret store
+(`SessionExecutor::api_key_secret`).

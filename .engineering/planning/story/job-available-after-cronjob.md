@@ -2,14 +2,30 @@
 format: aep.planning-md/3
 id: story:job-available-after-cronjob
 kind: story
-status: draft
+status: active
 title: Available names the wait while a CronJob goes before a single-run Job
 tags:
 - from-finding
 relations:
 - decomposes: epic:loom-agent-command-variant
 - serves: vision:O1
-revision: 1
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-operator/src/reconcile.rs
+- confidence: cited
+  path: crates/loom-operator/src/status.rs
+- confidence: cited
+  path: crates/loom-operator/tests/reconcile.rs
+- confidence: cited
+  path: docs/design/loom-agent-crd-deployment.md
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-05T06:22:00Z", actor: "human:timo", revision: 2, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-w2-loom"}
+- {from: "proposed", to: "active", at: "2026-11-05T06:22:00Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-w2-loom"}
 ---
 ## Outcome
 
