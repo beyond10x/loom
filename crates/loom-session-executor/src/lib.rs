@@ -2955,11 +2955,11 @@ fn record_reason(why: &str, child: &ChildEnd) -> String {
 const STDERR_SAID_BY_REASON: &str = "; the last lines of its stderr:\n";
 
 /// The lines of `text` as a tail or a record shows them: each one inert ([`inert`]), and each
-/// that holds a credential's shape ([`credential_lines`]) withheld, read in three forms: with its
+/// that holds a credential's shape ([`credential_lines`]) withheld, read in four forms: with its
 /// escape sequences and control characters removed, as a terminal shows it; with each replaced;
-/// and with its control characters alone dropped ([`dropped`]), so an `ESC` an escape sequence's
-/// reading would take a token's first character with hides no prefix. A note stands in for each
-/// run of withheld lines. A line's `\r` ending is dropped.
+/// and both again with each escape sequence's intermediate and final bytes kept as text
+/// ([`kept`]), so a sequence whose reading takes a token's first character hides no prefix. A
+/// note stands in for each run of withheld lines. A line's `\r` ending is dropped.
 fn walked(text: &str) -> Vec<String> {
     let (lines, withheld) = walk_lines(text);
     noted(lines, &withheld)
@@ -2972,15 +2972,20 @@ fn walk_lines(text: &str) -> (Vec<String>, Vec<bool>) {
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
         .collect();
     let forms: Vec<(String, String)> = raw.iter().map(|line| inert(line)).collect();
-    let dropped_forms: Vec<String> = raw.iter().map(|line| dropped(line)).collect();
-    let shown_forms: Vec<&str> = forms.iter().map(|(shown, _)| shown.as_str()).collect();
-    let bare_forms: Vec<&str> = forms.iter().map(|(_, bare)| bare.as_str()).collect();
-    let dropped_forms: Vec<&str> = dropped_forms.iter().map(String::as_str).collect();
-    let withheld: Vec<bool> = credential_lines(&shown_forms)
+    let kept_forms: Vec<(String, String)> = raw.iter().map(|line| kept(line)).collect();
+    let pick = |forms: &[(String, String)], second: bool| -> Vec<bool> {
+        let lines: Vec<&str> = forms
+            .iter()
+            .map(|(first, other)| if second { other } else { first }.as_str())
+            .collect();
+        credential_lines(&lines)
+    };
+    let withheld: Vec<bool> = pick(&forms, false)
         .into_iter()
-        .zip(credential_lines(&bare_forms))
-        .zip(credential_lines(&dropped_forms))
-        .map(|((shown, bare), dropped)| shown || bare || dropped)
+        .zip(pick(&forms, true))
+        .zip(pick(&kept_forms, false))
+        .zip(pick(&kept_forms, true))
+        .map(|(((shown, bare), marked), joined)| shown || bare || marked || joined)
         .collect();
     (
         forms.into_iter().map(|(shown, _)| shown).collect(),
@@ -3013,12 +3018,65 @@ fn noted(lines: impl IntoIterator<Item = String>, withheld: &[bool]) -> Vec<Stri
     shown
 }
 
-/// `line` with each control character but a tab dropped and nothing else: no escape sequence is
-/// read, so none takes the character after its `ESC`.
-fn dropped(line: &str) -> String {
-    line.chars()
-        .filter(|c| !c.is_control() || *c == '\t')
-        .collect()
+/// `line` read as [`inert`] reads it, twice, but each escape sequence's intermediate bytes
+/// (`0x20..=0x2f`) and final byte kept as text, since the one the sequence ends with may be a
+/// token's first character: marked, each sequence and each other control character but a tab
+/// replaced by one U+FFFD before what it keeps, so a token joined to the word before it still
+/// starts one; and joined, each of them removed, so a sequence inside a prefix hides it from
+/// neither. A control sequence's parameter bytes (`0x30..=0x3f`, `?` among them) and a string's
+/// body (`ESC ]`, `ESC P`, `ESC X`, `ESC ^`, `ESC _`, up to `BEL` or `ESC \`) are never kept.
+fn kept(line: &str) -> (String, String) {
+    let mut marked = String::with_capacity(line.len());
+    let mut joined = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut keep = |c: char, marked: &mut String| {
+        marked.push(c);
+        joined.push(c);
+    };
+    while let Some(c) = chars.next() {
+        if !c.is_control() || c == '\t' {
+            keep(c, &mut marked);
+            continue;
+        }
+        marked.push(char::REPLACEMENT_CHARACTER);
+        let csi = match c {
+            '\u{9b}' => true,
+            '\u{1b}' => match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    true
+                }
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\u{7}' || (c == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some(_) => false,
+                None => continue,
+            },
+            _ => continue,
+        };
+        let final_bytes = if csi {
+            while chars
+                .next_if(|c| ('\u{30}'..='\u{3f}').contains(c))
+                .is_some()
+            {}
+            '\u{40}'..='\u{7e}'
+        } else {
+            '\u{30}'..='\u{7e}'
+        };
+        while let Some(c) = chars.next_if(|c| ('\u{20}'..='\u{2f}').contains(c)) {
+            keep(c, &mut marked);
+        }
+        if let Some(c) = chars.next_if(|c| final_bytes.contains(c)) {
+            keep(c, &mut marked);
+        }
+    }
+    (marked, joined)
 }
 
 /// `line` made inert, twice: as shown, each terminal escape sequence and each other control
@@ -3885,6 +3943,42 @@ mod tests {
         );
         assert!(holds_credential(&inert("key=\u{1b}[1msk-x").0));
         assert!(holds_credential(&inert("s\u{1b}[0mk-x").1));
+    }
+
+    #[test]
+    fn an_escape_sequence_keeps_its_final_byte_and_no_parameter_or_string_body() {
+        assert_eq!(
+            kept("a\u{1b}gb\u{1b}[?25hc\u{1b}]8;;u?q\u{1b}\\d\u{1b}(Be\u{9b}1Kf\u{7}g\tz\u{1b}"),
+            (
+                "a\u{fffd}gb\u{fffd}hc\u{fffd}d\u{fffd}(Be\u{fffd}Kf\u{fffd}g\tz\u{fffd}"
+                    .to_owned(),
+                "agbhcd(BeKfg\tz".to_owned()
+            )
+        );
+        let withheld = |line: &str| walked(line) != [line.to_owned()];
+        for line in [
+            "value=\u{1b}ghp_x",
+            "value=x\u{1b}ghp_x",
+            "value=\u{1b}[1ghp_x",
+            "value=gh\u{1b}p_x",
+            "\u{1b}-----BEGIN PRIVATE KEY-----",
+        ] {
+            assert!(withheld(line), "{line:?} is withheld");
+        }
+        for line in [
+            "fetched https://h.example/a",
+            "see https://h.example/a for more",
+        ] {
+            assert!(!withheld(line), "{line:?} is kept");
+        }
+        assert_eq!(
+            walked("fetched https://h.example/a\u{1b}[?25h"),
+            ["fetched https://h.example/a\u{fffd}"]
+        );
+        assert_eq!(
+            walked("see \u{1b}]8;;https://h.example/e?q=7\u{1b}\\guide\u{1b}]8;;\u{1b}\\ now"),
+            ["see \u{fffd}guide\u{fffd} now"]
+        );
     }
 
     #[test]

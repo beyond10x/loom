@@ -297,6 +297,30 @@ fn security_w3_u2_a_token_after_a_control_sequence_with_a_parameter_reaches_none
 }
 
 #[test]
+fn security_w3_u2_a_token_after_an_escape_joined_to_a_word_reaches_none_of_the_four() {
+    // `ESC` right after a letter and before a token: the shown and bare forms read `ESC g` as
+    // one escape sequence and lose the prefix's `g`, and a form that drops the `ESC` joins `x`
+    // to the token, so the prefix starts no word in any of them (story:
+    // stderr-walk-withholds-token-after-joined-escape).
+    let stderr = format!(
+        "starting\ndebug: value=x\u{1b}{}{SECRET}\n{REFUSED}\n",
+        github_prefix()
+    );
+    let outcome = session("joined-escape", &stderr);
+    for (what, text) in [
+        ("transcript", outcome.transcript.as_str()),
+        ("observed", &outcome.observed.join("\n")),
+        ("error", outcome.why.as_str()),
+        ("record tail", outcome.record_tail.as_deref().unwrap_or("")),
+    ] {
+        assert!(
+            !text.contains(SECRET),
+            "the {what} holds the token's secret: {text:?}"
+        );
+    }
+}
+
+#[test]
 fn security_w3_u2_a_url_followed_by_a_private_mode_sequence_is_kept_as_shown() {
     // `ESC [ ? 25 h` shows the cursor again, as a spinner does when it ends. It is shown as one
     // U+FFFD, so the line as every output keeps it holds a URL without a query; the dropped form
@@ -413,7 +437,14 @@ fn security_w3_u2_every_line_the_tail_keeps_the_whole_walk_keeps() {
         .filter(|prefix| !prefix.starts_with('-'))
         .collect();
     // Escape sequences each of which the three forms together see through to a prefix after it.
-    let escapes = ["\u{1b}", "\u{1b}[", "\u{1b}[0m", "\u{1b}(", "\u{9b}", "\u{7}"];
+    let escapes = [
+        "\u{1b}",
+        "\u{1b}[",
+        "\u{1b}[0m",
+        "\u{1b}(",
+        "\u{9b}",
+        "\u{7}",
+    ];
     let end = ["-----END ", "PRIVATE", " KEY-----"].concat();
     let mut state: u64 = 0x5eed_0302;
     let mut next = move || {
@@ -436,7 +467,11 @@ fn security_w3_u2_every_line_the_tail_keeps_the_whole_walk_keeps() {
                 15..=18 => Draw::Body,
                 _ => Draw::End,
             };
-            let run = if draw == Draw::Body { 1 + next() % 60 } else { 1 };
+            let run = if draw == Draw::Body {
+                1 + next() % 60
+            } else {
+                1
+            };
             for _ in 0..run {
                 let pad = "p".repeat(next() % 120);
                 let ending = if next() % 4 == 0 { "\r" } else { "" };
