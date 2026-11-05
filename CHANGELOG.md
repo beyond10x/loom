@@ -12,6 +12,19 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.57.2] - 2026-11-05
+
+No breaking changes.
+
+### Changed
+
+- README's `loom-agents` upgrade guide applies the CRD of the release tag with `kubectl apply --server-side` before `helm upgrade` (story:chart-upgrade-guide-applies-crd-first)
+
+### Fixed
+
+- `SessionExecutor`'s stderr tail withholds a PEM block's body lines when its window cut the block's opening (story:stderr-tail-withholds-cut-pem-block)
+- `SessionExecutor` withholds a stderr line whose token follows an escape sequence, lone or joined to a word, in the transcript, observer, tail and record (story:stderr-walk-withholds-token-after-lone-escape, story:stderr-walk-withholds-token-after-joined-escape)
+
 ## [0.57.1] - 2026-11-05
 
 No breaking changes.
@@ -1400,7 +1413,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.2...HEAD
+[0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2
 [0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1
 [0.57.0]: https://github.com/beyond10x/loom/releases/tag/0.57.0
 [0.56.0]: https://github.com/beyond10x/loom/releases/tag/0.56.0

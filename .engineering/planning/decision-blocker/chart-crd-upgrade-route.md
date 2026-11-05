@@ -2,11 +2,13 @@
 format: aep.planning-md/3
 id: decision-blocker:chart-crd-upgrade-route
 kind: decision-blocker
-status: open
+status: cleared
 title: How a loom-agents chart upgrade delivers its CRD; operator decides
 relations:
 - blocks: story:chart-upgrade-applies-crd
-revision: 1
+revision: 3
+transitions:
+- {from: "open", to: "cleared", at: "2026-11-05T09:32:49Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w3"}
 ---
 Decider: operator. A consumer-visible change to how the chart installs its CRD; no default on silence.
 
@@ -41,3 +43,13 @@ under option A; no workflow change under any option.
 
 The orchestrator took the story out of wave 2026-11-05-w2 on 2026-11-05: "option A makes the first
 `helm upgrade` of every existing release fail until a manual relabel, which breaks a consumer".
+
+## Decided
+
+The operator answered on 2026-11-05, relayed by the orchestrator: "yes" to the recommendation.
+
+- C now: the chart stays as it is, and the README and AGENTS.md § chart say to run
+  `kubectl apply --server-side -f` with the CRD of the new tag before `helm upgrade`.
+  `story:chart-upgrade-guide-applies-crd-first` delivers it.
+- A later: `story:chart-upgrade-applies-crd` moves the CRD into the chart templates in a release
+  that announces the one-time migration ahead of time. It stays a draft until then.
