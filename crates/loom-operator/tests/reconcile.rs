@@ -2644,6 +2644,65 @@ async fn a_scheduled_resource_reports_each_finished_run_in_turn() {
     );
 }
 
+/// `resource-schedule/a-run-past-its-deadline-is-reported-failed` (`story:schedule-run-deadline`):
+/// `runDeadlineSeconds: 600` applies the CronJob with `activeDeadlineSeconds: 600` on its job
+/// template; a run Kubernetes ended there, its Job `Failed` with `DeadlineExceeded` and its pod
+/// already gone, is the last run `Failed` with that reason and no exit code, `LastRunSucceeded`
+/// False `RunFailed`, and the resource stays Running.
+#[tokio::test]
+async fn a_scheduled_run_past_its_deadline_is_reported_failed() {
+    let schedule = "  schedule: {cron: '0 3 * * *', runDeadlineSeconds: 600}\n";
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, schedule), &ctx).await;
+    let seen = fake.take();
+    let cron = applied_body(&seen, CRON_JOB);
+    assert_eq!(
+        cron["spec"]["jobTemplate"]["spec"]["activeDeadlineSeconds"],
+        600
+    );
+    assert_eq!(cron["spec"]["concurrencyPolicy"], "Forbid");
+
+    let (run, job) = cron_run(
+        "platform-operator-29370180",
+        &cron_uid(),
+        "2026-11-05T03:00:00Z",
+        json!({
+            "failed": 1,
+            "conditions": [
+                {"type": "FailureTarget", "status": "True", "reason": "DeadlineExceeded",
+                 "message": "Job was active longer than specified deadline"},
+                {"type": "Failed", "status": "True", "reason": "DeadlineExceeded",
+                 "message": "Job was active longer than specified deadline"},
+            ],
+        }),
+    );
+    fake.put(&run, job);
+    reconciled(scheduled_agent(1, schedule), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(
+        status["state"], "Running",
+        "a run past its deadline fails no resource"
+    );
+    assert_eq!(
+        status["lastRun"],
+        json!({"phase": "Failed", "reason": "DeadlineExceeded"})
+    );
+    assert_eq!(
+        conditions(&status)[2],
+        triple("LastRunSucceeded", "False", "RunFailed")
+    );
+    assert_eq!(
+        last_runs(&ctx.events()),
+        [LoomAgentLastRunObserved {
+            name: name(),
+            generation: 1,
+            phase: RunPhase::Failed,
+            exit_code: None,
+        }]
+    );
+}
+
 /// `resource-schedule/suspend-starts-nothing`: `suspend: true` applies the CronJob suspended and
 /// reads `Available` False `Suspended`; lifting it applies it running again.
 #[tokio::test]
@@ -2680,7 +2739,8 @@ async fn a_suspended_schedule_applies_the_cronjob_suspended() {
 
 /// `resource-schedule/switch-variant`: adding `spec.schedule` deletes the resource's Job, in the
 /// foreground and preconditioned on its uid, before the CronJob is created; while the Job still
-/// terminates nothing is applied.
+/// terminates nothing is applied, and `Available` reads False `WorkloadTerminating` naming the Job
+/// (`story:schedule-available-after-cronjob`), True `Scheduled` once the CronJob is created.
 #[tokio::test]
 async fn adding_a_schedule_deletes_the_job_before_the_cronjob_is_created() {
     let (client, fake) = fake();
@@ -2705,6 +2765,7 @@ async fn adding_a_schedule_deletes_the_job_before_the_cronjob_is_created() {
         "nothing while the Job terminates"
     );
     assert!(!fake.holds(CRON_JOB));
+    the_cronjob_waits_for("Job platform-operator", &published(&seen));
 
     fake.remove(JOB);
     reconciled(scheduled_agent(2, SCHEDULE), &ctx).await;
@@ -2712,7 +2773,115 @@ async fn adding_a_schedule_deletes_the_job_before_the_cronjob_is_created() {
     assert_eq!(applies(&seen), SCHEDULED_CHILDREN);
     assert!(paths(&seen, &Method::DELETE).is_empty(), "{seen:?}");
     assert!(fake.holds(CRON_JOB) && !fake.holds(JOB));
-    assert_eq!(published(&seen)["state"], "Running");
+    let status = published(&seen);
+    assert_eq!(status["state"], "Running");
+    assert_eq!(
+        conditions(&status)[1],
+        triple("Available", "True", "Scheduled")
+    );
+}
+
+/// Asserts that `status`, published while the CronJob waits for `workload` to go, reads Running
+/// with `Available` False `WorkloadTerminating` and a message naming `workload`
+/// (`story:schedule-available-after-cronjob`): no CronJob exists yet, so none starts a run.
+fn the_cronjob_waits_for(workload: &str, status: &Value) {
+    assert_eq!(status["state"], "Running", "{status}");
+    assert_eq!(
+        conditions(status)[1],
+        triple("Available", "False", "WorkloadTerminating"),
+        "{status}"
+    );
+    let message = message(status, "Available");
+    assert!(message.contains(workload), "{workload}: {message}");
+    assert!(message.contains("CronJob"), "{message}");
+}
+
+/// `story:schedule-available-after-cronjob`: an `AgentServe` resource that becomes a scheduled
+/// `Command` resource waits for its Deployment to go before the CronJob is created, and reads
+/// `WorkloadTerminating` naming the Deployment until it has, then `Scheduled`.
+#[tokio::test]
+async fn a_switch_from_a_deployment_to_a_schedule_reads_workload_terminating_until_it_is_gone() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(agent(1, &example(), DEFAULT_ROUTES), &ctx).await;
+    assert!(fake.holds(CHILDREN[2]));
+    fake.take();
+
+    fake.set_lingering(true);
+    for round in 0..2 {
+        let action = reconciled(scheduled_agent(2, SCHEDULE), &ctx).await;
+        assert_eq!(action, Action::requeue(Duration::from_secs(30)), "{round}");
+        let seen = fake.take();
+        assert_eq!(paths(&seen, &Method::DELETE), [CHILDREN[2]], "{round}");
+        assert!(applies(&seen).is_empty(), "{round}: {seen:?}");
+        assert!(!fake.holds(CRON_JOB), "{round}");
+        the_cronjob_waits_for("Deployment platform-operator", &published(&seen));
+    }
+
+    fake.remove(CHILDREN[2]);
+    reconciled(scheduled_agent(2, SCHEDULE), &ctx).await;
+    let seen = fake.take();
+    assert!(fake.holds(CRON_JOB) && !fake.holds(CHILDREN[2]));
+    assert_eq!(
+        conditions(&published(&seen))[1],
+        triple("Available", "True", "Scheduled")
+    );
+}
+
+/// `story:schedule-available-after-cronjob`: a scheduled resource created again under the name
+/// of one whose CronJob still terminates applies nothing and reads `WorkloadTerminating` naming
+/// that CronJob, then `Scheduled` once its own CronJob is created.
+#[tokio::test]
+async fn a_predecessors_cronjob_terminating_reads_workload_terminating_not_scheduled() {
+    let (client, fake) = fake();
+    fake.put(
+        CRON_JOB,
+        object(
+            NAME,
+            CRON_JOB,
+            Some(("LoomAgent", NAME, "uid-of-the-predecessor")),
+        ),
+    );
+    fake.set_lingering(true);
+    let ctx = context(client);
+
+    let action = reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(30)));
+    let seen = fake.take();
+    assert_eq!(paths(&seen, &Method::DELETE), [CRON_JOB]);
+    assert!(applies(&seen).is_empty(), "{seen:?}");
+    the_cronjob_waits_for("CronJob platform-operator", &published(&seen));
+
+    fake.remove(CRON_JOB);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), SCHEDULED_CHILDREN);
+    assert_eq!(
+        conditions(&published(&seen))[1],
+        triple("Available", "True", "Scheduled")
+    );
+}
+
+/// `story:schedule-available-after-cronjob`: a suspended schedule waiting for the Job to go reads
+/// `WorkloadTerminating`, since no CronJob exists to be suspended, then `Suspended`.
+#[tokio::test]
+async fn a_suspended_schedule_waiting_for_the_job_reads_workload_terminating() {
+    let suspended = "  schedule: {cron: '*/20 * * * *', suspend: true}\n";
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    fake.take();
+
+    fake.set_lingering(true);
+    reconciled(scheduled_agent(2, suspended), &ctx).await;
+    the_cronjob_waits_for("Job platform-operator", &published(&fake.take()));
+
+    fake.remove(JOB);
+    reconciled(scheduled_agent(2, suspended), &ctx).await;
+    assert_eq!(
+        conditions(&published(&fake.take()))[1],
+        triple("Available", "False", "Suspended")
+    );
 }
 
 /// `resource-schedule/switch-variant`: removing `spec.schedule` deletes the CronJob, in the

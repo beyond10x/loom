@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 96608ecd066f658e89cedd313c82a943050c7e31c943cad26dfdd9f5fc71d254
-// contract digest e244f059c9f153845bf0bebe21d6edf79d5f2e0a410f5b8a96e3a06e5bf3d1fb
+// model digest 3a328dc948904436c12e838eb0b1eef21b3344259c68398f095f34b168e70799
+// contract digest c87e5c015377bb0ba7fae4424851c7c85d000bd207002f7306bda748b90be72f
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Resource — `loom.resource`.
@@ -368,6 +368,8 @@ pub struct ScheduleSpec {
     pub suspend: Option<bool>,
     /// `starting_deadline_seconds` — `Optional<Integer>`.
     pub starting_deadline_seconds: Option<i64>,
+    /// `run_deadline_seconds` — `Optional<Integer>`.
+    pub run_deadline_seconds: Option<i64>,
     /// `input` — `Optional<loom.resource.ScheduleInput>`.
     pub input: Option<ScheduleInput>,
 }

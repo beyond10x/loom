@@ -425,7 +425,9 @@ the run ended from the resource.
 
 A `Command` resource that must run again and again, one bounded run at a time, adds
 `spec.schedule`: `cron` (five fields or a descriptor such as `@hourly`), optional `timeZone` (an
-IANA name), `suspend` (no new run starts while true) and `startingDeadlineSeconds`. Its pod is
+IANA name), `suspend` (no new run starts while true), `startingDeadlineSeconds` and
+`runDeadlineSeconds` (a run still going after that many seconds is ended and reported failed, so a
+hung run does not hold the later ones; zero or less and above 9223372036 are refused). Its pod is
 then a `batch/v1` CronJob in the Job's place (`concurrencyPolicy: Forbid`, `backoffLimit` 0, three
 finished runs of each outcome kept), the resource stays `Running`, and `status.lastRun` (`phase`,
 `exitCode`, `finishedAt`, `reason`) and the condition `LastRunSucceeded` report the newest finished
@@ -433,7 +435,8 @@ run; a failed run fails no resource. `spec.schedule.input` gives each run its ta
 an inline `text` or a `configMapKeyRef` (`name`, `key`) the pod mounts read-only; with it the
 program is `b10x-loom agent run --spec /config/agent.yaml --state /var/lib/agent --input <file>`,
 so the resource gives `spec.agent` and `command: {}`. Adding or removing `spec.schedule` deletes
-the Job or the CronJob before the other is created. The controller refuses a schedule on an
+the Job or the CronJob before the other is created; until the CronJob exists, `Available` reads
+False `WorkloadTerminating`. The controller refuses a schedule on an
 `AgentServe` resource, a `cron` or `timeZone` Kubernetes does not read, and an `input` that gives
 both forms or neither (`Malformed`), and a credential in the text (`SecretLiteral`).
 

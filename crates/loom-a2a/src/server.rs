@@ -84,7 +84,9 @@ pub trait Answerer {
     ///
     /// # Errors
     /// The turn could not run (no model, a service that is down, a store that failed): the task
-    /// fails naming it.
+    /// fails as `the turn could not run: <error>`, the error as given. It reaches the caller (the
+    /// task's status on `SendMessage`, `GetTask` and a stream's last `statusUpdate`), so it names
+    /// no path of the host; an answerer writes the full error where only the host reads it.
     fn answer(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String>;
 }
 

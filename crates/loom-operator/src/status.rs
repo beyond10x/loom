@@ -10,7 +10,7 @@
 //! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` | none |
 //! | Running, `AgentServe` | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read | none |
 //! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished` | Unknown, `RunNotFinished` |
-//! | Running, `Command`, `spec.schedule` | True, `SpecAdmitted` | True, `Scheduled`; False, `Suspended` while suspended | none; `LastRunSucceeded`: Unknown, `NoRunYet`; True, `RunSucceeded`; False, `RunFailed` |
+//! | Running, `Command`, `spec.schedule` | True, `SpecAdmitted` | True, `Scheduled`; False, `Suspended` while suspended; False, `WorkloadTerminating` before the CronJob exists | none; `LastRunSucceeded`: Unknown, `NoRunYet`; True, `RunSucceeded`; False, `RunFailed` |
 //! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` | none |
 //! | Completed | True, `SpecAdmitted` | False, `RunSucceeded` | True, `RunSucceeded` |
 //! | Failed | True, `SpecAdmitted` | False, `RunFailed` | False, `RunFailed` |
@@ -260,11 +260,17 @@ pub fn pods_unread(status: &mut resource::LoomAgentStatus, code: u16) {
     }
 }
 
-/// What the status of a resource with `spec.schedule` reads of it: whether it is suspended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What the status of a resource with `spec.schedule` reads of it: whether it is suspended, and
+/// what its CronJob, not yet created, waits for.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Scheduled {
     /// `spec.schedule.suspend` is true: the CronJob starts no run.
     pub suspended: bool,
+    /// The children still terminating before the CronJob is created, each as kind and name
+    /// (`Job platform-operator`): the resource's Job or a Deployment of its name, or a child a
+    /// predecessor of its name left (story schedule-available-after-cronjob). Empty once nothing
+    /// holds the CronJob back.
+    pub terminating: Vec<String>,
 }
 
 /// The phase as the CRD's `status.lastRun.phase` spells it.
@@ -278,8 +284,10 @@ pub fn run_phase(phase: RunPhase) -> &'static str {
 }
 
 /// The conditions of a running `Command` resource with `spec.schedule` (story command-schedule):
-/// `Checked` as any `Command` resource's; `Available` True `Scheduled`, or False `Suspended`
-/// while `spec.schedule.suspend` holds, since the CronJob then starts nothing; and
+/// `Checked` as any `Command` resource's; `Available` False `WorkloadTerminating` naming the
+/// children while the CronJob waits for them to go (story schedule-available-after-cronjob), since
+/// no CronJob exists to start a run or to be suspended, else True `Scheduled`, or False
+/// `Suspended` while `spec.schedule.suspend` holds, since the CronJob then starts nothing; and
 /// `LastRunSucceeded` from the newest finished run, `last_run`: Unknown `NoRunYet` before one,
 /// True `RunSucceeded` or False `RunFailed`, its message naming the exit code and end time as
 /// `Completed` does for a single run. A failed run moves the resource to no other state: the next
@@ -291,7 +299,18 @@ pub fn scheduled_conditions(
     scheduled: Scheduled,
 ) -> Vec<Condition> {
     let message = check.map(|check| check.message.clone()).unwrap_or_default();
-    let available = if scheduled.suspended {
+    let available = if !scheduled.terminating.is_empty() {
+        condition(
+            ConditionType::Available,
+            ConditionStatus::False,
+            "WorkloadTerminating",
+            format!(
+                "waiting for {} to be deleted before the CronJob is created; no run starts until \
+                 then",
+                scheduled.terminating.join(", ")
+            ),
+        )
+    } else if scheduled.suspended {
         condition(
             ConditionType::Available,
             ConditionStatus::False,
@@ -706,5 +725,46 @@ mod tests {
         );
         assert_eq!(published["conditions"][2]["type"], "Completed");
         assert_eq!(published["conditions"][2]["status"], "False");
+    }
+
+    /// `story:schedule-available-after-cronjob`: while the CronJob waits for a workload to go,
+    /// `Available` reads False `WorkloadTerminating` naming it, suspended or not; without a wait
+    /// it reads `Scheduled` or `Suspended`.
+    #[test]
+    fn a_schedule_waiting_for_a_workload_is_not_available() {
+        let check = checked(0, "admitted");
+        let waiting = |suspended| Scheduled {
+            suspended,
+            terminating: vec!["Job a".to_owned(), "Deployment a".to_owned()],
+        };
+        for suspended in [false, true] {
+            let read = scheduled_conditions(Some(&check), None, waiting(suspended));
+            assert_eq!(
+                (read[1].r#type, read[1].status, read[1].reason.as_str()),
+                (
+                    ConditionType::Available,
+                    ConditionStatus::False,
+                    "WorkloadTerminating"
+                ),
+                "{suspended}"
+            );
+            assert_eq!(
+                read[1].message,
+                "waiting for Job a, Deployment a to be deleted before the CronJob is created; \
+                 no run starts until then"
+            );
+            assert_eq!(read[2].reason, "NoRunYet");
+        }
+        for (suspended, status, reason) in [
+            (false, ConditionStatus::True, "Scheduled"),
+            (true, ConditionStatus::False, "Suspended"),
+        ] {
+            let scheduled = Scheduled {
+                suspended,
+                terminating: Vec::new(),
+            };
+            let read = scheduled_conditions(Some(&check), None, scheduled);
+            assert_eq!((read[1].status, read[1].reason.as_str()), (status, reason));
+        }
     }
 }

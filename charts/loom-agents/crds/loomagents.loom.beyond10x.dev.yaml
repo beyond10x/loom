@@ -645,6 +645,8 @@ spec:
                       text:
                         type: string
                     type: object
+                  runDeadlineSeconds:
+                    type: integer
                   startingDeadlineSeconds:
                     type: integer
                   suspend:
