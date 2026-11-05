@@ -657,7 +657,10 @@ fn stderr_warning(transcript: &str) -> String {
 fn credential_stderr() -> (String, usize) {
     let mut stderr = String::from("starting\n");
     let mut held = 0;
-    for prefix in TOKEN_PREFIXES.iter().filter(|prefix| !prefix.starts_with('-')) {
+    for prefix in TOKEN_PREFIXES
+        .iter()
+        .filter(|prefix| !prefix.starts_with('-'))
+    {
         stderr.push_str(&format!("debug: value={prefix}{SECRET}\n"));
         held += 1;
     }
@@ -690,7 +693,10 @@ fn a_credential_on_stderr_reaches_neither_the_transcript_nor_the_observer() {
     let transcript = String::from_utf8(report.transcript.clone()).expect("a UTF-8 transcript");
     let seen = seen.borrow();
 
-    for (what, text) in [("transcript", transcript.as_str()), ("observed", &seen.join("\n"))] {
+    for (what, text) in [
+        ("transcript", transcript.as_str()),
+        ("observed", &seen.join("\n")),
+    ] {
         for secret in [SECRET, "MIIEvQ", "hunter2pass"] {
             let holding: Vec<&str> = text.lines().filter(|line| line.contains(secret)).collect();
             assert!(
@@ -710,7 +716,8 @@ fn a_credential_on_stderr_reaches_neither_the_transcript_nor_the_observer() {
         "the observer sees the transcript's lines"
     );
     let warning = stderr_warning(&transcript);
-    let shown = format!("starting\n[{held} lines withheld: they hold a credential's shape]\n{REFUSED}");
+    let shown =
+        format!("starting\n[{held} lines withheld: they hold a credential's shape]\n{REFUSED}");
     assert!(
         warning.ends_with(&format!("wrote this on stderr: {shown}")),
         "the warning keeps every other line and says what it withheld: {warning:?}"

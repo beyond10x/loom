@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `SessionReport::transcript` and the `with_observer` observer withhold each credential-shaped stderr line, as the stderr tail does (story:session-transcript-withholds-stderr-credentials)
+
 ## [0.57.0] - 2026-11-05
 
 No breaking changes.
