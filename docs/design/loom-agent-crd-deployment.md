@@ -396,7 +396,7 @@ Admission (`crates/loom-operator/src/admission.rs`, step 18):
 | `cron` is not five fields Kubernetes reads (each a list of `*`, `?`, a value or a range, with an optional `/step`; months and days of the week also by three-letter name) or one of `@yearly`, `@annually`, `@monthly`, `@weekly`, `@daily`, `@midnight`, `@hourly`; a `TZ=` or `CRON_TZ=` prefix, `@every` and whitespace around the expression, which the CronJob would carry as written, are refused | `Malformed` at `spec.schedule.cron` |
 | the resource's name is longer than 52 characters, which its CronJob cannot carry since each Job it starts appends 11 (unscheduled, the name runs as a Job) | `Malformed` at `metadata.name` |
 | `timeZone` is not an IANA name the bundled time zone database holds, spelt as it spells it, or is `Local` | `Malformed` at `spec.schedule.timeZone` |
-| `startingDeadlineSeconds` is negative | `Malformed` at `spec.schedule.startingDeadlineSeconds` |
+| `startingDeadlineSeconds` is negative, or above 9223372036, past which Kubernetes' CronJob controller wraps the deadline as a nanosecond duration | `Malformed` at `spec.schedule.startingDeadlineSeconds` |
 | `runDeadlineSeconds` is zero or negative, or above 9223372036, past which Kubernetes' Job controller wraps the deadline negative as a nanosecond duration | `Malformed` at `spec.schedule.runDeadlineSeconds` |
 | `input` gives both `text` and `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no ConfigMap name or whose `key` no ConfigMap key; or the resource names a program in `spec.command` or gives no `spec.agent` | `Malformed` at `spec.schedule.input` |
 | `text` holds a credential, walked as `spec.env` is | `SecretLiteral` at `spec.schedule.input.text` |
@@ -424,7 +424,7 @@ Lifecycle and status:
 
 - A scheduled resource never reaches `Completed` or `Failed`; it stays `Running` while the CronJob
   exists, `suspend` included. `Available` is True `Scheduled`, or False `Suspended` while
-  `suspend` is true.
+  `suspend` is true, and False `WorkloadTerminating` before the CronJob exists (below).
 - `status.lastRun` is the end of the newest finished Job the CronJob owns (by the instance label
   and the CronJob's uid as controlling owner; a Job still active never speaks), read as
   `story:command-run-exit-status` reads one: the Job's own pod by owner uid, the program
@@ -448,6 +448,12 @@ Lifecycle and status:
 - Removing `spec.schedule` deletes the CronJob in the foreground, preconditioned on its uid, and
   then creates the one Job of § 9a; adding it deletes that Job first. While either still
   terminates nothing is applied and the reconcile comes again after 30 s. The two never coexist.
+  While a scheduled resource waits so for a Job, a Deployment (a switch from `AgentServe`), its
+  own CronJob still being deleted (the schedule removed and given back meanwhile) or, with no
+  live CronJob of its own, a predecessor's child to go, `Available` is False
+  `WorkloadTerminating`, its message naming what it waits for; it reads `Scheduled` (or
+  `Suspended`) only once the CronJob is created, and a reconcile that fails after the CronJob's
+  apply returned still publishes that (`story:schedule-available-after-cronjob`).
 - The Jobs the CronJob starts are Kubernetes's: the controller never applies, deletes or counts
   them as the resource's children. It watches the CronJob, whose status changes as runs start and
   end, beside its periodic reconcile.

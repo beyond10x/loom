@@ -1201,7 +1201,8 @@ Kubernetes does not read (five fields or `@yearly`, `@annually`, `@monthly`, `@w
 `@midnight`, `@hourly`; no `TZ=` prefix, no `@every`, no whitespace around it, since the CronJob
 carries it as written) at `spec.schedule.cron`, a `timeZone` the
 bundled IANA database (jiff, `tzdb-bundle-always`) does not hold as spelt, or `Local`, at
-`spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, a
+`spec.schedule.timeZone`, a `startingDeadlineSeconds` that is negative or above 9223372036
+(`MAX_RUN_DEADLINE_SECONDS`, as below) at that member, a
 `runDeadlineSeconds` that is zero or negative or above 9223372036 (`MAX_RUN_DEADLINE_SECONDS`, past
 which Kubernetes' nanosecond duration wraps) at that member (`story:schedule-run-deadline`), an
 `input` with
@@ -1279,14 +1280,22 @@ an AgentServe resource is ever Degraded).
 A `Command` resource with `spec.schedule` has a CronJob in its Job's place: before it is created
 the resource's Job and a Deployment of its name are deleted, and before a Job is created the
 resource's CronJob, each in the foreground with a uid precondition, nothing applied while one
-terminates (requeue 30 s), so the two never coexist. The CronJob is applied on every reconcile, so
+terminates (requeue 30 s), so the two never coexist. Its own CronJob still being deleted (the
+schedule removed and given back meanwhile) is waited for too, never applied to. While a
+scheduled resource waits so, or, with no live CronJob of its own, for a predecessor's child,
+`Available` reads False `WorkloadTerminating` naming the children it waits for
+(`status::Scheduled::terminating`, `story:schedule-available-after-cronjob`), and True
+`Scheduled` only once the CronJob is created; a reconcile that fails after the CronJob's apply
+returned still publishes the status without the wait before it returns the error. The CronJob is
+applied on every reconcile, so
 a new generation patches its schedule and template. The Jobs it starts are Kubernetes's (their
 controller is the CronJob, so the sweep never counts them): of those labelled
 `app.kubernetes.io/instance=<name>` whose controlling owner is the CronJob's uid, the newest
 finished one (by `creationTimestamp`, then name) is `ObserveScheduledRun`, read by `observation`
 as a single run is, once per Job uid and never one older than the last observed (`Held::last_job`
 holds its uid and order, so deleting the newest Job leaves `last_run`), and again after a new
-generation cleared `last_run`. The resource stays Running: `Available` True `Scheduled` or False `Suspended`,
+generation cleared `last_run`. The resource stays Running: `Available` True `Scheduled` or False `Suspended`
+(False `WorkloadTerminating` before the CronJob exists),
 `LastRunSucceeded` Unknown `NoRunYet`, True `RunSucceeded` or False `RunFailed` with the exit
 code and end time, `status.lastRun` the row's `last_run` (`status::status_of`,
 `status::scheduled_conditions`).

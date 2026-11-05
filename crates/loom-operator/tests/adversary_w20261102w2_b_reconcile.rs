@@ -516,30 +516,46 @@ async fn adv_b_a_last_run_never_moves_back_to_an_older_run() {
 
 /// `resource-schedule/switch-variant` across a controller restart: the Job is deleted, the
 /// controller restarts while it terminates, and the new controller deletes it again and applies
-/// no CronJob until it is gone; the two never coexist.
+/// no CronJob until it is gone; the two never coexist. Each controller publishes `Available`
+/// False `WorkloadTerminating` while it waits, and True `Scheduled` only once the CronJob is
+/// created (`story:schedule-available-after-cronjob`).
 #[tokio::test]
 async fn adv_b_a_restart_while_the_job_terminates_creates_no_cronjob_beside_it() {
-    let (client, fake, _) = fake();
+    let (client, fake, statuses) = fake();
     let first = context(client.clone());
     reconciled(command_agent(1), &first).await;
     assert!(fake.holds(JOB));
     fake.set_lingering(true);
     reconciled(scheduled_agent(2, SCHEDULE), &first).await;
     assert!(fake.holds(JOB) && !fake.holds(CRON_JOB));
+    assert_eq!(
+        condition(&last_published(&statuses), "Available"),
+        ("False".to_owned(), "WorkloadTerminating".to_owned())
+    );
     fake.take();
 
     let restarted = context(client);
-    for _ in 0..2 {
+    for round in 0..2 {
+        statuses.lock().expect("the statuses").clear();
         let action = reconciled(scheduled_agent(2, SCHEDULE), &restarted).await;
         assert_eq!(action, Action::requeue(Duration::from_secs(30)));
         let seen = fake.take();
         assert!(applies(&seen).is_empty(), "{seen:?}");
         assert_eq!(paths(&seen, &Method::DELETE), [JOB]);
         assert!(!fake.holds(CRON_JOB));
+        assert_eq!(
+            condition(&last_published(&statuses), "Available"),
+            ("False".to_owned(), "WorkloadTerminating".to_owned()),
+            "{round}: the restarted controller does not read Scheduled before the CronJob"
+        );
     }
     fake.remove(JOB);
     reconciled(scheduled_agent(2, SCHEDULE), &restarted).await;
     assert!(fake.holds(CRON_JOB) && !fake.holds(JOB));
+    assert_eq!(
+        condition(&last_published(&statuses), "Available"),
+        ("True".to_owned(), "Scheduled".to_owned())
+    );
 }
 
 /// The other way across a restart: the CronJob terminates, the restarted controller creates no

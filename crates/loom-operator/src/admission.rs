@@ -137,8 +137,10 @@
 //!     with an optional `/step`, months and days of the week also by three-letter name; or one of
 //!     [`CRON_DESCRIPTORS`]; never a `TZ=` prefix or `@every`) is `Malformed` at
 //!     `spec.schedule.cron`; a `timeZone` that is not an IANA name the bundled time zone database
-//!     holds, spelt as it spells it, or `Local`, at `spec.schedule.timeZone`; a negative
-//!     `startingDeadlineSeconds` at that member, a `runDeadlineSeconds` that is zero or negative
+//!     holds, spelt as it spells it, or `Local`, at `spec.schedule.timeZone`; a
+//!     `startingDeadlineSeconds` that is negative or above [`MAX_RUN_DEADLINE_SECONDS`] (Kubernetes'
+//!     CronJob controller holds it as the same nanosecond duration) at that member, a
+//!     `runDeadlineSeconds` that is zero or negative
 //!     or above [`MAX_RUN_DEADLINE_SECONDS`] (story schedule-run-deadline; either would end every
 //!     run as it starts) at that member. An `input` that gives both `text` and
 //!     `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no
@@ -1508,7 +1510,8 @@ pub const MAX_CRON_JOB_NAME: usize = 52;
 /// The longest run deadline (`spec.schedule.runDeadlineSeconds`, story schedule-run-deadline)
 /// Kubernetes' Job controller holds: it compares a run's age with the deadline as nanoseconds in
 /// a signed 64-bit duration, which wraps negative past `i64::MAX / 10^9` seconds and would end
-/// every run as it starts.
+/// every run as it starts. It bounds `spec.schedule.startingDeadlineSeconds` too, which the
+/// CronJob controller holds as the same duration.
 pub const MAX_RUN_DEADLINE_SECONDS: i64 = i64::MAX / 1_000_000_000;
 
 /// Refuses the scheduled resource `name`, whose spec `spec` [`admit`] admitted, when its CronJob,
@@ -2014,7 +2017,8 @@ fn dns_subdomain(name: &str) -> bool {
 
 /// Step 18: `spec.schedule`, only for `Command`; on an `AgentServe` resource `Malformed`. A cron
 /// expression Kubernetes does not read is `Malformed` at `cron`, a time zone the database does not
-/// hold at `timeZone`, a negative starting deadline at `startingDeadlineSeconds`, a run deadline of
+/// hold at `timeZone`, a starting deadline that is negative or above [`MAX_RUN_DEADLINE_SECONDS`]
+/// at `startingDeadlineSeconds`, a run deadline of
 /// zero or less or above [`MAX_RUN_DEADLINE_SECONDS`] at `runDeadlineSeconds` (story
 /// schedule-run-deadline). An `input` gives
 /// exactly one of a text that is not blank and a `configMapKeyRef` whose name is a ConfigMap name
@@ -2051,6 +2055,18 @@ fn schedule(
         return malformed(
             "spec.schedule.startingDeadlineSeconds",
             "it is negative; a run may start that many seconds late at most",
+        );
+    }
+    if schedule
+        .starting_deadline_seconds
+        .is_some_and(|seconds| seconds > MAX_RUN_DEADLINE_SECONDS)
+    {
+        return malformed(
+            "spec.schedule.startingDeadlineSeconds",
+            &format!(
+                "it is above {MAX_RUN_DEADLINE_SECONDS}; Kubernetes holds the deadline as \
+                 nanoseconds in a signed 64-bit duration, which wraps past it"
+            ),
         );
     }
     if schedule

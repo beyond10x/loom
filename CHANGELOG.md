@@ -19,6 +19,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - An A2A turn that cannot run gives its caller a fixed reason per kind (`serve::a2a::TURN_*`), naming no host path (story:a2a-turn-error-names-no-host-path)
+- A scheduled resource waiting for its Job or Deployment to go reads `Available` False `WorkloadTerminating`, not `Scheduled`, until its CronJob exists (story:schedule-available-after-cronjob)
+- `spec.schedule.startingDeadlineSeconds` above 9223372036 (`MAX_RUN_DEADLINE_SECONDS`), which Kubernetes' duration wraps, is `Malformed` (story:schedule-available-after-cronjob)
 
 ## [0.56.0] - 2026-11-05
 
