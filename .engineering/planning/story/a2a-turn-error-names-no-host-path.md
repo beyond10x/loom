@@ -2,14 +2,17 @@
 format: aep.planning-md/3
 id: story:a2a-turn-error-names-no-host-path
 kind: story
-status: draft
+status: active
 title: An A2A turn's own error reaches the caller without naming a host path
 tags:
 - from-finding
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 1
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-05T02:40:09Z", actor: "human:timo", revision: 2, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
+- {from: "proposed", to: "active", at: "2026-11-05T02:40:09Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 ---
 ## Outcome
 
