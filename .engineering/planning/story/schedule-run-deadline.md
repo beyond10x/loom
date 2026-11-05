@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:schedule-run-deadline
 kind: story
-status: active
+status: implemented
 title: A scheduled run has a deadline so a hung run does not hold later runs
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -44,10 +44,11 @@ scope:
   path: website/data/status.json
 - confidence: cited
   path: website/docs/reference/ess
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T02:46:35Z", actor: "human:timo", revision: 2, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 - {from: "proposed", to: "active", at: "2026-11-05T02:46:35Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
+- {from: "active", to: "implemented", at: "2026-11-05T04:37:33Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"test_result":1},"asserted":{"test_result":1}}, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:a2a-turn-error-names-no-host-path
 kind: story
-status: active
+status: implemented
 title: An A2A turn's own error reaches the caller without naming a host path
 tags:
 - from-finding
@@ -20,10 +20,11 @@ scope:
   path: crates/loom-agent/src/serve/a2a.rs
 - confidence: cited
   path: crates/loom-agent/tests/a2a.rs
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T02:40:09Z", actor: "human:timo", revision: 2, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 - {from: "proposed", to: "active", at: "2026-11-05T02:40:09Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
+- {from: "active", to: "implemented", at: "2026-11-05T04:37:32Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1},"asserted":{"test_result":1}}, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 ---
 ## Outcome
 

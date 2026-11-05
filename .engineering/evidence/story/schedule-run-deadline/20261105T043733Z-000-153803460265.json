@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-05T04:37:33Z",
+  "actor": "human:timo",
+  "artifact": "story:schedule-run-deadline",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate of wave 2026-11-05-w1 at 36935b96: S1 (spec, drift, crd-drift, chart-check, conformance, docs-check, fmt and release-check --tag 0.57.0), S2 (all targets of the seven touched packages, both ESS gate tests, release_check, clippy -D warnings), S3 (consumer-check), every step exit 0; the reviewers' cases green"
+  }
+}

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:agent-run-without-loops
 kind: story
-status: active
+status: implemented
 title: agent run runs a spec that declares no loops
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -46,10 +46,11 @@ scope:
   path: website/docs/reference/cli.md
 - confidence: inferred
   path: website/docs/reference/ess
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T02:46:35Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 - {from: "proposed", to: "active", at: "2026-11-05T02:46:35Z", actor: "human:timo", revision: 4, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
+- {from: "active", to: "implemented", at: "2026-11-05T04:37:33Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"test_result":1},"asserted":{"test_result":1}}, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 ---
 ## Outcome
 
