@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:a2a-record-and-streaming
 kind: story
-status: active
+status: implemented
 title: An A2A turn is recorded in record.jsonl, and SendStreamingMessage streams the task's status
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:agent-a2a
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-10-26T13:20:19Z", actor: "human:timo", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-04T07:33:04Z", actor: "human:timo", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-05T01:30:28Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Outcome
 

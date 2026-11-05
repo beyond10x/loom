@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-05T01:30:28Z",
+  "actor": "human:timo",
+  "artifact": "story:operator-constraints-in-ess",
+  "kind": "story",
+  "revision": 21,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate of wave 2026-11-04-w1 at 315e9e19: S1 (21 spec, drift, conformance and fmt steps), S2 (all targets of the seven touched packages, both ESS gate tests, release_check, clippy -D warnings), S3 (consumer-check), every step exit 0; the reviewers' cases green"
+  }
+}
