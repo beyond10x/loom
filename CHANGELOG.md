@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.56.0] - 2026-11-05
+
+No breaking changes.
+
 ### Added
 
 - `loom.resource.AdmitLoomAgent` declares each of the 32 reasons the operator refuses a `LoomAgent` with as an outcome, and `task conform` admits one authored fixture per reason with the operator's own `admit`, asserting its reason, member and detail (story:operator-constraints-in-ess)
@@ -1365,7 +1369,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.55.2...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.56.0...HEAD
+[0.56.0]: https://github.com/beyond10x/loom/releases/tag/0.56.0
 [0.55.2]: https://github.com/beyond10x/loom/releases/tag/0.55.2
 [0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1
 [0.55.0]: https://github.com/beyond10x/loom/releases/tag/0.55.0
