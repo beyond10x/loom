@@ -966,3 +966,76 @@ fn a_message_without_a_message_id_is_refused() {
     });
     assert!(agent.items().is_empty(), "no turn ran");
 }
+
+// ---- fix round 1 (story:a2a-record-and-streaming) ------------------------------------------------
+
+/// A stream that carries no event for the answer's bound is cut even while its caller reads: the
+/// listener cannot tell that caller from one that stopped reading while the events fit the
+/// buffers. The turn goes on after the cut, and `GetTask` reads the end the stream never sent.
+#[test]
+fn a_stream_idle_for_the_bound_is_cut_while_its_turn_goes_on() {
+    use std::time::Instant;
+
+    let (started_tx, started) = channel();
+    let (go, go_rx) = channel();
+    let agent = Fake::gated(started_tx, go_rx);
+    with_listener(&agent, |address| {
+        let begun = Instant::now();
+        let streaming = std::thread::spawn(move || {
+            request(
+                address,
+                "POST",
+                PATH,
+                Some(TOKEN),
+                Some(&rpc(
+                    "SendStreamingMessage",
+                    message("Is the deploy finished?"),
+                )),
+            )
+        });
+        started
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the turn started");
+        let answer = streaming.join().expect("the stream was read to its end");
+        let took = begun.elapsed();
+        assert!(
+            took >= b10x_loom_a2a::STREAM_IDLE
+                && took < b10x_loom_a2a::STREAM_IDLE + Duration::from_secs(5),
+            "cut after {took:?}"
+        );
+        let sent = events(&answer.body);
+        let task_id = sent[0]["result"]["task"]["id"]
+            .as_str()
+            .expect("the submitted task")
+            .to_owned();
+        let last = &sent.last().expect("events")["result"]["statusUpdate"]["status"];
+        assert_eq!(last["state"], "TASK_STATE_WORKING", "{}", answer.body);
+        assert!(
+            !answer.body.contains("TASK_STATE_COMPLETED"),
+            "{}",
+            answer.body
+        );
+
+        go.send(()).expect("the turn listens");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let got = request(
+                address,
+                "POST",
+                PATH,
+                Some(TOKEN),
+                Some(&rpc("GetTask", json!({"id": task_id}))),
+            );
+            if got.json()["result"]["status"]["state"] == "TASK_STATE_COMPLETED" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the turn did not end: {}",
+                got.body
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    assert_eq!(agent.items().len(), 1);
+}

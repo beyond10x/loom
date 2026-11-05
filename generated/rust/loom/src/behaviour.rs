@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest f898a72c6fb993d5397c5fd98115f61c45512e9c127b38eb6d608caccfccf273
-// contract digest 9b55b14ddd1c39557a07374384e719e4194da453c92dd38257554911a9fe87a5
+// model digest a6a8775b24fe51bb303398cc3be0edd676a829580c27a084398e10490ecc2f83
+// contract digest db241eebea7e49b099edd51a612d4b03ad7dc018bf9323320426cdf17e63334e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -348,6 +348,10 @@ impl<P> crate::agent::obligations::RecordA2aTurnBehavior for Generated<P>
         // `replayed`: an accepting branch, in declaration order.
         if decided(equal(Some(&input.recorded).map(|value| *value), Some(true)), "loom.agent.RecordA2aTurn")? {
             return Ok(crate::agent::RecordA2aTurnOutcome::Replayed);
+        }
+        // `unrecorded`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.ran_unrecorded).map(|value| *value), Some(true)), "loom.agent.RecordA2aTurn")? {
+            return Ok(crate::agent::RecordA2aTurnOutcome::Unrecorded);
         }
         // `turned`: the default.
         return Ok(crate::agent::RecordA2aTurnOutcome::Turned);

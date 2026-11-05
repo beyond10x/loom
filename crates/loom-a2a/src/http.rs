@@ -6,7 +6,9 @@
 //! within [`WRITE_DEADLINE`], so a caller trickling a byte at a time cannot hold memory or a
 //! connection without end. An answer of server-sent events ([`Connection::stream`]) has no length:
 //! it ends when the connection closes, and its head and each of its events must be written within
-//! [`WRITE_DEADLINE`], so a caller that stops reading is cut off once an event waited that long.
+//! [`WRITE_DEADLINE`]: a write the connection's buffers cannot take that long fails. A caller that
+//! stops reading is noticed only once its buffers are full, so the listener also cuts a stream
+//! that carries no event for the bound (`crate::STREAM_IDLE`).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -368,8 +370,8 @@ pub struct EventStream {
 
 impl EventStream {
     /// Writes one event whose data is `data`, one line of JSON, within [`WRITE_DEADLINE`] from
-    /// now: a caller that takes nothing for that long makes this fail, and the stream is then
-    /// [`EventStream::cut`].
+    /// now: once the buffers between the listener and the caller are full and stay full that long,
+    /// this fails, and the stream is then [`EventStream::cut`].
     ///
     /// # Errors
     /// The event could not be written whole in time, or the caller went away.
