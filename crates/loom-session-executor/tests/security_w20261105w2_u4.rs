@@ -420,7 +420,6 @@ fn security_the_single_pass_end_fill_withholds_what_the_earlier_fill_withheld() 
 }
 
 #[test]
-#[ignore = "pre-existing; story:stderr-tail-withholds-cut-pem-block"]
 fn security_a_pem_block_the_tail_window_cuts_from_its_opening_is_withheld_from_the_record() {
     // A PEM opening, more body than the tail's window holds, and no `-----END`: the window holds
     // body lines only, no opening and no end, so the tail keeps them. The whole stderr's walk

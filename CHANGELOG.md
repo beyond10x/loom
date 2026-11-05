@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `SessionExecutor`'s stderr tail withholds a PEM block's body lines when its window cut the block's opening (story:stderr-tail-withholds-cut-pem-block)
+
 ## [0.57.1] - 2026-11-05
 
 No breaking changes.

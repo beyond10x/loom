@@ -2876,22 +2876,23 @@ impl ChildEnd {
 }
 
 /// The last whole lines of `stderr`, a harness child's, that fit in [`STDERR_TAIL_BYTES`]: only
-/// the final [`STDERR_TAIL_BYTES`] bytes are read, a line they cut into is dropped whole, and so is
-/// a last line longer than the bound, which a note stands in for. Every line that holds a
-/// credential's shape ([`credential_lines`]) is withheld, a note standing in for each run of them,
-/// and every other control character but a tab is replaced, so the tail is one inert text. Empty
-/// when the child said nothing.
+/// the final [`STDERR_TAIL_BYTES`] bytes are shown, a line they cut into is dropped whole, and so
+/// is a last line longer than the bound, which a note stands in for. Every line that holds a
+/// credential's shape ([`credential_lines`]) is withheld, read over the whole stderr, so a PEM
+/// block the window cut from its opening is withheld as the whole walk ([`walked`]) withholds it;
+/// a note stands in for each run of them, and every other control character but a tab is
+/// replaced, so the tail is one inert text. Empty when the child said nothing.
 fn stderr_tail(stderr: &str) -> String {
     let stderr = stderr.trim_end();
     let mut start = stderr.len().saturating_sub(STDERR_TAIL_BYTES);
     while !stderr.is_char_boundary(start) {
         start += 1;
     }
-    let window = if start == 0 || stderr.as_bytes()[start - 1] == b'\n' {
-        &stderr[start..]
+    let from = if start == 0 || stderr.as_bytes()[start - 1] == b'\n' {
+        start
     } else {
         match stderr[start..].find('\n') {
-            Some(at) => &stderr[start + at + 1..],
+            Some(at) => start + at + 1,
             None => {
                 return format!(
                     "[its last line, longer than {STDERR_TAIL_BYTES} bytes, is not shown]"
@@ -2899,7 +2900,13 @@ fn stderr_tail(stderr: &str) -> String {
             }
         }
     };
-    let shown = walked(window);
+    // The window starts a line, so its lines are the whole stderr's past the ones before it.
+    let before = stderr.as_bytes()[..from]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count();
+    let (lines, withheld) = walk_lines(stderr);
+    let shown = noted(lines.into_iter().skip(before), &withheld[before..]);
     // A note or a replaced character may be longer than what it stands in for: the bound holds
     // for the tail as shown, its first lines going first. A last line that no longer fits once
     // shown is dropped as one the window cannot hold, a note standing in for it.
@@ -2952,6 +2959,12 @@ const STDERR_SAID_BY_REASON: &str = "; the last lines of its stderr:\n";
 /// sequences and control characters removed, as a terminal shows it, and with each replaced, a
 /// note standing in for each run of withheld lines. A line's `\r` ending is dropped.
 fn walked(text: &str) -> Vec<String> {
+    let (lines, withheld) = walk_lines(text);
+    noted(lines, &withheld)
+}
+
+/// The lines of `text`, each as shown ([`inert`]), and which of them [`walked`] withholds.
+fn walk_lines(text: &str) -> (Vec<String>, Vec<bool>) {
     let forms: Vec<(String, String)> = text
         .split('\n')
         .map(|line| inert(line.strip_suffix('\r').unwrap_or(line)))
@@ -2963,13 +2976,21 @@ fn walked(text: &str) -> Vec<String> {
         .zip(credential_lines(&bare_forms))
         .map(|(shown, bare)| shown || bare)
         .collect();
+    (
+        forms.into_iter().map(|(shown, _)| shown).collect(),
+        withheld,
+    )
+}
+
+/// `lines` with each one `withheld` marks left out, a note standing in for each run of them.
+fn noted(lines: impl IntoIterator<Item = String>, withheld: &[bool]) -> Vec<String> {
     let mut shown: Vec<String> = Vec::new();
     let mut run = 0usize;
     let note = |run: usize| match run {
         1 => "[a line withheld: it holds a credential's shape]".to_owned(),
         n => format!("[{n} lines withheld: they hold a credential's shape]"),
     };
-    for ((line, _), withheld) in forms.into_iter().zip(withheld) {
+    for (line, withheld) in lines.into_iter().zip(withheld.iter().copied()) {
         if withheld {
             run += 1;
             continue;
