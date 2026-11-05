@@ -424,14 +424,20 @@ fn the_upgrade_guide_applies_the_crd_of_the_workspace_version() {
         .iter()
         .position(|line| line.contains("helm upgrade loom-agents"))
         .expect("README.md holds `helm upgrade loom-agents`");
-    assert!(apply < upgrade, "README applies the CRD before `helm upgrade`");
+    assert!(
+        apply < upgrade,
+        "README applies the CRD before `helm upgrade`"
+    );
     assert_eq!(
         version_after(lines[upgrade], "--version "),
         Some(VERSION),
         "README's `helm upgrade` names the workspace version"
     );
 
-    for line in lines.iter().filter(|line| line.contains("kubectl apply")) {
+    for line in lines
+        .iter()
+        .filter(|line| line.contains("kubectl apply --server-side -f"))
+    {
         let named = [
             version_after(line, "beyond10x/loom/"),
             version_after(line, "ghcr.io/beyond10x/loom-operator:"),
@@ -441,7 +447,10 @@ fn the_upgrade_guide_applies_the_crd_of_the_workspace_version() {
             "README's `{line}` names the CRD of a release"
         );
         for version in named.into_iter().flatten() {
-            assert_eq!(version, VERSION, "README's `{line}` names the workspace version");
+            assert_eq!(
+                version, VERSION,
+                "README's `{line}` names the workspace version"
+            );
         }
     }
 }
