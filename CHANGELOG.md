@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- README's `loom-agents` upgrade guide applies the CRD of the release tag with `kubectl apply --server-side` before `helm upgrade` (story:chart-upgrade-guide-applies-crd-first)
+
 ## [0.57.1] - 2026-11-05
 
 No breaking changes.

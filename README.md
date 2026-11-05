@@ -396,8 +396,23 @@ registry at the release version: `ghcr.io/beyond10x/loom-agent:<version>` (`b10x
 <version>`. Each image runs its one binary as user 10001; `deploy/images/` holds their
 Dockerfiles.
 
-Helm installs the chart's `crds/` once and never upgrades it; `b10x-loom-operator crd` prints the
-CRD of the installed version. For each resource the controller first runs the check of
+Helm installs the chart's `crds/` once and never upgrades it, so an upgrade first applies the CRD
+of the new release tag and then upgrades the release with the values it was installed with:
+
+```console
+$ kubectl apply --server-side -f https://raw.githubusercontent.com/beyond10x/loom/0.57.1/deploy/crd/loomagents.loom.beyond10x.dev.yaml
+$ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 0.57.1 --namespace agents \
+    --set modelRoute.url=http://model-route.agents.svc:8080/v1 \
+    --set modelRoute.protocol=messages --set modelRoute.model=small-model
+```
+
+Add `--force-conflicts` to the apply when it reports a conflict because another field manager
+owns fields of the CRD, such as Helm, which created it, or an earlier `kubectl apply` without
+`--server-side`. `b10x-loom-operator crd` prints the CRD of its own version, so
+`docker run --rm ghcr.io/beyond10x/loom-operator:0.57.1 crd | kubectl apply --server-side -f -`
+applies the same CRD from the release's image.
+
+For each resource the controller first runs the check of
 `b10x-loom agent check` over `spec.agent`, looks for a credential in `spec.routes`,
 `spec.connectorsConfig`, `spec.env` and `spec.configFiles`, and holds the Secret, the namespace,
 the egress hosts and a boundary's upstreams to its configuration. A refusal is the resource's status (`state: Refused`, `check` naming the member)

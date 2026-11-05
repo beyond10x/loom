@@ -1417,7 +1417,12 @@ the values. The Role grants `get`, `list`, `watch`, `update`, `patch` on `loomag
 `create`, `update`, `patch`, `get`, `list`, `watch`, `delete` on the seven child kinds (Job and
 CronJob among them), and `get` and `list` on `pods` (a finished run's exit code; no watch); nothing on Secrets
 or Events. `values.yaml` carries no comments. `Chart.yaml` `version` and `appVersion`
-are the workspace version, so a release bumps both (`tests/chart.rs` fails otherwise). The values
+are the workspace version, so a release bumps both (`tests/chart.rs` fails otherwise). Helm
+installs `crds/` once and never upgrades it, so README's upgrade guide applies
+`deploy/crd/loomagents.loom.beyond10x.dev.yaml` at the release tag with `kubectl apply
+--server-side -f` before `helm upgrade`, both at the workspace version; a release moves them with
+the other README versions (`the_upgrade_guide_applies_the_crd_of_the_workspace_version` in
+`tests/chart.rs` fails otherwise, `story:chart-upgrade-guide-applies-crd-first`). The values
 name the published images `ghcr.io/beyond10x/loom-operator` (`image`) and
 `ghcr.io/beyond10x/loom-agent` (`agentImage`) with empty tags, which render as `appVersion`
 (`story:chart-defaults-to-published-images`). `task chart-check` compares the CRD copy, then runs
