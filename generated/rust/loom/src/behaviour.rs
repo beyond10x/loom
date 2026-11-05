@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 6ee58c7e138136366044c4f43f53ef36d67d7b072496de73e913df57f6133b3b
-// contract digest 0fbdeee9f72de9fd6e7f4adbd5b63b02c4570ed9a5dc6255cd1286dff2e13cb0
+// model digest f898a72c6fb993d5397c5fd98115f61c45512e9c127b38eb6d608caccfccf273
+// contract digest 9b55b14ddd1c39557a07374384e719e4194da453c92dd38257554911a9fe87a5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -203,6 +203,10 @@ impl<P> crate::agent::obligations::AdmitA2aRequestBehavior for Generated<P>
         if decided(equal(Some(&input.probe).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
             return Ok(crate::agent::AdmitA2aRequestOutcome::Probe);
         }
+        // `streamed`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.stream).map(|value| *value), Some(true)), "loom.agent.AdmitA2aRequest")? {
+            return Ok(crate::agent::AdmitA2aRequestOutcome::Streamed);
+        }
         // `admitted`: the default.
         return Ok(crate::agent::AdmitA2aRequestOutcome::Admitted);
     }
@@ -333,6 +337,20 @@ impl<P> crate::agent::obligations::BoundHttpAnswerBehavior for Generated<P>
 impl<P: crate::agent::obligations::CheckAgentSpecBehavior> crate::agent::obligations::CheckAgentSpecBehavior for Generated<P> {
     fn check_agent_spec(&mut self, input: crate::agent::CheckAgentSpec) -> Result<crate::agent::CheckAgentSpecOutcome, UnmetObligation> {
         crate::agent::obligations::CheckAgentSpecBehavior::check_agent_spec(&mut self.ports, input)
+    }
+}
+
+/// `loom.agent.RecordA2aTurn`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::RecordA2aTurnBehavior for Generated<P>
+{
+    fn record_a2a_turn(&mut self, input: crate::agent::RecordA2aTurn) -> Result<crate::agent::RecordA2aTurnOutcome, UnmetObligation> {
+        let _ = &input;
+        // `replayed`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.recorded).map(|value| *value), Some(true)), "loom.agent.RecordA2aTurn")? {
+            return Ok(crate::agent::RecordA2aTurnOutcome::Replayed);
+        }
+        // `turned`: the default.
+        return Ok(crate::agent::RecordA2aTurnOutcome::Turned);
     }
 }
 

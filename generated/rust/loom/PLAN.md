@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 6ee58c7e138136366044c4f43f53ef36d67d7b072496de73e913df57f6133b3b
-  contract digest 0fbdeee9f72de9fd6e7f4adbd5b63b02c4570ed9a5dc6255cd1286dff2e13cb0
+  model digest f898a72c6fb993d5397c5fd98115f61c45512e9c127b38eb6d608caccfccf273
+  contract digest 9b55b14ddd1c39557a07374384e719e4194da453c92dd38257554911a9fe87a5
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-295 capabilities: **290 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+297 capabilities: **292 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -221,6 +221,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.agent.BoundHttpAnswer` |
 | command behaviour | `loom.agent.BoundHttpAnswer` |
 | command contract | `loom.agent.CheckAgentSpec` |
+| command contract | `loom.agent.RecordA2aTurn` |
+| command behaviour | `loom.agent.RecordA2aTurn` |
 | command contract | `loom.agent.RunOnce` |
 | command behaviour | `loom.agent.RunOnce` |
 | command contract | `loom.resource.AdmitLoomAgent` |

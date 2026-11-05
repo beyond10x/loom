@@ -21,7 +21,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
-- ESS moves from 0.84.0 to 0.85.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); generated Rust, the CRD and the reference pages are unchanged, and the commission domain graph names `0.85.0`
+- ESS moves from 0.84.0 to 0.86.0 (`ess-conformance`, `ess-primitives` and the CLI CI installs); the commission domain graph names `0.86.0`
 - A `Command` resource whose `spec.agent` the `loom.agent/1` decoder refuses is refused with the decoder's reason at its member (`PortOutOfRange at spec.agent.expose.a2a.port`), not `Malformed at spec.agent`, as an `AgentServe` resource already was (story:operator-constraints-in-ess)
 - `b10x-loom agent stage-files` decides before writing anything: a refused stage leaves the destination as it was, where it could create it or copy keys before the refusal (story:operator-constraints-in-ess)
 - `loom.agent.AdmitA2aRequest` gains the input `stream` and the outcome `streamed`; `AdmitA2aRequest` (generated) gains `stream`, so a struct literal adds `stream: false` (story:a2a-record-and-streaming)

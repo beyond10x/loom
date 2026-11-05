@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 6ee58c7e138136366044c4f43f53ef36d67d7b072496de73e913df57f6133b3b
-// contract digest 0fbdeee9f72de9fd6e7f4adbd5b63b02c4570ed9a5dc6255cd1286dff2e13cb0
+// model digest f898a72c6fb993d5397c5fd98115f61c45512e9c127b38eb6d608caccfccf273
+// contract digest 9b55b14ddd1c39557a07374384e719e4194da453c92dd38257554911a9fe87a5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -572,6 +572,8 @@ pub struct AdmitA2aRequest {
     pub bearer_presented: bool,
     /// `bearer_matches` — `Boolean`.
     pub bearer_matches: bool,
+    /// `stream` — `Boolean`.
+    pub stream: bool,
 }
 
 /// Everything `loom.agent.AdmitA2aRequest` can result in — one variant per declared outcome.
@@ -593,6 +595,8 @@ pub enum AdmitA2aRequestOutcome {
     },
     /// `probe` — when `probe == true`.
     Probe,
+    /// `streamed` — when `stream == true`.
+    Streamed,
     /// `admitted` — otherwise.
     Admitted,
 }
@@ -888,6 +892,28 @@ pub enum CheckAgentSpecOutcome {
     Serveable,
 }
 
+/// RecordA2aTurn — the input of `loom.agent.RecordA2aTurn`.
+///
+/// Everything it can result in is [`RecordA2aTurnOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordA2aTurn {
+    /// `recorded` — `Boolean`.
+    pub recorded: bool,
+}
+
+/// Everything `loom.agent.RecordA2aTurn` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordA2aTurnOutcome {
+    /// `replayed` — when `recorded == true`.
+    Replayed,
+    /// `turned` — otherwise.
+    Turned,
+}
+
 /// RunOnce — the input of `loom.agent.RunOnce`.
 ///
 /// Everything it can result in is [`RunOnceOutcome`].
@@ -1083,6 +1109,17 @@ pub mod obligations {
         /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
         /// implementation never returns it.
         fn check_agent_spec(&mut self, input: super::CheckAgentSpec) -> Result<super::CheckAgentSpecOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.RecordA2aTurn` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait RecordA2aTurnBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.RecordA2aTurn`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn record_a2a_turn(&mut self, input: super::RecordA2aTurn) -> Result<super::RecordA2aTurnOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.agent.RunOnce` — generated.
