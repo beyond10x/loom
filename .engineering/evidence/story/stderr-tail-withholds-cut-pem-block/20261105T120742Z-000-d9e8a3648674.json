@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-05T12:07:42Z",
+  "actor": "human:timo",
+  "artifact": "story:stderr-tail-withholds-cut-pem-block",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "local gate of wave 2026-11-05-w3 at e8a8b137: S1 (spec, drift, crd-drift, chart-check, conformance, docs-check, fmt and release-check --tag 0.57.2), S2 (all targets of the eight gate packages including b10x-loom-session-executor, both ESS gate tests, release_check, clippy -D warnings), S3 (consumer-check), every step exit 0; the reviewers' cases green, none ignored"
+  }
+}

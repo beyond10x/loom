@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:chart-upgrade-guide-applies-crd-first
 kind: story
-status: active
+status: implemented
 title: The chart upgrade guide applies the CRD of the new tag before helm upgrade
 relations:
 - decomposes: epic:loom-agent-command-variant
@@ -16,10 +16,11 @@ scope:
   path: README.md
 - confidence: cited
   path: crates/loom-operator/tests/chart.rs
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T09:33:25Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w3"}
 - {from: "proposed", to: "active", at: "2026-11-05T09:33:25Z", actor: "human:timo", revision: 4, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w3"}
+- {from: "active", to: "implemented", at: "2026-11-05T12:07:42Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w3"}
 ---
 ## Outcome
 
