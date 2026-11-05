@@ -2955,9 +2955,11 @@ fn record_reason(why: &str, child: &ChildEnd) -> String {
 const STDERR_SAID_BY_REASON: &str = "; the last lines of its stderr:\n";
 
 /// The lines of `text` as a tail or a record shows them: each one inert ([`inert`]), and each
-/// that holds a credential's shape ([`credential_lines`]) withheld, read both with its escape
-/// sequences and control characters removed, as a terminal shows it, and with each replaced, a
-/// note standing in for each run of withheld lines. A line's `\r` ending is dropped.
+/// that holds a credential's shape ([`credential_lines`]) withheld, read in three forms: with its
+/// escape sequences and control characters removed, as a terminal shows it; with each replaced;
+/// and with its control characters alone dropped ([`dropped`]), so an `ESC` an escape sequence's
+/// reading would take a token's first character with hides no prefix. A note stands in for each
+/// run of withheld lines. A line's `\r` ending is dropped.
 fn walked(text: &str) -> Vec<String> {
     let (lines, withheld) = walk_lines(text);
     noted(lines, &withheld)
@@ -2965,16 +2967,20 @@ fn walked(text: &str) -> Vec<String> {
 
 /// The lines of `text`, each as shown ([`inert`]), and which of them [`walked`] withholds.
 fn walk_lines(text: &str) -> (Vec<String>, Vec<bool>) {
-    let forms: Vec<(String, String)> = text
+    let raw: Vec<&str> = text
         .split('\n')
-        .map(|line| inert(line.strip_suffix('\r').unwrap_or(line)))
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
         .collect();
+    let forms: Vec<(String, String)> = raw.iter().map(|line| inert(line)).collect();
+    let dropped_forms: Vec<String> = raw.iter().map(|line| dropped(line)).collect();
     let shown_forms: Vec<&str> = forms.iter().map(|(shown, _)| shown.as_str()).collect();
     let bare_forms: Vec<&str> = forms.iter().map(|(_, bare)| bare.as_str()).collect();
+    let dropped_forms: Vec<&str> = dropped_forms.iter().map(String::as_str).collect();
     let withheld: Vec<bool> = credential_lines(&shown_forms)
         .into_iter()
         .zip(credential_lines(&bare_forms))
-        .map(|(shown, bare)| shown || bare)
+        .zip(credential_lines(&dropped_forms))
+        .map(|((shown, bare), dropped)| shown || bare || dropped)
         .collect();
     (
         forms.into_iter().map(|(shown, _)| shown).collect(),
@@ -3005,6 +3011,14 @@ fn noted(lines: impl IntoIterator<Item = String>, withheld: &[bool]) -> Vec<Stri
         shown.push(note(run));
     }
     shown
+}
+
+/// `line` with each control character but a tab dropped and nothing else: no escape sequence is
+/// read, so none takes the character after its `ESC`.
+fn dropped(line: &str) -> String {
+    line.chars()
+        .filter(|c| !c.is_control() || *c == '\t')
+        .collect()
 }
 
 /// `line` made inert, twice: as shown, each terminal escape sequence and each other control

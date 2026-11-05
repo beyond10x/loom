@@ -1605,7 +1605,8 @@ the last whole lines within `STDERR_TAIL_BYTES` (4096) of it, each line holding 
 shape withheld (`TOKEN_PREFIXES`, which `crates/loom-agent/tests/token_prefixes.rs` holds equal
 to the agent check's, a URL with user information or a query, a PEM block), each line read with
 its terminal escape sequences and control characters both removed and replaced by U+FFFD, the
-form it is shown in. Which lines are withheld is read over the whole stderr before the window is
+form it is shown in, and with its control characters alone dropped, no escape sequence read, so
+an `ESC` before a token takes none of its prefix. Which lines are withheld is read over the whole stderr before the window is
 cut, so the tail withholds each of its lines the whole walk withholds, a PEM block the window cut
 from its opening included. The warning itself reaches the transcript and the observer with the
 whole stderr so walked

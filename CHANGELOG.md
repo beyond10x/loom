@@ -15,6 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - `SessionExecutor`'s stderr tail withholds a PEM block's body lines when its window cut the block's opening (story:stderr-tail-withholds-cut-pem-block)
+- `SessionExecutor` withholds a stderr line whose token follows a lone `ESC`, in the transcript, tail and record (story:stderr-walk-withholds-token-after-lone-escape)
 
 ## [0.57.1] - 2026-11-05
 
