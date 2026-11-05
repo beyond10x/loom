@@ -56,6 +56,7 @@ scenarios:
   - scenarios/a2a-record-and-streaming/a-stream-without-the-bearer-is-refused.yaml
   - scenarios/a2a-record-and-streaming/a-new-message-runs-one-recorded-turn.yaml
   - scenarios/a2a-record-and-streaming/a-repeated-message-runs-no-second-turn.yaml
+  - scenarios/a2a-record-and-streaming/a-message-whose-turn-ran-unrecorded-runs-no-second-turn.yaml
   - scenarios/http-binding-cluster-ca/an-unset-ca-file-keeps-the-webpki-roots.yaml
   - scenarios/http-binding-cluster-ca/an-unreadable-ca-file-is-refused.yaml
   - scenarios/http-binding-cluster-ca/a-ca-file-over-one-mebibyte-is-refused.yaml

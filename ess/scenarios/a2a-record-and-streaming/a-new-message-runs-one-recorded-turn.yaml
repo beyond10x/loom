@@ -8,5 +8,5 @@ summary: A message whose item is not recorded runs one turn, recorded once.
 timeline:
   - at: 2026-11-04T00:00:00Z
     command: loom.agent.RecordA2aTurn
-    input: {recorded: false}
+    input: {recorded: false, ran_unrecorded: false}
     outcome: turned

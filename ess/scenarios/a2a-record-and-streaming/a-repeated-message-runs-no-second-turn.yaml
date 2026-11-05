@@ -8,5 +8,5 @@ summary: A message whose item is recorded already is answered with the recorded 
 timeline:
   - at: 2026-11-04T00:00:00Z
     command: loom.agent.RecordA2aTurn
-    input: {recorded: true}
+    input: {recorded: true, ran_unrecorded: false}
     outcome: replayed
