@@ -393,6 +393,59 @@ spec:
     }
 }
 
+/// The version a README line names after `marker`, up to the first character that cannot be part
+/// of a version.
+fn version_after<'a>(line: &'a str, marker: &str) -> Option<&'a str> {
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.' || c == '-'))
+        .unwrap_or(rest.len());
+    Some(&rest[..end])
+}
+
+/// `story:chart-upgrade-guide-applies-crd-first`: Helm never upgrades `crds/`, so README's upgrade
+/// guide applies the CRD of the release tag with `kubectl apply --server-side` before `helm
+/// upgrade`, and every apply line names the workspace version, so a release cannot ship a guide
+/// that applies an older CRD.
+#[test]
+fn the_upgrade_guide_applies_the_crd_of_the_workspace_version() {
+    let readme = fs::read_to_string(root().join("README.md")).expect("README.md");
+    let lines: Vec<&str> = readme.lines().collect();
+    let tagged_crd = format!(
+        "kubectl apply --server-side -f https://raw.githubusercontent.com/beyond10x/loom/{VERSION}/{}",
+        b10x_loom_resource::crd::FILE
+    );
+    let apply = lines
+        .iter()
+        .position(|line| line.contains(&tagged_crd))
+        .unwrap_or_else(|| panic!("README.md holds `{tagged_crd}`"));
+    let upgrade = lines
+        .iter()
+        .position(|line| line.contains("helm upgrade loom-agents"))
+        .expect("README.md holds `helm upgrade loom-agents`");
+    assert!(apply < upgrade, "README applies the CRD before `helm upgrade`");
+    assert_eq!(
+        version_after(lines[upgrade], "--version "),
+        Some(VERSION),
+        "README's `helm upgrade` names the workspace version"
+    );
+
+    for line in lines.iter().filter(|line| line.contains("kubectl apply")) {
+        let named = [
+            version_after(line, "beyond10x/loom/"),
+            version_after(line, "ghcr.io/beyond10x/loom-operator:"),
+        ];
+        assert!(
+            named.iter().any(Option::is_some),
+            "README's `{line}` names the CRD of a release"
+        );
+        for version in named.into_iter().flatten() {
+            assert_eq!(version, VERSION, "README's `{line}` names the workspace version");
+        }
+    }
+}
+
 #[test]
 fn the_taskfile_renders_the_overrides_this_test_asserts() {
     let taskfile = fs::read_to_string(root().join("Taskfile.yml")).expect("Taskfile.yml");
