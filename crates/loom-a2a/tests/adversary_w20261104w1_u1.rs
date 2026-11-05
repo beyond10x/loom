@@ -4,9 +4,9 @@
 //!
 //! - the item of an A2A turn is `a2a:<revision>`, and the record replays a turn by that item, so
 //!   two different `messageId`s must never give one item;
-//! - `ess/domains/agent.yaml` (`AdmitA2aRequest`): "a stream whose peer takes nothing for that
-//!   long is cut", and AGENTS.md: "a caller that takes nothing that long is cut off, freeing its
-//!   admitted slot". The events are the size a real turn's are, not mebibytes.
+//! - `ess/domains/agent.yaml` (`AdmitA2aRequest`): "a stream on which no event was written for the
+//!   idle bound is cut", and AGENTS.md: the cut frees its admitted slot. The events are the size a
+//!   real turn's are, not mebibytes.
 //!
 //! No model, no network beyond 127.0.0.1.
 
@@ -17,7 +17,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use b10x_loom_a2a::{A2aServer, Answerer, Bearer, WRITE_DEADLINE, item_revision};
+use b10x_loom_a2a::{A2aServer, Answerer, Bearer, item_revision};
 use b10x_loom_plugin::{InboundItem, RecordLine, RecordOutcome};
 use loom::agent::{A2aCard, A2aExposure};
 use loom_sdk::EventSink;
@@ -31,6 +31,9 @@ use serde_json::{Value, json};
 
 const TOKEN: &str = "a2a-adversary-bearer-u1w1104";
 const PATH: &str = "/a2a";
+/// The idle bound this file's listener is given in place of the host's `STREAM_IDLE` (300 s), so
+/// that the case does not wait 300 s for the cut.
+const IDLE: Duration = Duration::from_secs(2);
 
 fn exposure() -> A2aExposure {
     A2aExposure {
@@ -140,7 +143,8 @@ fn with_listener<A: Answerer + Sync>(agent: &A, case: impl FnOnce(SocketAddr)) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
     let address = listener.local_addr().unwrap();
     let server = A2aServer::new(exposure(), Bearer::new(TOKEN).expect("a bearer"))
-        .expect("the exposure is served");
+        .expect("the exposure is served")
+        .with_stream_idle(IDLE);
     let stop = AtomicBool::new(false);
     std::thread::scope(|scope| {
         let served = scope.spawn(|| server.serve(listener, agent, &stop));
@@ -213,9 +217,9 @@ fn adversary_two_different_message_ids_never_give_one_item() {
 }
 
 /// The unit's contract (`AdmitA2aRequest` in `ess/domains/agent.yaml`, AGENTS.md § Agent spec):
-/// a stream whose caller takes nothing for the answer's bound is cut and its admitted slot freed.
-/// With events the size a turn's are, the caller here takes nothing for the bound and 4 s more,
-/// and the stream is still open: nothing is cut, and the slot stays held until the turn ends.
+/// a stream whose caller takes nothing for the idle bound is cut and its admitted slot freed.
+/// With events the size a turn's are, the caller here takes nothing for the bound ([`IDLE`] on
+/// this file's listener, in place of the host's 300 s) and 4 s more, and the stream must be cut.
 #[test]
 fn adversary_a_stream_whose_caller_takes_nothing_for_the_bound_is_cut() {
     let (started_tx, started) = channel();
@@ -236,7 +240,7 @@ fn adversary_a_stream_whose_caller_takes_nothing_for_the_bound_is_cut() {
         started
             .recv_timeout(Duration::from_secs(30))
             .expect("the turn started");
-        std::thread::sleep(WRITE_DEADLINE.saturating_sub(asked.elapsed()) + Duration::from_secs(4));
+        std::thread::sleep(IDLE.saturating_sub(asked.elapsed()) + Duration::from_secs(4));
         idle.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut held = Vec::new();
         let mut chunk = [0_u8; 4096];
@@ -258,8 +262,8 @@ fn adversary_a_stream_whose_caller_takes_nothing_for_the_bound_is_cut() {
                 || ended
                     .as_ref()
                     .is_err_and(|error| error.kind() == ErrorKind::ConnectionReset),
-            "a caller that took nothing for {:?} (bound {WRITE_DEADLINE:?}) still holds an \
-             open stream: {ended:?}, {} bytes buffered",
+            "story:a2a-record-and-streaming: a caller that took nothing for {:?} (idle bound \
+             {IDLE:?}) still holds an open stream: {ended:?}, {} bytes buffered",
             asked.elapsed(),
             held.len()
         );

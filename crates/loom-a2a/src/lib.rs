@@ -13,7 +13,8 @@
 //!   the task as submitted, one `statusUpdate` per runtime event of the run, then an
 //!   `artifactUpdate` with the record and the last `statusUpdate` with the state the task ended in.
 //!   Each event must be written within the answer's bound, and a stream that carries no event for
-//!   that long ([`STREAM_IDLE`]) is cut too, while the turn goes on and `GetTask` reads its end.
+//!   the idle bound ([`STREAM_IDLE`], 300 s) is cut too, while the turn goes on and `GetTask`
+//!   reads its end.
 //!   The card advertises `capabilities.streaming: true`.
 //! - `GetTask` (also `tasks/get`): the task's status. While its turn runs, each runtime event of
 //!   the run moves it ([`tasks::follows`]); the record ends it ([`tasks::ended`]).

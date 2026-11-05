@@ -58,10 +58,12 @@ pub const LIVE_PATH: &str = "/live";
 /// requests answered at once (see the module documentation).
 pub const MAX_CONNECTIONS: usize = 32;
 
-/// How long a stream may carry no event before it is cut: the answer's bound. A caller that
+/// How long a stream may carry no event before it is cut: the idle bound, 300 s. A caller that
 /// stopped reading cannot be told from one that reads while the events fit the connection's
-/// buffers, so a stream idle that long is cut either way, freeing its admitted slot.
-pub const STREAM_IDLE: Duration = crate::http::WRITE_DEADLINE;
+/// buffers, so a stream idle that long is cut either way, freeing its admitted slot. It is longer
+/// than the answer's bound ([`crate::WRITE_DEADLINE`]), which cuts an event not written whole, so
+/// that a turn quiet between events, as a model call is, keeps its stream.
+pub const STREAM_IDLE: Duration = Duration::from_secs(300);
 
 /// The A2A protocol version the card names.
 pub const PROTOCOL_VERSION: &str = "1.0";
@@ -86,12 +88,13 @@ pub trait Answerer {
     fn answer(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String>;
 }
 
-/// The A2A listener of one agent: its exposure, the bearer every request but a probe carries, and
-/// its tasks.
+/// The A2A listener of one agent: its exposure, the bearer every request but a probe carries, its
+/// tasks, and how long a stream may carry no event.
 pub struct A2aServer {
     exposure: A2aExposure,
     bearer: Bearer,
     tasks: Tasks,
+    stream_idle: Duration,
 }
 
 /// One message handed to the thread that runs turns: its task, its item, whether its connection
@@ -238,7 +241,16 @@ impl A2aServer {
             exposure,
             bearer,
             tasks: Tasks::default(),
+            stream_idle: STREAM_IDLE,
         })
+    }
+
+    /// This listener with `idle` as its idle bound in place of [`STREAM_IDLE`]. A host keeps
+    /// [`STREAM_IDLE`]; a test sets a short bound so that it does not wait 300 s for a cut.
+    #[must_use]
+    pub fn with_stream_idle(mut self, idle: Duration) -> Self {
+        self.stream_idle = idle;
+        self
     }
 
     /// The agent card, its interface at `base` (`http://<host>`) and `expose.a2a.path`: the
@@ -605,12 +617,12 @@ impl A2aServer {
     /// Answers a streamed task with server-sent events, each a JSON-RPC response to the request
     /// whose result is a `StreamResponse`: the task as it was submitted, a `statusUpdate` for
     /// each status change its turn makes, then the task's end: an `artifactUpdate` for its record
-    /// and a last `statusUpdate` with the state it ended in. Two things cut the stream, each at
-    /// the answer's bound: an event not written whole within it
-    /// ([`crate::http::EventStream::event`]), and [`STREAM_IDLE`] without an event, since a caller
-    /// that stopped reading cannot be told from one that reads while the events fit the
-    /// connection's buffers. A cut frees the admitted slot; the turn goes on, its task ended as it
-    /// would be and readable by `GetTask`.
+    /// and a last `statusUpdate` with the state it ended in. Two things cut the stream: an event
+    /// not written whole within the answer's bound ([`crate::http::EventStream::event`]), and the
+    /// idle bound ([`STREAM_IDLE`] unless [`A2aServer::with_stream_idle`] set another) without an
+    /// event, since a caller that stopped reading cannot be told from one that reads while the
+    /// events fit the connection's buffers. A cut frees the admitted slot; the turn goes on, its
+    /// task ended as it would be and readable by `GetTask`.
     fn stream(&self, connection: Connection, streamed: Streamed) {
         let Streamed { id, task, updates } = streamed;
         let Ok(mut events) = connection.stream() else {
@@ -624,7 +636,7 @@ impl A2aServer {
             return events.cut();
         }
         let ended = loop {
-            match updates.recv_timeout(STREAM_IDLE) {
+            match updates.recv_timeout(self.stream_idle) {
                 Ok(Update::Status(status)) => {
                     let update = status_update(&task, status);
                     if events
@@ -635,7 +647,7 @@ impl A2aServer {
                     }
                 }
                 Ok(Update::Ended(ended)) => break ended,
-                // Idle for the bound: the caller took no event within it.
+                // Idle for the idle bound: the caller took no event within it.
                 Err(RecvTimeoutError::Timeout) => return events.cut(),
                 Err(RecvTimeoutError::Disconnected) => {
                     break self

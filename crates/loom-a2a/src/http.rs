@@ -8,7 +8,7 @@
 //! it ends when the connection closes, and its head and each of its events must be written within
 //! [`WRITE_DEADLINE`]: a write the connection's buffers cannot take that long fails. A caller that
 //! stops reading is noticed only once its buffers are full, so the listener also cuts a stream
-//! that carries no event for the bound (`crate::STREAM_IDLE`).
+//! that carries no event for its idle bound (`crate::STREAM_IDLE`, 300 s).
 
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
