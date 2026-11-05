@@ -558,7 +558,8 @@ fn a_spec_with_neither_a_channel_nor_a2a_is_not_served() {
 /// `a_turn_that_cannot_run_writes_its_full_error_to_standard_error`.
 const TURN_ERROR_CHILD: &str = "LOOM_A2A_TEST_TURN_ERROR_CHILD";
 
-/// What the child prints before its full error, for the parent to find on standard error.
+/// What the child prints on standard output ahead of its full error, which the parent then looks
+/// for on standard error; libtest may print the case's name ahead of it on the same line.
 const FULL_ERROR: &str = "the full error: ";
 
 /// The fixed reason an A2A caller is given for a turn whose plugin reports something it needs
@@ -709,7 +710,7 @@ fn a_turn_that_cannot_run_writes_its_full_error_to_standard_error() {
     );
     let why = stdout
         .lines()
-        .find_map(|line| line.strip_prefix(FULL_ERROR))
+        .find_map(|line| line.split_once(FULL_ERROR).map(|(_, why)| why))
         .expect("the child names its full error");
     assert!(names_a_path(why), "{why}");
     assert!(

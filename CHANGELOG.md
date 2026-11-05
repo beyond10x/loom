@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- An A2A turn that cannot run gives its caller a fixed reason per kind (`serve::a2a::TURN_*`), naming no host path (story:a2a-turn-error-names-no-host-path)
+
 ## [0.56.0] - 2026-11-05
 
 No breaking changes.
