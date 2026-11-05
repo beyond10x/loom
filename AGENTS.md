@@ -1295,8 +1295,13 @@ schedule removed and given back meanwhile) is waited for too, never applied to. 
 scheduled resource waits so, or, with no live CronJob of its own, for a predecessor's child,
 `Available` reads False `WorkloadTerminating` naming the children it waits for
 (`status::Scheduled::terminating`, `story:schedule-available-after-cronjob`), and True
-`Scheduled` only once the CronJob is created; a reconcile that fails after the CronJob's apply
-returned still publishes the status without the wait before it returns the error. The CronJob is
+`Scheduled` only once the CronJob is created. The other way round, a resource without
+`spec.schedule` whose Job waits for a CronJob of its name (its own, or a scheduled predecessor's)
+reads `Available` False `WorkloadTerminating` naming it instead of Unknown `RunNotFinished`
+(`status_of`'s `switching`, `story:job-available-after-cronjob`), and the Job's run once the Job
+is created; a Job waiting only for an older Job or Deployment still reads `RunNotFinished`. A
+reconcile that fails after the CronJob's or the created Job's apply returned still publishes the
+status without the wait before it returns the error. The CronJob is
 applied on every reconcile, so
 a new generation patches its schedule and template. The Jobs it starts are Kubernetes's (their
 controller is the CronJob, so the sweep never counts them): of those labelled

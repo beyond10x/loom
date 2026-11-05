@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- A `Command` resource whose Job waits for its CronJob to go reads `Available` False `WorkloadTerminating`, not `RunNotFinished` (story:job-available-after-cronjob)
+
 ## [0.57.0] - 2026-11-05
 
 No breaking changes.
