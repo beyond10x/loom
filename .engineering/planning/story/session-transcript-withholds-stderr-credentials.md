@@ -2,11 +2,27 @@
 format: aep.planning-md/3
 id: story:session-transcript-withholds-stderr-credentials
 kind: story
-status: draft
+status: implemented
 title: The session transcript and the event observer hold a harness child's stderr to the executor's credential walk
 relations:
 - decomposes: epic:loom-on-llm-and-metaharness
-revision: 1
+- serves: vision:governed-autonomy
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-session-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-session-executor/tests/event_observer.rs
+- confidence: cited
+  path: crates/loom-session-executor/tests/harness_child_failure.rs
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-05T06:22:00Z", actor: "human:timo", revision: 2, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-w2-loom"}
+- {from: "proposed", to: "active", at: "2026-11-05T06:22:00Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-w2-loom"}
+- {from: "active", to: "implemented", at: "2026-11-05T07:04:45Z", actor: "human:timo", revision: 5, decided_on: {"recorded":{"test_result":1}}, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w2"}
 ---
 ## Outcome
 

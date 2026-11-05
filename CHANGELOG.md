@@ -12,6 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.57.1] - 2026-11-05
+
+No breaking changes.
+
+### Fixed
+
+- `agent serve` escapes control characters in the A2A turn error it writes to stderr, so it stays one line (story:a2a-stderr-line-escapes-error-text)
+- A `Command` resource whose Job waits for its CronJob to go reads `Available` False `WorkloadTerminating`, not `RunNotFinished` (story:job-available-after-cronjob)
+- `SessionReport::transcript` and the `with_observer` observer withhold each credential-shaped stderr line, as the stderr tail does (story:session-transcript-withholds-stderr-credentials)
+
 ## [0.57.0] - 2026-11-05
 
 No breaking changes.
@@ -1390,7 +1400,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.1...HEAD
+[0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1
 [0.57.0]: https://github.com/beyond10x/loom/releases/tag/0.57.0
 [0.56.0]: https://github.com/beyond10x/loom/releases/tag/0.56.0
 [0.55.2]: https://github.com/beyond10x/loom/releases/tag/0.55.2

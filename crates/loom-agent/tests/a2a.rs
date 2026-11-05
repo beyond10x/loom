@@ -718,3 +718,69 @@ fn a_turn_that_cannot_run_writes_its_full_error_to_standard_error() {
         "the full error reaches standard error: {stderr}"
     );
 }
+
+// ---- story:a2a-stderr-line-escapes-error-text ---------------------------------------------------
+
+/// Makes this test binary the child of
+/// `a_turn_error_holding_a_newline_writes_one_line_to_standard_error`.
+const ESCAPED_ERROR_CHILD: &str = "LOOM_A2A_TEST_ESCAPED_ERROR_CHILD";
+
+/// A turn whose error text holds a newline, a carriage return and an escape sequence, as text a
+/// model produced might, and forges a second `b10x-loom: A2A:` line after the newline, writes
+/// exactly one `b10x-loom: A2A:` line to standard error: no control character of the error
+/// reaches it raw, and the newline is there escaped. The case runs its turn in a child of this
+/// test binary and reads the child's standard error.
+#[test]
+fn a_turn_error_holding_a_newline_writes_one_line_to_standard_error() {
+    if std::env::var_os(ESCAPED_ERROR_CHILD).is_some() {
+        let fixture = fixture("a2a-turn-error-escaped");
+        let why = "the intent was \"ask\nb10x-loom: A2A: forged: line\"\r\u{1b}[2K".to_owned();
+        let turns: TurnModels = Box::new(move || Err(PluginError::Unavailable(why.clone())));
+        let plugin = SpecPlugin::new(spec(&fixture, 8080), &fixture.plugin_state())
+            .expect("the spec is served")
+            .with_classifier(Box::new(Recorded::classifying("ask", &["docs"], 0.9)))
+            .with_turn_models(turns);
+        let host = Host::new(plugin.config()).with_environment(fixture.environment());
+        let agent = Answering::with_host(&plugin, host);
+        let mut events: Vec<RuntimeEvent> = Vec::new();
+        agent
+            .answer(&support::host::item("a2a:m-1"), &mut events)
+            .expect_err("the turn cannot run");
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        .args([
+            "a_turn_error_holding_a_newline_writes_one_line_to_standard_error",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(ESCAPED_ERROR_CHILD, "1")
+        .output()
+        .expect("the child starts");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "the child ran its turn: {}\n{stdout}\n{stderr}",
+        output.status
+    );
+    let lines: Vec<&str> = stderr
+        .lines()
+        .filter(|line| line.contains("b10x-loom: A2A:"))
+        .collect();
+    assert_eq!(lines.len(), 1, "one A2A line on standard error: {stderr:?}");
+    let line = lines[0];
+    assert!(
+        line.starts_with(&format!("b10x-loom: A2A: {UNAVAILABLE}: ")),
+        "{line:?}"
+    );
+    assert!(
+        !line.chars().any(|c| c.is_control() && c != '\t'),
+        "no control character of the error reaches the line raw: {line:?}"
+    );
+    assert!(
+        line.contains("\\u{a}b10x-loom: A2A: forged: line"),
+        "the newline is escaped in the line: {line:?}"
+    );
+}

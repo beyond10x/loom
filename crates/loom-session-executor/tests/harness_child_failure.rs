@@ -1,7 +1,8 @@
 //! A harness child that fails says why: the executor's error names how the child ended (its exit
 //! status, or the signal that took it) and, where metaharness hands it on, the last whole lines of
 //! what it wrote on standard error, bounded by `STDERR_TAIL_BYTES` and with every line that holds
-//! a credential withheld, never repeated.
+//! a credential withheld, never repeated: not in the error, the failure record, the session's
+//! transcript or the lines its observer is handed.
 //!
 //! The shape is that of a delivery trial: a b10x-harness child refused by the model wire wrote
 //! one sentence on stderr and exited non-zero without a terminal record, and the case recorded only
@@ -10,7 +11,9 @@
 //! Every session here is scripted (metaharness's `ScriptedRunner`, wrapped so that the child ends
 //! as the test says): no harness program runs, no model is called and nothing reaches the network.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -21,6 +24,7 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_session_executor::metaharness::protocol::ProcessTermination;
+use b10x_loom_session_executor::metaharness::warning::NO_TERMINAL_RECORD;
 use b10x_loom_session_executor::metaharness::{
     HarnessProcess, LaunchPlanView, ProcessPoll, ScriptStep, ScriptedLog, ScriptedRunner,
 };
@@ -29,6 +33,7 @@ use b10x_loom_session_executor::model::session::{
 };
 use b10x_loom_session_executor::{
     CredentialSource, Endpoint, Kind, ProcessRunner, STDERR_TAIL_BYTES, SessionExecutor,
+    TOKEN_PREFIXES,
 };
 
 const WRITE: &str = "tests.write";
@@ -619,6 +624,139 @@ fn a_failed_session_names_its_predecessor_and_leaves_it_to_the_retry() {
         "the retry continues what the failed attempt continued: {retry}"
     );
     assert!(again.failure.is_some(), "and fails the same way");
+}
+
+/// Every event line a session hands its observer, serialized.
+type Observed = Rc<RefCell<Vec<String>>>;
+
+/// `executor` handing each event it receives, serialized, to the list returned beside it.
+fn observed(executor: SessionExecutor) -> (SessionExecutor, Observed) {
+    let seen: Observed = Rc::new(RefCell::new(Vec::new()));
+    let into = Rc::clone(&seen);
+    let executor = executor.with_observer(move |line, _copy| {
+        into.borrow_mut()
+            .push(serde_json::to_string(line).expect("an event serializes"));
+    });
+    (executor, seen)
+}
+
+/// The message of the `NO_TERMINAL_RECORD` warning `transcript` holds, or a panic naming it.
+fn stderr_warning(transcript: &str) -> String {
+    transcript
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|line| line["event"] == "warning" && line["code"] == NO_TERMINAL_RECORD)
+        .and_then(|line| line["message"].as_str().map(str::to_owned))
+        .unwrap_or_else(|| panic!("no {NO_TERMINAL_RECORD} warning in {transcript:?}"))
+}
+
+/// A stderr between a first line and the cause, which hold no credential, of a line for each
+/// prefix of `TOKEN_PREFIXES` but a PEM block's opening, a URL with user information, a prefix an
+/// escape sequence splits and a PEM block, each joined at run time with [`SECRET`]; and how many
+/// lines of it hold a credential's shape.
+fn credential_stderr() -> (String, usize) {
+    let mut stderr = String::from("starting\n");
+    let mut held = 0;
+    for prefix in TOKEN_PREFIXES
+        .iter()
+        .filter(|prefix| !prefix.starts_with('-'))
+    {
+        stderr.push_str(&format!("debug: value={prefix}{SECRET}\n"));
+        held += 1;
+    }
+    stderr.push_str(&shaped(&[
+        "debug: proxy https://agent:",
+        "hunter2pass",
+        "@proxy.example:8443/v1\n",
+    ]));
+    let (head, rest) = TOKEN_PREFIXES[0].split_at(1);
+    stderr.push_str(&format!("debug: read {head}\u{1b}[0m{rest}{SECRET}\n"));
+    let begin = TOKEN_PREFIXES
+        .iter()
+        .find(|prefix| prefix.starts_with('-'))
+        .expect("a PEM opening");
+    stderr.push_str(&format!("{begin} PRIVATE KEY-----\n"));
+    stderr.push_str(&shaped(&["MIIEvQ", SECRET, "\n"]));
+    stderr.push_str(&shaped(&["-----END ", "PRIVATE", " KEY-----\n"]));
+    held += 5;
+    stderr.push_str(&format!("{REFUSED}\n"));
+    (stderr, held)
+}
+
+#[test]
+fn a_credential_on_stderr_reaches_neither_the_transcript_nor_the_observer() {
+    let scratch = Scratch::new("transcript-credential");
+    let (stderr, held) = credential_stderr();
+    let (executor, seen) = observed(scratch.executor(silent_session(), &stderr, End::Exited(1)));
+    let why = why(&executor);
+    let report = executor.last_report().expect("a report");
+    let transcript = String::from_utf8(report.transcript.clone()).expect("a UTF-8 transcript");
+    let seen = seen.borrow();
+
+    for (what, text) in [
+        ("transcript", transcript.as_str()),
+        ("observed", &seen.join("\n")),
+    ] {
+        for secret in [SECRET, "MIIEvQ", "hunter2pass"] {
+            let holding: Vec<&str> = text.lines().filter(|line| line.contains(secret)).collect();
+            assert!(
+                holding.is_empty(),
+                "no line of the {what} holds {secret}: {holding:?}"
+            );
+        }
+    }
+    assert!(
+        !format!("{:?}", report.trace).contains(SECRET),
+        "nor in the trace projected from it: {:?}",
+        report.trace
+    );
+    assert_eq!(
+        seen.join("\n"),
+        transcript.trim_end(),
+        "the observer sees the transcript's lines"
+    );
+    let warning = stderr_warning(&transcript);
+    let shown =
+        format!("starting\n[{held} lines withheld: they hold a credential's shape]\n{REFUSED}");
+    assert!(
+        warning.ends_with(&format!("wrote this on stderr: {shown}")),
+        "the warning keeps every other line and says what it withheld: {warning:?}"
+    );
+    assert_eq!(tail_of(&why), shown, "the error's tail is as today");
+    let failure = last_row(&executor, 1).failure.expect("a failure");
+    assert_eq!(
+        failure.stderr_tail.as_deref(),
+        Some(shown.as_str()),
+        "the record's tail is as today"
+    );
+}
+
+#[test]
+fn a_stderr_without_a_credential_is_kept_whole_in_the_transcript() {
+    let scratch = Scratch::new("transcript-whole");
+    let mut stderr = String::new();
+    for at in 0..(2 * STDERR_TAIL_BYTES / 40) {
+        stderr.push_str(&format!("progress: step {at:>6} of the loop went well\n"));
+    }
+    stderr.push_str(&format!("{REFUSED}\n"));
+    let (executor, seen) = observed(scratch.executor(silent_session(), &stderr, End::Exited(1)));
+    let _ = why(&executor);
+    let report = executor.last_report().expect("a report");
+    let transcript = String::from_utf8(report.transcript.clone()).expect("a UTF-8 transcript");
+
+    assert_eq!(
+        stderr_warning(&transcript),
+        format!(
+            "the harness produced no terminal record and wrote this on stderr: {}",
+            stderr.trim_end()
+        ),
+        "the warning as metaharness wrote it, past the tail's bound"
+    );
+    assert_eq!(
+        seen.borrow().join("\n"),
+        transcript.trim_end(),
+        "and as the observer sees it"
+    );
 }
 
 #[test]

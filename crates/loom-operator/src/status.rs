@@ -9,7 +9,7 @@
 //! |---|---|---|---|
 //! | Pending | Unknown, `CheckPending` | Unknown, `CheckPending` | none |
 //! | Running, `AgentServe` | True, `SpecServeable` | True, `DeploymentAvailable`; Unknown, `DeploymentNotObserved` before the Deployment is read | none |
-//! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished` | Unknown, `RunNotFinished` |
+//! | Running, `Command` | True, `SpecAdmitted` | Unknown, `RunNotFinished`; False, `WorkloadTerminating` while the Job waits for a CronJob to go | Unknown, `RunNotFinished` |
 //! | Running, `Command`, `spec.schedule` | True, `SpecAdmitted` | True, `Scheduled`; False, `Suspended` while suspended; False, `WorkloadTerminating` before the CronJob exists | none; `LastRunSucceeded`: Unknown, `NoRunYet`; True, `RunSucceeded`; False, `RunFailed` |
 //! | Degraded | True, `SpecServeable` | False, `DeploymentUnavailable` | none |
 //! | Completed | True, `SpecAdmitted` | False, `RunSucceeded` | True, `RunSucceeded` |
@@ -24,7 +24,11 @@
 //! gone first, or ended before the container ran), that no exit code was read and the Job's
 //! reason; [`pods_unread`] adds that the pod could not be read when the API server refused the
 //! list. Only an `AgentServe` resource reaches Degraded, since only its Deployment is observed
-//! for availability. A scheduled `Command` resource (story command-schedule) stays Running: its
+//! for availability. While a `Command` resource that lost `spec.schedule` waits for a CronJob of
+//! its name to go before its Job is created, no run has started, so `Available` reads False
+//! `WorkloadTerminating` naming what the Job waits for (story job-available-after-cronjob), and
+//! follows the Job's run once the Job exists. A scheduled `Command` resource (story
+//! command-schedule) stays Running: its
 //! CronJob starts each run, `Available` says whether it does, and `LastRunSucceeded` how the
 //! newest finished run ended, from the row's `last_run`, published as `status.lastRun`. A row
 //! that carries conditions is published with its own.
@@ -273,6 +277,23 @@ pub struct Scheduled {
     pub terminating: Vec<String>,
 }
 
+/// `Available` False `WorkloadTerminating` while the `workload` (`CronJob`, `Job`) a `Command`
+/// resource runs as waits for `terminating`, each as kind and name, to go before it is created
+/// (stories schedule-available-after-cronjob, job-available-after-cronjob): nothing exists yet
+/// to start a run.
+fn workload_terminating(terminating: &[String], workload: &str) -> Condition {
+    condition(
+        ConditionType::Available,
+        ConditionStatus::False,
+        "WorkloadTerminating",
+        format!(
+            "waiting for {} to be deleted before the {workload} is created; no run starts until \
+             then",
+            terminating.join(", ")
+        ),
+    )
+}
+
 /// The phase as the CRD's `status.lastRun.phase` spells it.
 #[must_use]
 pub fn run_phase(phase: RunPhase) -> &'static str {
@@ -300,16 +321,7 @@ pub fn scheduled_conditions(
 ) -> Vec<Condition> {
     let message = check.map(|check| check.message.clone()).unwrap_or_default();
     let available = if !scheduled.terminating.is_empty() {
-        condition(
-            ConditionType::Available,
-            ConditionStatus::False,
-            "WorkloadTerminating",
-            format!(
-                "waiting for {} to be deleted before the CronJob is created; no run starts until \
-                 then",
-                scheduled.terminating.join(", ")
-            ),
-        )
+        workload_terminating(&scheduled.terminating, "CronJob")
     } else if scheduled.suspended {
         condition(
             ConditionType::Available,
@@ -363,31 +375,49 @@ pub fn scheduled_conditions(
     ]
 }
 
-/// The status a row of `LoomAgents` publishes, for a resource without `spec.schedule`.
+/// The status a row of `LoomAgents` publishes, for a resource without `spec.schedule` whose Job
+/// waits for nothing.
 #[must_use]
 pub fn status(row: &LoomAgents) -> resource::LoomAgentStatus {
-    status_of(row, None)
+    status_of(row, None, &[])
 }
 
 /// The status a row of `LoomAgents` publishes; `scheduled` is present for a resource with
 /// `spec.schedule`, whose conditions, while it runs as a `Command` resource, are
-/// [`scheduled_conditions`].
+/// [`scheduled_conditions`]. `switching` names, each as kind and name (`CronJob
+/// platform-operator`), what the Job of a running `Command` resource without `spec.schedule`
+/// waits for to go while a CronJob of its name terminates (story job-available-after-cronjob);
+/// while it names any, `Available` reads False `WorkloadTerminating`, since no Job exists to run.
+/// It is empty once the Job is created, and for every other resource.
 #[must_use]
-pub fn status_of(row: &LoomAgents, scheduled: Option<Scheduled>) -> resource::LoomAgentStatus {
+pub fn status_of(
+    row: &LoomAgents,
+    scheduled: Option<Scheduled>,
+    switching: &[String],
+) -> resource::LoomAgentStatus {
+    let command_running =
+        row.state == LoomAgentState::Running && row.variant == Some(AgentVariant::Command);
     let conditions = row.conditions.clone().unwrap_or_else(|| match scheduled {
-        Some(scheduled)
-            if row.state == LoomAgentState::Running
-                && row.variant == Some(AgentVariant::Command) =>
-        {
+        Some(scheduled) if command_running => {
             scheduled_conditions(row.check.as_ref(), row.last_run.as_ref(), scheduled)
         }
-        _ => conditions(
-            row.state,
-            row.check.as_ref(),
-            row.deployment.as_ref(),
-            row.variant,
-            row.run.as_ref(),
-        ),
+        _ => {
+            let mut conditions = conditions(
+                row.state,
+                row.check.as_ref(),
+                row.deployment.as_ref(),
+                row.variant,
+                row.run.as_ref(),
+            );
+            if command_running && !switching.is_empty() {
+                for condition in &mut conditions {
+                    if condition.r#type == ConditionType::Available {
+                        *condition = workload_terminating(switching, "Job");
+                    }
+                }
+            }
+            conditions
+        }
     });
     resource::LoomAgentStatus {
         observed_generation: row.observed_generation,
@@ -765,6 +795,82 @@ mod tests {
             };
             let read = scheduled_conditions(Some(&check), None, scheduled);
             assert_eq!((read[1].status, read[1].reason.as_str()), (status, reason));
+        }
+    }
+
+    /// `story:job-available-after-cronjob`: a running `Command` resource whose Job waits for a
+    /// CronJob to go reads `Available` False `WorkloadTerminating` naming it, `Completed` still
+    /// Unknown `RunNotFinished`; with nothing to wait for it reads the Job's run, and no other
+    /// state or variant reads the wait.
+    #[test]
+    fn a_job_waiting_for_a_cronjob_is_not_available() {
+        let row = |state, variant| LoomAgents {
+            name: ResourceName("a".to_owned()),
+            observed_generation: 2,
+            check: Some(checked(0, "admitted")),
+            deployment: None,
+            variant: Some(variant),
+            run: None,
+            last_run: None,
+            conditions: None,
+            state,
+        };
+        let switching = ["CronJob a".to_owned()];
+        let waiting = status_of(
+            &row(LoomAgentState::Running, AgentVariant::Command),
+            None,
+            &switching,
+        );
+        let read: Vec<(&str, &str, &str, &str)> = waiting
+            .conditions
+            .iter()
+            .flatten()
+            .map(|condition| {
+                (
+                    condition.kind.as_str(),
+                    condition.status.as_str(),
+                    condition.reason.as_str(),
+                    condition.message.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            read,
+            [
+                ("Checked", "True", "SpecAdmitted", "admitted"),
+                (
+                    "Available",
+                    "False",
+                    "WorkloadTerminating",
+                    "waiting for CronJob a to be deleted before the Job is created; no run \
+                     starts until then"
+                ),
+                (
+                    "Completed",
+                    "Unknown",
+                    "RunNotFinished",
+                    "the Job's run has not finished"
+                ),
+            ]
+        );
+        assert_eq!(
+            status_of(
+                &row(LoomAgentState::Running, AgentVariant::Command),
+                None,
+                &[]
+            ),
+            status(&row(LoomAgentState::Running, AgentVariant::Command))
+        );
+        for (state, variant) in [
+            (LoomAgentState::Running, AgentVariant::AgentServe),
+            (LoomAgentState::Pending, AgentVariant::Command),
+            (LoomAgentState::Completed, AgentVariant::Command),
+        ] {
+            assert_eq!(
+                status_of(&row(state, variant), None, &switching),
+                status(&row(state, variant)),
+                "{state:?} {variant:?}"
+            );
         }
     }
 }

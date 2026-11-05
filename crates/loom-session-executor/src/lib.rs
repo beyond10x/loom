@@ -68,7 +68,9 @@
 //! error (it does when the child left no terminal record), the last whole lines of it within
 //! [`STDERR_TAIL_BYTES`], each line that holds a credential's shape withheld and never repeated
 //! ([`TOKEN_PREFIXES`], a URL with user information or a query component, a PEM block), read with
-//! its terminal escape sequences both removed and replaced.
+//! its terminal escape sequences both removed and replaced. The warning that hands the stderr on
+//! reaches [`SessionReport::transcript`] and the observer ([`SessionExecutor::with_observer`])
+//! with every line of it so walked, so no line the tail withholds is repeated there either.
 //!
 //! The change is what the session made in its copy against the bytes the copy was made from, the
 //! workspace as the frontier was handed: a file written in the workspace while the session runs
@@ -551,7 +553,9 @@ pub struct SessionReport {
     pub cache_creation: Option<u64>,
     /// The directory the session worked in, the scratch copy; removed when the call returns.
     pub cwd: Option<PathBuf>,
-    /// Every event metaharness delivered, one JSON line each.
+    /// Every event metaharness delivered, one JSON line each; its `NO_TERMINAL_RECORD` warning
+    /// with the child's whole stderr walked as the error's stderr tail is, at least each line the
+    /// tail withholds withheld.
     pub transcript: Vec<u8>,
     /// Each gating row of metaharness's hermetic floor that was not `ok`, as
     /// `<row> <verdict>: <detail>`.
@@ -910,7 +914,9 @@ impl SessionExecutor {
     /// observer halts the session (metaharness kills the harness child) and then continues out
     /// of the call with its own payload; the call records no session and leaves
     /// [`Self::last_report`] as it was. The observer serves every call of this executor; an event
-    /// the executor could not serialize is in neither the transcript nor the observer's view.
+    /// the executor could not serialize is in neither the transcript nor the observer's view. The
+    /// observer is handed the event as the transcript holds it: the `NO_TERMINAL_RECORD` warning
+    /// with each line of the child's stderr that holds a credential's shape withheld.
     #[must_use]
     pub fn with_observer(self, observer: impl FnMut(&EventLine, &Path) + 'static) -> Self {
         *self.observer.borrow_mut() = Some(Box::new(observer));
@@ -1451,6 +1457,13 @@ impl SessionExecutor {
                     break;
                 }
             };
+            // The one event that carries the child's stderr: its tail is read as metaharness
+            // wrote it, and each of its lines that holds a credential's shape is withheld before
+            // the transcript or the observer holds the event.
+            let mut line = line;
+            if let Some(tail) = withhold_stderr(&mut line.event) {
+                child.stderr = tail;
+            }
             if let Ok(text) = serde_json::to_string(&*line) {
                 report.transcript.extend_from_slice(text.as_bytes());
                 report.transcript.push(b'\n');
@@ -1570,14 +1583,7 @@ impl SessionExecutor {
                         final_text = Some(answer.text.clone());
                     }
                 }
-                // Metaharness hands on the child's stderr only here, when it left no terminal
-                // record (`warning::NO_TERMINAL_RECORD`), and its native end on `stream.closed`.
-                Event::Warning { code, message }
-                    if code == metaharness::warning::NO_TERMINAL_RECORD =>
-                {
-                    child.stderr =
-                        stderr_tail(message.strip_prefix(STDERR_SAID).unwrap_or(message));
-                }
+                // The child's native end; its stderr is read above ([`withhold_stderr`]).
                 Event::StreamClosed { process, .. } => child.termination = *process,
                 _ => {}
             }
@@ -2777,6 +2783,28 @@ const NO_ACTION_LINE: &str = "the session ended without the JSON line naming its
 /// What metaharness's `NO_TERMINAL_RECORD` warning says before the child's stderr.
 const STDERR_SAID: &str = "the harness produced no terminal record and wrote this on stderr: ";
 
+/// The stderr tail ([`stderr_tail`]) of `event` when it is the one event metaharness hands a
+/// harness child's stderr on in, its `NO_TERMINAL_RECORD` warning, read as metaharness wrote it;
+/// the warning itself then keeps the whole stderr with each line shown and withheld as the tail's
+/// are ([`walked`]), so neither [`SessionReport::transcript`] nor the observer holds a line the
+/// tail withholds. Any other event is left as it is.
+fn withhold_stderr(event: &mut Event) -> Option<String> {
+    let Event::Warning { code, message } = event else {
+        return None;
+    };
+    if code != metaharness::warning::NO_TERMINAL_RECORD {
+        return None;
+    }
+    let (said, stderr) = match message.strip_prefix(STDERR_SAID) {
+        Some(stderr) => (STDERR_SAID, stderr),
+        None => ("", message.as_str()),
+    };
+    let tail = stderr_tail(stderr);
+    let shown = format!("{said}{}", walked(stderr).join("\n"));
+    *message = shown;
+    Some(tail)
+}
+
 /// The action and summary of a reply: its last line that opens a JSON object naming `action`.
 fn reply(text: &str) -> Result<(String, String), Unreplied> {
     for line in text.lines().rev() {
@@ -3022,6 +3050,9 @@ fn inert(line: &str) -> (String, String) {
 fn credential_lines(lines: &[&str]) -> Vec<bool> {
     let mut withheld: Vec<bool> = lines.iter().map(|line| holds_credential(line)).collect();
     let mut in_block = false;
+    // Every line before `filled` is withheld already, so an `-----END` line without its
+    // `-----BEGIN` fills only from there: a whole stderr of them is walked in one pass.
+    let mut filled = 0;
     for at in 0..lines.len() {
         let lower = lines[at].to_ascii_lowercase();
         if lower.contains("-----begin") {
@@ -3032,7 +3063,10 @@ fn credential_lines(lines: &[&str]) -> Vec<bool> {
         }
         if lower.contains("-----end") {
             if !in_block {
-                withheld[..=at].iter_mut().for_each(|line| *line = true);
+                withheld[filled..=at]
+                    .iter_mut()
+                    .for_each(|line| *line = true);
+                filled = at + 1;
             }
             in_block = false;
         }
@@ -3053,12 +3087,34 @@ fn holds_credential(line: &str) -> bool {
                 .is_none_or(|before| !before.is_alphanumeric())
         })
     });
-    prefixed || line_urls(line).iter().any(|url| url_holds_credential(url))
+    prefixed || holds_credential_url(line)
 }
 
-/// Whether `url` carries user information or a query component. Its authority runs from after
-/// `://` to the first `/`, or to its end: a `#` or a `?` does not end it, so a password holding
-/// either is user information all the same.
+/// Whether `line` holds a URL that carries user information or a query component. A URL is each
+/// `://` with at least one scheme character before it (a letter, a digit, `+`, `-`, `.`) and
+/// everything after it up to whitespace, so it lies in one word of the line. Its authority runs
+/// from after `://` to the first `/`, or to the word's end: a `#` or a `?` does not end it, so a
+/// password holding either is user information all the same. Each word is read in one pass: an
+/// authority ends at the latest at the next `://`, whose `/` ends it, and a `?` after a `://` is
+/// the word's last `?` after it, found once per word.
+fn holds_credential_url(line: &str) -> bool {
+    let is_scheme = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.');
+    line.split(char::is_whitespace).any(|word| {
+        let last_query = word.rfind('?');
+        word.match_indices("://").any(|(at, _)| {
+            if !word[..at].chars().next_back().is_some_and(is_scheme) {
+                return false;
+            }
+            let rest = &word[at + 3..];
+            last_query.is_some_and(|query| query >= at + 3)
+                || rest[..rest.find('/').unwrap_or(rest.len())].contains('@')
+        })
+    })
+}
+
+/// Whether `url` carries user information or a query component, as the walk read it before
+/// [`holds_credential_url`]: the equivalence its unit test holds it to.
+#[cfg(test)]
 fn url_holds_credential(url: &str) -> bool {
     let rest = &url[url.find("://").map_or(0, |at| at + 3)..];
     let authority = &rest[..rest.find('/').unwrap_or(rest.len())];
@@ -3066,7 +3122,9 @@ fn url_holds_credential(url: &str) -> bool {
 }
 
 /// Every URL `line` holds: each `://` with the scheme before it (letters, digits, `+`, `-`, `.`,
-/// at least one) and everything after it up to whitespace.
+/// at least one) and everything after it up to whitespace; the reading before
+/// [`holds_credential_url`], kept for its unit test.
+#[cfg(test)]
 fn line_urls(line: &str) -> Vec<&str> {
     let is_scheme = |c: char| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.');
     let mut found = Vec::new();
@@ -3682,6 +3740,92 @@ mod tests {
             record_reason(&why, &child),
             "[a line withheld: it holds a credential's shape]\n\
              next (the harness exited with status 1)"
+        );
+    }
+
+    #[test]
+    fn each_pem_end_without_its_begin_withholds_every_line_before_it() {
+        let end = ["-----END ", "PRIVATE", " KEY-----"].concat();
+        let lines = ["a", end.as_str(), "b", "c", end.as_str(), "d"];
+        assert_eq!(
+            credential_lines(&lines),
+            [true, true, true, true, true, false]
+        );
+    }
+
+    #[test]
+    fn the_one_pass_url_reading_withholds_what_the_earlier_reading_withheld() {
+        let pieces = [
+            "a",
+            "Z",
+            "9",
+            ":",
+            "/",
+            "//",
+            "://",
+            "@",
+            "?",
+            "#",
+            " ",
+            "\t",
+            "+",
+            "-",
+            ".",
+            "é",
+            "\u{3000}",
+            "https",
+            "user:pw@",
+            "h.example",
+            "?q=1",
+        ];
+        let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut next = |bound: usize| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(seed >> 33).expect("31 bits fit") % bound
+        };
+        let mut held = 0;
+        for _ in 0..20_000 {
+            let line: String = (0..next(24)).map(|_| pieces[next(pieces.len())]).collect();
+            let earlier = line_urls(&line).iter().any(|url| url_holds_credential(url));
+            assert_eq!(holds_credential_url(&line), earlier, "{line:?}");
+            held += usize::from(earlier);
+        }
+        assert!(
+            held > 1_000,
+            "the lines drawn hold credentials often enough: {held}"
+        );
+    }
+
+    #[test]
+    fn the_no_terminal_record_warning_is_walked_and_its_tail_read_as_written() {
+        let token = format!("{}SECRETabcdef", TOKEN_PREFIXES[0]);
+        let mut event = Event::Warning {
+            code: metaharness::warning::NO_TERMINAL_RECORD.to_owned(),
+            message: format!("{STDERR_SAID}start\nvalue={token}\nrefused"),
+        };
+        assert_eq!(
+            withhold_stderr(&mut event).as_deref(),
+            Some("start\n[a line withheld: it holds a credential's shape]\nrefused")
+        );
+        let Event::Warning { message, .. } = &event else {
+            panic!("still a warning: {event:?}");
+        };
+        assert_eq!(
+            message,
+            &format!(
+                "{STDERR_SAID}start\n[a line withheld: it holds a credential's shape]\nrefused"
+            )
+        );
+        let mut other = Event::Warning {
+            code: "SOMETHING_ELSE".to_owned(),
+            message: format!("value={token}"),
+        };
+        assert_eq!(
+            withhold_stderr(&mut other),
+            None,
+            "another warning is no stderr"
         );
     }
 

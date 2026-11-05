@@ -453,7 +453,12 @@ Lifecycle and status:
   live CronJob of its own, a predecessor's child to go, `Available` is False
   `WorkloadTerminating`, its message naming what it waits for; it reads `Scheduled` (or
   `Suspended`) only once the CronJob is created, and a reconcile that fails after the CronJob's
-  apply returned still publishes that (`story:schedule-available-after-cronjob`).
+  apply returned still publishes that (`story:schedule-available-after-cronjob`). The other way
+  round, while the Job of a resource whose schedule was removed (or one created again under the
+  name of a scheduled predecessor) waits for that CronJob to go, `Available` is False
+  `WorkloadTerminating` naming the CronJob, not Unknown `RunNotFinished`, since no run has
+  started; once the Job is created it follows the Job's run, and a reconcile that fails after
+  the Job's apply returned publishes that (`story:job-available-after-cronjob`).
 - The Jobs the CronJob starts are Kubernetes's: the controller never applies, deletes or counts
   them as the resource's children. It watches the CronJob, whose status changes as runs start and
   end, beside its periodic reconcile.
