@@ -2876,22 +2876,23 @@ impl ChildEnd {
 }
 
 /// The last whole lines of `stderr`, a harness child's, that fit in [`STDERR_TAIL_BYTES`]: only
-/// the final [`STDERR_TAIL_BYTES`] bytes are read, a line they cut into is dropped whole, and so is
-/// a last line longer than the bound, which a note stands in for. Every line that holds a
-/// credential's shape ([`credential_lines`]) is withheld, a note standing in for each run of them,
-/// and every other control character but a tab is replaced, so the tail is one inert text. Empty
-/// when the child said nothing.
+/// the final [`STDERR_TAIL_BYTES`] bytes are shown, a line they cut into is dropped whole, and so
+/// is a last line longer than the bound, which a note stands in for. Every line that holds a
+/// credential's shape ([`credential_lines`]) is withheld, read over the whole stderr, so a PEM
+/// block the window cut from its opening is withheld as the whole walk ([`walked`]) withholds it;
+/// a note stands in for each run of them, and every other control character but a tab is
+/// replaced, so the tail is one inert text. Empty when the child said nothing.
 fn stderr_tail(stderr: &str) -> String {
     let stderr = stderr.trim_end();
     let mut start = stderr.len().saturating_sub(STDERR_TAIL_BYTES);
     while !stderr.is_char_boundary(start) {
         start += 1;
     }
-    let window = if start == 0 || stderr.as_bytes()[start - 1] == b'\n' {
-        &stderr[start..]
+    let from = if start == 0 || stderr.as_bytes()[start - 1] == b'\n' {
+        start
     } else {
         match stderr[start..].find('\n') {
-            Some(at) => &stderr[start + at + 1..],
+            Some(at) => start + at + 1,
             None => {
                 return format!(
                     "[its last line, longer than {STDERR_TAIL_BYTES} bytes, is not shown]"
@@ -2899,7 +2900,13 @@ fn stderr_tail(stderr: &str) -> String {
             }
         }
     };
-    let shown = walked(window);
+    // The window starts a line, so its lines are the whole stderr's past the ones before it.
+    let before = stderr.as_bytes()[..from]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count();
+    let (lines, withheld) = walk_lines(stderr);
+    let shown = noted(lines.into_iter().skip(before), &withheld[before..]);
     // A note or a replaced character may be longer than what it stands in for: the bound holds
     // for the tail as shown, its first lines going first. A last line that no longer fits once
     // shown is dropped as one the window cannot hold, a note standing in for it.
@@ -2948,28 +2955,53 @@ fn record_reason(why: &str, child: &ChildEnd) -> String {
 const STDERR_SAID_BY_REASON: &str = "; the last lines of its stderr:\n";
 
 /// The lines of `text` as a tail or a record shows them: each one inert ([`inert`]), and each
-/// that holds a credential's shape ([`credential_lines`]) withheld, read both with its escape
-/// sequences and control characters removed, as a terminal shows it, and with each replaced, a
-/// note standing in for each run of withheld lines. A line's `\r` ending is dropped.
+/// that holds a credential's shape ([`credential_lines`]) withheld, read in four forms: with its
+/// escape sequences and control characters removed, as a terminal shows it; with each replaced;
+/// and both again with each escape sequence's intermediate and final bytes kept as text
+/// ([`kept`]), so a sequence whose reading takes a token's first character hides no prefix. A
+/// note stands in for each run of withheld lines. A line's `\r` ending is dropped.
 fn walked(text: &str) -> Vec<String> {
-    let forms: Vec<(String, String)> = text
+    let (lines, withheld) = walk_lines(text);
+    noted(lines, &withheld)
+}
+
+/// The lines of `text`, each as shown ([`inert`]), and which of them [`walked`] withholds.
+fn walk_lines(text: &str) -> (Vec<String>, Vec<bool>) {
+    let raw: Vec<&str> = text
         .split('\n')
-        .map(|line| inert(line.strip_suffix('\r').unwrap_or(line)))
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
         .collect();
-    let shown_forms: Vec<&str> = forms.iter().map(|(shown, _)| shown.as_str()).collect();
-    let bare_forms: Vec<&str> = forms.iter().map(|(_, bare)| bare.as_str()).collect();
-    let withheld: Vec<bool> = credential_lines(&shown_forms)
+    let forms: Vec<(String, String)> = raw.iter().map(|line| inert(line)).collect();
+    let kept_forms: Vec<(String, String)> = raw.iter().map(|line| kept(line)).collect();
+    let pick = |forms: &[(String, String)], second: bool| -> Vec<bool> {
+        let lines: Vec<&str> = forms
+            .iter()
+            .map(|(first, other)| if second { other } else { first }.as_str())
+            .collect();
+        credential_lines(&lines)
+    };
+    let withheld: Vec<bool> = pick(&forms, false)
         .into_iter()
-        .zip(credential_lines(&bare_forms))
-        .map(|(shown, bare)| shown || bare)
+        .zip(pick(&forms, true))
+        .zip(pick(&kept_forms, false))
+        .zip(pick(&kept_forms, true))
+        .map(|(((shown, bare), marked), joined)| shown || bare || marked || joined)
         .collect();
+    (
+        forms.into_iter().map(|(shown, _)| shown).collect(),
+        withheld,
+    )
+}
+
+/// `lines` with each one `withheld` marks left out, a note standing in for each run of them.
+fn noted(lines: impl IntoIterator<Item = String>, withheld: &[bool]) -> Vec<String> {
     let mut shown: Vec<String> = Vec::new();
     let mut run = 0usize;
     let note = |run: usize| match run {
         1 => "[a line withheld: it holds a credential's shape]".to_owned(),
         n => format!("[{n} lines withheld: they hold a credential's shape]"),
     };
-    for ((line, _), withheld) in forms.into_iter().zip(withheld) {
+    for (line, withheld) in lines.into_iter().zip(withheld.iter().copied()) {
         if withheld {
             run += 1;
             continue;
@@ -2984,6 +3016,67 @@ fn walked(text: &str) -> Vec<String> {
         shown.push(note(run));
     }
     shown
+}
+
+/// `line` read as [`inert`] reads it, twice, but each escape sequence's intermediate bytes
+/// (`0x20..=0x2f`) and final byte kept as text, since the one the sequence ends with may be a
+/// token's first character: marked, each sequence and each other control character but a tab
+/// replaced by one U+FFFD before what it keeps, so a token joined to the word before it still
+/// starts one; and joined, each of them removed, so a sequence inside a prefix hides it from
+/// neither. A control sequence's parameter bytes (`0x30..=0x3f`, `?` among them) and a string's
+/// body (`ESC ]`, `ESC P`, `ESC X`, `ESC ^`, `ESC _`, up to `BEL` or `ESC \`) are never kept.
+fn kept(line: &str) -> (String, String) {
+    let mut marked = String::with_capacity(line.len());
+    let mut joined = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut keep = |c: char, marked: &mut String| {
+        marked.push(c);
+        joined.push(c);
+    };
+    while let Some(c) = chars.next() {
+        if !c.is_control() || c == '\t' {
+            keep(c, &mut marked);
+            continue;
+        }
+        marked.push(char::REPLACEMENT_CHARACTER);
+        let csi = match c {
+            '\u{9b}' => true,
+            '\u{1b}' => match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    true
+                }
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\u{7}' || (c == '\u{1b}' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+                Some(_) => false,
+                None => continue,
+            },
+            _ => continue,
+        };
+        let final_bytes = if csi {
+            while chars
+                .next_if(|c| ('\u{30}'..='\u{3f}').contains(c))
+                .is_some()
+            {}
+            '\u{40}'..='\u{7e}'
+        } else {
+            '\u{30}'..='\u{7e}'
+        };
+        while let Some(c) = chars.next_if(|c| ('\u{20}'..='\u{2f}').contains(c)) {
+            keep(c, &mut marked);
+        }
+        if let Some(c) = chars.next_if(|c| final_bytes.contains(c)) {
+            keep(c, &mut marked);
+        }
+    }
+    (marked, joined)
 }
 
 /// `line` made inert, twice: as shown, each terminal escape sequence and each other control
@@ -3850,6 +3943,42 @@ mod tests {
         );
         assert!(holds_credential(&inert("key=\u{1b}[1msk-x").0));
         assert!(holds_credential(&inert("s\u{1b}[0mk-x").1));
+    }
+
+    #[test]
+    fn an_escape_sequence_keeps_its_final_byte_and_no_parameter_or_string_body() {
+        assert_eq!(
+            kept("a\u{1b}gb\u{1b}[?25hc\u{1b}]8;;u?q\u{1b}\\d\u{1b}(Be\u{9b}1Kf\u{7}g\tz\u{1b}"),
+            (
+                "a\u{fffd}gb\u{fffd}hc\u{fffd}d\u{fffd}(Be\u{fffd}Kf\u{fffd}g\tz\u{fffd}"
+                    .to_owned(),
+                "agbhcd(BeKfg\tz".to_owned()
+            )
+        );
+        let withheld = |line: &str| walked(line) != [line.to_owned()];
+        for line in [
+            "value=\u{1b}ghp_x",
+            "value=x\u{1b}ghp_x",
+            "value=\u{1b}[1ghp_x",
+            "value=gh\u{1b}p_x",
+            "\u{1b}-----BEGIN PRIVATE KEY-----",
+        ] {
+            assert!(withheld(line), "{line:?} is withheld");
+        }
+        for line in [
+            "fetched https://h.example/a",
+            "see https://h.example/a for more",
+        ] {
+            assert!(!withheld(line), "{line:?} is kept");
+        }
+        assert_eq!(
+            walked("fetched https://h.example/a\u{1b}[?25h"),
+            ["fetched https://h.example/a\u{fffd}"]
+        );
+        assert_eq!(
+            walked("see \u{1b}]8;;https://h.example/e?q=7\u{1b}\\guide\u{1b}]8;;\u{1b}\\ now"),
+            ["see \u{fffd}guide\u{fffd} now"]
+        );
     }
 
     #[test]

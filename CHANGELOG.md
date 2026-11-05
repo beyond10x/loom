@@ -16,6 +16,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - README's `loom-agents` upgrade guide applies the CRD of the release tag with `kubectl apply --server-side` before `helm upgrade` (story:chart-upgrade-guide-applies-crd-first)
 
+### Fixed
+
+- `SessionExecutor`'s stderr tail withholds a PEM block's body lines when its window cut the block's opening (story:stderr-tail-withholds-cut-pem-block)
+- `SessionExecutor` withholds a stderr line whose token follows an escape sequence, lone or joined to a word, in the transcript, observer, tail and record (story:stderr-walk-withholds-token-after-lone-escape, story:stderr-walk-withholds-token-after-joined-escape)
+
 ## [0.57.1] - 2026-11-05
 
 No breaking changes.
