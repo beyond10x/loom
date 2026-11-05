@@ -9,7 +9,18 @@ tags:
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-a2a/src/server.rs
+- confidence: cited
+  path: crates/loom-agent/src/serve/a2a.rs
+- confidence: cited
+  path: crates/loom-agent/tests/a2a.rs
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-05T02:40:09Z", actor: "human:timo", revision: 2, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
 - {from: "proposed", to: "active", at: "2026-11-05T02:40:09Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "wave-2026-11-05-loom"}
