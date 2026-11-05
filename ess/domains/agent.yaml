@@ -840,13 +840,15 @@ commands:
   # so the listener decides them on the request line and its headers, before the body is read: a
   # stream without the bearer is refused `401` before any event. Once an admitted request's body
   # names its method, `streamed` answers it `text/event-stream`, one event per status change of
-  # its task and the task's end last, under the answer's bound (10 s), applied twice: an event
-  # not written whole within the bound cuts the stream, and so does a stream on which no event was
-  # written for the bound. The listener cannot tell a caller that reads from one that does not
-  # while the events fit the connection's buffers, so a caller that takes no event within the
-  # bound is cut whether it stopped reading or its turn is between events; a cut frees the
-  # request's admitted slot, its turn goes on and its task is readable with `GetTask`. `admitted`
-  # answers it one JSON document. Nothing is held between two decisions.
+  # its task and the task's end last, under two bounds. An event not written whole within the
+  # answer's bound (10 s) cuts the stream: a caller that stopped reading is cut once the
+  # connection's buffers are full. A stream on which no event was written for the idle bound
+  # (300 s, `STREAM_IDLE`) is cut too: the listener cannot tell a caller that reads from one that
+  # does not while the events fit the buffers, so a caller that takes no event for that long is
+  # cut whether it stopped reading or its turn is between events. The idle bound is longer than
+  # the answer's so that a turn quiet between events, as a model call is, keeps its stream. A cut
+  # frees the request's admitted slot, its turn goes on and its task is readable with `GetTask`.
+  # `admitted` answers it one JSON document. Nothing is held between two decisions.
   - name: loom.agent.AdmitA2aRequest
     input:
       - name: probe
