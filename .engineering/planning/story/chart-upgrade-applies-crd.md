@@ -24,7 +24,7 @@ scope:
   path: charts/loom-agents/templates
 - confidence: inferred
   path: charts/loom-agents/templates/role.yaml
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -54,3 +54,12 @@ Derived 2026-10-26 by the coordinator from `b6e35835`.
 - `Taskfile.yml` (`crd-generate` copies the CRD into the chart; `chart-check`) — cited
 - `charts/loom-agents/templates/role.yaml` (if a hook needs CRD rights) — inferred
 - README.md (Kubernetes install), AGENTS.md § Resource, CHANGELOG.md — cited
+
+## Route
+
+Route A of `decision-blocker:chart-crd-upgrade-route`, chosen by the operator on 2026-11-05 as the
+later end state ("yes" to "C now, A later"). The CRD moves into `templates/` with
+`helm.sh/resource-policy: keep`. An existing release then needs a one-time relabel before its first
+`helm upgrade`, so this story ships in a minor release whose notes announce that migration ahead
+of time, under a `**Breaking:**` line. Until then `story:chart-upgrade-guide-applies-crd-first`
+documents the manual apply.

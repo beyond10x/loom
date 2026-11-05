@@ -2,12 +2,27 @@
 format: aep.planning-md/3
 id: story:stderr-tail-withholds-cut-pem-block
 kind: story
-status: draft
+status: active
 title: The stderr tail withholds a PEM block whose opening the window cut
 tags:
 - from-finding
 - security
-revision: 1
+relations:
+- decomposes: epic:loom-on-llm-and-metaharness
+- serves: vision:governed-autonomy
+scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-session-executor/src/lib.rs
+- confidence: cited
+  path: crates/loom-session-executor/tests/security_w20261105w2_u4.rs
+revision: 4
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-05T09:33:25Z", actor: "human:timo", revision: 3, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w3"}
+- {from: "proposed", to: "active", at: "2026-11-05T09:33:25Z", actor: "human:timo", revision: 4, executor: "agent:loom-wave-lead", correlation: "loom-wave-2026-11-05-w3"}
 ---
 ## Problem
 
