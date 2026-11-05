@@ -1,5 +1,6 @@
 # story operator-constraints-in-ess: an AgentServe resource with empty routes, under a
-# configuration with no model route.
+# configuration with no model route. It declares `loops`, which an AgentServe resource needs
+# (story agent-run-without-loops), so the routes are what it is refused for.
 apiVersion: loom.beyond10x.dev/v1alpha1
 kind: LoomAgent
 metadata: {name: probe, namespace: agents}
@@ -8,4 +9,7 @@ spec:
     format: loom.agent/1
     agent: {id: probe, name: Probe, brief: Answers on A2A.}
     model: {routes: routes.yaml, roles: [{role: agent, model: small}]}
+    loops:
+      outer: {poll_interval_seconds: 60, sources: [], min_age_minutes: 0, lookback_minutes: 120}
+      inner: {protocol: inbound-answer@1, step_budget: 8, model_budget: 16}
   routes: {}

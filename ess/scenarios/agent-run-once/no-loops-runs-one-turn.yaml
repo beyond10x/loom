@@ -2,6 +2,9 @@
 # against `inbound-answer@1`, and `agent run --input` runs it as that protocol's turn: one turn,
 # recorded, ending on its proposal with exit 0. It never sends, whatever its channel binding
 # declares, and its channel binding needs no `list`, `get` or `search`, since a run polls nothing.
+# The `CheckAgentSpec` step is what the suite can fail here; the `RunOnce` step decides over flags
+# alone and cannot tell a spec with loops from one without, so the run itself is covered by
+# `no_loops_runs_one_turn` in `crates/loom-cli/tests/agent_run.rs`, which runs the binary.
 type: ess-scenario/4
 domain: loom.agent
 scenario: no-loops-runs-one-turn

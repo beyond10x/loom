@@ -15,6 +15,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - `b10x-loom agent run` runs a spec with no `loops` as an `inbound-answer@1` turn that never sends; `agent serve` still refuses it (story:agent-run-without-loops)
+- `b10x-loom agent run` needs no `list`, `get` or `search` on the channel binding; only its `write` is read (story:agent-run-without-loops)
+- The operator refuses an `AgentServe` `LoomAgent` whose spec has no `loops`, `Malformed` at `spec.agent.loops` (story:agent-run-without-loops)
 
 ## [0.56.0] - 2026-11-05
 

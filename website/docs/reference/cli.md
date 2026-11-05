@@ -323,10 +323,12 @@ refused.
 
 Exit status:
   0  the cycles ran
-  1  the spec, the models, LOOM_HTTP_CA_FILE or the state directory cannot be used, or the last
-     cycle's poll failed
+  1  the spec `agent check` accepts is not one the host serves (no loops, so nothing would poll;
+     neither a channel nor expose.a2a; writes.mode auto; no connectors command line or channel
+     poll operations), or the models, LOOM_HTTP_CA_FILE or the state directory cannot be used, or
+     the last cycle's poll failed; standard error names why
   2  the command line is not valid
-  3  the spec cannot be served
+  3  the spec `agent check` refuses (standard error carries its refusal)
   130  a second SIGTERM or SIGINT ended it at once
 ```
 
@@ -352,8 +354,11 @@ The spec is checked as `agent check` does, then --input is read: a regular file 
 most 1048576 bytes, not empty or only whitespace. Both are decided before any model call, read or
 record. The spec needs neither a channel nor expose.a2a: nothing is polled and no A2A is answered.
 It needs no loops either: a spec without them runs on inbound-answer@1, the protocol `agent check`
-holds its states to, and sends nothing, whatever its channel binding declares (it needs no list,
-get or search). `agent serve` refuses such a spec.
+holds its states to, under the host's defaults in place of the inner loop's (8 steps and 16 model
+calls, TURN_STEP_BUDGET and TURN_MODEL_BUDGET of b10x-loom-plugin's turn, and classify_threshold
+0.5, its DEFAULT_THRESHOLD), and sends nothing, whatever its channel binding declares. A run polls
+nothing, so the channel binding needs no list, get or search either way. `agent serve` refuses a
+spec with no loops.
 
 The text is one item, classified and answered in one governed turn as `agent serve` answers a polled
 item: the state whose `when` names its intent is the projection, the spec's capabilities are the

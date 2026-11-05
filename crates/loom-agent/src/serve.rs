@@ -133,9 +133,11 @@ impl SpecPlugin {
     /// `story:agent-run-once`, [`crate::run`]): as [`SpecPlugin::new`], but it needs neither
     /// `channel` nor `expose.a2a`, and it serves `writes.mode: auto`, in which a send the
     /// authority grants and `AdmitSend` admits is performed in the turn, under `max_per_hour`.
-    /// It needs no `loops` either (`story:agent-run-without-loops`): without them the turn runs
-    /// on [`crate::RUN_PROTOCOL`] under the host's default threshold, and the channel binding is
-    /// neither polled nor sent to, so it needs no `list`, `get` or `search` and a `write` sends
+    /// A run polls nothing, so the channel binding needs no `list`, `get` or `search`: only its
+    /// `write` is read, as the send (`story:agent-run-without-loops`). It needs no `loops`
+    /// either: without them the turn runs on [`crate::RUN_PROTOCOL`] under the host's defaults
+    /// (`b10x_loom_plugin::DEFAULT_THRESHOLD`, `turn::TURN_STEP_BUDGET` and
+    /// `turn::TURN_MODEL_BUDGET`), and the channel binding is not sent to, so a `write` sends
     /// nothing ([`SpecPlugin::sends`] is false).
     ///
     /// # Errors
@@ -196,13 +198,18 @@ impl SpecPlugin {
             workspace_roots: Vec::new(),
             checkouts: Vec::new(),
         };
-        // With no loops (a run only) the channel binding is neither polled nor sent to, whatever
-        // it declares.
+        // A served spec polls its channel and sends to it. A run polls nothing, so it takes only
+        // the send from the channel binding's `write` and needs no `list`, `get` or `search`;
+        // with no loops it is neither polled nor sent to, whatever the binding declares.
         let (slack, send) = match (channel, loops) {
-            (Some(channel), Some(loops)) => {
+            (Some(channel), Some(loops)) if !run => {
                 let (slack, send) = polled(&spec, channel, &config, loops, mode)?;
                 (Some(slack), send)
             }
+            (Some(channel), Some(_)) => (
+                None,
+                sent_to(&spec, channel_binding(&spec, channel)?, channel, mode),
+            ),
             _ => (None, None),
         };
         let authority = SpecAuthority {
@@ -817,9 +824,48 @@ fn grant_id(commission: &str) -> grant::CommissionId {
     grant::CommissionId(intake_model::primitives::Uuid(commission.to_owned()))
 }
 
+/// The connectors binding `channel.binding` names.
+fn channel_binding<'a>(
+    spec: &'a AgentSpec,
+    channel: &ChannelSpec,
+) -> Result<&'a ConnectorsBinding, PluginError> {
+    spec.bindings
+        .iter()
+        .find_map(|binding| match binding {
+            Binding::Connectors(binding) if binding.name == channel.binding => Some(binding),
+            _ => None,
+        })
+        .ok_or_else(|| {
+            PluginError::Config(format!(
+                "the agent spec: `channel.binding` `{}` is no connectors binding",
+                channel.binding.0
+            ))
+        })
+}
+
+/// The send to `channel`: the send policy's operation when its binding declares `write`. A run
+/// (`agent run`) takes only this from the binding, since it polls nothing.
+fn sent_to(
+    spec: &AgentSpec,
+    binding: &ConnectorsBinding,
+    channel: &ChannelSpec,
+    mode: WriteMode,
+) -> Option<Send> {
+    binding.write.clone().map(|write| Send {
+        operation: WriteOperation {
+            action: SEND.to_owned(),
+            adapter: binding.adapter.clone(),
+            connection: binding.connection.clone(),
+            operation: write,
+        },
+        allow: channel.allow.clone(),
+        mode,
+        max_per_hour: spec.writes.as_ref().map_or(0, |writes| writes.max_per_hour),
+    })
+}
+
 /// The poll of `channel` and the send to it: the slack-handler over the channel binding's `list`,
-/// `get` and `search` operations, and the send policy's operation when the binding declares
-/// `write`.
+/// `get` and `search` operations, and the send of [`sent_to`].
 fn polled(
     spec: &AgentSpec,
     channel: &ChannelSpec,
@@ -827,24 +873,11 @@ fn polled(
     loops: &Loops,
     mode: WriteMode,
 ) -> Result<(SlackHandler, Option<Send>), PluginError> {
-    let config = |why: String| PluginError::Config(format!("the agent spec: {why}"));
-    let binding = spec
-        .bindings
-        .iter()
-        .find_map(|binding| match binding {
-            Binding::Connectors(binding) if binding.name == channel.binding => Some(binding),
-            _ => None,
-        })
-        .ok_or_else(|| {
-            config(format!(
-                "`channel.binding` `{}` is no connectors binding",
-                channel.binding.0
-            ))
-        })?;
+    let binding = channel_binding(spec, channel)?;
     let operation = |name: &str, held: &Option<loom::datasource::OperationId>| {
         held.clone().ok_or_else(|| {
-            config(format!(
-                "the channel binding `{}` declares no `{name}` operation",
+            PluginError::Config(format!(
+                "the agent spec: the channel binding `{}` declares no `{name}` operation",
                 binding.name.0
             ))
         })
@@ -866,18 +899,7 @@ fn polled(
         channels: Vec::new(),
     })?
     .with_channel_allow(channel.allow.clone());
-    let send = binding.write.clone().map(|write| Send {
-        operation: WriteOperation {
-            action: SEND.to_owned(),
-            adapter: binding.adapter.clone(),
-            connection: binding.connection.clone(),
-            operation: write,
-        },
-        allow: channel.allow.clone(),
-        mode,
-        max_per_hour: spec.writes.as_ref().map_or(0, |writes| writes.max_per_hour),
-    });
-    Ok((slack, send))
+    Ok((slack, sent_to(spec, binding, channel, mode)))
 }
 
 /// The data source of a connectors binding.

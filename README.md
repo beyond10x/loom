@@ -309,9 +309,10 @@ the text of the input file and exits, as a scheduled job does: the turn is class
 governed as `agent serve` governs a polled item, and one line is appended to `record.jsonl` in the
 state directory. It polls nothing and opens no listener, so the spec needs neither `channel` nor
 `expose.a2a`, and it needs no `loops`: a spec without them has its states checked against
-`inbound-answer@1` and runs as that protocol's turn, which never sends, whatever its channel
-binding declares (`agent serve` still refuses such a spec). A spec with `loops` whose channel
-binding declares a write sends to the first channel of `channel.allow` under `writes`, `auto`
+`inbound-answer@1` and runs as that protocol's turn under the host's defaults (8 steps, 16 model
+calls, classification threshold 0.5), which never sends, whatever its channel binding declares
+(`agent serve` refuses such a spec and exits 1). The channel binding needs no `list`, `get` or
+`search`, since a run polls nothing. A spec with `loops` whose channel binding declares a write sends to the first channel of `channel.allow` under `writes`, `auto`
 included, at most `writes.max_per_hour` an hour; any other spec ends on its proposal and sends
 nothing. It prints one line for the turn and exits 0 when the
 turn answered, 4 when it ended without an answer, 3 when the spec or the send was refused (a
