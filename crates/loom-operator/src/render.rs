@@ -50,7 +50,10 @@
 //!   the `batch/v1` CronJob `<resource>` in the Job's place and no Job: `spec.schedule.cron`,
 //!   `timeZone` and `startingDeadlineSeconds` as given, `suspend` (false when absent),
 //!   `concurrencyPolicy: Forbid`, [`SCHEDULE_HISTORY`] finished runs of each outcome kept, and as
-//!   its job template the Job's spec, the same pod template byte for byte. With
+//!   its job template the Job's spec, the same pod template byte for byte, with
+//!   `activeDeadlineSeconds` set to `spec.schedule.runDeadlineSeconds` when given (story
+//!   schedule-run-deadline), so a hung run is ended and holds no later one; the unscheduled Job
+//!   carries no deadline. With
 //!   `spec.schedule.input` the program container runs `b10x-loom agent run --spec
 //!   /config/agent.yaml --state /var/lib/agent --input <file>` from `spec.image` (else the
 //!   configured default), with no argument of `spec.command`: `<file>` is
@@ -1115,9 +1118,11 @@ impl Renderer<'_> {
 
     /// A scheduled `Command` resource's CronJob (story command-schedule): named as the Job would
     /// be, its job template the Job's spec (`backoffLimit: 0`, the same pod template byte for
-    /// byte), `concurrencyPolicy: Forbid`, so a run still going holds the next, and three finished
-    /// runs of each outcome kept, so the newest stays readable. `suspend` is rendered explicitly,
-    /// so removing it from the resource resumes the schedule.
+    /// byte) with `activeDeadlineSeconds` from `spec.schedule.runDeadlineSeconds` when given
+    /// (story schedule-run-deadline), so Kubernetes ends a hung run, `concurrencyPolicy: Forbid`,
+    /// so a run still going holds the next, and three finished runs of each outcome kept, so the
+    /// newest stays readable. `suspend` is rendered explicitly, so removing it from the resource
+    /// resumes the schedule.
     fn cron_job(&self, schedule: &crate::resource::Schedule) -> CronJob {
         CronJob {
             metadata: self.meta(self.name.to_owned()),
@@ -1134,7 +1139,10 @@ impl Renderer<'_> {
                         labels: Some(labels(self.name)),
                         ..ObjectMeta::default()
                     }),
-                    spec: self.job().spec,
+                    spec: self.job().spec.map(|spec| JobSpec {
+                        active_deadline_seconds: schedule.run_deadline_seconds,
+                        ..spec
+                    }),
                 },
             }),
             ..CronJob::default()

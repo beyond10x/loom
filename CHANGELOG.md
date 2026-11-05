@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `spec.schedule.runDeadlineSeconds` renders the CronJob job template's `activeDeadlineSeconds`; a run past it is a failed `status.lastRun` with reason `DeadlineExceeded`; zero or less, or above 9223372036, is `Malformed` (story:schedule-run-deadline)
+
 ### Fixed
 
 - An A2A turn that cannot run gives its caller a fixed reason per kind (`serve::a2a::TURN_*`), naming no host path (story:a2a-turn-error-names-no-host-path)

@@ -979,8 +979,10 @@ records the variant the controller admitted; `respecified` clears it, and the vi
 `status.variant` carry it.
 
 `spec.schedule` (`ScheduleSpec`: `cron`, optional `time_zone`, `suspend`,
-`starting_deadline_seconds` and `input`, `story:command-schedule`, design § 12) runs a `Command`
-resource as a CronJob, one bounded run at a time, instead of once. `input` (`ScheduleInput`) is
+`starting_deadline_seconds`, `run_deadline_seconds` and `input`, `story:command-schedule`, design
+§ 12) runs a `Command` resource as a CronJob, one bounded run at a time, instead of once.
+`run_deadline_seconds` (`story:schedule-run-deadline`) ends a run still going after that many
+seconds, reported as a failed run (`last-run-failed`). `input` (`ScheduleInput`) is
 exactly one of `text` and `config_map_key_ref` (`ConfigMapKeyRef`: `name`, `key`); with it each
 run is `b10x-loom agent run` over `spec.agent` with that task text (`story:agent-run-once`).
 `ObserveScheduledRun` (input `name`, `phase` and the optional `exit_code`, `finished_at`,
@@ -1199,7 +1201,10 @@ Kubernetes does not read (five fields or `@yearly`, `@annually`, `@monthly`, `@w
 `@midnight`, `@hourly`; no `TZ=` prefix, no `@every`, no whitespace around it, since the CronJob
 carries it as written) at `spec.schedule.cron`, a `timeZone` the
 bundled IANA database (jiff, `tzdb-bundle-always`) does not hold as spelt, or `Local`, at
-`spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, an `input` with
+`spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, a
+`runDeadlineSeconds` that is zero or negative or above 9223372036 (`MAX_RUN_DEADLINE_SECONDS`, past
+which Kubernetes' nanosecond duration wraps) at that member (`story:schedule-run-deadline`), an
+`input` with
 both or neither of `text` and `configMapKeyRef`, a blank text, a name that is no ConfigMap name, a
 key that is no ConfigMap key, or beside a `spec.command` entrypoint or argument or without
 `spec.agent` at `spec.schedule.input`, all `Malformed` without repeating the value; then the
@@ -1334,7 +1339,9 @@ current key names. `stage-files` decides by `loom.resource.StageFiles` (§ Resou
 read before writing, so a refused stage leaves the destination as it was. Either sets `fsGroup` 10001. A scheduled `Command` resource renders a
 `batch/v1` CronJob named like the Job (`schedule`, `timeZone`, `startingDeadlineSeconds` as given,
 `suspend` false when absent, `concurrencyPolicy: Forbid`, history limits 3 and 3, job template
-labels the children's, job template spec the Job's spec byte for byte) and no Job. With
+labels the children's, job template spec the Job's spec, the pod template byte for byte, plus
+`activeDeadlineSeconds` from `runDeadlineSeconds` when given, `story:schedule-run-deadline`) and no
+Job. With
 `spec.schedule.input` the program container runs `b10x-loom agent run --spec /config/agent.yaml
 --state /var/lib/agent --input <file>` with no `args`: `<file>` is `/config/schedule-input.txt`
 for `text`, or `/var/run/loom/schedule-input/input` for `configMapKeyRef`, whose key alone the

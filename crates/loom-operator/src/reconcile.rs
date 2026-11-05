@@ -914,7 +914,10 @@ fn run_phase(job: &Job) -> RunPhase {
 /// (deleted before its container's end was read, or one in a final phase whose container never
 /// ran) the exit code and end time are absent and the reason is the Job's own, from its `Failed`
 /// or `Complete` condition. A list answered 403 or 404 is the same, logged, and the resource's
-/// `Completed` condition says its pod could not be read.
+/// `Completed` condition says its pod could not be read. A run whose Job is `Failed` with the
+/// reason [`DEADLINE_EXCEEDED`] (ended at its run deadline, story schedule-run-deadline) carries
+/// that reason, never its container's (the Job controller's kill reads `Error`, exit 143); the
+/// pod's exit code and end time stay when they were read.
 async fn observation(
     ctx: &Context,
     namespace: &str,
@@ -958,6 +961,9 @@ async fn observation(
             );
             observed.reason = job_reason(job, phase);
         }
+    }
+    if phase == RunPhase::Failed && job_reason(job, phase).as_deref() == Some(DEADLINE_EXCEEDED) {
+        observed.reason = Some(DEADLINE_EXCEEDED.to_owned());
     }
     Ok(Some(observed))
 }
@@ -1060,6 +1066,11 @@ pub const TERMINATION_SLACK: Duration = Duration::from_secs(60);
 
 /// The reason a run's end carries when its pod never finished terminating.
 pub const NEVER_TERMINATED: &str = "PodNeverFinishedTerminating";
+
+/// The reason of a Job's `Failed` condition when Kubernetes ended the run at its
+/// `activeDeadlineSeconds` (`spec.schedule.runDeadlineSeconds`, story schedule-run-deadline); a
+/// run's end carries it whatever its pod's container says.
+pub const DEADLINE_EXCEEDED: &str = "DeadlineExceeded";
 
 /// Whether `pod` is being deleted and its deletion deadline plus [`TERMINATION_SLACK`] is past
 /// at `now`.

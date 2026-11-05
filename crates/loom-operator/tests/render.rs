@@ -3276,6 +3276,74 @@ fn a_schedules_time_zone_and_starting_deadline_reach_the_cronjob() {
     );
 }
 
+/// `story:schedule-run-deadline`: `runDeadlineSeconds` reaches the CronJob's job template as
+/// `activeDeadlineSeconds`, so Kubernetes ends a run still going after it and `Forbid` holds no
+/// later run behind a hung one; the pod template stays the Job's byte for byte, and without it
+/// the job template carries no deadline.
+#[test]
+fn a_schedules_run_deadline_reaches_the_cronjobs_job_template() {
+    let once = documents(&render_document(&takt_resource(), &config()).expect("rendered"));
+    let rendered = render_document(
+        &command_with("  schedule: {cron: '0 3 * * *', runDeadlineSeconds: 600}\n"),
+        &config(),
+    )
+    .expect("rendered");
+    let cron = cron_job_of(&rendered);
+    assert_eq!(
+        at(
+            &cron,
+            &["spec", "jobTemplate", "spec", "activeDeadlineSeconds"]
+        )
+        .as_i64(),
+        Some(600)
+    );
+    assert_eq!(
+        at(&cron, &["spec", "jobTemplate", "spec", "backoffLimit"]).as_i64(),
+        Some(0)
+    );
+    assert!(
+        at(&cron, &["spec", "startingDeadlineSeconds"]).is_null(),
+        "the run deadline is not the starting deadline"
+    );
+    assert_eq!(
+        serde_yaml_ng::to_string(at(&cron, &["spec", "jobTemplate", "spec", "template"]))
+            .expect("YAML"),
+        serde_yaml_ng::to_string(at(&once[2], &["spec", "template"])).expect("YAML"),
+        "the Job's pod template, byte for byte"
+    );
+    let without =
+        cron_job_of(&render_document(&command_with(SCHEDULE), &config()).expect("rendered"));
+    assert!(
+        at(
+            &without,
+            &["spec", "jobTemplate", "spec", "activeDeadlineSeconds"]
+        )
+        .is_null()
+    );
+    assert!(
+        at(&once[2], &["spec", "activeDeadlineSeconds"]).is_null(),
+        "an unscheduled Job has none"
+    );
+}
+
+/// `story:schedule-run-deadline`: a run deadline of zero or less, which would end every run at
+/// once or which Kubernetes refuses at apply, is refused `Malformed` at its member before.
+#[test]
+fn a_run_deadline_of_zero_or_less_is_refused() {
+    for seconds in ["0", "-1", "-600"] {
+        let message = refusal(
+            &command_with(&format!(
+                "  schedule: {{cron: '0 3 * * *', runDeadlineSeconds: {seconds}}}\n"
+            )),
+            &config(),
+        );
+        assert!(
+            message.starts_with("refused: Malformed at spec.schedule.runDeadlineSeconds: "),
+            "{seconds}: {message}"
+        );
+    }
+}
+
 /// `resource-schedule/suspend-starts-nothing`: `suspend: true` renders the CronJob suspended, so
 /// Kubernetes starts no run; `false` and absent render it running.
 #[test]

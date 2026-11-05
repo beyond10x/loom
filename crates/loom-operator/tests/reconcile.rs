@@ -2644,6 +2644,65 @@ async fn a_scheduled_resource_reports_each_finished_run_in_turn() {
     );
 }
 
+/// `resource-schedule/a-run-past-its-deadline-is-reported-failed` (`story:schedule-run-deadline`):
+/// `runDeadlineSeconds: 600` applies the CronJob with `activeDeadlineSeconds: 600` on its job
+/// template; a run Kubernetes ended there, its Job `Failed` with `DeadlineExceeded` and its pod
+/// already gone, is the last run `Failed` with that reason and no exit code, `LastRunSucceeded`
+/// False `RunFailed`, and the resource stays Running.
+#[tokio::test]
+async fn a_scheduled_run_past_its_deadline_is_reported_failed() {
+    let schedule = "  schedule: {cron: '0 3 * * *', runDeadlineSeconds: 600}\n";
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, schedule), &ctx).await;
+    let seen = fake.take();
+    let cron = applied_body(&seen, CRON_JOB);
+    assert_eq!(
+        cron["spec"]["jobTemplate"]["spec"]["activeDeadlineSeconds"],
+        600
+    );
+    assert_eq!(cron["spec"]["concurrencyPolicy"], "Forbid");
+
+    let (run, job) = cron_run(
+        "platform-operator-29370180",
+        &cron_uid(),
+        "2026-11-05T03:00:00Z",
+        json!({
+            "failed": 1,
+            "conditions": [
+                {"type": "FailureTarget", "status": "True", "reason": "DeadlineExceeded",
+                 "message": "Job was active longer than specified deadline"},
+                {"type": "Failed", "status": "True", "reason": "DeadlineExceeded",
+                 "message": "Job was active longer than specified deadline"},
+            ],
+        }),
+    );
+    fake.put(&run, job);
+    reconciled(scheduled_agent(1, schedule), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(
+        status["state"], "Running",
+        "a run past its deadline fails no resource"
+    );
+    assert_eq!(
+        status["lastRun"],
+        json!({"phase": "Failed", "reason": "DeadlineExceeded"})
+    );
+    assert_eq!(
+        conditions(&status)[2],
+        triple("LastRunSucceeded", "False", "RunFailed")
+    );
+    assert_eq!(
+        last_runs(&ctx.events()),
+        [LoomAgentLastRunObserved {
+            name: name(),
+            generation: 1,
+            phase: RunPhase::Failed,
+            exit_code: None,
+        }]
+    );
+}
+
 /// `resource-schedule/suspend-starts-nothing`: `suspend: true` applies the CronJob suspended and
 /// reads `Available` False `Suspended`; lifting it applies it running again.
 #[tokio::test]

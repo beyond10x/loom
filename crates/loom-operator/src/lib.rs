@@ -126,6 +126,7 @@ mod tests {
             time_zone: Some("UTC".to_owned()),
             suspend: Some(false),
             starting_deadline_seconds: Some(300),
+            run_deadline_seconds: Some(600),
             input: Some(resource::ScheduleInput {
                 text: Some("t".to_owned()),
                 config_map_key_ref: Some(resource::ConfigMapKeyRef {

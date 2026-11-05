@@ -69,6 +69,7 @@ scenarios:
   - scenarios/agent-run-once/refused-spec.yaml
   - scenarios/agent-run-once/budgets-hold.yaml
   - scenarios/resource-schedule/runs-reported-in-turn.yaml
+  - scenarios/resource-schedule/a-run-past-its-deadline-is-reported-failed.yaml
   - scenarios/resource-admission/a-resource-within-every-rule-is-admitted.yaml
   - scenarios/resource-admission/an-agent-the-decoder-cannot-read-is-refused.yaml
   - scenarios/resource-admission/a-secret-literal-in-the-agent-is-refused.yaml
