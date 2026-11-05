@@ -1,0 +1,18 @@
+# story agent-run-without-loops: a spec with no `loops` passes the check, its states checked
+# against `inbound-answer@1`, and `agent run --input` runs it as that protocol's turn: one turn,
+# recorded, ending on its proposal with exit 0. It never sends, whatever its channel binding
+# declares, and its channel binding needs no `list`, `get` or `search`, since a run polls nothing.
+type: ess-scenario/4
+domain: loom.agent
+scenario: no-loops-runs-one-turn
+summary: A spec with no loops is checked against inbound-answer@1 and runs one turn that ends answered and sends nothing.
+
+timeline:
+  - at: 2026-11-05T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/no-loops.yaml}
+    outcome: serveable
+  - at: 2026-11-05T00:00:01Z
+    command: loom.agent.RunOnce
+    input: {spec_refused: false, input_given: true, input_read: true, input_blank: false, send_refused: false, answered: true}
+    outcome: answered

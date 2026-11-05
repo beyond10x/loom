@@ -1,0 +1,17 @@
+# story agent-run-without-loops: with no `loops` the states are checked against `inbound-answer@1`,
+# and a state naming an action that protocol does not declare is refused `UnknownProtocol` at
+# `states`, as a spec with states and no loops always was. The fixture is the no-loops fixture with
+# `reply.send` in its first state.
+type: ess-scenario/4
+domain: loom.agent
+scenario: states-with-no-loops-that-inbound-answer-does-not-admit-are-refused
+summary: States with no loops naming an action inbound-answer@1 does not declare are refused UnknownProtocol at states.
+
+timeline:
+  - at: 2026-11-05T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/no-loops-sends.yaml}
+    outcome: unknown-protocol
+    error:
+      name: loom.agent.SpecRefused
+      fields: {reason: UnknownProtocol, member: states, detail: "with no loops the states run on inbound-answer@1, which does not declare reply.send (states[0].actions[2])"}

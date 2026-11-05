@@ -1,0 +1,15 @@
+# story agent-run-without-loops: a spec with no `loops` has its states checked against
+# `inbound-answer@1`, the protocol `agent run` runs such a spec on. The fixture's states name only
+# `source.read`, `reply.propose` and `reply.decline`, which that protocol declares, so it is
+# serveable to the check, though its channel binding declares a `write` and no `list`, `get` or
+# `search`: a run of it polls nothing and never sends, and `agent serve` still refuses it.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-spec-with-no-loops-checks-its-states-against-inbound-answer
+summary: A spec with no loops whose states inbound-answer@1 admits is serveable to the check.
+
+timeline:
+  - at: 2026-11-05T00:00:00Z
+    command: loom.agent.CheckAgentSpec
+    input: {path: ess/scenarios/agent-check/specs/no-loops.yaml}
+    outcome: serveable
