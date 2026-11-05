@@ -2925,6 +2925,130 @@ async fn removing_a_schedule_deletes_the_cronjob_before_the_job_is_created() {
     );
 }
 
+/// Asserts that `status`, published while the Job waits for the CronJob `cron_job` to go, reads
+/// Running with `Available` False `WorkloadTerminating` and a message naming the CronJob
+/// (`story:job-available-after-cronjob`): no Job exists yet, so no run is under way.
+fn the_job_waits_for_the_cronjob(cron_job: &str, status: &Value) {
+    assert_eq!(status["state"], "Running", "{status}");
+    assert_eq!(
+        conditions(status)[1],
+        triple("Available", "False", "WorkloadTerminating"),
+        "{status}"
+    );
+    assert_eq!(
+        message(status, "Available"),
+        format!(
+            "waiting for {cron_job} to be deleted before the Job is created; no run starts until \
+             then"
+        )
+    );
+}
+
+/// `story:job-available-after-cronjob`: removing `spec.schedule` waits for the CronJob to go
+/// before the Job is created, and meanwhile `Available` reads False `WorkloadTerminating` naming
+/// the CronJob, since no run has started; once the Job exists `Available` follows its run,
+/// Unknown `RunNotFinished`, then False `RunSucceeded` once it ended.
+#[tokio::test]
+async fn removing_a_schedule_reads_workload_terminating_until_the_job_is_created() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    assert!(fake.holds(CRON_JOB));
+    fake.take();
+
+    fake.set_lingering(true);
+    for round in 0..2 {
+        let action = reconciled(command_agent(2, "run"), &ctx).await;
+        assert_eq!(action, Action::requeue(Duration::from_secs(30)), "{round}");
+        let seen = fake.take();
+        assert_eq!(paths(&seen, &Method::DELETE), [CRON_JOB], "{round}");
+        assert!(applies(&seen).is_empty(), "{round}: {seen:?}");
+        assert!(!fake.holds(JOB), "{round}");
+        the_job_waits_for_the_cronjob("CronJob platform-operator", &published(&seen));
+    }
+
+    fake.remove(CRON_JOB);
+    reconciled(command_agent(2, "run"), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    assert!(fake.holds(JOB) && !fake.holds(CRON_JOB));
+    assert_eq!(
+        conditions(&published(&seen)),
+        [
+            triple("Checked", "True", "SpecAdmitted"),
+            triple("Available", "Unknown", "RunNotFinished"),
+            triple("Completed", "Unknown", "RunNotFinished"),
+        ]
+    );
+
+    fake.set_run(JOB, Some(succeeded()));
+    reconciled(command_agent(2, "run"), &ctx).await;
+    let status = published(&fake.take());
+    assert_eq!(status["state"], "Completed");
+    assert_eq!(
+        conditions(&status)[1],
+        triple("Available", "False", "RunSucceeded")
+    );
+}
+
+/// `story:job-available-after-cronjob`: a single-run resource created again under the name of a
+/// scheduled one whose CronJob still terminates applies nothing and reads `WorkloadTerminating`
+/// naming that CronJob, then `RunNotFinished` once its own Job is created.
+#[tokio::test]
+async fn a_predecessors_cronjob_terminating_reads_workload_terminating_before_the_job() {
+    let (client, fake) = fake();
+    fake.put(
+        CRON_JOB,
+        object(
+            NAME,
+            CRON_JOB,
+            Some(("LoomAgent", NAME, "uid-of-the-predecessor")),
+        ),
+    );
+    fake.set_lingering(true);
+    let ctx = context(client);
+
+    let action = reconciled(command_agent(1, "run"), &ctx).await;
+    assert_eq!(action, Action::requeue(Duration::from_secs(30)));
+    let seen = fake.take();
+    assert_eq!(paths(&seen, &Method::DELETE), [CRON_JOB]);
+    assert!(applies(&seen).is_empty(), "{seen:?}");
+    the_job_waits_for_the_cronjob("CronJob platform-operator", &published(&seen));
+
+    fake.remove(CRON_JOB);
+    reconciled(command_agent(1, "run"), &ctx).await;
+    let seen = fake.take();
+    assert_eq!(applies(&seen), COMMAND_CHILDREN);
+    assert_eq!(
+        conditions(&published(&seen))[1],
+        triple("Available", "Unknown", "RunNotFinished")
+    );
+}
+
+/// `story:job-available-after-cronjob`: a reconcile that fails after the Job's apply returned (here
+/// the list of Services in the sweep is refused) still publishes the status without the wait: the
+/// Job exists and runs, so the `WorkloadTerminating` an earlier round published no longer stands.
+#[tokio::test]
+async fn a_reconcile_failing_after_the_jobs_apply_does_not_leave_workload_terminating() {
+    let (client, fake) = fake();
+    let ctx = context(client);
+    reconciled(scheduled_agent(1, SCHEDULE), &ctx).await;
+    fake.set_lingering(true);
+    reconciled(command_agent(2, "run"), &ctx).await;
+    the_job_waits_for_the_cronjob("CronJob platform-operator", &published(&fake.take()));
+
+    fake.remove(CRON_JOB);
+    fake.set_forbidden(COLLECTIONS[6]);
+    let answer = reconcile(Arc::new(command_agent(2, "run")), Arc::clone(&ctx)).await;
+    assert!(answer.is_err(), "the list of Services is refused");
+    let seen = fake.take();
+    assert!(fake.holds(JOB), "the Job is applied: {seen:?}");
+    assert_eq!(
+        conditions(&published(&seen))[1],
+        triple("Available", "Unknown", "RunNotFinished")
+    );
+}
+
 /// `resource-schedule/new-generation`: a new generation patches the CronJob's template in place,
 /// deleting nothing, and its `lastRun` is read again from the CronJob's newest finished Job.
 #[tokio::test]

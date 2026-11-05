@@ -435,7 +435,7 @@ run; a failed run fails no resource. `spec.schedule.input` gives each run its ta
 an inline `text` or a `configMapKeyRef` (`name`, `key`) the pod mounts read-only; with it the
 program is `b10x-loom agent run --spec /config/agent.yaml --state /var/lib/agent --input <file>`,
 so the resource gives `spec.agent` and `command: {}`. Adding or removing `spec.schedule` deletes
-the Job or the CronJob before the other is created; until the CronJob exists, `Available` reads
+the Job or the CronJob before the other is created; until the other exists, `Available` reads
 False `WorkloadTerminating`. The controller refuses a schedule on an
 `AgentServe` resource, a `cron` or `timeZone` Kubernetes does not read, and an `input` that gives
 both forms or neither (`Malformed`), and a credential in the text (`SecretLiteral`).
