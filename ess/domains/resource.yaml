@@ -298,7 +298,10 @@ types:
   # When a `Command` resource runs (story command-schedule, design § 12.2): a `batch/v1` CronJob
   # in the Job's place, on the five-field `cron` expression (or a descriptor such as `@hourly`),
   # in the IANA `time_zone` (the controller's when absent), no new run starting while `suspend`
-  # holds, and none starting later than `starting_deadline_seconds` after its time.
+  # holds, and none starting later than `starting_deadline_seconds` after its time. That deadline
+  # lies in 0 to 9223372036: the controller refuses a negative value, and a value above
+  # 9223372036, which Kubernetes' CronJob controller holds as nanoseconds in a signed 64-bit
+  # duration, where it wraps.
   # `run_deadline_seconds` (story schedule-run-deadline) bounds how long one run may last once it
   # started: a run still going after that many seconds is ended and reported as a failed run
   # (`last-run-failed`, reason `DeadlineExceeded`), so a hung run does not hold the later ones.
