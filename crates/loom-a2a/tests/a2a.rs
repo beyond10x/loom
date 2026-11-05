@@ -239,10 +239,14 @@ impl Drop for StopOnDrop<'_> {
 /// Runs `case` against a listener over `agent` on a loopback port, then stops the listener and
 /// waits for it.
 fn with_listener<A: Answerer + Sync>(agent: &A, case: impl FnOnce(SocketAddr)) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
-    let address = listener.local_addr().unwrap();
     let server = A2aServer::new(exposure(), Bearer::new(TOKEN).expect("a bearer"))
         .expect("the exposure is served");
+    with_server(server, agent, case);
+}
+
+fn with_server<A: Answerer + Sync>(server: A2aServer, agent: &A, case: impl FnOnce(SocketAddr)) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a loopback port");
+    let address = listener.local_addr().unwrap();
     let stop = AtomicBool::new(false);
     std::thread::scope(|scope| {
         let served = scope.spawn(|| server.serve(listener, agent, &stop));
@@ -965,4 +969,117 @@ fn a_message_without_a_message_id_is_refused() {
         }
     });
     assert!(agent.items().is_empty(), "no turn ran");
+}
+
+// ---- fix round 1 (story:a2a-record-and-streaming) ------------------------------------------------
+
+/// The idle bound of the listeners these cases set, in place of the host's 300 s.
+const SHORT_IDLE: Duration = Duration::from_secs(2);
+
+/// A stream that carries no event for the idle bound is cut even while its caller reads: the
+/// listener cannot tell that caller from one that stopped reading while the events fit the
+/// buffers. The turn goes on after the cut, and `GetTask` reads the end the stream never sent.
+#[test]
+fn a_stream_idle_for_the_bound_is_cut_while_its_turn_goes_on() {
+    use std::time::Instant;
+
+    let (started_tx, started) = channel();
+    let (go, go_rx) = channel();
+    let agent = Fake::gated(started_tx, go_rx);
+    let server = A2aServer::new(exposure(), Bearer::new(TOKEN).expect("a bearer"))
+        .expect("the exposure is served")
+        .with_stream_idle(SHORT_IDLE);
+    with_server(server, &agent, |address| {
+        let begun = Instant::now();
+        let streaming = std::thread::spawn(move || {
+            request(
+                address,
+                "POST",
+                PATH,
+                Some(TOKEN),
+                Some(&rpc(
+                    "SendStreamingMessage",
+                    message("Is the deploy finished?"),
+                )),
+            )
+        });
+        started
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the turn started");
+        let answer = streaming.join().expect("the stream was read to its end");
+        let took = begun.elapsed();
+        assert!(
+            took >= SHORT_IDLE && took < SHORT_IDLE + Duration::from_secs(5),
+            "cut after {took:?}"
+        );
+        let sent = events(&answer.body);
+        let task_id = sent[0]["result"]["task"]["id"]
+            .as_str()
+            .expect("the submitted task")
+            .to_owned();
+        let last = &sent.last().expect("events")["result"]["statusUpdate"]["status"];
+        assert_eq!(last["state"], "TASK_STATE_WORKING", "{}", answer.body);
+        assert!(
+            !answer.body.contains("TASK_STATE_COMPLETED"),
+            "{}",
+            answer.body
+        );
+
+        go.send(()).expect("the turn listens");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let got = request(
+                address,
+                "POST",
+                PATH,
+                Some(TOKEN),
+                Some(&rpc("GetTask", json!({"id": task_id}))),
+            );
+            if got.json()["result"]["status"]["state"] == "TASK_STATE_COMPLETED" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the turn did not end: {}",
+                got.body
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    assert_eq!(agent.items().len(), 1);
+}
+
+/// A turn quiet between two events for longer than the answer's bound, as a model call is, keeps
+/// its stream on a host's listener: the idle bound is [`b10x_loom_a2a::STREAM_IDLE`], 300 s, and
+/// the stream ends with the task's end.
+#[test]
+fn a_stream_quiet_past_the_answer_bound_keeps_its_stream_until_the_idle_bound() {
+    assert_eq!(b10x_loom_a2a::STREAM_IDLE, Duration::from_secs(300));
+    let (started_tx, started) = channel();
+    let (go, go_rx) = channel();
+    let agent = Fake::gated(started_tx, go_rx);
+    with_listener(&agent, |address| {
+        let streaming = std::thread::spawn(move || {
+            request(
+                address,
+                "POST",
+                PATH,
+                Some(TOKEN),
+                Some(&rpc(
+                    "SendStreamingMessage",
+                    message("Is the deploy finished?"),
+                )),
+            )
+        });
+        started
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the turn started");
+        std::thread::sleep(b10x_loom_a2a::WRITE_DEADLINE + Duration::from_secs(1));
+        go.send(()).expect("the turn listens");
+        let answer = streaming.join().expect("the stream was read to its end");
+        let sent = events(&answer.body);
+        let last = &sent.last().expect("events")["result"]["statusUpdate"]["status"];
+        assert_eq!(last["state"], "TASK_STATE_COMPLETED", "{}", answer.body);
+    });
+    assert_eq!(agent.items().len(), 1);
 }

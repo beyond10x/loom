@@ -12,8 +12,10 @@
 //! - `SendStreamingMessage` (also `message/stream`): the same turn, answered `text/event-stream`:
 //!   the task as submitted, one `statusUpdate` per runtime event of the run, then an
 //!   `artifactUpdate` with the record and the last `statusUpdate` with the state the task ended in.
-//!   Each event must be taken within the answer's bound, or the stream is cut while the turn goes
-//!   on. The card advertises `capabilities.streaming: true`.
+//!   Each event must be written within the answer's bound, and a stream that carries no event for
+//!   the idle bound ([`STREAM_IDLE`], 300 s) is cut too, while the turn goes on and `GetTask`
+//!   reads its end.
+//!   The card advertises `capabilities.streaming: true`.
 //! - `GetTask` (also `tasks/get`): the task's status. While its turn runs, each runtime event of
 //!   the run moves it ([`tasks::follows`]); the record ends it ([`tasks::ended`]).
 //! - `GET /ready` and `GET /live`: the pod's probes.
@@ -37,5 +39,5 @@ pub use admit::{Bearer, a2a_refusal_spelling, admit_a2a_request};
 pub use http::WRITE_DEADLINE;
 pub use server::{
     A2aServer, Answerer, BEARER_SCHEME, CARD_PATH, LIVE_PATH, MAX_CONNECTIONS, MAX_REVISION,
-    PROTOCOL_BINDING, PROTOCOL_VERSION, READY_PATH, TASK_NOT_FOUND, item_revision,
+    PROTOCOL_BINDING, PROTOCOL_VERSION, READY_PATH, STREAM_IDLE, TASK_NOT_FOUND, item_revision,
 };

@@ -840,10 +840,15 @@ commands:
   # so the listener decides them on the request line and its headers, before the body is read: a
   # stream without the bearer is refused `401` before any event. Once an admitted request's body
   # names its method, `streamed` answers it `text/event-stream`, one event per status change of
-  # its task and the task's end last, under the bounds of every answer: each event is written
-  # within the answer's bound, and a stream whose peer takes nothing for that long is cut, its turn
-  # going on and its task readable with `GetTask`; `admitted` answers it one JSON document.
-  # Nothing is held between two decisions.
+  # its task and the task's end last, under two bounds. An event not written whole within the
+  # answer's bound (10 s) cuts the stream: a caller that stopped reading is cut once the
+  # connection's buffers are full. A stream on which no event was written for the idle bound
+  # (300 s, `STREAM_IDLE`) is cut too: the listener cannot tell a caller that reads from one that
+  # does not while the events fit the buffers, so a caller that takes no event for that long is
+  # cut whether it stopped reading or its turn is between events. The idle bound is longer than
+  # the answer's so that a turn quiet between events, as a model call is, keeps its stream. A cut
+  # frees the request's admitted slot, its turn goes on and its task is readable with `GetTask`.
+  # `admitted` answers it one JSON document. Nothing is held between two decisions.
   - name: loom.agent.AdmitA2aRequest
     input:
       - name: probe
@@ -884,21 +889,32 @@ commands:
   # that runs the listener's turns, right before the turn, so two messages are never both
   # undecided. An A2A turn is recorded as a polled item's turn is: one `loom.plugin.RecordLine` in
   # the state directory's `record.jsonl`, appended under the lock its host holds, its `item`
-  # `a2a:<revision>`, the revision the message's `messageId` gives (the id itself when it is a
-  # plain token, else `m-` and its hash). `recorded` is whether the record holds a line for that
+  # `a2a:<revision>`, the revision the message's `messageId` gives: the id itself when it is a
+  # plain token that is not spelt as a hashed revision, else `m-` and 32 hex digits of its SHA-256,
+  # so two different ids never give one item (a kept id never has the hashed spelling, and a
+  # collision of the hash is not found). `recorded` is whether the record holds a line for that
   # item already. A message whose item is recorded runs no turn: its task ends with the recorded
   # line (`replayed`), so a client that sends a message again, after a lost answer or a restart of
-  # the host, gets the first answer and causes no second turn. Any other runs one turn, and its
-  # line is appended once, before its task ends (`turned`); a turn that could not run records
-  # nothing, so the message may be sent again. Nothing but the record is held between two
-  # decisions.
+  # the host, gets the first answer and causes no second turn. `ran_unrecorded` is whether a turn
+  # of that item ran in this process and its line could not be appended: such a message runs no
+  # second turn either, its task failing with a fixed reason (`unrecorded`), for as long as the
+  # process remembers the item (a bounded number of them). Any other runs one turn, and its line
+  # is appended once, before its task ends (`turned`); a turn that could not run records nothing,
+  # so the message may be sent again. A failure reaches the caller as a fixed reason that names no
+  # path; the full error goes to the host's standard error. Nothing but the record and the items
+  # run unrecorded is held between two decisions.
   - name: loom.agent.RecordA2aTurn
     input:
       - name: recorded
         type: Boolean
+      - name: ran_unrecorded
+        type: Boolean
     outcomes:
       - name: replayed
         when: recorded == true
+        accepts: nothing
+      - name: unrecorded
+        when: ran_unrecorded == true
         accepts: nothing
       - name: turned
         accepts: nothing

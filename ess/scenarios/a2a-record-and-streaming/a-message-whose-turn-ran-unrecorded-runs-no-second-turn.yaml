@@ -1,0 +1,12 @@
+# story a2a-record-and-streaming (fix round 1): a message whose turn ran in this process and whose
+# line could not be appended runs no second governed turn; its task fails with a fixed reason.
+type: ess-scenario/4
+domain: loom.agent
+scenario: a-message-whose-turn-ran-unrecorded-runs-no-second-turn
+summary: A message whose turn ran but was not recorded runs no second turn.
+
+timeline:
+  - at: 2026-11-05T00:00:00Z
+    command: loom.agent.RecordA2aTurn
+    input: {recorded: false, ran_unrecorded: true}
+    outcome: unrecorded

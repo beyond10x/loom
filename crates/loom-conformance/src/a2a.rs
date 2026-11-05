@@ -4,7 +4,8 @@
 //! whether its method is `SendStreamingMessage`.
 //!
 //! `loom.agent.RecordA2aTurn`, answered by `b10x_loom_agent::serve::a2a::record_a2a_turn`, the
-//! decision `Answering` takes before an A2A turn: whether the record has a line for its item.
+//! decision `Answering` takes before an A2A turn: whether the record has a line for its item, and
+//! whether a turn of the item ran in this process unrecorded.
 //!
 //! `loom.agent.AdmitServe`, answered by `b10x_loom_agent::serve::a2a::admit_serve`, the decision
 //! `SpecPlugin::new` takes: whether the spec declares a channel and whether it declares
@@ -52,13 +53,15 @@ pub(crate) fn admit_a2a_request_command(input: &Input) -> Option<SemanticCommand
     })
 }
 
-/// Answers one `RecordA2aTurn`: `None` when `recorded` is absent or no boolean.
+/// Answers one `RecordA2aTurn`: `None` when an input is absent or no boolean.
 pub(crate) fn record_a2a_turn_command(input: &Input) -> Option<SemanticCommandResult> {
     let turn = RecordA2aTurn {
         recorded: codec::boolean(input, "recorded")?,
+        ran_unrecorded: codec::boolean(input, "ran_unrecorded")?,
     };
     Some(match record_a2a_turn(&turn) {
         RecordA2aTurnOutcome::Replayed => took(RECORD_A2A_TURN, "replayed"),
+        RecordA2aTurnOutcome::Unrecorded => took(RECORD_A2A_TURN, "unrecorded"),
         RecordA2aTurnOutcome::Turned => took(RECORD_A2A_TURN, "turned"),
     })
 }
