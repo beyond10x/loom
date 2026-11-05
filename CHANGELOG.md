@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- `b10x-loom agent run` runs a spec with no `loops` as an `inbound-answer@1` turn that never sends; `agent serve` still refuses it (story:agent-run-without-loops)
+
 ## [0.56.0] - 2026-11-05
 
 No breaking changes.

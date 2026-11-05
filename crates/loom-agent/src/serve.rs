@@ -12,7 +12,9 @@
 //! - A turn runs on the inner loop's protocol (`operator-reply@1`), under the state whose `when`
 //!   names the item's intent: its actions and sources are the projection. No state for the intent
 //!   is a turn that stops. [`SpecAuthority`] grants exactly `policy.capabilities` and denies every
-//!   other; in `writes.mode: approval` it holds `reply.send` for a person's approval.
+//!   other; in `writes.mode: approval` it holds `reply.send` for a person's approval. A spec with
+//!   no `loops` is not served (nothing would poll); one run of it ([`SpecPlugin::for_run`]) is a
+//!   turn on [`crate::RUN_PROTOCOL`] that polls and sends nothing.
 //! - `reply.send` is a governed write ([`b10x_loom_plugin::SendPolicy`], performed by the effect
 //!   port through `ConnectorsCli::invoke_write`) on the channel binding's `write` operation, to
 //!   the item's channel, of the recorded proposal, under `writes.max_per_hour` counted in
@@ -131,10 +133,14 @@ impl SpecPlugin {
     /// `story:agent-run-once`, [`crate::run`]): as [`SpecPlugin::new`], but it needs neither
     /// `channel` nor `expose.a2a`, and it serves `writes.mode: auto`, in which a send the
     /// authority grants and `AdmitSend` admits is performed in the turn, under `max_per_hour`.
+    /// It needs no `loops` either (`story:agent-run-without-loops`): without them the turn runs
+    /// on [`crate::RUN_PROTOCOL`] under the host's default threshold, and the channel binding is
+    /// neither polled nor sent to, so it needs no `list`, `get` or `search` and a `write` sends
+    /// nothing ([`SpecPlugin::sends`] is false).
     ///
     /// # Errors
-    /// As [`SpecPlugin::new`], but for `writes.mode: auto` and a spec with neither a channel nor
-    /// `expose.a2a`.
+    /// As [`SpecPlugin::new`], but for `writes.mode: auto`, a spec with neither a channel nor
+    /// `expose.a2a`, and a spec with no `loops`.
     pub fn for_run(spec: AgentSpec, state: &Path) -> Result<Self, PluginError> {
         Self::build(spec, state, true)
     }
@@ -149,10 +155,14 @@ impl SpecPlugin {
             .as_ref()
             .and_then(|runtime| runtime.connectors.as_ref())
             .ok_or_else(|| config("`runtime` names no connectors command line".to_owned()))?;
-        let loops = spec
-            .loops
-            .as_ref()
-            .ok_or_else(|| config("`loops` is undeclared; nothing would poll".to_owned()))?;
+        // A run polls nothing, so it needs no `loops`: with none it is an `inbound-answer@1` turn
+        // (`crate::RUN_PROTOCOL`, which `check` held the states to) that never sends.
+        let loops = spec.loops.as_ref();
+        if loops.is_none() && !run {
+            return Err(config(
+                "`loops` is undeclared; nothing would poll".to_owned(),
+            ));
+        }
         let mode = spec
             .writes
             .as_ref()
@@ -181,17 +191,19 @@ impl SpecPlugin {
                 })
                 .collect(),
             objectives: Vec::new(),
-            classify_threshold: loops.inner.classify_threshold.clone(),
-            poll_interval_seconds: loops.outer.poll_interval_seconds,
+            classify_threshold: loops.and_then(|loops| loops.inner.classify_threshold.clone()),
+            poll_interval_seconds: loops.map_or(0, |loops| loops.outer.poll_interval_seconds),
             workspace_roots: Vec::new(),
             checkouts: Vec::new(),
         };
-        let (slack, send) = match channel {
-            Some(channel) => {
+        // With no loops (a run only) the channel binding is neither polled nor sent to, whatever
+        // it declares.
+        let (slack, send) = match (channel, loops) {
+            (Some(channel), Some(loops)) => {
                 let (slack, send) = polled(&spec, channel, &config, loops, mode)?;
                 (Some(slack), send)
             }
-            None => (None, None),
+            _ => (None, None),
         };
         let authority = SpecAuthority {
             capabilities: spec
@@ -210,7 +222,10 @@ impl SpecPlugin {
             })
             .collect();
         Ok(Self {
-            protocol: loops.inner.protocol.clone(),
+            protocol: loops.map_or_else(
+                || crate::RUN_PROTOCOL.to_owned(),
+                |loops| loops.inner.protocol.clone(),
+            ),
             spec,
             config,
             slack,
@@ -272,7 +287,7 @@ impl SpecPlugin {
         &self.state
     }
 
-    /// Whether a turn can send: the spec's channel binding declares a `write`.
+    /// Whether a turn can send: the spec has `loops` and its channel binding declares a `write`.
     pub fn sends(&self) -> bool {
         self.send.is_some()
     }

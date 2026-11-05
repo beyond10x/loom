@@ -307,9 +307,12 @@ A2A listener are not given these roots.
 the text of the input file and exits, as a scheduled job does: the turn is classified, projected and
 governed as `agent serve` governs a polled item, and one line is appended to `record.jsonl` in the
 state directory. It polls nothing and opens no listener, so the spec needs neither `channel` nor
-`expose.a2a`. A spec whose channel binding declares a write sends to the first channel of
-`channel.allow` under `writes`, `auto` included, at most `writes.max_per_hour` an hour; any other
-spec ends on its proposal and sends nothing. It prints one line for the turn and exits 0 when the
+`expose.a2a`, and it needs no `loops`: a spec without them has its states checked against
+`inbound-answer@1` and runs as that protocol's turn, which never sends, whatever its channel
+binding declares (`agent serve` still refuses such a spec). A spec with `loops` whose channel
+binding declares a write sends to the first channel of `channel.allow` under `writes`, `auto`
+included, at most `writes.max_per_hour` an hour; any other spec ends on its proposal and sends
+nothing. It prints one line for the turn and exits 0 when the
 turn answered, 4 when it ended without an answer, 3 when the spec or the send was refused (a
 `RateLimited` send is recorded first), and 1 when `--input` is absent, unreadable, larger than
 1048576 bytes or blank, before any model is called.

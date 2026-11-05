@@ -8,13 +8,15 @@
 //! item kept as handled. Nothing is polled and no A2A is answered, so the spec needs neither a
 //! `channel` nor `expose.a2a` ([`SpecPlugin::for_run`]). [`RunItem`] picks the turn:
 //!
-//! - a spec whose channel binding declares a `write` runs a served turn on the inner loop's
-//!   protocol with the send policy, and in `writes.mode: auto` performs the send `AdmitSend`
-//!   admits in the turn, to the first channel of `channel.allow`, which [`run_item`] names as the
-//!   item's channel; `approval` holds it for `b10x-loom approve` and `agent resume` as a served
-//!   turn does;
+//! - a spec with `loops` whose channel binding declares a `write` runs a served turn on the inner
+//!   loop's protocol with the send policy, and in `writes.mode: auto` performs the send
+//!   `AdmitSend` admits in the turn, to the first channel of `channel.allow`, which [`run_item`]
+//!   names as the item's channel; `approval` holds it for `b10x-loom approve` and `agent resume`
+//!   as a served turn does;
 //! - any other runs as an A2A turn does: on `inbound-answer@1`, `reply.send` out of the
-//!   projection and no send policy, so it ends on its proposal and sends nothing.
+//!   projection and no send policy, so it ends on its proposal and sends nothing. A spec with no
+//!   `loops` is always such a turn (`story:agent-run-without-loops`): `check` held its states to
+//!   `inbound-answer@1`, and its channel binding is neither polled nor sent to.
 //!
 //! How the run ends is `loom.agent.RunOnce` ([`run_once`]), over the refusals of the spec and the
 //! input and the record line ([`ended`]).
