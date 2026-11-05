@@ -30,7 +30,7 @@ use ess_conformance::target::{SemanticCommandResult, TargetError};
 use ess_primitives::node::Node;
 use loom_protocols::ProtocolCatalog;
 
-use crate::agent::root;
+use crate::agent::{file_under, root};
 use crate::codec::{self, Input};
 use crate::{Live, error, took};
 
@@ -107,8 +107,7 @@ pub(crate) fn admit_loom_agent(
     let forced = live.forced_admission.take();
     let root = root()?;
     let fixtures = root.join(FIXTURES);
-    let named = root.join(&path);
-    let resource = if named.is_file() {
+    let resource = if let Some(named) = file_under(&root, &path) {
         named
     } else {
         let branch = forced.as_deref().unwrap_or(ADMITTED);

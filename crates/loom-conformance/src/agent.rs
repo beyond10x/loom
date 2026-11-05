@@ -84,10 +84,18 @@ pub(crate) fn root() -> Result<PathBuf, TargetError> {
     Ok(root.canonicalize().unwrap_or(root))
 }
 
+/// The regular file `path` names under `root`, resolved: none for an absolute path, a `..` or a
+/// link that leaves `root`, or anything that is no regular file, so a target never reads a file
+/// outside the repository through its input.
+pub(crate) fn file_under(root: &Path, path: &str) -> Option<PathBuf> {
+    let root = root.canonicalize().ok()?;
+    let resolved = root.join(path).canonicalize().ok()?;
+    (resolved.starts_with(&root) && resolved.is_file()).then_some(resolved)
+}
+
 /// The document the check reads for `path`, as the module documentation says.
 fn document(root: &Path, path: &str, forced: Option<&str>) -> Result<String, TargetError> {
-    let named = root.join(path);
-    let read = if named.is_file() {
+    let read = if let Some(named) = file_under(root, path) {
         named
     } else if let Some(branch) = forced {
         root.join(FIXTURES).join(format!("{branch}.yaml"))
