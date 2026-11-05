@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.57.2] - 2026-11-05
+
+No breaking changes.
+
 ### Changed
 
 - README's `loom-agents` upgrade guide applies the CRD of the release tag with `kubectl apply --server-side` before `helm upgrade` (story:chart-upgrade-guide-applies-crd-first)
@@ -1409,7 +1413,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.2...HEAD
+[0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2
 [0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1
 [0.57.0]: https://github.com/beyond10x/loom/releases/tag/0.57.0
 [0.56.0]: https://github.com/beyond10x/loom/releases/tag/0.56.0
