@@ -2,7 +2,9 @@
 //! spec's agent on `inbound-answer@1`, answered with the turn's record, and nothing is sent through
 //! A2A even when the spec grants `reply.send`. The listener refuses to start without its bearer.
 //! The turn's line is appended to the state directory's `record.jsonl` once per `messageId`
-//! (`story:a2a-record-and-streaming`).
+//! (`story:a2a-record-and-streaming`). A turn that cannot run answers its caller with a fixed reason
+//! naming no path of the host, the full error on standard error
+//! (`story:a2a-turn-error-names-no-host-path`).
 //!
 //! The listener runs on a loopback port this file binds; every read goes to the fake `connectors`
 //! of `loom-connectors`, answering the slack-handler's `docs` fixtures; the models are recorded.
@@ -23,7 +25,7 @@ use b10x_loom_agent::SpecPlugin;
 use b10x_loom_agent::serve::a2a::{
     Answering, BEARER_ENV, answer_projection, bearer, listener, port,
 };
-use b10x_loom_plugin::{Host, Projection, RecordOutcome};
+use b10x_loom_plugin::{Host, PluginError, Projection, RecordOutcome};
 use b10x_loom_plugin_slack::TurnModels;
 use loom_sdk::agent::{A2aExposure, AgentSpec, parse};
 use loom_sdk::commission::model::responsibility::RuntimeEvent;
@@ -547,5 +549,171 @@ fn a_spec_with_neither_a_channel_nor_a2a_is_not_served() {
     assert!(
         refused.contains("nothing would be polled or answered"),
         "{refused}"
+    );
+}
+
+// ---- story:a2a-turn-error-names-no-host-path ----------------------------------------------------
+
+/// Makes this test binary the child of
+/// `a_turn_that_cannot_run_writes_its_full_error_to_standard_error`.
+const TURN_ERROR_CHILD: &str = "LOOM_A2A_TEST_TURN_ERROR_CHILD";
+
+/// What the child prints before its full error, for the parent to find on standard error.
+const FULL_ERROR: &str = "the full error: ";
+
+/// The fixed reason an A2A caller is given for a turn whose plugin reports something it needs
+/// unavailable (`serve::a2a::TURN_UNAVAILABLE`), spelt here as the caller reads it.
+const UNAVAILABLE: &str = "something the turn needs is unavailable";
+
+/// A served spec whose every turn fails as one whose model routes cannot be read does: the error
+/// names the state directory, an absolute path of the host. Also that error's text.
+fn failing_plugin(fixture: &Fixture) -> (SpecPlugin, String) {
+    let state = fixture.plugin_state().display().to_string();
+    let why = format!("the model routes {state}/routes.yaml cannot be read: permission denied");
+    let error = why.clone();
+    let turns: TurnModels = Box::new(move || Err(PluginError::Unavailable(error.clone())));
+    let plugin = SpecPlugin::new(spec(fixture, 8080), &fixture.plugin_state())
+        .expect("the spec is served")
+        .with_classifier(Box::new(Recorded::classifying("ask", &["docs"], 0.9)))
+        .with_turn_models(turns);
+    (plugin, PluginError::Unavailable(why).to_string())
+}
+
+/// Whether `text` names a path of the host: a word that starts at `/` or `~/`.
+fn names_a_path(text: &str) -> bool {
+    text.split(|c: char| c.is_whitespace() || "`'\"(),;:=".contains(c))
+        .any(|word| word.starts_with('/') || word.starts_with("~/"))
+}
+
+/// The text of a task status's message.
+fn reason_of(status: &Value) -> String {
+    status["message"]["parts"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// A turn whose executor fails with an error naming an absolute path answers the caller with a
+/// fixed reason that names no path: on `SendMessage`, on `GetTask` of that task, and on a
+/// stream's last `statusUpdate`.
+#[test]
+fn a_turn_that_cannot_run_answers_the_caller_naming_no_host_path() {
+    let fixture = fixture("a2a-turn-error-no-path");
+    let (plugin, why) = failing_plugin(&fixture);
+    let state = fixture.plugin_state().display().to_string();
+    assert!(
+        state.starts_with('/') && why.contains(&state) && names_a_path(&why),
+        "the turn's error names an absolute path: {why}"
+    );
+    let exposure = plugin.spec().expose.clone().unwrap().a2a.unwrap();
+    let server = listener(&exposure, Bearer::new(TOKEN).unwrap()).expect("the listener is built");
+    let host = Host::new(plugin.config()).with_environment(fixture.environment());
+    let agent = Answering::with_host(&plugin, host);
+    let socket = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = socket.local_addr().unwrap();
+    let stop = AtomicBool::new(false);
+
+    let (sent, got, (head, body)) = std::thread::scope(|scope| {
+        let asking = scope.spawn(|| {
+            let _stop = StopOnDrop(&stop);
+            let sent = post(
+                address,
+                &send("SendMessage", "m-1", "Is the deploy finished?"),
+            );
+            let task = sent["result"]["task"]["id"].clone();
+            let got = post(
+                address,
+                &json!({"jsonrpc": "2.0", "id": 2, "method": "GetTask", "params": {"id": task}}),
+            );
+            let streamed = post_raw(
+                address,
+                &send("SendStreamingMessage", "m-2", "And the logs?"),
+            );
+            (sent, got, streamed)
+        });
+        server
+            .serve(socket, &agent, &stop)
+            .expect("the listener ends cleanly");
+        asking.join().expect("the client asked")
+    });
+
+    assert!(head.contains("text/event-stream"), "{head}");
+    let last = body
+        .split("\n\n")
+        .filter(|event| !event.is_empty())
+        .map(|event| serde_json::from_str::<Value>(event.trim_start_matches("data: ")).unwrap())
+        .last()
+        .expect("the stream carries events");
+    let expected = format!("the turn could not run: {UNAVAILABLE}");
+    for (surface, status) in [
+        ("SendMessage", &sent["result"]["task"]["status"]),
+        ("GetTask", &got["result"]["status"]),
+        (
+            "the stream's last statusUpdate",
+            &last["result"]["statusUpdate"]["status"],
+        ),
+    ] {
+        assert_eq!(status["state"], "TASK_STATE_FAILED", "{surface}: {status}");
+        let reason = reason_of(status);
+        assert!(
+            !names_a_path(&reason),
+            "{surface} names a path of the host: {reason}"
+        );
+        assert_eq!(reason, expected, "{surface}: {status}");
+    }
+    for (surface, answer) in [
+        ("SendMessage", sent.to_string()),
+        ("GetTask", got.to_string()),
+        ("the stream", body.clone()),
+    ] {
+        assert!(
+            !answer.contains(&state),
+            "{surface} names the state directory {state}: {answer}"
+        );
+    }
+}
+
+/// The full error of a turn that cannot run, its path included, goes to standard error. The case
+/// runs its turn in a child of this test binary and reads the child's standard error.
+#[test]
+fn a_turn_that_cannot_run_writes_its_full_error_to_standard_error() {
+    if std::env::var_os(TURN_ERROR_CHILD).is_some() {
+        let fixture = fixture("a2a-turn-error-stderr");
+        let (plugin, why) = failing_plugin(&fixture);
+        let host = Host::new(plugin.config()).with_environment(fixture.environment());
+        let agent = Answering::with_host(&plugin, host);
+        let mut events: Vec<RuntimeEvent> = Vec::new();
+        let failed = agent
+            .answer(&support::host::item("a2a:m-1"), &mut events)
+            .expect_err("the turn cannot run");
+        assert!(!names_a_path(&failed), "{failed}");
+        println!("{FULL_ERROR}{why}");
+        return;
+    }
+    let output = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        .args([
+            "a_turn_that_cannot_run_writes_its_full_error_to_standard_error",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(TURN_ERROR_CHILD, "1")
+        .output()
+        .expect("the child starts");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "the child ran its turn: {}\n{stdout}\n{stderr}",
+        output.status
+    );
+    let why = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix(FULL_ERROR))
+        .expect("the child names its full error");
+    assert!(names_a_path(why), "{why}");
+    assert!(
+        stderr.contains(&format!("b10x-loom: A2A: {UNAVAILABLE}: {why}")),
+        "the full error reaches standard error: {stderr}"
     );
 }
