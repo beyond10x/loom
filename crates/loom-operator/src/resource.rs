@@ -75,8 +75,8 @@ pub struct LoomAgentSpec {
     pub schedule: Option<Schedule>,
 }
 
-/// `spec.schedule`: the CronJob's schedule, time zone, kill switch and starting deadline, and
-/// the task text each run is given.
+/// `spec.schedule`: the CronJob's schedule, time zone, kill switch, starting deadline and run
+/// deadline, and the task text each run is given.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Schedule {
@@ -91,6 +91,10 @@ pub struct Schedule {
     /// How late after its time a missed run may still start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub starting_deadline_seconds: Option<i64>,
+    /// How long one run may last once it started: the job template's `activeDeadlineSeconds`,
+    /// so Kubernetes ends a run still going after it and the run is a failed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_deadline_seconds: Option<i64>,
     /// The task text each run is given; present, the program is `b10x-loom agent run`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<ScheduleInput>,

@@ -820,6 +820,48 @@ fn a_spec_without_runtime_connectors_is_refused_before_anything_runs() {
     assert!(fixture.argv().is_empty(), "nothing ran");
 }
 
+/// `story:agent-run-without-loops`: a spec with no `loops`, its states within `inbound-answer@1`
+/// and its channel binding declaring a `write` and no `list`, `get` or `search`, is refused by
+/// `agent serve` (nothing would poll) and built for `agent run`, which polls nothing and never
+/// sends. Nothing runs either way.
+#[test]
+fn a_spec_with_no_loops_is_refused_by_serve_and_built_for_a_run() {
+    let fixture = fixture("serve-no-loops");
+    let no_loops = || {
+        let mut spec = spec(&fixture, "auto", &[CHANNEL], 5);
+        spec.loops = None;
+        spec.states[0]
+            .actions
+            .retain(|action| action != "reply.send");
+        for binding in &mut spec.bindings {
+            if let loom_sdk::agent::Binding::Connectors(binding) = binding {
+                binding.list = None;
+                binding.get = None;
+                binding.search = None;
+            }
+        }
+        spec
+    };
+    match SpecPlugin::new(no_loops(), &fixture.plugin_state()) {
+        Err(PluginError::Config(why)) => assert!(why.contains("`loops` is undeclared"), "{why}"),
+        other => panic!("serve needs loops: {:?}", other.map(|_| ())),
+    }
+    let run = SpecPlugin::for_run(no_loops(), &fixture.plugin_state()).expect("a run is built");
+    assert!(!run.sends(), "a run with no loops never sends");
+    assert_eq!(run.config().classify_threshold, None, "the host's default");
+    let host = Host::new(run.config());
+    let ask = run.project(
+        &host,
+        &item("item-1"),
+        &classification(Intent::Ask, &[], "0.9"),
+    );
+    assert_eq!(
+        ask.actions,
+        ["source.read", "reply.propose", "reply.decline"]
+    );
+    assert!(fixture.argv().is_empty(), "nothing ran");
+}
+
 #[test]
 fn a_state_projects_its_actions_and_sources() {
     let fixture = fixture("serve-projection");

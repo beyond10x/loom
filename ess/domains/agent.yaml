@@ -492,8 +492,8 @@ types:
   # (`NotAVariableName`), a port is outside 1 to 65535 (`PortOutOfRange`), an `allow_paths` entry
   # of an `http` binding is not a plain path (`NotAPlainPath`), a `Timestamp` member is not an
   # RFC 3339 instant such as `2026-12-31T23:59:59Z` (`NotAnInstant`); the inner
-  # loop's protocol is not in the plugin catalog, or states are declared with no inner loop to
-  # check them against (`UnknownProtocol`); a state names an action its protocol lacks
+  # loop's protocol is not in the plugin catalog, or a spec with no loops declares states that
+  # `inbound-answer@1`, the protocol it runs on, does not admit (`UnknownProtocol`); a state names an action its protocol lacks
   # (`UnknownAction`); a state, the outer loop or the channel names a source no binding declares
   # (`UnboundSource`); an `http` binding's method is not `GET` (`HttpMethod`); `reply.send` is
   # among the capabilities while writes are `none` or undeclared (`SendWithoutWrites`); the
@@ -622,7 +622,11 @@ commands:
   # answers (a YAML tag anywhere is refused before the walk, which reads the undeclared members of
   # a mapping first and then its members in the order the domain declares them); then the rest,
   # in declaration order. A document none of them claims is serveable. Nothing runs, nothing is
-  # read but the document, and nothing is held between two checks.
+  # read but the document, and nothing is held between two checks. A spec with no `loops` has its
+  # states checked against `inbound-answer@1` (story agent-run-without-loops): a state naming an
+  # action that protocol does not declare, or a catalog without it, is `unknown-protocol` at
+  # `states`. Such a spec is run by `agent run` as that protocol's turn, which never sends;
+  # `agent serve` still refuses it, since nothing would poll.
   - name: loom.agent.CheckAgentSpec
     input:
       - name: path
@@ -669,7 +673,7 @@ commands:
         payload:
           loom.agent.SpecRefused: {reason: NotAnInstant}
       - name: unknown-protocol
-        external: the inner loop names a protocol the plugin catalog does not hold, or states are declared with no inner loop
+        external: the inner loop names a protocol the plugin catalog does not hold, or a spec with no loops declares states inbound-answer@1 does not admit
         error: loom.agent.SpecRefused
         payload:
           loom.agent.SpecRefused: {reason: UnknownProtocol}
@@ -1018,7 +1022,10 @@ commands:
   # the intent) or unclassified. The first refusal in declaration order is the answer. A refused
   # spec or input is decided before any model call, read or record. The exit status follows the
   # outcome: `answered` 0, `no-answer` 4, `spec-refused` and `send-refused` 3, the input's three
-  # refusals 1. Nothing is held between two runs but the state directory.
+  # refusals 1. Nothing is held between two runs but the state directory. A spec with no `loops`
+  # (story agent-run-without-loops) runs as an `inbound-answer@1` turn, which declares no
+  # `reply.send`: it never sends, whatever its channel binding declares, so `send_refused` is
+  # false, and the binding needs no `list`, `get` or `search`, since a run polls nothing.
   - name: loom.agent.RunOnce
     input:
       - name: spec_refused

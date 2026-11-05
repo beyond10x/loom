@@ -320,6 +320,44 @@ fn agent_serve_refuses_what_check_refuses() {
     );
     assert!(scratch.argv().is_empty(), "nothing was read");
     assert!(!scratch.state().exists(), "no state directory was made");
+
+    // A spec `agent check` accepts and the host does not serve exits 1, not 3, as the help says:
+    // no loops (`story:agent-run-without-loops`), and neither a channel nor `expose.a2a`.
+    let no_loops = spec
+        .lines()
+        .filter(|line| {
+            *line != "loops:" && !line.starts_with("  outer:") && !line.starts_with("  inner:")
+        })
+        .map(|line| format!("{}\n", line.replace("reply.send, ", "")))
+        .collect::<String>();
+    let neither = spec
+        .lines()
+        .filter(|line| !line.starts_with("channel:"))
+        .map(|line| format!("{line}\n"))
+        .collect::<String>();
+    for (case, text, named) in [
+        ("no loops", no_loops, "`loops` is undeclared"),
+        ("neither", neither, "neither `channel` nor `expose.a2a`"),
+    ] {
+        fs::write(scratch.spec(), text).unwrap();
+        let output = scratch.serve_once(&base_url);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{case}: {stderr}");
+        assert!(stderr.contains(named), "{case}: {stderr}");
+        assert!(scratch.argv().is_empty(), "{case}: nothing was read");
+        assert!(!scratch.state().exists(), "{case}: no state directory");
+    }
+    let help = scratch
+        .command()
+        .args(["agent", "serve", "--help"])
+        .output()
+        .unwrap();
+    let help = String::from_utf8_lossy(&help.stdout);
+    assert!(
+        help.contains("1  the spec `agent check` accepts is not one the host serves (no loops"),
+        "{help}"
+    );
+    assert!(help.contains("3  the spec `agent check` refuses"), "{help}");
 }
 
 /// `--state <DIR>` is a path like any other flag's: a relative one, given from the directory

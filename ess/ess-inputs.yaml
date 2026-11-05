@@ -32,6 +32,8 @@ scenarios:
   - scenarios/agent-check/a-bearer-env-that-is-not-a-variable-name-is-refused.yaml
   - scenarios/agent-check/a-port-outside-the-range-is-refused.yaml
   - scenarios/agent-check/a-deadline-that-is-not-an-instant-is-refused.yaml
+  - scenarios/agent-check/a-spec-with-no-loops-checks-its-states-against-inbound-answer.yaml
+  - scenarios/agent-check/states-with-no-loops-that-inbound-answer-does-not-admit-are-refused.yaml
   - scenarios/agent-serve/a-send-outside-the-allow-list-is-refused.yaml
   - scenarios/agent-serve/a-send-without-a-proposal-is-not-admissible.yaml
   - scenarios/agent-serve/a-sixth-send-in-the-window-is-refused.yaml
@@ -68,7 +70,9 @@ scenarios:
   - scenarios/agent-run-once/input-missing.yaml
   - scenarios/agent-run-once/refused-spec.yaml
   - scenarios/agent-run-once/budgets-hold.yaml
+  - scenarios/agent-run-once/no-loops-runs-one-turn.yaml
   - scenarios/resource-schedule/runs-reported-in-turn.yaml
+  - scenarios/resource-schedule/a-run-past-its-deadline-is-reported-failed.yaml
   - scenarios/resource-admission/a-resource-within-every-rule-is-admitted.yaml
   - scenarios/resource-admission/an-agent-the-decoder-cannot-read-is-refused.yaml
   - scenarios/resource-admission/a-secret-literal-in-the-agent-is-refused.yaml

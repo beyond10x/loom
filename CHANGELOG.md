@@ -12,6 +12,26 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-11-05
+
+No breaking changes.
+
+### Added
+
+- `spec.schedule.runDeadlineSeconds` renders the CronJob job template's `activeDeadlineSeconds`; a run past it is a failed `status.lastRun` with reason `DeadlineExceeded`; zero or less, or above 9223372036, is `Malformed` (story:schedule-run-deadline)
+
+### Changed
+
+- `b10x-loom agent run` runs a spec with no `loops` as an `inbound-answer@1` turn that never sends; `agent serve` still refuses it (story:agent-run-without-loops)
+- `b10x-loom agent run` needs no `list`, `get` or `search` on the channel binding; only its `write` is read (story:agent-run-without-loops)
+- The operator refuses an `AgentServe` `LoomAgent` whose spec has no `loops`, `Malformed` at `spec.agent.loops` (story:agent-run-without-loops)
+
+### Fixed
+
+- An A2A turn that cannot run gives its caller a fixed reason per kind (`serve::a2a::TURN_*`), naming no host path (story:a2a-turn-error-names-no-host-path)
+- A scheduled resource waiting for its Job or Deployment to go reads `Available` False `WorkloadTerminating`, not `Scheduled`, until its CronJob exists (story:schedule-available-after-cronjob)
+- `spec.schedule.startingDeadlineSeconds` above 9223372036 (`MAX_RUN_DEADLINE_SECONDS`), which Kubernetes' duration wraps, is `Malformed` (story:schedule-available-after-cronjob)
+
 ## [0.56.0] - 2026-11-05
 
 No breaking changes.
@@ -1370,7 +1390,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.56.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.0...HEAD
+[0.57.0]: https://github.com/beyond10x/loom/releases/tag/0.57.0
 [0.56.0]: https://github.com/beyond10x/loom/releases/tag/0.56.0
 [0.55.2]: https://github.com/beyond10x/loom/releases/tag/0.55.2
 [0.55.1]: https://github.com/beyond10x/loom/releases/tag/0.55.1

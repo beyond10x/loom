@@ -38,6 +38,27 @@ fn a_valid_spec_checks() {
     assert!(output.stderr.is_empty(), "{}", text(&output.stderr));
 }
 
+/// `story:agent-run-without-loops`: with no loops the states are checked against
+/// `inbound-answer@1`; states within it check, a state naming `reply.send` is refused at `states`.
+#[test]
+fn a_spec_with_no_loops_is_checked_against_inbound_answer() {
+    let output = agent_check(&fixture("no-loops"));
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    assert_eq!(
+        text(&output.stdout),
+        "checked scheduled-operator: 2 states, 2 bindings, protocol none\n"
+    );
+    let output = agent_check(&fixture("no-loops-sends"));
+    assert_eq!(output.status.code(), Some(3), "{}", text(&output.stderr));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains(
+            "refused: UnknownProtocol at states: with no loops the states run on inbound-answer@1, which does not declare reply.send (states[0].actions[2])"
+        ),
+        "{stderr}"
+    );
+}
+
 #[test]
 fn a_state_naming_an_unknown_action_is_refused() {
     let output = agent_check(&fixture("unknown-action"));

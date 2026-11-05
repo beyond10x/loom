@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.56.0`, released from source at the tag `0.56.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.56.0)). No crate is on a registry: you
-install from the tag or depend on it with `tag = "0.56.0"`. `b10x-loom run` completed a live run
+Version `0.57.0`, released from source at the tag `0.57.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.57.0)). No crate is on a registry: you
+install from the tag or depend on it with `tag = "0.57.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -167,14 +167,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.56.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.57.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.56.0
+b10x-loom 0.57.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -265,7 +265,8 @@ the domain answering its own reason at the first member the decoder refuses (`Un
 `BlankText`, `NotAVariableName` for a `bearer_env`, `PortOutOfRange`, `NotAPlainPath` for an
 `allow_paths` entry, `NotAnInstant` for a deadline that is not an RFC 3339 instant) and anything
 else `Malformed`; the inner loop's
-protocol is not in the catalog, or states have no inner loop; a state names an action its
+protocol is not in the catalog, or a spec with no loops declares states `inbound-answer@1` does
+not admit; a state names an action its
 protocol lacks; a state, the outer loop or the channel names a source no binding declares; an
 `http` binding's method is not `GET`; `reply.send` is a capability while writes are `none`; the
 channel allows no channel id. It exits 0 when the spec is serveable, 3 when it is refused, 1 when
@@ -307,9 +308,13 @@ A2A listener are not given these roots.
 the text of the input file and exits, as a scheduled job does: the turn is classified, projected and
 governed as `agent serve` governs a polled item, and one line is appended to `record.jsonl` in the
 state directory. It polls nothing and opens no listener, so the spec needs neither `channel` nor
-`expose.a2a`. A spec whose channel binding declares a write sends to the first channel of
-`channel.allow` under `writes`, `auto` included, at most `writes.max_per_hour` an hour; any other
-spec ends on its proposal and sends nothing. It prints one line for the turn and exits 0 when the
+`expose.a2a`, and it needs no `loops`: a spec without them has its states checked against
+`inbound-answer@1` and runs as that protocol's turn under the host's defaults (8 steps, 16 model
+calls, classification threshold 0.5), which never sends, whatever its channel binding declares
+(`agent serve` refuses such a spec and exits 1). The channel binding needs no `list`, `get` or
+`search`, since a run polls nothing. A spec with `loops` whose channel binding declares a write sends to the first channel of `channel.allow` under `writes`, `auto`
+included, at most `writes.max_per_hour` an hour; any other spec ends on its proposal and sends
+nothing. It prints one line for the turn and exits 0 when the
 turn answered, 4 when it ended without an answer, 3 when the spec or the send was refused (a
 `RateLimited` send is recorded first), and 1 when `--input` is absent, unreadable, larger than
 1048576 bytes or blank, before any model is called.
@@ -420,7 +425,9 @@ the run ended from the resource.
 
 A `Command` resource that must run again and again, one bounded run at a time, adds
 `spec.schedule`: `cron` (five fields or a descriptor such as `@hourly`), optional `timeZone` (an
-IANA name), `suspend` (no new run starts while true) and `startingDeadlineSeconds`. Its pod is
+IANA name), `suspend` (no new run starts while true), `startingDeadlineSeconds` and
+`runDeadlineSeconds` (a run still going after that many seconds is ended and reported failed, so a
+hung run does not hold the later ones; zero or less and above 9223372036 are refused). Its pod is
 then a `batch/v1` CronJob in the Job's place (`concurrencyPolicy: Forbid`, `backoffLimit` 0, three
 finished runs of each outcome kept), the resource stays `Running`, and `status.lastRun` (`phase`,
 `exitCode`, `finishedAt`, `reason`) and the condition `LastRunSucceeded` report the newest finished
@@ -428,7 +435,8 @@ run; a failed run fails no resource. `spec.schedule.input` gives each run its ta
 an inline `text` or a `configMapKeyRef` (`name`, `key`) the pod mounts read-only; with it the
 program is `b10x-loom agent run --spec /config/agent.yaml --state /var/lib/agent --input <file>`,
 so the resource gives `spec.agent` and `command: {}`. Adding or removing `spec.schedule` deletes
-the Job or the CronJob before the other is created. The controller refuses a schedule on an
+the Job or the CronJob before the other is created; until the CronJob exists, `Available` reads
+False `WorkloadTerminating`. The controller refuses a schedule on an
 `AgentServe` resource, a `cron` or `timeZone` Kubernetes does not read, and an `input` that gives
 both forms or neither (`Malformed`), and a credential in the text (`SecretLiteral`).
 
@@ -543,7 +551,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.56.0'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.57.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
@@ -611,7 +619,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.56.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.57.0" }
 ```
 
 The example below

@@ -7,7 +7,9 @@
 //!    `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`,
 //!    `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`,
 //!    `EmptyChannelAllow`), then a `runtime` without `connectors`, which `agent serve` needs and
-//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0; an
+//!    the check does not read (`Malformed`), as the decoder refused it before 0.42.0, then a spec
+//!    with no `loops`, which the check admits for `agent run` and `agent serve` refuses at start
+//!    (`Malformed` at `spec.agent.loops`, `story:agent-run-without-loops`); an
 //!    `AgentServe` resource without `spec.agent` is `Malformed` at `spec.agent`. For the
 //!    `Command` variant (`spec.command` present), whose
 //!    document the image's program reads and `agent serve` does not, only the credential walk
@@ -137,8 +139,12 @@
 //!     with an optional `/step`, months and days of the week also by three-letter name; or one of
 //!     [`CRON_DESCRIPTORS`]; never a `TZ=` prefix or `@every`) is `Malformed` at
 //!     `spec.schedule.cron`; a `timeZone` that is not an IANA name the bundled time zone database
-//!     holds, spelt as it spells it, or `Local`, at `spec.schedule.timeZone`; a negative
-//!     `startingDeadlineSeconds` at that member. An `input` that gives both `text` and
+//!     holds, spelt as it spells it, or `Local`, at `spec.schedule.timeZone`; a
+//!     `startingDeadlineSeconds` that is negative or above [`MAX_RUN_DEADLINE_SECONDS`] (Kubernetes'
+//!     CronJob controller holds it as the same nanosecond duration) at that member, a
+//!     `runDeadlineSeconds` that is zero or negative
+//!     or above [`MAX_RUN_DEADLINE_SECONDS`] (story schedule-run-deadline; either would end every
+//!     run as it starts) at that member. An `input` that gives both `text` and
 //!     `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no
 //!     ConfigMap name or whose `key` no ConfigMap key, or an `input` on a resource whose
 //!     `spec.command` names an entrypoint or argument or that gives no `spec.agent` (with an
@@ -1503,6 +1509,13 @@ fn relay(upstream: &Upstream<'_>, url: BoundaryUrl, at: &str) -> Result<(), Refu
 /// scheduled minute appended, 11 characters, and a Job name is at most 63.
 pub const MAX_CRON_JOB_NAME: usize = 52;
 
+/// The longest run deadline (`spec.schedule.runDeadlineSeconds`, story schedule-run-deadline)
+/// Kubernetes' Job controller holds: it compares a run's age with the deadline as nanoseconds in
+/// a signed 64-bit duration, which wraps negative past `i64::MAX / 10^9` seconds and would end
+/// every run as it starts. It bounds `spec.schedule.startingDeadlineSeconds` too, which the
+/// CronJob controller holds as the same duration.
+pub const MAX_RUN_DEADLINE_SECONDS: i64 = i64::MAX / 1_000_000_000;
+
 /// Refuses the scheduled resource `name`, whose spec `spec` [`admit`] admitted, when its CronJob,
 /// which carries that name, cannot (step 19): `Malformed` at `metadata.name`. A resource without
 /// `spec.schedule` runs as a Job, which takes the name.
@@ -1599,6 +1612,20 @@ pub fn admit(
             "spec.agent.runtime.connectors",
             "`b10x-loom agent serve` needs a connectors command line; only a Command resource \
              may leave it out",
+        ));
+    }
+    // `check` admits a spec with no `loops` for `agent run` (`story:agent-run-without-loops`);
+    // `agent serve` refuses it at start, since nothing would poll.
+    if variant == AgentVariant::AgentServe
+        && decoded
+            .as_ref()
+            .is_some_and(|decoded| decoded.loops.is_none())
+    {
+        return Err(Refusal::new(
+            Reason::Malformed,
+            "spec.agent.loops",
+            "`b10x-loom agent serve` needs `loops`, since with none nothing would poll; only a \
+             Command resource, which may run `agent run`, may leave them out",
         ));
     }
 
@@ -2006,7 +2033,10 @@ fn dns_subdomain(name: &str) -> bool {
 
 /// Step 18: `spec.schedule`, only for `Command`; on an `AgentServe` resource `Malformed`. A cron
 /// expression Kubernetes does not read is `Malformed` at `cron`, a time zone the database does not
-/// hold at `timeZone`, a negative starting deadline at `startingDeadlineSeconds`. An `input` gives
+/// hold at `timeZone`, a starting deadline that is negative or above [`MAX_RUN_DEADLINE_SECONDS`]
+/// at `startingDeadlineSeconds`, a run deadline of
+/// zero or less or above [`MAX_RUN_DEADLINE_SECONDS`] at `runDeadlineSeconds` (story
+/// schedule-run-deadline). An `input` gives
 /// exactly one of a text that is not blank and a `configMapKeyRef` whose name is a ConfigMap name
 /// and whose key a ConfigMap key, and runs `b10x-loom agent run` over `spec.agent`, so the
 /// resource gives `spec.agent` and `spec.command` names no entrypoint and no argument; otherwise
@@ -2041,6 +2071,41 @@ fn schedule(
         return malformed(
             "spec.schedule.startingDeadlineSeconds",
             "it is negative; a run may start that many seconds late at most",
+        );
+    }
+    if schedule
+        .starting_deadline_seconds
+        .is_some_and(|seconds| seconds > MAX_RUN_DEADLINE_SECONDS)
+    {
+        return malformed(
+            "spec.schedule.startingDeadlineSeconds",
+            &format!(
+                "it is above {MAX_RUN_DEADLINE_SECONDS}; Kubernetes holds the deadline as \
+                 nanoseconds in a signed 64-bit duration, which wraps past it"
+            ),
+        );
+    }
+    if schedule
+        .run_deadline_seconds
+        .is_some_and(|seconds| seconds <= 0)
+    {
+        return malformed(
+            "spec.schedule.runDeadlineSeconds",
+            "it is not positive; a run is ended that many seconds after it started, so give at \
+             least one",
+        );
+    }
+    if schedule
+        .run_deadline_seconds
+        .is_some_and(|seconds| seconds > MAX_RUN_DEADLINE_SECONDS)
+    {
+        return malformed(
+            "spec.schedule.runDeadlineSeconds",
+            &format!(
+                "it is above {MAX_RUN_DEADLINE_SECONDS}; Kubernetes holds the deadline as \
+                 nanoseconds in a signed 64-bit duration, which wraps negative past it and ends \
+                 every run as it starts"
+            ),
         );
     }
     if let Some(input) = &schedule.input {
@@ -2277,6 +2342,11 @@ mod tests {
                 "format": "loom.agent/1",
                 "agent": {"id": "a", "name": "A", "brief": "answers"},
                 "model": {"routes": "routes.yaml", "roles": [{"role": "agent", "model": "small"}]},
+                "loops": {
+                    "outer": {"poll_interval_seconds": 60, "sources": [], "min_age_minutes": 0,
+                              "lookback_minutes": 120},
+                    "inner": {"protocol": "inbound-answer@1", "step_budget": 8, "model_budget": 16},
+                },
             })),
             routes: serde_json::json!({
                 "format": "llm.routes/1",
@@ -2299,16 +2369,21 @@ mod tests {
         }
     }
 
+    /// `spec` admitted against a catalog holding every protocol with no action: the fixture's
+    /// loops name one and it declares no state.
     fn admitted(spec: &LoomAgentSpec) -> Result<Admitted, Refusal> {
-        admit(spec, "agents", &config(), &|_| None)
+        admit(spec, "agents", &config(), &|_| Some(Vec::new()))
     }
 
+    /// An `AgentServe` spec needs `loops` (`story:agent-run-without-loops`; one without them is
+    /// refused at `spec.agent.loops`, `tests/adversary_w20261105w1_u2_admission.rs`), and one
+    /// with loops and no states is admitted with the check's line.
     #[test]
-    fn a_spec_without_loops_is_admitted_with_the_checks_line() {
+    fn a_spec_without_states_is_admitted_with_the_checks_line() {
         let admitted = admitted(&spec(None)).expect("admitted");
         assert_eq!(
             admitted.message(),
-            "checked a: 0 states, 0 bindings, protocol none"
+            "checked a: 0 states, 0 bindings, protocol inbound-answer@1"
         );
         assert!(!admitted.default_routes);
         assert_eq!(admitted.connectors, "");

@@ -641,6 +641,8 @@ fn a_spec_with_no_channel_is_serveable() {
     assert!(check(&spec, &plugin_actions).is_ok());
 }
 
+/// `story:agent-run-without-loops`: with no loops the states are checked against
+/// `inbound-answer@1`, and the operator example's states name `reply.send`, which it lacks.
 #[test]
 fn states_with_no_inner_loop_are_refused() {
     let mut spec = operator();
@@ -650,8 +652,57 @@ fn states_with_no_inner_loop_are_refused() {
         refusal(
             RefusalReason::UnknownProtocol,
             "states",
-            "no inner loop names a protocol to check the states against"
+            "with no loops the states run on inbound-answer@1, which does not declare reply.send (states[0].actions[2])"
         )
+    );
+}
+
+/// `agent-check/a-spec-with-no-loops-checks-its-states-against-inbound-answer`: states naming only
+/// actions `inbound-answer@1` declares are serveable with no loops, whatever the channel binding
+/// declares (here a `write` and no `list`, `get` or `search`).
+#[test]
+fn a_spec_with_no_loops_checks_its_states_against_inbound_answer() {
+    assert_eq!(
+        check_text(&fixture("no-loops"), &plugin_actions),
+        Ok(Checked {
+            agent: "scheduled-operator".to_owned(),
+            protocol: None,
+            states: 2,
+            bindings: 2,
+        })
+    );
+}
+
+/// `agent-check/states-with-no-loops-that-inbound-answer-does-not-admit-are-refused`.
+#[test]
+fn states_with_no_loops_that_inbound_answer_does_not_admit_are_refused() {
+    assert_eq!(
+        refused_text(&fixture("no-loops-sends")),
+        refusal(
+            RefusalReason::UnknownProtocol,
+            "states",
+            "with no loops the states run on inbound-answer@1, which does not declare reply.send (states[0].actions[2])"
+        )
+    );
+}
+
+/// With no loops and a catalog that does not hold `inbound-answer@1`, the states have no protocol
+/// to be checked against.
+#[test]
+fn states_with_no_loops_and_no_inbound_answer_in_the_catalog_are_refused() {
+    let only_operator_reply = |name: &str| {
+        (name == "operator-reply@1")
+            .then(|| plugin_actions(name))
+            .flatten()
+    };
+    let spec = parse(&fixture("no-loops")).expect("the fixture decodes");
+    assert_eq!(
+        check(&spec, &only_operator_reply),
+        Err(refusal(
+            RefusalReason::UnknownProtocol,
+            "states",
+            "with no loops the states run on inbound-answer@1, which the catalog does not hold"
+        ))
     );
 }
 
