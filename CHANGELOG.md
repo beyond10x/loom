@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `agent serve` escapes control characters in the A2A turn error it writes to stderr, so it stays one line (story:a2a-stderr-line-escapes-error-text)
+
 ## [0.57.0] - 2026-11-05
 
 No breaking changes.
