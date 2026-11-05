@@ -298,9 +298,13 @@ types:
   # When a `Command` resource runs (story command-schedule, design § 12.2): a `batch/v1` CronJob
   # in the Job's place, on the five-field `cron` expression (or a descriptor such as `@hourly`),
   # in the IANA `time_zone` (the controller's when absent), no new run starting while `suspend`
-  # holds, and none starting later than `starting_deadline_seconds` after its time. `input`, when
-  # present, makes the program `b10x-loom agent run` over the resource's spec with that task
-  # text; without it the CronJob runs `spec.command` as the Job would.
+  # holds, and none starting later than `starting_deadline_seconds` after its time.
+  # `run_deadline_seconds` (story schedule-run-deadline) bounds how long one run may last once it
+  # started: a run still going after that many seconds is ended and reported as a failed run
+  # (`last-run-failed`), so a hung run does not hold the later ones; the controller refuses zero
+  # and a negative value. `input`, when present, makes the program `b10x-loom agent run` over the
+  # resource's spec with that task text; without it the CronJob runs `spec.command` as the Job
+  # would.
   - name: loom.resource.ScheduleSpec
     kind: struct
     fields:
@@ -314,6 +318,9 @@ types:
       - name: starting_deadline_seconds
         type: Optional<Integer>
         naming: {wire: startingDeadlineSeconds}
+      - name: run_deadline_seconds
+        type: Optional<Integer>
+        naming: {wire: runDeadlineSeconds}
       - name: input
         type: Optional<loom.resource.ScheduleInput>
 

@@ -1,0 +1,28 @@
+# story schedule-run-deadline: a scheduled run still going at `runDeadlineSeconds` is ended by
+# Kubernetes (`DeadlineExceeded`) before its program reported an exit code; it is recorded as a
+# failed `last_run`, and the resource stays Running, so the next run starts on time.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-run-past-its-deadline-is-reported-failed
+summary: A scheduled run ended at its run deadline is reported as a failed last run while the resource stays Running.
+
+timeline:
+  - at: 2026-11-05T00:00:00Z
+    command: loom.resource.ApplyLoomAgent
+    input: {name: nightly, generation: 1}
+    outcome: created
+  - at: 2026-11-05T00:00:01Z
+    command: loom.resource.RecordCheck
+    input: {name: nightly, generation: 1, exit_code: 0, message: admitted, variant: Command}
+    outcome: running
+  - at: 2026-11-05T03:10:00Z
+    command: loom.resource.ObserveScheduledRun
+    input: {name: nightly, phase: Failed, reason: DeadlineExceeded}
+    outcome: last-run-failed
+
+assert:
+  - view: loom.resource.LoomAgents
+    contains:
+      name: nightly
+      state: Running
+      last_run: {phase: Failed, reason: DeadlineExceeded}
