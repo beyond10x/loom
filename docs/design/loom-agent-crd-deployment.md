@@ -397,7 +397,7 @@ Admission (`crates/loom-operator/src/admission.rs`, step 18):
 | the resource's name is longer than 52 characters, which its CronJob cannot carry since each Job it starts appends 11 (unscheduled, the name runs as a Job) | `Malformed` at `metadata.name` |
 | `timeZone` is not an IANA name the bundled time zone database holds, spelt as it spells it, or is `Local` | `Malformed` at `spec.schedule.timeZone` |
 | `startingDeadlineSeconds` is negative | `Malformed` at `spec.schedule.startingDeadlineSeconds` |
-| `runDeadlineSeconds` is zero or negative | `Malformed` at `spec.schedule.runDeadlineSeconds` |
+| `runDeadlineSeconds` is zero or negative, or above 9223372036, past which Kubernetes' Job controller wraps the deadline negative as a nanosecond duration | `Malformed` at `spec.schedule.runDeadlineSeconds` |
 | `input` gives both `text` and `configMapKeyRef` or neither, a blank `text`, a `configMapKeyRef` whose `name` is no ConfigMap name or whose `key` no ConfigMap key; or the resource names a program in `spec.command` or gives no `spec.agent` | `Malformed` at `spec.schedule.input` |
 | `text` holds a credential, walked as `spec.env` is | `SecretLiteral` at `spec.schedule.input.text` |
 
@@ -437,8 +437,10 @@ Lifecycle and status:
   than the run last observed, so deleting the newest Job leaves `lastRun`; a new generation clears
   `lastRun` and the newest finished run is read again.
 - A run ended at `runDeadlineSeconds` is a failed run: its Job is `Failed` with the reason
-  `DeadlineExceeded`, so `lastRun` is `Failed` with that reason (no exit code when the pod is
-  already gone) and `LastRunSucceeded` is False `RunFailed`. The resource stays `Running` and the
+  `DeadlineExceeded`, so `lastRun` is `Failed` with that reason, never the reason of the
+  container the Job controller killed (`Error`, exit 143); the exit code and end time are the
+  pod's when it is still readable and absent when it is gone. `LastRunSucceeded` is False
+  `RunFailed`. The resource stays `Running` and the
   next run starts on its schedule.
 - A new generation patches the CronJob's schedule and template in place (a CronJob's template is
   mutable, unlike a Job's). A run of an older generation that is still active finishes under its

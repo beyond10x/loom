@@ -14,7 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
-- `spec.schedule.runDeadlineSeconds` renders the CronJob job template's `activeDeadlineSeconds`; a run past it is a failed `status.lastRun`, and zero or less is `Malformed` (story:schedule-run-deadline)
+- `spec.schedule.runDeadlineSeconds` renders the CronJob job template's `activeDeadlineSeconds`; a run past it is a failed `status.lastRun` with reason `DeadlineExceeded`; zero or less, or above 9223372036, is `Malformed` (story:schedule-run-deadline)
 
 ## [0.56.0] - 2026-11-05
 

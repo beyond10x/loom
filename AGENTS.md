@@ -1197,8 +1197,10 @@ Kubernetes does not read (five fields or `@yearly`, `@annually`, `@monthly`, `@w
 `@midnight`, `@hourly`; no `TZ=` prefix, no `@every`, no whitespace around it, since the CronJob
 carries it as written) at `spec.schedule.cron`, a `timeZone` the
 bundled IANA database (jiff, `tzdb-bundle-always`) does not hold as spelt, or `Local`, at
-`spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, a zero or negative
-`runDeadlineSeconds` at that member (`story:schedule-run-deadline`), an `input` with
+`spec.schedule.timeZone`, a negative `startingDeadlineSeconds` at that member, a
+`runDeadlineSeconds` that is zero or negative or above 9223372036 (`MAX_RUN_DEADLINE_SECONDS`, past
+which Kubernetes' nanosecond duration wraps) at that member (`story:schedule-run-deadline`), an
+`input` with
 both or neither of `text` and `configMapKeyRef`, a blank text, a name that is no ConfigMap name, a
 key that is no ConfigMap key, or beside a `spec.command` entrypoint or argument or without
 `spec.agent` at `spec.schedule.input`, all `Malformed` without repeating the value; then the

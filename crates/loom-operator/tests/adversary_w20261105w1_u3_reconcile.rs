@@ -465,7 +465,6 @@ fn finished_run(fake: &Fake, name: &str, created: &str, exit_code: i64, ended: &
     path
 }
 
-
 const DEADLINE: &str = "  schedule: {cron: '0 3 * * *', runDeadlineSeconds: 600}\n";
 
 /// The Job status Kubernetes writes for a run it ended at `activeDeadlineSeconds`.
