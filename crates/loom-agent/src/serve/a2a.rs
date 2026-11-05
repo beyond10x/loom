@@ -26,7 +26,9 @@
 //!
 //! A record that cannot be read or written fails the task with a fixed reason
 //! ([`RECORD_UNREADABLE`], [`RECORD_UNWRITABLE`]) that names no path of the host; the full error
-//! goes to standard error only.
+//! goes to standard error only. So does a turn that cannot run: its task fails with the fixed
+//! reason of its error's kind ([`TURN_STATE`], [`TURN_CONFIG`], [`TURN_POLL`],
+//! [`TURN_UNCLASSIFIED`], [`TURN_FAILED`], [`TURN_UNAVAILABLE`]).
 //!
 //! The listener needs a bearer: [`bearer`] reads it from [`BEARER_ENV`], which the agent's Secret
 //! sets; serving refuses to start without it. A spec with `expose.a2a` and no `channel` is served
@@ -84,6 +86,40 @@ pub const RECORD_UNWRITABLE: &str = "the turn ran and its record line could not 
 /// Why a repeat of a message fails whose turn ran unrecorded in this process: no second turn runs.
 pub const UNRECORDED: &str =
     "this message's turn ran and was not recorded; it is not run a second time";
+
+/// Why a task fails when its turn could not use the agent's state directory.
+pub const TURN_STATE: &str = "the agent's state cannot be used";
+
+/// Why a task fails when its turn found the agent's configuration unusable.
+pub const TURN_CONFIG: &str = "the agent's configuration cannot be used";
+
+/// Why a task fails when a poll its turn needed failed.
+pub const TURN_POLL: &str = "a poll the turn needs failed";
+
+/// Why a task fails when its message could not be classified.
+pub const TURN_UNCLASSIFIED: &str = "the message could not be classified";
+
+/// Why a task fails when its turn failed.
+pub const TURN_FAILED: &str = "the turn failed";
+
+/// Why a task fails when something its turn needs is unavailable: a model, a source, a service.
+pub const TURN_UNAVAILABLE: &str = "something the turn needs is unavailable";
+
+/// The fixed reason a caller is given for a turn that failed with `error`: one per kind of
+/// failure, so the kind stays visible while the text, which may name a path of the host, does
+/// not reach the caller. The match is exhaustive: a new kind of [`PluginError`] needs its reason.
+fn turn_failure(error: &PluginError) -> &'static str {
+    match error {
+        PluginError::StateInsideCheckout { .. }
+        | PluginError::StateInUse { .. }
+        | PluginError::State(_) => TURN_STATE,
+        PluginError::Config(_) => TURN_CONFIG,
+        PluginError::Poll(_) => TURN_POLL,
+        PluginError::Classify(_) => TURN_UNCLASSIFIED,
+        PluginError::Turn(_) => TURN_FAILED,
+        PluginError::Unavailable(_) => TURN_UNAVAILABLE,
+    }
+}
 
 /// The most items whose turn ran unrecorded an [`Answering`] remembers; past it the oldest is
 /// forgotten, and a repeat of its message may run a turn again.
@@ -309,9 +345,11 @@ impl<'a> Answering<'a> {
         Ok(self.record.get_or_init(|| record))
     }
 
-    /// The governed turn on `item` (see the module documentation) and its record line.
+    /// The governed turn on `item` (see the module documentation) and its record line. A turn
+    /// that cannot run fails with the fixed reason of its error's kind ([`turn_failure`]); the
+    /// error itself goes to standard error.
     fn turn(&self, item: &InboundItem, events: &mut dyn EventSink) -> Result<RecordLine, String> {
-        let error = |error: PluginError| error.to_string();
+        let error = |error: PluginError| failed(turn_failure(&error), &error);
         let (plugin, host) = (self.plugin, &self.host);
         let threshold = host.threshold().map_err(error)?;
         let classification = plugin.classify(host, item).map_err(error)?;
@@ -480,6 +518,49 @@ mod tests {
         let other = item("a2a:m-2");
         let _ = answered(&Unwritable, &unrecorded, &other, || turn(&other));
         assert_eq!(turns.get(), 2, "another messageId runs its own turn");
+    }
+
+    /// Every kind of [`PluginError`] a turn can fail with, each naming a path of the host, gets a
+    /// fixed reason naming no path, one per kind (the three state kinds share one).
+    #[test]
+    fn every_turn_failure_gives_a_fixed_reason_naming_no_path() {
+        let path = "/srv/agents/state/cases";
+        let failures = [
+            (
+                PluginError::StateInsideCheckout {
+                    state: path.to_owned(),
+                    inside: "/srv/agents".to_owned(),
+                },
+                TURN_STATE,
+            ),
+            (
+                PluginError::StateInUse {
+                    state: path.to_owned(),
+                },
+                TURN_STATE,
+            ),
+            (PluginError::State(format!("{path}: denied")), TURN_STATE),
+            (PluginError::Config(format!("{path}: denied")), TURN_CONFIG),
+            (PluginError::Poll(format!("{path}: denied")), TURN_POLL),
+            (
+                PluginError::Classify(format!("{path}: denied")),
+                TURN_UNCLASSIFIED,
+            ),
+            (PluginError::Turn(format!("{path}: denied")), TURN_FAILED),
+            (
+                PluginError::Unavailable(format!("~/agents/routes.yaml and {path}")),
+                TURN_UNAVAILABLE,
+            ),
+        ];
+        for (error, reason) in &failures {
+            assert!(error.to_string().contains('/'), "{error}");
+            assert_eq!(turn_failure(error), *reason, "{error}");
+            assert!(!reason.contains('/') && !reason.contains('~'), "{reason}");
+        }
+        let mut reasons: Vec<&str> = failures.iter().map(|(_, reason)| *reason).collect();
+        reasons.sort_unstable();
+        reasons.dedup();
+        assert_eq!(reasons.len(), 6, "one reason per kind: {reasons:?}");
     }
 
     /// The items remembered are bounded: past [`MAX_UNRECORDED`] the oldest is forgotten.
