@@ -420,7 +420,9 @@ the run ended from the resource.
 
 A `Command` resource that must run again and again, one bounded run at a time, adds
 `spec.schedule`: `cron` (five fields or a descriptor such as `@hourly`), optional `timeZone` (an
-IANA name), `suspend` (no new run starts while true) and `startingDeadlineSeconds`. Its pod is
+IANA name), `suspend` (no new run starts while true), `startingDeadlineSeconds` and
+`runDeadlineSeconds` (a run still going after that many seconds is ended and reported failed, so a
+hung run does not hold the later ones; zero or less is refused). Its pod is
 then a `batch/v1` CronJob in the Job's place (`concurrencyPolicy: Forbid`, `backoffLimit` 0, three
 finished runs of each outcome kept), the resource stays `Running`, and `status.lastRun` (`phase`,
 `exitCode`, `finishedAt`, `reason`) and the condition `LastRunSucceeded` report the newest finished
