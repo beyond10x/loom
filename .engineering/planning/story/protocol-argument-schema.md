@@ -9,13 +9,18 @@ tags:
 relations:
 - decomposes: epic:fast-selector
 - serves: vision:O1
+- depends_on: story:canon-0-10-0-pin
 scope:
 - confidence: inferred
   path: AGENTS.md
 - confidence: inferred
   path: CHANGELOG.md
 - confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
   path: crates/loom-conformance/src/lib.rs
+- confidence: inferred
+  path: crates/loom-executor/Cargo.toml
 - confidence: cited
   path: crates/loom-executor/src/arguments.rs
 - confidence: cited
@@ -44,7 +49,7 @@ scope:
   path: protocols/inbound-answer/1.yaml
 - confidence: cited
   path: protocols/operator-reply/1.yaml
-revision: 5
+revision: 7
 ---
 # story:protocol-argument-schema
 
@@ -52,12 +57,14 @@ Title: Generated arguments are refused unless they match the argument schema the
 declares
 
 Relations: decomposes `epic:fast-selector`; serves `vision:governed-autonomy`, `vision:O1`,
-`vision:O3`; depends on `story:laya-arguments-slice` (implemented). Records the contract of
+`vision:O3`; depends on `story:laya-arguments-slice` (implemented) and on
+`story:canon-0-10-0-pin` (§ Waits on). Records the contract of
 `architecture-decision-record:action-argument-schema-from-protocol`; the blocker it answers,
 `decision-blocker:action-argument-schema`, is `cleared` (2026-10-14).
 
 Revisions cited: Loom at `8a8fad3b`; Canon 0.9.0 at `8f1f4527`, as `Cargo.lock:187-190` pins it
-(read with `git -C ~/beyond10x/canon show 0.9.0:<path>`).
+(read with `git -C ~/beyond10x/canon show 0.9.0:<path>`); Canon 0.10.0 at `2c7a1ea6` for
+`check_arguments` (read with `git -C ~/beyond10x/canon show 0.10.0:<path>`).
 
 ## Outcome
 
@@ -82,8 +89,12 @@ arguments; a runner accepts only `{}`. Canon never validates arguments at run ti
 argument-schema dialect, one `action-arguments` problem per offending keyword
 (`crates/canon/src/validate/mod.rs:566-576`; the dialect,
 `crates/canon/src/validate/arguments.rs:1-32`, nesting at most 32 deep, `:40`). The dialect
-check is `validate::arguments::check`, `pub(super)` (`arguments.rs:129`): Canon offers no
-function that validates a value against a schema, so the value check is Loom's.
+check is `validate::arguments::check`, `pub(super)` (`arguments.rs:129`). Canon 0.10.0 exports
+`validate::check_arguments` (`crates/canon/src/validate/mod.rs:84`, `arguments.rs:869` at
+0.10.0), so the value check is Canon's: `check_arguments(schema: Option<&Value>, arguments:
+&Value) -> Result<(), ArgumentsRefused>`, pure, `None` taking only `{}`, every refusal an
+`ArgumentRefusal {pointer, keyword, reason}` in document order (`arguments.rs:817-824`), and
+`ArgumentsRefused::Schema` for a schema outside the dialect (`arguments.rs:835-840`).
 
 Runbook needs the check (`~/beyond10x/sdc/docs/boundary.md` row 15; its driver checks
 `required` and `additionalProperties`, `~/beyond10x/sdc/driver/src/main.rs:1365-1383`); four of its
@@ -92,6 +103,11 @@ the check function and the executor path. A tree's bound program takes its argum
 binding (literal or `arguments_from`) after the executor
 (`crates/loom-bindings/src/program.rs:17-22`), so the tree path's call is a bindings story's
 (§ Not in scope).
+
+## Waits on
+
+- `story:canon-0-10-0-pin`: it moves Loom to Canon 0.10.0, the first tag that exports
+  `check_arguments`. Same planner wave; it merges first and this story starts from it.
 
 ## Design
 
@@ -105,13 +121,23 @@ binding (literal or `arguments_from`) after the executor
   is one of those refusals, naming the action (`validate/mod.rs:462`).
 - `loom-executor`: a new `arguments::ArgumentSchemas`, a host-supplied lookup from action id to
   `Option<Value>` (none: the protocol declares no schema), and `arguments::check(schema, value) ->
-  Result<(), ArgumentMismatch>`, public, which walks the value along the schema for the keywords
-  Canon's dialect admits (`type`, `enum`, `properties`, `required`, `additionalProperties`,
-  `items`, `minItems`, `maxItems`, `minLength`, `maxLength`, `minimum`, `maximum`) and names the
-  JSON pointer and keyword of the first failure, quoting at most 120 bytes of the value. The walk
-  is bounded by the schema's depth. No dependency is added: `jsonschema` left the executor at
-  `460813ed`. The executor keeps no dependency on `loom-protocols`
-  (`crates/loom-executor/Cargo.toml`, `[dependencies]`); hosts build the lookup from the entry.
+  Result<(), ArgumentMismatch>`, public, which calls `b10x_canon::validate::check_arguments` and
+  names the JSON pointer and keyword of the first `ArgumentRefusal`, quoting at most 120 bytes of
+  the value; `ArgumentsRefused::Schema` is a mismatch saying the schema is outside Canon's dialect.
+  The schema is Canon's `serde_json::Value`; the generated value is written with Commission's
+  `json::push_value` and read with `serde_json::from_str`, so Loom rounds no number of its own.
+  `crates/loom-executor/Cargo.toml` gains `b10x-canon` at the reference the other three manifests
+  name (`AGENTS.md` § Governor: "any other crate that adds Canon uses the same reference"). No
+  other dependency is added: `jsonschema` left the executor at `460813ed`. The executor keeps no
+  dependency on `loom-protocols` (`crates/loom-executor/Cargo.toml`, `[dependencies]`); hosts
+  build the lookup from the entry.
+- Numbers are compared by exact value, and the value Canon reads depends on how `serde_json` is
+  built (Canon `CHANGELOG.md`, `## [0.10.0]`, "Numbers are compared by exact value";
+  `validate/arguments.rs:72`, `# Numbers`): with `arbitrary_precision` it holds number text,
+  without it doubles and 64-bit integers. In this workspace the feature comes through
+  `connectors-core` (`AGENTS.md:591-592`), so a build of `b10x-loom-executor` alone and a build
+  with `b10x-loom-connectors` in it may answer differently, and only for the literals Canon's
+  changelog lists (`9007199254740992.5`, `1e400`, an integer beyond 64 bits).
 - `Loom::with_argument_schemas(schemas)` beside `Loom::with_governor`
   (`crates/loom-executor/src/lib.rs:142-160`). A Loom built without it checks nothing and records
   no check, as today.
@@ -178,10 +204,19 @@ recorded on its argument request.
     request stays `Requested`.
   - `an_action_outside_the_catalogue_never_reaches_the_check` (no `CheckArguments` recorded).
 - `crates/loom-executor/src/arguments.rs` (unit tests)
-  - `check_refuses_a_value_failing_each_keyword_of_canons_dialect`: for each of the twelve
-    keywords one failing value is refused naming its JSON pointer and the keyword.
+  - `check_passes_canons_refusal_through_with_its_pointer_and_keyword`: `{"limit": "20"}` under a
+    schema with `limit` of `type: integer` is refused naming `/limit` and `type`, the pair
+    `check_arguments` returns first.
+  - `a_schema_outside_canons_dialect_is_a_mismatch_naming_the_dialect`: a hand-built schema with
+    `$ref` is a mismatch saying the schema is outside Canon's dialect; no argument is checked.
   - `a_mismatch_quotes_at_most_120_bytes_of_the_value`: a 4 KiB string under `maxLength: 1` gives
     a diagnostic whose quoted value is 120 bytes or fewer.
+  - `a_number_past_a_double_is_checked_as_this_build_holds_it`: the test reads the feature state
+    (whether `serde_json::from_str::<serde_json::Value>("9007199254740992.5")` writes back as
+    `9007199254740992.5`) and prints it as `arbitrary_precision: on|off`; under a schema with
+    `n` of `type: number, maximum: 9007199254740992` the value `{"n": 9007199254740992.5}` is
+    refused (`maximum`) when it is on and accepted when it is off. It runs in
+    `cargo test -p b10x-loom-executor`, whatever state that build has.
 - `crates/loom-plugin/tests/turn.rs`
   - `a_source_read_without_kind_is_never_performed`: a scripted model writes
     `{"source": "<fixture>", "input": {}}`; the turn submits no `source_read` evidence and starts
@@ -246,6 +281,8 @@ could be wrong).
   target, `Taskfile.yml:23`) — cited
 - **Files:** `crates/loom-executor/src/arguments.rs` (`ArgumentSchemas`, `check`,
   `CheckArgumentsBehavior`) — cited
+- **Files:** `crates/loom-executor/Cargo.toml` (`b10x-canon` at the pinned tag), `Cargo.lock`
+  (the executor's dependency list) — inferred
 - **Files:** `crates/loom-executor/src/lib.rs` (`Loom` fields 97-105, `new` 130-140,
   `with_governor` 146-160, `prepare` 478-606) — cited
 - **Files:** `crates/loom-executor/tests/argument_schema.rs` (new) — cited
@@ -262,8 +299,8 @@ could be wrong).
 - **Files:** `AGENTS.md` (§ Checks that hold the rules, line 118; § Plugin host, 1707),
   `CHANGELOG.md` (`Breaking:` names the empty-object rule for plugin turns, the new
   `ArgumentRequest` states, and `with_argument_schemas` for hosts) — inferred
-- **Not touched:** `Cargo.toml`, `Cargo.lock` (Canon 0.9.0 is pinned already,
-  `crates/loom-protocols/Cargo.toml:14`), `crates/loom-intake-slice/src/run.rs` (passes no lookup),
+- **Not touched:** `Cargo.toml` (the workspace manifest; `story:canon-0-10-0-pin` moves the
+  Canon pin), `crates/loom-intake-slice/src/run.rs` (passes no lookup),
   `protocols/engineering/` (vendored, never edited here, `AGENTS.md:55`) — cited
 - **Would collide with:** any unit in the `loom.run` domain (`ess/domains/run.yaml`, generated
   model), `story:selector-stop-names-set-aside-record` (`ess/domains/run.yaml`),

@@ -31,7 +31,7 @@ scope:
   path: website/docs/guides/move-to-loom.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T22:20:08Z", actor: "agent:sdc", revision: 6, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
 - {from: "proposed", to: "active", at: "2026-11-21T22:20:09Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
@@ -231,7 +231,7 @@ The test file writes its own protocols, in the forms of Canon's fixtures at tag 
 - `website/docs/reference/sdk-stability.md` gains the row `| unreleased | 0.10.0 | 0.16.0 |`;
   `website/docs/guides/move-to-loom.md` names tag `0.10.0`;
   `docs/contracts/loom-action-selection.md` says a `children` form's `subject` and `revision` are
-  not read by `action_facts`.
+  not read by `action_facts` (until `story:selector-stop-names-set-aside-record`).
 - `cargo test -p b10x-loom-governor -p b10x-loom-protocols -p b10x-loom-bindings` exits 0. Each
   new test is timed and named with its time when over 5 s; none runs 60 s; the gate's test step
   ends within 120 s.
@@ -245,8 +245,9 @@ The test file writes its own protocols, in the forms of Canon's fixtures at tag 
 - Calling `check_arguments`: `story:protocol-argument-schema`.
 - Grounds on entries: `story:decided-records-carry-grounds-to-canon`,
   `story:authority-records-bound-and-grounded-in-canon`.
-- `action_facts` reading a `children` form's `subject` and `revision`, and a scope in the
-  frontier: left as they are; a story that needs them takes them.
+- `action_facts` reading a `children` form's `subject` and `revision`:
+  `story:selector-stop-names-set-aside-record`. A scope on the supplied authority entry:
+  `story:approvals-supplied-to-canon-evaluation`.
 - Following Canon in counting an equal repeated evidence record once.
 - Composing imported protocols.
 - Runbook: its `canon evaluate` cases record `"canon": "0.9.0"` (158 files, for example

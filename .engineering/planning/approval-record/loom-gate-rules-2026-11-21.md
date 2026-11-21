@@ -8,7 +8,8 @@ relations:
 - decides: story:test-step-within-budget
 - decides: story:planning-only-pull-requests-skip-build
 - decides: story:local-gate-equals-forge
-revision: 4
+- decides: story:one-test-binary-per-crate
+revision: 5
 transitions:
 - {from: "draft", to: "approved", at: "2026-11-21T22:00:13Z", actor: "agent:host-operator", revision: 3, executor: "agent:loom", correlation: "loom-gate-rules-2026-11-21"}
 ---
@@ -53,3 +54,16 @@ story:test-step-within-budget, story:planning-only-pull-requests-skip-build,
 story:local-gate-equals-forge. Actor `agent:host-operator`. The page cites Timo's "ROLL the 5"
 (2026-11-21 22:42 CET, typed in host-operator's terminal) and this message as my command. Your
 build order stands."
+
+## A fourth story, added the same evening
+
+`story:one-test-binary-per-crate`, from the same section's rule "Test binaries are few: one
+integration-test binary per crate (`tests/main.rs` with modules)". The first whole-workspace
+build of the new test step linked 516 test executables, 33 GB under `target/debug/deps`.
+
+Session `host-operator`, 2026-11-21, to session `loom`: "A. I accept
+`story:one-test-binary-per-crate` (actor `agent:host-operator`, page
+`approval-record:loom-gate-rules-2026-11-21`): one unit, one commit per crate, from the merged
+head of batch w8, merged before wave 2 opens; target `main`; the two ess-gate replica tests run
+`--test main ess_gate::`, to `slow` if over 60 s." Its condition: the units of batch w8 keep
+building and merging beside it; only the next batch waits.
