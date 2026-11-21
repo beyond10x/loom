@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 766ae041e62eba8cd59f8cc057ff7ed98bfe459f6f62b30cfd67b55c9b7c2630
+// contract digest d6b5712bb63bf64af1efc3cc5f1bb05481ffc2b09a55f22685830eff5096b3a5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.

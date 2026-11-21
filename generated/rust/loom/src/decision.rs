@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 766ae041e62eba8cd59f8cc057ff7ed98bfe459f6f62b30cfd67b55c9b7c2630
+// contract digest d6b5712bb63bf64af1efc3cc5f1bb05481ffc2b09a55f22685830eff5096b3a5
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Decisions — `loom.decision`.
@@ -280,7 +280,7 @@ pub struct PathLineCitation {
 
 /// Principal — `loom.decision.Principal`: a distinct wrapper around `String`.
 ///
-/// Who decides: a person's name (operator), decider:<kind> (decider:haiku, decider:approve, decider:reject), or silence for a default taken because nobody answered. Recorded as given, as Canon records a principal (canon-decisions/1).
+/// Who decides: a person's name (operator), decider:<kind> (decider:model, decider:haiku as an older alias, decider:approve, decider:reject), rule:<name>, or silence for a default taken because nobody answered. Recorded as given, as Canon records a principal (canon-decisions/1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Principal(pub String);
 
@@ -868,6 +868,13 @@ pub struct Decide {
 /// outcomes exist to prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecideOutcome {
+    /// `kind-not-principal` — when `((principal_kind == decider and not (principal starts_with "decider:")) or (principal_kind == rule and not (principal starts_with "rule:")) or (principal_kind == silence and principal != silence) or (principal_kind == person and (principal starts_with "decider:" or principal starts_with "rule:" or principal == silence)))`.
+    ///
+    /// principal_kind must be the kind the principal's name has: decider:<kind> is decider, rule:<name> is rule, silence is silence, any other name is person. A command whose kind is not its principal's is refused whatever the holder, before every other kind guard.
+    KindNotPrincipal {
+        /// Why it was refused: `loom.decision.NotEligible`.
+        error: NotEligible,
+    },
     /// `silence-takes-recommendation` — when `principal_kind == silence`.
     ///
     /// Silence never chooses an option: a default on silence is taken through TakeRecommendation.
@@ -1359,6 +1366,13 @@ pub struct TakeRecommendation {
 /// outcomes exist to prevent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TakeRecommendationOutcome {
+    /// `kind-not-principal` — when `((principal_kind == decider and not (principal starts_with "decider:")) or (principal_kind == rule and not (principal starts_with "rule:")) or (principal_kind == silence and principal != silence) or (principal_kind == person and (principal starts_with "decider:" or principal starts_with "rule:" or principal == silence)))`.
+    ///
+    /// principal_kind must be the kind the principal's name has: decider:<kind> is decider, rule:<name> is rule, silence is silence, any other name is person. A command whose kind is not its principal's is refused whatever the holder, before every other kind guard.
+    KindNotPrincipal {
+        /// Why it was refused: `loom.decision.NotEligible`.
+        error: NotEligible,
+    },
     /// `no-request` — for an identity no record carries.
     ///
     /// No request has this id.
@@ -1804,9 +1818,9 @@ pub struct OpenDecisionsForPrincipal {
 pub mod obligations {
     /// The behaviour `loom.decision.Decide` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by the fields of error `loom.decision.NotEligible`, which the specification gives no source, in `silence-takes-recommendation`.
+    /// Why it is not generated: kept an obligation by the fields of error `loom.decision.NotEligible`, which the specification gives no source, in `kind-not-principal`.
     ///
-    /// Contract: given `loom.decision.Decide` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `silence-takes-recommendation` when `principal_kind == silence`, error `loom.decision.NotEligible`; `option-or-answer` when `((defined(option) and defined(answer)) or (not (defined(option)) and not (defined(answer))))`, error `loom.decision.OptionOrAnswer`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `answer-not-allowed` when the existing subject's stored fields satisfy `unblocks.kind != question` and `defined(answer)`, error `loom.decision.AnswerNotAllowed`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `principal_kind != person`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))`, error `loom.decision.NotEligible`; `decider-under-rule` when the existing subject's stored fields satisfy `(holder == rule or holder == rule_final or holder == rule_and_decider or (holder == rule_and_decider_final and not (exists o in options: ((o.letter == input.option and o.consequence.grant == denied)))))` and `principal_kind == decider`, error `loom.decision.NotEligible`; `rule-not-holder` when the existing subject's stored fields satisfy `not ((holder == rule or holder == rule_final))` and `principal_kind == rule`, error `loom.decision.NotEligible`; `decided` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`.
+    /// Contract: given `loom.decision.Decide` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `kind-not-principal` when `((principal_kind == decider and not (principal starts_with "decider:")) or (principal_kind == rule and not (principal starts_with "rule:")) or (principal_kind == silence and principal != silence) or (principal_kind == person and (principal starts_with "decider:" or principal starts_with "rule:" or principal == silence)))`, error `loom.decision.NotEligible`; `silence-takes-recommendation` when `principal_kind == silence`, error `loom.decision.NotEligible`; `option-or-answer` when `((defined(option) and defined(answer)) or (not (defined(option)) and not (defined(answer))))`, error `loom.decision.OptionOrAnswer`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `answer-not-allowed` when the existing subject's stored fields satisfy `unblocks.kind != question` and `defined(answer)`, error `loom.decision.AnswerNotAllowed`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `principal_kind != person`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))`, error `loom.decision.NotEligible`; `decider-under-rule` when the existing subject's stored fields satisfy `(holder == rule or holder == rule_final or holder == rule_and_decider or (holder == rule_and_decider_final and not (exists o in options: ((o.letter == input.option and o.consequence.grant == denied)))))` and `principal_kind == decider`, error `loom.decision.NotEligible`; `rule-not-holder` when the existing subject's stored fields satisfy `not ((holder == rule or holder == rule_final))` and `principal_kind == rule`, error `loom.decision.NotEligible`; `decided` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`.
     pub trait DecideBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.decision.Decide`.
         ///
@@ -1895,9 +1909,9 @@ pub mod obligations {
 
     /// The behaviour `loom.decision.TakeRecommendation` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request`.
+    /// Why it is not generated: kept an obligation by the fields of error `loom.decision.NotEligible`, which the specification gives no source, in `kind-not-principal`.
     ///
-    /// Contract: given `loom.decision.TakeRecommendation` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `(principal_kind == decider or principal_kind == rule)`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))` and `principal_kind != silence`, error `loom.decision.NotEligible`; `not-strong` when the existing subject's stored fields satisfy `recommendation_strength != strong`, error `loom.decision.NotEligible`; `silence-without-default` when the existing subject's stored fields satisfy `default_on_silence == false` and `principal_kind == silence`, error `loom.decision.NoDefaultOnSilence`; `silence-not-due` when the existing subject's stored fields satisfy `(not (defined(expires_at)) or expires_at > input.decided_at as timestamp)` and `principal_kind == silence`, error `loom.decision.NotDue`; `taken` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`.
+    /// Contract: given `loom.decision.TakeRecommendation` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `kind-not-principal` when `((principal_kind == decider and not (principal starts_with "decider:")) or (principal_kind == rule and not (principal starts_with "rule:")) or (principal_kind == silence and principal != silence) or (principal_kind == person and (principal starts_with "decider:" or principal starts_with "rule:" or principal == silence)))`, error `loom.decision.NotEligible`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `(principal_kind == decider or principal_kind == rule)`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))` and `principal_kind != silence`, error `loom.decision.NotEligible`; `not-strong` when the existing subject's stored fields satisfy `recommendation_strength != strong`, error `loom.decision.NotEligible`; `silence-without-default` when the existing subject's stored fields satisfy `default_on_silence == false` and `principal_kind == silence`, error `loom.decision.NoDefaultOnSilence`; `silence-not-due` when the existing subject's stored fields satisfy `(not (defined(expires_at)) or expires_at > input.decided_at as timestamp)` and `principal_kind == silence`, error `loom.decision.NotDue`; `taken` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`.
     pub trait TakeRecommendationBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.decision.TakeRecommendation`.
         ///
