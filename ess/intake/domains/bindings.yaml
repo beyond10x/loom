@@ -11,8 +11,10 @@ summary: >-
   own action: its report may state evidence of the kinds the action declares it may produce, and
   only those are submitted, about the intent. A binding confers no authority: an action that
   needs a capability still needs its grant, and the governor still decides admission. Commands
-  start with a cleared environment that keeps only PATH, never Loom's own credentials, and are
-  killed with the processes they started past the configuration's timeout. They run through the
+  start with a cleared environment that keeps only PATH, never Loom's own credentials. Past the
+  configuration's timeout a command is killed: under `linux` with every process it started, under
+  `local` with its process group, where a process that left the group and still holds the
+  command's output is not killed and the step is refused by its runner. They run through the
   engine's confinement, the runner the host injected, and never through a process the library
   starts on its own: a run given bindings and no runner is refused, before any process starts and
   before any model call, with the confinement refusal NoRunner. The operator's opt-in selects the
