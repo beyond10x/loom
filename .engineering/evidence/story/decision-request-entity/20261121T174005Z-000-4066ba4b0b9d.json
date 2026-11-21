@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T17:40:05Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-request-entity",
+  "kind": "story",
+  "revision": 35,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "six findings of pass 1 fixed in 54cf9f95, b6dfb3a3 and 0357f12a (impl/decision-request-entity); pass 2 found each closed (review-result:decision-request-entity-security-2)",
+    "review": "review-result:decision-request-entity-security-1",
+    "outcome": "fixed"
+  }
+}

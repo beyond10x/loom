@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 08667631688524975ef5aa1dadccc9336df0dcf1a7bdd51985e2b2230103f5c3
+// contract digest c758f5f11113e183054756382575f65c4c89d30c0a8c3bff06fb4597cb584925
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Decisions — `loom.decision`.

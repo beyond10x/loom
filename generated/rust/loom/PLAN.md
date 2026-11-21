@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 08667631688524975ef5aa1dadccc9336df0dcf1a7bdd51985e2b2230103f5c3
+  contract digest c758f5f11113e183054756382575f65c4c89d30c0a8c3bff06fb4597cb584925
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-419 capabilities: **403 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+426 capabilities: **410 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -63,11 +63,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.authority.Outcome` |
 | domain type | `loom.bindings.ActionBudget` |
 | domain type | `loom.bindings.ArtifactPath` |
+| domain type | `loom.bindings.ArtifactPlacement` |
 | domain type | `loom.bindings.ArtifactRevision` |
 | domain type | `loom.bindings.BindingsDocument` |
 | domain type | `loom.bindings.BindingsRefusal` |
 | domain type | `loom.bindings.BindingsRefusalReason` |
 | domain type | `loom.bindings.BoundAction` |
+| domain type | `loom.bindings.BoundStep` |
+| domain type | `loom.bindings.DiscardReason` |
 | domain type | `loom.bindings.EvidenceEntry` |
 | domain type | `loom.bindings.Executor` |
 | domain type | `loom.bindings.ExecutorSpec` |
@@ -83,6 +86,10 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.RetryFeedback` |
 | domain type | `loom.bindings.RetryLog` |
 | domain type | `loom.bindings.RetryRecord` |
+| domain type | `loom.bindings.RevisionMove` |
+| domain type | `loom.bindings.RevisionRefusal` |
+| domain type | `loom.bindings.RevisionRefusalReason` |
+| domain type | `loom.bindings.StepOutcome` |
 | domain type | `loom.bindings.ToolAllowList` |
 | domain type | `loom.datasource.AdapterAlias` |
 | domain type | `loom.datasource.ConnectionId` |

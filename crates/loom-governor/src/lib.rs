@@ -179,6 +179,7 @@ mod file_suspension;
 mod locked_dir;
 
 pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
+pub use file_store::WriteStep;
 pub use file_store::{FileCaseStore, FileStoreError, case_file_stem};
 pub use file_suspension::{FileSuspensionStore, LONGEST_COMMISSION_ID};
 pub use locked_dir::LockedDir;
@@ -1551,6 +1552,228 @@ impl<S: FallibleCaseStore, T: EvaluationTime> ObservationPort for CanonGovernor<
             .observe(observation.into_data())
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
+}
+
+/// What one step wrote ([`CanonGovernor::record_step`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepWritten {
+    /// The artifact revisions moved, in artifact order: from the revision the case held to the
+    /// one given.
+    pub moves: Vec<loom::bindings::RevisionMove>,
+    /// The case revision once the step was written.
+    pub case_revision: i64,
+    /// Whether each record applies, in the order given.
+    pub applies: Vec<bool>,
+}
+
+/// Why a step was not written ([`CanonGovernor::record_step`]): nothing of it was kept, neither
+/// a revision move nor a record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepError {
+    /// The store could not write the step.
+    StoreUnavailable { problem: String },
+    /// The governor does not hold the case.
+    UnknownCase,
+    /// The held case cannot be read under its protocol, or the trusted time cannot be read.
+    Unavailable,
+    /// The case's protocol does not declare `artifact`.
+    UndeclaredArtifact { artifact: String },
+    /// The revision given for `artifact` is not an identifier.
+    InvalidRevision { artifact: String },
+    /// The record `evidence` is for another case.
+    OtherCase { evidence: String },
+    /// The governor does not take the record ([`CanonGovernor::check_evidence`]).
+    Evidence(EvidenceRefusal),
+    /// The record `evidence` is not about the revisions the case holds once the step's moves are
+    /// applied: its case revision, its subject's revision or an upstream revision differs.
+    StaleRecord { evidence: String, detail: String },
+}
+
+impl From<GovernorError> for StepError {
+    fn from(error: GovernorError) -> Self {
+        match error {
+            GovernorError::UnknownCase => Self::UnknownCase,
+            GovernorError::GovernorUnavailable => Self::Unavailable,
+        }
+    }
+}
+
+impl fmt::Display for StepError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
+            Self::UnknownCase => f.write_str("the governor does not hold the case"),
+            Self::Unavailable => {
+                f.write_str("the governor cannot read the case under its protocol")
+            }
+            Self::UndeclaredArtifact { artifact } => {
+                write!(f, "artifact `{artifact}` is not declared by the protocol")
+            }
+            Self::InvalidRevision { artifact } => write!(
+                f,
+                "the revision of artifact `{artifact}` is not an identifier"
+            ),
+            Self::OtherCase { evidence } => write!(f, "evidence `{evidence}` is for another case"),
+            Self::Evidence(refusal) => refusal.fmt(f),
+            Self::StaleRecord { evidence, detail } => write!(
+                f,
+                "evidence `{evidence}` is not about the revisions the step writes: {detail}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for StepError {}
+
+impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
+    /// Writes one step to the case in one store write: each artifact of `revisions` whose
+    /// revision differs from the one the case holds moves to it, the case revision rising by one
+    /// per artifact moved, and `evidence` is kept after the moves, in the order given, each record
+    /// judged as [`EvidencePort::receive`] judges one against the case as moved. An artifact
+    /// `revisions` does not name keeps its revision.
+    ///
+    /// Everything is checked before anything changes: each revision is an identifier, each record
+    /// is for the case and taken by [`CanonGovernor::check_evidence`]; and, under the store's
+    /// write, each artifact is declared and each record is about the case as moved: its
+    /// `subject_revision` is the moved case revision, and a record its facts carry names the moved
+    /// revision of its subject and of every upstream artifact. A failed check writes nothing, so a
+    /// store whose write is atomic ([`FileCaseStore`]) holds the case either as before the step or
+    /// with every move and every record of it. A step with no record that would move nothing
+    /// writes nothing.
+    ///
+    /// # Errors
+    /// [`StepError`]; nothing of the step was kept.
+    pub fn record_step(
+        &self,
+        case: &CaseId,
+        revisions: &BTreeMap<String, String>,
+        evidence: Vec<AttributedEvidence>,
+    ) -> Result<StepWritten, StepError> {
+        if let Some((artifact, _)) = revisions
+            .iter()
+            .find(|(_, revision)| !is_identifier(revision))
+        {
+            return Err(StepError::InvalidRevision {
+                artifact: artifact.clone(),
+            });
+        }
+        let (held, ir) = self.held_with_ir(case)?;
+        let records: Vec<EvidenceData> = evidence
+            .into_iter()
+            .map(|attributed| attributed.into_evidence().into_data())
+            .collect();
+        for data in &records {
+            if data.case_id != *case {
+                return Err(StepError::OtherCase {
+                    evidence: data.evidence_id.0.0.clone(),
+                });
+            }
+            self.check_evidence(data).map_err(StepError::Evidence)?;
+        }
+        if records.is_empty()
+            && revisions
+                .iter()
+                .all(|(artifact, revision)| held.artifacts.get(artifact) == Some(revision))
+        {
+            return Ok(StepWritten {
+                moves: Vec::new(),
+                case_revision: held.revision,
+                applies: Vec::new(),
+            });
+        }
+        let at = self.time.at(case).map_err(|_| StepError::Unavailable)?;
+        self.store
+            .update(case, |state| {
+                let mut next = state.clone();
+                let moves = moved(&mut next, revisions)?;
+                for data in &records {
+                    about_moved_case(&next, data)?;
+                }
+                let mut applying = Vec::with_capacity(records.len());
+                for data in records {
+                    let applies = applies(&ir, &next, &data, at.as_deref());
+                    applying.push(applies);
+                    next.evidence.push(HeldEvidence { data, applies });
+                }
+                let written = StepWritten {
+                    moves,
+                    case_revision: next.revision,
+                    applies: applying,
+                };
+                *state = next;
+                Ok(written)
+            })
+            .map_err(|error| StepError::StoreUnavailable {
+                problem: error.to_string(),
+            })?
+            .unwrap_or(Err(StepError::UnknownCase))
+    }
+}
+
+/// Moves each artifact of `revisions` whose revision in `state` differs, raising the case revision
+/// by one per move; the moves made, in artifact order.
+fn moved(
+    state: &mut CaseState,
+    revisions: &BTreeMap<String, String>,
+) -> Result<Vec<loom::bindings::RevisionMove>, StepError> {
+    let mut moves = Vec::new();
+    for (artifact, to) in revisions {
+        let current =
+            state
+                .artifacts
+                .get_mut(artifact)
+                .ok_or_else(|| StepError::UndeclaredArtifact {
+                    artifact: artifact.clone(),
+                })?;
+        if current != to {
+            moves.push(loom::bindings::RevisionMove {
+                artifact: artifact.clone(),
+                from: current.clone(),
+                to: to.clone(),
+            });
+            to.clone_into(current);
+            state.revision += 1;
+        }
+    }
+    Ok(moves)
+}
+
+/// Whether `data` is about the case as `state` holds it: its case revision, and, for the record
+/// its facts carry, its subject's revision and every upstream revision.
+fn about_moved_case(state: &CaseState, data: &EvidenceData) -> Result<(), StepError> {
+    let stale = |detail: String| StepError::StaleRecord {
+        evidence: data.evidence_id.0.0.clone(),
+        detail,
+    };
+    if data.subject_revision != state.revision {
+        return Err(stale(format!(
+            "it is for case revision {}, and the step leaves the case at {}",
+            data.subject_revision, state.revision
+        )));
+    }
+    let Some(record) = canon_record(data) else {
+        return Ok(());
+    };
+    let held = |artifact: &str| state.artifacts.get(artifact).map(String::as_str);
+    if !bound_to_current_revision(state, &record) {
+        return Err(stale(format!(
+            "it names revision {} of {}, and the step leaves {}",
+            record.subject_revision.as_str(),
+            record.subject.as_str(),
+            held(record.subject.as_str()).unwrap_or("no revision")
+        )));
+    }
+    for (artifact, revision) in record.upstream_revisions.iter() {
+        if held(artifact.as_str()) != Some(revision.as_str()) {
+            return Err(stale(format!(
+                "it names upstream revision {} of {}, and the step leaves {}",
+                revision.as_str(),
+                artifact.as_str(),
+                held(artifact.as_str()).unwrap_or("no revision")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// The compiled protocol, after checking `revisions` and `inputs` against what it declares.

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bound-artifact-revisions
 kind: story
-status: proposed
+status: active
 title: After a bound action each placed artifact takes the content digest of its path as its revision
 summary: Loom computes revisions; an observing action that changed an artifact records no evidence
 tags:
@@ -25,9 +25,10 @@ scope:
   path: crates/loom-governor/tests/step_write.rs
 - confidence: cited
   path: ess/domains/bindings.yaml
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:45Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-11-21T21:13:21Z", actor: "agent:sdc", revision: 8, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
 ---
 ## Outcome
 

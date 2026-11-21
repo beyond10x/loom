@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:record-copy-between-cases
 kind: story
-status: proposed
+status: active
 title: A copy binding copies the latest current record of a kind from another case of the same tree
 summary: Evidence from parent or sibling into a case, made by Loom and cited to its source
 tags:
@@ -11,7 +11,6 @@ relations:
 - decomposes: epic:protocol-tree-on-bindings
 - serves: vision:O1
 - depends_on: story:child-case-runtime
-- depends_on: story:bound-agent-node
 scope:
 - confidence: inferred
   path: crates/loom-bindings
@@ -23,9 +22,10 @@ scope:
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
   path: ess/domains/bindings.yaml
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
+- {from: "proposed", to: "active", at: "2026-11-21T21:13:22Z", actor: "agent:sdc", revision: 9, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
 ---
 ## Outcome
 

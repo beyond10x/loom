@@ -132,6 +132,8 @@ struct Stubs {
     /// Appends `run` to the file `runs` of its start directory, prints `LOOM_RETRY_FEEDBACK` and
     /// exits 0.
     write: String,
+    /// [`Stubs::write`], after it writes a second draft to `docs/draft`.
+    write_draft: String,
 }
 
 fn stubs() -> &'static Stubs {
@@ -160,6 +162,10 @@ fn stubs() -> &'static Stubs {
             write: script(
                 "write.sh",
                 "echo run >> runs\nprintf '%s' \"${LOOM_RETRY_FEEDBACK-}\"\nexit 0\n",
+            ),
+            write_draft: script(
+                "write-draft.sh",
+                "echo 'the second draft' > docs/draft\necho run >> runs\nprintf '%s' \"${LOOM_RETRY_FEEDBACK-}\"\nexit 0\n",
             ),
         }
     })
@@ -248,6 +254,11 @@ impl Scratch {
         let store = dir.path().join("store");
         std::fs::create_dir(&workspace).unwrap();
         std::fs::create_dir(&store).unwrap();
+        // The placed artifacts hold something, so a step moves them to a revision that is not
+        // `none` (story bound-artifact-revisions).
+        std::fs::create_dir(workspace.join("docs")).unwrap();
+        std::fs::write(workspace.join("docs/brief"), b"the brief\n").unwrap();
+        std::fs::write(workspace.join("docs/draft"), b"the first draft\n").unwrap();
         Self {
             _dir: dir,
             workspace,
@@ -1349,4 +1360,60 @@ fn a_feedback_document_that_cannot_be_kept_starts_nothing() {
     assert!(runner.children_of(WRITE_STUB).is_empty());
     assert_eq!(port_observations(&governor), observations);
     assert_eq!(blob_names(&outside), before);
+}
+
+// ---------------------------------------------------------------------------------------------
+// A retry meets the revisions a step writes (story bound-artifact-revisions)
+
+/// What the writer's blob holds: the value of `LOOM_RETRY_FEEDBACK` it was given, empty for none.
+fn printed_by_the_writer(
+    governor: &CanonGovernor<MemoryCaseStore>,
+    scratch: &Scratch,
+    run: usize,
+) -> String {
+    let runs = runs_of(governor, WRITE);
+    let blob = runs[run]["blob_sha256"].as_str().unwrap().to_owned();
+    std::fs::read_to_string(scratch.blobs().join(blob)).unwrap()
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_retried_writer_that_moves_the_draft_records_the_moved_revision_and_is_not_sent_back_again() {
+    let scratch = Scratch::new();
+    let document = document(&stubs().check_invalid, &stubs().write_draft, RETRY);
+    let governor = governor();
+    let case = CaseId(CASE.to_owned());
+    let effects = port(&governor, &document, &scratch, flag_runner());
+    assert_performed(&drive(&governor, &effects, CHECK, "{}"));
+    // The check's step moved `draft` to the digest of the first draft; its record is about it.
+    let first = governor.revisions(&case).unwrap()["draft"].clone();
+    assert_ne!(first, DRAFT_REVISION);
+    let sent_back = retries(&governor, writer(&document));
+    assert_eq!(sent_back.len(), 1, "{sent_back:#?}");
+    assert_eq!(sent_back[0].subject_revision, first);
+    // The retried writer writes a second draft: its step moves `draft`, and its record is about
+    // the moved revision, which the step's one write accepts (no `StaleRecord`).
+    assert_performed(&drive(&governor, &effects, WRITE, "{}"));
+    assert!(!printed_by_the_writer(&governor, &scratch, 0).is_empty());
+    assert_eq!(
+        runs_of(&governor, WRITE)[0]["retry_of"],
+        serde_json::json!(ids(&sent_back))
+    );
+    let second = governor.revisions(&case).unwrap()["draft"].clone();
+    assert_ne!(second, first);
+    let held = governor.evidence(&case).unwrap();
+    let written = held.last().unwrap();
+    assert_eq!(written.kind, "draft_written");
+    assert_eq!(
+        plain(&written.facts)["subject_revision"],
+        serde_json::json!(second)
+    );
+    // The check's record is about the first draft: nothing sends the writer back now.
+    assert!(retries(&governor, writer(&document)).is_empty());
+    assert_performed(&drive(&governor, &effects, WRITE, "{}"));
+    assert_eq!(printed_by_the_writer(&governor, &scratch, 1), "");
+    assert_eq!(
+        runs_of(&governor, WRITE)[1]["retry_of"],
+        serde_json::json!([])
+    );
 }

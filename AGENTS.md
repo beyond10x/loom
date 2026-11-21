@@ -1243,8 +1243,15 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   naming no flag and no file member; `local` only with `UNCONFINED_FLAG_REASON`, else
   `CommandUnconfined`), then `preflight_child` on the workspace root, its refusal passed on. Every
   program, the `arguments_from` argv included, starts through that runner's `run_child`, as
-  `bound_program_child` builds the child (the one definition the intake slice's `CommandRunner`
-  also uses). A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
+  `bound_case_child` (`src/child.rs`, `story:bound-program-case-id`) builds the child: it calls
+  `bound_program_child` (the one definition the intake slice's `CommandRunner` also uses) and
+  replaces the environment with the one `loom.bindings.ProgramEnvironment` describes, `PATH` at
+  the host's value and `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
+  and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
+  anything starts. It is the only caller of `bound_program_child` in `crates/loom-bindings/src`
+  (`every_child_of_the_crate_is_built_by_bound_case_child`), so a port of the crate that starts a
+  program gives the case id; the intake slice's commands keep `PATH` alone. Held by
+  `crates/loom-bindings/tests/bound_case_id.rs`. A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
   naming both, nothing started or recorded), the run count (observations of source
   `PROGRAM_SOURCE`, `loom/bound-program`, naming the case and the action; `RunsSpent` at
   `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
@@ -1264,8 +1271,22 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   program prints names a result, revision, producer or instant. The cap holds for one port that
   drives the case; two hosts that drive one case store at the same time can each start the action
   once more (`story:bound-program-run-cap-holds-across-ports`). Held by
-  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
-  `crates/loom-governor` is not changed by it.
+  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`.
+- A placed artifact's revision is Loom's (`revision.rs`, `story:bound-artifact-revisions`):
+  `content_revision` is `t` and 16 hex digits of the SHA-256 over a file's bytes, a link's target
+  string (never followed) or a tree's entries in path order, `none` while absent. It opens each
+  segment from the workspace root with `O_NOFOLLOW` (rustix), so a link among the directories,
+  an absolute path and `..` are `OutsideWorkspace` and read by nothing; past `MAX_ARTIFACT_BYTES`,
+  `MAX_TREE_ENTRIES` or `MAX_TREE_DEPTH` is `TooLarge`; a change during the read is
+  `ChangedWhileRead`; a pipe, socket or device is `Unreadable`, never opened. `ProgramEffects`
+  digests before the run (one that fails is `ArtifactUnreadable`, nothing started) and after it,
+  and writes the moves with the records through `CanonGovernor::record_step`, one store write
+  that checks every record is about the moved revisions before it changes anything;
+  a non-`write` action whose program changed a placed artifact is `Discarded`
+  (`ChangedByNonWriter`): moves, no records. `PlacedRevisions` is the `Governor` that writes the
+  moves before every `frontier` and `completion`. Held by `crates/loom-bindings/tests/bound_revisions.rs`
+  and `crates/loom-governor/tests/step_write.rs` (a crash at each `WriteStep` of
+  `FileCaseStore::update_until` leaves neither or both).
 - `retry_records(governor, case, binding)` (`retry.rs`, `story:bound-program-retry-records`) is
   each held record of the case whose facts name, once each, a `kind` (the record's own) and a
   `result` the binding's `retry_when` lists, about the revision the case holds for the facts'
