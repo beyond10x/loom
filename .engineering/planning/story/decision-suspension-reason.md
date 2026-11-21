@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:decision-suspension-reason
 kind: story
-status: proposed
+status: active
 title: Commission holds a run for a decision request and resumes it only once it is decided and any record it produces is recorded
 summary: SuspensionReason::Decision, a hold with no action request, resume_after_decision with Recorded or NoRecord; the optional Suspension members reach the slice's grant and handoff modules and the CLI's resume refusals, so the approval and inbox stories wait on it
 tags:
@@ -73,9 +73,10 @@ scope:
   path: crates/loom-mandate/tests/mandate_authority.rs
 - confidence: cited
   path: ess/commission/domains/responsibility.yaml
-revision: 15
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:21Z", actor: "agent:sdc", revision: 14, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T04:23:21Z", actor: "agent:sdc", revision: 17, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
 ---
 ## Outcome
 
@@ -282,8 +283,9 @@ Elsewhere:
 Who returns the `Decision` suspension, opening the request, and reading whether its option
 produces a record (`story:question-and-outcome-decisions-hold-runs`). A command that calls
 `resume_after_decision`, and its exit statuses (`story:decisions-resume-the-held-run`:
-`decisions decide`, `take` and `record` over `--state` resume through `resume_decision_hold`, and
-number `HeldForAuthority` 31 and `OtherDecision` 32 for those commands).
+the command line resumes approval holds only and refuses any other hold `NotRebuildable`, exit
+31; `HeldForAuthority` and `OtherDecision` reach a host through `resume_decided_request` and have
+no exit status of their own).
 Any timer. Changing the approval path. `approve`'s own refusal of a decision-held commission
 (`story:approval-decisions-resume-held-runs`).
 

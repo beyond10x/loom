@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:hash-chained-run-log
 kind: story
-status: proposed
+status: active
 title: Each case has a run log appended one line per event, each line naming the digest of the one before
 summary: seq and prev per line, appended under the store lock, a reader that refuses a cut or altered log
 tags:
@@ -38,9 +38,10 @@ scope:
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/status.json
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:45Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":4}}}
+- {from: "proposed", to: "active", at: "2026-11-21T04:23:20Z", actor: "agent:sdc", revision: 8, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
 ---
 ## Outcome
 

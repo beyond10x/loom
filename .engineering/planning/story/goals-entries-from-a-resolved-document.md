@@ -13,7 +13,26 @@ relations:
 - depends_on: story:goals-grounds-and-free-answers
 - depends_on: story:engine-configuration-document
 - depends_on: story:tree-daemon
-revision: 2
+scope:
+- confidence: inferred
+  path: crates/loom-cli/src/lib.rs
+- confidence: cited
+  path: crates/loom-governor/src/file_goals.rs
+- confidence: cited
+  path: crates/loom-governor/src/lib.rs
+- confidence: cited
+  path: crates/loom-governor/tests/file_goals.rs
+- confidence: inferred
+  path: crates/loom-tree/src
+- confidence: cited
+  path: crates/loom-tree/src/engine.rs
+- confidence: cited
+  path: crates/loom-tree/tests/engine_goals.rs
+- confidence: cited
+  path: ess/domains/decision.yaml
+- confidence: cited
+  path: ess/domains/engine.yaml
+revision: 5
 ---
 ## Outcome
 
@@ -240,3 +259,35 @@ Last:
 - Reloading a changed engine configuration in a running daemon.
 - A cache of the goals document between checks.
 - A per-file bound for workspace files (`story:workspace-file-bound-in-engine-configuration`).
+
+## Scope
+
+Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Primary surface:** `crates/loom-governor/src/file_goals.rs` (new) with `crates/loom-tree/src/engine.rs` — cited, story § Files
+- **Files:** `ess/domains/engine.yaml` — cited; not at HEAD, created by `story:engine-configuration-document`
+- **Files:** `ess/domains/decision.yaml` — cited; not at HEAD, created by `story:decision-request-entity`, extended by `story:goals-grounds-and-free-answers`
+- **Files:** `generated/rust/loom` — cited; exists at HEAD, regenerated
+- **Files:** `crates/loom-governor/src/file_goals.rs` — cited; new, not at HEAD
+- **Files:** `crates/loom-governor/src/lib.rs` — cited; exists at HEAD, one `mod` line
+- **Files:** `crates/loom-tree/src/engine.rs` — cited; not at HEAD, `crates/loom-tree` is created by `story:tree-run-command` and the file by `story:engine-configuration-document`
+- **Files:** `website/docs/reference/cli.md` — cited; exists at HEAD, regenerated
+- **Files (tests):** `crates/loom-governor/tests/file_goals.rs`, `crates/loom-tree/tests/engine_goals.rs` — cited; new
+- **Symbols:** `FileGoalsEntries`, `GoalsEntries`, `GoalsEntryState`, `goals_verdict`, `with_goals_entries`, `HeldCaseGrounds`, `EngineRefusal::Goals*`, `RunOptions.goals` — cited; none at HEAD. The traits and functions are planned by `story:goals-grounds-and-free-answers` (`HeldCaseGrounds` by `story:grounds-resolve-against-held-cases`). `EngineRefusal` is planned by `story:engine-configuration-document`
+- **Also likely:** `crates/loom-tree/src` (the `HeldCaseGrounds` build that `tree run` and the daemon share) — inferred; the story names no file, and `story:goals-grounds-and-free-answers` § Files names only the crate
+- **Also likely:** `crates/loom-cli/src/lib.rs` (the `tree` arms that load `--engine`) — inferred; exists at HEAD. `crates/loom-cli/src/tree.rs` is the other candidate (`story:tree-run-command` scope, itself inferred)
+- **Documents:** the guide page `story:engine-configuration-document` plans under `website/docs/` — inferred; no path is named anywhere
+- **Confidence:** medium — every code path the story names is cited, but only 3 of 9 exist at HEAD (`generated/rust/loom`, `crates/loom-governor/src/lib.rs`, `website/docs/reference/cli.md`), and two surfaces are inferred
+- **Would collide with:**
+  - `ess/domains/engine.yaml`, ordered before it by `depends_on`: `story:engine-configuration-document`, `story:tree-daemon`, `story:concurrent-cases-in-the-tree-daemon`, `story:named-egress-per-action`, `story:substrate-daemon-runner`, `story:action-limits-enforced`, `story:confinement-level-required`, `story:executable-allow-list`, `story:limit-hits-in-run-log`
+  - `ess/domains/engine.yaml`, unordered by the coordinator's decision (a section each, no edge): `story:confinement-level-on-oci-and-pod`, `story:executable-descendants-held`, `story:ingress-routes-per-action`, `story:substrate-daemon-on-another-host`, `story:capacity-given-to-an-admission-program`, `story:agent-session-through-substrate`, `story:workspace-file-bound-in-engine-configuration`
+  - `ess/domains/decision.yaml`, ordered before it: `story:decision-request-entity`, `decider-port-and-grounding-check`, `decided-record-written-then-recorded`, `decision-inbox-commands`, `decision-routing-by-holder`, `escalate-when-conditions`, `silence-and-expiry-at-a-host-tick`, `goals-grounds-and-free-answers`
+  - `generated/rust/loom`, unordered: `story:observe-git-in-a-linked-worktree`, `story:secret-files-several-secrets`, `story:egress-by-host` (inferred). Every story that edits ESS regenerates it, so the unordered `engine.yaml` editors above collide here too
+  - `crates/loom-governor/src/lib.rs`, unordered: `story:engineering-registry-calls-replaced`, `story:gates-document-evaluated-in-the-governor`. Their typed scope names the file.
+  - `crates/loom-governor/src/lib.rs`, unordered, with no typed scope (the body names the file, not computed as an edit): `authority-records-bound-and-grounded-in-canon`, `decided-records-carry-grounds-to-canon`, `engineering-protocol-lock`, `engineering-protocols-dependency-removed`, `frontier-names-movers`, `gate-run-collects-a-gates-document`, `requests-from-canon-pending-decisions`
+  - `crates/loom-tree`, unordered: `story:capacity-given-to-an-admission-program`, `story:flow-limits-recorded-as-events` (typed scope). Also, by body only: `story:confinement-level-on-oci-and-pod`, `story:ingress-routes-per-action`, `story:workspace-file-bound-in-engine-configuration`, `story:budget-and-limit-stops-raise-decision-requests`, `story:requests-from-canon-pending-decisions`, `story:run-log-references-exec-file-changes`
+  - `crates/loom-tree` and `crates/loom-cli/src/lib.rs`, ordered before it: `story:tree-run-command`, `agent-node-run-records`, `tree-waits-open-decision-requests`, `daemon-continues-a-decided-request`, `approval-decisions-resume-held-runs` and the rest of the closure
+  - `crates/loom-cli/src/lib.rs` (inferred), unordered: `story:flow-limits-recorded-as-events`, `story:secrets-subcommand`, `story:agent-selects-the-connectors-relay`. The last two also hold `crates/loom-cli/src/main.rs`.
+  - `website/docs/reference/cli.md`, unordered: `story:secrets-subcommand`, `story:flow-limits-recorded-as-events`, `story:agent-selects-the-connectors-relay`, `story:agent-project-kubernetes`, `story:command-invocation-contract`. Only `secrets-subcommand` holds it as typed scope.
+- **Safety fact:** a goals-document read failure becomes `invalid_goals`, never a panic or a pass: the loader refusals and the per-check `validates` answer are one list in the story § Outcome, so no new refusal can pass a ground. Pointed at the story text only, no code exists — step 1, unproven

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocol-lock
 kind: story
-status: proposed
+status: active
 title: ProtocolCatalog::engineering reads ten vendored files from engineering-protocols 0.16.0, each checked against a sha256 lock at load
 summary: intake.protocols.ProtocolLock with one encoder and decoder (loom_protocols::lock); ProtocolCatalog::from_vendored refuses a digest mismatch, an unlocked file, a missing locked file and a malformed lock; ten literal sha256 digests
 tags:
@@ -28,9 +28,10 @@ scope:
   path: ess/intake/domains/protocols.yaml
 - confidence: cited
   path: protocols/engineering
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:30Z", actor: "human:timo", revision: 9}
+- {from: "proposed", to: "active", at: "2026-11-21T04:23:21Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
 ---
 ## Outcome
 
