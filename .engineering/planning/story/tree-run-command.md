@@ -18,6 +18,7 @@ relations:
 - depends_on: story:bound-program-case-id
 - depends_on: story:child-case-runtime
 - depends_on: story:bound-program-result-table
+- depends_on: story:open-children-from-arguments-from
 scope:
 - confidence: inferred
   path: crates/loom-cli/Cargo.toml
@@ -51,7 +52,7 @@ scope:
   path: website/data/status.json
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":4}}}
 ---
@@ -143,8 +144,7 @@ the store: `performed_at` from the log's `action finished` lines, `due` from `re
 (`story:record-copy-between-cases`).
 
 The arguments of an `open` action come as a `program` binding's do: the binding's `arguments`,
-else the object its `arguments_from` argv prints through the runner. When the `open` port of
-`story:child-case-runtime` does not read them itself, this story hands them to it.
+else the object its `arguments_from` argv prints through the runner.
 
 An `agent` executor has no effect port before `story:bound-agent-node`. Until that story lands,
 `tree open` reads the root's bindings file and, through the `bindings` member of each `open`
@@ -178,6 +178,12 @@ executor has no subcommand. The SDC's driver has the surface (`init`, `run`, `ap
 name its command (`~/beyond10x/sdc/docs/driver.md` § Status, third pass: "`run` names the exact
 command when it waits on a person"). The SDC's live view needs the list of cases and where each
 log is (request 7 of session `sdc`), which is what `tree status` gives it.
+
+## Waits on
+
+- `story:open-children-from-arguments-from`: the `open` port reads an `arguments_from` object
+  itself, opens one child per name it prints, and reports the list's `blob_sha256`. It merges
+  first; this story builds `OpenEffects` with the tree's workspace, store directory and runner.
 
 ## ESS first
 
@@ -277,7 +283,9 @@ produce `route_approval`; a `program` action `ticket.issue` runs under the capab
   `the_root_copies_the_childs_approval_before_the_next_opening`).
 - The `each` opening opens `<root>.north` and `<root>.south` from the object
   `{"legs": ["north", "south"]}` its `arguments_from` stub prints, with one `case_outcome` record
-  each in the root (test `an_each_opening_takes_its_names_from_arguments_from`).
+  each in the root, and the step's `action finished` line in the root's log names as its
+  `blob_digest` the `blob_sha256` of the open port's report (test
+  `an_each_opening_takes_its_names_from_arguments_from`).
 - `ticket.issue` stops the run with exit 3 and a printed `tree approve` command without
   `--action`; after it, `tree run` performs the action through its program and records its
   evidence (test `an_approved_capability_lets_the_run_take_a_program_action`).
