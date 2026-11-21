@@ -494,6 +494,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-bindings"
+version = "0.57.2"
+dependencies = [
+ "b10x-canon",
+ "loom",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "b10x-loom-boundary"
 version = "0.57.2"
 dependencies = [
