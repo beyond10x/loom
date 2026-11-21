@@ -49,6 +49,10 @@ pub struct IntentRequest {
     pub intent: String,
     pub workspace: Option<PathBuf>,
     pub test: TestCommand,
+    /// The runner a software change's tests run under, and the one the request's bound commands
+    /// start through ([`TestRunner::run_child`], [`crate::bindings`]): bindings with no runner,
+    /// and no `unconfined_bindings: true` in their file, are refused `NoRunner` before any model
+    /// call.
     pub runner: Option<Arc<dyn TestRunner>>,
     pub max_steps: usize,
     pub threshold: f64,
@@ -60,7 +64,9 @@ pub struct IntentRequest {
     pub test_paths: TestPaths,
     /// The commands the operator binds to an installed protocol's actions, checked against the
     /// run's catalog ([`crate::bindings::check`]): a run of that protocol performs its admitted
-    /// actions through them. Trusted host context, never a model's; it confers no authority.
+    /// actions through them, started by `runner` in `workspace` (a private directory made for
+    /// the run when it is `None`). Trusted host context, never a model's; it confers no
+    /// authority.
     pub bindings: Option<ActionBindings>,
 }
 
@@ -69,6 +75,9 @@ pub struct IntentRequest {
 pub struct PreparedIntent {
     protocol: String,
     binding: Value,
+    /// The runner the request's bound commands start through, selected and checked before the
+    /// route was asked for; a restored route selects it again.
+    commands: Option<Arc<bindings::CommandRunner>>,
 }
 
 impl PreparedIntent {
@@ -100,6 +109,7 @@ impl PreparedIntent {
         Ok(Self {
             protocol: protocol.into(),
             binding: value["binding"].clone(),
+            commands: None,
         })
     }
 
@@ -206,6 +216,17 @@ pub fn prepare_intent(
             "measurement policy differs from context policy".into(),
         ));
     }
+    // Bound commands start only through a runner: one that cannot is refused here, before any
+    // model call and before any process starts.
+    let commands = match &request.bindings {
+        Some(bound) => match command_runner(request, bound) {
+            Ok(commands) => Some(Arc::new(commands)),
+            Err(refusal) => {
+                return commands_refused(out, bound, &refusal).map(Preparation::Stopped);
+            }
+        },
+        None => None,
+    };
     for reference in references(&request.intent) {
         writeln!(
             out,
@@ -288,7 +309,34 @@ pub fn prepare_intent(
     Ok(Preparation::Ready(PreparedIntent {
         protocol: pick.protocol,
         binding: binding(request, catalog, options),
+        commands,
     }))
+}
+
+/// The runner `bound`'s commands start through: the request's runner and workspace, as
+/// [`bindings::CommandRunner::select`] selects and checks them.
+fn command_runner(
+    request: &IntentRequest,
+    bound: &ActionBindings,
+) -> Result<bindings::CommandRunner, crate::confinement::ConfinementError> {
+    bindings::CommandRunner::select(bound, request.runner.as_ref(), request.workspace.as_deref())
+}
+
+/// The stop of a run whose bound commands no runner can start: `ConfinementUnavailable`, the
+/// refusal its detail, before any case opens.
+fn commands_refused(
+    out: &mut dyn Write,
+    bound: &ActionBindings,
+    refusal: &crate::confinement::ConfinementError,
+) -> Result<SliceRun, SliceError> {
+    writeln!(out, "confinement: bound commands")?;
+    stop(
+        out,
+        bound.protocol.clone(),
+        StopReason::ConfinementUnavailable,
+        &refusal.to_string(),
+        Vec::new(),
+    )
 }
 
 /// The request's action bindings when they bind `protocol`'s actions.
@@ -905,6 +953,14 @@ fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
                 "no command is bound to {action}"
             )));
         }
+        // Selected again for a restored route; refused before the case opens.
+        let commands = match &prepared.commands {
+            Some(commands) => Arc::clone(commands),
+            None => match command_runner(request, bound) {
+                Ok(commands) => Arc::new(commands),
+                Err(refusal) => return commands_refused(out, bound, &refusal),
+            },
+        };
         let revision = case::intent_revision(&request.intent);
         let case = governor
             .open(
@@ -927,6 +983,7 @@ fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
                 bindings: bound,
                 productions: bindings::productions(entry),
                 intent_revision: &revision,
+                commands: &commands,
             },
             mode,
         )
@@ -1127,6 +1184,7 @@ mod tests {
         let prepared = PreparedIntent {
             protocol: "system-query@1".into(),
             binding: binding(&request, &catalog, &options),
+            commands: None,
         };
         let value = prepared.handoff();
         assert_eq!(
@@ -1178,6 +1236,7 @@ mod tests {
         let prepared = PreparedIntent {
             protocol: "system-query@1".into(),
             binding: binding(&request, &catalog, &options),
+            commands: None,
         };
         let route = prepared.accepted_route().unwrap();
         assert_eq!(route.protocol, "system-query@1");

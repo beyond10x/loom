@@ -881,20 +881,24 @@ pub struct RunArgs {
     /// commands: {"protocol": "<name>@<major>", "timeout_seconds": <n>, "unconfined_bindings":
     /// <true|false>, "bindings": [{"action": "<action>", "argv": ["<program>", "<argument>",
     /// ...]}]}. A run of that protocol starts an
-    /// admitted action's program without a shell, with the action's arguments as JSON on standard
-    /// input, a cleared environment but PATH, and a timeout (60 s when absent); exit 0 is
+    /// admitted action's program through the run's confinement, without a shell, in --workspace
+    /// or a private directory made for the run, with the action's arguments as JSON on standard
+    /// input, an environment of PATH alone, and a timeout (60 s when absent); exit 0 is
     /// performed, with standard output, one JSON object, as the report; any other end is refused.
     /// A binding confers no authority. A file that names an action the protocol does not declare
     /// is refused before any model call; an action it binds no command to stops the run
-    /// NoLocalExecutor, naming it. Substrate does not confine these commands, so the run is
-    /// refused ConfinementUnavailable (CommandUnconfined), exit 3, before any model call unless
-    /// --unconfined-bindings is given or the file sets "unconfined_bindings": true.
+    /// NoLocalExecutor, naming it. Without an opt-in the commands run under --confinement
+    /// substrate, Substrate's linux adapter, the program file mounted read-only at its own path,
+    /// and a run whose adapter is not served stops ConfinementUnavailable, exit 3, before any
+    /// model call; under --confinement none or local it is refused ConfinementUnavailable
+    /// (CommandUnconfined) instead, unless --unconfined-bindings is given or the file sets
+    /// "unconfined_bindings": true.
     #[arg(long, value_name = "FILE")]
     pub action_bindings: Option<PathBuf>,
-    /// Run the commands --action-bindings binds with the operator's rights, outside Substrate.
-    /// Without it, and without "unconfined_bindings": true in that file, a run given
-    /// --action-bindings is refused ConfinementUnavailable (CommandUnconfined). The flag wins over
-    /// the file; standard error reports which one opted in.
+    /// Run the commands --action-bindings binds under Substrate's local adapter: unconfined,
+    /// declared insecure, with the operator's rights, each launch recording the reason that this
+    /// flag opted in. The file's "unconfined_bindings": true opts in too, recording that the file
+    /// did; the flag wins, and standard error reports which one opted in. Not with --state.
     #[arg(long)]
     pub unconfined_bindings: bool,
     /// What to do, as given.

@@ -1,0 +1,18 @@
+# story boundary-admits-declared-http-egress: beside a boundary an egress namespace that is no
+# DNS-1123 label names no namespace a boundary may open; it is refused at its namespace.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-egress-that-names-no-namespace-is-refused
+summary: A model boundary beside an egress namespace that is no namespace name is refused BoundaryEgressNamespace at the namespace.
+
+timeline:
+  - at: 2026-11-21T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-egress-namespace-name.yaml}
+    outcome: boundary-egress-namespace
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryEgressNamespace
+        member: spec.agent.deploy.kubernetes.egress[0].namespace
+        detail: "it is no namespace name, a DNS-1123 label, so it is no namespace a boundary may open"

@@ -1090,7 +1090,8 @@ an `upstream`, the base URL of a cluster service, and an `audience`, that of the
 service-account token the boundary adds to each call; `connectors` also lists the operation ids
 it admits (`operations`) and `git` the `<owner>/<repo>` repositories (`repositories`). A resource
 that declares it holds no Secret. Its refusals are the controller's (§ Operator), as for
-`spec.env`, not the domain's.
+`spec.env`, not the domain's; beside it a namespace egress entry of `spec.agent` is admitted only
+under the controller's `allowedBoundaryHttpEgress` (`story:boundary-admits-declared-http-egress`).
 
 The controller's refusals are declared all the same (`story:operator-constraints-in-ess`): two
 stateless commands, which move no `LoomAgent` and publish nothing, name what the controller and
@@ -1098,12 +1099,13 @@ stateless commands, which move no `LoomAgent` and publish nothing, name what the
 `external:` outcome per reason admission refuses a resource with, each carrying `AdmissionRefused`
 (`reason` of `AdmissionRefusalReason`, `member`, `detail`), and `admitted`. The reasons are
 `loom.agent.RefusalReason`'s fourteen, which admission passes through from the check and the
-decoder, and the controller's eighteen; `ChildNotOwned`, which a reconcile reads from the cluster
+decoder, and the controller's twenty; `ChildNotOwned`, which a reconcile reads from the cluster
 after admission, is none of them. The resource, the controller configuration and the plugin
 catalog are outside the input, so `task conform` plays them (`crates/loom-conformance/src/admission.rs`):
 it admits the file the path names, or the forced branch's
 `ess/scenarios/resource-admission/resources/<branch>.yaml`, under
-`ess/scenarios/resource-admission/config.yaml` with `b10x_loom_operator::admission::admit`, the
+`ess/scenarios/resource-admission/config.yaml`, or the `config.yaml` beside the file when its
+directory holds one (`resources/with-model-route/`, the one configuration with a model route), with `b10x_loom_operator::admission::admit`, the
 controller's own function, and one authored scenario per reason asserts its reason, member and
 detail. `StageFiles` decides from what `stage-files` read before writing anything:
 `destination` (`StageDestination`: Absent, Directory, Link, Other), `names_utf8`, `keys_inside`
@@ -1274,7 +1276,7 @@ is a non-negative Kubernetes quantity, checked by `Config::parse` without a depe
 `render --config` starts), optional
 `modelRoute {url, protocol, model}`, `allowedSecretNames`, `allowedEgressHosts`,
 `allowedClaimNames` (the PersistentVolumeClaims a `spec.workspace` may name; each list, empty,
-admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists entries `{kind, url, audience, port?}` (`config::AllowedUpstream`, unknown members refused): a declared `spec.boundary.<kind>` is admitted only when an entry has its kind (`model`, `connectors` or `git`), exactly its `upstream` as `url` and exactly its `audience`, so neither one relay's URL under another relay nor an audience the entry does not give (an API-server audience, say) passes; the optional `port` (1 to 65535) is the pod port the upstream's Service targets, which the NetworkPolicy opens in place of the URL's port, since a NetworkPolicy matches the port after Service translation; empty, the default, it admits none. One instance watches one namespace with one replica; there is no leader election.
+admits none), `allowUnconfinedProfiles` (default `false`: a `Command` resource's `Unconfined` seccomp or AppArmor profile is refused unless the operator allows it) and `allowedSeccompLocalhostProfiles` and `allowedAppArmorLocalhostProfiles` (the `Localhost` profile names `spec.seccompProfile` and `spec.appArmorProfile` may carry; admission step 16, `crates/loom-operator/tests/command_confinement_profiles.rs`). `allowedBoundaryUpstreams` lists entries `{kind, url, audience, port?}` (`config::AllowedUpstream`, unknown members refused): a declared `spec.boundary.<kind>` is admitted only when an entry has its kind (`model`, `connectors` or `git`), exactly its `upstream` as `url` and exactly its `audience`, so neither one relay's URL under another relay nor an audience the entry does not give (an API-server audience, say) passes; the optional `port` (1 to 65535) is the pod port the upstream's Service targets, which the NetworkPolicy opens in place of the URL's port, since a NetworkPolicy matches the port after Service translation; empty, the default, it admits none. An entry's `url`, like the `modelRoute` URL, whose host is no `<service>.<namespace>.svc` with an optional `.cluster.local` (a short service name, an IP literal) refuses the configuration when it is read, naming the member and the URL, since admission closes that namespace beside a boundary and must read it (`config::Config::parse`; correction 1 of `story:boundary-admits-declared-http-egress`). `allowedBoundaryHttpEgress` lists entries `{namespace, selector, port}` (`config::AllowedHttpEgress`, `selector` a list of `{name, value}`, unknown members refused, a selector empty or naming a label twice refused when the configuration is read; `story:boundary-admits-declared-http-egress`): a namespace egress entry beside `spec.boundary` is admitted only when one entry equals it in namespace, port and selector, the selector compared as a set of label pairs; empty, the default, it admits none. It is the controller's, naming no resource: every entry must name read-path pods and a port that serves only reads, never a pod that forwards requests with a credential of its own, since the pod reaches them by network position alone (`website/docs/reference/operator-cli.md`, from `cli::RUN_HELP`). One instance watches one namespace with one replica; there is no leader election.
 
 The record (`LoomAgentRecord`) lives in the controller's memory; after a restart every resource is
 applied again at its cluster generation and checked again. The record is keyed by name, so the
@@ -1314,10 +1316,22 @@ which `agent boundary` would read as a flag; `b10x_loom_boundary::operation_id` 
 a relay `b10x_loom_boundary::Relay` refuses to build from those values as `agent boundary` builds
 it from the rendered flags (`Malformed` at the list), a credential in it (the member whole, then
 each string word by word as `spec.command`; `SecretLiteral`), an `audience` the entry of its
-kind and URL does not give exactly (`BoundaryUpstreamNotAllowed` at `audience`), and a
-`deploy.kubernetes.egress` entry naming a host (`BoundaryEgressHost` at its `host`) or a
-namespace (`BoundaryEgressNamespace` at its `namespace`; `story:credential-free-network-policy`,
-design D243 § 2: beside a boundary the pod reaches DNS and its upstreams only); a
+kind and URL does not give exactly (`BoundaryUpstreamNotAllowed` at `audience`), and, entry by
+entry, a `deploy.kubernetes.egress` entry naming a host (`BoundaryEgressHost` at its `host`;
+`story:credential-free-network-policy`, design D243 § 2) or a namespace, which is admitted only
+when, in this order (`story:boundary-admits-declared-http-egress`), it is, read in lower case
+without a trailing dot, the namespace of no `allowedBoundaryUpstreams` URL of any kind, declared
+or not, and not that of the `modelRoute` URL, a proxy holding a credential, then it is a
+DNS-1123 label (`BoundaryEgressNamespace` at its `namespace`, each with its own detail; the
+configuration read refuses an upstream or model route URL whose host is no
+`<service>.<namespace>.svc[.cluster.local]`, so each names its namespace, and condition 1 fails
+closed: under a `Config` built without the read, one such URL whose namespace cannot be read
+refuses every namespace entry, its detail naming the URL), its selector is not
+empty (`BoundaryEgressNamespace` at its `selector`), a `GET` `http` binding of `spec.agent`
+without a `bearer_env` has a `base_url` `admission::cluster_service` reads as a service in that
+namespace (`BoundaryEgressUnbound` at the entry; it ties by namespace only, and the operator's
+list is the gate), and one `allowedBoundaryHttpEgress` entry equals it
+(`BoundaryEgressNotAllowed` at the entry); a
 `secretRef` or `secretFiles` not allowed (`SecretNotAllowed`); a `deploy.kubernetes.namespace` other than the
 resource's (`NamespaceMismatch`); an egress entry naming neither a host nor a namespace (its rule
 would admit every destination on its port), or a host not allowed (`EgressHostNotAllowed`); a
@@ -1528,8 +1542,9 @@ Job. With
 for `text`, or `/var/run/loom/schedule-input/input` for `configMapKeyRef`, whose key alone the
 program container mounts read-only from the volume `schedule-input` (`optional: false`, so a
 missing ConfigMap leaves the run unstarted and `Forbid` holds later runs). The golden files
-`tests/golden/platform-operator.yaml`, `tests/golden/takt-delivery.yaml` and
-`tests/golden/credential-free.yaml` are rewritten by
+`tests/golden/platform-operator.yaml`, `tests/golden/takt-delivery.yaml`,
+`tests/golden/credential-free.yaml` and `tests/golden/credential-free-http-egress.yaml` are
+rewritten by
 `LOOM_OPERATOR_BLESS=1 cargo test -p b10x-loom-operator --test render`; review its diff.
 
 A resource with `spec.boundary` (`story:boundary-container-projected-token`, design D243 § 2,
@@ -1557,10 +1572,14 @@ env before `spec.env`. The NetworkPolicy (`story:credential-free-network-policy`
 § 2) then opens DNS and, per declared upstream, the namespace its host names
 (`kubernetes.io/metadata.name`) on one TCP port: the `port` of the `allowedBoundaryUpstreams`
 entry that admitted it (the pod port its Service targets), else the URL's (80 when it names
-none); no egress entry of `spec.agent` (admission refuses host and namespace entries, and render
-skips them beside a boundary), no model-route rule. Without `boundary.model` and with empty
-routes a `Command` resource's `routes.yaml` is empty. A resource without `spec.boundary` renders
-byte for byte as before.
+none); each admitted namespace egress entry of `spec.agent`, after DNS and before the upstreams,
+as a peer of its namespace and pod selector on its TCP port, as without a boundary (render keeps
+beside a boundary only an entry with no host, a namespace, a selector and an equal
+`allowedBoundaryHttpEgress` entry); no host entry, no model-route rule. Nothing is added to the
+boundary container, the agent container or the relays. Without `boundary.model` and with empty
+routes a `Command` resource's `routes.yaml` is empty. A resource without `spec.boundary`, and one
+with a boundary and no namespace entry, renders byte for byte as before
+(`tests/golden/credential-free-http-egress.yaml` holds one with an entry).
 Native sidecars need Kubernetes 1.29 or newer, where they are on by default.
 
 The chart `charts/loom-agents` (Helm 3) installs `crds/` (§ Generated files), the controller
@@ -2073,20 +2092,38 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   does not declare, one bound twice and an empty argv. A pick of that protocol with an action left
   unbound stops `NoLocalExecutor` naming it, before a case opens, its `SliceRun::unperformed`
   (the jsonl terminal record's `unperformed_actions`) every unbound action; otherwise
-  `bindings::CommandEffects` performs each admitted action by starting its program directly (no
-  shell) with the arguments as JSON on stdin, only `PATH` in its environment and a timeout past
-  which it and the processes it started are killed and reaped: exit 0 is `Performed` with its
-  stdout (one JSON object) as the report, anything else `Refused`, a status that cannot be read
-  included, naming the error; a timeout this host's clock cannot hold is `Refused`, naming it,
-  before the program starts (`crates/loom-intake-slice/tests/bound_command.rs`,
+  `bindings::CommandEffects` performs each admitted action by handing a `ChildCommand` (its
+  argv, no shell, the arguments as JSON on stdin, `PATH` alone at the host process's value, the
+  timeout) to `TestRunner::run_child`; `src/bindings.rs` starts no process of its own
+  (`bound_command_confined.rs`, `bindings_starts_no_process_of_its_own`). The runner kills the
+  program at the timeout, under `linux` with every process it started (the run's cgroup), under
+  `local` with its process group; under `local` a process that left the group and still holds the
+  output makes the step a runner refusal, after one `Kill`, and a stdin write still pending then
+  is dropped (`engine.rs` tests): exit 0 is `Performed` with its stdout
+  (one JSON object) as the report, anything else `Refused`, a runner's refusal included, naming
+  it, and each step prints its applied `confinement:`; a timeout this host's clock cannot hold is
+  `Refused`, naming it, before the program starts (`crates/loom-intake-slice/tests/bound_command.rs`,
   `a_timed_out_command_leaves_no_process_it_started`,
   `a_timeout_too_large_for_the_clock_is_refused_and_starts_no_command`). Evidence comes only from the report's `evidence` list
   (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
   `intent`; another kind fails the run. A binding confers no authority: the slice's
   authority provider still answers every capability with approval required, and `resume`
-  continues `software-change@1` runs only. Substrate does not confine a bound command, so
-  without `--unconfined-bindings` `run` stops `ConfinementUnavailable (CommandUnconfined: ...)`,
-  exit 3, before any model call (`bindings_refused`); with it, standard error says so. `crates/loom-cli/tests/custom_protocol_commands.rs`
+  continues `software-change@1` runs only. `bindings::CommandRunner::select` picks the runner in
+  `prepare_intent`, before any model call, and again before the case opens for a restored route:
+  a host runner on `local` with `UNCONFINED_FLAG_REASON` (the flag's, which wins), else the
+  file's `unconfined_bindings: true` opening `local` with `UNCONFINED_FILE_REASON` (a file holds
+  no reason), else the host's runner (`CommandUnconfined` for one on `local` with another
+  reason), else `NoRunner`; then `TestRunner::preflight_child` on the workspace (`run
+  --workspace`, or a private `<tmp>/loom-bound-*/workspace`), whose default refuses `NoRunner`.
+  Each refusal stops the run `ConfinementUnavailable`, exit 3. A runner not on `local` gets an
+  absolute program outside `/usr`, `/bin`, `/lib`, `/lib64` mounted read-only at its own path
+  (`at_host_path`). `run` passes the flag's `local` runner, none for the file's opt-in, and
+  `SubstrateRunner` on `--cgroup-root` otherwise (no delegated re-exec for bound commands);
+  `--confinement none` or `local` without an opt-in stops `ConfinementUnavailable
+  (CommandUnconfined: ...)` before any model call (`bindings_refused`); `--unconfined-bindings`
+  beside `--state` is refused, exit 2; standard error names the opt-in.
+  `crates/loom-intake-slice/tests/bound_command_confined.rs` holds the runner, the reasons and,
+  delegated, the `linux` case; `crates/loom-cli/tests/custom_protocol_commands.rs`
   (`a_custom_protocol_runs_through_declared_commands`) runs the binary against scripts.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
@@ -2337,6 +2374,13 @@ clone (`blob:none`) needs `git backfill` first.
 Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
 workspace version and no crate is on a registry. Consumers pin `tag = "<version>"`. A release
 publishes two container images and the chart to ghcr (step 4).
+
+Who orders a release (the operator, 2026-11-21): an order, decision or approval of the session
+`host-operator` counts as the operator's own for Loom, whether it arrives as a cross-session
+message from that session or in a Loom session's prompt. That covers a release, a tag, a push of
+`main`, a publication and the choice between lettered options. A Loom session follows it without
+asking the operator to confirm it, and still holds every step below (the gate green on the
+release commit, the checks green before the tag). No other session's word orders a release.
 
 `CHANGELOG.md` follows Keep a Changelog 1.1.0 and collects under `## [Unreleased]` between
 releases. A change adds one bullet per change a consumer sees under `### Added`, `### Changed`,

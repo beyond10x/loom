@@ -4,24 +4,38 @@
 //!
 //! A run configuration file names one protocol and, for each of its actions, one argv. [`decode`]
 //! reads it, refusing any member it does not declare; [`check`] holds it against the run's catalog
-//! before any model call. A run of that protocol performs an admitted action by starting its
-//! program directly, never through a shell, with the action's arguments as JSON on standard input,
-//! a cleared environment that keeps only `PATH`, and the configuration's timeout
-//! ([`DEFAULT_TIMEOUT_SECONDS`] when absent), past which the program and the processes it started
-//! are killed and reaped; a timeout this host's clock cannot hold is refused, naming it, before
-//! the program starts. Exit status 0 is `Performed`, with the program's standard output, one
-//! JSON object, as the report; any other end is `Refused`, a status that cannot be read included,
-//! naming the error. The report's `evidence` member (a list of
+//! before any model call. A run of that protocol performs an admitted action by handing its
+//! command to the runner the host injected ([`TestRunner::run_child`]); this module starts no
+//! process of its own. The command is a [`ChildCommand`]: its program, never a shell, with the
+//! action's arguments as JSON on standard input, an environment of `PATH` alone (the host's
+//! `PATH`, [`INHERITED`]), and the configuration's timeout ([`DEFAULT_TIMEOUT_SECONDS`] when
+//! absent), past which the runner kills the program (under `linux` with every process it started,
+//! under `local` with its process group; a process that left the group and still holds the
+//! program's output makes the step a refusal of the runner); a timeout this
+//! host's clock cannot hold is refused, naming it, before the program starts.
+//!
+//! Which runner, decided before any model call ([`CommandRunner::select`]): the operator's opt-in
+//! selects Substrate's `local` adapter, unconfined and declared insecure, with a reason naming the
+//! opt-in. The run's `--unconfined-bindings` flag is a host runner opened on `local` with
+//! [`UNCONFINED_FLAG_REASON`], and wins; the file's `unconfined_bindings: true` opens one with
+//! [`UNCONFINED_FILE_REASON`], which is the only reason a file gives. Without an opt-in the
+//! host's own runner runs them, refused [`ConfinementRefusal::CommandUnconfined`] when it
+//! launches through `local` for another reason; no runner, or one that starts no child, is
+//! refused [`ConfinementRefusal::NoRunner`]. A runner that is not `local` gets the program file
+//! mounted read-only at its own path when it lies outside the system view Substrate binds. The
+//! commands run in the host's workspace, or in a private directory made for the run.
+//!
+//! Exit status 0 is `Performed`, with the program's standard output, one JSON object, as the
+//! report; any other end is `Refused`, naming why. The report's `evidence` member (a list of
 //! `intake.bindings.CommandEvidence`) states evidence about the intent, each of a kind the action
 //! declares it may produce; it is submitted under this module's producer, citing one observation
 //! of the command's run. A binding confers no authority: the governor admits the action first,
 //! and an action that needs a capability still needs its grant.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{Read, Write};
-use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc;
-use std::thread;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use b10x_loom_commission::model::responsibility::{
@@ -39,8 +53,12 @@ use loom_protocols::{ProtocolCatalog, ProtocolEntry, SourceKind};
 use serde_json::Value;
 
 use crate::case::INTENT;
+use crate::confinement::{
+    ChildCommand, ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement,
+    EngineRunner, ExecEnvironment, TestExecution, TestRunner, escape_reason,
+};
 use crate::effect::{Console, refuse};
-use crate::executor::{ended_unreaped, fresh_uuid, kill_group};
+use crate::executor::{applied_label, fresh_uuid};
 use crate::run::{SliceError, json_text, printable};
 use crate::selector::Briefing;
 
@@ -50,11 +68,21 @@ pub const DEFAULT_TIMEOUT_SECONDS: i64 = 60;
 pub const MAX_TIMEOUT_SECONDS: i64 = 3600;
 /// The most bytes of a command's standard output read as its report.
 pub const MAX_REPORT_BYTES: usize = 1024 * 1024;
-/// The only environment variable a command starts with, from the CLI's own environment.
+/// The only environment variable a command starts with, at the value the host process has.
 pub const INHERITED: &[&str] = &["PATH"];
+/// The reason a `local` runner carries when the run's `--unconfined-bindings` flag opted in: a
+/// host that opts in as the flag does opens its `local` runner with it
+/// ([`CommandRunner::select`]).
+pub const UNCONFINED_FLAG_REASON: &str =
+    "--unconfined-bindings: the operator runs the bound commands unconfined, as the operator";
+/// The reason the `local` runner carries when the file's `unconfined_bindings: true` opted in;
+/// the only reason a run configuration file gives.
+pub const UNCONFINED_FILE_REASON: &str = "unconfined_bindings: true in the run configuration file: the operator runs the bound commands unconfined, as the operator";
+/// The directories Substrate's `linux` view binds read-only from the host: a program under one is
+/// already there, and is never mounted again.
+const SYSTEM_VIEW: [&str; 4] = ["/usr", "/bin", "/lib", "/lib64"];
 const SOURCE: &str = "loom/action-command";
 const PRODUCER: &str = "loom/action-command-verifier";
-const POLL: Duration = Duration::from_millis(10);
 /// The most bytes of a refused command's standard error its refusal names.
 const STDERR_TAIL: usize = 512;
 
@@ -223,21 +251,158 @@ pub(crate) fn productions(entry: &ProtocolEntry) -> BTreeMap<String, Vec<String>
         .collect()
 }
 
-/// How a command ended.
-enum Ended {
-    Exited(ExitStatus, Vec<u8>, Vec<u8>),
-    /// Ran past its timeout: killed with the processes it started and reaped, unless `unkilled`
-    /// names why its process group could not be killed.
-    TimedOut {
-        unkilled: Option<std::io::Error>,
-    },
-    NotStarted(std::io::Error),
-    /// Its status could not be read (`error`): killed with the processes it started and reaped,
-    /// unless `unkilled` names why its process group could not be killed.
-    Unobserved {
-        error: std::io::Error,
-        unkilled: Option<std::io::Error>,
-    },
+/// The runner a run's bound commands start through, and the workspace they start in.
+pub(crate) struct CommandRunner {
+    runner: Arc<dyn TestRunner>,
+    workspace: PathBuf,
+    /// The private directory holding `workspace` when the host named none, removed with it.
+    _private: Option<tempfile::TempDir>,
+}
+
+impl fmt::Debug for CommandRunner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommandRunner")
+            .field("runner", &self.runner.label())
+            .field("workspace", &self.workspace)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CommandRunner {
+    /// The runner `bindings`' commands start through, given the host's runner `host` and
+    /// workspace `workspace`, checked before any model call and with no process started:
+    ///
+    /// 1. a host runner on `local` with [`UNCONFINED_FLAG_REASON`]: the flag opted in, and wins;
+    /// 2. the file's `unconfined_bindings: true`: Substrate's `local` adapter, opened here with
+    ///    [`UNCONFINED_FILE_REASON`];
+    /// 3. the host's runner, refused [`ConfinementRefusal::CommandUnconfined`] when it launches
+    ///    through `local` for another reason (no opt-in selected it);
+    /// 4. no runner: refused [`ConfinementRefusal::NoRunner`].
+    ///
+    /// The workspace is `workspace`, or a private directory made here and removed with the
+    /// runner. The runner then checks it can start a child there
+    /// ([`TestRunner::preflight_child`]): a runner that starts no child is refused `NoRunner`,
+    /// and one whose adapter is not served is refused as its preflight refuses.
+    ///
+    /// # Errors
+    /// The refusal, as above.
+    pub(crate) fn select(
+        bindings: &ActionBindings,
+        host: Option<&Arc<dyn TestRunner>>,
+        workspace: Option<&Path>,
+    ) -> Result<Self, ConfinementError> {
+        let runner = select_runner(bindings, host)?;
+        let (workspace, private) = match workspace {
+            Some(workspace) => (workspace.to_owned(), None),
+            None => {
+                let private = tempfile::Builder::new()
+                    .prefix("loom-bound-")
+                    .tempdir()
+                    .map_err(|error| refusal(ConfinementRefusal::ScopeInvalid, error))?;
+                // A name Substrate admits for a workspace.
+                let workspace = private.path().join("workspace");
+                std::fs::create_dir(&workspace)
+                    .map_err(|error| refusal(ConfinementRefusal::ScopeInvalid, error))?;
+                (workspace, Some(private))
+            }
+        };
+        runner.preflight_child(&workspace)?;
+        Ok(Self {
+            runner,
+            workspace,
+            _private: private,
+        })
+    }
+
+    /// The child `binding`'s program is started as: its argv, `arguments` on standard input,
+    /// `PATH` alone, `timeout`; and, under a runner that is not `local`, its program file mounted
+    /// read-only at its own path when that is absolute and outside [`SYSTEM_VIEW`].
+    ///
+    /// # Errors
+    /// The host's `PATH` is not UTF-8, which no child environment carries.
+    fn child(
+        &self,
+        binding: &ActionBinding,
+        arguments: &str,
+        timeout: Duration,
+    ) -> Result<ChildCommand, String> {
+        let mut set = BTreeMap::new();
+        for name in INHERITED {
+            if let Some(value) = std::env::var_os(name) {
+                let value = value
+                    .into_string()
+                    .map_err(|_| format!("the host's {name} is not UTF-8"))?;
+                set.insert((*name).to_owned(), value);
+            }
+        }
+        let program = &binding.argv[0];
+        let mut child = ChildCommand::new(
+            program.clone(),
+            binding.argv[1..].iter().cloned(),
+            &self.workspace,
+        )
+        .with_environment(ExecEnvironment {
+            allow: Vec::new(),
+            set,
+        })
+        .with_stdin(arguments.as_bytes().to_vec())
+        .with_timeout(timeout);
+        let path = Path::new(program);
+        if self.runner.local_reason().is_none()
+            && path.is_absolute()
+            && !SYSTEM_VIEW.iter().any(|system| path.starts_with(system))
+        {
+            child = child.at_host_path(path);
+        }
+        Ok(child)
+    }
+
+    fn run(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        self.runner.run_child(child)
+    }
+}
+
+/// [`CommandRunner::select`]'s choice of runner.
+fn select_runner(
+    bindings: &ActionBindings,
+    host: Option<&Arc<dyn TestRunner>>,
+) -> Result<Arc<dyn TestRunner>, ConfinementError> {
+    if let Some(host) = host
+        && host.local_reason() == Some(UNCONFINED_FLAG_REASON)
+    {
+        return Ok(Arc::clone(host));
+    }
+    if bindings.unconfined_bindings == Some(true) {
+        let runner = EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Local,
+            local_reason: Some(UNCONFINED_FILE_REASON.to_owned()),
+            cgroup_root: None,
+        })?;
+        return Ok(Arc::new(runner));
+    }
+    match host {
+        None => Err(refusal(
+            ConfinementRefusal::NoRunner,
+            "the request binds commands and names no runner to start them; a bound command starts only through the host's runner, or under the local adapter with --unconfined-bindings or unconfined_bindings: true",
+        )),
+        Some(host) => match host.local_reason() {
+            Some(reason) => Err(refusal(
+                ConfinementRefusal::CommandUnconfined,
+                format!(
+                    "the host's runner launches through the local adapter for another reason ({}); bound commands run unconfined only with --unconfined-bindings or unconfined_bindings: true",
+                    escape_reason(reason)
+                ),
+            )),
+            None => Ok(Arc::clone(host)),
+        },
+    }
+}
+
+fn refusal(reason: ConfinementRefusal, detail: impl fmt::Display) -> ConfinementError {
+    ConfinementError {
+        reason,
+        detail: detail.to_string(),
+    }
 }
 
 /// The effect port that performs an admitted action through the command bound to it.
@@ -247,17 +412,20 @@ pub(crate) struct CommandEffects<'a, 'o, S, T> {
     intent_revision: &'a str,
     bindings: &'a ActionBindings,
     productions: BTreeMap<String, Vec<String>>,
+    commands: &'a CommandRunner,
     briefing: Briefing,
     console: &'a Console<'o>,
 }
 
 impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, T> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         governor: &'a CanonGovernor<S, T>,
         case: CaseId,
         intent_revision: &'a str,
         bindings: &'a ActionBindings,
         productions: BTreeMap<String, Vec<String>>,
+        commands: &'a CommandRunner,
         briefing: Briefing,
         console: &'a Console<'o>,
     ) -> Self {
@@ -267,6 +435,7 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
             intent_revision,
             bindings,
             productions,
+            commands,
             briefing,
             console,
         }
@@ -315,21 +484,41 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
         }
         let program = &binding.argv[0];
         // The deadline is taken before the program starts, so a timeout the clock cannot hold
-        // starts nothing.
-        let deadline = match self.deadline() {
-            Ok(deadline) => deadline,
+        // starts nothing; the runner takes its own from the same timeout.
+        if let Err(why) = self.deadline() {
+            return refused(format!("{program} was not started: {why}"));
+        }
+        let child = match self.commands.child(binding, &arguments, self.timeout()) {
+            Ok(child) => child,
             Err(why) => return refused(format!("{program} was not started: {why}")),
         };
-        let (status, stdout, stderr) = match exited(
-            program,
-            self.timeout(),
-            self.run(binding, &arguments, deadline),
-        ) {
-            Ok(exited) => exited,
-            Err(reason) => return refused(reason),
+        // The one start of a bound command: through the runner, never here.
+        let execution = match self.commands.run(&child) {
+            Ok(execution) => execution,
+            Err(refusal) => {
+                return refused(format!("{program} was refused by its runner: {refusal}"));
+            }
         };
-        if !status.success() {
-            let stderr = String::from_utf8_lossy(&stderr);
+        self.console.write(|out| {
+            writeln!(
+                out,
+                "  confinement: {}",
+                printable(&applied_label(&execution.applied))
+            )?;
+            Ok(())
+        })?;
+        if execution.timed_out {
+            return refused(format!(
+                "{program} was killed after {} s",
+                self.timeout().as_secs()
+            ));
+        }
+        let output = &execution.child_output;
+        let Some(code) = execution.exit_code else {
+            return refused(format!("{program}'s status could not be read"));
+        };
+        if code != 0 {
+            let stderr = String::from_utf8_lossy(&output.stderr);
             let tail: String = stderr
                 .trim()
                 .chars()
@@ -339,9 +528,10 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
                 .into_iter()
                 .rev()
                 .collect();
-            return refused(format!("{program} ended {status}: {tail}"));
+            return refused(format!("{program} ended exit status: {code}: {tail}"));
         }
-        let (report, evidence) = self.report(&request.action, &stdout)?;
+        let (report, evidence) =
+            self.report(&request.action, &output.stdout, output.stdout_truncated)?;
         let observed_at =
             crate::clock::instant(&crate::clock::SystemClock).map_err(SliceError::Context)?;
         let revision = self.governor.current_revision(&self.case)?;
@@ -409,44 +599,16 @@ impl<'a, 'o, S: FallibleCaseStore, T: EvaluationTime> CommandEffects<'a, 'o, S, 
         })
     }
 
-    /// Runs `binding`'s program with `arguments` on standard input, to its end or to `deadline`,
-    /// whichever is first; one still running is killed and reaped with the processes it started.
-    fn run(&self, binding: &ActionBinding, arguments: &str, deadline: Instant) -> Ended {
-        let mut command = Command::new(&binding.argv[0]);
-        command
-            .args(&binding.argv[1..])
-            .env_clear()
-            .envs(std::env::vars_os().filter(|(name, _)| INHERITED.iter().any(|kept| name == kept)))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        // The program leads a process group of its own, so what it starts is killed with it.
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt as _;
-            command.process_group(0);
-        }
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => return Ended::NotStarted(error),
-        };
-        if let Some(mut pipe) = child.stdin.take() {
-            let document = arguments.to_owned();
-            // Dropping the pipe at the end of the write closes standard input.
-            thread::spawn(move || pipe.write_all(document.as_bytes()));
-        }
-        finish(child, deadline, |child| ended_unreaped(child))
-    }
-
     /// The report `stdout` holds, and the evidence it states, each of a kind `action` declares it
-    /// may produce.
+    /// may produce; `truncated` says the runner kept only the start of the output.
     fn report(
         &self,
         action: &str,
         stdout: &[u8],
+        truncated: bool,
     ) -> Result<(json::Value, Vec<CommandEvidence>), SliceError> {
         let failed = |why: String| SliceError::Context(format!("{action}'s command report {why}"));
-        if stdout.len() > MAX_REPORT_BYTES {
+        if truncated || stdout.len() > MAX_REPORT_BYTES {
             return Err(failed(format!("is longer than {MAX_REPORT_BYTES} bytes")));
         }
         let text = std::str::from_utf8(stdout).map_err(|_| failed("is not UTF-8".into()))?;
@@ -538,347 +700,9 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EffectPort for CommandEffects<'_, 
         })
     }
 }
-
-/// Reads `pipe` to its end on its own thread, keeping at most one byte past
-/// [`MAX_REPORT_BYTES`] and discarding the rest, so a long output never blocks the program; the
-/// bytes arrive on the receiver.
-fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Vec<u8>> {
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let limit = u64::try_from(MAX_REPORT_BYTES + 1).unwrap_or(u64::MAX);
-            let _ = (&mut pipe).take(limit).read_to_end(&mut bytes);
-            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
-        }
-        let _ = sender.send(bytes);
-    });
-    receiver
-}
-
-/// Waits for `child`, a process-group leader, asking `poll` whether it ended
-/// ([`ended_unreaped`], which leaves it unreaped) until it ends and its output is read, or until
-/// `deadline`. At the deadline, and when its status cannot be read, it and the processes it
-/// started are killed and reaped ([`stop`]); that includes a program that ended while a process
-/// it started keeps its output open past the deadline. The program is reaped only after its output
-/// was read or its group was killed, so the group's id is its own whenever it is killed.
-fn finish(
-    mut child: Child,
-    deadline: Instant,
-    mut poll: impl FnMut(&mut Child) -> std::io::Result<bool>,
-) -> Ended {
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
-    loop {
-        match poll(&mut child) {
-            Ok(true) => break,
-            Ok(false) if Instant::now() < deadline => thread::sleep(POLL),
-            Ok(false) => {
-                return Ended::TimedOut {
-                    unkilled: stop(&mut child).err(),
-                };
-            }
-            Err(error) => {
-                return Ended::Unobserved {
-                    error,
-                    unkilled: stop(&mut child).err(),
-                };
-            }
-        }
-    }
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let Ok(stdout) = stdout.recv_timeout(remaining) else {
-        return Ended::TimedOut {
-            unkilled: stop(&mut child).err(),
-        };
-    };
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    let Ok(stderr) = stderr.recv_timeout(remaining) else {
-        return Ended::TimedOut {
-            unkilled: stop(&mut child).err(),
-        };
-    };
-    match child.wait() {
-        Ok(status) => Ended::Exited(status, stdout, stderr),
-        Err(error) => Ended::Unobserved {
-            error,
-            unkilled: stop(&mut child).err(),
-        },
-    }
-}
-
-/// What `program` ended with when it exited, else the reason its action is refused: killed at
-/// `timeout`, never started, or its status unreadable, naming the error; a process group that
-/// could not be killed is named as such, never reported killed.
-fn exited(
-    program: &str,
-    timeout: Duration,
-    ended: Ended,
-) -> Result<(ExitStatus, Vec<u8>, Vec<u8>), String> {
-    let seconds = timeout.as_secs();
-    match ended {
-        Ended::Exited(status, stdout, stderr) => Ok((status, stdout, stderr)),
-        Ended::TimedOut { unkilled: None } => {
-            Err(format!("{program} was killed after {seconds} s"))
-        }
-        Ended::TimedOut {
-            unkilled: Some(why),
-        } => Err(format!(
-            "{program} ran past {seconds} s, and the processes it started could not be killed: \
-             {why}"
-        )),
-        Ended::NotStarted(error) => Err(format!("{program} did not start: {error}")),
-        Ended::Unobserved {
-            error,
-            unkilled: None,
-        } => Err(format!(
-            "{program}'s status could not be read, so it was killed: {error}"
-        )),
-        Ended::Unobserved {
-            error,
-            unkilled: Some(why),
-        } => Err(format!(
-            "{program}'s status could not be read ({error}), and the processes it started could \
-             not be killed: {why}"
-        )),
-    }
-}
-
-/// Kills `child`, the leader of its own process group, with the processes it started
-/// ([`kill_group`], the test runner's), and reaps it, so no process and no zombie is left.
-///
-/// # Errors
-/// The group could not be killed; `child` is then reaped only if it already ended, since waiting
-/// for a process the signal did not reach could hold the run past its timeout.
-fn stop(child: &mut Child) -> std::io::Result<()> {
-    let killed = kill_group(child);
-    if killed.is_ok() {
-        let _ = child.wait();
-    } else {
-        let _ = child.try_wait();
-    }
-    killed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Kills the `sleep` with this pid when a test ends with it still there, so none outlives the
-    /// test run.
-    struct Sleeping(u32);
-
-    /// Whether a process with this pid exists, a zombie included: `kill` with no signal, which
-    /// works where there is no `/proc`.
-    fn alive(pid: u32) -> bool {
-        i32::try_from(pid)
-            .is_ok_and(|pid| nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok())
-    }
-
-    impl Drop for Sleeping {
-        fn drop(&mut self) {
-            let proc = std::path::Path::new("/proc").join(self.0.to_string());
-            if std::fs::read(proc.join("cmdline")).is_ok_and(|line| line.starts_with(b"sleep\0"))
-                && let Ok(pid) = i32::try_from(self.0)
-            {
-                let _ = nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(pid),
-                    nix::sys::signal::Signal::SIGKILL,
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_group_that_could_not_be_killed_is_never_reported_killed() {
-        let unkilled = || Some(std::io::Error::from_raw_os_error(libc::EPERM));
-        let reason = exited(
-            "record-note",
-            Duration::from_secs(1),
-            Ended::TimedOut {
-                unkilled: unkilled(),
-            },
-        )
-        .unwrap_err();
-        assert!(
-            reason.starts_with(
-                "record-note ran past 1 s, and the processes it started could not be killed: "
-            ),
-            "{reason}"
-        );
-        assert!(reason.contains("Operation not permitted"), "{reason}");
-        assert!(!reason.contains("was killed"), "{reason}");
-        let reason = exited(
-            "record-note",
-            Duration::from_secs(1),
-            Ended::Unobserved {
-                error: std::io::Error::other("the fixture's wait failed"),
-                unkilled: unkilled(),
-            },
-        )
-        .unwrap_err();
-        assert!(reason.contains("the fixture's wait failed"), "{reason}");
-        assert!(reason.contains("could not be killed"), "{reason}");
-        assert!(!reason.contains("so it was killed"), "{reason}");
-    }
-
-    #[test]
-    fn a_status_that_cannot_be_read_is_refused_with_its_error_and_never_as_a_timeout() {
-        let mut command = Command::new("sleep");
-        command
-            .arg("30")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        {
-            use std::os::unix::process::CommandExt as _;
-            command.process_group(0);
-        }
-        let child = command.spawn().unwrap();
-        let sleeping = Sleeping(child.id());
-        let ended = finish(child, Instant::now() + Duration::from_secs(30), |_| {
-            Err(std::io::Error::other("the fixture's wait failed"))
-        });
-        assert!(matches!(ended, Ended::Unobserved { unkilled: None, .. }));
-        let reason = exited("record-note", Duration::from_secs(30), ended).unwrap_err();
-        assert_eq!(
-            reason,
-            "record-note's status could not be read, so it was killed: the fixture's wait failed"
-        );
-        assert!(!reason.contains("killed after"), "{reason}");
-        // The program was killed and reaped: no process and no zombie is left.
-        assert!(!alive(sleeping.0), "{} is still there", sleeping.0);
-    }
-
-    /// A program started as `sh -c script`, leading a process group of its own.
-    fn leader(script: &str) -> Child {
-        let mut command = Command::new("sh");
-        command
-            .args(["-c", script])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        {
-            use std::os::unix::process::CommandExt as _;
-            command.process_group(0);
-        }
-        command.spawn().unwrap()
-    }
-
-    #[test]
-    fn a_leader_reaped_before_the_timeout_is_never_signalled_and_never_reported_killed() {
-        let child = leader("exit 0");
-        // The poll reaps the program and still answers that it runs, so the deadline finds the
-        // group's id no longer held by its leader.
-        let ended = finish(
-            child,
-            Instant::now() + Duration::from_millis(300),
-            |child| child.try_wait().map(|_| false),
-        );
-        let Ended::TimedOut {
-            unkilled: Some(why),
-        } = ended
-        else {
-            panic!("a group whose leader was reaped is reported killed");
-        };
-        assert!(why.to_string().contains("already reaped"), "{why}");
-        let reason = exited(
-            "record-note",
-            Duration::from_secs(1),
-            Ended::TimedOut {
-                unkilled: Some(why),
-            },
-        )
-        .unwrap_err();
-        assert!(!reason.contains("was killed"), "{reason}");
-    }
-
-    #[test]
-    fn output_held_past_the_timeout_after_its_leader_was_reaped_is_never_reported_killed() {
-        let dir = tempfile::tempdir().unwrap();
-        let pid_file = dir.path().join("pid");
-        let child = leader(&format!(
-            "sleep 30 & echo $! > '{}'; exit 0",
-            pid_file.display()
-        ));
-        let leader_pid = child.id();
-        // The poll reaps the program once it ended, while the `sleep` it started holds its
-        // output open past the deadline.
-        let ended = finish(
-            child,
-            Instant::now() + Duration::from_millis(500),
-            |child| child.try_wait().map(|status| status.is_some()),
-        );
-        let sleeping = Sleeping(
-            std::fs::read_to_string(&pid_file)
-                .unwrap()
-                .trim()
-                .parse()
-                .unwrap(),
-        );
-        let Ended::TimedOut {
-            unkilled: Some(why),
-        } = ended
-        else {
-            panic!("a group whose leader {leader_pid} was reaped is reported killed");
-        };
-        assert!(why.to_string().contains("already reaped"), "{why}");
-        // Nothing was signalled: the `sleep` still runs, and its guard kills it.
-        assert!(alive(sleeping.0), "{} was signalled", sleeping.0);
-    }
-
-    #[test]
-    fn standard_error_held_past_the_timeout_after_its_leader_was_reaped_is_never_reported_killed() {
-        let dir = tempfile::tempdir().unwrap();
-        let pid_file = dir.path().join("pid");
-        let child = leader(&format!(
-            "sleep 30 > /dev/null & echo $! > '{}'; exit 0",
-            pid_file.display()
-        ));
-        // Standard output closes with the program; the `sleep` it started holds only its standard
-        // error open past the deadline.
-        let ended = finish(
-            child,
-            Instant::now() + Duration::from_millis(500),
-            |child| child.try_wait().map(|status| status.is_some()),
-        );
-        let sleeping = Sleeping(
-            std::fs::read_to_string(&pid_file)
-                .unwrap()
-                .trim()
-                .parse()
-                .unwrap(),
-        );
-        let Ended::TimedOut {
-            unkilled: Some(why),
-        } = ended
-        else {
-            panic!("a group whose leader was reaped is reported killed");
-        };
-        assert!(why.to_string().contains("already reaped"), "{why}");
-        assert!(alive(sleeping.0), "{} was signalled", sleeping.0);
-    }
-
-    #[test]
-    fn a_status_lost_after_the_program_ended_is_never_reported_killed() {
-        let child = leader("exit 0");
-        let pid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
-        // The poll reaps the program behind `Child`'s back, so its status cannot be read after.
-        let ended = finish(child, Instant::now() + Duration::from_secs(5), |_| {
-            use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
-            waitpid(pid, Some(WaitPidFlag::WNOHANG))
-                .map(|status| status != WaitStatus::StillAlive)
-                .map_err(std::io::Error::from)
-        });
-        let Ended::Unobserved {
-            unkilled: Some(why),
-            ..
-        } = ended
-        else {
-            panic!("a lost status is not refused naming a group that could not be killed");
-        };
-        assert!(why.to_string().contains("already reaped"), "{why}");
-    }
 
     #[test]
     fn a_file_with_an_undeclared_member_is_refused_naming_it() {

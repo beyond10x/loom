@@ -1,0 +1,18 @@
+# story boundary-admits-declared-http-egress: the scenarios' configuration with a model route,
+# for the resources of this directory only, so the scenarios that rely on no model route keep
+# theirs. The model route's namespace is `models`, and the http egress entry the fixture here
+# names is allowed, so condition 1 alone can refuse it.
+namespace: agents
+defaultImage: {repository: registry.example/loom-agent, tag: '0.0.0'}
+defaultResources: {cpu: 250m, memory: 256Mi}
+modelRoute: {url: 'http://model-route.models.svc:8080/v1', protocol: messages, model: small}
+allowedSecretNames: [agent-env, agent-files]
+allowedEgressHosts: [chat.example, models.example]
+allowedClaimNames: [agent-workspace]
+allowedSeccompLocalhostProfiles: [profiles/agent.json]
+allowedAppArmorLocalhostProfiles: [agent]
+allowedBoundaryUpstreams:
+  - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
+allowedBoundaryHttpEgress:
+  - {namespace: monitoring, selector: [{name: app, value: metrics}], port: 9090}
+  - {namespace: models, selector: [{name: app, value: model-route}], port: 8080}

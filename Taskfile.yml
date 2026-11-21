@@ -119,6 +119,12 @@ tasks:
         --set 'allowedBoundaryUpstreams[1].kind=git'
         --set 'allowedBoundaryUpstreams[1].url=http://connectors.connectors.svc/git'
         --set 'allowedBoundaryUpstreams[1].audience=connectors-git'
+        --set 'allowedBoundaryHttpEgress[0].namespace=monitoring'
+        --set 'allowedBoundaryHttpEgress[0].selector[0].name=app'
+        --set 'allowedBoundaryHttpEgress[0].selector[0].value=logs'
+        --set 'allowedBoundaryHttpEgress[0].selector[1].name=tier'
+        --set 'allowedBoundaryHttpEgress[0].selector[1].value=read'
+        --set 'allowedBoundaryHttpEgress[0].port=3100'
         > /dev/null
 
   no-hand-model:

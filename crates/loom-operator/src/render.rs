@@ -102,8 +102,10 @@
 //!   declared upstream, the namespace its host names on a TCP port: the `port` of the
 //!   `allowedBoundaryUpstreams` entry that admitted it, the pod port its Service targets, which a
 //!   NetworkPolicy matches after the Service has translated it, else the URL's port (80 when it
-//!   names none); no `deploy.kubernetes.egress` entry (admission refuses each) and no rule to the
-//!   model route.
+//!   names none), and, after DNS and before the upstreams, each namespace entry admission
+//!   admitted (story boundary-admits-declared-http-egress) as a peer of its namespace and pod
+//!   selector on its TCP port, kept only when it names no host, has a selector and an
+//!   `allowedBoundaryHttpEgress` entry equals it; no host entry and no rule to the model route.
 //! * Service `<resource>` (ClusterIP, port `a2a`) only with `expose.a2a`.
 
 use std::collections::BTreeMap;
@@ -1177,11 +1179,26 @@ impl Renderer<'_> {
         let mut ingress = Vec::new();
         let upstreams = self.boundary_upstreams();
         if let Some(kubernetes) = self.kubernetes() {
-            let entries = if upstreams.is_empty() {
-                kubernetes.egress.as_slice()
-            } else {
-                &[]
-            };
+            // Beside a boundary only a namespace entry with a selector that an
+            // `allowedBoundaryHttpEgress` entry equals, as admission admits it, never a host
+            // entry or a wider peer (story boundary-admits-declared-http-egress).
+            let entries = kubernetes.egress.iter().filter(|entry| {
+                upstreams.is_empty()
+                    || (entry.host.is_none()
+                        && !entry.selector.is_empty()
+                        && entry.namespace.as_ref().is_some_and(|namespace| {
+                            self.config
+                                .allowed_http_egress(
+                                    namespace,
+                                    entry
+                                        .selector
+                                        .iter()
+                                        .map(|label| (label.name.as_str(), label.value.as_str())),
+                                    entry.port,
+                                )
+                                .is_some()
+                        }))
+            });
             for entry in entries {
                 let to = entry.namespace.as_ref().map(|namespace| {
                     vec![NetworkPolicyPeer {

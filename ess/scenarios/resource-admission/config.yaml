@@ -12,3 +12,5 @@ allowedSeccompLocalhostProfiles: [profiles/agent.json]
 allowedAppArmorLocalhostProfiles: [agent]
 allowedBoundaryUpstreams:
   - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
+allowedBoundaryHttpEgress:
+  - {namespace: monitoring, selector: [{name: app, value: metrics}], port: 9090}

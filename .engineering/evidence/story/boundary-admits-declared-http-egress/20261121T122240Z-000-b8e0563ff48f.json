@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T12:22:40Z",
+  "actor": "agent:loom",
+  "artifact": "story:boundary-admits-declared-http-egress",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "correction 1 (61a26396, 0c9d56e3) after the planner's option A; pass 2 found F1, F4, F5 and the read half of F2 closed; F3 fixed by the unit in 984ce66e",
+    "review": "review-result:boundary-admits-declared-http-egress-security-1",
+    "outcome": "fixed"
+  }
+}

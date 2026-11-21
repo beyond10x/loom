@@ -12,10 +12,10 @@ catalog. Loom owns `system-query@1`; engineering definitions and installed custo
 remain separate sources. [System queries and custom protocols](https://beyond10x.github.io/loom/docs/guides/system-queries)
 describes the clock tool, pinned installation and offline loading. `run --action-bindings <FILE>`
 drives an installed protocol through commands the operator binds to its actions: each admitted
-action starts its program without a shell, with its arguments as JSON on standard input, and the
-program's JSON report becomes the action's result; a binding confers no authority, and the
-commands run unconfined only with `--unconfined-bindings` or the file's own
-`"unconfined_bindings": true`. Transient model failures get
+action starts its program through the run's confinement, without a shell, with its arguments as
+JSON on standard input, and the program's JSON report becomes the action's result; a binding
+confers no authority, and the commands run unconfined, under Substrate's `local` adapter, only
+with `--unconfined-bindings` or the file's own `"unconfined_bindings": true`. Transient model failures get
 at most three attempts on the same binding; reports count every attempt. Persistent overload
 is reported as unavailable, and tool effects are never retried by this policy.
 
@@ -519,18 +519,27 @@ the audience of a projected service-account token. The pod then gets a second co
 image: it alone mounts the tokens, one per upstream, each valid 600 s, and the agent container
 gets only loopback URLs (`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL`,
 `LOOM_BOUNDARY_GIT_URL`); with `boundary.model` the default routes name the model relay. The
-NetworkPolicy opens DNS and each upstream's namespace on its port, and nothing else. The values
+NetworkPolicy opens DNS, each upstream's namespace on its port and each namespace egress entry
+the operator allows (below), and nothing else. The values
 must list each upstream in `allowedBoundaryUpstreams` (empty by default) as an entry of its
 `kind` (`model`, `connectors` or `git`), its `url` and its token `audience`, which the resource
 must give exactly, and optionally the `port` of the upstream's pods that its Service targets,
 which the NetworkPolicy then opens in place of the URL's port. The controller refuses a
 boundary beside `spec.secretRef` or `spec.secretFiles` (`BoundaryWithSecret`), an upstream that
 is no cluster service or is `https` (`BoundaryUpstreamInvalid`), one no entry of its kind lists
-or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host or namespace
-egress entry (`BoundaryEgressHost`, `BoundaryEgressNamespace`), empty routes on an `AgentServe`
+or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host egress entry
+(`BoundaryEgressHost`), a namespace egress entry in an allowed upstream's or the model route's
+namespace, one whose namespace is no namespace name, or one without a selector
+(`BoundaryEgressNamespace`), one no `GET` `http` binding without a `bearer_env` reads by
+a cluster-service `base_url` in that namespace (`BoundaryEgressUnbound`), one no single
+`allowedBoundaryHttpEgress` entry (`{namespace, selector, port}`, empty by default) equals
+(`BoundaryEgressNotAllowed`), empty routes on an `AgentServe`
 resource without `boundary.model` (`NoModelRoute`; a `Command` resource gets an empty
 `routes.yaml`), and an audience, operation id (at most 256 bytes) or repository out of form
-(`Malformed`). Native sidecars need Kubernetes 1.29 or newer.
+(`Malformed`). The controller does not start on an `allowedBoundaryUpstreams` or `modelRoute`
+URL whose host is not `<service>.<namespace>.svc`, optionally `.cluster.local` (a short service
+name or an IP address), since no egress entry may open that namespace and it could not be read.
+Native sidecars need Kubernetes 1.29 or newer.
 
 ```yaml
 spec:

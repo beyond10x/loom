@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T12:22:41Z",
+  "actor": "agent:loom",
+  "artifact": "story:boundary-admits-declared-http-egress",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 0c9d56e3..527a3147 in place of a third security pass",
+    "reference": "5 files, 171 insertions, 36 deletions: admission.rs boundary_http_egress refuses at the first allowedBoundaryUpstreams or modelRoute URL whose namespace upstream_namespace cannot read; render.rs:4045 four unreadable modelRoute URLs refused and the same entry admitted under a readable one; unit gate on 527a3147: fmt, clippy, 335 operator tests, conform (286 scenarios), drift exit 0"
+  }
+}

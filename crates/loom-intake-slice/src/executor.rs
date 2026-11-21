@@ -1381,6 +1381,7 @@ fn run_bounded(test: &TestCommand, root: &Path) -> Result<Finished, ExecuteError
 ///
 /// # Errors
 /// Its status could not be read.
+#[cfg(test)]
 pub(crate) fn ended_unreaped(child: &Child) -> std::io::Result<bool> {
     peek_ended(leader_pid(child)?).map_err(std::io::Error::from)
 }

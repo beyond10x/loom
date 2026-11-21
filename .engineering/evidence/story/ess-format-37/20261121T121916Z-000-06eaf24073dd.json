@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T12:19:16Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-format-37",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff f51c2141..d3fa9878 and of the unit's whole gate",
+    "reference": "2 files (ess/system.yaml line 1, one CHANGELOG.md bullet), 2 insertions, 1 deletion; identity.txt: compile sha256 and synthesized suite identical to the parent; whole gate on d3fa9878: 24 of 24 steps exit 0, 3259 passed, 0 failed, 10 ignored, tree-after 0 changed paths"
+  }
+}

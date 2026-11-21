@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T12:22:41Z",
+  "actor": "agent:loom",
+  "artifact": "story:boundary-admits-declared-http-egress",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "correction 2 (527a3147): condition 1 fails closed, the reviewer's F2-b case passes unchanged (3a6ef6a3); 335 operator tests passed, 0 failed",
+    "review": "review-result:boundary-admits-declared-http-egress-security-2",
+    "outcome": "fixed"
+  }
+}

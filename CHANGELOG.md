@@ -12,6 +12,25 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
+
+### Changed
+
+- `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
+- A namespace egress entry beside `spec.boundary` is admitted when the chart's `allowedBoundaryHttpEgress` allows it, outside every allowed upstream's and the model route's namespace (story:boundary-admits-declared-http-egress)
+- **Breaking:** `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`; operator `Config` gains `allowed_boundary_http_egress` (story:boundary-admits-declared-http-egress)
+- **Breaking:** the operator refuses a configuration whose `allowedBoundaryUpstreams` or `modelRoute` URL has a host other than `<service>.<namespace>.svc[.cluster.local]`, such as a short service name or an IP address; admission, given such a URL on a `Config` built without `Config::parse`, admits no namespace egress entry beside `spec.boundary` (story:boundary-admits-declared-http-egress)
+- **Breaking:** `ConfinementRefusal` gains `NoRunner`, bindings with no runner to start them (story:bound-commands-run-confined)
+- **Breaking:** bound commands start only through `IntentRequest.runner`; an opt-in selects `local` (story:bound-commands-run-confined)
+- **Breaking:** `b10x-loom run --action-bindings` with no opt-in runs its commands under Substrate's `linux` adapter instead of stopping `ConfinementUnavailable (CommandUnconfined)`, exit 3; with `--confinement none` or `local` it still stops so (story:bound-commands-run-confined)
+- **Breaking:** `b10x-loom run --unconfined-bindings` with `--state` is refused, exit 2 (story:bound-commands-run-confined)
+- A bound program ended by a signal reads `<program> was refused by its runner: CapabilityUnserved: …`, no longer `<program> ended signal: …`; under `local`, one whose output a process that left its group holds past the timeout reads the same refusal, no longer `was killed after N s` (story:bound-commands-run-confined)
+- Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
+- **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
+- A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
+
 ## [0.58.0] - 2026-11-21
 
 ### Added

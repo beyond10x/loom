@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T12:43:00Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-commands-run-confined",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 6c5a3466..0b0a50ce in place of a third security pass",
+    "reference": "3 files, 38 insertions, 1 deletion: 2 CHANGELOG bullets, 2 lines of website/docs/guides/system-queries.md, the reviewer's case (+34 lines) in security_w20261121w6_u1.rs; no file under src/; on 0b0a50ce fmt exit 0, the reviewer's file 4 passed, docs-check exit 0; pass 2 measured 432 passed, 0 failed, 4 ignored on 6c5a3466 plus that case"
+  }
+}

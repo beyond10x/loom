@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T11:21:39Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-request-entity",
+  "kind": "story",
+  "revision": 17,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "the two labels name the wave instead of a status; the epic's Source paragraph names the decision for ess/37; the Scope section is re-derived after wave 2026-11-21-w6 closes, before a wave takes the story",
+    "review": "review-result:decision-request-entity-e3r15-design",
+    "outcome": "fixed"
+  }
+}

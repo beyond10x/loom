@@ -26,7 +26,7 @@ scope:
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/system.yaml
-revision: 17
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:19Z", actor: "agent:sdc", revision: 16, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -60,7 +60,8 @@ declare is refused `BadDocument`, naming the document and the member:
 `AutonomyLevel` and `Holder` are the `loom.decision` types of `story:decision-request-entity`;
 this story declares neither again. The resolver uses no order of levels (a preset row is looked up
 by its level), and the holder order below is the resolver's own code, not an ESS ordered enum
-(Loom's `ess/31` has none; `ordered:` needs `ess/36`, `story:ess-format-31`).
+(`Holder` declares no `ordered:` key; in `loom.decision` only `Strength` and `AutonomyLevel`
+do, at `ess/37`, `story:ess-format-37`, and `ess` 0.96.0 generates no Rust order for them).
 
 Holders are ordered partially, as session `sdc` answered on 2026-11-21 (answer a):
 `person < advised < rule_and_decider < rule` and `rule_and_decider < decider`, with `rule` and

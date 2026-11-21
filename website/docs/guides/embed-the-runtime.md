@@ -55,6 +55,16 @@ Substrate by default; `with_runner` accepts an explicit `Arc<dyn TestRunner>`.
 `SliceRequest.runner` selects the runner for the higher-level slice call. A runner is a trusted
 host port: its results become observations from which the verifier can submit evidence.
 
+A host that sets `IntentRequest.bindings` also needs `IntentRequest.runner`: the bound commands
+start only through `TestRunner::run_child`, never through a process the library starts, and a
+request with bindings, no runner and no `"unconfined_bindings": true` in its file is refused
+`NoRunner` before any model call. `EngineRunner` and `SubstrateRunner` start child commands;
+`UnconfinedRunner` and a runner that keeps the defaults of `run_child` and `preflight_child` do
+not, and are refused `NoRunner` too. A host opts its bound commands in to Substrate's `local`
+adapter as the command line's flag does, by passing an `EngineRunner` opened on `local` with
+`bindings::UNCONFINED_FLAG_REASON`; a `local` runner opened with any other reason is refused
+`CommandUnconfined`.
+
 An embedded host supplies an already delegated cgroup root to `SubstrateRunner::new`, or allows
 discovery of the current delegated root. Automatic systemd re-exec belongs to the CLI.
 The scripted SDK example explicitly uses `UnconfinedRunner` for its fixed local fixture;
