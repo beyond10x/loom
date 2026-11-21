@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest b8861e6c0dcd516ae6a61f772ec91a14f639811cafa340e3d466e8a1ef368f96
+// contract digest 08667631688524975ef5aa1dadccc9336df0dcf1a7bdd51985e2b2230103f5c3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -209,6 +209,13 @@ pub struct ProducerIndependence {
     pub dimensions: Vec<String>,
 }
 
+/// ProgramEnvironment — `loom.bindings.ProgramEnvironment`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramEnvironment {
+    /// `loom_retry_feedback` — `Optional<String>`.
+    pub loom_retry_feedback: Option<String>,
+}
+
 /// ProgramRefusal — `loom.bindings.ProgramRefusal`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramRefusal {
@@ -250,6 +257,8 @@ pub struct ProgramRun {
     pub timed_out: bool,
     /// `runner_refusal` — `Optional<String>`.
     pub runner_refusal: Option<String>,
+    /// `retry_of` — `List<String>`.
+    pub retry_of: Vec<String>,
 }
 
 /// RecordedEvidence — `loom.bindings.RecordedEvidence`.
@@ -298,6 +307,51 @@ pub struct RetryCondition {
     pub kind: String,
     /// `results` — `List<String>`.
     pub results: Vec<String>,
+}
+
+/// RetryFeedback — `loom.bindings.RetryFeedback`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryFeedback {
+    /// `format` — `String`.
+    pub format: String,
+    /// `case` — `String`.
+    pub case: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `records` — `List<loom.bindings.RetryRecord>`.
+    pub records: Vec<RetryRecord>,
+    /// `logs` — `List<loom.bindings.RetryLog>`.
+    pub logs: Vec<RetryLog>,
+}
+
+/// RetryLog — `loom.bindings.RetryLog`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryLog {
+    /// `blob_sha256` — `String`.
+    pub blob_sha256: String,
+    /// `tail` — `String`.
+    pub tail: String,
+}
+
+/// RetryRecord — `loom.bindings.RetryRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetryRecord {
+    /// `evidence_id` — `String`.
+    pub evidence_id: String,
+    /// `kind` — `String`.
+    pub kind: String,
+    /// `subject` — `String`.
+    pub subject: String,
+    /// `subject_revision` — `String`.
+    pub subject_revision: String,
+    /// `result` — `String`.
+    pub result: String,
+    /// `producer` — `String`.
+    pub producer: String,
+    /// `observed_at` — `Timestamp`.
+    pub observed_at: crate::primitives::Timestamp,
+    /// `blob_sha256` — `Optional<String>`.
+    pub blob_sha256: Option<String>,
 }
 
 /// ToolAllowList — `loom.bindings.ToolAllowList`.
