@@ -31,6 +31,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
 - A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
 
+### Removed
+
+- No Loom crate depends on `b10x-canon-engineering`; a host that linked it beside Loom chooses its tag itself (story:engineering-protocols-dependency-removed)
+
 ## [0.58.0] - 2026-11-21
 
 ### Added

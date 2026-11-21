@@ -2,7 +2,7 @@
 //! `protocols/engineering/`, every file held to `protocols/engineering/lock.json` before any
 //! definition is admitted.
 //!
-//! The vendored files are byte-equal to the registry of the pinned `b10x-canon-engineering`, so a
+//! The vendored files are byte-equal to the registry engineering-protocols' tag holds, so a
 //! comparison of bytes or digests alone passes on a registry load too. What tells the vendored
 //! load apart is that the refusals below are observed through `from_vendored`, the function
 //! `engineering()` is, and that a lock with another tag moves every entry's revision.

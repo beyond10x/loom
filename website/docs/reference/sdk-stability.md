@@ -59,12 +59,13 @@ major and minor version as the previous tag. There is no 1.0 promise.
 
 ## The Canon release a Loom release links
 
-A Loom release links exactly one Canon release, `b10x-canon` (`Cargo.lock` holds one), and the
-engineering protocols built on it, `b10x-canon-engineering`. The governor's decision for a case is
-the same JSON document that Canon release renders for the same case
-(`crates/loom-governor/tests/canon_decision_bytes.rs`).
+A Loom release links exactly one Canon release, `b10x-canon` (`Cargo.lock` holds one). The
+engineering protocols are vendored files, `protocols/engineering/`, from one engineering-protocols
+tag, the one `protocols/engineering/lock.json` names; no Loom crate depends on an
+engineering-protocols package. The governor's decision for a case is the same JSON document that
+Canon release renders for the same case (`crates/loom-governor/tests/canon_decision_bytes.rs`).
 
-| Loom | `b10x-canon` | `b10x-canon-engineering` |
+| Loom | `b10x-canon` | `engineering-protocols` |
 |---|---|---|
 | 0.57.2 | 0.8.0 | 0.15.2 |
 | 0.58.0 | 0.9.0 | 0.16.0 |
