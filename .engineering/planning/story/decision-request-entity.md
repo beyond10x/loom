@@ -12,6 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:ess-format-31
 - depends_on: story:ess-096-upgrade
+- depends_on: story:ess-format-37
 scope:
 - confidence: inferred
   path: crates/loom-conformance/Cargo.toml

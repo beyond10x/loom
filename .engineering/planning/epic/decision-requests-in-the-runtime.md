@@ -10,7 +10,7 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 11, decided_on: {"recorded":{"review_outcome":12}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -216,6 +216,9 @@ is declared in Rust only.
 0. `story:ess-format-31`: `ess/system.yaml` goes from `ess/25` to `ess/31` on the pinned `ess`
    0.86.0, so the contract's `[]` in `sets:` and its `coalesce` guard are valid; the raise
    regenerates four files of `generated/rust/loom` and changes no command's outcome or stored row.
+0b. `story:ess-format-37`: `ess/system.yaml` goes from `ess/31` to `ess/37` on the same pinned
+   `ess` 0.96.0, so the copy of the decision domain keeps `ordered: true` on `Strength` and
+   `AutonomyLevel`; the raise changes no command's outcome, stored row or generated file.
 1. `story:decision-request-entity`: the `loom.decision` domain, the crate that applies its eight
    commands, and the `DecisionStore` port with the records kept beside a request.
 2. `story:decision-request-file-store`: requests and their records kept a file each in a store
@@ -323,7 +326,9 @@ Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enfor
   Canon's evidence (`story:non-independent-review-becomes-decision-request`).
 - Changes to Canon, and changes to any artifact of `epic:protocol-tree-on-bindings`.
 - Raising `ess/intake/system.yaml` or `ess/commission/system.yaml`, moving the ESS toolchain, and
-  `ordered:` enums (story 0 raises only `ess/system.yaml`, story 1 drops `ordered: true`).
+  `ordered:` on any enum but `Strength` and `AutonomyLevel` (stories 0 and 0b raise only
+  `ess/system.yaml`; session `sdc` decided on 2026-11-21 that story 0b raises it to `ess/37` and
+  the copy of the decision domain keeps `ordered: true` on those two).
 - Resuming a question or outcome hold from the command line, and a general rebuild of a commission
   from its resume context. Session `sdc` holds no questions in slice runs driven through the
   binary (`.engineering/drafts/e3-sdc-answers-11.md`, (a)), so that is a further story, not drafted.
@@ -414,8 +419,9 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
   request instead of stopping; decided by `decider:stub`, the review record's producer is
   `decider:stub` and the claim holds (story 20).
 - An eval run with an override to `decider` is refused `EvalOverride` (story 3).
-- `ess/system.yaml` declares `format: ess/31`, `task drift` exits 0, and `CHANGELOG.md` names the
-  raise in one `### Changed` bullet and in no `**Breaking:**` bullet (story 0).
+- `ess/system.yaml` declares `format: ess/37`, `task drift` exits 0, and `CHANGELOG.md` names the
+  raise to `ess/31` (story 0) and the raise to `ess/37` (story 0b) each in one `### Changed`
+  bullet and in no `**Breaking:**` bullet.
 - At an approval hold of a `software-change@1` run, `decisions decide DR-… A --as timo --state DIR`
   performs the held request once and prints the resumed run's last line `stopped: …` (story 21).
 - At an outcome hold of a slice run, `resume_decided_request` with a scripted executor brings the

@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T11:15:48Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-format-37",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "approve, no finding",
+    "review": "review-result:ess-format-37-acceptance-2",
+    "outcome": "no-op"
+  }
+}
