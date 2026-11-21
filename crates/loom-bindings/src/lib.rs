@@ -11,19 +11,27 @@
 //! [`ProgramEffects`] is the effect port that performs an action bound to a `program` executor,
 //! for any registered protocol: it starts each program through the host's runner alone, as
 //! `b10x_loom_intake_slice::bindings` admits the runner and builds the child, keeps its output as
-//! one content-addressed blob, and records evidence by the binding's result table alone. Decoding
-//! and the load-time check start no process; the crate opens no network connection.
+//! one content-addressed blob, and records evidence by the binding's result table alone. Once the
+//! program ended, every artifact the document places at a path takes the content digest of what is
+//! there as its revision ([`content_revision`]), written with the step's records in one store
+//! write; [`PlacedRevisions`] computes them again before every evaluation. Decoding and the
+//! load-time check start no process; the crate opens no network connection.
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 mod decode;
 mod load;
 mod program;
+mod revision;
 mod tree;
 
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use revision::{
+    ABSENT, MAX_ARTIFACT_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PlacedRevisions, RefreshError,
+    TREE_HEADER, content_revision, placements, revisions_of,
+};
 
 use loom::bindings::BindingsRefusal;
 use std::fmt;

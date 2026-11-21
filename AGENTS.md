@@ -1264,8 +1264,22 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   program prints names a result, revision, producer or instant. The cap holds for one port that
   drives the case; two hosts that drive one case store at the same time can each start the action
   once more (`story:bound-program-run-cap-holds-across-ports`). Held by
-  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
-  `crates/loom-governor` is not changed by it.
+  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`.
+- A placed artifact's revision is Loom's (`revision.rs`, `story:bound-artifact-revisions`):
+  `content_revision` is `t` and 16 hex digits of the SHA-256 over a file's bytes, a link's target
+  string (never followed) or a tree's entries in path order, `none` while absent. It opens each
+  segment from the workspace root with `O_NOFOLLOW` (rustix), so a link among the directories,
+  an absolute path and `..` are `OutsideWorkspace` and read by nothing; past `MAX_ARTIFACT_BYTES`,
+  `MAX_TREE_ENTRIES` or `MAX_TREE_DEPTH` is `TooLarge`; a change during the read is
+  `ChangedWhileRead`; a pipe, socket or device is `Unreadable`, never opened. `ProgramEffects`
+  digests before the run (one that fails is `ArtifactUnreadable`, nothing started) and after it,
+  and writes the moves with the records through `CanonGovernor::record_step`, one store write
+  that checks every record is about the moved revisions before it changes anything;
+  a non-`write` action whose program changed a placed artifact is `Discarded`
+  (`ChangedByNonWriter`): moves, no records. `PlacedRevisions` is the `Governor` that writes the
+  moves before every `frontier` and `completion`. Held by `crates/loom-bindings/tests/bound_revisions.rs`
+  and `crates/loom-governor/tests/step_write.rs` (a crash at each `WriteStep` of
+  `FileCaseStore::update_until` leaves neither or both).
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 

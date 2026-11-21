@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "8ee2331e35a0bd16da759d58a31a2ef3737667e04a6a3de9fe3e50dcf93ff73d",
-    "contract_digest": "b8861e6c0dcd516ae6a61f772ec91a14f639811cafa340e3d466e8a1ef368f96"
+    "source_digest": "856d9e63ae48f7c3ef789da31d4639685b3eb164a26a7bb76c1526f0cba82952",
+    "contract_digest": "c340617801a3fca5a88d9621a36c9a687ca510348010cf4434a40db3257f03e0"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -362,6 +362,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ArtifactPlacement",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.ArtifactRevision",
       "disposition": {
         "disposition": "generated"
@@ -391,6 +398,20 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.BoundAction",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.BoundStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.DiscardReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -468,6 +489,34 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.RetryCondition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionMove",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.StepOutcome",
       "disposition": {
         "disposition": "generated"
       }

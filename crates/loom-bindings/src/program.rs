@@ -15,7 +15,8 @@
 //! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
 //! and nothing starts; the action's run count (the observations this port kept for the action in
 //! the case, [`PROGRAM_SOURCE`]) below its `budget.max_runs`, else `RunsSpent` and nothing starts; the
-//! revisions the case holds, read before the program starts; the arguments (the request's, else the
+//! action's effect class and the placed artifacts' digests, read before the program starts; the
+//! arguments (the request's, else the
 //! binding's literal `arguments`, else the object the `arguments_from` argv prints, else `{}`; a
 //! request has none when its arguments are the empty object), an `arguments_from` that does not
 //! exit 0 or prints anything but one JSON object within [`MAX_REPORT_BYTES`] refused
@@ -29,9 +30,25 @@
 //! looked up in its `results`, falling to `*`. A value neither lists is `ResultNotInTable`, a
 //! report that cannot be read `ReportUnreadable`; either records nothing. Otherwise one record per
 //! entry is submitted, of the entry's kind about its subject, with the entry's producer, the
-//! observation's instant, and the revisions the case held for the subject and the `upstream`
-//! artifacts: nothing the program printed names a record's result, revision, producer or instant.
+//! observation's instant, and the revisions the case holds for the subject and the `upstream`
+//! artifacts once the step is written: nothing the program printed names a record's result,
+//! revision, producer or instant.
+//!
+//! Revisions (`story:bound-artifact-revisions`): before anything starts the port digests every
+//! artifact the document places at a path ([`crate::placements`]); one that cannot be digested
+//! refuses the step `ArtifactUnreadable` and starts nothing. Once the run's observation is kept it
+//! digests them again; one that cannot be digested then refuses the step `ArtifactUnreadable`, no
+//! revision moved and nothing recorded. Otherwise each placed artifact takes the digest as its
+//! revision, the moves written with the step's records in one store write
+//! ([`CanonGovernor::record_step`]) at every end after the run: a runner refusal, a blob failure,
+//! `ReportUnreadable` and `ResultNotInTable` write the moves alone. An action whose effect class is
+//! not `write` (`read` or none) whose program changed a placed artifact (its digest after the run
+//! differs from before) records nothing: the step is `Discarded` (`ChangedByNonWriter`) and its
+//! moves are still written. The report of a performed step carries `step`
+//! (`loom.bindings.BoundStep`): the outcome, the placements and the moves.
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -43,11 +60,13 @@ use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, CaseId, Commission, EffectOutcome, EffectOutcomePerformed,
-    EffectOutcomeRefused, EvidenceData, EvidenceId, Observation, ObservationData, ObservationId,
-    commission_state,
+    EffectOutcomeRefused, EvidenceData, EvidenceId, GovernorError, Observation, ObservationData,
+    ObservationId, commission_state,
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
-use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
+use b10x_loom_commission::ports::evidence::{
+    AttributedEvidence, EvidencePort, ObservationPort, submit_evidence,
+};
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_slice::bindings::{
     DEFAULT_TIMEOUT_SECONDS, MAX_REPORT_BYTES, admit_bound_program_runner, bound_program_child,
@@ -55,10 +74,15 @@ use b10x_loom_intake_slice::bindings::{
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{ConfinementError, TestExecution, TestRunner};
 use loom::bindings::{
-    ArtifactRevision, BindingsDocument, BoundAction, EvidenceEntry, Executor, ProgramRefusal,
-    ProgramRefusalReason, ProgramRun, RecordedEvidence, ResultSource,
+    ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason, EvidenceEntry,
+    Executor, ProgramRefusal, ProgramRefusalReason, ProgramRun, RecordedEvidence, ResultSource,
+    StepOutcome,
 };
-use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime};
+use loom_governor::{
+    CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime, StepWritten,
+};
+
+use crate::revision::{describe, placements, revisions_of};
 use sha2::{Digest as _, Sha256};
 
 /// The `source` of every observation the port keeps: one per run of a bound program. The run count
@@ -193,11 +217,19 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 "{program} was not started: timeout_seconds {seconds} is past what this host's clock can hold"
             )));
         }
-        let case_revision = self
-            .governor
-            .current_revision(&self.case)
-            .map_err(governor)?;
-        let revisions = self.governor.revisions(&self.case).map_err(governor)?;
+        let writes = self.writes(action)?;
+        // Read before anything starts, so a placed path that cannot be digested starts nothing,
+        // and what the program changed is told from what the workspace held already.
+        let before = match placements(&self.workspace, self.document) {
+            Ok(before) => before,
+            Err(unreadable) => {
+                return Ok(refusal(
+                    ProgramRefusalReason::ArtifactUnreadable,
+                    action,
+                    format!("nothing was started: {}", describe(&unreadable)),
+                ));
+            }
+        };
         let arguments = match self.arguments(binding, request, timeout) {
             Ok(arguments) => arguments,
             Err(outcome) => return Ok(outcome),
@@ -254,23 +286,74 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 payload: commission_value(&run_json(&run))?,
             }))
             .map_err(governor)?;
+        // What the workspace holds once the program ended: the revisions this step writes,
+        // whatever else it records, and never a value the program, its report or the request names.
+        let after = match placements(&self.workspace, self.document) {
+            Ok(after) => after,
+            Err(unreadable) => {
+                return Ok(refusal(
+                    ProgramRefusalReason::ArtifactUnreadable,
+                    action,
+                    format!(
+                        "no revision moved and nothing was recorded: {}",
+                        describe(&unreadable)
+                    ),
+                ));
+            }
+        };
+        let targets = revisions_of(&after);
+        let changed = before
+            .iter()
+            .zip(&after)
+            .any(|(before, after)| before.revision != after.revision);
         let execution = match answer {
             Ok(execution) => execution,
             Err(refusal) => {
+                self.write(&targets, Vec::new())?;
                 return Ok(refused(format!(
                     "{program} was refused by its runner: {refusal}"
                 )));
             }
         };
         if let Some(failure) = blob_failure {
+            self.write(&targets, Vec::new())?;
             return Err(EffectError::new(failure));
         }
+        if changed && !writes {
+            // A program of an action that does not write changed what it was to observe: its
+            // records are dropped, and the artifact still takes what is there.
+            let written = self.write(&targets, Vec::new())?;
+            return performed(
+                &run,
+                &[],
+                &BoundStep {
+                    action: action.to_owned(),
+                    outcome: StepOutcome::Discarded,
+                    discarded: Some(DiscardReason::ChangedByNonWriter),
+                    placements: after,
+                    moves: written.moves,
+                },
+            );
+        }
+        // The revisions the case holds once this step's moves are written.
+        let mut revisions = self.governor.revisions(&self.case).map_err(governor)?;
+        let moving = targets
+            .iter()
+            .filter(|(artifact, revision)| revisions.get(*artifact) != Some(*revision))
+            .count();
+        let case_revision = self
+            .governor
+            .current_revision(&self.case)
+            .map_err(governor)?
+            + i64::try_from(moving).unwrap_or(i64::MAX);
+        revisions.extend(targets.clone());
         let mut report = None;
         let mut recorded = Vec::new();
         for entry in &binding.evidence {
             let value = match value_of(entry, &execution, &mut report) {
                 Ok(value) => value,
                 Err(detail) => {
+                    self.write(&targets, Vec::new())?;
                     return Ok(refusal(
                         ProgramRefusalReason::ReportUnreadable,
                         action,
@@ -279,6 +362,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 }
             };
             let Some(result) = look_up(entry, value.as_deref()) else {
+                self.write(&targets, Vec::new())?;
                 return Ok(refusal(
                     ProgramRefusalReason::ResultNotInTable,
                     action,
@@ -316,18 +400,51 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                     .collect::<Result<_, EffectError>>()?,
             });
         }
-        for record in &recorded {
-            self.submit(record, case_revision, &observation)?;
-        }
-        Ok(EffectOutcome::Performed(EffectOutcomePerformed {
-            report: commission_value(&serde_json::json!({
-                "run": run_json(&run),
-                "evidence": recorded.iter().map(record_json).collect::<Vec<_>>(),
-            }))?,
-            attempt: None,
-            audit: None,
-            usage: None,
-        }))
+        let attributed = recorded
+            .iter()
+            .map(|record| self.attribute(record, case_revision, &observation))
+            .collect::<Result<Vec<_>, _>>()?;
+        // The moves and the records in one store write: a crash leaves neither or both.
+        let written = self.write(&targets, attributed)?;
+        performed(
+            &run,
+            &recorded,
+            &BoundStep {
+                action: action.to_owned(),
+                outcome: StepOutcome::Recorded,
+                discarded: None,
+                placements: after,
+                moves: written.moves,
+            },
+        )
+    }
+
+    /// Whether the protocol declares `action`'s effect class `write`.
+    fn writes(&self, action: &str) -> Result<bool, EffectError> {
+        let facts = self.governor.action_facts(&self.case).map_err(governor)?;
+        Ok(facts
+            .actions
+            .iter()
+            .find(|facts| facts.action == action)
+            .and_then(|facts| facts.effect.as_deref())
+            == Some(WRITE_EFFECT))
+    }
+
+    /// Writes this step to the case in one store write: the revision of every placed artifact
+    /// (`targets`) and the `records`.
+    fn write(
+        &self,
+        targets: &BTreeMap<String, String>,
+        records: Vec<AttributedEvidence>,
+    ) -> Result<StepWritten, EffectError> {
+        self.governor
+            .record_step(&self.case, targets, records)
+            .map_err(|error| {
+                EffectError::new(format!(
+                    "the step of case {} was not written, nothing of it was kept: {error}",
+                    self.case.0
+                ))
+            })
     }
 
     /// The arguments the bound program reads on standard input, as JSON text; `Err` is the step's
@@ -397,12 +514,14 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         }
     }
 
-    fn submit(
+    /// `record` as evidence of the case at `case_revision`, attributed to its producer by
+    /// Commission's `submit_evidence`, held for the step's one write.
+    fn attribute(
         &self,
         record: &RecordedEvidence,
         case_revision: i64,
         observation: &ObservationId,
-    ) -> Result<(), EffectError> {
+    ) -> Result<AttributedEvidence, EffectError> {
         let id = EvidenceId(fresh_uuid("program-evidence", &self.case.0));
         let mut facts = serde_json::json!({
             "format": "canon-evidence/1",
@@ -428,8 +547,9 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 .collect::<serde_json::Map<_, _>>()
                 .into();
         }
+        let held = Held::default();
         submit_evidence(
-            self.governor,
+            &held,
             &record.producer,
             EvidenceData {
                 evidence_id: id,
@@ -442,8 +562,63 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 provenance: commission_value(&serde_json::json!({"source": PROGRAM_SOURCE}))?,
             },
         )
-        .map_err(|error| EffectError::new(format!("the {} record: {error}", record.kind)))
+        .map_err(|error| EffectError::new(format!("the {} record: {error}", record.kind)))?;
+        held.0
+            .into_inner()
+            .pop()
+            .ok_or_else(|| EffectError::new(format!("the {} record was not held", record.kind)))
     }
+}
+
+/// The evidence port a record passes through to be attributed by Commission's `submit_evidence`:
+/// it holds the record for the step's one write and decides nothing.
+#[derive(Default)]
+struct Held(RefCell<Vec<AttributedEvidence>>);
+
+impl EvidencePort for Held {
+    fn receive(&self, evidence: AttributedEvidence) -> Result<(), GovernorError> {
+        self.0.borrow_mut().push(evidence);
+        Ok(())
+    }
+}
+
+/// The effect class the protocol declares for an action that writes.
+const WRITE_EFFECT: &str = "write";
+
+/// The step performed: the run, the records submitted and the step as written.
+fn performed(
+    run: &ProgramRun,
+    recorded: &[RecordedEvidence],
+    step: &BoundStep,
+) -> Result<EffectOutcome, EffectError> {
+    Ok(EffectOutcome::Performed(EffectOutcomePerformed {
+        report: commission_value(&serde_json::json!({
+            "run": run_json(run),
+            "evidence": recorded.iter().map(record_json).collect::<Vec<_>>(),
+            "step": step_json(step),
+        }))?,
+        attempt: None,
+        audit: None,
+        usage: None,
+    }))
+}
+
+fn step_json(step: &BoundStep) -> serde_json::Value {
+    serde_json::json!({
+        "action": step.action,
+        "outcome": format!("{:?}", step.outcome),
+        "discarded": step.discarded.map(|reason| format!("{reason:?}")),
+        "placements": step.placements.iter().map(|placement| serde_json::json!({
+            "artifact": placement.artifact,
+            "path": placement.path,
+            "revision": placement.revision,
+        })).collect::<Vec<_>>(),
+        "moves": step.moves.iter().map(|moved| serde_json::json!({
+            "artifact": moved.artifact,
+            "from": moved.from,
+            "to": moved.to,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 impl<S: FallibleCaseStore, T: EvaluationTime> EffectPort for ProgramEffects<'_, S, T> {

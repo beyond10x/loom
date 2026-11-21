@@ -1,6 +1,6 @@
 [package]
 name = "b10x-loom-bindings"
-description = "Decodes the loom.bindings/1 document, in which an operator declares per protocol action its executor, result table, tools, budget and timeout, checks it against the compiled protocol when it is loaded, and runs an action bound to a program through the host's runner, recording evidence by the binding's result table."
+description = "Decodes the loom.bindings/1 document, in which an operator declares per protocol action its executor, result table, tools, budget and timeout, checks it against the compiled protocol when it is loaded, and runs an action bound to a program through the host's runner, recording evidence by the binding's result table, and gives each artifact placed at a workspace path the content digest of what is there as its revision."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -16,6 +16,7 @@ b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 loom = { path = "../../generated/rust/loom" }
+rustix = { version = "1", features = ["fs", "std"] }
 serde = "1"
 serde_json = "1"
 serde_yaml_ng = "0.10"
