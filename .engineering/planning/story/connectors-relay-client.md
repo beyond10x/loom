@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connectors-relay-client
 kind: story
-status: proposed
+status: active
 title: ConnectorsRelay reads and performs one governed write over the Connectors wire at a loopback relay URL, holding no credential
 summary: GET /v1/describe and POST /v1alpha2/invoke on its own HTTP client over connectors-core v0.62.0 types, no authorization header, for one adapter and connection pair; one URL rule (loopback_url); one result per stage of a write; a write's answer classified from the typed InvokeResponse; the CLI's refusals, key and once-only rule kept; every relay and Connectors answer tested on a loopback fake with real v1alpha2 bodies
 tags:
@@ -27,9 +27,10 @@ scope:
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:54:03Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "sdc-accepts-boundary-epic-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T09:18:22Z", actor: "agent:sdc", revision: 15, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w5"}
 ---
 ## Outcome
 

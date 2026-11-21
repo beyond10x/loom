@@ -11,6 +11,7 @@ relations:
 - decomposes: epic:protocol-tree-on-bindings
 - serves: vision:O1
 - depends_on: story:confinement-opens-from-engine-config
+- depends_on: story:ess-096-upgrade
 scope:
 - confidence: inferred
   path: crates/loom-cli/src/lib.rs

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-096-upgrade
 kind: story
-status: draft
+status: active
 title: Loom builds, generates and gates on ESS 0.96.0
 summary: Every ess pin 0.86.0 to 0.96.0 on wave 4, all three systems regenerated; Suspension drops its case relation and a mixed HoldSuspension is refused incomplete-request before already-held (defaults 1a, 2a)
 relations:
@@ -13,7 +13,47 @@ relations:
 - depends_on: story:engineering-registry-calls-replaced
 - depends_on: story:engineering-protocols-vendor-command
 - depends_on: story:decision-suspension-reason
-revision: 3
+scope:
+- confidence: cited
+  path: .github/workflows/check.yml
+- confidence: cited
+  path: .github/workflows/pages.yml
+- confidence: cited
+  path: crates/loom-commission-conformance/Cargo.toml
+- confidence: cited
+  path: crates/loom-commission-conformance/src/lib.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/hold_incomplete_request.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/security_w20261121w3_u2.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/security_w20261121w3_u2_pass2.rs
+- confidence: cited
+  path: crates/loom-commission/src/ports/suspension.rs
+- confidence: cited
+  path: crates/loom-commission/tests/adversary2_gate.rs
+- confidence: cited
+  path: crates/loom-commission/tests/ess_gate.rs
+- confidence: cited
+  path: crates/loom-conformance/Cargo.toml
+- confidence: cited
+  path: crates/loom-executor/tests/adversary2_ess_gate.rs
+- confidence: cited
+  path: crates/loom-executor/tests/ess_gate.rs
+- confidence: cited
+  path: crates/loom-intake-conformance/Cargo.toml
+- confidence: cited
+  path: ess/commission/domains/responsibility.yaml
+- confidence: cited
+  path: ess/commission/ess-inputs.yaml
+- confidence: cited
+  path: ess/ess-inputs.yaml
+- confidence: cited
+  path: ess/intake/ess-inputs.yaml
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T09:17:24Z", actor: "agent:sdc", revision: 7, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T09:18:22Z", actor: "agent:sdc", revision: 8, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w5"}
 ---
 ## Outcome
 
@@ -24,7 +64,9 @@ dispatcher itself (sha256 of the binary `7be49dbf…ccdd4a`, equal to
 `~/.cache/ess/toolchains/0.96.0/ess` and to the binary in the release tarball
 `ess-0.96.0-x86_64-unknown-linux-gnu.tar.gz`, sha256
 `8eaf33989c9306bd923d19a96be82723addf7ad532b534fb8b0e423733f81825`), so after the move no `task`
-step needs `ESS_TOOLCHAIN` or a private binary first on `PATH`, and `ess --version` prints one line.
+step needs `ESS_TOOLCHAIN` or a private binary first on `PATH`. `ess --version` prints one line
+only while the pin equals the dispatcher; once the dispatcher is newer than the pin it prints two
+again, so `story:commission-docs-read-one-ess-version-line` stays open.
 
 The move lands on wave 2026-11-21-w4 (`71f15f92`): the main system is `ess/31`
 (`story:ess-format-31`), intake `ess/26`, Commission `ess/22`, and the engineering protocols are
@@ -36,11 +78,12 @@ no ESS release and does not move.
 A probe of the move (2026-11-21, worktree at `c94ccbbf`, before wave 4) found it is not mechanical.
 ESS 0.95.0 added two synthesis rules that refuse `commission.responsibility.HoldSuspension/held`,
 so `task commission:ess-gate` and `task commission:conform` go red (3 refusals, 41 scenarios where
-0.86.0 synthesized 43 with 0):
+0.86.0 synthesized 43 with 0). Every scenario name in this story is written as the synthesized
+suite keys it, less its leading `commission.responsibility.`:
 
 - `ESS-SYNTH-001` twice (`HoldSuspension/outcome/held` and
-  `Suspension/invariant/after/HoldSuspension/held`): `held` copies `input.case_id` into
-  `Suspension.case_id`, which carries the `references` relation `case` to
+  `Suspension/invariant/after/commission.responsibility.HoldSuspension/held`): `held` copies
+  `input.case_id` into `Suspension.case_id`, which carries the `references` relation `case` to
   `commission.responsibility.Case`, and no command creates a `Case`, so synthesis cannot arrange the
   row the input names (0.95.0, referenced-input arrangement).
 - `ESS-SYNTH-025`: `held` copies the four request fields into a Suspension whose invariant says
@@ -58,11 +101,16 @@ decision in `## Decision`.
 
 Both options were taken on 2026-11-21 by the Loom session on the silence of session `sdc`, which
 plans Loom's stories: `sdc` was asked for the two decisions with the defaults 1a and 2a named, was
-told the defaults stand on silence, and did not answer. `sdc` may overturn either before this story
-is proposed.
+told the defaults stand on silence, and did not answer. `sdc` confirmed both the same day, after
+this revision, with the two facts the revision found: the member check moves before `already-held`
+and the two wave 3 security tests change with it; a `Decision` hold with all four members and
+another reason with none stay `storage-failed`
+(`.engineering/drafts/w5-sdc-approval.md` holds its words while the wave runs; the wave page
+quotes them).
 
 - `ESS-SYNTH-001`, option (a): drop the `case` relation from `Suspension`
-  (`ess/commission/domains/responsibility.yaml:1328-1332`); validate then warns `implied_relation`.
+  (`ess/commission/domains/responsibility.yaml:1328-1332`), so `Suspension` keeps the relations
+  `run` and `action_request`; validate then warns `implied_relation` on `case_id`.
   Nothing reads the relation: the generated Commission model has no relation code, and only the two
   reference pages under `website/docs/reference/commission/` list it. `Suspension.case_id` and the
   `held` outcome's `case_id` stay.
@@ -101,6 +149,7 @@ What 2a changes against `decide_hold` at `71f15f92`
   the probe's synthesized scenario `HoldSuspension/outcome/incomplete-request` ends by sending a
   mixed hold to a commission that already holds a Suspension and expects `incomplete-request` with
   the held one unchanged, so `decide_hold` must test the members before `held.is_some()` (`:147`).
+  A testkit case holds the same order without the suite (see `## Acceptance`).
 - Unchanged: a host wrapper still answers `settled` before `decide_hold`
   (`crates/loom-intake-slice/src/handoff.rs:429-446`,
   `crates/loom-commission-conformance/src/store.rs:258-272`), as the specification declares
@@ -125,19 +174,44 @@ What 2a changes against `decide_hold` at `71f15f92`
   file matches it), `git grep -n '0\.86\.0' -- README.md AGENTS.md` prints nothing (3 lines at
   `71f15f92`), and `grep -c 8eaf33989c9306bd923d19a96be82723addf7ad532b534fb8b0e423733f81825
   .github/workflows/check.yml .github/workflows/pages.yml` prints 1 for each file.
+- 1a holds: `sed -n '/^  - name: commission.responsibility.Suspension$/,/^    lifecycle:/p'
+  ess/commission/domains/responsibility.yaml | grep -B1 'kind: references' | grep -o 'name: .*'`
+  prints `name: run` and `name: action_request` and nothing else (at `71f15f92` it also prints
+  `name: case`), and `grep -c 'creates: commission.responsibility.Case$'
+  ess/commission/domains/responsibility.yaml` prints 0 (no command creates a `Case`, so 1b was not
+  taken). `ess specify validate --path ess/commission` exits 0 and warns `implied_relation` on
+  `Suspension.case_id`: a reviewer reads a `warning[ESS-ENTITY-019]` line naming
+  `commission.responsibility.Suspension` and `case_id`, of the form the probe log quotes for
+  intake (`` warning[ESS-ENTITY-019]: `intake.routing.Grant` stores `action_request_id`, … and no
+  relation declares that it names a `intake.routing.MergeHandoff` ``); the probe never logged
+  Commission's own line.
+- The error name is declared and generated: `grep -c SuspensionRequestIncomplete
+  ess/commission/domains/responsibility.yaml` prints at least 1 (3 on the probe copy: the
+  declaration, the branch's `error:` and its payload) and `grep -c SuspensionRequestIncomplete
+  generated/rust/commission/src/responsibility.rs` prints at least 1 (0 at `71f15f92`).
 - `ess verify conform synthesize --path ess/commission --out <scratch>/suite.json` ends with the
-  summary line `<n> scenario(s) (<a> authored), 0 refusal(s), …`, and `<n>` is the count the unit
-  reads at its base after the first commit and records in its run (the probe: 44 scenarios and 0
-  refusals on a copy of `ess/commission` at `c94ccbbf`; wave 4 changed nothing under
-  `ess/commission/`, so 44 is expected). The suite's `scenarios` names, each prefixed
-  `commission.responsibility.`, include `HoldSuspension/outcome/incomplete-request`,
+  summary line `44 scenario(s) (0 authored), 0 refusal(s), …`, the probe's count for 1a and 2a on
+  a copy of `ess/commission` at `c94ccbbf` (wave 4 changed nothing under `ess/commission/`). If the
+  unit reads another count at its base, it stops and reports the count to the coordinator; it does
+  not edit this number. The suite's `scenarios` include `HoldSuspension/outcome/incomplete-request`,
   `HoldSuspension/outcome/held` and
   `Suspension/invariant/after/commission.responsibility.HoldSuspension/held`.
 - `task commission:ess-gate` (`crates/loom-commission/tests/ess_gate.rs`, all 11 tests) passes.
-- `task commission:conform` (`crates/loom-commission-conformance/tests/conform.rs`) passes with 0
-  refusal occurrences, and the scenarios `HoldSuspension/outcome/incomplete-request`,
-  `HoldSuspension/outcome/held` and `Suspension/invariant/after/HoldSuspension/held` are selected
-  and pass.
+- `task commission:conform` (`crates/loom-commission-conformance/tests/conform.rs`) passes, and
+  `grep -c '^- ' ess/commission/SKIPPED.md` prints 0 (0 at `71f15f92`). The gate fails on any
+  failed or errored scenario and on any skipped or unsupported scenario `ess/commission/SKIPPED.md`
+  does not name (`conform.rs:10-23`, `:170-196`), so with that file empty every scenario the suite
+  holds, the three above included, ran and passed. The unit does not change
+  `ess/commission/SKIPPED.md`.
+- The member check runs before `already-held`, without the suite: a new test in
+  `crates/loom-commission-testkit/tests/hold_incomplete_request.rs` holds a full `Authority` hold
+  for a commission on `SuspensionStore` and on `FileSuspensionStore`, then sends a mixed hold for
+  the same commission, and expects `HoldSuspensionOutcome::IncompleteRequest` naming that
+  Suspension and `SuspensionPort::get` returning the first Suspension unchanged;
+  `cargo test -p b10x-loom-commission-testkit --locked --test hold_incomplete_request` passes (it
+  answers `AlreadyHeld` before `decide_hold` changes). The second witness is the last step of the
+  synthesized scenario `HoldSuspension/outcome/incomplete-request` (a mixed hold after `held` on
+  the same Suspension, expecting `incomplete-request` and `expect_complete_subject_unchanged`).
 - A mixed hold stores nothing: `cargo test -p b10x-loom-commission-testkit --locked --test
   security_w20261121w3_u2 --test security_w20261121w3_u2_pass2` passes, where
   `security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_disagree` expects
@@ -151,7 +225,8 @@ What 2a changes against `decide_hold` at `71f15f92`
   `task docs-check` and `task commission:docs-drift` pass after regeneration with 0.96.0, with no
   `ESS_TOOLCHAIN` set.
 - `cargo clippy --workspace --all-targets --locked -- -D warnings` and
-  `cargo test --workspace --locked --no-fail-fast` pass (base: `<w4 gate counts>`).
+  `cargo test --workspace --locked --no-fail-fast` pass (base: the whole gate of wave
+  2026-11-21-w4 on `71f15f92`, 3192 passed, 0 failed, 10 ignored).
 - CHANGELOG (Unreleased) has one line for the move under `### Changed` and one `**Breaking:**`
   line: `HoldSuspensionOutcome` gains `IncompleteRequest` (`SuspensionRequestIncomplete`), and a
   mixed hold answers it instead of `StorageFailed`. README.md and AGENTS.md § ESS name 0.96.0.
@@ -164,7 +239,7 @@ What 2a changes against `decide_hold` at `71f15f92`
 The unit's first commit changes only `ess/`. In
 `ess/commission/domains/responsibility.yaml` it declares the error
 `commission.responsibility.SuspensionRequestIncomplete` (one field, `suspension`, a
-`SuspensionKey`) among the errors beside `SuspensionAlreadyHeld` (`:1518-1523`), adds the branch
+`SuspensionKey`) among the errors beside `SuspensionAlreadyHeld` (`:1520-1523`), adds the branch
 `incomplete-request` to `HoldSuspension` between `settled` (`:1719`) and `held` (`:1726`), and
 removes the `case` relation from `Suspension` (`:1328-1332`). The same commit moves the three
 `requires:` lines to 0.96.0, because every later commit leaves `ess/` alone (AGENTS.md § ESS,
@@ -185,8 +260,9 @@ changes, since `decide_hold` answers `storage-failed` (or `already-held` on the 
   reason's variant.
 - The workspace version, the release heading of `CHANGELOG.md` and the chart version: the release
   commit's.
-- `story:commission-docs-read-one-ess-version-line`: the two-line `ess --version` no longer happens
-  once the pin equals the dispatcher; that story can close as moot, not be implemented here.
+- `story:commission-docs-read-one-ess-version-line`: it stays open. The move only hides the
+  two-line `ess --version` while the pin equals the dispatcher; a dispatcher newer than the pin
+  prints two lines again.
 
 ## Scope
 
@@ -201,7 +277,8 @@ changes, since `decide_hold` answers `storage-failed` (or `already-held` on the 
   `SuspensionStore` documentation that names its refusals)
 - `crates/loom-commission-conformance/src/lib.rs` (the `incomplete-request` arm and the error name)
 - `crates/loom-commission-testkit/tests/security_w20261121w3_u2.rs`,
-  `crates/loom-commission-testkit/tests/security_w20261121w3_u2_pass2.rs`
+  `crates/loom-commission-testkit/tests/security_w20261121w3_u2_pass2.rs`,
+  `crates/loom-commission-testkit/tests/hold_incomplete_request.rs` (new; not at `71f15f92`)
 - `generated/rust/loom/`, `generated/rust/commission/`, `generated/rust/intake/`,
   `website/docs/reference/ess/`, `website/docs/reference/commission/` (by task only)
 - `README.md`, `AGENTS.md`, `CHANGELOG.md`

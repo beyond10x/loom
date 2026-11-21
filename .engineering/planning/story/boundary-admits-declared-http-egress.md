@@ -10,6 +10,7 @@ tags:
 relations:
 - decomposes: epic:boundary-agent-reaches-connectors-and-http-sources
 - serves: vision:O1
+- depends_on: story:ess-096-upgrade
 scope:
 - confidence: cited
   path: AGENTS.md
