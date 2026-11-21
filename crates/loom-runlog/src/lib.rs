@@ -29,8 +29,13 @@
 //!   as a line is named by the line after it when that line's `prev` does not match it, and is
 //!   itself named otherwise.
 //!
-//! What the log cannot show: a log whose last lines were removed whole, or rewritten from some
-//! line on with a fresh chain, verifies. The log is not signed.
+//! An `ActionFinished` holds an `exit` or a `refusal`, exactly one: a line with both or neither
+//! does not read as a line, so `verify` refuses it and an append refuses to write it.
+//!
+//! What the log cannot show: a change to the last line alone is not detected, as a cut at a line
+//! boundary is not, since no line after it names its digest, and the next append makes the change
+//! permanent. A log whose last lines were removed whole, or rewritten from some line on with a
+//! fresh chain, verifies too. The log is not signed.
 //!
 //! The crate declares the events and writes what it is given; it emits nothing itself.
 #![forbid(unsafe_code)]
@@ -613,6 +618,17 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
         "ActionStarted" => RunLogEvent::ActionStarted(ActionStarted {
             action: text("action")?,
         }),
+        "ActionFinished" if value.member("exit").is_some() == value.member("refusal").is_some() => {
+            return Err(DecodeError {
+                at: "exit".to_owned(),
+                expected: "an exit or a refusal, exactly one".to_owned(),
+                found: if value.member("exit").is_some() {
+                    "both".to_owned()
+                } else {
+                    "neither".to_owned()
+                },
+            });
+        }
         "ActionFinished" => RunLogEvent::ActionFinished(ActionFinished {
             action: text("action")?,
             exit: value

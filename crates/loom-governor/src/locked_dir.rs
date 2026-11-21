@@ -103,6 +103,10 @@ impl LockedDir {
 
     /// Runs `operation` holding the directory's lock. The outer error is the lock's: `operation`
     /// did not run.
+    ///
+    /// Not re-entrant: the lock is a fresh `flock` on each call, so an `operation` that takes
+    /// the same directory's lock again (through this method, a store over the directory, or a
+    /// run log's append) waits for itself forever.
     pub fn locked<T>(&self, operation: impl FnOnce() -> T) -> Result<T, FileStoreError> {
         let path = self.dir.join(LOCK);
         let lock = OpenOptions::new()
@@ -138,6 +142,9 @@ impl LockedDir {
     }
 
     /// A new temporary file in the directory, created for writing. Only called holding the lock.
+    ///
+    /// The precondition is not checked: called without the lock, a store opening the directory
+    /// at the same time may remove the file as one a dead process left.
     pub fn temporary(&self) -> Result<(PathBuf, File), FileStoreError> {
         // A name in use, left by an earlier life with the same process id, is skipped for the
         // next one rather than reported: it says nothing about this write.

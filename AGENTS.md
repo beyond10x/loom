@@ -1176,12 +1176,15 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   with the reader's refusal and no byte changes; a line that would not read back as given (an `at`
   that is no RFC 3339 instant) is refused before anything is written. `LockedDir::open` removes a
   temporary file a crashed append left. `append_until` stops at an `AppendStep` as a crash would,
-  for the crash test.
+  for the crash test. `LockedDir::temporary` is public with its precondition (call it holding the
+  lock) unchecked, and `LockedDir::locked` is not re-entrant: an append made inside `locked` on
+  the same directory waits for itself forever.
 - `verify` refuses, naming the first failing line: `CutLine` (the last line has no line feed or
   does not read), `SequenceGap` (`seq` is not the position: a deleted or swapped line),
   `BrokenChain` (`prev` does not match, or is present on line 0 or absent later; a changed byte is
-  named by the line after it). A log cut at a line boundary, or rewritten from a line on with a
-  fresh chain, still verifies: the log is not signed.
+  named by the line after it). A change to the last line alone is not detected, as a cut at a
+  line boundary is not, and the next append makes it permanent; a log rewritten from a line on
+  with a fresh chain also verifies: the log is not signed.
 - The crate declares the events and writes what it is given; emitting them is
   `story:tree-run-command`'s. It depends on the governor for the lock and the stem, so the executor
   and Canon reach it only through the governor.

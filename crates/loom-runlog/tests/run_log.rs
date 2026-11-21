@@ -671,3 +671,51 @@ fn the_log_of_a_case_id_over_100_bytes_sits_beside_its_case_sha256_file() {
     assert_eq!(log_file_name(&id), format!("runlog-{stem}.jsonl"));
     assert_eq!(log.path(&id), dir.join(format!("runlog-{stem}.jsonl")));
 }
+
+#[test]
+fn a_rename_that_fails_removes_its_temporary_file_and_changes_no_byte() {
+    let (log, path) = log_with("failed-rename", 3);
+    let before = fs::read(&path).expect("reads");
+    let aside = path.with_extension("aside");
+    // Once the temporary file is synced, a non-empty directory takes the log's name, so the
+    // rename over it fails as a write does: the append must clean up after itself.
+    let result = log.append_until(CASE, at(3), event(3), &mut |reached| {
+        if reached == AppendStep::Synced {
+            fs::rename(&path, &aside).expect("the log moves aside");
+            fs::create_dir(&path).expect("a directory takes its name");
+            fs::write(path.join("occupant"), b"x").expect("the directory is not empty");
+        }
+        ControlFlow::Continue(())
+    });
+    assert!(
+        matches!(result, Err(RunLogError::Store(_))),
+        "a failed rename is a store failure: {result:?}"
+    );
+    assert!(
+        temporaries(log.dir()).is_empty(),
+        "the failed append removed its temporary file"
+    );
+    fs::remove_dir_all(&path).expect("the directory goes");
+    fs::rename(&aside, &path).expect("the log comes back");
+    assert_eq!(
+        fs::read(&path).expect("reads"),
+        before,
+        "no byte of the log changed"
+    );
+    assert_eq!(log.read(CASE).expect("verifies").len(), 3);
+}
+
+#[test]
+fn two_unreadable_lines_in_a_row_are_named_by_the_second() {
+    let (_log, path) = log_with("two-unreadable", 6);
+    let mut garbled = lines(&fs::read(&path).expect("reads"));
+    for index in [1, 2] {
+        let last = garbled[index].len() - 1;
+        garbled[index][last] = b']';
+    }
+    assert_eq!(
+        refused(verify(&joined(&garbled))),
+        (RunLogRefusal::BrokenChain, 2),
+        "line 2 does not read, so it names no line before it: the break is line 2"
+    );
+}
