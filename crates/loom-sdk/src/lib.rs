@@ -113,6 +113,12 @@ pub use b10x_loom_intake_slice::confinement::{
     ChildError, ChildExit, ChildFrame, ChildOutput, ChildResult, ChildSignal, ChildStream,
     ConfinedChild,
 };
+/// A host's confinement named once, as engine configuration, and the one runner built from it
+/// ([`EngineRunner::open`]): Substrate's `linux` adapter on today's host-driver route, or its
+/// `local` adapter, unconfined and declared insecure, with the operator's reason.
+pub use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner,
+};
 pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,
 };

@@ -128,8 +128,16 @@ naming a Mandate approval `NotGranted` (16) and performs nothing: only Mandate c
 
 `--confinement substrate` is the default. `--cgroup-root` selects an explicit delegated
 root. Tests retain their 300-second timeout, with 8 GiB memory and 2,048-process limits.
-Only `--confinement none` runs with your rights and environment; the run output and every test
-observation name this choice. Confined observations include the actual Substrate applied record.
+Only `--confinement local` and the deprecated `--confinement none` run with your rights and your
+host's file system and network. `local` needs `--local-reason <TEXT>`: the run goes through
+Substrate's `local` adapter, declared insecure, prints `confinement: local (<reason>)`, and every
+test observation names adapter `local` and the reason. Tests run in the workspace with your
+`PATH`, `HOME`, `RUSTUP_HOME` and `CARGO_HOME` and nothing else of your environment, and are
+killed with their whole process group at their timeout. A host policy of
+`SUBSTRATE_CONFINEMENT_LOCAL` other than `permit` refuses `local` (`ConfinementUnavailable`), and
+a `local` run is not kept for resume: `--state` with it is refused, exit 2. `none` prints its
+deprecation on standard error. The run output and every test observation name the choice.
+Confined observations include the actual Substrate applied record.
 
 ## Read the output
 

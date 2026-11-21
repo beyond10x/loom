@@ -30,7 +30,7 @@ use crate::case;
 use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
-use crate::executor::{RegressionTestCommand, TestCommand, TestPaths, backend_name};
+use crate::executor::{RegressionTestCommand, TestCommand, TestPaths};
 use crate::grant::{GrantAuthority, GrantStore, MandateApprovals};
 use crate::handoff::MergeHandoffStore;
 use crate::resume::{
@@ -708,7 +708,7 @@ fn resume_prepared<S: FallibleCaseStore, T: EvaluationTime>(
         .as_ref()
         .ok_or_else(|| SliceError::Context("software-change@1 requires a test runner".into()))?;
     case::validate_workspace(workspace).map_err(SliceError::Case)?;
-    writeln!(out, "confinement: {}", backend_name(runner.backend()))?;
+    writeln!(out, "confinement: {}", runner.label())?;
     let grant = state
         .grants
         .get(&context.commission_id)
@@ -857,7 +857,7 @@ fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
             SliceError::Context("software-change@1 requires a test runner".into())
         })?;
         case::validate_workspace(workspace).map_err(SliceError::Case)?;
-        writeln!(out, "confinement: {}", backend_name(runner.backend()))?;
+        writeln!(out, "confinement: {}", runner.label())?;
         let case = case::open_with_catalog(
             governor,
             &prepared.protocol,

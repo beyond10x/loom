@@ -23,7 +23,8 @@ use b10x_loom_intake_slice::bindings::ActionBindings;
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
-    ConfinementError, ConfinementRefusal, SubstrateRunner, TestRunner, prepare_delegated_cgroup,
+    ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement, EngineRunner,
+    SubstrateRunner, TestRunner, prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -41,7 +42,7 @@ use b10x_loom_intake_slice::run::{
     slice_governor,
 };
 use b10x_loom_plugin_slack::{SlackHandler, config as slack_config};
-use clap::Parser;
+use clap::{CommandFactory as _, Parser};
 use intake_model::confinement::Backend;
 use llm_core::Model;
 use llm_models::Port;
@@ -908,6 +909,24 @@ fn protocols(command: ProtocolCommand) -> Result<(), String> {
 /// lines, ended by the one terminal record whose exit status this returns. A delegated child owns
 /// the final measurement output and, with the stream, the terminal record.
 fn run_command(arguments: RunArgs) -> ExitCode {
+    // Usage refusals of the command line, exit 2, before anything else: a `local` run is not kept
+    // for resume (the resume context keeps only a backend, and a resume would come back under
+    // another adapter), and a reason belongs to `local` alone.
+    if arguments.confinement == Confinement::Local && arguments.state.is_some() {
+        usage_refused(
+            "--state cannot be used with --confinement local: a local run is not kept for resume; run again with --confinement local and --local-reason",
+        );
+    }
+    if arguments.confinement != Confinement::Local && arguments.local_reason.is_some() {
+        usage_refused(
+            "--local-reason is the reason for --confinement local and is given only with it",
+        );
+    }
+    if arguments.confinement == Confinement::None {
+        eprintln!(
+            "warning: --confinement none is deprecated; use --confinement local --local-reason <TEXT>, which runs through Substrate's local adapter and records the reason"
+        );
+    }
     let options = RunOptions {
         context_policy: arguments.context_policy,
         context_report: arguments.context_report.clone(),
@@ -1017,6 +1036,8 @@ fn execute(
         confinement: match arguments.confinement {
             Confinement::Substrate => Backend::Substrate,
             Confinement::None => Backend::None,
+            // `run_command` refused `--state` with `local`; a resume context never keeps one.
+            Confinement::Local => return Err("a local run is not kept for resume".into()),
         },
         cgroup_root: arguments.cgroup_root.clone(),
         // With `--config`, the name its routes document serves the agent by, so a resume
@@ -1150,6 +1171,22 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
         }
         request.runner = Some(match arguments.confinement {
             Confinement::None => Arc::new(UnconfinedRunner) as Arc<dyn TestRunner>,
+            Confinement::Local => {
+                let reason = arguments.local_reason.clone();
+                let label = format!("local ({})", printable(reason.as_deref().unwrap_or("")));
+                let opened = EngineRunner::open(&EngineConfinement {
+                    adapter: ConfinementAdapter::Local,
+                    local_reason: reason,
+                    cgroup_root: None,
+                })
+                .and_then(|runner| runner.preflight(workspace).map(|()| runner));
+                match opened {
+                    Ok(runner) => Arc::new(runner),
+                    Err(error) => {
+                        return Ok(confinement_refused(&prepared, &label, &error.to_string()));
+                    }
+                }
+            }
             Confinement::Substrate => {
                 let root = if std::env::var_os(REEXEC_MARKER).is_some()
                     && arguments.cgroup_root.is_none()
@@ -1157,7 +1194,11 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
                     match prepare_delegated_cgroup() {
                         Ok(root) => Some(root),
                         Err(error) => {
-                            return Ok(confinement_refused(&prepared, &error.to_string()));
+                            return Ok(confinement_refused(
+                                &prepared,
+                                "substrate",
+                                &error.to_string(),
+                            ));
                         }
                     }
                 } else {
@@ -1175,7 +1216,11 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
                         }
                         return Ok(reexec(&prepared, metrics));
                     }
-                    return Ok(confinement_refused(&prepared, &error.to_string()));
+                    return Ok(confinement_refused(
+                        &prepared,
+                        "substrate",
+                        &error.to_string(),
+                    ));
                 }
                 Arc::new(runner)
             }
@@ -1327,8 +1372,22 @@ fn chosen_model(route: Option<Port>, name: &str) -> Result<Box<dyn Model>, Strin
     }
 }
 
-fn confinement_refused(prepared: &PreparedIntent, reason: &str) -> Ending {
-    eprintln!("confinement: substrate");
+/// Refuse `b10x-loom run`'s arguments as the command line refuses a usage error: `message` on
+/// standard error under clap's `error:` prefix with `run`'s usage, exit status 2.
+fn usage_refused(message: &str) -> ! {
+    let mut command = Cli::command();
+    command.build();
+    let run = command
+        .find_subcommand_mut("run")
+        .expect("b10x-loom has a run command");
+    run.error(clap::error::ErrorKind::ArgumentConflict, message)
+        .exit()
+}
+
+/// The stop of a run whose confinement, named `label` (`substrate`, `local (<reason>)`), was
+/// refused before any test ran.
+fn confinement_refused(prepared: &PreparedIntent, label: &str, reason: &str) -> Ending {
+    eprintln!("confinement: {label}");
     eprintln!("stopped: ConfinementUnavailable ({})", printable(reason));
     Ending::Stopped(SliceRun {
         protocol: prepared.protocol().to_owned(),
@@ -1417,7 +1476,11 @@ fn reexec(prepared: &PreparedIntent, metrics: &ContextMetrics) -> Ending {
         ))
     };
     run().unwrap_or_else(|error| {
-        confinement_refused(prepared, &format!("CgroupUndelegated: {error}"))
+        confinement_refused(
+            prepared,
+            "substrate",
+            &format!("CgroupUndelegated: {error}"),
+        )
     })
 }
 

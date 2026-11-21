@@ -1325,9 +1325,10 @@ fn a_live_child_echoes_what_it_is_written() {
             assert_eq!(result.applied.network, Some(Vec::new()));
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert_eq!(result.applied.profile_digest.len(), 64);
-            assert_eq!(result.driver_record.network, AppliedNetwork::None);
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert_eq!(record.network, AppliedNetwork::None);
             assert_eq!(
-                result.driver_record.cgroup.as_deref(),
+                record.cgroup.as_deref(),
                 Some(result.applied.cgroup.as_str())
             );
         },
@@ -1655,7 +1656,14 @@ fn a_read_only_root_at_its_host_path_is_readable_and_not_writable() {
             assert_eq!(result.exit.exit_code, Some(0));
             assert_eq!(result.applied.read_only_roots, [named]);
             assert!(result.applied.read_only_files.is_empty());
-            assert_eq!(result.driver_record.read_only_roots, record.read_only_roots);
+            assert_eq!(
+                result
+                    .driver_record
+                    .as_ref()
+                    .expect("the driver's record")
+                    .read_only_roots,
+                record.read_only_roots
+            );
         },
     );
 }
@@ -2196,7 +2204,12 @@ fn a_child_starts_in_its_named_workdir() {
             assert_eq!(ended.exit.exit_code, Some(0));
             assert_eq!(ended.applied.workdir.as_deref(), Some("/workspace/sub"));
             assert_eq!(
-                ended.driver_record.workdir.as_deref(),
+                ended
+                    .driver_record
+                    .as_ref()
+                    .expect("the driver's record")
+                    .workdir
+                    .as_deref(),
                 Some("/workspace/sub")
             );
 

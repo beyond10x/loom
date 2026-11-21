@@ -26,6 +26,9 @@ pub use intake_model::confinement::{
     BaselineVariable, ChildAperture, ChildEnvironment, ChildNetwork, ChildProfile, ConfinementSpec,
     WritableRoot,
 };
+/// A host's confinement, named once as engine configuration, and the adapter it names: the one
+/// value [`EngineRunner::open`] builds the runner from.
+pub use intake_model::confinement::{ConfinementAdapter, EngineConfinement};
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
 /// host and port the host names, the address that host was resolved to and an optional byte
@@ -53,6 +56,7 @@ use substrate_wire::{
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
 
 mod child;
+mod engine;
 #[cfg(test)]
 mod security_w20261023w1_u3;
 #[cfg(test)]
@@ -61,6 +65,7 @@ mod spec;
 #[cfg(test)]
 mod workdir;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
+pub use engine::EngineRunner;
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
@@ -73,6 +78,12 @@ const CACHE_DIRS: [&str; 3] = ["registry", "git/db", "git/checkouts"];
 pub trait TestRunner: Send + Sync {
     fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError>;
     fn backend(&self) -> Backend;
+    /// How a run names this runner's confinement on its `confinement:` line: by default the
+    /// backend's name (`substrate`, `none`); [`EngineRunner`] under `local` answers
+    /// `local (<reason>)`.
+    fn label(&self) -> String {
+        crate::executor::backend_name(self.backend()).to_owned()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -864,6 +875,8 @@ fn settle(
         // Named by the driver that settled the launch (`OpenDriver::adapted`); absent until then.
         adapter: None,
         facts: None,
+        // Only a `local` run carries the operator's reason; a `linux` one has none.
+        local_reason: None,
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -977,7 +990,7 @@ fn live_result(launched: Launched, signalled: bool) -> Result<ChildResult, Confi
         exit,
         output: execution.child_output,
         applied: execution.applied,
-        driver_record,
+        driver_record: Some(driver_record),
     })
 }
 
@@ -4128,6 +4141,7 @@ mod tests {
             workdir: None,
             adapter: None,
             facts: None,
+            local_reason: None,
         }
     }
 
@@ -4464,7 +4478,7 @@ mod tests {
         assert_eq!(result.applied.profile_digest, "digest");
         assert_eq!(
             result.driver_record,
-            record_for(input, AppliedNetwork::None)
+            Some(record_for(input, AppliedNetwork::None))
         );
 
         let error = settle(
