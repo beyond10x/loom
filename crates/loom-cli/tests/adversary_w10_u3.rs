@@ -328,11 +328,11 @@ impl Scratch {
             .expect("the suspension store reads")
             .expect("the commission holds a Suspension");
         assert_eq!(suspension.state, SuspensionState::Pending);
-        assert_eq!(suspension.data.action, "repository.merge");
+        assert_eq!(suspension.data.action.as_deref(), Some("repository.merge"));
         Held {
             state,
             commission,
-            action_request_id: suspension.data.action_request_id.0.0,
+            action_request_id: suspension.data.action_request_id.unwrap().0.0,
             workspace,
         }
     }

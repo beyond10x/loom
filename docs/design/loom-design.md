@@ -80,7 +80,14 @@ ReasoningModelSelector
 FastTypedSelector
 RuleSelector
 HybridSelector
+DeterministicSelector
 ```
+
+As built, `DeterministicSelector` (strategy `Deterministic`) calls no model: it takes the first
+useful admissible action, every non-`write` action before every `write` action, then by action id,
+reading effect class and open evidence from the host's `ActionFactsPort` and what was performed or
+is due from its `StepHistory`. See
+[Deterministic selection](../contracts/loom-action-selection.md#deterministic-selection).
 
 ### Laya
 

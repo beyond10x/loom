@@ -1,4 +1,4 @@
-format: ess/25
+format: ess/31
 system: loom
 version: v1
 
@@ -21,3 +21,5 @@ domains:
   - loom.session
   - loom.agent
   - loom.resource
+  - loom.bindings
+  - loom.runlog

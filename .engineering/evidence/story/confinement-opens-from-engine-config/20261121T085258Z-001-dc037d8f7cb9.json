@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T08:52:58Z",
+  "actor": "agent:loom",
+  "artifact": "story:confinement-opens-from-engine-config",
+  "kind": "story",
+  "revision": 18,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 37de3e91..281013d8",
+    "reference": "5 files: confinement.rs gains the table FORMAT_CHARACTERS (category Cf and the tag block), escape_reason escapes them and the backslash, recorded_label prints a recorded reason without escaping the backslash again, and the doc of TestRunner::local_reason states the wrapper's duty; executor.rs uses recorded_label for the summary; engine_confinement.rs gains two cases (another script passes unchanged; two reasons never escape to the same text) and no changed assertion; the reviewer's pass-2 file differs from the delivered copy only in case A (the wrapper forwards local_reason, the assertion states the refusal, a two-line comment names the declined finding) and in the wrapping of one array; sdk-stability.md states the duty in the TestRunner row; the linux route (confinement/child.rs) and the ESS files are untouched; no file under .engineering, no manifest; unit gate on 281013d8: fmt, clippy exit 0, 416 slice tests and 310 CLI and SDK tests passed, docs-check and consumer-check exit 0"
+  }
+}

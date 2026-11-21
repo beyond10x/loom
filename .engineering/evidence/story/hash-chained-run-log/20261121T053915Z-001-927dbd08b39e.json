@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T05:39:15Z",
+  "actor": "agent:loom",
+  "artifact": "story:hash-chained-run-log",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 600b9fdd..942bceab",
+    "reference": "3 files: the adversary's amended case reads ActionFinished twice (exit alone, refusal alone), refuses both and neither, and keeps every other assertion; adversary_w20261121w3_u1_pass2.rs adds 3 cases; website/data/status.json says once that the log is not signed; no implementation line changed; unit gate on 942bceab: fmt, clippy exit 0, 191 tests passed 0 failed, task spec, drift, no-hand-model, conform, docs-check exit 0; adversary pass 2 found nothing (30 runlog cases, mutants m09 and m10 killed)"
+  }
+}

@@ -9,6 +9,7 @@ use llm_core::{
     StopReason, StreamSink, ToolCall, ToolChoice, ToolName, TurnObservation, TurnOutcome,
     TurnRequest,
 };
+use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 use std::sync::Mutex;
 
@@ -86,11 +87,12 @@ impl Model for Recorded {
     }
 }
 
-/// Every registry entry as `name@major`, in registry order.
+/// Every vendored engineering entry as `name@major`, in catalog order.
 fn registry() -> Vec<String> {
-    canon_engineering::registry::list()
-        .into_iter()
-        .map(|(name, major)| format!("{name}@{major}"))
+    ProtocolCatalog::engineering()
+        .expect("the engineering catalog")
+        .iter()
+        .map(|entry| entry.name().to_owned())
         .collect()
 }
 
@@ -142,8 +144,9 @@ fn assert_request(model: &Recorded, intent: &str) {
     assert!(properties.get("confidence").is_some(), "{properties}");
     assert!(properties.get("reasons").is_some(), "{properties}");
 
-    for (name, major) in canon_engineering::registry::list() {
-        let builtin = canon_engineering::registry::get(name, major).expect("a valid built-in");
+    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
+    for builtin in catalog.iter() {
+        let name = builtin.name();
         let description = builtin
             .model
             .protocol
@@ -152,13 +155,13 @@ fn assert_request(model: &Recorded, intent: &str) {
             .expect("every built-in describes itself");
         assert!(
             text.contains(description),
-            "{name}@{major}'s description was not sent: {text}"
+            "{name}'s description was not sent: {text}"
         );
         for (artifact, declared) in builtin.model.artifacts.iter() {
             if let Some(description) = declared.description.as_deref() {
                 assert!(
                     text.contains(description),
-                    "{name}@{major} artifact {artifact:?}'s description was not sent: {text}"
+                    "{name} artifact {artifact:?}'s description was not sent: {text}"
                 );
             }
         }

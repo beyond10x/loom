@@ -52,7 +52,8 @@ Usage: b10x-loom run [OPTIONS] <INTENT>
 |---|---|---|---|
 | `--context-policy <CONTEXT_POLICY>` | no | `legacy` | Keep the legacy rolling transcript, or opt into bounded working context and history lookup |
 | `--context-report <PATH>` | no | none | Write payload-free measurements, including routing and startup failures |
-| `--confinement <CONFINEMENT>` | no | `substrate` | Confine tests with Substrate, or explicitly run with the operator's rights |
+| `--confinement <CONFINEMENT>` | no | `substrate` | Confine tests with Substrate, or explicitly run with the operator's rights: `local`, with --local-reason, through Substrate's local adapter (not with --state); `none` is deprecated |
+| `--local-reason <TEXT>` | no | none | The operator's reason for --confinement local, recorded on every launch and printed on the run's confinement line; required with it, and not blank |
 | `--cgroup-root <DIR>` | no | none | An explicitly delegated cgroup v2 root for confined tests |
 | `--workspace <DIR>` | no | none | Existing Git worktree for software changes; unnecessary for system queries |
 | `--test-cmd <CMD>` | no | `cargo test` | The test command, run in the workspace without a shell: a program and its arguments, split at white space |
@@ -635,7 +636,9 @@ Exit status:
       not given, or with --mandate Mandate did not clear its approval
   17  NotPerformed: nothing performs the request's action
   18  RunNotSuspended: the run store does not hold the run suspended
-  20  the suspension store could not be read; nothing was resumed
+  19  HeldForDecision: the commission's Suspension holds the run for a decision request; nothing is performed
+  20  the suspension store could not be read, or it holds a Suspension that holds no action
+      request and whose reason is no decision; nothing was resumed
   21  the governor could not answer before the run resumed; nothing was resumed
   22  the run could not be resumed, the Suspension could not be taken or released, or the resumed
       loop stopped without a run outcome

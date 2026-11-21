@@ -134,6 +134,55 @@ The embedding host reads the records through `Loom::selection_records`, and a tr
 Loom's decision records (Atlas ADR 0101); metaharness never depends on loom-sdk (Atlas ADR 0098).
 They are never evidence (Atlas ADR 0074).
 
+## Deterministic selection
+
+`DeterministicSelector` (`crates/loom-executor/src/selection.rs`, strategy `Deterministic`) is the
+selector that calls no model. From the candidates it keeps only the `Admissible` ones whose action
+is useful, orders them with every action whose effect class is not `write` (an action whose effect
+the protocol does not declare included) before every `write` action and then by action id, and
+takes the first. With no useful candidate it answers `SelectorError::NothingAdmissible`, which Loom
+answers with `NoUsefulAction`; a port that cannot answer makes it `SelectorError::Unavailable`. Its
+pick has no confidence and reports no tokens, so its `SelectionRecord` names `Deterministic`, 0
+tokens and no confidence.
+
+What it knows besides a candidate's id and status comes from two host ports, never from a model and
+never from the candidate list:
+
+- `ActionFactsPort::action_facts(case)` answers the case revision and, per action,
+  `loom.run.ActionFacts` (`ess/domains/run.yaml`): its effect class, the evidence kinds it may
+  produce and its open evidence, the kinds among those Canon counted no record of at the subject's
+  current revision. `CanonGovernor` answers it from the protocol's IR and the case's current
+  decision (`CanonGovernor::action_facts`), so a kind is open again once its subject's revision
+  moves, the earlier record still held. A record counts when it applies, is about its subject's
+  current revision, is not expired at the trusted time, is not invalidated, and an evidence match
+  of the protocol (in a claim, an obligation, a precondition or an outcome) reads it by kind and
+  subject; a kind no match reads counts any such record. A kind only order forms (`first`,
+  `before`, `after`, `since`) read counts any record that applies and that an order form reads by
+  kind and subject, whatever its revision, freshness or invalidation, as Canon's order forms read
+  every record the evidence check accepted. A `children` form (Canon 0.9.0) reads `case_outcome`
+  the same way, about any artifact.
+- `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
+
+An action is useful while `due` is true (`retry_when`, a pending copy). Otherwise it is not useful
+once `performed_at` is true for the case revision the facts were read at, whatever it may produce
+and whatever is still open; it is useful again once an artifact moves. Before that it is useful
+when it may produce no evidence or when its open evidence is not empty. `max_runs` stays a ceiling
+in the effect. A candidate the facts do not name is not useful, and an action
+the facts name that is not a candidate is never returned: the choice passes Loom's membership rule
+like every other. A selector is built for one case: a run of a commission for another case is
+`SelectorError::Unavailable` naming both, and no port is asked (`ActionSelector::resolve_for_case`,
+which Loom calls with the case of the frontier it was handed). A selector that wraps another must
+forward `resolve_for_case`; one that forwards only `select` answers for the wrapped selector's own
+case.
+
+A record Canon sets aside only as not independent (its producer is not declared independent on a
+dimension the match demands) still counts. A kind whose only records are set aside so is treated
+as produced: the selector does not pick the action again for it, and a run can end
+`NothingAdmissible` with the claim still unknown until a producer the case declares independent
+records the kind. Not counting such a record would take the same producer again and again. The same candidates, facts and history give the same choice
+(`crates/loom-executor/tests/deterministic_selector.rs`,
+`crates/loom-governor/tests/action_facts.rs`).
+
 ## Safety rules
 
 1. Candidate labels originate from the current frontier.

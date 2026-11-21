@@ -1,6 +1,5 @@
 // generated from loom v1
-// model digest 3a328dc948904436c12e838eb0b1eef21b3344259c68398f095f34b168e70799
-// contract digest c87e5c015377bb0ba7fae4424851c7c85d000bd207002f7306bda748b90be72f
+// contract digest 077f4e4e6548832cdab0185ef7b7f4e65f130d090c84f28346747b75d9e33239
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -17,6 +16,19 @@
 pub enum ActionCatalogueState {
     /// `Projected`.
     Projected,
+}
+
+/// ActionFacts — `loom.run.ActionFacts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionFacts {
+    /// `action` — `String`.
+    pub action: String,
+    /// `effect` — `Optional<String>`.
+    pub effect: Option<String>,
+    /// `may_produce` — `List<String>`.
+    pub may_produce: Vec<String>,
+    /// `open_evidence` — `List<String>`.
+    pub open_evidence: Vec<String>,
 }
 
 /// The states of `loom.run.ArgumentRequest`, as runtime values.
@@ -131,6 +143,8 @@ pub enum SelectionStrategy {
     Rule,
     /// `Hybrid`.
     Hybrid,
+    /// `Deterministic`.
+    Deterministic,
 }
 
 /// TurnId — `loom.run.TurnId`: a distinct wrapper around `Uuid`.
@@ -1308,7 +1322,7 @@ pub mod obligations {
     ///
     /// Why it is not generated: kept an obligation by the guard `exists entry in entries: (entry.action == input.action)`, in `not-in-catalogue`.
     ///
-    /// Contract: given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-exists` for an identity a record already carries, error `loom.run.SelectionExists`; `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected`.
+    /// Contract: given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then choose the present `when_related:` predicate refusal whose predicate and optional input guard hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-exists` for an identity a record already carries, error `loom.run.SelectionExists`; `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected`.
     pub trait SelectActionBehavior {
         /// Decides and enacts exactly one declared outcome of `loom.run.SelectAction`.
         ///

@@ -485,7 +485,10 @@ fn an_ungranted_approval_required_action_is_still_refused_without_the_gate() {
         .unwrap_or_else(|| panic!("no Suspension holds the withheld request"));
     assert_eq!(held.state, SuspensionState::Pending);
     let made = &end.requests[0].request;
-    assert_eq!(held.data.action_request_id, made.action_request_id);
+    assert_eq!(
+        held.data.action_request_id,
+        Some(made.action_request_id.clone())
+    );
     assert_eq!(made.action, MERGE);
 
     // A provider that denies it.

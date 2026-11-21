@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T10:27:58Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-096-upgrade",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/ess-096-upgrade 590b01f8: the reviewer's 7 cases committed after cargo fmt (7ffc43fa); the mixed check is one function, incomplete_request, asked by decide_hold and by FileSuspensionStore::hold before its identity check (F3), with a case over both stores, 11 reasons and 14 mixed member sets; ResumeError::Store and exit status 20 name the hold with no request (F2); decide_take and decide_release state that a take or release naming neither cannot tell two such holds apart (F1); the .any mutant at file_suspension.rs:548 fails the reviewer's case",
+    "review": "review-result:ess-096-upgrade-security-1",
+    "outcome": "fixed"
+  }
+}

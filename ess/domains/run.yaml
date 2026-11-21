@@ -42,10 +42,11 @@ types:
     kind: newtype
     of: Uuid
 
-  # docs/design/loom-design.md § Action selection strategies.
+  # docs/design/loom-design.md § Action selection strategies. Deterministic is the selector that
+  # calls no model and orders useful admissible actions by effect class, then by action id.
   - name: loom.run.SelectionStrategy
     kind: enum
-    variants: [ReasoningModel, FastTyped, Rule, Hybrid]
+    variants: [ReasoningModel, FastTyped, Rule, Hybrid, Deterministic]
 
   # The two projected outcomes of Commission's admission (Admissible, NeedsAuthority): an action
   # Commission refuses is not projected. A Loom type, as CommissionRunId mirrors RunId.
@@ -61,6 +62,23 @@ types:
         type: String
       - name: status
         type: loom.run.CatalogueEntryStatus
+
+  # What the deterministic selector knows of one action besides its catalogue entry, answered by
+  # the host (the governor), never by a model or the candidate list: the effect class the protocol
+  # declares for it (absent when it declares none), every evidence kind it may produce, and its
+  # open evidence, the kinds among those that Canon counted no record of at the subject's current
+  # revision in the case's current decision.
+  - name: loom.run.ActionFacts
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: effect
+        type: Optional<String>
+      - name: may_produce
+        type: List<String>
+      - name: open_evidence
+        type: List<String>
 
   # Why a workflow judgement step's chooser stopped on its budget (crates/loom-executor/src/workflow.rs,
   # `WorkflowExecutor::with_max_input_tokens`): the payload of the `LoopBudget` suspension, which

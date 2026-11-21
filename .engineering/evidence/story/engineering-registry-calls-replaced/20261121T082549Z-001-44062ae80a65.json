@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T08:25:49Z",
+  "actor": "agent:loom",
+  "artifact": "story:engineering-registry-calls-replaced",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 7ebac517..365ef1c8",
+    "reference": "8 files: the adversary's three test files committed as delivered; in crates/loom-governor/src/lib.rs every changed hunk lies inside mod tests (from line 2494): two new unit cases over a refused catalog and the built-in test widened to all ten; AGENTS.md sentence on a refused catalog corrected; comment text in three existing test files; no line outside tests and prose changed, so no second attack pass ran; no file under .engineering, ess, generated, protocols or a manifest changed in the unit; unit gate on 365ef1c8: fmt, clippy exit 0, 223 tests passed 0 failed, adversary_case 8 passed 1 ignored as on base, docs-check exit 0"
+  }
+}

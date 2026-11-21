@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T08:25:49Z",
+  "actor": "agent:loom",
+  "artifact": "story:engineering-registry-calls-replaced",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/engineering-registry-calls-replaced b3937ab6, 365ef1c8",
+    "review": "review-result:engineering-registry-calls-replaced-adversary-1",
+    "outcome": "fixed"
+  }
+}

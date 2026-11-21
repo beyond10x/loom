@@ -47,8 +47,9 @@
 //!
 //! # Evaluation
 //!
-//! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the built-in
-//! registry or registered by [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
+//! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the vendored
+//! engineering catalog ([`ProtocolCatalog::engineering`]) or registered by
+//! [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
 //! `b10x_canon::eval::evaluate_with` over the case's `canon-case/1` snapshot and the evidence that
 //! applies. A trusted host may supply [`EvaluationTime`] for freshness; the governor reads no clock
 //! itself and supplies no authority decision. It never invents authority, so an action
@@ -126,17 +127,17 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library `b10x-canon-engineering` uses, tag `0.8.0`, pinned by `Cargo.lock` to
-//! commit `cf17175`, so the protocol model the ELS registry returns is the one this crate
-//! compiles. Commission is the path dependency `b10x-loom-commission`, built from this
-//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.15.2` of
-//! beyond10x/engineering-protocols.
+//! Canon is `b10x-canon` at the reference this crate's `Cargo.toml` names, pinned by
+//! `Cargo.lock`, and compiles the catalog's engineering protocols. Commission is the path
+//! dependency `b10x-loom-commission`, built from this repository's own tree. The engineering
+//! protocols are the files `b10x-loom-protocols` vendors under `protocols/engineering/`, held to
+//! their lock.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use loom_protocols::ProtocolCatalog;
+use loom_protocols::{ProtocolCatalog, ProtocolEntry};
 
 /// The generated `loom` model: [`evaluate`] reads and returns its `loom.evaluation` types.
 pub use loom as model;
@@ -155,9 +156,10 @@ use b10x_canon::eval::{
 };
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
-    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord,
-    IndependenceDimensionId, InputId, InputValue, Principal, Revision, Truth as CanonTruth,
-    is_identifier,
+    ArtifactId, CASE_FORMAT, CASE_OUTCOME, Case, CaseArtifact, Decision, Declarations,
+    EvidenceKindId, EvidenceRecord, ExclusionReason, IndependenceDimensionId, InputId, InputValue,
+    Instant as CanonInstant, OutcomeRequirement, Predicate, Principal, Revision,
+    Truth as CanonTruth, is_identifier,
 };
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -168,6 +170,8 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
 use b10x_loom_commission::ports::governor::Governor;
+use b10x_loom_executor::{ActionFactsPort, CaseFacts};
+use loom::run::ActionFacts;
 
 mod file_run_store;
 mod file_store;
@@ -175,8 +179,9 @@ mod file_suspension;
 mod locked_dir;
 
 pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
-pub use file_store::{FileCaseStore, FileStoreError};
+pub use file_store::{FileCaseStore, FileStoreError, case_file_stem};
 pub use file_suspension::{FileSuspensionStore, LONGEST_COMMISSION_ID};
+pub use locked_dir::LockedDir;
 
 /// One case as the governor holds it. A durable store writes it as the `loom.governor` domain's
 /// `StoredCase` (`ess/domains/governor.yaml`), as [`FileCaseStore`] does.
@@ -1131,6 +1136,77 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
+    /// The facts of every action the case's protocol declares, in identifier order, at the case's
+    /// current revision (`loom.run.ActionFacts`, for the executor's `DeterministicSelector`): the
+    /// effect class the protocol declares for it (none when it declares none), the evidence kinds
+    /// it may produce, and its open evidence, the kinds among those Canon counted no record of.
+    ///
+    /// A record counts, at the case's current decision and its trusted time, when all of these
+    /// hold (see `counted_kinds`):
+    ///
+    /// - it applies to the case (see the crate documentation, "Evidence");
+    /// - it is about its subject's current revision, as Canon's revision binding requires;
+    /// - it is not expired at the trusted time, by Canon's freshness rule (whole seconds, older
+    ///   than its kind's `max_age` by more than that age, only with an instant and `observed_at`);
+    /// - the decision lists it under no claim as invalidated;
+    /// - an evidence match of the protocol (in a claim, an obligation, an action's precondition or
+    ///   an outcome) reads it by kind and subject (a match naming no subject, or its subject), as
+    ///   Canon reads a record for a match. A kind no evidence match reads at all counts any record
+    ///   that passes the rules above.
+    ///
+    /// A kind only order forms or `children` forms read (a `children` form reads `case_outcome`)
+    /// counts any applying record one of them reads, whatever its binding, freshness or
+    /// invalidation, as Canon reads every accepted record for those forms.
+    ///
+    /// A record Canon sets aside only as not independent still counts: the kind is treated as
+    /// produced, so the selector does not take the action again for it, and the claim stays
+    /// unknown until a producer the case declares independent records the kind. Whether a held
+    /// record applies is decided once, when it arrives; whether it counts is decided at every
+    /// call, so a kind counted at one revision of its subject is open again once that subject
+    /// moves, the record still held.
+    ///
+    /// # Errors
+    /// As `frontier` refuses the case: `UnknownCase` when it is not held, and `GovernorUnavailable`
+    /// when its store fails, its protocol is not registered, its held inputs or independence
+    /// declarations do not satisfy the protocol, or Canon refuses to decide it.
+    pub fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, GovernorError> {
+        let Decided {
+            state,
+            ir,
+            decision,
+            at,
+        } = self.decided_at(case)?;
+        let counted = counted_kinds(&ir, &state, &decision, at.as_deref());
+        let actions = ir
+            .actions
+            .iter()
+            .map(|(id, declared)| {
+                let may_produce: Vec<String> = declared
+                    .may_produce
+                    .iter()
+                    .map(|kind| kind.as_str().to_owned())
+                    .collect();
+                ActionFacts {
+                    action: id.as_str().to_owned(),
+                    effect: declared
+                        .effect
+                        .as_ref()
+                        .map(|effect| effect.as_str().to_owned()),
+                    open_evidence: may_produce
+                        .iter()
+                        .filter(|kind| !counted.contains(kind.as_str()))
+                        .cloned()
+                        .collect(),
+                    may_produce,
+                }
+            })
+            .collect();
+        Ok(CaseFacts {
+            case_revision: state.revision,
+            actions,
+        })
+    }
+
     /// The `canon-decision/1` document behind the frontier `frontier` this governor issued for the
     /// case: the whole document Canon wrote, its explanation included, whose rendering gives that
     /// frontier id, as the generated JSON value [`evaluate`] returns as `canon`. `None` when this
@@ -1248,6 +1324,12 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
 
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
     fn decided(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
+        self.decided_at(case)
+            .map(|decided| (decided.state, decided.ir, decided.decision))
+    }
+
+    /// [`Self::decided`], and the trusted time the decision was made at, when one was given.
+    fn decided_at(&self, case: &CaseId) -> Result<Decided, GovernorError> {
         let (state, ir) = self.held_with_ir(case)?;
         let records: Vec<EvidenceRecord> = state
             .evidence
@@ -1267,8 +1349,22 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             &state.decisions,
         )
         .map_err(|_| GovernorError::GovernorUnavailable)?;
-        Ok((state, ir, decision))
+        Ok(Decided {
+            state,
+            ir,
+            decision,
+            at,
+        })
     }
+}
+
+/// Canon's decision for a held case ([`CanonGovernor`]'s `decided_at`): the case as held, the
+/// compiled protocol, the decision, and the trusted time it was made at, when one was given.
+struct Decided {
+    state: CaseState,
+    ir: Ir,
+    decision: Decision,
+    at: Option<String>,
 }
 
 impl<S: CaseStore, T> CanonGovernor<S, T> {
@@ -1433,6 +1529,19 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, 
     }
 }
 
+/// The executor's [`ActionFactsPort`], answered by [`CanonGovernor::action_facts`]; a case the
+/// governor cannot answer for is the port's error, naming the case.
+impl<S: FallibleCaseStore, T: EvaluationTime> ActionFactsPort for CanonGovernor<S, T> {
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String> {
+        CanonGovernor::action_facts(self, case).map_err(|error| match error {
+            GovernorError::UnknownCase => format!("the governor holds no case `{}`", case.0),
+            GovernorError::GovernorUnavailable => {
+                format!("the governor cannot decide case `{}`", case.0)
+            }
+        })
+    }
+}
+
 impl<S: FallibleCaseStore, T: EvaluationTime> ObservationPort for CanonGovernor<S, T> {
     fn observe(
         &self,
@@ -1511,8 +1620,8 @@ fn checked_independence(ir: &Ir, independence: &CaseIndependence) -> Result<(), 
     Ok(())
 }
 
-/// Checks `inputs` against the case inputs the ELS built-in `protocol` declares, when it names
-/// one; a protocol that is not built in is the registering governor's to check.
+/// Checks `inputs` against the case inputs the vendored engineering `protocol` declares, when it
+/// names one; a protocol that is not vendored is the registering governor's to check.
 pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Result<(), OpenError> {
     match protocol_ir(protocol) {
         Ok(ir) => checked_inputs(&ir, inputs),
@@ -1521,8 +1630,8 @@ pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Res
     }
 }
 
-/// Checks `independence` against the dimensions the ELS built-in `protocol` declares, when it
-/// names one; a protocol that is not built in is the registering governor's to check.
+/// Checks `independence` against the dimensions the vendored engineering `protocol` declares,
+/// when it names one; a protocol that is not vendored is the registering governor's to check.
 pub(crate) fn checked_builtin_independence(
     protocol: &str,
     independence: &CaseIndependence,
@@ -1593,7 +1702,7 @@ fn opened(
     }
 }
 
-/// The ELS built-in `protocol`, `<name>@<major>`, compiled by Canon.
+/// The vendored engineering `protocol`, `<name>@<major>`, compiled by Canon.
 fn protocol_ir(protocol: &str) -> Result<Ir, OpenError> {
     let builtin = builtin(protocol)?;
     compile(&builtin.model).map_err(|problems| OpenError::InvalidProtocol {
@@ -1617,25 +1726,41 @@ fn declared_outcomes(model: &b10x_canon::model::Protocol) -> Vec<String> {
         .collect()
 }
 
-/// The ELS built-in `protocol`, `<name>@<major>`, as the registry declares it.
-fn builtin(protocol: &str) -> Result<canon_engineering::registry::Builtin, OpenError> {
+/// The vendored engineering `protocol`, `<name>@<major>`, as [`ProtocolCatalog::engineering`]
+/// holds it. The catalog is built once per process: its files are compiled in, so every build
+/// gives the same catalog or the same refusal.
+fn builtin(protocol: &str) -> Result<ProtocolEntry, OpenError> {
+    static ENGINEERING: OnceLock<Result<ProtocolCatalog, String>> = OnceLock::new();
+    builtin_in(
+        ENGINEERING
+            .get_or_init(ProtocolCatalog::engineering)
+            .clone(),
+        protocol,
+    )
+}
+
+/// The entry `catalog` holds for `protocol`: a registration that is not `<name>@<major>`, or one
+/// the catalog does not hold, is [`OpenError::UnknownProtocol`]; a catalog that could not be
+/// built, a lock refusal included, is [`OpenError::InvalidProtocol`] with its error text
+/// unchanged as `problem`.
+fn builtin_in(
+    catalog: Result<ProtocolCatalog, String>,
+    protocol: &str,
+) -> Result<ProtocolEntry, OpenError> {
     let unknown = || OpenError::UnknownProtocol {
         protocol: protocol.to_owned(),
     };
-    let (name, major) = protocol.split_once('@').ok_or_else(unknown)?;
-    let major: u32 = major
-        .parse()
+    let (_, major) = protocol.split_once('@').ok_or_else(unknown)?;
+    major
+        .parse::<u32>()
         .ok()
-        .filter(|parsed: &u32| parsed.to_string() == major)
+        .filter(|parsed| parsed.to_string() == major)
         .ok_or_else(unknown)?;
-    canon_engineering::registry::get(name, major).map_err(|error| match error {
-        canon_engineering::registry::Error::UnknownName { .. }
-        | canon_engineering::registry::Error::UnknownMajor { .. } => unknown(),
-        other => OpenError::InvalidProtocol {
-            protocol: protocol.to_owned(),
-            problem: other.to_string(),
-        },
-    })
+    let catalog = catalog.map_err(|problem| OpenError::InvalidProtocol {
+        protocol: protocol.to_owned(),
+        problem,
+    })?;
+    catalog.get(protocol).cloned().ok_or_else(unknown)
 }
 
 /// The case's `canon-case/1` snapshot.
@@ -1772,6 +1897,164 @@ impl JsonTree for loom::json::Value {
             Self::Object(members) => Node::Object(members),
         }
     }
+}
+
+/// The evidence kinds of which `state` holds a record Canon counts in `decision`, the case's
+/// current decision ([`CanonGovernor::action_facts`]), made at the trusted instant `at`: a record
+/// that applies, is about its subject's current revision (Canon's revision binding), is not
+/// expired at `at` (Canon's freshness rule), is listed under no claim of `decision` as
+/// invalidated, and is read by an evidence match of `ir` by kind and subject (Canon's rule for a
+/// match) or is of a kind no evidence match reads. A record of a kind only order forms and
+/// `children` forms read counts when one of them reads it by kind and subject, whatever its
+/// binding, freshness or invalidation: Canon's order forms read every record the evidence check
+/// accepted (`eval/order.rs`, `of`), and a `children` form every accepted `case_outcome` record
+/// (`eval/composition.rs`). A record Canon sets aside only as not independent still counts.
+fn counted_kinds(
+    ir: &Ir,
+    state: &CaseState,
+    decision: &Decision,
+    at: Option<&str>,
+) -> BTreeSet<String> {
+    let invalidated: BTreeSet<&str> = decision
+        .claims
+        .iter()
+        .flat_map(|(_, claim)| claim.excluded_evidence.iter())
+        .filter(|exclusion| exclusion.reason == ExclusionReason::Invalidated)
+        .map(|exclusion| exclusion.evidence.as_str())
+        .collect();
+    let (matches, orders) = evidence_reads(ir);
+    let at = at.and_then(|at| CanonInstant::new(at).seconds());
+    state
+        .evidence
+        .iter()
+        .filter(|held| held.applies)
+        .filter_map(|held| canon_record(&held.data))
+        .filter(|record| {
+            let left = || {
+                bound_to_current_revision(state, record)
+                    && !expired(ir, record, at)
+                    && !invalidated.contains(record.id.as_str())
+            };
+            if names_kind(&matches, record) {
+                left() && read_by(&matches, record)
+            } else if names_kind(&orders, record) {
+                read_by(&orders, record)
+            } else {
+                left()
+            }
+        })
+        .map(|record| record.kind.as_str().to_owned())
+        .collect()
+}
+
+/// Whether `record` is about its subject's current revision in `state`: Canon's revision binding
+/// (`eval/binding.rs`, `exclude`), which excludes a record whose subject revision is not the
+/// case's current revision of that artifact.
+fn bound_to_current_revision(state: &CaseState, record: &EvidenceRecord) -> bool {
+    state
+        .artifacts
+        .get(record.subject.as_str())
+        .map(String::as_str)
+        == Some(record.subject_revision.as_str())
+}
+
+/// Whether `record` is expired at the instant `at`, in whole seconds: Canon's freshness rule
+/// (`eval/freshness.rs`, `exclude`). Only a record of a kind with a `max_age`, that gives its
+/// `observed_at`, at a given instant, expires, and only when the instant is later than
+/// `observed_at` by more than the maximum age. A `max_age` Canon cannot read never reaches here:
+/// Canon refuses the evaluation, and no decision is made.
+fn expired(ir: &Ir, record: &EvidenceRecord, at: Option<i64>) -> bool {
+    let max_age = ir
+        .evidence_kinds
+        .get(&record.kind)
+        .and_then(|kind| kind.max_age.as_ref())
+        .and_then(|max_age| max_age.seconds());
+    let observed = record.observed_at.as_ref().and_then(CanonInstant::seconds);
+    match (at, max_age, observed) {
+        (Some(at), Some(max_age), Some(observed)) => at.saturating_sub(observed) > max_age,
+        _ => false,
+    }
+}
+
+/// What reads a record: a kind, and the subject it must be about when one is named.
+type Reader<'p> = (&'p EvidenceKindId, Option<&'p ArtifactId>);
+
+/// Every evidence match of `ir`, and every kind an order form or a `children` form reads, as
+/// (kind, subject): in each claim's `true_when`, each obligation's `discharged_when` and
+/// `applicable_when`, each action's precondition and each outcome's requirement, through every
+/// `all`, `any` and `not`. Order forms and `children` forms are kept apart: they read the whole
+/// history, excluded records included. A `children` form reads the kind `case_outcome` about any
+/// artifact (Canon's `eval/composition.rs`, `value`), which a protocol with such a form declares.
+fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
+    fn walk<'p>(
+        predicate: &'p Predicate,
+        case_outcome: Option<&'p EvidenceKindId>,
+        found: &mut (Vec<Reader<'p>>, Vec<Reader<'p>>),
+    ) {
+        let (matches, orders) = found;
+        match predicate {
+            Predicate::All(members) | Predicate::Any(members) => {
+                for member in members {
+                    walk(member, case_outcome, found);
+                }
+            }
+            Predicate::Not(member) => walk(member, case_outcome, found),
+            Predicate::Evidence(matching) => {
+                matches.push((&matching.kind, matching.subject.as_ref()));
+            }
+            Predicate::First(form) => orders.push((&form.kind, form.subject.as_ref())),
+            Predicate::Before(form) => {
+                orders.push((&form.first, form.subject.as_ref()));
+                orders.push((&form.then, form.subject.as_ref()));
+            }
+            Predicate::After(form) => {
+                orders.push((&form.first, form.subject.as_ref()));
+                orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Since(form) => {
+                orders.push((&form.last, form.subject.as_ref()));
+                orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Children(_) => orders.extend(case_outcome.map(|kind| (kind, None))),
+            Predicate::Input(_) | Predicate::Claim(_) => {}
+        }
+    }
+    let case_outcome = ir
+        .evidence_kinds
+        .get_key_value(&EvidenceKindId::new(CASE_OUTCOME))
+        .map(|(kind, _)| kind);
+    let mut found = (Vec::new(), Vec::new());
+    for claim in ir.claims.values() {
+        walk(&claim.true_when, case_outcome, &mut found);
+    }
+    for obligation in ir.obligations.values() {
+        walk(&obligation.discharged_when, case_outcome, &mut found);
+        if let Some(applicable) = &obligation.applicable_when {
+            walk(applicable, case_outcome, &mut found);
+        }
+    }
+    for action in ir.actions.values() {
+        walk(&action.precondition, case_outcome, &mut found);
+    }
+    for outcome in ir.outcomes.values() {
+        if let OutcomeRequirement::Predicate(predicate) = &outcome.requires {
+            walk(predicate, case_outcome, &mut found);
+        }
+    }
+    found
+}
+
+/// Whether one of `readers` reads records of `record`'s kind.
+fn names_kind(readers: &[Reader<'_>], record: &EvidenceRecord) -> bool {
+    readers.iter().any(|(kind, _)| **kind == record.kind)
+}
+
+/// Whether one of `readers` reads `record`: a record of its kind and, when it names a subject,
+/// about that artifact, Canon's rule for every match and order form (`eval/claims.rs`, `reads`).
+fn read_by(readers: &[Reader<'_>], record: &EvidenceRecord) -> bool {
+    readers.iter().any(|(kind, subject)| {
+        **kind == record.kind && subject.is_none_or(|subject| *subject == record.subject)
+    })
 }
 
 /// Whether `data` applies to the case: its facts carry a record of its kind, and Canon evaluates
@@ -1970,6 +2253,11 @@ fn first_declared(decision: &Decision, order: &[String]) -> Option<String> {
 /// A record that reads as a `canon-evidence/1` record but that Canon refuses for this case (a kind
 /// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
 /// aside when it arrives, and the decision is made from the rest; the decision does not list it.
+/// The records are judged in the order `evidence` gives them, as the governor judges records in
+/// the order received: of the `case_outcome` records for one child that Canon takes alone, the
+/// first is kept and every later one is set aside, as Canon refuses them together
+/// (`duplicate-child-case`). Whatever Canon still refuses over the records kept is refused as
+/// the snapshot, as for its termination.
 ///
 /// Two inputs differ from `CanonGovernor`: a record that is not a readable `canon-evidence/1`
 /// record, and a record repeating an earlier record's id. The governor sets either aside (for a
@@ -2059,12 +2347,24 @@ pub fn evaluate(
     let decision = match decide_case(&ir, &case, &records, at, decisions) {
         Ok(decision) => decision,
         Err(_) => {
-            // As `CanonGovernor` does on arrival, a record Canon refuses for this case is set
-            // aside; what Canon still refuses with the rest is the snapshot's termination.
+            // As `CanonGovernor` does on arrival, a record Canon refuses with the records kept
+            // before it is set aside; what Canon still refuses with the rest is the snapshot's
+            // termination. A record Canon refuses alone is refused with any others, so each is
+            // judged alone, once. Of those that pass, Canon refuses together only a later
+            // `case_outcome` record for a child an earlier one names (`duplicate-child-case`;
+            // a repeated id was refused above): in request order, the first per child is kept.
+            let mut children = BTreeSet::new();
             let applying: Vec<EvidenceRecord> = records
                 .iter()
                 .filter(|record| {
                     decide_case(&ir, &open, std::slice::from_ref(record), at, decisions).is_ok()
+                })
+                .filter(|record| {
+                    record.kind.as_str() != CASE_OUTCOME
+                        || record
+                            .child_case
+                            .as_ref()
+                            .is_none_or(|child| children.insert(child.as_str()))
                 })
                 .cloned()
                 .collect();
@@ -2188,4 +2488,127 @@ fn fnv1a(basis: u64, bytes: &[u8]) -> u64 {
     bytes.iter().fold(basis, |hash, byte| {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_protocols::{ENGINEERING_FILES, ENGINEERING_LOCK};
+
+    /// `ENGINEERING_FILES` with one byte of `software-change/1.yaml` changed, its lock untouched.
+    fn one_byte_changed() -> Vec<(&'static str, Vec<u8>)> {
+        let mut files: Vec<(&'static str, Vec<u8>)> = ENGINEERING_FILES
+            .iter()
+            .map(|(path, bytes)| (*path, bytes.to_vec()))
+            .collect();
+        let (_, bytes) = files
+            .iter_mut()
+            .find(|(path, _)| *path == "software-change/1.yaml")
+            .expect("software-change/1.yaml is vendored");
+        let at = bytes
+            .windows(b"Deliver a change".len())
+            .position(|window| window == b"Deliver a change")
+            .expect("the description");
+        bytes[at] = b'd';
+        files
+    }
+
+    /// The catalog `from_vendored` refuses over [`one_byte_changed`], and its error text.
+    fn refused_catalog() -> (Result<ProtocolCatalog, String>, String) {
+        let files = one_byte_changed();
+        let borrowed: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(path, bytes)| (*path, bytes.as_slice()))
+            .collect();
+        let catalog = ProtocolCatalog::from_vendored(&borrowed, ENGINEERING_LOCK)
+            .map_err(|error| error.to_string());
+        let refusal = catalog
+            .clone()
+            .expect_err("the lock refuses the changed file");
+        (catalog, refusal)
+    }
+
+    /// Asserts that `protocol` under the refused catalog is `InvalidProtocol` naming it, with the
+    /// lock's refusal text unchanged as `problem`.
+    fn assert_refused(protocol: &str) {
+        let (catalog, refusal) = refused_catalog();
+        match builtin_in(catalog, protocol) {
+            Err(OpenError::InvalidProtocol {
+                protocol: named,
+                problem,
+            }) => {
+                assert_eq!(named, protocol);
+                assert!(
+                    problem.starts_with(
+                        "engineering protocol lock refused: DigestMismatch software-change/1.yaml"
+                    ),
+                    "{problem}"
+                );
+                assert_eq!(problem, refusal, "the catalog's error text, unchanged");
+            }
+            other => panic!("{protocol} under a lock refusal is InvalidProtocol, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_catalog_failing_its_lock_is_invalid_protocol_naming_the_refusal() {
+        assert_refused("software-change@1");
+    }
+
+    /// A well-formed name the catalog might hold cannot be told unknown while the catalog is
+    /// refused: it is the refusal, never `UnknownProtocol`.
+    #[test]
+    fn an_unknown_well_formed_name_under_a_refused_catalog_is_invalid_protocol() {
+        assert_refused("no-such@1");
+    }
+
+    /// A name that is not `<name>@<major>` is no catalog entry whatever the catalog holds, so it
+    /// stays `UnknownProtocol` under a refused catalog too.
+    #[test]
+    fn a_malformed_name_under_a_refused_catalog_is_unknown_protocol() {
+        for protocol in ["software-change", "software-change@01", "software-change@x"] {
+            let (catalog, _) = refused_catalog();
+            assert_eq!(
+                builtin_in(catalog, protocol).map(|entry| entry.name().to_owned()),
+                Err(OpenError::UnknownProtocol {
+                    protocol: protocol.to_owned()
+                }),
+                "{protocol}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_engineering_catalog_holds_each_builtin_and_nothing_else() {
+        let catalog = || ProtocolCatalog::engineering();
+        let entry = builtin_in(catalog(), "software-change@1").expect("software-change@1");
+        assert_eq!(entry.model.protocol.id.as_str(), "software.change");
+        assert_eq!(entry.model.protocol.revision, 1);
+        assert_eq!(ENGINEERING_FILES.len(), 10, "the ten vendored files");
+        for (path, bytes) in ENGINEERING_FILES {
+            let (name, file) = path.split_once('/').expect("<name>/<major>.yaml");
+            let major = file.strip_suffix(".yaml").expect("<major>.yaml");
+            let registration = format!("{name}@{major}");
+            let entry = builtin_in(catalog(), &registration)
+                .unwrap_or_else(|error| panic!("{registration}: {error}"));
+            assert_eq!(entry.name(), registration);
+            assert_eq!(entry.definition.yaml.as_bytes(), *bytes, "{registration}");
+        }
+        for protocol in [
+            "no-such@1",
+            "software-change@2",
+            "software-change",
+            "software-change@01",
+            "software-change@x",
+            "@1",
+        ] {
+            assert_eq!(
+                builtin_in(catalog(), protocol).map(|entry| entry.name().to_owned()),
+                Err(OpenError::UnknownProtocol {
+                    protocol: protocol.to_owned()
+                }),
+                "{protocol}"
+            );
+        }
+    }
 }

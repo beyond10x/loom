@@ -1,0 +1,217 @@
+format: protocol/1
+
+protocol:
+  id: eval.gated_change
+  revision: 1
+  description: >-
+    Decide one change an automated loop made to an agent's text or configuration (guidance, a
+    system prompt, tool caps) against an evaluation set: keep it only on evidence about that exact
+    candidate revision, from a producer the case lists as another agent run than the one that wrote
+    it, that the evaluation design passed review, the change stays inside the surface the loop may
+    change and carries no leaked or forbidden content, it improved on the tuning split and the
+    improvement reproduced, and the held-out split did not regress; reject it when every one of
+    those is decided and one is false; propose it to a person when it leaves the surface; or close
+    the case inconclusive on an explicit decision. The candidate's revision hashes its content
+    together with its basis (baseline, question set, data revision and design), so a moved basis is
+    a new candidate revision and evidence about the old one no longer counts. Missing, stale or
+    non-independent evidence leaves a claim unknown, and unknown neither keeps nor rejects.
+
+independence_dimensions:
+  different_agent_run:
+    description: the producer is another agent run than the one that wrote the candidate
+
+artifacts:
+  eval_design:
+    description: the evaluation design the loop is tuned under; its splits, metrics and guards
+  candidate:
+    description: >-
+      the change under test; its revision hashes the changed text or configuration together with
+      its basis: the baseline, the question set, the data revision and the evaluation design
+
+evidence_kinds:
+  design_review:
+    description: a review of the evaluation design; its result is passed or failed
+  guard_check:
+    description: >-
+      a check of the candidate, in order, against the surface the loop may change, for expected
+      answers inside the candidate and for new forbidden content in answers; its result is
+      outside, leaked or clean
+  tuning_comparison:
+    description: >-
+      a first and a second run of the candidate against the baseline on the tuning split; its
+      result is reproduced (both better), not_reproduced (the first better, the second not) or
+      not_better (the first not better)
+  heldout_comparison:
+    description: >-
+      a run of the candidate against the baseline on the held-out split; its result is held or
+      regressed
+
+claims:
+  experiment.valid:
+    description: >-
+      the current evaluation design passed a review by a producer the case lists as another agent
+      run than the loop's
+    true_when:
+      evidence:
+        kind: design_review
+        result: passed
+        subject: eval_design
+        independent_on: [different_agent_run]
+  change.within_surface:
+    description: >-
+      an independent guard check of the current candidate revision did not find it outside the
+      surface the loop may change
+    true_when:
+      not:
+        evidence:
+          kind: guard_check
+          result: outside
+          subject: candidate
+          independent_on: [different_agent_run]
+  content.clean:
+    description: >-
+      an independent guard check of the current candidate revision found it inside the surface,
+      with no expected answers inside it and no new forbidden content in answers
+    true_when:
+      evidence:
+        kind: guard_check
+        result: clean
+        subject: candidate
+        independent_on: [different_agent_run]
+  tuning.improved:
+    description: >-
+      an independent first run of the current candidate revision on the tuning split was better
+      than the baseline
+    true_when:
+      not:
+        evidence:
+          kind: tuning_comparison
+          result: not_better
+          subject: candidate
+          independent_on: [different_agent_run]
+  result.reproducible:
+    description: >-
+      an independent second run of the current candidate revision on the tuning split reproduced
+      the first run's improvement
+    true_when:
+      evidence:
+        kind: tuning_comparison
+        result: reproduced
+        subject: candidate
+        independent_on: [different_agent_run]
+  heldout.not_regressed:
+    description: >-
+      an independent run of the current candidate revision on the held-out split did not regress
+      against the baseline
+    true_when:
+      evidence:
+        kind: heldout_comparison
+        result: held
+        subject: candidate
+        independent_on: [different_agent_run]
+  change.supported:
+    description: >-
+      every keep claim holds for the current candidate revision: the design is valid, the change
+      is within the surface and clean, it improved on the tuning split reproducibly, and the
+      held-out split did not regress
+    true_when:
+      all:
+        - claim: experiment.valid
+        - claim: change.within_surface
+        - claim: content.clean
+        - claim: tuning.improved
+        - claim: result.reproducible
+        - claim: heldout.not_regressed
+
+actions:
+  design.review:
+    description: review the evaluation design, under authority
+    effect: none
+    requires:
+      - capability: eval_design.review
+    may_produce:
+      - evidence: design_review
+  candidate.evaluate:
+    description: >-
+      check and run the current candidate revision: the guard check, the tuning comparison and the
+      held-out comparison
+    effect: read
+    may_produce:
+      - evidence: guard_check
+      - evidence: tuning_comparison
+      - evidence: heldout_comparison
+  change.keep:
+    description: >-
+      keep the candidate; needs every keep claim to hold for the current candidate revision and
+      authority to keep a loop's change
+    effect: write
+    precondition:
+      claim: change.supported
+      is: true
+    requires:
+      - capability: loop_change.keep
+  change.reject:
+    description: >-
+      discard the candidate, leaving the surface as it was; needs every keep claim decided and one
+      of them false, so an unknown claim never rejects
+    effect: none
+    precondition:
+      all:
+        - claim: change.supported
+          is: false
+        - not: {claim: experiment.valid, is: unknown}
+        - not: {claim: change.within_surface, is: unknown}
+        - not: {claim: content.clean, is: unknown}
+        - not: {claim: tuning.improved, is: unknown}
+        - not: {claim: result.reproducible, is: unknown}
+        - not: {claim: heldout.not_regressed, is: unknown}
+  change.propose:
+    description: >-
+      hand a candidate that leaves the surface the loop may change to a person as a proposal,
+      applying nothing
+    effect: none
+    precondition:
+      claim: change.within_surface
+      is: false
+  change.apply_outside_surface:
+    description: >-
+      apply a candidate that leaves the surface the loop may change; needs a capability never
+      granted to a loop
+    effect: write
+    precondition:
+      claim: change.within_surface
+      is: false
+    requires:
+      - capability: loop_change.apply_outside_surface
+
+outcomes:
+  kept:
+    description: the case closed with the candidate kept; needs every keep claim to hold
+    requires:
+      claim: change.supported
+  rejected:
+    description: >-
+      the case closed with the candidate rejected; needs it within the surface, every keep claim
+      decided and one of them false. Evidence that is missing, about another candidate revision or
+      not independent rejects nothing: it leaves its claim unknown, not false
+    requires:
+      all:
+        - claim: change.within_surface
+        - claim: change.supported
+          is: false
+        - not: {claim: experiment.valid, is: unknown}
+        - not: {claim: content.clean, is: unknown}
+        - not: {claim: tuning.improved, is: unknown}
+        - not: {claim: result.reproducible, is: unknown}
+        - not: {claim: heldout.not_regressed, is: unknown}
+  proposed:
+    description: >-
+      the case closed with the candidate proposed to a person, because it leaves the surface the
+      loop may change
+    requires:
+      claim: change.within_surface
+      is: false
+  inconclusive:
+    description: the case closed on an explicit decision that the evaluation settles nothing
+    requires:
+      decision: explicitly_inconclusive

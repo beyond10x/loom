@@ -1,0 +1,182 @@
+{
+  "contract": "runlog-<stem>.jsonl, the run log of one case, beside its case file <stem>.json",
+  "domain": "loom.runlog",
+  "generated_by": "loom-docs generate, from ess; task docs-check holds the committed file to the declaration",
+  "kinds": {
+    "ActionFinished": {
+      "fields": {
+        "action": {
+          "optional": false,
+          "type": "String"
+        },
+        "blob_digest": {
+          "optional": true,
+          "type": "String"
+        },
+        "evidence": {
+          "optional": false,
+          "type": "List<String>"
+        },
+        "exit": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "refusal": {
+          "optional": true,
+          "type": "String"
+        },
+        "revisions": {
+          "fields": {
+            "artifact": {
+              "optional": false,
+              "type": "String"
+            },
+            "from": {
+              "optional": true,
+              "type": "String"
+            },
+            "to": {
+              "optional": false,
+              "type": "String"
+            }
+          },
+          "optional": false,
+          "type": "List<loom.runlog.RevisionMove>"
+        }
+      }
+    },
+    "ActionStarted": {
+      "fields": {
+        "action": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "AuthorityRecorded": {
+      "fields": {
+        "capability": {
+          "optional": false,
+          "type": "String"
+        },
+        "decision": {
+          "optional": false,
+          "type": "String"
+        },
+        "principal": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "CaseOpened": {
+      "fields": {
+        "case": {
+          "optional": false,
+          "type": "String"
+        },
+        "protocol": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "ChildClosed": {
+      "fields": {
+        "child": {
+          "optional": false,
+          "type": "String"
+        },
+        "outcome": {
+          "optional": true,
+          "type": "String"
+        }
+      }
+    },
+    "ChildOpened": {
+      "fields": {
+        "child": {
+          "optional": false,
+          "type": "String"
+        },
+        "protocol": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "Discarded": {
+      "fields": {
+        "action": {
+          "optional": false,
+          "type": "String"
+        },
+        "reason": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "Evaluated": {
+      "fields": {
+        "case_revision": {
+          "optional": false,
+          "type": "Integer"
+        },
+        "decision_digest": {
+          "optional": false,
+          "type": "String"
+        },
+        "frontier": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "Stopped": {
+      "fields": {
+        "next": {
+          "optional": false,
+          "type": "List<String>"
+        },
+        "stop": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
+    "Terminated": {
+      "fields": {
+        "reason": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    }
+  },
+  "line": {
+    "encoding": "one JSON object per line, ended by a line feed; the event's tag and fields sit beside the line's members",
+    "members": {
+      "at": {
+        "optional": false,
+        "type": "Timestamp"
+      },
+      "prev": {
+        "optional": true,
+        "type": "String"
+      },
+      "seq": {
+        "optional": false,
+        "type": "Integer"
+      }
+    },
+    "prev": "the SHA-256 of the previous line's bytes without its line feed, as 64 lower-case hex digits; absent on line 0, present on every other line",
+    "seq": "the line's position, counted from 0, with no gap",
+    "tag": "kind"
+  },
+  "refusals": [
+    "BrokenChain",
+    "CutLine",
+    "SequenceGap"
+  ]
+}

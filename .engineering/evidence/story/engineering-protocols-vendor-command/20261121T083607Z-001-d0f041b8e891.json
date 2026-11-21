@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T08:36:07Z",
+  "actor": "agent:loom",
+  "artifact": "story:engineering-protocols-vendor-command",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 9dd940d7..fdc4e87a",
+    "reference": "6 files: the adversary's pass-2 cases (equal to the delivered file with spaces, newlines and commas removed); in protocols_vendor.rs the failure to peel a tag gets its own refusal text and the doc comment names file and ssh beside ext; main.rs help text and AGENTS.md name Git 2.44.0; host_git_hardening.rs matches GIT_NO_LAZY_FETCH=1 and GIT_CONFIG_GLOBAL=/dev/null with their values, its checks of the three older helpers unchanged; one new case in protocols_vendor.rs tests; no further attack pass; the unit changes nothing under .engineering, ess, generated, protocols or crates/loom-protocols; unit gate on fdc4e87a: fmt, clippy exit 0, loom-xtask 100 passed, protocols 70, host_git_hardening 8, docs-check exit 0"
+  }
+}

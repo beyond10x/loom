@@ -306,7 +306,7 @@ fn a_driver_without_the_workdir_fact_refuses_a_workdir_unserved() {
 fn record(input: &ExecStartInput, workdir: Option<&str>) -> substrate_wire::AppliedConfinement {
     substrate_wire::AppliedConfinement {
         capability_snapshot: input.sandbox.capability_snapshot.clone(),
-        cgroup: "substrate-ex_loom_1_0".to_owned(),
+        cgroup: Some("substrate-ex_loom_1_0".to_owned()),
         filesystem: substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly,
         network: AppliedNetwork::None,
         profile: input.sandbox.profile,
@@ -317,6 +317,7 @@ fn record(input: &ExecStartInput, workdir: Option<&str>) -> substrate_wire::Appl
         secret_slots: Vec::new(),
         workdir: workdir.map(str::to_owned),
         writable_roots: Vec::new(),
+        requires: None,
     }
 }
 

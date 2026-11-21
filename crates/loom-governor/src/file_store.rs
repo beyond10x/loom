@@ -12,7 +12,7 @@
 //! A document naming a member its declaration does not, or one member twice, is refused on read,
 //! and so is one missing a member: a case stored without its `inputs`, as Loom 0.19.0 and earlier
 //! wrote every case, is a [`FileStoreError`] naming the case, never read with inputs filled in.
-//! So is a case whose inputs name one input twice, and a case of an ELS built-in protocol
+//! So is a case whose inputs name one input twice, and a case of a vendored engineering protocol
 //! (`software-change@1`) whose inputs that protocol refuses as an opening would (a declared input
 //! missing, an empty list included, an undeclared one, an unlisted value), naming the case and
 //! the input. A case's explicit decisions are its `decisions` member, left out when none was
@@ -87,6 +87,23 @@ fn push_hex(out: &mut String, bytes: &[u8]) {
     }
 }
 
+/// The name, without its extension, of the file [`FileCaseStore`] keeps the case with id `case`
+/// in, named so no id names a file outside the store and no name passes the 255 bytes a file name
+/// may have: `case-<hex of the id>` for an id of up to 100 bytes, and
+/// `case-sha256-<hex of its SHA-256>` for a longer one. The two forms never meet: a hex name has
+/// no `s` after `case-`. A file kept beside the case file under the same stem (a run log) is
+/// named from this.
+pub fn case_file_stem(case: &str) -> String {
+    let mut name = String::from("case-");
+    if case.len() <= HEX_NAMED {
+        push_hex(&mut name, case.as_bytes());
+    } else {
+        name.push_str("sha256-");
+        push_hex(&mut name, &Sha256::digest(case.as_bytes()));
+    }
+    name
+}
+
 /// A [`FallibleCaseStore`] keeping one file per case in a directory.
 #[derive(Debug)]
 pub struct FileCaseStore {
@@ -128,19 +145,10 @@ impl FileCaseStore {
         self.dir.path()
     }
 
-    /// The file that holds `case`, named so no id names a file outside the store and no name
-    /// passes the 255 bytes a file name may have: `case-<hex of the id>.json` for an id of up to
-    /// [`HEX_NAMED`] bytes, and `case-sha256-<hex of its SHA-256>.json` for a longer one. The two
-    /// forms never meet: a hex name has no `s` after `case-`. The file carries the full id, and a
-    /// read refuses a file whose id is not the one asked for.
+    /// The file that holds `case`: its [`case_file_stem`] and `.json`. The file carries the full
+    /// id, and a read refuses a file whose id is not the one asked for.
     fn case_path(&self, case: &CaseId) -> PathBuf {
-        let mut name = String::from("case-");
-        if case.0.len() <= HEX_NAMED {
-            push_hex(&mut name, case.0.as_bytes());
-        } else {
-            name.push_str("sha256-");
-            push_hex(&mut name, &Sha256::digest(case.0.as_bytes()));
-        }
+        let mut name = case_file_stem(&case.0);
         name.push_str(".json");
         self.dir.path().join(name)
     }

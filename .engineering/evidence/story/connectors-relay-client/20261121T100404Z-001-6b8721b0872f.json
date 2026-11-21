@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T10:04:04Z",
+  "actor": "agent:loom",
+  "artifact": "story:connectors-relay-client",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 69793e4d..cbf96e1e",
+    "reference": "3 files: the reviewer's test file added, unreachable_url in tests/connectors_relay.rs returns a bound, never listened Tokio TcpSocket the case holds until both assertions ran, one README.md line; no change under src/, no assertion changed; unit gate on cbf96e1e exit 0, 163 connectors cases passed"
+  }
+}

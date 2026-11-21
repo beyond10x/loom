@@ -1,14 +1,15 @@
 //! Adversary pass 1 for the engineering-protocols 0.3.0 pin.
 //!
 //! The pin is written in three places that nothing compares: the manifests (`tag = "…"`), the
-//! lockfile, and the literal `revision` that `ProtocolCatalog::engineering` stamps on every entry
-//! (`src/lib.rs`). These cases tie them together, so the next pin cannot move one and leave the
-//! others, and hold the catalog to what the CHANGELOG says callers now see.
+//! lockfile, and the `revision` that `ProtocolCatalog::engineering` stamps on every entry, which
+//! is the `tag` of `protocols/engineering/lock.json`. These cases tie them together, so the next
+//! pin cannot move one and leave the others, and hold the catalog to what the CHANGELOG says
+//! callers now see.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use loom_protocols::{ProtocolCatalog, SourceKind};
+use loom_protocols::{ENGINEERING_LOCK, ProtocolCatalog, SourceKind, lock};
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -75,9 +76,14 @@ fn one_tag(dependency: &str) -> String {
     distinct.into_iter().next().expect("one").to_owned()
 }
 
+/// Each entry's revision is also the tag of the vendored files' lock (story:engineering-protocol-lock),
+/// so the manifests, the lockfile and `protocols/engineering/lock.json` name one release.
 #[test]
 fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
     let tag = one_tag("b10x-canon-engineering");
+    let locked = lock::decode(ENGINEERING_LOCK)
+        .expect("the committed lock decodes")
+        .tag;
     let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
     let mut seen = 0;
     for entry in catalog.iter() {
@@ -91,6 +97,13 @@ fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
             entry.definition.source.revision,
             tag,
             "{} says it comes from engineering-protocols {} while the manifests pin {tag}",
+            entry.name(),
+            entry.definition.source.revision
+        );
+        assert_eq!(
+            entry.definition.source.revision,
+            locked,
+            "{} says it comes from engineering-protocols {} while the vendored lock names {locked}",
             entry.name(),
             entry.definition.source.revision
         );
@@ -122,7 +135,8 @@ fn the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags() {
 /// `eval-gated-change@1`, since 0.10.0 `loop-improvement@1`, `self-improvement@1` and
 /// `story-delivery@1`, since 0.11.0 `story-delivery@2`, since 0.15.0 `protocol-adopt@1`;
 /// `incident.response/1` declares `investigate_cause`. The names are the release's `protocols/`
-/// directory at engineering-protocols 0.15.2.
+/// directory at engineering-protocols 0.16.0, which adds and removes no protocol (its CHANGELOG:
+/// every protocol is the one 0.15.2 has).
 #[test]
 fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
     let names = |catalog: &ProtocolCatalog| -> BTreeSet<String> {
@@ -146,8 +160,8 @@ fn the_catalog_lists_what_the_changelog_says_callers_now_see() {
             "story-delivery@2".to_owned(),
             "support-triage@1".to_owned(),
         ]),
-        "story:engineering-protocols-0-15-pin: the protocols/ directory at engineering-protocols \
-         0.15.2, as its CHANGELOG adds them (0.10.0, 0.11.0, 0.15.0)"
+        "story:canon-0-9-0-pin: the protocols/ directory at engineering-protocols 0.16.0, the \
+         same as at 0.15.2, as its CHANGELOG adds them (0.10.0, 0.11.0, 0.15.0)"
     );
     let bundled = ProtocolCatalog::bundled().expect("bundled");
     assert!(names(&bundled).contains("support-triage@1"));

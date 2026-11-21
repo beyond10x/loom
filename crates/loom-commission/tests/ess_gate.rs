@@ -86,7 +86,7 @@ fn run_ess(step: &str, args: &[&str], cwd: &Path) -> Result<Output, String> {
         .output()
         .map_err(|error| {
             format!(
-                "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.86.0 on PATH \
+                "{step}: cannot run `{ESS}` ({error}); the gate needs ess 0.96.0 on PATH \
                  (ess/commission/ess-inputs.yaml)"
             )
         })
@@ -323,14 +323,21 @@ fn gate_names_an_added_marker() {
 const UNWITNESSED_INVARIANT: &str = "    invariants:\n      - case_revision >= 0\n";
 
 /// A command creating a Frontier, which obliges the scenario the invariant above refuses: an item
-/// of the domain's `commands:` list.
+/// of the domain's `commands:` list. Since ess 0.95.0 synthesis refuses an input naming a `Case`
+/// row no command creates (ESS-SYNTH-001) and a copied input no branch keeps inside the invariant
+/// (ESS-SYNTH-025), so the command takes no `case_id` and refuses a negative revision; the one
+/// refusal left is the unwitnessed invariant.
 const ISSUING_COMMAND: &str = "  - name: commission.responsibility.IssueFrontier
     input:
-      - name: case_id
-        type: commission.responsibility.CaseId
       - name: case_revision
         type: Integer
     outcomes:
+      - name: negative-revision
+        when: \"case_revision < 0\"
+        error: commission.responsibility.RunStorageFailed
+        payload:
+          commission.responsibility.RunStorageFailed:
+            reason: negative
       - name: issued
         creates: commission.responsibility.Frontier
         instance: frontier_id
@@ -339,7 +346,6 @@ const ISSUING_COMMAND: &str = "  - name: commission.responsibility.IssueFrontier
           commission.responsibility.FrontierIssued:
             frontier_id: {generated: true}
         sets:
-          case_id: input.case_id
           case_revision: input.case_revision
 ";
 
@@ -411,14 +417,14 @@ fn gate_fails_at_step_1_on_an_older_required_ess() {
     let text = fs::read_to_string(&inputs)
         .unwrap_or_else(|error| panic!("read {}: {error}", inputs.display()));
     assert_eq!(
-        text.matches("requires: ess 0.86.0").count(),
+        text.matches("requires: ess 0.96.0").count(),
         1,
-        "{}: expected exactly one `requires: ess 0.86.0`",
+        "{}: expected exactly one `requires: ess 0.96.0`",
         inputs.display()
     );
     fs::write(
         &inputs,
-        text.replace("requires: ess 0.86.0", "requires: ess 0.51.0"),
+        text.replace("requires: ess 0.96.0", "requires: ess 0.51.0"),
     )
     .unwrap_or_else(|error| panic!("write {}: {error}", inputs.display()));
 

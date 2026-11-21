@@ -1,0 +1,48 @@
+{
+  "format": "loom.protocol-lock/1",
+  "repository": "https://github.com/beyond10x/engineering-protocols",
+  "tag": "0.16.0",
+  "commit": "70e6eff48963c9ea178d515ae33e645cf95c9773",
+  "files": [
+    {
+      "path": "eval-gated-change/1.yaml",
+      "sha256": "631d759afb0a24401cca6abf7f970170052fab1bd2d29db6a09f65f935afb520"
+    },
+    {
+      "path": "incident-response/1.yaml",
+      "sha256": "10a6f9120fe3570c54498e6be054622c2509a9f4d8ab1876aa72fa50b4df1943"
+    },
+    {
+      "path": "loop-improvement/1.yaml",
+      "sha256": "04ba56c8fe24cc29f9deaa209697ec6a33f1c34c4e8fcaa8c4d0d3bbd198389f"
+    },
+    {
+      "path": "ml-experiment/1.yaml",
+      "sha256": "7b0ac3b9f9d079fb729a84987a31902867c5869e137957e4af9d3be4c95f98da"
+    },
+    {
+      "path": "protocol-adopt/1.yaml",
+      "sha256": "69d1304b7d6ac89f74f7d16cb9bc2d38197b9871182b5ba63977ac1dc4a28929"
+    },
+    {
+      "path": "self-improvement/1.yaml",
+      "sha256": "7947a8ebb461b56b608c1d15821b126ed353d12a20eaab8a30ebc2f5f71d9033"
+    },
+    {
+      "path": "software-change/1.yaml",
+      "sha256": "8367fdafba358845ce842c87298ecfb80970f4b72ba3466ec8402bc6272d2046"
+    },
+    {
+      "path": "story-delivery/1.yaml",
+      "sha256": "f24e9c1f98c0e4c6ba4a88ad82696c68ac403655378ebc5af51c3c8a775f8e39"
+    },
+    {
+      "path": "story-delivery/2.yaml",
+      "sha256": "37e129039e390b67c522ed35b95b19db534bcc4f76d579af3db1f8bce933ba13"
+    },
+    {
+      "path": "support-triage/1.yaml",
+      "sha256": "d970d928e6299aa400566b0c4e2fb928479c42f7c96a82e5b78feab41277c67a"
+    }
+  ]
+}

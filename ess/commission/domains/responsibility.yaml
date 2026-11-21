@@ -142,6 +142,11 @@ types:
   # Suspended, with nothing invoked. The deadline stays where it was read, a pending request is
   # still asked about before it is invoked again and a resume as above; no effect is invoked past
   # a host stop.
+  #
+  # story:decision-suspension-reason adds Decision: the run waits on a decision request
+  # (DecisionHold). An executor that returns Suspended with it suspends the Run, and under a
+  # suspension port the commission's Suspension is held with that reason and no action request. Only
+  # resume_after_decision, given the decided hold, resumes it; it performs no held request.
   - name: commission.responsibility.SuspensionReason
     kind: union
     tag: kind
@@ -156,6 +161,43 @@ types:
       ExternalAvailability: Json
       RunBudget: commission.responsibility.RunBudgetBreach
       HostStop: commission.responsibility.HostStop
+      Decision: commission.responsibility.DecisionHold
+
+  # story:decision-suspension-reason: the decision request a run is held for, by its id, and what
+  # its decision unblocks. Commission reads neither the request nor the decision store.
+  - name: commission.responsibility.DecisionHold
+    kind: struct
+    fields:
+      - name: request_id
+        type: String
+      - name: unblocks
+        type: commission.responsibility.DecisionUnblocks
+
+  # story:decision-suspension-reason: what a decision request unblocks: an approval, a question or
+  # an outcome decision.
+  - name: commission.responsibility.DecisionUnblocks
+    kind: enum
+    variants: [Approval, Question, Outcome]
+
+  # story:decision-suspension-reason: the decided hold a resume is given: the request id and what
+  # its decision recorded. The caller reads both from the request; Commission cannot tell whether an
+  # option produces a record.
+  - name: commission.responsibility.DecidedHold
+    kind: struct
+    fields:
+      - name: request_id
+        type: String
+      - name: record
+        type: commission.responsibility.DecidedRecord
+
+  # story:decision-suspension-reason: Recorded carries the request's produced_record as JSON, for a
+  # decided option that produces a Canon record; NoRecord is a decided option that produces none.
+  - name: commission.responsibility.DecidedRecord
+    kind: union
+    tag: kind
+    variants:
+      Recorded: Json
+      NoRecord: commission.responsibility.Unit
 
   # story:host-stop-before-step: why the host stopped a run before a step, as the host names it.
   # `name` is the host's label for the stop (for takt, ActiveTime, its wall time less its own
@@ -1231,6 +1273,17 @@ entities:
   # `settled`) leaves nothing held: the host has already done what an approval of the request
   # would lead to, so no Suspension is stored, none is left for an approval to name and nothing
   # can resume the Run from one.
+  #
+  # story:decision-suspension-reason: a Suspension whose reason is Decision holds the Run for a
+  # decision request and no action request, so `action_request_id`, `expected_case_revision`,
+  # `action` and `arguments` are absent on it and present on every other. A take and a release of
+  # it name no action request, and the `other-request` guard reads an absent input as matching an
+  # absent held member. They name its decision request instead (`decision_request_id`): one that
+  # names another, or none, is refused (`other-decision`, naming both) and kept, so a resume that
+  # read the hold for one decision never takes or releases a later hold for another; a take or a
+  # release naming a decision request on a Suspension held for an action request is refused the
+  # same way. ess/22 refuses a guard that reads `reason`'s `Decision` payload (`unobservable_fact`),
+  # so `other-decision` is decided by the suspension port, in the same step as the change.
   - name: commission.responsibility.Suspension
     identity:
       name: suspension
@@ -1243,17 +1296,24 @@ entities:
       - name: run_case_revision
         type: Integer
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
       - name: case_id
         type: commission.responsibility.CaseId
       - name: expected_case_revision
-        type: Integer
+        type: Optional<Integer>
       - name: action
-        type: String
+        type: Optional<String>
       - name: arguments
-        type: commission.responsibility.ProposedActionArguments
+        type: Optional<commission.responsibility.ProposedActionArguments>
       - name: reason
         type: commission.responsibility.SuspensionReason
+    # The four are present together or absent together. An invariant cannot read the reason's
+    # variant (`reason.kind` is refused `unobservable_fact`), so which reason leaves them absent is
+    # held by the runtime: only a Decision hold gives none.
+    invariants:
+      - any:
+          - all: [defined(action_request_id), defined(expected_case_revision), defined(action), defined(arguments)]
+          - all: ["not defined(action_request_id)", "not defined(expected_case_revision)", "not defined(action)", "not defined(arguments)"]
     relations:
       - name: run
         kind: references
@@ -1265,11 +1325,8 @@ entities:
         target: commission.responsibility.ActionRequest
         cardinality: one
         via: action_request_id
-      - name: case
-        kind: references
-        target: commission.responsibility.Case
-        cardinality: one
-        via: case_id
+    # story:ess-096-upgrade: `case_id` names the commission's case and declares no relation: no
+    # command creates a `Case`, so synthesis cannot arrange the row a relation would name.
     lifecycle:
       initial: Pending
       states: [Pending, Resuming]
@@ -1462,6 +1519,13 @@ errors:
       - name: suspension
         type: commission.responsibility.SuspensionKey
 
+  # story:ess-096-upgrade: the hold gives some but not all of `action_request_id`,
+  # `expected_case_revision`, `action` and `arguments`; nothing was stored.
+  - name: commission.responsibility.SuspensionRequestIncomplete
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+
   # story:approval-suspend-resume-slice: the commission holds no Suspension.
   - name: commission.responsibility.SuspensionNotFound
     fields:
@@ -1470,32 +1534,47 @@ errors:
 
   # story:approval-suspend-resume-slice: the Suspension is not in a state the command acts from.
   # Taken when it is already `Resuming`, it names the request whose performance is in doubt.
+  # story:decision-suspension-reason: a Decision Suspension holds no request, so it names none.
   - name: commission.responsibility.SuspensionStateConflict
     fields:
       - name: state
         type: commission.responsibility.Suspension.State
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
 
   # story:approval-suspend-resume-slice: the commission's Suspension is held for another action
   # request than the one the command names; nothing was changed. It names both.
+  # story:decision-suspension-reason: either is absent where it names no request.
   - name: commission.responsibility.SuspensionRequestMismatch
     fields:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: held_action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
+
+  # story:decision-suspension-reason: a take or a release names the decision request a Suspension
+  # held for a decision holds, and the Suspension holds another (or none, being held for an
+  # action request), or names none while it holds one; nothing was changed. It names both.
+  - name: commission.responsibility.SuspensionDecisionMismatch
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: held_decision_request_id
+        type: Optional<String>
+      - name: decision_request_id
+        type: Optional<String>
 
   # story:handoff-holds-no-suspension: the host already settled the request the Suspension would
   # hold; nothing was stored. It names the Suspension, the request and the host's reason.
+  # story:decision-suspension-reason: the request when the hold names one.
   - name: commission.responsibility.SuspensionSettled
     fields:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
       - name: reason
         type: String
 
@@ -1615,6 +1694,13 @@ commands:
   # story:handoff-holds-no-suspension: the host answers first whether it already settled the
   # request the Suspension would hold (`settled`, naming the Suspension, the request and why); then
   # nothing is stored and the run ends with nothing held.
+  #
+  # story:decision-suspension-reason: a hold for a decision request (reason Decision) gives no
+  # action request, expected case revision, action or arguments; every other hold gives all four.
+  #
+  # story:ess-096-upgrade: a hold giving some but not all four is refused (`incomplete-request`,
+  # naming the Suspension), whatever its reason and whether or not the commission already holds
+  # one, and nothing is stored. Which reason gives none is held by the suspension port.
   - name: commission.responsibility.HoldSuspension
     input:
       - name: suspension
@@ -1626,15 +1712,15 @@ commands:
       - name: run_case_revision
         type: Integer
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
       - name: case_id
         type: commission.responsibility.CaseId
       - name: expected_case_revision
-        type: Integer
+        type: Optional<Integer>
       - name: action
-        type: String
+        type: Optional<String>
       - name: arguments
-        type: commission.responsibility.ProposedActionArguments
+        type: Optional<commission.responsibility.ProposedActionArguments>
       - name: reason
         type: commission.responsibility.SuspensionReason
     outcomes:
@@ -1645,6 +1731,16 @@ commands:
           commission.responsibility.SuspensionSettled:
             suspension: input.suspension
             action_request_id: input.action_request_id
+      - name: incomplete-request
+        when:
+          not:
+            any:
+              - all: [defined(action_request_id), defined(expected_case_revision), defined(action), defined(arguments)]
+              - all: ["not defined(action_request_id)", "not defined(expected_case_revision)", "not defined(action)", "not defined(arguments)"]
+        error: commission.responsibility.SuspensionRequestIncomplete
+        payload:
+          commission.responsibility.SuspensionRequestIncomplete:
+            suspension: input.suspension
       - name: held
         creates: commission.responsibility.Suspension
         instance: suspension
@@ -1679,12 +1775,17 @@ commands:
   # request the resume revalidated: a Suspension held for another request is refused, naming both,
   # and kept as it is. A Suspension already `Resuming` is refused, naming its request: that request
   # may have been performed, and is never performed again from it.
+  # story:decision-suspension-reason: a resume of a Decision Suspension names no request; an
+  # absent input matches an absent held member. It names the decision request instead, and the
+  # take is refused `other-decision` unless that is the one the Suspension holds.
   - name: commission.responsibility.TakeSuspension
     input:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
+      - name: decision_request_id
+        type: Optional<String>
     outcomes:
       - name: other-request
         when_subject:
@@ -1715,6 +1816,9 @@ commands:
         payload:
           commission.responsibility.SuspensionStateConflict:
             action_request_id: {subject: action_request_id}
+      - name: other-decision
+        external: the held Suspension's decision request is not the one the input names
+        error: commission.responsibility.SuspensionDecisionMismatch
       - name: storage-failed
         external: the suspension port cannot record the take
         error: commission.responsibility.SuspensionStorageFailed
@@ -1725,12 +1829,16 @@ commands:
   # not removed. story:authority-sees-the-request: a resume that took the Suspension and finds the
   # case moved off the request's revision before invoking it releases it the same way, since the
   # request bound to that revision can never be performed, and performs nothing.
+  # story:decision-suspension-reason: a release of a Decision Suspension names no request, as its
+  # take did, and names its decision request, refused `other-decision` as the take is.
   - name: commission.responsibility.ReleaseSuspension
     input:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
+      - name: decision_request_id
+        type: Optional<String>
     outcomes:
       - name: other-request
         when_subject:
@@ -1761,6 +1869,9 @@ commands:
         payload:
           commission.responsibility.SuspensionNotFound:
             suspension: input.suspension
+      - name: other-decision
+        external: the held Suspension's decision request is not the one the input names
+        error: commission.responsibility.SuspensionDecisionMismatch
       - name: storage-failed
         external: the suspension port cannot remove the Suspension
         error: commission.responsibility.SuspensionStorageFailed
@@ -1946,6 +2057,7 @@ events:
       - name: run_id
         type: commission.responsibility.RunId
 
+  # story:decision-suspension-reason: the request is absent for a Decision Suspension.
   - name: commission.responsibility.SuspensionHeld
     fields:
       - name: suspension
@@ -1953,14 +2065,14 @@ events:
       - name: run_id
         type: commission.responsibility.RunId
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
 
   - name: commission.responsibility.SuspensionTaken
     fields:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
 
   - name: commission.responsibility.SuspensionReleased
     fields:
@@ -1982,7 +2094,9 @@ views:
         type: commission.responsibility.Run.State
 
   # story:approval-suspend-resume-slice: each commission's Suspension and its state, as the
-  # suspension port holds it.
+  # suspension port holds it. story:decision-suspension-reason: a Decision Suspension's request is
+  # absent, and so are its revision, action and arguments, which the view publishes so the
+  # Suspension's invariant is checked after each command.
   - name: commission.responsibility.SuspensionStates
     source: commission.responsibility.Suspension
     consistency: read_your_writes
@@ -1994,6 +2108,12 @@ views:
       - name: run_id
         type: commission.responsibility.RunId
       - name: action_request_id
-        type: commission.responsibility.ActionRequestId
+        type: Optional<commission.responsibility.ActionRequestId>
+      - name: expected_case_revision
+        type: Optional<Integer>
+      - name: action
+        type: Optional<String>
+      - name: arguments
+        type: Optional<commission.responsibility.ProposedActionArguments>
       - name: state
         type: commission.responsibility.Suspension.State

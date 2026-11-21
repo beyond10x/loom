@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T06:29:31Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-suspension-reason",
+  "kind": "story",
+  "revision": 17,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/decision-suspension-reason 0c716b3a, 61e38aad",
+    "review": "review-result:decision-suspension-reason-security-1",
+    "outcome": "fixed"
+  }
+}

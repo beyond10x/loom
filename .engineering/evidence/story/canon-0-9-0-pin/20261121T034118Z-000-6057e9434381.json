@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T03:41:18Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-0-9-0-pin",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/canon-0-9-0-pin c9816cfd",
+    "review": "review-result:canon-0-9-0-pin-adversary-2",
+    "outcome": "fixed"
+  }
+}

@@ -2,7 +2,7 @@
   "domain": {
     "display": "Responsibility",
     "id": "commission.responsibility",
-    "source": "commission ess/commission/ compiled with ess 0.86.0",
+    "source": "commission ess/commission/ compiled with ess 0.96.0",
     "summary": "An agent revision commissioned to a durable case. The governor owns the case's truth and returns a frontier; a run is one bounded period of execution against it. The executor proposes; it never completes a case.",
     "system": "commission"
   },
@@ -445,7 +445,7 @@
         },
         {
           "name": "action_request_id",
-          "type": "ActionRequestId"
+          "type": "Optional<ActionRequestId>"
         },
         {
           "name": "case_id",
@@ -453,15 +453,15 @@
         },
         {
           "name": "expected_case_revision",
-          "type": "integer"
+          "type": "Optional<integer>"
         },
         {
           "name": "action",
-          "type": "string"
+          "type": "Optional<string>"
         },
         {
           "name": "arguments",
-          "type": "ProposedActionArguments"
+          "type": "Optional<ProposedActionArguments>"
         },
         {
           "name": "reason",
@@ -619,14 +619,6 @@
       "name": "action_request",
       "to": "commission.responsibility.ActionRequest",
       "via": "action_request_id"
-    },
-    {
-      "cardinality": "one",
-      "from": "commission.responsibility.Suspension",
-      "kind": "references",
-      "name": "case",
-      "to": "commission.responsibility.Case",
-      "via": "case_id"
     }
   ]
 }

@@ -188,7 +188,8 @@ fn a_resume_after_a_crash_between_take_and_hand_off_is_in_doubt() {
             suspension: SuspensionKey {
                 commission_id: CommissionId(Uuid(held.commission.clone())),
             },
-            action_request_id: ActionRequestId(Uuid(held.action_request_id.clone())),
+            action_request_id: Some(ActionRequestId(Uuid(held.action_request_id.clone()))),
+            decision_request_id: None,
         });
     assert!(
         matches!(taken, TakeSuspensionOutcome::Taken { .. }),
@@ -395,7 +396,7 @@ impl Scratch {
         Held {
             state,
             commission,
-            action_request_id: suspension.data.action_request_id.0.0,
+            action_request_id: suspension.data.action_request_id.unwrap().0.0,
         }
     }
 

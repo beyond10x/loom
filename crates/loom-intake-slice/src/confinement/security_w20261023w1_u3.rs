@@ -33,7 +33,7 @@ fn aperture(listen: Option<&str>) -> substrate_wire::AppliedAperture {
 fn exact(input: &ExecStartInput, network: AppliedNetwork) -> substrate_wire::AppliedConfinement {
     substrate_wire::AppliedConfinement {
         capability_snapshot: input.sandbox.capability_snapshot.clone(),
-        cgroup: "substrate-ex_loom_1_0".to_owned(),
+        cgroup: Some("substrate-ex_loom_1_0".to_owned()),
         filesystem: substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly,
         network,
         profile: input.sandbox.profile,
@@ -44,6 +44,7 @@ fn exact(input: &ExecStartInput, network: AppliedNetwork) -> substrate_wire::App
         secret_slots: Vec::new(),
         workdir: None,
         writable_roots: Vec::new(),
+        requires: None,
     }
 }
 

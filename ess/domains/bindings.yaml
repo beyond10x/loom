@@ -1,0 +1,246 @@
+# The `loom.bindings/1` document (story bindings-document): the one file in which an operator
+# declares, per action of one registered protocol, which executor performs it and how its result
+# becomes evidence. Sources read: epic protocol-tree-on-bindings, the story's Outcome and
+# Acceptance, and the SDC bindings examples (`~/beyond10x/sdc/driver/examples/sdc/*.bindings.json`)
+# in the old JSON format. The document is YAML, JSON is read as YAML. This domain declares the
+# decoded document and the refusals that decoding and the load-time check against a compiled
+# protocol give; nothing here is executed. An adapter, an aperture and a remote endpoint are
+# engine configuration and never binding data.
+domain: loom.bindings
+
+summary: >-
+  The `loom.bindings/1` document: per action of one registered protocol its executor (a program,
+  an agent, a person, the opening of child cases or the copy of a record from another case), the
+  table that turns its result into evidence, the tools an agent may be offered, its budget and
+  timeout, the records that send it back to work and the text shown when a person continues; and
+  the refusals a document earns at decoding and at load against the compiled protocol.
+
+naming:
+  wire: bindings
+  display: Bindings
+
+types:
+  # Who performs an action: `Program` runs an argv (never a shell string); `Agent` is a session of
+  # a named adapter and model; `Person` is taken only by a named principal; `Open` opens child
+  # cases; `Copy` copies an evidence record from the case of another protocol.
+  - name: loom.bindings.Executor
+    kind: enum
+    variants: [Program, Agent, Person, Open, Copy]
+
+  # An executor and the members it takes. `kind` is the variant; each other member belongs to one
+  # variant (`argv`: Program; `adapter`, `model`, `inputs`, `outputs`: Agent; `principal`: Person;
+  # `name`, `each`, `bindings`: Open; `evidence`, `from`: Copy) and the load-time check refuses it
+  # on any other. A decoded Agent with no `model` holds `claude-haiku-5-5`. `inputs` and `outputs`
+  # are paths in the workspace. `name` or `each` (one of them) is the argument that names the
+  # child case; `bindings` is the child's bindings file. `evidence` is the kind of the copied
+  # record and `from` the protocol id of the case it is copied from.
+  - name: loom.bindings.ExecutorSpec
+    kind: struct
+    fields:
+      - name: kind
+        type: loom.bindings.Executor
+      - name: argv
+        type: Optional<List<String>>
+      - name: adapter
+        type: Optional<String>
+      - name: model
+        type: Optional<String>
+      - name: inputs
+        type: Optional<List<String>>
+      - name: outputs
+        type: Optional<List<String>>
+      - name: principal
+        type: Optional<String>
+      - name: name
+        type: Optional<String>
+      - name: each
+        type: Optional<String>
+      - name: bindings
+        type: Optional<String>
+      - name: evidence
+        type: Optional<String>
+      - name: from
+        type: Optional<String>
+
+  # Where the value of an evidence entry comes from: `Exit` the program's exit code; `Effect`
+  # Loom's own report that it performed the action (it opened the children, applied the agent's
+  # outputs, took the person's action), whose one value is `performed`, and an effect that was
+  # refused or failed records nothing; `Report` a JSON pointer into the program's report. A
+  # Program executor's entries read `Exit` or `Report`, never `Effect`; a Person or Open
+  # executor's entries read `Effect` alone; an Agent's and a Copy's are not restricted.
+  - name: loom.bindings.ResultSource
+    kind: enum
+    variants: [Exit, Effect, Report]
+
+  # One row of a result table: the value read (`*` for any other) and the evidence result it
+  # becomes; absent, the record carries no result.
+  - name: loom.bindings.ResultRule
+    kind: struct
+    fields:
+      - name: value
+        type: String
+      - name: result
+        type: Optional<String>
+
+  # One record an action writes: its evidence `kind` (one the action may produce), the artifact it
+  # is about (`subject`), the principal it is recorded as (`producer`), where its value is read
+  # (`from`, with `pointer` the JSON pointer when `from` is Report), the table that turns the value
+  # into a result, and the artifacts it follows (`upstream`).
+  - name: loom.bindings.EvidenceEntry
+    kind: struct
+    fields:
+      - name: kind
+        type: String
+      - name: subject
+        type: String
+      - name: producer
+        type: String
+      - name: from
+        type: loom.bindings.ResultSource
+      - name: pointer
+        type: Optional<String>
+      - name: results
+        type: List<loom.bindings.ResultRule>
+      - name: upstream
+        type: List<String>
+
+  # The tool names an Agent executor may be offered. An entry is never empty and holds no comma
+  # and no white space: the session executor joins the names with commas.
+  - name: loom.bindings.ToolAllowList
+    kind: struct
+    fields:
+      - name: allow
+        type: List<String>
+
+  # How many runs an action gets (`max_runs`, 8 when the document names none) and, for an Agent,
+  # the bounds of one run. Each present member is at least 1.
+  - name: loom.bindings.ActionBudget
+    kind: struct
+    fields:
+      - name: max_runs
+        type: Integer
+      - name: max_turns
+        type: Optional<Integer>
+      - name: max_tokens
+        type: Optional<Integer>
+      - name: max_budget_micro_usd
+        type: Optional<Integer>
+
+  # The records about what this action wrote that send it back to work: the evidence `kind` and
+  # the results that do.
+  - name: loom.bindings.RetryCondition
+    kind: struct
+    fields:
+      - name: kind
+        type: String
+      - name: results
+        type: List<String>
+
+  # An artifact id and the path in the workspace it is held at.
+  - name: loom.bindings.ArtifactPath
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: path
+        type: String
+
+  # The independence dimensions a producer is independent on.
+  - name: loom.bindings.ProducerIndependence
+    kind: struct
+    fields:
+      - name: producer
+        type: String
+      - name: dimensions
+        type: List<String>
+
+  # One action's binding: the action id of the protocol, its executor, the arguments (a literal
+  # JSON object, or `arguments_from`, an argv whose standard output is the object), the records it
+  # writes, the tools an Agent may be offered, budget and timeout (1 to 3600 seconds), the retry
+  # conditions and the handoff text a run shows when this writer has done what it may and a person
+  # continues.
+  - name: loom.bindings.BoundAction
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: executor
+        type: loom.bindings.ExecutorSpec
+      - name: arguments
+        type: Optional<Json>
+      - name: arguments_from
+        type: Optional<List<String>>
+      - name: evidence
+        type: List<loom.bindings.EvidenceEntry>
+      - name: tools
+        type: Optional<loom.bindings.ToolAllowList>
+      - name: budget
+        type: loom.bindings.ActionBudget
+      - name: timeout_seconds
+        type: Optional<Integer>
+      - name: retry_when
+        type: List<loom.bindings.RetryCondition>
+      - name: handoff
+        type: Optional<String>
+
+  # The document: `format` is `loom.bindings/1`; `protocol` a registration, `name@major`;
+  # `artifacts` maps artifact ids to workspace paths; `independence` maps producers to dimensions
+  # of the protocol; `actions` holds one binding per action, in document order.
+  - name: loom.bindings.BindingsDocument
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: protocol
+        type: String
+      - name: artifacts
+        type: List<loom.bindings.ArtifactPath>
+      - name: independence
+        type: List<loom.bindings.ProducerIndependence>
+      - name: actions
+        type: List<loom.bindings.BoundAction>
+
+  # Why a document is refused: at decoding (`Malformed`, `UndeclaredMember`, `MissingMember`,
+  # `UnsupportedFormat`, `InvalidArgv`, `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`,
+  # `InvalidToolName`, `InvalidEffectResult`) and at load against the compiled protocol
+  # (`ProtocolMismatch`, `UnknownAction`, `DuplicateAction`, `KindNotProducible`,
+  # `UndeclaredArtifact`, `UndeclaredEvidenceKind` (a `retry_when` kind the protocol does not declare),
+  # `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace`,
+  # `UndeclaredDimension`).
+  - name: loom.bindings.BindingsRefusalReason
+    kind: enum
+    variants:
+      - Malformed
+      - UndeclaredMember
+      - MissingMember
+      - UnsupportedFormat
+      - InvalidArgv
+      - InvalidProtocol
+      - InvalidEvidence
+      - InvalidBudget
+      - InvalidToolName
+      - InvalidEffectResult
+      - ProtocolMismatch
+      - UnknownAction
+      - DuplicateAction
+      - KindNotProducible
+      - UndeclaredArtifact
+      - UndeclaredEvidenceKind
+      - MemberNotForExecutor
+      - TimeoutOutOfRange
+      - PathNotInWorkspace
+      - UndeclaredDimension
+
+  # A refusal: the reason, the action it names when it is about one, the member and what is wrong
+  # with it. The first defect found is the one reported.
+  - name: loom.bindings.BindingsRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.BindingsRefusalReason
+      - name: action
+        type: Optional<String>
+      - name: member
+        type: String
+      - name: detail
+        type: String

@@ -1,0 +1,136 @@
+format: protocol/1
+
+protocol:
+  id: ml.experiment
+  revision: 1
+  description: >-
+    Test a hypothesis by experiment: run a candidate against a baseline on a frozen dataset
+    snapshot under a reviewed design, and close the case supported when the experiment is valid
+    and its result reproducible, beats the baseline and is robust; refuted when a valid,
+    reproducible result does not beat the baseline; invalid when the experiment itself is not
+    valid; or inconclusive or superseded on an explicit decision.
+
+artifacts:
+  experiment_design:
+    description: the metrics, splits, seeds and success criterion the experiment is run under
+  dataset_snapshot:
+    description: the frozen data the runs read
+  baseline:
+    description: the reference model or method the candidate is compared with
+  candidate:
+    description: the model or method under test
+  run_configuration:
+    description: the hyperparameters, environment and code revision of the runs
+  results:
+    description: the metrics the runs produced
+
+evidence_kinds:
+  design_review:
+    description: a review of an experiment design; its result is passed or failed
+  integrity_check:
+    description: >-
+      a check of the runs behind a set of results for leakage, contamination or other integrity
+      violations; its result is clean or violated
+  reproduction:
+    description: >-
+      a rerun on the same dataset snapshot and run configuration; its result is matched or
+      diverged
+  comparison:
+    description: >-
+      a comparison of a candidate with the baseline on the design's metrics; its result is
+      candidate_better or baseline_better
+  seed_sweep:
+    description: >-
+      a sweep of a candidate's effect over seeds or ablations; its result is stable or unstable
+
+claims:
+  experiment.valid:
+    description: >-
+      the current experiment design passed review and the current results carry no integrity
+      violation
+    true_when:
+      all:
+        - evidence:
+            kind: design_review
+            result: passed
+            subject: experiment_design
+        - evidence:
+            kind: integrity_check
+            result: clean
+            subject: results
+  result.reproducible:
+    description: a reproduction of the current results matched them
+    true_when:
+      evidence:
+        kind: reproduction
+        result: matched
+        subject: results
+  candidate.beats_baseline:
+    description: a comparison of the current candidate revision found it better than the baseline
+    true_when:
+      evidence:
+        kind: comparison
+        result: candidate_better
+        subject: candidate
+  effect.robust:
+    description: a seed sweep of the current candidate revision found its effect stable
+    true_when:
+      evidence:
+        kind: seed_sweep
+        result: stable
+        subject: candidate
+  hypothesis.supported:
+    description: >-
+      the experiment is valid, its result reproducible, and the candidate beats the baseline with
+      a robust effect
+    true_when:
+      all:
+        - claim: experiment.valid
+        - claim: result.reproducible
+        - claim: candidate.beats_baseline
+        - claim: effect.robust
+
+outcomes:
+  supported:
+    description: the case closed with the hypothesis supported
+    requires:
+      claim: hypothesis.supported
+  refuted:
+    description: >-
+      the case closed with the hypothesis refuted; needs a valid experiment and a reproducible
+      result in which the candidate does not beat the baseline. A comparison that is missing, or
+      about another candidate revision, refutes nothing: it leaves the comparison unknown, not false
+    requires:
+      all:
+        - claim: experiment.valid
+        - claim: result.reproducible
+        - claim: candidate.beats_baseline
+          is: false
+  invalid_experiment:
+    description: the case closed because the experiment itself is not valid
+    requires:
+      claim: experiment.valid
+      is: false
+  inconclusive:
+    description: the case closed on an explicit decision that the experiment settles nothing
+    requires:
+      decision: explicitly_inconclusive
+  superseded:
+    description: the case closed because another case explicitly superseded it
+    requires:
+      decision: explicitly_superseded
+
+invalidation:
+  dataset_snapshot.revised:
+    description: >-
+      a result observed against an earlier dataset snapshot no longer supports the result claims
+    upstream: dataset_snapshot
+    invalidates:
+      - result.reproducible
+      - candidate.beats_baseline
+      - effect.robust
+  baseline.revised:
+    description: a comparison made against an earlier baseline no longer supports the comparison
+    upstream: baseline
+    invalidates:
+      - candidate.beats_baseline

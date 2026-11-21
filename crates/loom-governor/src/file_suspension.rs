@@ -19,6 +19,19 @@
 //! another commission's Suspension. Temporary files a dead process left are removed when a store
 //! opens.
 //!
+//! A Suspension held for a decision request (`story:decision-suspension-reason`) holds no action
+//! request: its `action_request_id`, `expected_case_revision`, `action` and `arguments` are written
+//! as JSON `null`, so the file keeps all ten members. The reason decides how they read: for
+//! `Decision` all four must be `null` and read as absent; for any other reason all four are read
+//! as present, so `arguments` that are themselves `null` stay arguments, unless
+//! `action_request_id`, `expected_case_revision` and `action` are all `null`: then the Suspension
+//! holds no request and `arguments` must be `null` too (`story:ess-096-upgrade`, a hold of another
+//! reason with none of the four is held). A file written before has all four and reads as it did;
+//! no earlier build wrote another reason's file with none, and one written by hand, refused before,
+//! now reads as such a Suspension. A `Decision` file with any of the four not `null`, or another
+//! reason's file with some but not all of them `null`, is refused on read, so it is never written
+//! either.
+//!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, the lock
 //! [`FileCaseStore`](crate::FileCaseStore) takes, through the same code. A suspension store and a
 //! case store may share one directory, in one process or in two: their file names never meet and
@@ -35,14 +48,15 @@ use b10x_loom_commission::model::json::{
 };
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    ActionRequestId, BudgetLimit, CaseId, CommissionId, HoldSuspension, HoldSuspensionOutcome,
-    HostStop, HumanDecisionRequest, ProposedActionArguments, ReleaseSuspension,
-    ReleaseSuspensionOutcome, RunBudgetBreach, RunId, SuspensionData, SuspensionKey,
-    SuspensionReason, SuspensionSnapshot, SuspensionState, SuspensionStorageFailed, TakeSuspension,
-    TakeSuspensionOutcome,
+    ActionRequestId, BudgetLimit, CaseId, CommissionId, DecisionHold, DecisionUnblocks,
+    HoldSuspension, HoldSuspensionOutcome, HostStop, HumanDecisionRequest, ProposedActionArguments,
+    ReleaseSuspension, ReleaseSuspensionOutcome, RunBudgetBreach, RunId, SuspensionData,
+    SuspensionKey, SuspensionReason, SuspensionSnapshot, SuspensionState, SuspensionStorageFailed,
+    TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::ports::suspension::{
-    SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release, decide_take,
+    SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release,
+    decide_take, incomplete_request,
 };
 
 use crate::FileStoreError;
@@ -198,6 +212,10 @@ impl FileSuspensionStore {
 impl SuspensionPort for FileSuspensionStore {
     fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
         let refused = |error| HoldSuspensionOutcome::StorageFailed { error };
+        // `incomplete-request` comes before every other outcome, the identity check included.
+        if let Some(incomplete) = incomplete_request(&input) {
+            return incomplete;
+        }
         if input.suspension.commission_id != input.commission_id {
             return refused(
                 SuspensionStoreError::new(
@@ -258,16 +276,30 @@ fn encode(out: &mut String, snapshot: &SuspensionSnapshot) {
     push_text(out, &data.run_id.0.0);
     member(out, "run_case_revision");
     push_integer(out, data.run_case_revision);
+    // A Suspension held for a decision holds no request: its four members are written `null`, so
+    // the file keeps every member (`story:decision-suspension-reason`).
     member(out, "action_request_id");
-    push_text(out, &data.action_request_id.0.0);
+    match &data.action_request_id {
+        Some(request) => push_text(out, &request.0.0),
+        None => push_value(out, &Value::Null),
+    }
     member(out, "case_id");
     push_text(out, &data.case_id.0);
     member(out, "expected_case_revision");
-    push_integer(out, data.expected_case_revision);
+    match data.expected_case_revision {
+        Some(revision) => push_integer(out, revision),
+        None => push_value(out, &Value::Null),
+    }
     member(out, "action");
-    push_text(out, &data.action);
+    match &data.action {
+        Some(action) => push_text(out, action),
+        None => push_value(out, &Value::Null),
+    }
     member(out, "arguments");
-    push_value(out, &data.arguments.0);
+    match &data.arguments {
+        Some(arguments) => push_value(out, &arguments.0),
+        None => push_value(out, &Value::Null),
+    }
     member(out, "reason");
     encode_reason(out, &data.reason);
     out.push('}');
@@ -299,6 +331,7 @@ fn encode_reason(out: &mut String, reason: &SuspensionReason) {
         SuspensionReason::ExternalAvailability(value) => ("ExternalAvailability", value.clone()),
         SuspensionReason::RunBudget(breach) => ("RunBudget", breach_payload(breach)),
         SuspensionReason::HostStop(stop) => ("HostStop", host_stop_payload(stop)),
+        SuspensionReason::Decision(hold) => ("Decision", decision_payload(hold)),
     };
     push_text(out, kind);
     member(out, "payload");
@@ -398,6 +431,62 @@ fn decode_host_stop(payload: &Value) -> Result<HostStop, DecodeError> {
     })
 }
 
+/// The names of `DecisionUnblocks`, as `ess/commission/` declares them.
+const UNBLOCKS: [(DecisionUnblocks, &str); 3] = [
+    (DecisionUnblocks::Approval, "Approval"),
+    (DecisionUnblocks::Question, "Question"),
+    (DecisionUnblocks::Outcome, "Outcome"),
+];
+
+/// A decision hold as `{"request_id": <its request>, "unblocks": <what it unblocks>}`
+/// (`story:decision-suspension-reason`).
+fn decision_payload(hold: &DecisionHold) -> Value {
+    let unblocks = UNBLOCKS
+        .iter()
+        .find(|(unblocks, _)| *unblocks == hold.unblocks)
+        .map_or("", |(_, name)| name);
+    Value::Object(vec![
+        (
+            "request_id".to_owned(),
+            Value::Text(hold.request_id.clone()),
+        ),
+        ("unblocks".to_owned(), Value::Text(unblocks.to_owned())),
+    ])
+}
+
+/// The `DecisionHold` [`decision_payload`] wrote: both members, the request a string and what it
+/// unblocks a `DecisionUnblocks` name.
+fn decode_decision(payload: &Value) -> Result<DecisionHold, DecodeError> {
+    let at = "reason.payload";
+    exactly(payload, at, &["request_id", "unblocks"])?;
+    let request_id = text_at(
+        member_at(payload, at, "request_id")?,
+        &nested(at, "request_id"),
+        "a string",
+    )?;
+    let unblocks_value = member_at(payload, at, "unblocks")?;
+    let name = text_at(
+        unblocks_value,
+        &nested(at, "unblocks"),
+        "a DecisionUnblocks name",
+    )?;
+    let unblocks = UNBLOCKS
+        .iter()
+        .find(|(_, known)| *known == name)
+        .map(|(unblocks, _)| *unblocks)
+        .ok_or_else(|| {
+            DecodeError::of(
+                &nested(at, "unblocks"),
+                "a DecisionUnblocks name",
+                unblocks_value,
+            )
+        })?;
+    Ok(DecisionHold {
+        request_id: request_id.to_owned(),
+        unblocks,
+    })
+}
+
 /// Refuses an object with a member `declared` does not name, or one member twice.
 fn exactly(value: &Value, at: &str, declared: &[&str]) -> Result<(), DecodeError> {
     let members = members_at(value, at, "an object")?;
@@ -449,6 +538,51 @@ fn decode(value: &Value) -> Result<SuspensionSnapshot, DecodeError> {
         }
     };
     let commission_id = CommissionId(uuid(value, "commission_id")?);
+    let reason = decode_reason(member_at(value, "", "reason")?)?;
+    // The reason decides how the four request members read (`story:decision-suspension-reason`):
+    // a Suspension held for a decision has all four `null`. Any other has all four present, where
+    // a `null` is a value (`arguments` may be `null`) or a refusal (the other three), or, when
+    // `action_request_id`, `expected_case_revision` and `action` are all `null`, holds no request
+    // (`story:ess-096-upgrade`): then `arguments` reads absent when `null`, and present otherwise,
+    // which the invariant check below refuses.
+    let no_request = ["action_request_id", "expected_case_revision", "action"]
+        .iter()
+        .map(|name| member_at(value, "", name))
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .all(|found| matches!(found, Value::Null));
+    let (action_request_id, expected_case_revision, action, arguments) =
+        if !matches!(reason, SuspensionReason::Decision(_)) && no_request {
+            let arguments = member_at(value, "", "arguments")?;
+            (
+                None,
+                None,
+                None,
+                (!matches!(arguments, Value::Null))
+                    .then(|| ProposedActionArguments(arguments.clone())),
+            )
+        } else if matches!(reason, SuspensionReason::Decision(_)) {
+            for name in REQUEST_MEMBERS {
+                let found = member_at(value, "", name)?;
+                if !matches!(found, Value::Null) {
+                    return Err(DecodeError::of(
+                        &nested("", name),
+                        "null for a Suspension held for a decision",
+                        found,
+                    ));
+                }
+            }
+            (None, None, None, None)
+        } else {
+            (
+                Some(ActionRequestId(uuid(value, "action_request_id")?)),
+                Some(integer(value, "expected_case_revision")?),
+                Some(text(value, "action")?),
+                Some(ProposedActionArguments(
+                    member_at(value, "", "arguments")?.clone(),
+                )),
+            )
+        };
     let data = SuspensionData {
         suspension: SuspensionKey {
             commission_id: commission_id.clone(),
@@ -456,15 +590,30 @@ fn decode(value: &Value) -> Result<SuspensionSnapshot, DecodeError> {
         commission_id,
         run_id: RunId(uuid(value, "run_id")?),
         run_case_revision: integer(value, "run_case_revision")?,
-        action_request_id: ActionRequestId(uuid(value, "action_request_id")?),
+        action_request_id,
         case_id: CaseId(text(value, "case_id")?),
-        expected_case_revision: integer(value, "expected_case_revision")?,
-        action: text(value, "action")?,
-        arguments: ProposedActionArguments(member_at(value, "", "arguments")?.clone()),
-        reason: decode_reason(member_at(value, "", "reason")?)?,
+        expected_case_revision,
+        action,
+        arguments,
+        reason,
     };
+    if let Some(broken) = data.broken_invariant() {
+        return Err(DecodeError {
+            at: nested("", "action_request_id"),
+            expected: format!("a Suspension that satisfies {broken}"),
+            found: "one that breaks it".to_owned(),
+        });
+    }
     Ok(SuspensionSnapshot { state, data })
 }
+
+/// The members a Suspension held for a decision request leaves `null`.
+const REQUEST_MEMBERS: [&str; 4] = [
+    "action_request_id",
+    "expected_case_revision",
+    "action",
+    "arguments",
+];
 
 fn decode_reason(value: &Value) -> Result<SuspensionReason, DecodeError> {
     let at = "reason";
@@ -495,6 +644,7 @@ fn decode_reason(value: &Value) -> Result<SuspensionReason, DecodeError> {
         "ExternalAvailability" => SuspensionReason::ExternalAvailability(payload),
         "RunBudget" => SuspensionReason::RunBudget(decode_breach(&payload)?),
         "HostStop" => SuspensionReason::HostStop(decode_host_stop(&payload)?),
+        "Decision" => SuspensionReason::Decision(decode_decision(&payload)?),
         _ => {
             return Err(DecodeError::of(
                 &nested(at, "kind"),

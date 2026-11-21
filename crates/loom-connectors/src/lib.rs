@@ -66,9 +66,15 @@
 //! key.
 //! [`evidence::WriteEvidenceAdapter`] is the host evidence adapter that turns an applied write
 //! into the protocol's evidence for its step.
+//!
+//! [`relay::ConnectorsRelay`] is a third client, of the Connectors wire at a loopback relay URL
+//! (`story:connectors-relay-client`): the reads and the governed write of [`cli`], under the same
+//! signatures, for the one adapter and connection pair behind a credential boundary's Connectors
+//! relay, holding no credential and starting no program.
 
 pub mod cli;
 pub mod evidence;
+pub mod relay;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -434,13 +440,7 @@ fn refused(
     // message the host's reader gives it; any other `unsupported` only names the code. The write
     // is not sent again without the key.
     if !read && is_key_refusal(failure) {
-        said.push_str(&format!(
-            " (a Connectors host whose configuration sets no standing grants refuses a write's \
-             idempotency key, and a write is only sent with one: set the host's `service` \
-             configuration `standing_grants` to the path of a `connectors.standing-grants/1` grant \
-             file with a grant covering instance `{instance}` and operation `{operation}`, and its \
-             `state` to a directory)"
-        ));
+        said.push_str(&standing_grant_remedy(instance, operation));
     }
     // A key that needs an approval or names another input is no refusal of this write: the run
     // cannot go on past it as if the write were declined, whatever `mutation` the answer carries.
@@ -483,8 +483,21 @@ fn is_key_refusal(failure: &Failure) -> bool {
         && failure.audit_status == Some(AuditStatus::Unavailable)
 }
 
+/// What a host without standing grants needs before it takes a write's idempotency key: the
+/// remedy the invoker and the relay client name when such a host refuses the key, in parentheses
+/// and starting with a space.
+pub(crate) fn standing_grant_remedy(instance: &str, operation: &str) -> String {
+    format!(
+        " (a Connectors host whose configuration sets no standing grants refuses a write's \
+         idempotency key, and a write is only sent with one: set the host's `service` \
+         configuration `standing_grants` to the path of a `connectors.standing-grants/1` grant \
+         file with a grant covering instance `{instance}` and operation `{operation}`, and its \
+         `state` to a directory)"
+    )
+}
+
 /// The code as Connectors spells it on the wire (`approval_required`).
-fn code_name(code: ErrorCode) -> String {
+pub(crate) fn code_name(code: ErrorCode) -> String {
     match serde_json::to_value(code) {
         Ok(serde_json::Value::String(name)) => name,
         _ => format!("{code:?}"),

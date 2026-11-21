@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T03:15:37Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-0-9-0-pin",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "unit commits 4c7ce72d, c2f9b245, 52691f71 on impl/canon-0-9-0-pin",
+    "review": "review-result:canon-0-9-0-pin-adversary-1",
+    "outcome": "fixed"
+  }
+}

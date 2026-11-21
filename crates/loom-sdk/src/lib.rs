@@ -11,7 +11,7 @@
 //! | Module | Crate | What it is for |
 //! | --- | --- | --- |
 //! | [`commission`] | `b10x-loom-commission` | The contracts and the runtime: the generated responsibility model ([`commission::model`]), the ports an embedder implements or calls ([`commission::ports`]), and the loop that drives a commission until it is blocked ([`commission::runtime`]). |
-//! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded; [`connectors::cli::ConnectorsCli`] reads through the operator's `connectors` command line and performs one governed write for an admitted request, and [`connectors::evidence::WriteEvidenceAdapter`] records an applied write as the protocol's evidence. |
+//! | [`connectors`] | `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service: [`connectors::ConnectorsInvoker`] invokes the operation an action is bound to once, on the host's endpoint for its instance, and reports the attempt Connectors recorded; [`connectors::cli::ConnectorsCli`] reads through the operator's `connectors` command line and performs one governed write for an admitted request, [`connectors::relay::ConnectorsRelay`] does the same over the Connectors wire at a loopback relay URL, holding no credential, and [`connectors::evidence::WriteEvidenceAdapter`] records an applied write as the protocol's evidence. |
 //! | [`loom`] | `b10x-loom-executor` | The executor: [`Loom`] proposes one action per frontier through an [`ActionSelector`] and an [`ArgumentGenerator`] the embedder supplies, or the ones over an llm `Model` in [`loom::model_selector`], told the embedder's `Briefing`, on which a plugin turn runs. |
 //! | [`session`] | `b10x-loom-session-executor` | The session executor: [`session::SessionExecutor`] runs one harness, Claude Code or Codex session through metaharness per frontier in a scratch copy of the workspace, and returns the change it made there as a proposed action whose arguments are its files; an effect applies it once Commission admits it. |
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
@@ -112,6 +112,12 @@ pub use b10x_loom_intake_slice::confinement::{
 pub use b10x_loom_intake_slice::confinement::{
     ChildError, ChildExit, ChildFrame, ChildOutput, ChildResult, ChildSignal, ChildStream,
     ConfinedChild,
+};
+/// A host's confinement named once, as engine configuration, and the one runner built from it
+/// ([`EngineRunner::open`]): Substrate's `linux` adapter on today's host-driver route, or its
+/// `local` adapter, unconfined and declared insecure, with the operator's reason.
+pub use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner,
 };
 pub use b10x_loom_intake_slice::confinement::{
     ConfinementError, SubstrateRunner, TestExecution, TestRunner,

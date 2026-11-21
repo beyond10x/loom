@@ -1,14 +1,13 @@
 <!--
   generated from intake v1
-  model digest 91e7b24c1442a41a622f4feaa84db250d7769d7784122bae93f2e0cda0c64c8e
-  contract digest 99df8d6f24c0dac87f11d99d24d6f1ffae8788936b89c7b0d0c7979db6533769
+  contract digest 269817d065f2141004a80e19c1657c4d5e71848ad914d839461bb42b30596827
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-104 capabilities: **101 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+109 capabilities: **106 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -28,9 +27,11 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.confinement.ChildOutput` |
 | domain type | `intake.confinement.ChildProfile` |
 | domain type | `intake.confinement.ChildStream` |
+| domain type | `intake.confinement.ConfinementAdapter` |
 | domain type | `intake.confinement.ConfinementProfile` |
 | domain type | `intake.confinement.ConfinementRefusal` |
 | domain type | `intake.confinement.ConfinementSpec` |
+| domain type | `intake.confinement.EngineConfinement` |
 | domain type | `intake.confinement.EnvironmentEntry` |
 | domain type | `intake.confinement.ReadOnlyFile` |
 | domain type | `intake.confinement.ToolchainRoot` |
@@ -55,7 +56,10 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.events.ToolCallEvent` |
 | domain type | `intake.events.TurnEvent` |
 | domain type | `intake.events.UsageEvent` |
+| domain type | `intake.protocols.LockRefusal` |
+| domain type | `intake.protocols.LockedFile` |
 | domain type | `intake.protocols.ProtocolDefinition` |
+| domain type | `intake.protocols.ProtocolLock` |
 | domain type | `intake.protocols.ProtocolSource` |
 | domain type | `intake.protocols.SourceKind` |
 | domain type | `intake.query.TimeObservation` |

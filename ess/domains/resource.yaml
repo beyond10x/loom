@@ -861,9 +861,10 @@ commands:
   # A finished resource observed again stays as it is, whatever was read, so a Job someone deletes
   # or replaces starts no second run of that generation. A resource with no Job (Pending, Refused)
   # or whose pod is a Deployment (Degraded) answers a state conflict. The command carries no
-  # generation: on `format: ess/25` a guard on a subject field (`observed_generation !=
-  # input.generation`) and guards on the held state cannot share a command, so the controller
-  # observes only a Job whose pod template names the generation the record holds, and deletes any
+  # generation: the specification does not combine a guard on a subject field
+  # (`observed_generation != input.generation`) with the guards on the held state in one command
+  # (`ess/27` would allow it), so the controller observes only a Job whose pod template names the
+  # generation the record holds, and deletes any
   # other. The observation carries how the run ended as far as the Job's own pod says
   # (`exit_code`, `finished_at`, `reason`, story command-run-exit-status); `completed` and `failed`
   # record it as `run`, and the other outcomes leave `run` as it was.

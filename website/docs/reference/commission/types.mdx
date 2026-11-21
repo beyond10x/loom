@@ -46,6 +46,15 @@ Tagged by `kind`.
 | `Complete` | [`CompletionDeterminationComplete`](#completiondeterminationcomplete) |
 | `Open` | none |
 
+### DecidedRecord
+
+Tagged by `kind`.
+
+| Variant | Payload |
+|---|---|
+| `NoRecord` | none |
+| `Recorded` | `json` |
+
 ### EffectOutcome
 
 Tagged by `kind`.
@@ -111,6 +120,7 @@ Tagged by `kind`.
 |---|---|
 | `Authority` | `json` |
 | `Budget` | `json` |
+| `Decision` | [`DecisionHold`](#decisionhold) |
 | `Dependency` | list of [`CaseId`](#caseid) |
 | `Evidence` | list of `string` |
 | `ExternalAvailability` | `json` |
@@ -187,6 +197,20 @@ Tagged by `kind`.
 | Field | Type |
 |---|---|
 | `outcome` | `string` |
+
+### DecidedHold
+
+| Field | Type |
+|---|---|
+| `request_id` | `string` |
+| `record` | [`DecidedRecord`](#decidedrecord) |
+
+### DecisionHold
+
+| Field | Type |
+|---|---|
+| `request_id` | `string` |
+| `unblocks` | [`DecisionUnblocks`](#decisionunblocks) |
 
 ### EffectOutcomePending
 
@@ -501,6 +525,10 @@ Variants: `MaxSteps`, `MaxTrials`, `MaxTokensIn`, `MaxTokensOut`, `MaxDurationMs
 ### ConnectorOperationEffect
 
 Variants: `Read`, `Write`.
+
+### DecisionUnblocks
+
+Variants: `Approval`, `Question`, `Outcome`.
 
 ### GovernorError
 

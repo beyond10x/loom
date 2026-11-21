@@ -12,6 +12,44 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-11-21
+
+### Added
+
+- `b10x-loom-bindings` decodes a `loom.bindings/1` document and checks it against its protocol at load (story:bindings-document)
+- **Breaking:** `SelectionStrategy` gains `Deterministic`, the strategy of the model-free `DeterministicSelector` (story:deterministic-default-selector)
+- `CanonGovernor` and `ProtocolCatalog` take a protocol with `case_open` or a `children` form; `action_facts` reads its `case_outcome` (story:canon-0-9-0-pin)
+- `b10x-loom-runlog` keeps a hash-chained run log per case; `loom_governor::LockedDir` and `case_file_stem` are public (story:hash-chained-run-log)
+- `loom_sdk::protocols` gains `ProtocolCatalog::from_vendored`, `VendoredError`, `ENGINEERING_FILES`, `ENGINEERING_LOCK` and the `lock` module (story:engineering-protocol-lock)
+- `resume_after_decision` resumes a run held for `SuspensionReason::Decision`; `b10x-loom resume` refuses that hold `HeldForDecision`, exit 19 (story:decision-suspension-reason)
+- `EngineRunner::open(&EngineConfinement)` builds the one runner; `local` runs through Substrate's `local` adapter with a reason (story:confinement-opens-from-engine-config)
+- `b10x-loom run --confinement local --local-reason <TEXT>`; with `--state` it is refused, exit 2 (story:confinement-opens-from-engine-config)
+- `TestRunner::local_reason`, `confinement::local_label`: every confinement line names `local (<reason>)`; `ResumeHost::check` refuses it (story:confinement-opens-from-engine-config)
+- `loom_connectors::relay::ConnectorsRelay` reads and writes over the Connectors wire at a loopback relay URL, no credential (story:connectors-relay-client)
+
+### Changed
+
+- Substrate moves from `0.14.0` to `0.21.0` (`adfde402`, host without its `kubernetes` feature, so no `aws-lc-rs`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
+- **Breaking:** `ChildCommand` refuses `ScopeInvalid` a root or file mounted on, under or containing `/etc/alternatives`, which a confined child now sees read-only where the host has it (story:substrate-0-21-pin)
+- **Breaking:** Canon `0.8.0` -> `0.9.0`, `b10x-canon-engineering` `0.15.2` -> `0.16.0`: `ProtocolEntry::model` is Canon 0.9.0's `Protocol`; Canon reserves the evidence kind `case_outcome`, refusing its records without `child_case` or `result` (story:canon-0-9-0-pin)
+- `ProtocolCatalog::engineering` reads the vendored files of engineering-protocols `0.16.0`, held to `protocols/engineering/lock.json` (story:engineering-protocol-lock)
+- **Breaking:** a Suspension's `action_request_id`, `expected_case_revision`, `action` and `arguments` are `Option`, so is each `ActionRequestId` of its commands and events; `TakeSuspension` and `ReleaseSuspension` gain `decision_request_id` and the refusal `OtherDecision`, so a Decision hold is taken and released only by naming it; `ResumeRefusal` gains three variants (story:decision-suspension-reason)
+- `CanonGovernor` without a catalog opens engineering protocols from `ProtocolCatalog::engineering`; a lock refusal is `InvalidProtocol` (story:engineering-registry-calls-replaced)
+- `ess/system.yaml` declares format `ess/31` on the pinned `ess` 0.86.0; the regenerated `loom` model answers as before (story:ess-format-31)
+- **Breaking:** `AppliedConfinement.local_reason`, the operator's reason on a `local` run, is a new field (story:confinement-opens-from-engine-config)
+- **Breaking:** `ChildResult.driver_record` is `Option`, `None` for a `local` live child (story:confinement-opens-from-engine-config)
+- **Breaking:** `ConfinementRefusal` gains `LocalReasonMissing`, a blank or absent `local` reason (story:confinement-opens-from-engine-config)
+- ESS moves from 0.86.0 to 0.96.0 (`ess-conformance`, `ess-primitives`, the CLI CI installs); generated files drop their `model digest` line (story:ess-096-upgrade)
+- **Breaking:** `HoldSuspensionOutcome` gains `IncompleteRequest` (`SuspensionRequestIncomplete`) for a mixed hold, before `AlreadyHeld`; a non-`Decision` hold with no request is held (story:ess-096-upgrade)
+
+### Deprecated
+
+- `UnconfinedRunner` and `b10x-loom run --confinement none`: use `EngineRunner` and `--confinement local` (story:confinement-opens-from-engine-config)
+
+### Removed
+
+- **Breaking:** `loom_sdk::intake::router::RouterError::Registry` is removed; a catalog that cannot be built stays `RouterError::Catalog` (story:engineering-registry-calls-replaced)
+
 ## [0.57.2] - 2026-11-05
 
 No breaking changes.
@@ -1413,7 +1451,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.2...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.58.0...HEAD
+[0.58.0]: https://github.com/beyond10x/loom/releases/tag/0.58.0
 [0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2
 [0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1
 [0.57.0]: https://github.com/beyond10x/loom/releases/tag/0.57.0

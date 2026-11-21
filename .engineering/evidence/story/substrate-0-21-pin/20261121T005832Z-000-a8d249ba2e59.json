@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T00:58:32Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-0-21-pin",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-intake-slice --locked at aa907285, and the ignored five-facts case in a delegated scope (reviewer, pass 2); pin read from crates/loom-intake-slice/Cargo.toml at ecefe180 and at 01871cfd",
+    "reference": "wave scratch u1/verify-baseline.txt (2 lines at =0.14.0) vs u1/verify-treatment.txt (2 lines at =0.21.0), u1/review/p2-suite.txt, u1/review/p2-ignored-confinement.txt; verdict VERIFIED"
+  }
+}

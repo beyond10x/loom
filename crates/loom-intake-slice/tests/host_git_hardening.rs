@@ -478,7 +478,8 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
     }
     const SOURCE_HELPER: &str = "crates/loom-protocols/src/git.rs";
     const RELEASE_HELPER: &str = "crates/loom-xtask/src/release.rs";
-    let helpers = [HELPER, SOURCE_HELPER, RELEASE_HELPER];
+    const VENDOR_HELPER: &str = "crates/loom-xtask/src/protocols_vendor.rs";
+    let helpers = [HELPER, SOURCE_HELPER, RELEASE_HELPER, VENDOR_HELPER];
     let bypassing: Vec<&(String, String)> = starts
         .iter()
         .filter(|(file, _)| !helpers.contains(&file.as_str()))
@@ -515,6 +516,32 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
             "source fetch helper omitted {setting}"
         );
     }
+    // The vendor helper reads a maintainer's checkout, whose own configuration may name an
+    // `ext::` promisor remote and allow `ext`: a `-c` for the same key outranks the repository,
+    // and no lazy fetch is made. Each setting is matched as a string literal, so a comment that
+    // names it does not count.
+    let vendor = std::fs::read_to_string(root.join(VENDOR_HELPER)).unwrap();
+    for setting in [
+        "\"protocol.ext.allow=never\"",
+        "\"protocol.allow=never\"",
+        "\"--no-replace-objects\"",
+    ] {
+        assert!(
+            vendor.contains(setting),
+            "protocols vendor helper omitted {setting}"
+        );
+    }
+    // Where the value matters, the variable is matched with its value, whitespace aside.
+    let squeezed_vendor: String = vendor.chars().filter(|c| !c.is_whitespace()).collect();
+    for setting in [
+        ".env(\"GIT_NO_LAZY_FETCH\",\"1\")",
+        ".env(\"GIT_CONFIG_GLOBAL\",\"/dev/null\")",
+    ] {
+        assert!(
+            squeezed_vendor.contains(setting),
+            "protocols vendor helper omitted {setting}"
+        );
+    }
 
     // Substrate's pinned host driver implements its own Git source service. Loom never
     // enables that service. Every dependency path outside that exact foundation still
@@ -546,10 +573,10 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         let package = packages.iter().find(|package| package["id"] == id).unwrap();
         let name = package["name"].as_str().unwrap();
         if name == "b10x-substrate-host" {
-            assert_eq!(package["version"], "0.14.0");
+            assert_eq!(package["version"], "0.21.0");
             assert_eq!(
                 package["source"],
-                "git+https://github.com/beyond10x/substrate?rev=0b9d50c6105cacc7f959eb41d5e65f252084a282#0b9d50c6105cacc7f959eb41d5e65f252084a282"
+                "git+https://github.com/beyond10x/substrate?rev=adfde4020b14741b167532f46c7a0e9cebf2b3d3#adfde4020b14741b167532f46c7a0e9cebf2b3d3"
             );
             continue;
         }

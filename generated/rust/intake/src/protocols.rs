@@ -1,13 +1,34 @@
 // generated from intake v1
-// model digest 91e7b24c1442a41a622f4feaa84db250d7769d7784122bae93f2e0cda0c64c8e
-// contract digest 99df8d6f24c0dac87f11d99d24d6f1ffae8788936b89c7b0d0c7979db6533769
+// contract digest 269817d065f2141004a80e19c1657c4d5e71848ad914d839461bb42b30596827
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! protocols — `intake.protocols`.
 //!
-//! A trusted host composes engineering, Loom and explicitly installed custom Canon definitions into one immutable catalog per run. Registration names are name@major and their major matches the definition revision. Canon owns parsing, validation and evaluation. Routing, artifact initialization and governor admission use the same exact definitions. Duplicate identities refuse, including attempts to shadow a bundled definition. Definition availability does not grant authority or supply executable tools; host bindings and revision initializers decide execution support. Custom documents never execute code or prescribe host commands. Installation snapshots one local file or regular Git blob at a full pinned commit. Git uses HTTPS, SSH or file transports, never a checkout, filters, submodules or package hooks. Installation validates before atomically publishing in the user XDG data directory. Replacement is explicit; bundled entries cannot be replaced or removed. Source bytes and digest are retained together. Every run verifies installed content and loads offline; no automatic network fetch or workspace discovery occurs. Missing, corrupt or incompatible definitions fail before model calls. Source credentials are never stored in locators. Protocol documents are bounded to one MiB and model requests retain the bounded-context ceiling without silently omitting entries. Installed definitions are one atomic manifest bounded to 64 MiB. An existing installation directory without its manifest is corrupt, not an empty catalog. Writers serialize updates; readers observe a whole manifest. Symlinked installation roots or ancestors refuse.
+//! A trusted host composes engineering, Loom and explicitly installed custom Canon definitions into one immutable catalog per run. Registration names are name@major and their major matches the definition revision. Canon owns parsing, validation and evaluation. Routing, artifact initialization and governor admission use the same exact definitions. Duplicate identities refuse, including attempts to shadow a bundled definition. Definition availability does not grant authority or supply executable tools; host bindings and revision initializers decide execution support. Custom documents never execute code or prescribe host commands. Installation snapshots one local file or regular Git blob at a full pinned commit. Git uses HTTPS, SSH or file transports, never a checkout, filters, submodules or package hooks. Installation validates before atomically publishing in the user XDG data directory. Replacement is explicit; bundled entries cannot be replaced or removed. Source bytes and digest are retained together. Every run verifies installed content and loads offline; no automatic network fetch or workspace discovery occurs. Missing, corrupt or incompatible definitions fail before model calls. Source credentials are never stored in locators. Protocol documents are bounded to one MiB and model requests retain the bounded-context ceiling without silently omitting entries. Installed definitions are one atomic manifest bounded to 64 MiB. An existing installation directory without its manifest is corrupt, not an empty catalog. Writers serialize updates; readers observe a whole manifest. Symlinked installation roots or ancestors refuse. Engineering definitions are vendored files held to a lock: the lock names the source repository, tag and commit and, per file, its path and sha256. A file whose digest is not the locked one, a file the lock does not name, a locked file that is absent and a lock that cannot be read each refuse the whole catalog before any definition is admitted, and every engineering entry's revision is the lock's tag.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// LockRefusal — `intake.protocols.LockRefusal`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LockRefusal {
+    /// `Malformed`.
+    Malformed,
+    /// `DigestMismatch`.
+    DigestMismatch,
+    /// `Unlocked`.
+    Unlocked,
+    /// `Missing`.
+    Missing,
+}
+
+/// LockedFile — `intake.protocols.LockedFile`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedFile {
+    /// `path` — `String`.
+    pub path: String,
+    /// `sha256` — `String`.
+    pub sha256: String,
+}
 
 /// ProtocolDefinition — `intake.protocols.ProtocolDefinition`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +41,21 @@ pub struct ProtocolDefinition {
     pub sha256: String,
     /// `source` — `intake.protocols.ProtocolSource`.
     pub source: ProtocolSource,
+}
+
+/// ProtocolLock — `intake.protocols.ProtocolLock`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtocolLock {
+    /// `format` — `String`.
+    pub format: String,
+    /// `repository` — `String`.
+    pub repository: String,
+    /// `tag` — `String`.
+    pub tag: String,
+    /// `commit` — `String`.
+    pub commit: String,
+    /// `files` — `List<intake.protocols.LockedFile>`.
+    pub files: Vec<LockedFile>,
 }
 
 /// ProtocolSource — `intake.protocols.ProtocolSource`.

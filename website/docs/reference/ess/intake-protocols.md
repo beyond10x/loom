@@ -10,11 +10,22 @@ custom_edit_url: null
 
 # protocols
 
-A trusted host composes engineering, Loom and explicitly installed custom Canon definitions into one immutable catalog per run. Registration names are name@major and their major matches the definition revision. Canon owns parsing, validation and evaluation. Routing, artifact initialization and governor admission use the same exact definitions. Duplicate identities refuse, including attempts to shadow a bundled definition. Definition availability does not grant authority or supply executable tools; host bindings and revision initializers decide execution support. Custom documents never execute code or prescribe host commands. Installation snapshots one local file or regular Git blob at a full pinned commit. Git uses HTTPS, SSH or file transports, never a checkout, filters, submodules or package hooks. Installation validates before atomically publishing in the user XDG data directory. Replacement is explicit; bundled entries cannot be replaced or removed. Source bytes and digest are retained together. Every run verifies installed content and loads offline; no automatic network fetch or workspace discovery occurs. Missing, corrupt or incompatible definitions fail before model calls. Source credentials are never stored in locators. Protocol documents are bounded to one MiB and model requests retain the bounded-context ceiling without silently omitting entries. Installed definitions are one atomic manifest bounded to 64 MiB. An existing installation directory without its manifest is corrupt, not an empty catalog. Writers serialize updates; readers observe a whole manifest. Symlinked installation roots or ancestors refuse.
+A trusted host composes engineering, Loom and explicitly installed custom Canon definitions into one immutable catalog per run. Registration names are name@major and their major matches the definition revision. Canon owns parsing, validation and evaluation. Routing, artifact initialization and governor admission use the same exact definitions. Duplicate identities refuse, including attempts to shadow a bundled definition. Definition availability does not grant authority or supply executable tools; host bindings and revision initializers decide execution support. Custom documents never execute code or prescribe host commands. Installation snapshots one local file or regular Git blob at a full pinned commit. Git uses HTTPS, SSH or file transports, never a checkout, filters, submodules or package hooks. Installation validates before atomically publishing in the user XDG data directory. Replacement is explicit; bundled entries cannot be replaced or removed. Source bytes and digest are retained together. Every run verifies installed content and loads offline; no automatic network fetch or workspace discovery occurs. Missing, corrupt or incompatible definitions fail before model calls. Source credentials are never stored in locators. Protocol documents are bounded to one MiB and model requests retain the bounded-context ceiling without silently omitting entries. Installed definitions are one atomic manifest bounded to 64 MiB. An existing installation directory without its manifest is corrupt, not an empty catalog. Writers serialize updates; readers observe a whole manifest. Symlinked installation roots or ancestors refuse. Engineering definitions are vendored files held to a lock: the lock names the source repository, tag and commit and, per file, its path and sha256. A file whose digest is not the locked one, a file the lock does not name, a locked file that is absent and a lock that cannot be read each refuse the whole catalog before any definition is admitted, and every engineering entry's revision is the lock's tag.
 
 `intake.protocols` is one of intake's bounded contexts. [All domains](./index.mdx).
 
 ## Types
+
+### `LockRefusal`
+
+`intake.protocols.LockRefusal` is one of `Malformed`, `DigestMismatch`, `Unlocked` and `Missing`.
+
+### `LockedFile`
+
+`intake.protocols.LockedFile` is a record of two fields:
+
+- `path` — `String`
+- `sha256` — `String`
 
 ### `ProtocolDefinition`
 
@@ -24,6 +35,16 @@ A trusted host composes engineering, Loom and explicitly installed custom Canon 
 - `yaml` — `String`
 - `sha256` — `String`
 - `source` — `intake.protocols.ProtocolSource`
+
+### `ProtocolLock`
+
+`intake.protocols.ProtocolLock` is a record of five fields:
+
+- `format` — `String`
+- `repository` — `String`
+- `tag` — `String`
+- `commit` — `String`
+- `files` — `List<intake.protocols.LockedFile>`
 
 ### `ProtocolSource`
 
@@ -38,9 +59,9 @@ A trusted host composes engineering, Loom and explicitly installed custom Canon 
 
 `intake.protocols.SourceKind` is one of `Engineering`, `Loom`, `Local`, `Git` and `Memory`.
 
-One of the types above is reached by nothing else in this system: `intake.protocols.ProtocolDefinition`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+Three of the types above are reached by nothing else in this system: `intake.protocols.LockRefusal`, `intake.protocols.ProtocolDefinition` and `intake.protocols.ProtocolLock`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
 
 ---
 
-Generated from intake v1 · model digest `91e7b24c1442a41a622f4feaa84db250d7769d7784122bae93f2e0cda0c64c8e` · contract digest `slice-sha256/2:44df2f836ccd51bae221a1652dcfbde272cc691dccba289dadafbf50d606201e`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from intake v1 · contract digest `slice-sha256/2:c1d048dec3a56557ffdf18a8c5bdd0628ebd4f992fe84b8129c72af8be979621`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

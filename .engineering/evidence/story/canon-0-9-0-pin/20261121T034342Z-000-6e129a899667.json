@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T03:43:42Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-0-9-0-pin",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 52691f71..c9816cfd",
+    "reference": "evaluate keeps the first case_outcome record per child_case among records Canon takes alone, one decide; matches Canon 0.9.0 one_record_per_child (canon eval/composition.rs:79-106: kind case_outcome with child_case, keyed by child); the only other set-level check, a repeated id (eval/evidence.rs:40-46), is refused earlier; unit gate on c9816cfd: fmt, clippy, 605 lane-1 tests, 8 cli tests, docs-check exit 0; cost ratio 222.7 -> 11.4 at n=1000"
+  }
+}

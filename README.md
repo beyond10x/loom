@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.57.2`, released from source at the tag `0.57.2`
-([release](https://github.com/beyond10x/loom/releases/tag/0.57.2)). No crate is on a registry: you
-install from the tag or depend on it with `tag = "0.57.2"`. `b10x-loom run` completed a live run
+Version `0.58.0`, released from source at the tag `0.58.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.58.0)). No crate is on a registry: you
+install from the tag or depend on it with `tag = "0.58.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -66,7 +66,7 @@ variant.
 Since `0.6.0` a run whose case moved to a revision whose frontier still admits an action ends
 `RunOutcome::CaseMovedOn`, naming the Run's revision and the current one; start a new Run at the
 current revision. Callers that match `RunOutcome` exhaustively handle the new variant. Loom
-requires ESS 0.86.0.
+requires ESS 0.96.0.
 
 Since `0.7.0` a process can supervise a run through `b10x-loom run --output jsonl`, decide a case
 it keeps itself through `b10x-loom evaluate`, and drive a run with a model from an llm catalog
@@ -139,7 +139,7 @@ left. A plugin that builds a `TurnResult` or `RecordLine` literal adds `steps: V
 Since `0.16.0` a step performed under an authority grant passes Commission's approval gate:
 `run_until_blocked` runs the executor again instead of ending the Run `AwaitingApproval`, so a
 caller that matched `AwaitingApproval` after a granted effect now gets the Run's own end, and a
-plugin turn is one Run. Loom requires ESS 0.86.0.
+plugin turn is one Run. Loom requires ESS 0.96.0.
 
 Since `0.15.0` a confidence fallback is recorded as two selections, the overruled fast one
 naming its replacement, each with the strategy of the selector that made it, and every
@@ -155,7 +155,10 @@ posted.
 Since `0.12.0` the executor offers two more action selectors: a reasoning-model selector chooses
 one of the given candidates, and `HybridSelector` takes a fast selector's choice at or above a
 confidence threshold the host supplies, else the stronger selector's. The experimental
-`b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint.
+`b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint. `DeterministicSelector`
+calls no model: it takes the first useful admissible action, reads before writes, then by action
+id, from facts the governor answers (`CanonGovernor::action_facts`) and a step history the host
+supplies.
 
 ## Run the command line
 
@@ -167,14 +170,14 @@ establish live quality or cost savings. See [working context](website/docs/conce
 You need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.57.2 https://github.com/beyond10x/loom.git
+git clone --branch 0.58.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.57.2
+b10x-loom 0.58.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -400,8 +403,8 @@ Helm installs the chart's `crds/` once and never upgrades it, so an upgrade firs
 of the new release tag and then upgrades the release with the values it was installed with:
 
 ```console
-$ kubectl apply --server-side -f https://raw.githubusercontent.com/beyond10x/loom/0.57.2/deploy/crd/loomagents.loom.beyond10x.dev.yaml
-$ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 0.57.2 --namespace agents \
+$ kubectl apply --server-side -f https://raw.githubusercontent.com/beyond10x/loom/0.58.0/deploy/crd/loomagents.loom.beyond10x.dev.yaml
+$ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 0.58.0 --namespace agents \
     --set modelRoute.url=http://model-route.agents.svc:8080/v1 \
     --set modelRoute.protocol=messages --set modelRoute.model=small-model
 ```
@@ -409,7 +412,7 @@ $ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 
 Add `--force-conflicts` to the apply when it reports a conflict because another field manager
 owns fields of the CRD, such as Helm, which created it, or an earlier `kubectl apply` without
 `--server-side`. `b10x-loom-operator crd` prints the CRD of its own version, so
-`docker run --rm ghcr.io/beyond10x/loom-operator:0.57.2 crd | kubectl apply --server-side -f -`
+`docker run --rm ghcr.io/beyond10x/loom-operator:0.58.0 crd | kubectl apply --server-side -f -`
 applies the same CRD from the release's image.
 
 For each resource the controller first runs the check of
@@ -566,7 +569,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.57.2'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.58.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
@@ -634,7 +637,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.57.2" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.58.0" }
 ```
 
 The example below
@@ -718,12 +721,14 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-executor` | The executor: catalogue, action selection and argument generation, each model request one turn of an llm `Model` |
 | `b10x-loom-session-executor` | An `AgentExecutor` over a harness, Claude Code or Codex session run through metaharness (`0.20.0`) in a scratch copy: it proposes the session's change, never applies it, and summarizes the session's record as `trace-ir-summary/1`, with each tool call's decision and who made it; `SessionExecutor::from_spec` builds it from a `loom.agent/1` spec, offering only the spec's allowed tools; a b10x-harness session can read its endpoint's API key from the secret store by name (`api_key_secret`), or name no key on a loopback endpoint such as a credential-free pod's boundary relay; a caller names a partial run over the kind's defaults, `SessionOverrides` (effort, a budget in micro-USD, strict version, context files), refused before the copy where the kind's launcher does not apply a member |
 | `b10x-loom-commission` | Commission's contracts and runtime loop, generated from its ESS specification |
-| `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`) |
+| `b10x-loom-connectors` | Commission's `ConnectorInvoker` over a Connectors service (Connectors `v0.35.0`), and `relay::ConnectorsRelay`, the reads and governed write over a credential boundary's loopback Connectors relay |
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed turn over Connectors data sources, one record line per item; a turn given a `SendPolicy` may send the reply it proposed, once admitted |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-resource` | The `LoomAgent` Kubernetes resource: its lifecycle record over the generated `loom.resource` behaviour, and the CRD projected from the specification; talks to no cluster |
+| `b10x-loom-bindings` | Decodes the `loom.bindings/1` document, which declares per protocol action its executor, result table, tools, budget and timeout, and refuses at load each defect against the compiled protocol, naming the action and the member; executes nothing |
 | `b10x-loom-operator` | The `b10x-loom-operator` controller: reconciles a `LoomAgent` into a pod and its children, and renders them; installed by `charts/loom-agents` |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
+| `b10x-loom-runlog` | The run log of a case, `runlog-<stem>.jsonl` beside its case file: one JSON line per event, each naming the SHA-256 of the line before, appended atomically under the store's lock; its reader refuses a cut, shortened, reordered or changed log, naming the first line that fails; a change to the last line alone is not detected, as a cut at a line boundary is not, and the log is not signed |
 | `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |

@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 mod git;
+pub mod lock;
 mod store;
 use b10x_canon::model::Protocol;
 pub use intake::protocols::{ProtocolDefinition, ProtocolSource, SourceKind};
@@ -19,6 +20,40 @@ pub const INBOUND_ANSWER_YAML: &str = include_str!("../../../protocols/inbound-a
 /// Loom's protocol a plugin turn answers an inbound item under and sends the proposed reply:
 /// `inbound-answer@1` plus `reply.send`. Plugin catalog only.
 pub const OPERATOR_REPLY_YAML: &str = include_str!("../../../protocols/operator-reply/1.yaml");
+/// The vendored engineering definitions, `protocols/engineering/<name>/<major>.yaml`, as (path
+/// below `protocols/engineering/`, bytes), sorted by path: every file of that directory other than
+/// `lock.json`, whatever its name, so a file the lock does not name reaches its check.
+pub const ENGINEERING_FILES: &[(&str, &[u8])] =
+    include!(concat!(env!("OUT_DIR"), "/engineering_files.rs"));
+/// The bytes of `protocols/engineering/lock.json`, the `loom.protocol-lock/1` document
+/// [`ENGINEERING_FILES`] are held to; no bytes when the file is absent, which the lock refuses.
+pub const ENGINEERING_LOCK: &[u8] = include!(concat!(env!("OUT_DIR"), "/engineering_lock.rs"));
+
+/// Why [`ProtocolCatalog::from_vendored`] built no catalog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VendoredError {
+    /// The lock refused: it is malformed, or a file is unlocked, changed or missing.
+    Lock(lock::LockError),
+    /// A file the lock holds is not UTF-8 or is no definition the catalog admits.
+    Definition {
+        /// The file's path below `protocols/engineering/`.
+        path: String,
+        /// What is wrong with it.
+        problem: String,
+    },
+}
+/// One line: `engineering protocol lock refused: <Variant> <path>…` or
+/// `engineering protocol <path>: <problem>`.
+impl std::fmt::Display for VendoredError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let line = match self {
+            Self::Lock(error) => format!("engineering protocol lock refused: {error}"),
+            Self::Definition { path, problem } => format!("engineering protocol {path}: {problem}"),
+        };
+        f.write_str(&line.lines().collect::<Vec<_>>().join(" "))
+    }
+}
+impl std::error::Error for VendoredError {}
 
 /// A definition and its validated Canon model. Definition availability grants no authority.
 #[derive(Debug, Clone)]
@@ -154,22 +189,45 @@ impl ProtocolCatalog {
         }
         Ok(catalog)
     }
-    /// Engineering-only compatibility catalog used by existing embedding entrypoints.
+    /// Engineering-only compatibility catalog used by existing embedding entrypoints: the
+    /// vendored files held to their lock, [`Self::from_vendored`] over [`ENGINEERING_FILES`] and
+    /// [`ENGINEERING_LOCK`], its refusal as the line [`VendoredError`] prints.
     pub fn engineering() -> Result<Self, String> {
+        Self::from_vendored(ENGINEERING_FILES, ENGINEERING_LOCK).map_err(|error| error.to_string())
+    }
+    /// The engineering catalog of `files`, as (path below `protocols/engineering/`, bytes), held
+    /// to `lock`, the bytes of a `loom.protocol-lock/1` document. The lock is decoded and every
+    /// file checked against it before any definition is admitted: a malformed lock, a file the
+    /// lock does not name, a file whose sha256 is not its entry's and an entry with no file each
+    /// refuse with [`VendoredError::Lock`], building no catalog. Each file is then added as
+    /// `<name>@<major>` from its path, with kind `Engineering`, location `engineering-protocols`,
+    /// path `protocols/<path>` and the lock's `tag` as revision; a file that is not UTF-8 or that
+    /// the catalog refuses is [`VendoredError::Definition`].
+    pub fn from_vendored(files: &[(&str, &[u8])], lock: &[u8]) -> Result<Self, VendoredError> {
+        let lock = lock::decode(lock).map_err(VendoredError::Lock)?;
+        lock::check(&lock, files).map_err(VendoredError::Lock)?;
         let mut catalog = Self::default();
-        for (name, major) in canon_engineering::registry::list() {
-            let builtin =
-                canon_engineering::registry::get(name, major).map_err(|e| e.to_string())?;
-            catalog.add_yaml(
-                &format!("{name}@{major}"),
-                builtin.yaml,
-                ProtocolSource {
-                    kind: SourceKind::Engineering,
-                    location: "engineering-protocols".into(),
-                    revision: "0.15.2".into(),
-                    path: format!("protocols/{name}/{major}.yaml"),
-                },
-            )?;
+        for (path, bytes) in files {
+            let definition = |problem: String| VendoredError::Definition {
+                path: (*path).to_owned(),
+                problem,
+            };
+            let registration = lock::registration(path)
+                .ok_or_else(|| definition("the path is not <name>/<major>.yaml".into()))?;
+            let yaml = std::str::from_utf8(bytes)
+                .map_err(|error| definition(format!("not UTF-8: {error}")))?;
+            catalog
+                .add_yaml(
+                    &registration,
+                    yaml,
+                    ProtocolSource {
+                        kind: SourceKind::Engineering,
+                        location: "engineering-protocols".into(),
+                        revision: lock.tag.clone(),
+                        path: format!("protocols/{path}"),
+                    },
+                )
+                .map_err(definition)?;
         }
         Ok(catalog)
     }

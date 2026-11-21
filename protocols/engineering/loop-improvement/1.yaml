@@ -1,0 +1,164 @@
+format: protocol/1
+
+protocol:
+  id: loop.improvement
+  revision: 1
+  description: >-
+    One turn of improving the improvement loop itself: the loop scorecard, computed over at least
+    three recorded self.improvement turns, shows a metric below its target on the promoted loop
+    definition (the scenario corpus, the metric definitions, the review panel, the intake rules,
+    the protocols and the agent profiles); a candidate change to the loop is delivered; the
+    candidate is checked not to redefine a metric without reporting the previous definition beside
+    it; the owner, or a role the owner delegated the grant to on record, merges it; and after at
+    least three further turns under the candidate the metric is compared again. Accepted once the
+    metric improved; declined when it did not. Every change to the loop is a judge-surface change,
+    so its merge needs the owner's grant or that of a role the owner delegated it to by a revocable
+    record; a revoked delegation grants nothing (story:judge-guard enforces it).
+
+independence_dimensions:
+  different_agent_run:
+    description: the producer is another agent run than the one that delivered the candidate
+
+artifacts:
+  loop_baseline:
+    description: the promoted loop definition the metric was measured on
+  loop_candidate:
+    description: a changed loop definition meant to raise the metric
+  loop_finding:
+    description: >-
+      a finding against the loop, naming the metric, its target and the turns it was computed from
+
+evidence_kinds:
+  loop_measurement:
+    description: >-
+      the loop scorecard over at least three recorded self.improvement cases at a loop definition
+      revision; figures no validator can observe (escaped defects) enter as human-sourced counts,
+      labelled so; its result is below_target or at_target
+  definition_check:
+    description: >-
+      the candidate's diff against the baseline's metric definitions; its result is unchanged,
+      dual_reported (a changed definition whose previous figures are printed beside the new ones)
+      or redefined (a changed definition without them)
+  merge_observation:
+    description: the loop candidate merged into the mainline; its result is merged
+  loop_comparison:
+    description: >-
+      the metric over at least three turns under the candidate against the same metric under the
+      baseline; its result is improved or not_improved
+
+claims:
+  loop.metric_below_target:
+    description: a loop metric is below its target on the baseline loop definition
+    true_when:
+      evidence:
+        kind: loop_measurement
+        result: below_target
+        subject: loop_baseline
+  loop.definition_honest:
+    description: >-
+      the current loop candidate leaves every metric definition unchanged, or reports the previous
+      definition's figures beside the new ones
+    true_when:
+      any:
+        - evidence:
+            kind: definition_check
+            result: unchanged
+            subject: loop_candidate
+        - evidence:
+            kind: definition_check
+            result: dual_reported
+            subject: loop_candidate
+  loop.change_merged:
+    description: the current loop candidate is merged into the mainline
+    true_when:
+      evidence:
+        kind: merge_observation
+        result: merged
+        subject: loop_candidate
+  loop.metric_improved:
+    description: >-
+      the metric improved under the current loop candidate, observed by another agent run than the
+      one that delivered it
+    true_when:
+      evidence:
+        kind: loop_comparison
+        result: improved
+        subject: loop_candidate
+        independent_on: [different_agent_run]
+
+obligations:
+  honesty.required:
+    description: a loop change never redefines a metric silently
+    discharged_when:
+      claim: loop.definition_honest
+  improvement.required:
+    description: a loop change counts only when its metric improved
+    discharged_when:
+      claim: loop.metric_improved
+
+actions:
+  loop.measure:
+    description: compute the loop scorecard over the recorded self.improvement cases
+    effect: read
+    may_produce:
+      - evidence: loop_measurement
+  loop.finding.file:
+    description: file the lowest metric as a finding against the loop
+    effect: write
+    precondition:
+      claim: loop.metric_below_target
+  loop.change.deliver:
+    description: >-
+      deliver a candidate change to the loop definition: the corpus, a metric definition, the
+      review panel, the intake rules, a protocol or an agent profile
+    effect: write
+    precondition:
+      claim: loop.metric_below_target
+  loop.definition.check:
+    description: compare the candidate's metric definitions with the baseline's
+    effect: read
+    may_produce:
+      - evidence: definition_check
+  loop.merge:
+    description: >-
+      merge the loop candidate; the owner holds this capability, or a role the owner delegated it
+      to by a revocable record, and a revoked delegation grants nothing (story:judge-guard
+      enforces it)
+    effect: write
+    precondition:
+      claim: loop.definition_honest
+    requires:
+      - capability: repository.merge.judge_surface
+    may_produce:
+      - evidence: merge_observation
+  loop.compare:
+    description: >-
+      once at least three self.improvement turns ran under the merged candidate, compare the
+      metric with the baseline's
+    effect: read
+    precondition:
+      claim: loop.change_merged
+    may_produce:
+      - evidence: loop_comparison
+
+outcomes:
+  accepted:
+    description: the loop turn closed with an honest change merged and its metric improved
+    requires:
+      all:
+        - claim: loop.change_merged
+        - claim: loop.definition_honest
+        - claim: loop.metric_improved
+  declined:
+    description: >-
+      the loop turn closed because the metric did not improve; the candidate is reverted by a
+      further loop turn
+    requires:
+      evidence:
+        kind: loop_comparison
+        result: not_improved
+        subject: loop_candidate
+  abandoned:
+    description: the loop turn closed because it was explicitly abandoned
+    requires:
+      decision: explicitly_abandoned

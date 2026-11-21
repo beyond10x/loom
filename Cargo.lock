@@ -185,32 +185,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
-name = "aws-lc-rs"
-version = "1.18.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "faac5829c2b74c28f830747e7818ccfb684261b5f48a1118b1e2a13d36dfab13"
-dependencies = [
- "aws-lc-sys",
- "zeroize",
-]
-
-[[package]]
-name = "aws-lc-sys"
-version = "0.46.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1622d8446a2d4b2ce0c7eefc73dd43a99779028d5ee5c2dd8073a658ba8a2bc"
-dependencies = [
- "cc",
- "cmake",
- "dunce",
- "fs_extra",
- "pkg-config",
-]
-
-[[package]]
 name = "b10x-assertion-providers"
-version = "0.15.2"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.15.2#1deb2ca88273931ef8f1a6dc44f85cc567d5fa26"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.16.0#70e6eff48963c9ea178d515ae33e645cf95c9773"
 dependencies = [
  "clap",
  "jsonschema 0.33.0",
@@ -223,8 +200,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.8.0#cf171757878af943105132f686ff8c46170f8a77"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.9.0#8f1f4527439b813f4c0c0159c8b4ea7cd4131994"
 dependencies = [
  "serde",
  "serde_json",
@@ -235,8 +212,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering"
-version = "0.15.2"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.15.2#1deb2ca88273931ef8f1a6dc44f85cc567d5fa26"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.16.0#70e6eff48963c9ea178d515ae33e645cf95c9773"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering-assertions",
@@ -247,8 +224,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-engineering-assertions"
-version = "0.15.2"
-source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.15.2#1deb2ca88273931ef8f1a6dc44f85cc567d5fa26"
+version = "0.16.0"
+source = "git+https://github.com/beyond10x/engineering-protocols?tag=0.16.0#70e6eff48963c9ea178d515ae33e645cf95c9773"
 dependencies = [
  "anyhow",
  "b10x-assertion-providers",
@@ -263,8 +240,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-canon-expr"
-version = "0.8.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.8.0#cf171757878af943105132f686ff8c46170f8a77"
+version = "0.9.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.9.0#8f1f4527439b813f4c0c0159c8b4ea7cd4131994"
 dependencies = [
  "logos",
  "serde",
@@ -460,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-a2a"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "a2a",
  "b10x-loom-plugin",
@@ -473,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-agent"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-a2a",
@@ -494,8 +471,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-bindings"
+version = "0.58.0"
+dependencies = [
+ "b10x-canon",
+ "loom",
+ "serde",
+ "serde_yaml_ng",
+]
+
+[[package]]
 name = "b10x-loom-boundary"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -507,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-cli"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -544,14 +531,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "commission",
 ]
 
 [[package]]
 name = "b10x-loom-commission-conformance"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-loom-commission",
  "ess-conformance",
@@ -561,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-commission-testkit"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-commission",
@@ -574,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-conformance"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-loom-agent",
  "b10x-loom-commission",
@@ -590,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-connectors"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -598,6 +585,7 @@ dependencies = [
  "connectors-client",
  "connectors-core",
  "loom",
+ "reqwest 0.12.28",
  "serde_json",
  "sha2 0.11.0",
  "tokio",
@@ -605,7 +593,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-executor"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-commission",
@@ -621,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-governor"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -637,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-conformance"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-loom-intake-slice",
  "ess-conformance",
@@ -648,14 +636,14 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-references"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "regex",
 ]
 
 [[package]]
 name = "b10x-loom-intake-router"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -667,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-intake-slice"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-canon-engineering",
  "b10x-llm-core",
@@ -696,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-mandate"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -714,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-operator"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-models",
  "b10x-loom-agent",
@@ -740,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-tool-call",
@@ -753,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-plugin-slack"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-loom-plugin",
@@ -764,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-protocols"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-canon",
  "b10x-canon-engineering",
@@ -777,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-resource"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "jsonschema 0.52.1",
  "loom",
@@ -786,8 +774,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-loom-runlog"
+version = "0.58.0"
+dependencies = [
+ "b10x-loom-commission",
+ "b10x-loom-governor",
+ "loom",
+ "serde_json",
+ "sha2 0.11.0",
+]
+
+[[package]]
 name = "b10x-loom-sdk"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-credentials",
@@ -813,7 +812,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-selector-laya"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-llm-core",
  "b10x-llm-http",
@@ -826,7 +825,7 @@ dependencies = [
 
 [[package]]
 name = "b10x-loom-session-executor"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
@@ -839,11 +838,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "b10x-substrate-guarded"
+version = "0.21.0"
+source = "git+https://github.com/beyond10x/substrate?rev=adfde4020b14741b167532f46c7a0e9cebf2b3d3#adfde4020b14741b167532f46c7a0e9cebf2b3d3"
+dependencies = [
+ "b10x-substrate-wire",
+ "base64 0.23.1",
+ "chrono",
+ "hex",
+ "libc",
+ "sha2 0.11.0",
+ "thiserror",
+ "ulid",
+]
+
+[[package]]
 name = "b10x-substrate-host"
-version = "0.14.0"
-source = "git+https://github.com/beyond10x/substrate?rev=0b9d50c6105cacc7f959eb41d5e65f252084a282#0b9d50c6105cacc7f959eb41d5e65f252084a282"
+version = "0.21.0"
+source = "git+https://github.com/beyond10x/substrate?rev=adfde4020b14741b167532f46c7a0e9cebf2b3d3#adfde4020b14741b167532f46c7a0e9cebf2b3d3"
 dependencies = [
  "async-trait",
+ "b10x-substrate-guarded",
  "b10x-substrate-wire",
  "base64 0.23.1",
  "bytes",
@@ -852,21 +867,15 @@ dependencies = [
  "git2",
  "gix",
  "hex",
- "http-body-util",
- "hyper",
- "hyper-util",
  "libc",
  "nix",
  "parking_lot",
- "rustls",
- "rustls-pemfile",
  "serde",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "thiserror",
  "tokio",
- "tokio-rustls",
  "tracing",
  "ulid",
  "url",
@@ -875,8 +884,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-wire"
-version = "0.14.0"
-source = "git+https://github.com/beyond10x/substrate?rev=0b9d50c6105cacc7f959eb41d5e65f252084a282#0b9d50c6105cacc7f959eb41d5e65f252084a282"
+version = "0.21.0"
+source = "git+https://github.com/beyond10x/substrate?rev=adfde4020b14741b167532f46c7a0e9cebf2b3d3#adfde4020b14741b167532f46c7a0e9cebf2b3d3"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -1177,15 +1186,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "197fd99cb113a8d5d9b6376f3aa817f32c1078f2343b714fff7d2ca44fdf67d5"
 dependencies = [
  "hashbrown 0.16.1",
-]
-
-[[package]]
-name = "cmake"
-version = "0.1.58"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
-dependencies = [
- "cc",
 ]
 
 [[package]]
@@ -1635,8 +1635,8 @@ dependencies = [
 
 [[package]]
 name = "ess-compiler"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-domain",
  "ess-primitives",
@@ -1647,8 +1647,8 @@ dependencies = [
 
 [[package]]
 name = "ess-conformance"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1662,8 +1662,8 @@ dependencies = [
 
 [[package]]
 name = "ess-domain"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-primitives",
  "ess-yaml",
@@ -1675,8 +1675,8 @@ dependencies = [
 
 [[package]]
 name = "ess-gen"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1692,8 +1692,8 @@ dependencies = [
 
 [[package]]
 name = "ess-http"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1706,8 +1706,8 @@ dependencies = [
 
 [[package]]
 name = "ess-primitives"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-yaml",
  "schemars 0.8.22",
@@ -1718,8 +1718,8 @@ dependencies = [
 
 [[package]]
 name = "ess-transport"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "ess-compiler",
  "ess-domain",
@@ -1730,8 +1730,8 @@ dependencies = [
 
 [[package]]
 name = "ess-yaml"
-version = "0.86.0"
-source = "git+https://github.com/beyond10x/ess.git?tag=0.86.0#8d26c81f74f4374316d5ee565c2da43dd81a16a8"
+version = "0.96.0"
+source = "git+https://github.com/beyond10x/ess.git?tag=0.96.0#9e91e8b5754b2aacbc2c385421b27ee1e9939999"
 dependencies = [
  "serde",
  "serde_norway",
@@ -1875,12 +1875,6 @@ dependencies = [
  "num",
  "num-bigint",
 ]
-
-[[package]]
-name = "fs_extra"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
 name = "futures"
@@ -3701,7 +3695,7 @@ version = "1.0.0"
 
 [[package]]
 name = "loom-commission-docs"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "clap",
  "serde_json",
@@ -3709,7 +3703,7 @@ dependencies = [
 
 [[package]]
 name = "loom-commission-xtask"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "clap",
  "proc-macro2",
@@ -3719,7 +3713,7 @@ dependencies = [
 
 [[package]]
 name = "loom-docs"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
  "anyhow",
  "b10x-llm-models",
@@ -3732,8 +3726,9 @@ dependencies = [
 
 [[package]]
 name = "loom-xtask"
-version = "0.57.2"
+version = "0.58.0"
 dependencies = [
+ "b10x-loom-protocols",
  "b10x-loom-resource",
  "clap",
  "proc-macro2",
@@ -4601,7 +4596,6 @@ version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
- "aws-lc-rs",
  "log",
  "once_cell",
  "ring",
@@ -4621,15 +4615,6 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
-dependencies = [
- "rustls-pki-types",
 ]
 
 [[package]]
@@ -4675,7 +4660,6 @@ version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
- "aws-lc-rs",
  "ring",
  "rustls-pki-types",
  "untrusted",

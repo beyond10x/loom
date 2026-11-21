@@ -38,11 +38,11 @@ fn hold(n: u64, reason: SuspensionReason) -> HoldSuspension {
         commission_id,
         run_id: RunId(uuid(0x200 + n)),
         run_case_revision: 1,
-        action_request_id: ActionRequestId(uuid(0x300 + n)),
+        action_request_id: Some(ActionRequestId(uuid(0x300 + n))),
         case_id: CaseId("case-limits".to_owned()),
-        expected_case_revision: 1,
-        action: "evaluate".to_owned(),
-        arguments: ProposedActionArguments(Value::Null),
+        expected_case_revision: Some(1),
+        action: Some("evaluate".to_owned()),
+        arguments: Some(ProposedActionArguments(Value::Null)),
         reason,
     }
 }

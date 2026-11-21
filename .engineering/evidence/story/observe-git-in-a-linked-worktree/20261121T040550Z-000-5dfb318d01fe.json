@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T04:05:50Z",
+  "actor": "human:timo",
+  "artifact": "story:observe-git-in-a-linked-worktree",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "coordinator: Waits on and Scope lines of both stories brought in line with the tcp edge",
+    "review": "review-result:observe-git-in-a-linked-worktree-design-r2",
+    "outcome": "fixed"
+  }
+}

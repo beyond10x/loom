@@ -6,7 +6,7 @@
 //!
 //! `tests/fixtures/chg-1842.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/software-change/chg-1842.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.15.2`, the release this crate depends on; `b10x-canon-engineering` does not expose its
+//! `0.16.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
 //! fixtures.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -24,6 +24,7 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::evidence::submit_evidence;
 use b10x_loom_commission::ports::governor::Governor as _;
 use loom_governor::{CanonGovernor, CaseInputs, MemoryCaseStore, OpenError};
+use loom_protocols::ProtocolCatalog;
 use serde_json::Value;
 
 const PROTOCOL: &str = "software-change@1";
@@ -41,8 +42,8 @@ fn a_governed_case_issues_the_frontier_canon_decides() {
 }
 
 /// A case opened with a revision for every declared artifact holds them as given; one missing an
-/// artifact is refused, naming it, and so is a protocol the ELS registry does not hold. The first
-/// frontier admits `tests.write`, `implementation.edit` and `tests.run` and blocks
+/// artifact is refused, naming it, and so is a protocol the vendored catalog does not hold. The
+/// first frontier admits `tests.write`, `implementation.edit` and `tests.run` and blocks
 /// `repository.merge` on its precondition claim.
 fn fresh_case(fixture: &Fixture, ir: &Ir) {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
@@ -78,7 +79,7 @@ fn fresh_case(fixture: &Fixture, ir: &Ir) {
     }
     match governor.open("no-such-protocol@1", revisions, fixture.inputs()) {
         Err(OpenError::UnknownProtocol { .. }) => {}
-        other => panic!("a protocol the ELS registry does not hold is refused, got {other:?}"),
+        other => panic!("a protocol the vendored catalog does not hold is refused, got {other:?}"),
     }
 
     let revision = governor.current_revision(&case).expect("current revision");
@@ -431,6 +432,19 @@ fn a_protocol_without_inputs_opens_with_none() {
     );
 }
 
+/// A governor built without a catalog falls back to the vendored engineering catalog, which holds
+/// no `no-such@1`.
+#[test]
+fn a_governor_without_a_catalog_refuses_an_unknown_protocol() {
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    assert_eq!(
+        governor.open("no-such@1", BTreeMap::new(), CaseInputs::none()),
+        Err(OpenError::UnknownProtocol {
+            protocol: "no-such@1".to_owned()
+        })
+    );
+}
+
 /// At `risk: trivial` only `tests.required` applies among the risk-selected obligations, and a
 /// refactor off a security boundary owes neither `red_first.required` nor
 /// `security_review.required`. Canon reports the others `not_applicable`; the frontier reports
@@ -607,19 +621,23 @@ fn by_name(actions: &[FrontierAction]) -> BTreeMap<&str, &FrontierAction> {
         .collect()
 }
 
-/// `software.change/1` from the ELS registry, compiled by Canon.
+/// `software.change/1` from the vendored engineering catalog, compiled by Canon.
 fn software_change_ir() -> Ir {
-    let builtin =
-        canon_engineering::registry::get("software-change", 1).expect("ELS holds the protocol");
-    let protocol = b10x_canon::model::parse(builtin.yaml).expect("Canon parses it");
-    compile(&protocol).expect("Canon compiles it")
+    vendored_ir("software-change@1")
 }
 
-/// `incident.response/1` from the ELS registry, compiled by Canon.
+/// `incident.response/1` from the vendored engineering catalog, compiled by Canon.
 fn incident_ir() -> Ir {
-    let builtin =
-        canon_engineering::registry::get("incident-response", 1).expect("ELS holds the protocol");
-    let protocol = b10x_canon::model::parse(builtin.yaml).expect("Canon parses it");
+    vendored_ir("incident-response@1")
+}
+
+/// The vendored engineering `registration`'s definition, parsed and compiled by Canon.
+fn vendored_ir(registration: &str) -> Ir {
+    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
+    let entry = catalog
+        .get(registration)
+        .expect("the catalog holds the protocol");
+    let protocol = b10x_canon::model::parse(&entry.definition.yaml).expect("Canon parses it");
     compile(&protocol).expect("Canon compiles it")
 }
 

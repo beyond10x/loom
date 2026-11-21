@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T09:16:03Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-096-upgrade",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "story revision 5: story:commission-docs-read-one-ess-version-line stays open",
+    "review": "review-result:ess-096-upgrade-design-1",
+    "outcome": "fixed"
+  }
+}

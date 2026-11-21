@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T08:36:40Z",
+  "actor": "agent:loom",
+  "artifact": "story:confinement-opens-from-engine-config",
+  "kind": "story",
+  "revision": 18,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/confinement-opens-from-engine-config 37de3e91",
+    "review": "review-result:confinement-opens-from-engine-config-security-1",
+    "outcome": "fixed"
+  }
+}

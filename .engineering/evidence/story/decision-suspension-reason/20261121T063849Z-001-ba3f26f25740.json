@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T06:38:49Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-suspension-reason",
+  "kind": "story",
+  "revision": 19,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 61e38aad..5317683b",
+    "reference": "1 file: the reviewer's pass-2 cases, equal to the delivered file with spaces, newlines and commas removed (cargo fmt only); no implementation line changed after security review pass 2, which found F1 and F2 answered in the in-memory store and the file store (531 cases, 0 red); no file under .engineering, ess/system.yaml, ess/domains, ess/intake or the governor's locked_dir, file_store and lib changed; crates/loom-commission/Cargo.toml unchanged; unit gate on 5317683b: fmt, clippy exit 0, 531 tests passed; on 61e38aad all 14 gate commands exit 0"
+  }
+}

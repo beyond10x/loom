@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T04:11:59Z",
+  "actor": "human:timo",
+  "artifact": "epic:decision-requests-in-the-runtime",
+  "kind": "epic",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "e3r11-changes.md",
+    "review": "review-result:decision-requests-in-the-runtime-acceptance-r6",
+    "outcome": "fixed"
+  }
+}

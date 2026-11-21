@@ -193,7 +193,7 @@ fn a_second_run_over_a_held_directory_overwrites_nothing() {
         )
         .unwrap()
         .expect("the case");
-        assert_eq!(case.revision, held.data.expected_case_revision);
+        assert_eq!(Some(case.revision), held.data.expected_case_revision);
     }
     assert_eq!(files_named(&state, "suspension-"), 2);
     assert_eq!(files_named(&state, "case-"), 2);

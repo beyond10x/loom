@@ -1,6 +1,5 @@
 // generated from intake v1
-// model digest 91e7b24c1442a41a622f4feaa84db250d7769d7784122bae93f2e0cda0c64c8e
-// contract digest 99df8d6f24c0dac87f11d99d24d6f1ffae8788936b89c7b0d0c7979db6533769
+// contract digest 269817d065f2141004a80e19c1657c4d5e71848ad914d839461bb42b30596827
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.
@@ -49,6 +48,8 @@ pub struct AppliedConfinement {
     pub adapter: Option<String>,
     /// `facts` — `Optional<List<String>>`.
     pub facts: Option<Vec<String>>,
+    /// `local_reason` — `Optional<String>`.
+    pub local_reason: Option<String>,
 }
 
 /// Backend — `intake.confinement.Backend`: one of a closed set of names.
@@ -148,6 +149,15 @@ pub enum ChildStream {
     Stderr,
 }
 
+/// ConfinementAdapter — `intake.confinement.ConfinementAdapter`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfinementAdapter {
+    /// `Linux`.
+    Linux,
+    /// `Local`.
+    Local,
+}
+
 /// ConfinementProfile — `intake.confinement.ConfinementProfile`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfinementProfile {
@@ -186,6 +196,8 @@ pub enum ConfinementRefusal {
     CapabilityUnserved,
     /// `CommandUnconfined`.
     CommandUnconfined,
+    /// `LocalReasonMissing`.
+    LocalReasonMissing,
 }
 
 /// ConfinementSpec — `intake.confinement.ConfinementSpec`.
@@ -217,6 +229,17 @@ pub struct ConfinementSpec {
     pub timeout_ms: Option<i64>,
     /// `stdin` — `Optional<Bytes>`.
     pub stdin: Option<Vec<u8>>,
+}
+
+/// EngineConfinement — `intake.confinement.EngineConfinement`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineConfinement {
+    /// `adapter` — `intake.confinement.ConfinementAdapter`.
+    pub adapter: ConfinementAdapter,
+    /// `local_reason` — `Optional<String>`.
+    pub local_reason: Option<String>,
+    /// `cgroup_root` — `Optional<String>`.
+    pub cgroup_root: Option<String>,
 }
 
 /// EnvironmentEntry — `intake.confinement.EnvironmentEntry`.

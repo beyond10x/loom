@@ -56,7 +56,7 @@ use loom::datasource::{
 };
 use loom::json::Value;
 
-mod write;
+pub(crate) mod write;
 
 pub use write::{WriteError, commission_idempotency_key, idempotency_key};
 

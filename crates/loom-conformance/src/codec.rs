@@ -90,6 +90,7 @@ pub fn strategy(input: &Input, name: &str) -> Option<SelectionStrategy> {
         "FastTyped" => SelectionStrategy::FastTyped,
         "Rule" => SelectionStrategy::Rule,
         "Hybrid" => SelectionStrategy::Hybrid,
+        "Deterministic" => SelectionStrategy::Deterministic,
         _ => return None,
     })
 }
@@ -139,6 +140,7 @@ pub fn strategy_name(strategy: SelectionStrategy) -> Node {
         SelectionStrategy::FastTyped => "FastTyped",
         SelectionStrategy::Rule => "Rule",
         SelectionStrategy::Hybrid => "Hybrid",
+        SelectionStrategy::Deterministic => "Deterministic",
     })
 }
 

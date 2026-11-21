@@ -26,6 +26,9 @@ pub use intake_model::confinement::{
     BaselineVariable, ChildAperture, ChildEnvironment, ChildNetwork, ChildProfile, ConfinementSpec,
     WritableRoot,
 };
+/// A host's confinement, named once as engine configuration, and the adapter it names: the one
+/// value [`EngineRunner::open`] builds the runner from.
+pub use intake_model::confinement::{ConfinementAdapter, EngineConfinement};
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
 /// host and port the host names, the address that host was resolved to and an optional byte
@@ -53,6 +56,7 @@ use substrate_wire::{
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
 
 mod child;
+mod engine;
 #[cfg(test)]
 mod security_w20261023w1_u3;
 #[cfg(test)]
@@ -61,6 +65,7 @@ mod spec;
 #[cfg(test)]
 mod workdir;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
+pub use engine::EngineRunner;
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
@@ -73,6 +78,91 @@ const CACHE_DIRS: [&str; 3] = ["registry", "git/db", "git/checkouts"];
 pub trait TestRunner: Send + Sync {
     fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError>;
     fn backend(&self) -> Backend;
+    /// How a run names this runner's confinement on its `confinement:` line: by default the
+    /// backend's name (`substrate`, `none`); [`EngineRunner`] under `local` answers
+    /// `local (<reason>)`.
+    fn label(&self) -> String {
+        crate::executor::backend_name(self.backend()).to_owned()
+    }
+    /// The operator's reason when this runner launches through Substrate's `local` adapter, and
+    /// `None` for any other runner: a run that answers `Some` is not kept for resume.
+    ///
+    /// A runner that launches through another runner answers what the inner runner answers. A
+    /// runner that answers `None` for a `local` launch has its run kept for resume, and a resume
+    /// reopens it under another adapter with no reason.
+    fn local_reason(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// How a `local` run names its confinement wherever it is printed or recorded:
+/// `local (<reason>)`, the reason passed through [`escape_reason`].
+pub fn local_label(reason: &str) -> String {
+    format!("local ({})", escape_reason(reason))
+}
+
+/// How a run names a `local` record's reason, already passed through [`escape_reason`] when
+/// [`EngineRunner`] recorded it: every character that breaks or hides a line is escaped once more
+/// (a no-op on such a record), the backslash left as it is so the record reads as recorded.
+pub(crate) fn recorded_label(recorded: &str) -> String {
+    format!("local ({})", escape(recorded, false))
+}
+
+/// The format characters, Unicode category Cf, as inclusive ranges, and the whole tag block
+/// (`U+E0000` to `U+E007F`): each renders as nothing or reorders the text around it.
+const FORMAT_CHARACTERS: [(char, char); 22] = [
+    ('\u{00AD}', '\u{00AD}'),
+    ('\u{0600}', '\u{0605}'),
+    ('\u{061C}', '\u{061C}'),
+    ('\u{06DD}', '\u{06DD}'),
+    ('\u{070F}', '\u{070F}'),
+    ('\u{0890}', '\u{0891}'),
+    ('\u{08E2}', '\u{08E2}'),
+    ('\u{180E}', '\u{180E}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{2064}'),
+    ('\u{2066}', '\u{206F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFF9}', '\u{FFFB}'),
+    ('\u{110BD}', '\u{110BD}'),
+    ('\u{110CD}', '\u{110CD}'),
+    ('\u{13430}', '\u{1343F}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0000}', '\u{E0000}'),
+    ('\u{E0001}', '\u{E0001}'),
+    ('\u{E0020}', '\u{E007F}'),
+];
+
+/// `reason` with every character that can break, hide or reorder a line escaped as `\u{…}`:
+/// control characters (C0, DEL and C1, `U+0085` among them, and the tab), the line and paragraph
+/// separators (`U+2028`, `U+2029`, the categories Zl and Zp), and every format character
+/// (`FORMAT_CHARACTERS`: category Cf, the bidirectional controls and the tag block among them).
+/// The backslash itself is written `\\`, so two different reasons never escape to the same text.
+/// A letter, a digit, a space and punctuation of any script pass unchanged.
+pub fn escape_reason(reason: &str) -> String {
+    escape(reason, true)
+}
+
+/// [`escape_reason`], the backslash escaped when `backslash` is set.
+fn escape(text: &str, backslash: bool) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        let hides = character.is_control()
+            || matches!(character, '\u{2028}' | '\u{2029}')
+            || FORMAT_CHARACTERS
+                .iter()
+                .any(|&(first, last)| (first..=last).contains(&character));
+        if hides {
+            shown.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+        } else if backslash && character == '\\' {
+            shown.push_str("\\\\");
+        } else {
+            shown.push(character);
+        }
+    }
+    shown
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -848,7 +938,8 @@ fn settle(
         backend: Backend::Substrate,
         profile_digest: digest,
         capability_snapshot: record.capability_snapshot.clone(),
-        cgroup: record.cgroup.clone(),
+        // `check_record` refused a record naming no cgroup or an empty one, so this is never empty.
+        cgroup: record.cgroup.clone().unwrap_or_default(),
         filesystem: enum_name(&record.filesystem),
         network: Some(applied_apertures(&record.network)),
         profile: enum_name(&record.profile),
@@ -863,6 +954,8 @@ fn settle(
         // Named by the driver that settled the launch (`OpenDriver::adapted`); absent until then.
         adapter: None,
         facts: None,
+        // Only a `local` run carries the operator's reason; a `linux` one has none.
+        local_reason: None,
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -976,7 +1069,7 @@ fn live_result(launched: Launched, signalled: bool) -> Result<ChildResult, Confi
         exit,
         output: execution.child_output,
         applied: execution.applied,
-        driver_record,
+        driver_record: Some(driver_record),
     })
 }
 
@@ -1025,8 +1118,8 @@ impl TestRunner for SubstrateRunner {
 /// trusts there
 /// ([`ChildCommand::with_ca_bundle`]); without one it cannot verify the host's certificate.
 ///
-/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/proc`, `/dev`, a private `/tmp` and its workspace,
-/// a child sees only the host directories and files the host names, read-only, each at the mount
+/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/etc/alternatives` (where the host has it),
+/// `/proc`, `/dev`, a private `/tmp` and its workspace, a child sees only the host directories and files the host names, read-only, each at the mount
 /// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
 /// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
 /// where a host path is inside. The child starts in `/workspace` unless the host names another
@@ -1118,9 +1211,9 @@ impl ChildCommand {
     /// - a host path that does not exist, is no directory, or is reached through a symbolic link
     ///   in any component;
     /// - a mount on, under or containing one Substrate owns: `/`, `/usr`, `/bin`, `/lib`, `/lib64`,
-    ///   `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts` and
-    ///   `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace or the
-    ///   certificate bundle a child trusts;
+    ///   `/etc/alternatives`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`,
+    ///   `/etc/hosts` and `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace,
+    ///   the system view or the certificate bundle a child trusts;
     /// - a mount equal to, under or containing another root's or file's mount (`/opt/a` and
     ///   `/opt/ab` do not overlap);
     /// - more than [`ChildCommand::MAX_READ_ONLY_ROOTS`] roots;
@@ -1534,6 +1627,7 @@ impl ChildCommand {
                 },
                 profile: self.profile,
                 required: true,
+                requires: None,
             },
             limits: limits(self.timeout),
             wait: true,
@@ -2198,10 +2292,17 @@ impl Mount<'_> {
     }
 }
 
+/// The one part of `/etc` Substrate's Linux base view binds into every confined run, read-only and
+/// only where the host has it (Substrate 0.21.0, `crates/substrate-host/src/process.rs`, ADR 0049
+/// decision 1). Substrate exports no constant for it.
+const BASE_VIEW_ALTERNATIVES: &str = "/etc/alternatives";
+
 /// The mounts Substrate owns, which no read-only root or file may equal, lie under or contain:
-/// Substrate's reserved mounts, the execution capsule, the scratch directory, the hosts file and
-/// the certificate bundle path of an egress aperture.
-const OWNED_MOUNTS: [&str; 13] = [
+/// Substrate's reserved mounts, `/etc/alternatives` (bound read-only from the host where it has
+/// one since Substrate 0.21.0, before the roots and files, which would cover it; not in
+/// Substrate's `RESERVED_MOUNTS`), the execution capsule, the scratch directory, the hosts file
+/// and the certificate bundle path of an egress aperture.
+const OWNED_MOUNTS: [&str; 14] = [
     RESERVED_MOUNTS[0],
     RESERVED_MOUNTS[1],
     RESERVED_MOUNTS[2],
@@ -2211,6 +2312,7 @@ const OWNED_MOUNTS: [&str; 13] = [
     RESERVED_MOUNTS[6],
     RESERVED_MOUNTS[7],
     RESERVED_MOUNTS[8],
+    BASE_VIEW_ALTERNATIVES,
     EXECUTION_CAPSULE_MOUNT,
     EXEC_SCRATCH_MOUNT,
     APERTURE_HOSTS_PATH,
@@ -2780,9 +2882,11 @@ fn check_workdir_served(
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
-/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]),
-/// the apertures `input` asked for by name being exactly `egress`, in order; exactly the working
-/// directory requested, or none when none was ([`ChildCommand::with_workdir`]); no writable root
+/// snapshot, no secret slot, a cgroup (named and not empty), and exactly the requested network
+/// ([`network_applied`]), the apertures `input` asked for by name being exactly `egress`, in
+/// order; exactly the working directory requested, or none when none was
+/// ([`ChildCommand::with_workdir`]); no confinement requirement (`requires`, Substrate 0.18.0),
+/// which Loom never sends, in the request or echoed in the record; no writable root
 /// or execution capsule, which Loom never requests, and so the filesystem Substrate applies without a capsule. A test's launch and a child's are held to the
 /// same record. The record is taken apart without `..`, so a member a later Substrate adds does
 /// not compile until it is judged here.
@@ -2804,6 +2908,7 @@ fn check_record(
         secret_slots,
         workdir,
         writable_roots,
+        requires,
     } = record;
     if *workspace_access != input.workspace_access
         || !network_applied(input.sandbox.network, egress, network)
@@ -2819,7 +2924,9 @@ fn check_record(
         || *filesystem != substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly
         || !secret_slots.is_empty()
         || *capability_snapshot != input.sandbox.capability_snapshot
-        || cgroup.is_empty()
+        || cgroup.as_deref().is_none_or(str::is_empty)
+        || input.sandbox.requires.is_some()
+        || requires.is_some()
     {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
@@ -3248,6 +3355,7 @@ impl RustClosure {
                 apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
+                requires: None,
             },
             limits: limits(command.timeout()),
             wait: true,
@@ -3537,12 +3645,18 @@ mod tests {
             "exec.read-only-files": {"max_files": 16},
         });
         let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
+        // story:substrate-0-21-pin: since Substrate 0.15.0 the `linux` adapter also proves
+        // `stdin_pipe` and `output_live` whenever its floor (argv-only exec and namespaces) holds,
+        // as it does here, and `FACT_ORDER` places them last; the three facts of 0.14.0 keep their
+        // place.
         assert_eq!(
             facts,
             [
                 "whole_tree_kill",
                 "ipc_socket_allowlist",
-                "ipc_signals_contained"
+                "ipc_signals_contained",
+                "stdin_pipe",
+                "output_live"
             ],
             "the proved facts, exactly, in FACT_ORDER's spelling"
         );
@@ -3934,6 +4048,75 @@ mod tests {
         }
     }
 
+    /// Substrate 0.18.0 makes the record's `cgroup` optional (present exactly when the adapter
+    /// applied one) and echoes a start's `requires`. Every Loom launch runs in a cgroup and sends
+    /// no `requires`, so a record naming no cgroup is refused as one naming an empty cgroup is,
+    /// with the same refusal, and a record echoing requirements Loom did not send is refused, for a
+    /// child run to its end and a live child alike (story:substrate-0-21-pin).
+    #[test]
+    fn a_record_naming_no_cgroup_or_unrequested_requirements_is_refused() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        let requires = substrate_wire::ConfinementRequires {
+            families: Some(vec![substrate_wire::ConfinementFamily::ProcessRun]),
+            facts: Some(vec![substrate_wire::ConfinementProperty::WholeTreeKill]),
+        };
+        for input in [&run, &live] {
+            assert_eq!(input.sandbox.requires, None, "Loom sends no requirements");
+            let exact = record_for(input, AppliedNetwork::None);
+            check_record(input, &[], &exact).unwrap();
+            let refusal = |record: &substrate_wire::AppliedConfinement| {
+                let error = check_record(input, &[], record).unwrap_err();
+                (error.reason, error.detail)
+            };
+            let empty = refusal(&substrate_wire::AppliedConfinement {
+                cgroup: Some(String::new()),
+                ..exact.clone()
+            });
+            assert_eq!(empty.0, ConfinementRefusal::CapabilityUnserved);
+            assert!(
+                empty.1.contains(
+                    "Substrate's applied confinement does not match the required profile"
+                ),
+                "{empty:?}"
+            );
+            let absent = refusal(&substrate_wire::AppliedConfinement {
+                cgroup: None,
+                ..exact.clone()
+            });
+            assert_eq!(absent, empty, "no cgroup is refused as an empty one is");
+            let echoed = refusal(&substrate_wire::AppliedConfinement {
+                requires: Some(requires.clone()),
+                ..exact.clone()
+            });
+            assert_eq!(
+                echoed, empty,
+                "unrequested requirements are not the launch requested"
+            );
+            let mut asked = input.clone();
+            asked.sandbox.requires = Some(requires.clone());
+            let record = substrate_wire::AppliedConfinement {
+                requires: Some(requires.clone()),
+                ..exact.clone()
+            };
+            assert!(
+                check_record(&asked, &[], &record).is_err(),
+                "a request carrying requirements is not one Loom makes"
+            );
+            // The request alone: a record echoing nothing is refused for the request, not for
+            // the record.
+            let unechoed = check_record(&asked, &[], &exact).expect_err(
+                "a request carrying requirements is refused with no echo in the record",
+            );
+            assert_eq!(
+                (unechoed.reason, unechoed.detail),
+                empty,
+                "a request carrying requirements is refused as a record mismatch is"
+            );
+        }
+    }
+
     #[test]
     fn a_child_request_is_exactly_what_the_host_named_and_requires_substrate() {
         let environment = ExecEnvironment {
@@ -3956,6 +4139,7 @@ mod tests {
                 apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
+                requires: None,
             }
         );
         assert_eq!(
@@ -4036,6 +4220,7 @@ mod tests {
             workdir: None,
             adapter: None,
             facts: None,
+            local_reason: None,
         }
     }
 
@@ -4201,7 +4386,7 @@ mod tests {
     ) -> substrate_wire::AppliedConfinement {
         substrate_wire::AppliedConfinement {
             capability_snapshot: input.sandbox.capability_snapshot.clone(),
-            cgroup: "substrate-ex_loom_1_0".to_owned(),
+            cgroup: Some("substrate-ex_loom_1_0".to_owned()),
             filesystem: substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly,
             network,
             profile: input.sandbox.profile,
@@ -4212,6 +4397,7 @@ mod tests {
             secret_slots: Vec::new(),
             workdir: None,
             writable_roots: Vec::new(),
+            requires: None,
         }
     }
 
@@ -4371,7 +4557,7 @@ mod tests {
         assert_eq!(result.applied.profile_digest, "digest");
         assert_eq!(
             result.driver_record,
-            record_for(input, AppliedNetwork::None)
+            Some(record_for(input, AppliedNetwork::None))
         );
 
         let error = settle(
@@ -4864,6 +5050,7 @@ mod tests {
                 apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
+                requires: None,
             }
         );
         let profile = requested_profile(&input, &[model()]);

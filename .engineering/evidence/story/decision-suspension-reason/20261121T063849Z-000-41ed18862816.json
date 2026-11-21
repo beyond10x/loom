@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T06:38:49Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-suspension-reason",
+  "kind": "story",
+  "revision": 19,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/decision-suspension-reason 5317683b; the note is accepted and stated in the story",
+    "review": "review-result:decision-suspension-reason-security-2",
+    "outcome": "no-op"
+  }
+}

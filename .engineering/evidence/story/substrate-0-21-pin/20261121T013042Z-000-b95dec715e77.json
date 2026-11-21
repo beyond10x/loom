@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T01:30:42Z",
+  "actor": "human:timo",
+  "artifact": "story:substrate-0-21-pin",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "whole gate on wave/2026-11-21-w1 at b38eb7d1 with ESS_TOOLCHAIN=0.86.0: 24 steps (every command of task check, then task website); 23 exit 0; cargo test --workspace --locked: 2985 passed, 0 failed, 10 ignored over 492 result lines; commission:docs-drift exit 201 through the ess 0.96.0 dispatcher (two version lines) and exit 0 with the ess 0.86.0 binary first on PATH",
+    "reference": "b38eb7d15a254c7e7d071469b2aee00e7e35690b; wave scratch gate/status.txt"
+  }
+}

@@ -18,6 +18,11 @@ summary: >-
   Installed definitions are one atomic manifest bounded to 64 MiB. An existing installation
   directory without its manifest is corrupt, not an empty catalog. Writers serialize updates;
   readers observe a whole manifest. Symlinked installation roots or ancestors refuse.
+  Engineering definitions are vendored files held to a lock: the lock names the source
+  repository, tag and commit and, per file, its path and sha256. A file whose digest is not the
+  locked one, a file the lock does not name, a locked file that is absent and a lock that cannot
+  be read each refuse the whole catalog before any definition is admitted, and every engineering
+  entry's revision is the lock's tag.
 types:
   - name: intake.protocols.SourceKind
     kind: enum
@@ -36,3 +41,26 @@ types:
       - {name: yaml, type: String}
       - {name: sha256, type: String}
       - {name: source, type: intake.protocols.ProtocolSource}
+  # The lock of the vendored engineering definitions, `protocols/engineering/lock.json`
+  # (format `loom.protocol-lock/1`): the source repository, the tag and the full commit the files
+  # were taken from, and one entry per file, sorted by path.
+  - name: intake.protocols.ProtocolLock
+    kind: struct
+    fields:
+      - {name: format, type: String}
+      - {name: repository, type: String}
+      - {name: tag, type: String}
+      - {name: commit, type: String}
+      - {name: files, type: List<intake.protocols.LockedFile>}
+  # One vendored file: its path below the vendored directory, `<name>/<major>.yaml`, and the
+  # sha256 of its bytes as lowercase hex.
+  - name: intake.protocols.LockedFile
+    kind: struct
+    fields:
+      - {name: path, type: String}
+      - {name: sha256, type: String}
+  # Why the lock refused the vendored files: the lock cannot be read, a file's digest is not the
+  # locked one, a file the lock does not name, a locked file that is absent.
+  - name: intake.protocols.LockRefusal
+    kind: enum
+    variants: [Malformed, DigestMismatch, Unlocked, Missing]

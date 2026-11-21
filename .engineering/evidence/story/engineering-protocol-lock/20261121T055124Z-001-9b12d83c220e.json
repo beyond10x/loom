@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T05:51:24Z",
+  "actor": "agent:loom",
+  "artifact": "story:engineering-protocol-lock",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 3e768c32..a5c527c5",
+    "reference": "2 files: the adversary's 11 cases (committed unchanged in a39a9aef, then rustfmt only in a5c527c5: equal with spaces, newlines and commas removed) and the doc comment of lock::check at lock.rs:262; no code line changed, so no second attack pass ran; unit gate on a5c527c5: fmt, clippy exit 0, 70 protocols tests passed 0 failed, task intake-drift and docs-check exit 0"
+  }
+}

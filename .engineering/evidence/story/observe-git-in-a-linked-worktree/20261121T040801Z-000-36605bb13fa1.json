@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T04:08:01Z",
+  "actor": "human:timo",
+  "artifact": "story:observe-git-in-a-linked-worktree",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "e7r6-changes.md; the coordinator read step 5 as stored: lexical comparison of the back-pointer with <root>/.git, no link followed",
+    "review": "review-result:observe-git-in-a-linked-worktree-acceptance-r2",
+    "outcome": "fixed"
+  }
+}
