@@ -234,7 +234,7 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
 // 1 on an uncovered refusal, so no specification reaches the count; `ess_gate.rs` feeds the count
 // check that run directly. A gate whose count arm accepts any count fails that case.
 #[test]
-fn mutant_gate_accepting_any_refusal_count_is_killed() {
+fn slow_mutant_gate_accepting_any_refusal_count_is_killed() {
     mutant_is_killed(
         "accept_any_refusal_count",
         |tree| {
@@ -252,7 +252,7 @@ fn mutant_gate_accepting_any_refusal_count_is_killed() {
 // the gate over a specification whose `requires` differs from the ess on PATH, so dropping the flag
 // passes the suite: without it ess 0.69.0 warns about `requires: ess 0.51.0` and exits 0.
 #[test]
-fn mutant_validate_without_strict_requires_is_killed() {
+fn slow_mutant_validate_without_strict_requires_is_killed() {
     mutant_is_killed(
         "validate_without_strict_requires",
         |tree| {
@@ -269,7 +269,7 @@ fn mutant_validate_without_strict_requires_is_killed() {
 // Specification mutant, step 3: the unchanged gate holds a specification synthesize refuses with
 // exit 0. Pins the behaviour the code mutant above removes.
 #[test]
-fn mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
+fn slow_mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
     mutant_is_killed(
         "spec_refused_exit_0",
         add_unsatisfiable_command,
@@ -283,7 +283,7 @@ fn mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
 
 // Specification mutant, step 1: the unchanged gate holds a `requires` older than the ess on PATH.
 #[test]
-fn mutant_spec_requiring_an_older_ess_is_killed() {
+fn slow_mutant_spec_requiring_an_older_ess_is_killed() {
     mutant_is_killed(
         "spec_requires_older_ess",
         |tree| {

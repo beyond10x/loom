@@ -298,20 +298,52 @@ pub fn synthesize(
     })
 }
 
-/// [`synthesize`] of `spec` with the `ess` on `PATH`, made once per distinct input for every
+/// [`synthesize`] of `spec` with `ess`, made once per distinct input for every
 /// process that shares `cache`: the result is kept under `cache` by [`inputs_digest`] of `spec`,
 /// and a caller with an input already synthesized, or being synthesized, reads that result.
 pub fn synthesize_once(ess: &Ess, spec: &Path, cache: &Path) -> Result<Synthesis, String> {
     let version = ess_version(ess, None)?;
     let key = inputs_digest(spec, &version)?;
-    let key = key.trim_start_matches("sha256:").to_owned();
+    let key = format!("synthesis-{}", key.trim_start_matches("sha256:"));
+    let dir = made_once(cache, &key, |dir| {
+        let synthesis = synthesize(ess, None, spec, &dir.join("suite.json"))?;
+        let code = synthesis
+            .code
+            .map_or_else(|| "signal".to_owned(), |c| c.to_string());
+        fs::write(dir.join("stdout"), &synthesis.stdout)
+            .and_then(|()| fs::write(dir.join("stderr"), &synthesis.stderr))
+            .and_then(|()| fs::write(dir.join("code"), code))
+            .map_err(|e| format!("write under {}: {e}", dir.display()))
+    })?;
+    let read = |name: &str| {
+        let path = dir.join(name);
+        fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
+    };
+    Ok(Synthesis {
+        code: read("code")?.trim().parse().ok(),
+        stdout: read("stdout")?,
+        stderr: read("stderr")?,
+        suite: fs::read(dir.join("suite.json")).ok(),
+    })
+}
+
+/// `<cache>/<key>`, a directory `make` filled once for every process that shares `cache`: the
+/// first caller fills a fresh directory beside it and renames it into place; a caller that finds
+/// it reads it, and one that finds it being made waits. A runner that starts each test in its own
+/// process (nextest) makes the product once this way, where a `OnceLock` makes it once a test.
+/// `key` names the inputs, such as an [`inputs_digest`]; a failed `make` leaves nothing behind.
+pub fn made_once(
+    cache: &Path,
+    key: &str,
+    make: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
     fs::create_dir_all(cache).map_err(|e| format!("create {}: {e}", cache.display()))?;
-    let done = cache.join(format!("{key}.done"));
+    let done = cache.join(key);
     let lock = cache.join(format!("{key}.lock"));
     let started = Instant::now();
     loop {
-        if let Some(found) = read_cached(cache, &key, &done)? {
-            return Ok(found);
+        if done.is_dir() {
+            return Ok(done);
         }
         match fs::OpenOptions::new()
             .write(true)
@@ -330,7 +362,7 @@ pub fn synthesize_once(ess: &Ess, spec: &Path, cache: &Path) -> Result<Synthesis
                 }
                 if started.elapsed() > Duration::from_secs(900) {
                     return Err(format!(
-                        "{} held for 900 s: remove it if no synthesis runs",
+                        "{} held for 900 s: remove it if nothing makes {key}",
                         lock.display()
                     ));
                 }
@@ -339,20 +371,27 @@ pub fn synthesize_once(ess: &Ess, spec: &Path, cache: &Path) -> Result<Synthesis
             Err(e) => return Err(format!("create {}: {e}", lock.display())),
         }
     }
-    let result = synthesize(ess, None, spec, &cache.join(format!("{key}.suite.json")));
-    let written = result.as_ref().map_err(Clone::clone).and_then(|synthesis| {
-        let code = synthesis
-            .code
-            .map_or_else(|| "signal".to_owned(), |c| c.to_string());
-        fs::write(cache.join(format!("{key}.stdout")), &synthesis.stdout)
-            .and_then(|()| fs::write(cache.join(format!("{key}.stderr")), &synthesis.stderr))
-            .and_then(|()| fs::write(cache.join(format!("{key}.code")), code))
-            .and_then(|()| fs::write(&done, b""))
-            .map_err(|e| format!("write under {}: {e}", cache.display()))
-    });
+    let result = if done.is_dir() {
+        Ok(())
+    } else {
+        let partial = cache.join(format!("{key}.{}.partial", std::process::id()));
+        let _ = fs::remove_dir_all(&partial);
+        fs::create_dir_all(&partial)
+            .map_err(|e| format!("create {}: {e}", partial.display()))
+            .and_then(|()| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| make(&partial)))
+                    .unwrap_or_else(|_| Err(format!("making {key} panicked")))
+            })
+            .and_then(|()| {
+                fs::rename(&partial, &done)
+                    .map_err(|e| format!("rename {} to {}: {e}", partial.display(), done.display()))
+            })
+            .inspect_err(|_| {
+                let _ = fs::remove_dir_all(&partial);
+            })
+    };
     let _ = fs::remove_file(&lock);
-    written?;
-    result
+    result.map(|()| done)
 }
 
 /// A lock whose holder is gone: a process killed while it synthesized (a test past its time)
@@ -370,23 +409,6 @@ fn lock_is_stale(lock: &Path) -> bool {
     fs::metadata(lock)
         .and_then(|m| m.modified())
         .is_ok_and(|at| at.elapsed().is_ok_and(|age| age > Duration::from_secs(900)))
-}
-
-fn read_cached(cache: &Path, key: &str, done: &Path) -> Result<Option<Synthesis>, String> {
-    if !done.is_file() {
-        return Ok(None);
-    }
-    let read = |suffix: &str| {
-        let path = cache.join(format!("{key}.{suffix}"));
-        fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))
-    };
-    let code = read("code")?;
-    Ok(Some(Synthesis {
-        code: code.trim().parse().ok(),
-        stdout: read("stdout")?,
-        stderr: read("stderr")?,
-        suite: fs::read(cache.join(format!("{key}.suite.json"))).ok(),
-    }))
 }
 
 /// The record a synthesis of `<root>/ess` gives, its version read with the same `cwd` the

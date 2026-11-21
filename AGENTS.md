@@ -296,8 +296,16 @@ Before a change is reported done, in this order:
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
    Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
-   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
+   the test step (`loom-xtask test-step`), `task consumer-check`, then `task docs-check` and
+   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`, which
+   installs cargo-nextest by a pinned version and digest). The test step holds the budget of
+   `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
+   `cargo nextest run --workspace --locked` (`.config/nextest.toml`: a test is killed and fails at
+   60 s; `slow_` tests are left out, and so are the test binaries `task check` runs as their own
+   steps: `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`, `conform` of the three
+   conformance crates) and `cargo test --doc --workspace --locked`, prints the ten
+   slowest tests on every run and fails over 120 s
+   (`crates/loom-xtask/src/test_step.rs`).
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
@@ -314,8 +322,21 @@ Before a change is reported done, in this order:
 The slow lane is `task slow`, started on its own and never by `task check`: it synthesizes `ess/`
 again and fails unless `generated/ess/loom/` is equal byte for byte (§ ESS), then runs every test
 named `slow_` (`cargo nextest run --profile slow`, `.config/nextest.toml`). Run it after every
-change under `ess/`, with `task suite-generate` before it. A test that cannot meet the budget of
-`~/beyond10x/AGENTS.md` § Tests stay fast is renamed `slow_…` and runs there, never deleted.
+change under `ess/`, with `task suite-generate` before it, and after a change to the code a
+`slow_` test covers. A test that cannot meet the budget of `~/beyond10x/AGENTS.md` § Tests stay
+fast is renamed `slow_…` and runs there, never deleted; so is a test that starts a nested `cargo`
+build or test (the gate's replicas in `adversary_ess_gate.rs` and `adversary2_ess_gate.rs`).
+
+nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
+not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
+keyed by the digest of its inputs and made once for every process (`made_once` in
+`crates/loom-executor/tests/support/ess_suite.rs`).
+
+`.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
+builds inherit; the config file wins over one in the home directory, the manifest holds where no
+config sets it. The workspace has about 500 test binaries: with debug info `target/` grew to 34 GB
+and every one took longer to link. A panic still prints its file and line; a backtrace names
+functions without lines.
 
 There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchain`), and a local
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
@@ -332,9 +353,9 @@ candidate for dogfooding.
 Every work tree builds into its own `target/`. The Taskfiles set no `CARGO_TARGET_DIR`; do not set
 one. Two trees that share a build directory can run each other's test binaries: cargo judges the
 other tree's binary fresh, and the gate exits 0 on code it did not build
-(`gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory` in
+(`slow_gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory` in
 `crates/loom-executor/tests/adversary_ess_gate.rs`). Before a gate's result counts as evidence,
-check with `cargo test --workspace --locked -- --list` in the gated tree that the tests the run
+check with `cargo nextest list --workspace --locked` in the gated tree that the tests the run
 printed exist there. Check `df -h /` before a full gate and run one full gate at a time. End a
 managed worktree with `worktree finish --discard-cache --archive <tree>`, which removes its build
 cache; never delete a `target/` by hand. `worktree discard-cache` and `finish --discard-cache`

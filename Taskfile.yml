@@ -38,7 +38,7 @@ tasks:
       - task: commission:deps-guard
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
-      - cargo test --workspace --locked
+      - cargo run -q --locked -p loom-xtask -- test-step
       - task: consumer-check
       - task: docs-check
       - task: commission:docs-drift

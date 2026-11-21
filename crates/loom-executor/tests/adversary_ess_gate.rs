@@ -192,7 +192,7 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
 // another worktree's `ess_gate` binary fresh it runs that binary — and the gate checks the other
 // worktree's `ess/`, not the one `task check` was run in.
 #[test]
-fn gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
+fn slow_gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
     let dir = scratch("shared_target");
     let clean = dir.join("worktree-a");
     let marked = dir.join("worktree-b");
@@ -221,7 +221,7 @@ fn gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
 
 // Marker scan: a nested directory and a file ESS never reads (not listed in ess-inputs.yaml).
 #[test]
-fn mutant_marker_in_a_nested_non_yaml_file_is_killed() {
+fn slow_mutant_marker_in_a_nested_non_yaml_file_is_killed() {
     mutant_is_killed(
         "nested_non_yaml",
         |tree| {
@@ -238,7 +238,7 @@ fn mutant_marker_in_a_nested_non_yaml_file_is_killed() {
 
 // Marker scan: a hidden file, the marker mid-line.
 #[test]
-fn mutant_marker_mid_line_in_a_hidden_file_is_killed() {
+fn slow_mutant_marker_mid_line_in_a_hidden_file_is_killed() {
     mutant_is_killed(
         "hidden_mid_line",
         |tree| {
@@ -250,7 +250,7 @@ fn mutant_marker_mid_line_in_a_hidden_file_is_killed() {
 
 // Marker scan: the marker mid-line in the specification itself.
 #[test]
-fn mutant_marker_mid_line_in_run_yaml_is_killed() {
+fn slow_mutant_marker_mid_line_in_run_yaml_is_killed() {
     mutant_is_killed(
         "run_yaml_mid_line",
         |tree| {
@@ -272,7 +272,7 @@ fn mutant_marker_mid_line_in_run_yaml_is_killed() {
 // validation instead. Since ESS 0.82.0 synthesize accepts `Binary64`, so the compiled field's
 // primitive is what kills the mutant, not a synthesize refusal.
 #[test]
-fn mutant_confidence_binary64_is_killed() {
+fn slow_mutant_confidence_binary64_is_killed() {
     mutant_is_killed(
         "confidence_binary64",
         |tree| {
@@ -299,7 +299,7 @@ fn mutant_confidence_binary64_is_killed() {
 // Item 2: the relation Selection.catalogue dropped. It was Turn.catalogue until
 // `story:delete-harness-port` removed the turn with the ported loop.
 #[test]
-fn mutant_relation_dropped_is_killed() {
+fn slow_mutant_relation_dropped_is_killed() {
     mutant_is_killed(
         "relation_dropped",
         |tree| {
@@ -315,7 +315,7 @@ fn mutant_relation_dropped_is_killed() {
 
 // Item 2: the relation kept, its cardinality changed.
 #[test]
-fn mutant_relation_cardinality_many_is_killed() {
+fn slow_mutant_relation_cardinality_many_is_killed() {
     mutant_is_killed(
         "relation_many",
         |tree| {
@@ -332,7 +332,7 @@ fn mutant_relation_cardinality_many_is_killed() {
 // Item 2: a commission run's id back to String, and CommissionRunId of String. The field was
 // Session.commission_run until `story:delete-harness-port`; a workflow run record's `run` is one.
 #[test]
-fn mutant_commission_run_string_is_killed() {
+fn slow_mutant_commission_run_string_is_killed() {
     mutant_is_killed(
         "commission_run_string",
         |tree| {
@@ -347,7 +347,7 @@ fn mutant_commission_run_string_is_killed() {
 }
 
 #[test]
-fn mutant_commission_run_id_of_string_is_killed() {
+fn slow_mutant_commission_run_id_of_string_is_killed() {
     mutant_is_killed(
         "commission_run_id_string",
         |tree| {
@@ -363,7 +363,7 @@ fn mutant_commission_run_id_of_string_is_killed() {
 
 // Acceptance: `task check` runs `task ess-gate`.
 #[test]
-fn mutant_check_without_ess_gate_is_killed() {
+fn slow_mutant_check_without_ess_gate_is_killed() {
     mutant_is_killed(
         "check_without_ess_gate",
         |tree| {

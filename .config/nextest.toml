@@ -1,5 +1,5 @@
 [profile.default]
-default-filter = "not test(/(^|::)slow_/)"
+default-filter = "not test(/(^|::)slow_/) and not (binary_id(b10x-loom-executor::ess_gate) | binary_id(b10x-loom-conformance::conform) | binary_id(b10x-loom-commission::ess_gate) | binary_id(b10x-loom-commission-conformance::conform) | binary_id(b10x-loom-intake-conformance::conform))"
 slow-timeout = { period = "60s", terminate-after = 1 }
 fail-fast = false
 

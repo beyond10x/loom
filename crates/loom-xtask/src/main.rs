@@ -54,6 +54,7 @@ use syn::visit::Visit;
 mod ess_suite;
 mod protocols_vendor;
 mod release;
+mod test_step;
 
 /// Where the generated crate is committed, relative to the repository root.
 const GENERATED: &str = "generated/rust/loom";
@@ -121,6 +122,14 @@ enum Command {
     SuiteCheck {
         #[command(flatten)]
         scratch: Scratch,
+    },
+    /// The test step of `task check`: `cargo nextest run --workspace --locked` and
+    /// `cargo test --doc --workspace --locked`, failing when a test runs past 60 s or the step
+    /// past 120 s, and printing the ten slowest tests, green or red.
+    TestStep {
+        /// Run the tests of these packages in place of `--workspace` (repeatable).
+        #[arg(short = 'p', long = "package")]
+        packages: Vec<String>,
     },
     /// Write `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
     /// `CustomResourceDefinition` projected from `ess generate --kind schema` of `ess/` by
@@ -253,6 +262,7 @@ fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
+        Command::TestStep { packages } => test_step::run(&root, &packages),
         Command::CrdGenerate { scratch } => crd_generate(&root, &cli.ess, &scratch),
         Command::CrdDrift { scratch } => crd_drift(&root, &cli.ess, &scratch),
         Command::NoHandModel { src, generated } => no_hand_model(
