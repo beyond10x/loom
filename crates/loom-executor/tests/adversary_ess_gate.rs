@@ -1,18 +1,33 @@
 //! Adversary cases for `tests/ess_gate.rs` (story:ess-hard-gate, Atlas ADR 0076).
 //!
 //! Each case builds a std-only replica of the repository under `CARGO_TARGET_TMPDIR` — the root
-//! `Cargo.toml`, `AGENTS.md`, `Taskfile.yml`, `ess/` and `crates/loom-executor/tests/ess_gate.rs` copied
-//! verbatim, with an empty library in place of `crates/loom-executor/src` — mutates the replica, and runs the
+//! `Cargo.toml`, `AGENTS.md`, `Taskfile.yml`, `ess/` and `crates/loom-executor/tests/ess_gate.rs`
+//! with its `support/ess_suite.rs` copied verbatim, with an empty library in place of `crates/loom-executor/src` — mutates the replica, and runs the
 //! real gate suite in it with `cargo test --test ess_gate`. The gate is never edited: what is
 //! measured is the exit status of the suite CI runs, over a tree carrying the mutant.
 //!
 //! The repository root is read from `CARGO_MANIFEST_DIR` at run time, not from `env!`, so these
 //! cases read the tree they run in.
+//!
+//! The replica's `ess/` leaves out the decision domain (`ess_suite::drop_decision`), whose
+//! synthesis takes minutes and which no mutant is about, and after the mutant its committed
+//! synthesis is written again from it, as `task suite-generate` does, so the gate's step 3 reads a
+//! synthesis of the mutated tree. Every synthesis is made once per distinct input: the replicas
+//! and their suites share one cache (`LOOM_ESS_SYNTHESIS_CACHE`). The suite runs without its
+//! `slow_` cases, as `task ess-gate` does.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+#[path = "support/ess_suite.rs"]
+mod ess_suite;
+
+/// The synthesis cache every replica, and every suite run in one, shares.
+fn synthesis_cache() -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("ess-synthesis-cache")
+}
 
 const PROBE: &str = "# UNMAPPED: probe\n";
 
@@ -57,11 +72,16 @@ fn replica(at: &Path) {
         fs::copy(root.join(file), at.join(file)).expect("copy root file");
     }
     copy_dir(&root.join("ess"), &at.join("ess"));
-    fs::copy(
-        root.join("crates/loom-executor/tests/ess_gate.rs"),
-        at.join("crates/loom-executor/tests/ess_gate.rs"),
-    )
-    .expect("copy ess_gate.rs");
+    ess_suite::drop_decision(&at.join("ess")).unwrap_or_else(|detail| panic!("{detail}"));
+    fs::create_dir_all(at.join("crates/loom-executor/tests/support"))
+        .expect("create replica support");
+    for file in ["ess_gate.rs", "support/ess_suite.rs"] {
+        fs::copy(
+            root.join("crates/loom-executor/tests").join(file),
+            at.join("crates/loom-executor/tests").join(file),
+        )
+        .unwrap_or_else(|e| panic!("copy {file}: {e}"));
+    }
     fs::write(
         at.join("crates/loom-executor/Cargo.toml"),
         "[package]\nname = \"b10x-loom-executor\"\nversion.workspace = true\nedition.workspace = true\n\
@@ -71,12 +91,43 @@ fn replica(at: &Path) {
     fs::write(at.join("crates/loom-executor/src/lib.rs"), "").expect("write replica lib");
 }
 
-/// `cargo test --test ess_gate` in `tree`, building into `target`.
+/// Writes the replica's committed synthesis from its `ess/` as it is now.
+fn regenerate(tree: &Path) {
+    let ess = ess_program();
+    let run = ess_suite::synthesize_once(&ess, &tree.join("ess"), &synthesis_cache())
+        .unwrap_or_else(|detail| panic!("synthesize the replica: {detail}"));
+    ess_suite::write_generated(tree, &ess, None, &run)
+        .unwrap_or_else(|detail| panic!("write the replica's synthesis: {detail}"));
+}
+
+/// The `ess` of this repository, asking for the release its own `ess/ess-inputs.yaml` requires: a
+/// mutant of the replica's `requires` line never chooses the release that judges it.
+fn ess_program() -> ess_suite::Ess {
+    ess_suite::ess_program(&repo_root())
+}
+
+/// `cargo test --test ess_gate -- --skip slow_` in `tree`, building into `target`, after the
+/// replica's committed synthesis was written from its `ess/`, with this repository's
+/// `ESS_TOOLCHAIN`.
 fn gate_suite(tree: &Path, target: &Path) -> Output {
-    Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
-        .args(["test", "--offline", "--test", "ess_gate"])
+    regenerate(tree);
+    let mut command = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()));
+    if let Some(toolchain) = ess_program().toolchain {
+        command.env("ESS_TOOLCHAIN", toolchain);
+    }
+    command
+        .args([
+            "test",
+            "--offline",
+            "--test",
+            "ess_gate",
+            "--",
+            "--skip",
+            "slow_",
+        ])
         .current_dir(tree)
         .env("CARGO_TARGET_DIR", target)
+        .env("LOOM_ESS_SYNTHESIS_CACHE", synthesis_cache())
         .env("CARGO_INCREMENTAL", "0")
         .env_remove("CARGO_MAKEFLAGS")
         .env_remove("MAKEFLAGS")
