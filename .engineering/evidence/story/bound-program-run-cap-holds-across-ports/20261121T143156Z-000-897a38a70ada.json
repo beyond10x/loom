@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T14:31:56Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-program-run-cap-holds-across-ports",
+  "kind": "story",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "F3 (two ports over one case store both start a capped action at max_runs-1) is not closed in wave 2026-11-21-w7: session sdc decided it waits for this story; the reviewer's case is under #[ignore] with this story's id",
+    "review": "review-result:bound-program-result-table-security-1",
+    "outcome": "escalated"
+  }
+}

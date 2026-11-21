@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T18:28:46Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-request-file-store",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "finding F3 (one open request per record key across the check and the write) is fixed in the port by 0357f12a; the file store must hold the same rule in one locked operation: Acceptance line added 2026-11-21, accepted by session sdc",
+    "review": "review-result:decision-request-entity-security-1",
+    "outcome": "escalated"
+  }
+}
