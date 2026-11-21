@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:decision-request-entity
 kind: story
-status: proposed
+status: active
 title: loom.decision declares the decision request and its eight commands, and b10x-loom-decision applies them
 summary: 'The final SDC contract moved into Loom''s ESS at ess/37, ordered Strength and AutonomyLevel kept: class ids, the decided case revision, one open request per record id, and the DecisionStore port with the records kept beside a request'
 tags:
@@ -30,15 +30,16 @@ scope:
   path: ess/domains/decision.yaml
 - confidence: cited
   path: ess/ess-inputs.yaml
-- confidence: inferred
+- confidence: cited
   path: ess/scenarios/decision/merge-a5-veto.yaml
 - confidence: cited
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/ess/loom-decision.domain-graph.json
-revision: 17
+revision: 35
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T13:30:58Z", actor: "agent:sdc", revision: 35, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w7"}
 ---
 ## Outcome
 
@@ -182,8 +183,9 @@ It replaced its earlier choice, `ess/31` with `ordered: true` dropped
 
 ## Waits on
 
-`story:ess-format-37` (wave 2026-11-21-w6): `ess/system.yaml` at `ess/37`, which `ordered: true` on `Strength`
-and `AutonomyLevel` needs (from `ess/36`); both stories change `ess/system.yaml`. The two stories
+`story:ess-format-37` is delivered (wave 2026-11-21-w6) and `ess/system.yaml` declares `ess/37`:
+the dependency is met. This story needs `ess/37` for `ordered: true` on `Strength` and
+`AutonomyLevel` (from `ess/36`); both stories change `ess/system.yaml`. The two stories
 it named before are implemented at `9b4170fb`: `story:ess-format-31` (`ess/31`, which `[]` in
 `sets:` and the `coalesce` guard need) and `story:ess-096-upgrade` (the `ess` 0.96.0 pin).
 
@@ -291,24 +293,79 @@ crate is an internal library with no command.
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Derived 2026-11-21 by `story-scoper`, re-derived at `aa943153` (after wave 2026-11-21-w6). Every
+line is **cited** (read from the story or the tree) or **inferred** (a reading that could be wrong).
 
-- **Primary surface:** `ess/domains/decision.yaml` (new domain `loom.decision`) and `crates/loom-decision` (new crate `b10x-loom-decision`) — cited (story Outcome, ESS first)
-- **Files (ESS):** `ess/domains/decision.yaml`, `ess/system.yaml` (one `domains:` line, after `loom.bindings` at `ess/system.yaml:24`), `ess/ess-inputs.yaml` (one `specification:` line, `ess/ess-inputs.yaml:17`) — cited
-- **Files (crate):** `crates/loom-decision/{Cargo.toml,src/**,tests/decision_request.rs}` — cited (`Cargo.toml` and `src` are inferred as the crate's own layout, as `crates/loom-bindings` has)
-- **Files (conformance):** `crates/loom-conformance/src/decision.rs` — cited; `crates/loom-conformance/src/lib.rs` — inferred, needs a `mod decision;` line, a field on `Live` (`lib.rs:142-163`), command arms beside `run::RUN_ONCE` (`lib.rs:220-256`) and a view arm beside `resource::LOOM_AGENTS` (`lib.rs:375`); `crates/loom-conformance/Cargo.toml` — inferred, gains `b10x-loom-decision = { path = "../loom-decision" }`
-- **Files (house test):** `crates/loom-executor/tests/crate_names.rs` — cited (story acceptance). `EXPECTED` is `[..; 29]` at `:18`, so the length becomes 30 and a tuple `("b10x-loom-decision", "loom-decision", Some("b10x_loom_decision"))` is added
-- **Files (scenario):** `ess/scenarios/decision/merge-a5-veto.yaml` plus its `ess/ess-inputs.yaml` line — inferred path (acceptance says "copied into Loom"; sibling scenarios sit in `ess/scenarios/<group>/`)
-- **Files (generated, regenerated not hand-edited):** `generated/rust/loom/**`, `website/docs/reference/ess/loom-decision.md`, `website/data/ess/loom-decision.domain-graph.json` — inferred, from AGENTS.md § Generated files and the `loom.bindings` commit `501c332a`
-- **Symbols:** `DecisionRequest`, `DecisionStore`, `EscalationSuppressedRecord`, `SuppressionCause`, `DecisionClassId`, `OpenDecisionsForPrincipal`, `ArtifactDecisionHistory`, `DecisionRequests`, actor `loom.decision.Runtime`, errors `RecordKeyOpen` and `NotARequestClass` — cited (story). None exists in `ess/`, `generated/` or `crates/` (`git grep` found no `loom.decision`).
-- **Documents:** none beyond the generated reference page. The story ships no guide, so `website/data/status.json` is not scoped (see "could not establish").
-- **Confidence:** high for the ESS files and the crate, which the story names. Medium for `loom-conformance/src/lib.rs` and the scenario path: the dispatch is a closed `match` over command ids that returns `unavailable` for an unknown command (`lib.rs:256-261`), so the new commands cannot pass without an arm.
+- **Primary surface:** `ess/domains/decision.yaml` (new domain `loom.decision`) and
+  `crates/loom-decision` (new crate `b10x-loom-decision`): cited (Outcome, ESS first); neither
+  exists in `ess/`, `generated/` or `crates/`
+- **Files (ESS):** `ess/domains/decision.yaml`; `ess/system.yaml` (one `domains:` line after
+  `loom.runlog` at `ess/system.yaml:25`, so line 26; `format: ess/37` already at `:1`);
+  `ess/ess-inputs.yaml` (`domains/decision.yaml` after `ess/ess-inputs.yaml:19`,
+  `requires: ess 0.96.0` at `:2`): cited
+- **Files (crate):** `crates/loom-decision/tests/decision_request.rs`: cited;
+  `crates/loom-decision/{Cargo.toml,src/**}`: inferred, the crate's own layout
+  (`crates/loom-bindings/Cargo.toml:15` takes `loom = { path = "../../generated/rust/loom" }`)
+- **Files (conformance):** `crates/loom-conformance/src/decision.rs`: cited;
+  `crates/loom-conformance/src/lib.rs`: inferred (`mod decision;` beside `lib.rs:64-70`, a field on
+  `Live` `:142`, a command arm beside `run::RUN_ONCE` `:255` in the closed `match` of `:220`, which
+  answers `unavailable` for any other command at `:256-260`, a view arm beside
+  `resource::LOOM_AGENTS` `:375`); `crates/loom-conformance/Cargo.toml`: inferred, gains a
+  `b10x-loom-decision` path dependency
+- **Files (house test):** `crates/loom-executor/tests/crate_names.rs`: cited. `EXPECTED` is
+  `[..; 30]` at `:18` (was 29: `b10x-loom-runlog` landed at `:113`), so it becomes 31 and gains
+  `("b10x-loom-decision", "loom-decision", Some("b10x_loom_decision"))`
+- **Files (scenario):** `ess/scenarios/decision/merge-a5-veto.yaml` plus its `scenarios:` line in
+  `ess/ess-inputs.yaml`: cited (Acceptance names the path)
+- **Files (generated, regenerated not hand-edited):** `generated/rust/loom/**`,
+  `website/docs/reference/ess/loom-decision.md`, `website/docs/reference/ess/index.mdx`,
+  `website/data/ess/loom-decision.domain-graph.json`, `website/docs/reference/crates.md`,
+  `Cargo.lock`: inferred, from AGENTS.md § Generated files (`AGENTS.md:310-325`) and the
+  `b10x-loom-runlog` commits (`81a81886`, `4c4a5af3`)
+- **Symbols:** `DecisionRequest`, `DecisionStore`, `EscalationSuppressedRecord`, `SuppressionCause`,
+  `DecisionClassId`, `OpenDecisionsForPrincipal`, `ArtifactDecisionHistory`, `DecisionRequests`,
+  actor `loom.decision.Runtime`, errors `RecordKeyOpen`, `NotARequestClass`: cited (story);
+  `git grep` finds none outside `.engineering/`
+- **Documents:** `CHANGELOG.md` (an Unreleased bullet, AGENTS.md:334) and `README.md` (crate table,
+  row for `b10x-loom-runlog` at `README.md:740`): inferred. No guide and no
+  `website/data/status.json` entry (Out of scope)
+- **Confidence:** high for the ESS files, crate, test and scenario path (story names them). Medium
+  for `loom-conformance/src/lib.rs` and the generated and document files (read from the closed
+  dispatch and the runlog precedent, not from the story)
 - **Would collide with:**
-  - `ess/system.yaml`: `story:ess-format-37` (wave 2026-11-21-w6) changes its `format:` line from `ess/31` to `ess/37`, and this story adds a `domains:` line — ordered, this story `depends_on` it.
-  - `ess/system.yaml`, `ess/ess-inputs.yaml`: `story:hash-chained-run-log` (`loom.runlog`) — no `depends_on` path; `story:tree-run-command` (`loom.tree`) — no path; `story:engine-configuration-document` (`loom.engine`) — no path; `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`, `story:boundary-admits-declared-http-egress` (scenario lines in `ess-inputs.yaml`) — no path; `story:autonomy-grant-table` (`loom.autonomy`) — ordered, it `depends_on` this story.
-  - `crates/loom-executor/tests/crate_names.rs`: `story:hash-chained-run-log`, `story:tree-run-command` — no path. A merge of any two of them must both bump `[..; 29]` and add a tuple.
-  - `crates/loom-conformance/src/lib.rs`: `story:tree-run-command`, `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`, `story:revalidation-membership-conformance` — no path (the first three also touch `loom-conformance/Cargo.toml`, except `revalidation-membership-conformance`, which touches `lib.rs` only).
-  - `ess/domains/decision.yaml`, `crates/loom-decision/{Cargo.toml,src/lib.rs}`: every other story of the epic except `story:decision-suspension-reason` is ordered after this one by a `depends_on` path (graph: 19 of 20 siblings; the edges are direct only for `autonomy-grant-table` and `decision-request-file-store`). `decision-suspension-reason` touches only `ess/commission/` and Commission crates, so it does not collide.
-  - `Cargo.lock`, `generated/rust/loom/**`: every story that changes `ess/` or adds a crate.
-- **Safety fact:** the change adds a domain and a crate and edits no existing declaration, so no existing caller changes. `loom.bindings` landed as the same three `ess/` files (`501c332a`) plus a crate depending on `loom = { path = "../../generated/rust/loom" }` (`crates/loom-bindings/Cargo.toml:16`) — step 2, unproven. Whether `task crd-drift` or `task docs-check` move beyond the new domain's own page was not walked.
+  - `story:bound-program-result-table`, `story:standing-tree-rests-quiescent`: no shared file by
+    typed scope or text. The only overlap is `generated/rust/loom/**`, which the first regenerates
+    through `ess/domains/bindings.yaml`; regenerate after merge. `crates/loom-tree` and
+    `ess/domains/tree.yaml` are absent from this tree and come from `story:tree-daemon` (draft).
+  - `story:engineering-protocols-dependency-removed`: `Cargo.lock` (it removes four packages and
+    four dependency lines, this adds a package and two lines). Different hunks, but any merge
+    regenerates the lock.
+  - `ess/system.yaml`, `ess/ess-inputs.yaml`: `story:tree-run-command`,
+    `story:gates-document-evaluated-in-the-governor`, `story:observe-executor-reads-workspace-files`
+    (no `depends_on` path to this story); `story:autonomy-grant-table` (ordered after this one).
+    `story:engine-configuration-document`, a draft, declares `loom.engine` in `ess/system.yaml`
+    in its body and has no scope entry.
+  - `ess/ess-inputs.yaml` alone: `story:agent-selects-the-connectors-relay`,
+    `story:send-input-in-the-declared-shape`.
+  - `crates/loom-executor/tests/crate_names.rs`: `story:tree-run-command` (both bump the length and
+    add a tuple).
+  - `crates/loom-conformance/src/lib.rs`: `story:tree-run-command`,
+    `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`,
+    `story:flow-limits-recorded-as-events`. `loom-conformance/Cargo.toml` also:
+    `story:send-input-in-the-declared-shape`.
+  - `Cargo.lock`: also `story:gate-program-identity-bound-to-spawn`,
+    `story:observe-executor-reads-workspace-files`, `story:observe-git-changed`.
+  - `ess/domains/decision.yaml`, `crates/loom-decision/**`: the epic's stories
+    `decided-record-written-then-recorded`, `decider-port-and-grounding-check`,
+    `decision-inbox-commands`, `decision-routing-by-holder`, `escalate-when-conditions`,
+    `goals-grounds-and-free-answers`, `goals-entries-from-a-resolved-document`,
+    `non-independent-review-becomes-decision-request`, `silence-and-expiry-at-a-host-tick`,
+    `autonomy-grant-table`. Their `depends_on` ordering was not walked again; the stored "19 of
+    20 ordered" is unchanged.
+  - Now delivered, so removed from the list: `story:hash-chained-run-log`,
+    `story:boundary-admits-declared-http-egress`, `story:ess-format-37`.
+- **Safety fact:** the change adds a domain and a crate and edits no existing declaration, so no
+  existing caller changes. `loom.runlog` landed as the same three `ess/` files (`81a81886`) plus a
+  crate on `loom = { path = "../../generated/rust/loom" }` (`crates/loom-runlog/Cargo.toml:15`) —
+  step 2, unproven. Whether `task crd-drift` moves beyond the new domain's own outputs was not
+  walked.

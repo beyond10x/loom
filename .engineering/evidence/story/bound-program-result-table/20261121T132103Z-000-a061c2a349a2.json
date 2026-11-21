@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T13:21:03Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-program-result-table",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "story revision 16: Acceptance rewritten to one outcome and one named test or command per line; lines for no runner, the default run_child, a local runner with another reason, the flag's reason; task check line replaced by task drift and the bound_program test command; all five findings read as closed by the critic in round 2",
+    "review": "review-result:bound-program-result-table-w7-acceptance-1",
+    "outcome": "fixed"
+  }
+}
