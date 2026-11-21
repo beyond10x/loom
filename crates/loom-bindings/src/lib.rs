@@ -19,11 +19,15 @@
 mod decode;
 mod load;
 mod program;
+mod retry;
 mod tree;
 
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use retry::{
+    RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, retry_records,
+};
 
 use loom::bindings::BindingsRefusal;
 use std::fmt;

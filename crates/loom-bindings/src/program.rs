@@ -198,6 +198,9 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .current_revision(&self.case)
             .map_err(governor)?;
         let revisions = self.governor.revisions(&self.case).map_err(governor)?;
+        // After the run count and before anything starts: the records that send the action back,
+        // kept as one document, or an error with nothing started and nothing observed.
+        let feedback = crate::retry::feedback(self.governor, &self.case, binding, &self.store)?;
         let arguments = match self.arguments(binding, request, timeout) {
             Ok(arguments) => arguments,
             Err(outcome) => return Ok(outcome),
@@ -212,6 +215,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             Ok(child) => child,
             Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
         };
+        let child = crate::retry::given(child, feedback.as_ref(), self.runner.local_reason());
         // Read before the program starts, so the run's observation has an instant even when the
         // clock cannot be read after it.
         let started_at = instant(&SystemClock).map_err(EffectError::new)?;
@@ -226,6 +230,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             blob_sha256: None,
             timed_out: false,
             runner_refusal: None,
+            retry_of: feedback.map(|given| given.retry_of).unwrap_or_default(),
         };
         let mut blob_failure = None;
         match &answer {
@@ -551,7 +556,7 @@ fn named_twice(value: &commission_json::Value) -> Option<String> {
 /// that name, a link included, is replaced by the rename and never written through. A `blobs`
 /// that is not a directory, a link included, is refused, so nothing is written outside the store
 /// directory.
-fn keep_blob(store: &Path, digest: &str, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn keep_blob(store: &Path, digest: &str, bytes: &[u8]) -> std::io::Result<()> {
     let blobs = store.join(BLOBS);
     match std::fs::symlink_metadata(&blobs) {
         Ok(found) if found.file_type().is_dir() => {}
@@ -590,7 +595,7 @@ fn keep_blob(store: &Path, digest: &str, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(crate) fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .fold(String::new(), |mut hex, byte| {
@@ -632,6 +637,7 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
         "blob_sha256": run.blob_sha256,
         "timed_out": run.timed_out,
         "runner_refusal": run.runner_refusal,
+        "retry_of": run.retry_of,
     })
 }
 

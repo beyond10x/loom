@@ -213,7 +213,8 @@ fn document(check_program: &str, write: &str, members: &str) -> BindingsDocument
         write = argv(write),
     );
     let document = decode(&text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
-    check(&document, REGISTRATION, protocol()).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    check(&document, REGISTRATION, protocol())
+        .unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
     document
 }
 
@@ -894,8 +895,22 @@ fn a_record_held_by_another_case_is_not_a_retry_record() {
     let document = recorded_document(RETRY);
     open(&governor, "case-2", REGISTRATION, DRAFT_REVISION);
     open(&governor, "case-3", OTHER_REGISTRATION, DRAFT_REVISION);
-    let same = hold(&governor, "case-2", 1, "draft_check", DRAFT_REVISION, "invalid");
-    hold(&governor, "case-3", 2, "draft_check", DRAFT_REVISION, "invalid");
+    let same = hold(
+        &governor,
+        "case-2",
+        1,
+        "draft_check",
+        DRAFT_REVISION,
+        "invalid",
+    );
+    hold(
+        &governor,
+        "case-3",
+        2,
+        "draft_check",
+        DRAFT_REVISION,
+        "invalid",
+    );
     assert!(retries(&governor, writer(&document)).is_empty());
     // It is one for its own case.
     assert_eq!(
@@ -1158,7 +1173,10 @@ fn a_run_with_no_retry_records_has_an_empty_retry_of() {
     assert_eq!(runs.len(), 1, "{runs:#?}");
     assert_eq!(runs[0]["retry_of"], serde_json::json!([]));
     // The check's run was given none either.
-    assert_eq!(runs_of(&governor, CHECK)[0]["retry_of"], serde_json::json!([]));
+    assert_eq!(
+        runs_of(&governor, CHECK)[0]["retry_of"],
+        serde_json::json!([])
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1269,7 +1287,10 @@ fn a_record_the_binding_does_not_list_gives_the_writer_no_feedback() {
     assert_performed(&drive(&governor, &effects, LINT, "{}"));
     let held = governor.evidence(&CaseId(CASE.to_owned())).unwrap();
     assert_eq!(held.len(), 1);
-    assert_eq!(plain(&held[0].facts)["result"], serde_json::json!("invalid"));
+    assert_eq!(
+        plain(&held[0].facts)["result"],
+        serde_json::json!("invalid")
+    );
     assert_performed(&drive(&governor, &effects, WRITE, "{}"));
     assert_eq!(variable(&runner.writer_child()), None);
 }
@@ -1282,7 +1303,10 @@ fn an_argument_named_loom_retry_feedback_sets_no_variable() {
     let child = runner.writer_child();
     assert_eq!(variable(&child), None);
     assert!(
-        child.stdin().unwrap().starts_with(b"{\"LOOM_RETRY_FEEDBACK\""),
+        child
+            .stdin()
+            .unwrap()
+            .starts_with(b"{\"LOOM_RETRY_FEEDBACK\""),
         "the arguments reach the program as written"
     );
 }
