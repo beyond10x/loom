@@ -34,6 +34,10 @@
 //! that moves only the patch version, and never removing a path the SDK stability page lists
 //! that no earlier release deprecated;
 //! `.github/workflows/release.yml` runs it on every pushed tag (see `release`).
+//!
+//! `protocols-vendor --checkout <dir> --tag <tag>` rewrites `protocols/engineering/` and its
+//! `lock.json` from a local engineering-protocols checkout at a tag, reading Git objects only
+//! (see `protocols_vendor`).
 
 use b10x_loom_resource::crd;
 use clap::{Parser, Subcommand};
@@ -46,6 +50,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+mod protocols_vendor;
 mod release;
 
 /// Where the generated crate is committed, relative to the repository root.
@@ -141,6 +146,18 @@ enum Command {
         #[arg(long)]
         tag: String,
     },
+    /// Rewrite `<root>/protocols/engineering/` and its `lock.json` from the
+    /// `protocols/<name>/<major>.yaml` files of a tag in a local engineering-protocols checkout.
+    /// Reads Git objects only and never fetches: fetch the tag into the checkout first. A refusal
+    /// changes nothing under the root.
+    ProtocolsVendor {
+        /// A local Git checkout of engineering-protocols that holds the tag.
+        #[arg(long)]
+        checkout: PathBuf,
+        /// The tag to vendor; its commit and files come from the checkout's Git objects.
+        #[arg(long)]
+        tag: String,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -208,6 +225,9 @@ fn run(cli: Cli) -> Result<(), String> {
             &generated.unwrap_or_else(|| root.join(GENERATED)),
         ),
         Command::ReleaseCheck { tag } => release::release_check(&root, &tag),
+        Command::ProtocolsVendor { checkout, tag } => {
+            protocols_vendor::protocols_vendor(&root, &checkout, &tag)
+        }
     }
 }
 
