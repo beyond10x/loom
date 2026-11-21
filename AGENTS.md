@@ -245,7 +245,10 @@ moved without its digest fails the install step of every job in under 30 s.
 
 Needs Rust, Task, `ess`, Helm 3 (`task chart-check`) and bubblewrap (`/usr/bin/bwrap`).
 CI installs the backend before
-running the delegation-refusal tests. Run `cargo fetch --locked` before the gate, as CI does:
+running the delegation-refusal tests. Every workflow installs Rust 1.99.1, the toolchain the local
+gate runs on, and the pin moves by a story that also fixes the tests that depend on Cargo's layout
+(`adversary2_executor_guard.rs` finds its test binary by path); a local gate runs on the pinned
+version (`rustc --version`). Run `cargo fetch --locked` before the gate, as CI does:
 the offline dependency guard inspects the full graph, including platform-specific crates.
 Before a change is reported done, in this order:
 
