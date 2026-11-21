@@ -107,7 +107,8 @@ action, so a custom protocol needs no embedding host. The file is JSON:
 
 When the run picks that protocol, each action the governor admits starts its `argv` through the
 run's confinement, without a shell, in `--workspace` or in a private directory made for the run.
-Loom starts no bound program itself: it hands the command to the runner, which starts it. The
+It does not start in the directory `b10x-loom` ran in, and the private directory is removed after
+the run, so give the program and any file it writes as absolute paths. Loom starts no bound program itself: it hands the command to the runner, which starts it. The
 action's arguments arrive as one JSON document on standard input. The environment holds `PATH`
 alone, at the value `b10x-loom` has, and a program still running after `timeout_seconds` (60 when
 absent, at most 3600) is killed: under `linux` with every process it started, under `local` with

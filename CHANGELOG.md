@@ -46,6 +46,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `b10x-loom run --unconfined-bindings` with `--state` is refused, exit 2 (story:bound-commands-run-confined)
 - A bound program ended by a signal reads `<program> was refused by its runner: CapabilityUnserved: …`, no longer `<program> ended signal: …`; under `local`, one whose output a process that left its group holds past the timeout reads the same refusal, no longer `was killed after N s` (story:bound-commands-run-confined)
 - Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
+- **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
+- A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
 
 ### Deprecated
 
