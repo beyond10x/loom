@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-registry-calls-replaced
 kind: story
-status: active
+status: implemented
 title: The governor fallback, the router and every test read the vendored catalog, and no Rust source names canon_engineering
 summary: builtin() over ProtocolCatalog::engineering, a lock refusal is InvalidProtocol (unit test over a tampered set); 12 test calls; RouterError::Registry removed (Breaking)
 tags:
@@ -21,11 +21,17 @@ scope:
 - confidence: cited
   path: crates/loom-governor/tests/adversary_governor.rs
 - confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w4_u3.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w4_u3_threads.rs
+- confidence: cited
   path: crates/loom-governor/tests/governed_case.rs
 - confidence: cited
   path: crates/loom-intake-router/src/classify.rs
 - confidence: cited
   path: crates/loom-intake-router/tests/adversary_classify.rs
+- confidence: cited
+  path: crates/loom-intake-router/tests/adversary_w20261121w4_u3.rs
 - confidence: cited
   path: crates/loom-intake-router/tests/classify.rs
 - confidence: cited
@@ -36,10 +42,11 @@ scope:
   path: crates/loom-protocols/tests/engineering_lock.rs
 - confidence: cited
   path: crates/loom-xtask/tests/release_check.rs
-revision: 9
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 8}
 - {from: "proposed", to: "active", at: "2026-11-21T07:20:39Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
+- {from: "active", to: "implemented", at: "2026-11-21T09:11:56Z", actor: "agent:sdc", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 
@@ -198,23 +205,19 @@ the text of `VendoredError`). Changing `release_pair`'s signature or `STABILITY_
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or **inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w4 from the unit's commits (`git diff --stat 63668a97 365ef1c8`: 17 files, 808 insertions, 120 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-governor` (`src/lib.rs` `builtin()` and its doc comments, plus 4 test call sites) — cited (story § Outcome, `lib.rs:1724-1742`, verified)
-- **Also on:** `crates/loom-intake-router` (`RouterError::Registry`, `src/classify.rs:32,56,81`; 6 test calls), `crates/loom-plugin/src/turn.rs:282`, `crates/loom-intake-slice/tests/adversary_case.rs:244,248` — cited
-- **Files (governor):** `crates/loom-governor/src/lib.rs` (`:51`, `:129-133`, `:913`, `:1617`, `:1627`, `:1699-1701`, `:1723-1742`), `crates/loom-governor/src/file_store.rs:15`, `tests/governed_case.rs:613,621`, `tests/adversary_governor.rs:1044`, `tests/adversary2_governor.rs:643` — cited; all lines read at `39f4da88` and say what the story says
-- **Files (router, slice, plugin):** `crates/loom-intake-router/src/classify.rs`, `tests/adversary_classify.rs:116,476,477`, `tests/classify.rs:91,145,146`, `crates/loom-intake-slice/tests/adversary_case.rs`, `crates/loom-plugin/src/turn.rs` — cited
-- **Files (xtask and protocols tests):** `crates/loom-xtask/tests/release_check.rs` (new test), `crates/loom-protocols/tests/engineering_lock.rs` (delete one test; the file does not exist at `39f4da88`, `story:engineering-protocol-lock` creates it) — cited
-- **Files (shared prose):** `CHANGELOG.md` (`[Unreleased]` has no `### Removed` section yet; the story adds it) — cited
-- **Symbols:** `builtin`, `builtin_in` (new), `outcome_order`, `protocol_ir`, `OpenError::{UnknownProtocol,InvalidProtocol}`, `ProtocolCatalog::{engineering,from_vendored}`, `ENGINEERING_FILES`, `ENGINEERING_LOCK`, `ProtocolEntry::{name,definition.yaml,model}`, `RouterError::{Registry,Catalog}` — cited. The last four exist at `39f4da88` except `from_vendored`, `ENGINEERING_FILES` and `ENGINEERING_LOCK`, which the lock story creates.
-- **Documents:** none outside doc comments in the files above. `ess/` untouched; the story says so (§ ESS first) and `ess/intake/domains/routing.yaml:247` is a comment — cited
-- **Confidence:** high. The story names every file and line, and I read each one in the tree. The only guessed part is the collision picture below.
-- **Would collide with, `story:engineering-protocol-lock`:** `crates/loom-protocols/tests/engineering_lock.rs` and the removal of `canon_engineering` from `loom-protocols/src/lib.rs:160,162`. Ordered: `depends_on` — cited
-- **Would collide with, `story:canon-0-9-0-pin`:** `loom-governor/src/lib.rs:129-132`, `governed_case.rs:9` and `adversary2_governor.rs` (it fixes `:685`). Ordered: mine → lock → pin, so the pin lands first — cited
-- **Would collide with, `story:engineering-protocols-dependency-removed`:** `governed_case.rs:9` (doc comment) and `CHANGELOG.md`. Ordered: it `depends_on` mine — cited
-- **Would collide with, `story:engineering-protocols-vendor-command`:** `CHANGELOG.md` only (its bullet, body line 115). Not ordered: it depends on the lock story, not on mine. Trivial merge in a house-rule file — cited
-- **Would collide with, `story:child-case-runtime`:** `loom-governor/src/lib.rs` (`opened` `:1577`, `snapshot` `:1661`, near my `:1617`, `:1627`, `:1699`) and `adversary2_governor.rs`. NOT ordered: it depends on `canon-0-9-0-pin`, not on mine. Hunks are separate but close — inferred from its Scope lines
-- **Would collide with, `story:bound-artifact-revisions` and `story:record-copy-between-cases`:** `loom-governor/src/lib.rs`. Neither is ordered against mine. `bound-artifact-revisions` edits `:1017-1046`, `:1415-1432` and `:1779-1791` and reads `adversary_governor.rs:75-112`; mine is `:1699-1742`. Likely clean — inferred
-- **Would collide with, `story:hash-chained-run-log`:** `loom-governor/src/lib.rs:175-179` (a `pub use`) and `file_store.rs:136-147`; mine is `file_store.rs:15`, a comment. NOT ordered. Likely clean — inferred
-- **Would collide with, `story:co-pinned-consumer-check`, `story:command-invocation-contract`, `story:generated-types-release-surface`, `story:release-binaries`:** `crates/loom-xtask/tests/release_check.rs`. Each adds tests there; none is ordered against mine (the first three depend on `release-names-embedder-breaks`, which is implemented). Appended tests, likely clean, but my story may change the shape of `release_pair` (see defects) — cited (their Files lines)
-- **Would collide with, `story:protocol-argument-schema` and `story:send-input-in-the-declared-shape`:** `loom-plugin/src/turn.rs`. They edit `:392-393` and `:800-834`; mine is `:282`. Not ordered, disjoint hunks — cited
+- **Primary surface:** `crates/loom-governor` — cited, 7 of the 17 changed files are under it (`src/lib.rs`, `src/file_store.rs`, two new test files, three existing test files); `crates/loom-intake-router` holds 4 more (`src/classify.rs`, one new test file, two existing test files)
+- **Files (ESS sources, generated output, manifests):** none — cited; no file under `ess/`, `generated/`, `protocols/` or any `Cargo.toml` or `Cargo.lock` is in the diff
+- **Files:** `crates/loom-governor/src/lib.rs` — cited, 196 lines (168 added, 28 deleted): the `# Evaluation` and `# Dependencies` docs describe the vendored catalog, the `builtin` fallback reads `ProtocolCatalog::engineering()` once per process (a `OnceLock`) and maps through the new `builtin_in`, a lock refusal is `InvalidProtocol` with the catalog's error text, and 4 new unit tests
+- **Files:** `crates/loom-governor/src/file_store.rs` — cited, 2 lines: the doc comment on `:15` says "a vendored engineering protocol"
+- **Files:** `crates/loom-intake-router/src/classify.rs` — cited, 156 lines (146 added, 10 deleted): `RouterError::Registry` removed with its `Display` and `source` arms, `classify` delegates to a new private `classify_in` that takes the catalog result, docs name the vendored catalog, and 1 new unit test
+- **Files:** `crates/loom-plugin/src/turn.rs` — cited, 8 lines: the `RouterError::Registry(_)` arm of `propose_case` goes
+- **Files (new tests):** `crates/loom-governor/tests/adversary_w20261121w4_u3.rs` (103 lines, 2 cases), `crates/loom-governor/tests/adversary_w20261121w4_u3_threads.rs` (54 lines, 1 case), `crates/loom-intake-router/tests/adversary_w20261121w4_u3.rs` (139 lines, 2 cases), the adversary pass's cases, committed unchanged
+- **Files (new test code in existing files):** `crates/loom-governor/src/lib.rs` (`mod tests`, 4 `#[test]`: the story's `a_catalog_failing_its_lock_is_invalid_protocol_naming_the_refusal`, `an_unknown_well_formed_name_under_a_refused_catalog_is_invalid_protocol`, `a_malformed_name_under_a_refused_catalog_is_unknown_protocol`, `the_engineering_catalog_holds_each_builtin_and_nothing_else`), `crates/loom-intake-router/src/classify.rs` (1 `#[tokio::test]`, `a_catalog_failing_its_lock_is_a_catalog_error_and_asks_no_model`), `crates/loom-governor/tests/governed_case.rs` (1 `#[test]`, `a_governor_without_a_catalog_refuses_an_unknown_protocol`), `crates/loom-xtask/tests/release_check.rs` (1 `#[test]`, `the_router_registry_removal_passes_release_check`)
+- **Files (existing tests):** `crates/loom-governor/tests/governed_case.rs` (42 lines: `software_change_ir` and `incident_ir` go through a new `vendored_ir` over the catalog, plus the new case), `crates/loom-governor/tests/adversary_governor.rs` (21 lines: `ir_of` reads the catalog, two doc comments), `crates/loom-governor/tests/adversary2_governor.rs` (8 lines: `ir_of` reads the catalog), `crates/loom-intake-router/tests/classify.rs` (19 lines: `registry()` and `assert_request` read the catalog), `crates/loom-intake-router/tests/adversary_classify.rs` (29 lines: `registry()` sorts the catalog's names by name then numeric major, the order check reads the catalog), `crates/loom-intake-slice/tests/adversary_case.rs` (17 lines: `adversary_every_registry_protocol_opens_on_a_git_workspace` iterates the catalog), `crates/loom-protocols/tests/engineering_lock.rs` (24 lines deleted: `the_vendored_files_equal_the_pinned_registry`), `crates/loom-xtask/tests/release_check.rs` (96 lines, 92 added: the helper `release_pair_with_page`, with `release_pair` now calling it with `STABILITY_PAGE`, the helper `unreleased_removed`, the constant `ROUTER_REGISTRY` and the new case) — cited
+- **Files (documents):** `AGENTS.md` (9 lines: § Governor says a governor without a catalog takes any other protocol from `ProtocolCatalog::engineering` and what a lock refusal is, and the router bullet names `RouterError::Catalog`), `CHANGELOG.md` (5 lines: a `Changed` bullet for the governor and a new `### Removed` section with the `**Breaking:**` bullet for `RouterError::Registry`) — cited
+- **Symbols:** public item removed: `loom_intake_router::RouterError::Registry` (and with it `loom_sdk::intake::router::RouterError::Registry`). No public item added or changed: `classify` and `CanonGovernor::open` keep their signatures. Private, added or changed: `loom_governor::builtin` (now `Result<ProtocolEntry, OpenError>`), `builtin_in` (new), `loom_intake_router::classify_in` (new), `checked_builtin_inputs` and `checked_builtin_independence` (`pub(crate)`, doc text only) — cited
+- **Not predicted and touched:** `crates/loom-governor/tests/adversary_w20261121w4_u3.rs`, `crates/loom-governor/tests/adversary_w20261121w4_u3_threads.rs`, `crates/loom-intake-router/tests/adversary_w20261121w4_u3.rs` (the adversary pass's cases). `AGENTS.md` (9 lines) was not in the typed scope; the stored Files line omits it and names `CHANGELOG.md` only. The private `classify_in` in `classify.rs` and the 4 governor unit tests beyond the named one are not in the stored text — cited
+- **Predicted and not touched:** none — cited; all 12 files of the typed scope are in the diff, and no manifest was touched, as the story's Files section says
+- **Review:** `review-result:engineering-registry-calls-replaced-adversary-1` (head `7ebac517`, not the unit head): green, 5 cases added, 221 executed, 0 red; two notes, both introduced: a mutant survives by reasoning (a refused catalog with a malformed name, or an unknown well-formed name, had only the `software-change@1` case; the diff's unit tests now hold both), and `the_engineering_catalog_holds_each_builtin_and_nothing_else` named more than it checked (the diff's version loops over all 10 vendored files). Stale prose noted: `AGENTS.md` line 463 ("never an unknown protocol") and test comments that say "ELS registry/built-in". No security review recorded.

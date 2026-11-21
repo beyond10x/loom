@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:confinement-opens-from-engine-config
 kind: story
-status: active
+status: implemented
 title: A host names Loom's confinement once in engine configuration, and local runs through Substrate's contract with the operator's reason
 summary: EngineConfinement and one constructor; local, with a reason, opened through confinement::open; linux stays on today's host-driver route until story:child-launches-through-confinement-adapters
 tags:
@@ -16,17 +16,29 @@ scope:
 - confidence: cited
   path: crates/loom-cli/src/main.rs
 - confidence: cited
+  path: crates/loom-cli/tests/loom_cli.rs
+- confidence: cited
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/confinement/child.rs
 - confidence: cited
+  path: crates/loom-intake-slice/src/confinement/engine.rs
+- confidence: cited
   path: crates/loom-intake-slice/src/executor.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/intent.rs
-- confidence: inferred
-  path: crates/loom-intake-slice/src/resume.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/run.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/confined_child.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/engine_confinement.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/security_w20261121w1_u1.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/security_w20261121w4_u1.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/security_w20261121w4_u1_pass2.rs
 - confidence: inferred
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
@@ -34,17 +46,16 @@ scope:
 - confidence: inferred
   path: generated/rust/intake
 - confidence: inferred
-  path: website/data/ess/intake-confinement.domain-graph.json
-- confidence: inferred
   path: website/docs/concepts/governor-and-intake.md
 - confidence: inferred
   path: website/docs/guides/run-an-intent.md
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 18
+revision: 30
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:44Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-11-21T07:20:39Z", actor: "agent:sdc", revision: 18, decided_on: {"recorded":{"review_outcome":6}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
+- {from: "active", to: "implemented", at: "2026-11-21T09:11:55Z", actor: "agent:sdc", revision: 30, decided_on: {"recorded":{"test_result":1,"review_outcome":8,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 
@@ -150,6 +161,27 @@ and `resume` rebuilds a runner from it (`crates/loom-cli/src/main.rs:670-671`). 
 for resume would come back under another adapter with no word. So `b10x-loom run` refuses
 `--confinement local` together with `--state`, exit 2, naming both flags (the command line's usage refusal: no refusal variant is declared for it): a `local` run is not
 kept for resume, and an operator who wants one runs again with the flags and the reason.
+
+The library refuses as well (`review-result:confinement-opens-from-engine-config-security-1`,
+finding 2): `HostText::of` (`crates/loom-intake-slice/src/intent.rs`), which serves
+`ResumeHost::check` and the code that stores a resume context, answers
+`SliceError::State("a local run is not kept for resume: …")` for a runner whose
+`TestRunner::local_reason` answers a reason, and stores nothing. That method has a default,
+`None`. A host's own runner that launches through a `local` runner and does not forward it has
+its run kept for resume as an unconfined run; forwarding it is the host's duty, stated in the
+method's documentation and on the SDK stability page
+(`review-result:confinement-opens-from-engine-config-security-2`, finding A, declined by the
+coordinator at the close of wave 2026-11-21-w4: a required method breaks every implementor of a
+listed trait).
+
+The reason is escaped wherever it is printed or recorded (`confinement::escape_reason`): control
+characters, the line and paragraph separators, every format character (Unicode category Cf, the
+bidirectional controls and the tag block among them) and the backslash, so a reason cannot forge
+or hide a line and two different reasons never record as the same text. The record holds the
+escaped text.
+
+Substrate permits `local` when `SUBSTRATE_CONFINEMENT_LOCAL` is unset: on a host that sets
+nothing, the flag and the reason are the whole opt-in.
 
 With `linux`, the constructor wraps today's `SubstrateRunner` unchanged. Launches stay on the
 host-driver route: `HostDriver::open` (`crates/loom-intake-slice/src/confinement.rs:402`), one
@@ -318,42 +350,25 @@ adapters and remote placement (`story:confines-on-macos-through-substrate`,
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w4 from the unit's commits (`git diff --stat 63668a97 281013d8`: 46 files, 3534 insertions, 100 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-intake-slice/src/confinement.rs` — cited. `SubstrateRunner` (`:126`), `run_child` (`:475`), `spawn_child` (`:525`), `impl TestRunner` (`:984`), `HostDriver::open` (`:402`), `adapter = Some("linux")` (`:256`)
-- **Files:** `crates/loom-intake-slice/src/executor.rs:1163-1197` — cited. `UnconfinedRunner`, plus `backend_name` (`:1201`) and `observation_confinement` (`:1208`), where `local_reason` is written
-- **Files:** `crates/loom-intake-slice/src/confinement/child.rs:118-241` — cited. `ConfinedChild` holds an `OpenDriver` and calls `HostDriver` pipe sessions; a `local` child needs another route behind the same return type of `spawn_child`
-- **Files:** `crates/loom-intake-slice/src/intent.rs:711,860` — cited. The two `confinement:` lines, from `backend_name(runner.backend())`; `ResumeHost.confinement: Backend` at `:356`
-- **Files:** `crates/loom-cli/src/lib.rs:777,985` — cited. `--confinement`, `enum Confinement`; `--local-reason` goes here
-- **Files:** `crates/loom-cli/src/main.rs:670,1017,1152,1331` — cited. Resume runner, `ResumeHost` mapping, run runner, `eprintln!("confinement: substrate")`
-- **Files:** `ess/intake/domains/confinement.yaml:12,70` — cited. `ConfinementRefusal` variants, `adapter` member; `EngineConfinement`, `LocalReasonMissing` and `local_reason` go here
-- **Files:** `crates/loom-intake-slice/tests/engine_confinement.rs` — cited, new, named by the story
-- **Files:** `CHANGELOG.md` — cited. `### Deprecated` for `loom_sdk::UnconfinedRunner`; the new `AppliedConfinement` field also wants a `**Breaking:**` bullet (precedent `d56d248b`)
-- **Generated:** `generated/rust/intake/` — inferred. `task intake-drift` forces it. Any intake ESS change rewrites the model digest in every file there (`d56d248b` touched all 16)
-- **Generated:** `website/docs/reference/ess/intake-*.md` (8 pages), `index.mdx`, `website/data/ess/intake-confinement.domain-graph.json` — inferred. `task docs-check` forces them, by the same digest
-- **Symbols:** `EngineConfinement` (new), `SubstrateRunner`, `UnconfinedRunner`, `TestRunner`, `AppliedConfinement`, `Backend`, `ConfinementRefusal`, `substrate_host::confinement::{open, AdapterRequest::Local, LocalRequest}` — cited
-- **Also likely:** `crates/loom-intake-slice/src/resume.rs:510,587` — inferred. `Backend` is kept as text "Substrate" or "None"; whether a `local` run can resume is not in the story
-- **Also likely:** `crates/loom-sdk/src/lib.rs:117,123` — inferred. The new type and constructor are exported beside `SubstrateRunner`
-- **Documents:** `website/docs/reference/sdk-stability.md:134` — inferred. The row listing the runners
-- **Documents:** `website/docs/guides/run-an-intent.md:131`, `website/docs/concepts/governor-and-intake.md:134` — inferred. Both say only `--confinement none` runs with the operator's rights; false after this story
-- **Documents:** `AGENTS.md` (confinement section, `:2018-2100`) — inferred. Durable context; `d56d248b` updated it
-- **Confidence:** medium. The code surface is read in the tree and the Substrate side verified at 0.21.0 (`adfde40`). The resume and SDK ripple and the clock-query acceptance are not settled by the story
-- **Would collide with (no `depends_on` path orders these with this story):**
-  - `story:decision-suspension-reason` (active) on `crates/loom-cli/src/lib.rs`; it edits `:83,116-150`, this story `:777,985` — cited
-  - `story:engineering-protocol-lock` (active) on every file under `generated/rust/intake/` (`protocols.rs` included) and the `intake-*.md` pages, through the digest headers; its `protocols.yaml` change regenerates them — inferred
-  - `story:hash-chained-run-log` (active): no shared path; both touch only the house-rule files `CHANGELOG.md` and `AGENTS.md` — cited
-  - `story:approval-decisions-resume-held-runs`: `cli/src/lib.rs`, `main.rs`, `intent.rs`, and the intake ESS — cited
-  - `story:decisions-resume-the-held-run`: `cli/src/lib.rs`, `main.rs`, `resume.rs`, `sdk-stability.md`, and the intake ESS — cited
-  - `story:question-and-outcome-decisions-hold-runs`: `cli/src/lib.rs`, `main.rs`, `resume.rs`, and the intake ESS — cited
-  - `story:secrets-subcommand`: `cli/src/lib.rs`, `main.rs`, `generated/rust/intake`, and the intake ESS — cited
-  - `story:approvals-supplied-to-canon-evaluation`: `cli/src/lib.rs`, `main.rs` — cited
-  - `story:decision-inbox-commands`: `cli/src/lib.rs`, `main.rs`, `sdk/src/lib.rs`, `sdk-stability.md` — cited
-  - `story:agent-selects-the-connectors-relay`: `cli/src/lib.rs`, `main.rs`, `sdk/src/lib.rs`, `sdk-stability.md` — cited
-  - `story:connectors-relay-client`: `sdk/src/lib.rs`, `sdk-stability.md` — cited
-  - `story:silence-and-expiry-at-a-host-tick`: `cli/src/lib.rs` — cited
-  - `story:engineering-protocols-dependency-removed`: `sdk-stability.md` — cited
-  - `story:mantle-placement`: `crates/loom-cli` (a whole crate) — cited
-  - `story:python-test-profile`: `confinement.rs` — cited
-  - Ordered by a `depends_on` path (they depend on this story; transitively except the three direct ones): `story:bound-commands-run-confined` (direct), `story:child-launches-through-confinement-adapters` (direct), `story:substrate-daemon-runner` (direct, no shared path), `story:tcp-reachability-through-an-aperture`, `story:observe-executor-reads-workspace-files`, `story:child-case-runtime`, `story:tree-run-command`, `story:agent-node-run-records`, `story:tree-waits-open-decision-requests`, `story:tree-usage-and-model-budget`, `story:concurrent-cases-in-the-tree-daemon`, `story:daemon-continues-a-decided-request`, `story:flow-limits-recorded-as-events`, `story:run-caps-per-arrival`, `story:standing-tree-rests-quiescent`, `story:standing-tree-wakes-at-a-host-instant`, `story:goals-entries-from-a-resolved-document`, `story:goals-grounds-and-free-answers` — cited
-- **Safety fact:** a launch must start, read and wait inside one runtime, because `local` spawns its drain and reaper tasks on the caller's runtime (`local.rs:300-340`) and the constructor-built adapter is shared across launches; `run_child` and `run` use a runtime per call (`confinement.rs:570,606`), `ConfinedChild` owns its own (`child.rs:157`) — step 2, unproven
+- **Primary surface:** `crates/loom-intake-slice` — cited, 11 of the 46 changed files are under it (six in `src/`, one of them the new `src/confinement/engine.rs`; five in `tests/`). Beside it: `crates/loom-cli` 3 files, `crates/loom-sdk` 1, `generated/rust/intake` 16, `website` 12, `ess/intake` 1, and `AGENTS.md`, `CHANGELOG.md`
+- **Files (ESS sources):** `ess/intake/domains/confinement.yaml` (21 insertions, 3 deletions) — cited, the new enums `intake.confinement.ConfinementAdapter` (`Linux`, `Local`) and the struct `intake.confinement.EngineConfinement` (`adapter`, `local_reason`, `cgroup_root`), the variant `LocalReasonMissing` in `ConfinementRefusal`, the member `local_reason` of `AppliedConfinement`, and the comment on `adapter` and `facts` that says both are present on a `local` run
+- **Files (generated):** `generated/rust/intake/` (16 files: `Cargo.toml`, `PLAN.md`, `plan.json` and 13 files of `src/`) — cited, from the intake ESS generator; `src/confinement.rs` (26 insertions, 2 deletions) carries the new types, the other 12 `src/` files change by 2 lines each, the model digest
+- **Files (generated docs):** `website/docs/reference/ess/intake-{bindings,confinement,context,events,protocols,query,results,routing}.md` (8 pages; `intake-confinement.md` 17 insertions, 4 deletions, the others 1 line each), and `website/docs/reference/cli.md` (2 insertions, 1 deletion: the `--confinement` row and the new `--local-reason` row) — cited, from the ESS and CLI generators
+- **Files (source):** `crates/loom-intake-slice/src/confinement/engine.rs` — cited, new, 922 lines: `EngineRunner` with `open`, `preflight`, `run_child`, `spawn_child`, `child_path` and `impl TestRunner`, the `local` route (`LocalRoute`, `LocalChild`), the refusal mapping from Substrate's contract errors, and the deadline kill of the run's process group
+- **Files (source):** `crates/loom-intake-slice/src/confinement.rs` — cited, 95 insertions, 2 deletions: `mod engine`, the re-exports of `EngineRunner`, `ConfinementAdapter` and `EngineConfinement`, `TestRunner::label` and `TestRunner::local_reason` with defaults, `local_label`, `escape_reason` and the escape of format characters, line and paragraph separators and the backslash, `local_reason: None` on `SubstrateRunner`'s records, `Some(driver_record)` in `live_result`
+- **Files (source):** `crates/loom-intake-slice/src/confinement/child.rs` — cited, 120 insertions, 17 deletions: `ChildResult.driver_record` becomes `Option`; `ConfinedChild` becomes a route over the host-driver session and a `local` child, its five methods moved onto the route
+- **Files (source):** `crates/loom-intake-slice/src/executor.rs` — cited, 20 insertions, 1 deletion: `applied_label`, `local_reason` on the `UnconfinedRunner` record, `local_reason` in the observation JSON, and `TestRun::summary` printing the label
+- **Files (source):** `crates/loom-intake-slice/src/intent.rs` — cited, 15 insertions, 4 deletions: both `confinement:` lines print `runner.label()`; `HostText::of` refuses a runner that answers `local_reason`, so `ResumeHost::check` and `keep` refuse a `local` run with `SliceError::State`
+- **Files (source):** `crates/loom-intake-slice/src/run.rs` — cited, 1 insertion, 6 deletions: the `confinement:` line prints `runner.label()`
+- **Files (source):** `crates/loom-cli/src/lib.rs` — cited, 11 insertions, 2 deletions: `--local-reason` (required with `local`) and `Confinement::Local`, `none` marked deprecated
+- **Files (source):** `crates/loom-cli/src/main.rs` — cited, 70 insertions, 7 deletions: `usage_refused` (exit 2) for `--state` with `local` and for `--local-reason` without it, the `none` deprecation warning on standard error, the run runner built through `EngineRunner::open` with `preflight`, `confinement_refused` takes the label, resume refuses `local`
+- **Files (source):** `crates/loom-sdk/src/lib.rs` — cited, 6 insertions: exports `ConfinementAdapter`, `EngineConfinement`, `EngineRunner`
+- **Files (new tests):** `crates/loom-intake-slice/tests/engine_confinement.rs` (1250 lines, 32 cases, the story's test), `crates/loom-intake-slice/tests/security_w20261121w4_u1.rs` (589 lines, 11 cases) and `crates/loom-intake-slice/tests/security_w20261121w4_u1_pass2.rs` (156 lines, 4 cases), the two security passes' cases, committed
+- **Files (existing tests):** `crates/loom-cli/tests/loom_cli.rs` (87 insertions: the helper `refused` and four new cases, `local_confinement_is_offered_with_a_reason`, `local_without_a_reason_is_refused`, `a_local_run_is_not_kept_for_resume`, `none_prints_its_deprecation_naming_local`; 4 cases before, 8 after), `crates/loom-intake-slice/tests/confined_child.rs` (17 insertions, 4 deletions: reads `driver_record` as an `Option` with `.expect`), `crates/loom-intake-slice/tests/security_w20261121w1_u1.rs` (2 insertions, 1 deletion: the same)
+- **Files (documents):** `AGENTS.md` (23 insertions, 1 deletion: the engine-confinement paragraph, `UnconfinedRunner` named in the unconfined-record sentence), `CHANGELOG.md` (10 insertions: three Added bullets, three Changed bullets marked **Breaking:** for `AppliedConfinement.local_reason`, `ChildResult.driver_record` and `ConfinementRefusal::LocalReasonMissing`, and a new `### Deprecated` for `UnconfinedRunner` and `--confinement none`), `website/docs/reference/sdk-stability.md` (4 insertions, 3 deletions: the `TestRunner`, runners, `ConfinedChild` rows and a new row for `EngineRunner`), `website/docs/guides/run-an-intent.md` (11 insertions, 2 deletions), `website/docs/concepts/governor-and-intake.md` (5 insertions, 2 deletions)
+- **Symbols:** added — `loom_sdk::EngineRunner` with `open(&EngineConfinement)`, `preflight`, `run_child`, `spawn_child`, `child_path`; `EngineConfinement` and `ConfinementAdapter` (generated, re-exported by `confinement` and `loom_sdk`); `TestRunner::label` and `TestRunner::local_reason` (defaulted); `confinement::local_label`; `confinement::escape_reason`; `executor::applied_label`; `ConfinementRefusal::LocalReasonMissing`; `AppliedConfinement.local_reason`; in the CLI `RunArgs.local_reason` and `Confinement::Local`. Changed — `ChildResult.driver_record` from `substrate_wire::AppliedConfinement` to `Option<substrate_wire::AppliedConfinement>`. Removed — none; `UnconfinedRunner` and `--confinement none` stay, deprecated — cited
+- **Not predicted and touched:** `crates/loom-cli/tests/loom_cli.rs`, `crates/loom-intake-slice/src/confinement/engine.rs`, `crates/loom-intake-slice/src/run.rs`, `crates/loom-intake-slice/tests/confined_child.rs`, `crates/loom-intake-slice/tests/security_w20261121w1_u1.rs`, and the two security test files; `AGENTS.md`, `CHANGELOG.md`, `website/docs/reference/cli.md` and the eight `website/docs/reference/ess/intake-*.md` pages are house-rule files, the pages predicted as a group
+- **Predicted and not touched:** `crates/loom-intake-slice/src/resume.rs` (inferred; the library refusal went into `intent.rs`, and `resume.rs` keeps only `Substrate` and `None`), `website/data/ess/intake-confinement.domain-graph.json` (inferred; the generated graph did not change), `website/docs/reference/ess/index.mdx` (named in the story's Scope text, not in its typed scope)
+- **Review:** `review-result:confinement-opens-from-engine-config-security-1` (head `3cc79cbd`, red: three cases failed, four findings, the confinement line of `run.rs` and `executor.rs`, the resume refusal of the library, the Unicode line separators U+2028 and U+2029 in the reason, the scan for a second open point); `review-result:confinement-opens-from-engine-config-security-2` (head `37de3e91`, red: three cases failed, the first three findings answered for `EngineRunner`; open were a runner that wraps a `local` one without forwarding `local_reason`, invisible characters in the reason, and the backslash left unescaped, the subject of the last commit `281013d8`); plan-critic reviews of the story exist too (`-acceptance-c1`, `-design-c1`, `-design-edge-check`)

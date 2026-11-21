@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T08:20:19Z",
+  "actor": "agent:loom",
+  "artifact": "story:engineering-protocols-vendor-command",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/engineering-protocols-vendor-command 796b0fc3, 9dd940d7",
+    "review": "review-result:engineering-protocols-vendor-command-adversary-1",
+    "outcome": "fixed"
+  }
+}

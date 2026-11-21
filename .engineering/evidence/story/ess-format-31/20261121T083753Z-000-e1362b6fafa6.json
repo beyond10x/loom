@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T08:37:53Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-format-31",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/ess-format-31 4544b9a8; nothing found, the adversary's three cases committed unchanged",
+    "review": "review-result:ess-format-31-adversary-1",
+    "outcome": "no-op"
+  }
+}

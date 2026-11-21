@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocols-vendor-command
 kind: story
-status: active
+status: implemented
 title: loom-xtask protocols-vendor rewrites the vendored files and the lock from a local engineering-protocols checkout at a tag
 summary: Reads Git objects only, never fetches; writes the lock through loom_protocols::lock with the constant repository; tested on a temporary repository whose output loads through from_vendored
 tags:
@@ -21,11 +21,16 @@ scope:
 - confidence: cited
   path: crates/loom-xtask/src/protocols_vendor.rs
 - confidence: cited
+  path: crates/loom-xtask/tests/adversary_w20261121w4_u4.rs
+- confidence: cited
+  path: crates/loom-xtask/tests/adversary_w20261121w4_u4_pass2.rs
+- confidence: cited
   path: crates/loom-xtask/tests/protocols_vendor.rs
-revision: 11
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 10}
 - {from: "proposed", to: "active", at: "2026-11-21T07:20:40Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
+- {from: "active", to: "implemented", at: "2026-11-21T09:11:56Z", actor: "agent:sdc", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 
@@ -167,27 +172,17 @@ it runs by hand on a new tag, and its test runs in `task check`.
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w4 from the unit's commits (`git diff --stat 63668a97 fdc4e87a`: 9 files, 2178 insertions, 3 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-xtask` (a new `protocols_vendor` module and subcommand) — cited (story § Files; `crates/loom-xtask/src/main.rs:80` is the `Command` enum)
-- **Files:** `crates/loom-xtask/src/main.rs` — cited (new `Command` variant at `:80`, a `run` match arm in the `match` at `:170-210`, `mod protocols_vendor;` beside `mod release;`)
-- **Files:** `crates/loom-xtask/src/protocols_vendor.rs` (new) — cited
-- **Files:** `crates/loom-xtask/tests/protocols_vendor.rs` (new) — cited
-- **Files:** `crates/loom-xtask/Cargo.toml` — cited (`b10x-loom-protocols` by path, after `:11`)
-- **Files:** `Cargo.lock`, `AGENTS.md` (§ Protocol composition and system queries) — cited (house-rule files, left out of the `paths` block)
-- **Symbols:** `loom_protocols::lock::{REPOSITORY, locked_file, encode, decode}`, `ProtocolCatalog::from_vendored` — cited (story § Outcome; all declared by `story:engineering-protocol-lock`, none exist in the tree today)
-- **Symbols:** `Command` (`crates/loom-xtask/src/main.rs:80`), `run` (`:165`), `find_root` (`:214`), `Cli.root` (`:71`) — cited
-- **Files:** `crates/loom-intake-slice/tests/host_git_hardening.rs` — cited (revision e5r3: `protocols_vendor.rs` is added to its `helpers` list, `:479-481`, because the module has its own byte-returning git helper)
-- **Not touched:** `crates/loom-xtask/src/release.rs` — cited (revision e5r3: `release::git` is not reused, since it decodes lossily)
-- **Documents:** `AGENTS.md` § Protocol composition and system queries — cited
-- **Confidence:** high for the five named files, because the story lists them. Medium for the whole change, because the story does not say how the module starts `git`, and the tree's rule on that is unmet by the story as written.
-- **Would collide with:**
-  - `crates/loom-xtask/src/main.rs`: `story:consumer-sdk-paths` (draft, `consumer-paths` subcommand, its scope names `main.rs`) — cited. No `depends_on` path orders the two: `consumer-sdk-paths` has only `decomposes`/`serves` edges. Both add a `Command` variant, a `run` arm and a `mod` line, so they conflict.
-  - `crates/loom-xtask/src/release.rs`: no longer touched (revision e5r3), so no collision with `story:command-invocation-contract`, `story:co-pinned-consumer-check` or `story:generated-types-release-surface` there.
-  - `crates/loom-xtask/Cargo.toml`: no other open story names it — inferred (grep of the planning store: only this story and the implemented `loom-agent-resource-domain`).
-  - `Cargo.lock`: `story:engineering-protocols-dependency-removed` — cited. Ordered: it `depends_on` this story (graph). `story:canon-0-9-0-pin` also moves `Cargo.lock`. It is ordered before this story through `engineering-protocol-lock depends_on canon-0-9-0-pin`, and this story `depends_on` the lock.
-  - `AGENTS.md` § Protocol composition and system queries: `story:engineering-protocols-dependency-removed` edits § Boundary, § Governor and § Connectors, not the same section, and is ordered after this story. `story:engineering-protocol-lock` edits `AGENTS.md`, and this story `depends_on` it (ordered).
-  - `crates/loom-xtask/tests/` (siblings, not the same file): `story:engineering-registry-calls-replaced` edits `tests/release_check.rs`. It has no edge to this story and no shared file, so it does not collide.
-- **Safety fact:** the new git start is safe only if it goes through a helper `host_git_hardening.rs` accepts. `every_host_git_command_goes_through_a_hardened_helper` scans `crates/*/src` for `Command::new(` with `git` in the argument (`crates/loom-intake-slice/tests/host_git_hardening.rs:441-478`), allows exactly three helper files each starting git once (`:480-495`), and requires `core.hooksPath=` and `core.fsmonitor=false` in each (`:497-504`) — step 2 (file:line read), unproven
-- **Safety fact:** adding `b10x-loom-protocols` to `loom-xtask` introduces no dependency-edge check. `crate_names.rs` lists `("loom-xtask", "loom-xtask", None)` at `:119` and checks names only, and nothing in `crates/*/tests` scans `loom-xtask`'s manifest — step 2 (`git grep`), unproven. The same grep did not read `pinned_consumer.rs`, which runs `cargo tree --duplicates` on `consumers/pinned` and not on the workspace.
+- **Primary surface:** `crates/loom-xtask` — cited, 6 of the 9 changed files are under it (`Cargo.toml`, `src/main.rs`, the new `src/protocols_vendor.rs`, three new test files)
+- **Files (ESS sources, generated output):** none — cited; no file under `ess/`, `generated/` or `protocols/` is in the diff
+- **Files (manifests):** `crates/loom-xtask/Cargo.toml` (1 line: `b10x-loom-protocols` by path, no sha256 crate), `Cargo.lock` (1 line: `b10x-loom-protocols` in the `loom-xtask` dependency list) — cited
+- **Files:** `crates/loom-xtask/src/protocols_vendor.rs` — cited, new, 387 lines: the `protocols-vendor` command, its own byte-returning `git` helper, a Git 2.44.0 gate, and 3 unit tests
+- **Files:** `crates/loom-xtask/src/main.rs` — cited, 20 lines: `mod protocols_vendor;`, a `Command::ProtocolsVendor { checkout, tag }` variant with its help text, its `run` arm, and a paragraph in the crate doc
+- **Files (new tests):** `crates/loom-xtask/tests/protocols_vendor.rs` (788 lines, 18 cases, the story's temporary-repository test), `crates/loom-xtask/tests/adversary_w20261121w4_u4.rs` (500 lines, 9 cases) and `crates/loom-xtask/tests/adversary_w20261121w4_u4_pass2.rs` (445 lines, 7 cases), the two adversary passes' cases, committed unchanged
+- **Files (existing tests):** `crates/loom-intake-slice/tests/host_git_hardening.rs` — cited, 29 lines (28 added, 1 deleted): `protocols_vendor.rs` joins `helpers` in `every_host_git_command_goes_through_a_hardened_helper`, and the test also requires the vendor helper to hold `protocol.ext.allow=never`, `protocol.allow=never`, `--no-replace-objects`, `GIT_NO_LAZY_FETCH=1` and `GIT_CONFIG_GLOBAL=/dev/null`
+- **Files (documents):** `AGENTS.md` (10 lines: § Protocol composition and system queries gives the three steps, fetch the tag, run `protocols-vendor`, run `task check`, and the Git 2.44.0 minimum) — cited
+- **Symbols:** public item added: none; `loom-xtask` is a binary crate. Crate-private: `protocols_vendor::protocols_vendor(root, checkout, tag)` (`pub(crate)`), the `Command::ProtocolsVendor` variant with its two `--checkout` and `--tag` arguments (the `protocols-vendor` subcommand), and private helpers `lock_of`, `refusal`, `destination`, `supported_git`, `commit`, `protocol_paths`, `write`, `git` and the constants `VENDORED`, `UPSTREAM`, `MINIMUM_GIT`. No symbol changed or removed — cited
+- **Not predicted and touched:** `crates/loom-xtask/tests/adversary_w20261121w4_u4.rs`, `crates/loom-xtask/tests/adversary_w20261121w4_u4_pass2.rs` (the adversary passes' cases). `Cargo.lock` and `AGENTS.md` are in the stored Files and Scope text but not in the typed scope — cited
+- **Predicted and not touched:** none — cited; all 5 files of the typed scope are in the diff, and `crates/loom-xtask/src/release.rs` is untouched as the story says
+- **Review:** `review-result:engineering-protocols-vendor-command-adversary-1` (head `8fc87502`): red, 89 cases executed, 1 red, 9 findings introduced: a branch named `refs/tags/<tag>` was vendored as the tag (fixed in the diff: the tag is resolved with `show-ref`), seven guards without a case, now covered, and one wrong doc comment on transports. `review-result:engineering-protocols-vendor-command-adversary-2` (head `9dd940d7`): green, 99 cases executed, 0 red, 4 notes introduced: the doc comment at `protocols_vendor.rs:293-295` claims too much, `AGENTS.md` did not name Git 2.44.0 (the diff's text does), the hardening check matches setting names without values (the diff's version matches `GIT_NO_LAZY_FETCH=1` and `GIT_CONFIG_GLOBAL=/dev/null` with values), and a tag pointing at a tree is refused with the missing-tag message. No security review recorded.

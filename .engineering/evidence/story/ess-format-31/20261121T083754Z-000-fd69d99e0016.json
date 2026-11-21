@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T08:37:54Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-format-31",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 8b69b0b6..4544b9a8",
+    "reference": "1 file: the adversary's 3 cases in crates/loom-resource/tests/adversary_w20261121w4_u2.rs, committed as delivered (fmt check passed on it), no ignore attribute; the unit as a whole changes 11 files: ess/system.yaml, one comment in ess/domains/resource.yaml, four generated files of generated/rust/loom, two test files, one comment in loom-session-executor, AGENTS.md and one CHANGELOG bullet with no Breaking line (no answer changed); no file under .engineering, ess/intake, ess/commission or a manifest; unit gate on 4544b9a8: fmt, clippy exit 0, 279 tests passed 0 failed; on 8b69b0b6: 311 operator and conformance tests passed, task spec, ess-gate, drift, no-hand-model, conform, docs-check, crd-drift exit 0"
+  }
+}

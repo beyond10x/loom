@@ -2,15 +2,17 @@
 format: aep.planning-md/3
 id: story:ess-format-31
 kind: story
-status: active
+status: implemented
 title: Loom's main ESS system declares ess/31 on the pinned ess 0.86.0, with the raise's resource-command changes taken
-summary: ess/system.yaml from ess/25 to ess/31, regenerated; five loom.resource commands gain an existence check and a refusal order, with tests and Breaking notes; the intake and commission systems and the toolchain unchanged
+summary: ess/system.yaml from ess/25 to ess/31, regenerated (four generated files, +34/-6); five loom.resource commands gain an up-front existence check that answers as their first branch did; one regression test, no Breaking note; the intake and commission systems and the toolchain unchanged
 tags:
 - sdc
 relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 scope:
+- confidence: cited
+  path: crates/loom-resource/tests/adversary_w20261121w4_u2.rs
 - confidence: cited
   path: crates/loom-resource/tests/record.rs
 - confidence: cited
@@ -19,10 +21,11 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: cited
   path: ess/system.yaml
-revision: 8
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 - {from: "proposed", to: "active", at: "2026-11-21T07:20:39Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
+- {from: "active", to: "implemented", at: "2026-11-21T09:11:56Z", actor: "agent:sdc", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 
@@ -132,35 +135,16 @@ itself (`story:decision-request-entity`). Any change of a command's outcome.
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or **inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w4 from the unit's commits (`git diff --stat 63668a97 4544b9a8`: 11 files, 386 insertions, 21 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `ess/system.yaml` (line 1, `format: ess/25` to `ess/31`) and the regenerated `generated/rust/loom/` — cited, story Outcome and ESS first
-- **Files:** `ess/system.yaml:1` — cited
-- **Generated (listed for this story only):** `generated/rust/loom/src/behaviour.rs` (+31/-3), `src/run.rs` (+1/-1), `plan.json` (+1/-1), `PLAN.md` (+1/-1) — cited, probe and regeneration at `sweep31`
-- **Test file:** `crates/loom-resource/tests/record.rs` — inferred. `a_resource_the_record_does_not_hold_is_not_found` (`:393-415`) already covers three of the five; `ObserveScheduledRun` has no absent-row test anywhere
-- **Symbols:** `DeleteLoomAgent`, `ObserveDeployment`, `ObserveRun`, `ObserveScheduledRun`, `RecordCheck`, `LoomAgentRecord` — cited. `LoomAgentRecord` is `crates/loom-resource/src/lib.rs:155,179,214,242,268`, the wrapper both callers go through
-- **Documents:** `AGENTS.md:993`, `AGENTS.md:1663` — cited. Neither reason holds at `ess/31` as written (see defects)
-- **Confidence:** high on the file set (the story and the diff name every file). The semantic claim is contradicted by the code (see Safety fact)
-- **Would collide with, `ess/system.yaml`:**
-  - `story:decision-request-entity` — cited. It has `depends_on` this story, so it is ordered
-  - `story:autonomy-grant-table` — cited. Ordered through `decision-request-entity`
-  - `story:hash-chained-run-log` — cited. No `depends_on` path either way
-  - `story:tree-run-command` — cited. No `depends_on` path either way
-  - `story:engine-configuration-document` — inferred. Prose only, no scope entry, no path
-  - Each of the last three edits the `domains:` list, not line 1, so the merge is mechanical
-- **Would collide with, `generated/rust/loom/{plan.json,PLAN.md,src/behaviour.rs,src/run.rs}`:** any story that edits `ess/domains/*.yaml` — inferred. `story:egress-by-host`, `story:secret-files-several-secrets`, `story:boundary-admits-declared-http-egress`, `story:command-home-survives-pod-replacement`, `story:agent-node-run-records` and `story:revalidation-membership-conformance` have no `depends_on` path to or from this story; `story:flow-limits-recorded-as-events` is ordered after it. Whoever lands second regenerates
-- **Would collide with, `crates/loom-resource/tests/record.rs`:** no other open story scopes it — cited, `.engineering/planning/story/*.md` scope lines
-- **Callers of the five commands, and whether the new check or order can change what each observes (all none):**
-  - `crates/loom-resource/src/lib.rs:155,179,214,242,268` (wrappers). The match arms for `Unknown` do nothing (`:167,203,256,277`) — cited, none
-  - `crates/loom-operator/src/reconcile.rs:281` (`delete_loom_agent`, `let _ =`; the row may be absent) — cited, none
-  - `reconcile.rs:372` (`forget`, `let _ =`; callers `:1395`, `:1674`, `tests/reconcile.rs:845`) — cited, none
-  - `reconcile.rs:1429` (`?`; row present, guarded by `recorded` at `:1416`) — cited, none
-  - `reconcile.rs:1297` (`observe_scheduled_run`, `?`), `:1460` (`record_check`, `?`; after `apply`, `Stale` returns at `:1445`), `:1540`, `:1566`, `:1600` (`observe_run`, `?`), `:1590` (`observe_deployment`, `?`). The row is applied earlier in the same reconcile; no outcome is read — cited, none
-  - `crates/loom-operator/tests/*` (118 reconcile calls in `reconcile.rs`, plus the `adv*` files) reach the commands only through `reconcile`/`forget` — inferred, none
-  - `crates/loom-conformance/src/lib.rs:234-243` dispatches; `src/resource.rs:121,215,281,370,412` map `Unknown` to the scenario answer `unknown` (`:134,225,294,383,426`) — cited, none
-  - `ess/scenarios/resource-schedule/runs-reported-in-turn.yaml:15,19,23` and `a-run-past-its-deadline-is-reported-failed.yaml:15,19` use `RecordCheck` and `ObserveScheduledRun` after `ApplyLoomAgent`, so the row is present — cited, none
-  - `crates/loom-resource/tests/record.rs:123,137,260-267,393-415,483-487,497+` (the five commands, 38 hits): the absent-row asserts at `:396,:402,:408,:484` expect `Unknown`, as today — cited, none
-  - `crates/loom-cli`, `crates/loom-sdk`: no call — cited. `loom-cli` depends on `loom-resource` only for `stage_files`
-- **Safety fact (existence check):** the code before the raise already answers `Unknown { LoomAgentNotFound }` for an absent row, as the first branch of each command: `generated/rust/loom/src/behaviour.rs:499` (`DeleteLoomAgent`), `:517`, `:598`, `:674`, `:734`. `behaviour.rs` at `HEAD` is byte-identical to `orig`. The regenerated up-front `is_none()` check returns the same value before any other branch, so no outcome or stored row changes — walked, level 3, unproven
-- **Safety fact (refusal order):** the only other `behaviour.rs` hunks are `RecordSelection` (`:848`) and `RequestArguments` (`:884`), both in `loom.run`. `RecordSelection` moves `let _ = &related;` and adds an empty `{}` block. `RequestArguments` changes one comment. The generated `RequestArguments` is not used: `crates/loom-executor/src/arguments.rs:302` is hand-written. `RecordSelection` runs generated at `arguments.rs:294` and has no present-related refusal, so it is behaviour-identical — walked, level 3, unproven
-- **`SelectAction`:** the contract text gains a clause (`run.rs:1326`, `plan.json:1815`, `PLAN.md:341`). Its implementor is hand-written (`crates/loom-conformance/src/lib.rs:11`, `executor::selection::select_action`) and is not touched — cited
+- **Primary surface:** `ess/` and its regeneration `generated/rust/loom/` — cited, 6 of the 11 changed files are under them (`ess/system.yaml`, `ess/domains/resource.yaml`, and the four generated files); the other five are `crates/loom-resource` (2), `crates/loom-session-executor` (1), `AGENTS.md` and `CHANGELOG.md`
+- **Files (ESS sources):** `ess/system.yaml` (1 line: `format: ess/25` to `format: ess/31`), `ess/domains/resource.yaml` (7 lines, 4 added and 3 removed: the comment above the command that takes no generation no longer gives `ess/25` as its reason; no declaration changes) — cited
+- **Files (generated, one line):** `generated/rust/loom/{PLAN.md,plan.json,src/behaviour.rs,src/run.rs}` by `task generate` from `ess/`, +34/-6 lines (`behaviour.rs` 34 changed lines, 31 added and 3 removed; the other three 1 line each) — cited
+- **Files (source):** `crates/loom-session-executor/src/lib.rs` — cited, 8 lines (4 added, 4 removed): the doc comment on `impl RecordFailedSessionBehavior for SessionRecord` no longer gives `ess/25` as its reason; no code changes
+- **Files (new tests):** `crates/loom-resource/tests/adversary_w20261121w4_u2.rs` (280 lines, 3 cases), the adversary pass's cases, committed unchanged — cited
+- **Files (existing tests):** `crates/loom-resource/tests/record.rs` (57 lines, 55 added and 2 removed: the import list gains `ObserveScheduledRun` and `ObserveScheduledRunOutcome`, and one case is added, `a_scheduled_run_of_a_resource_the_record_does_not_hold_is_not_found`, taking the file from 7 to 8 `#[test]`; no assertion edited) — cited
+- **Files (documents):** `AGENTS.md` (12 lines, 7 added and 5 removed: the reason the observe command takes no generation, and the reason `RecordFailedSession` leaves `files` undetermined, at `:1014` and `:1719` where the story said `:993` and `:1663`), `CHANGELOG.md` (1 line: one `### Changed` bullet naming `ess/31` and the story, no `**Breaking:**`) — cited
+- **Symbols:** no public symbol added, changed or removed — cited; `src/` changes only a doc comment in `loom-session-executor`, and the generated `behaviour.rs` changes only inside existing trait-impl bodies (an up-front existence check in `DeleteLoomAgent`, `ObserveDeployment`, `ObserveRun`, `ObserveScheduledRun`, `RecordCheck`, and a moved statement and an empty block in `RecordSelection` and `RequestArguments`); the `SelectAction` contract text in `run.rs` gains a clause
+- **Not predicted and touched:** `CHANGELOG.md`, `crates/loom-resource/tests/adversary_w20261121w4_u2.rs`; `ess/domains/resource.yaml` and `crates/loom-session-executor/src/lib.rs` are in the typed scope but not in the stored Scope section (the Outcome names them)
+- **Predicted and not touched:** none; the stored Scope's callers list (`crates/loom-resource/src/lib.rs`, `crates/loom-operator/src/reconcile.rs`, `crates/loom-conformance/src/resource.rs`, `ess/scenarios/resource-schedule/*`) was read, not predicted to change
+- **Review:** `review-result:ess-format-31-adversary-1` — adversary pass 1 on head `8b69b0b6`: green, no finding; 3 cases added (46 passed in `b10x-loom-resource`, 43 before), the four corrected `ess/25` reasons probed true, no `**Breaking:**` owed
