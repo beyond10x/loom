@@ -112,6 +112,11 @@ const COVER_TABLE: [(&str, &str); 17] = [
         "loom.decision.RecordProduced/outcome/produced-conflict",
         PRODUCED,
     ),
+    // The conformance run checks no invariant after an authored scenario's steps: a
+    // record_produced that leaves default_on_silence beside a weak recommendation passes it. The
+    // invariant after `recorded` and after `already-recorded` is tested by
+    // `the_stored_request_keeps_every_invariant_after_recorded_and_already_recorded` in
+    // `crates/loom-decision/tests/decision_request.rs`.
     (
         "loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/recorded",
         PRODUCED,

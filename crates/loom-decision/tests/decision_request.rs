@@ -652,6 +652,82 @@ fn a_produced_record_is_recorded_once_and_another_is_refused() {
     assert_eq!(store, before, "the first record stands");
 }
 
+/// The three invariants of `loom.decision.DecisionRequest` (`ess/domains/decision.yaml:308-310`),
+/// each asserted on its own beside the generated check.
+fn assert_invariants(held: &DecisionRequestSnapshot, after: &str) {
+    let data = &held.data;
+    assert_eq!(data.broken_invariant(), None, "after {after}: {data:?}");
+    assert!(
+        data.recommended_option.is_none() || data.no_recommendation_reason.is_none(),
+        "after {after}: recommended_option beside no_recommendation_reason"
+    );
+    assert!(
+        data.recommended_answer.is_none() || data.no_recommendation_reason.is_none(),
+        "after {after}: recommended_answer beside no_recommendation_reason"
+    );
+    assert!(
+        !data.default_on_silence || data.recommendation_strength == Strength::Strong,
+        "after {after}: default_on_silence without a strong recommendation"
+    );
+}
+
+#[test]
+fn the_stored_request_keeps_every_invariant_after_recorded_and_already_recorded() {
+    let mut store = InMemoryDecisionStore::new();
+    opened(&mut store, person_approval(DR1));
+    let answer = recommend(
+        &mut store,
+        recommend_input(
+            DR1,
+            Strength::Moderate,
+            false,
+            vec![ground()],
+            CheckVerdict::Verified,
+        ),
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, RecommendOutcome::Recommended { .. }),
+        "{answer:?}"
+    );
+    decide(
+        &mut store,
+        decide_input(DR1, "A", "operator", PrincipalKind::Person),
+    )
+    .expect("applied");
+    let decided = stored(&store, DR1);
+    assert_eq!(decided.data.recommended_option, Some(letter("A")));
+    assert_eq!(decided.data.recommendation_strength, Strength::Moderate);
+    assert_invariants(&decided, "decided");
+
+    let answer = record_produced(
+        &mut store,
+        RecordProduced {
+            request_id: id(DR1),
+            produced: produced(KEY),
+        },
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, RecordProducedOutcome::Recorded { .. }),
+        "{answer:?}"
+    );
+    let recorded = stored(&store, DR1);
+    assert_eq!(recorded.state, DecisionRequestState::Decided);
+    assert_invariants(&recorded, "recorded");
+
+    let answer = record_produced(
+        &mut store,
+        RecordProduced {
+            request_id: id(DR1),
+            produced: produced(KEY),
+        },
+    )
+    .expect("applied");
+    assert_eq!(answer, RecordProducedOutcome::AlreadyRecorded);
+    assert_invariants(&stored(&store, DR1), "already-recorded");
+}
+
 #[test]
 fn leaving_an_outcome_untaken_produces_no_record() {
     let mut store = InMemoryDecisionStore::new();
@@ -1456,11 +1532,11 @@ fn no_sequence_of_commands_breaks_an_invariant_or_writes_on_a_refusal() {
             );
             assert!(
                 held.recommended_option.is_none() || held.no_recommendation_reason.is_none(),
-                "seed {seed}, step {step}: decision.yaml:275"
+                "seed {seed}, step {step}: decision.yaml:308"
             );
             assert!(
                 !held.default_on_silence || held.recommendation_strength == Strength::Strong,
-                "seed {seed}, step {step}: decision.yaml:277"
+                "seed {seed}, step {step}: decision.yaml:310"
             );
         }
     }

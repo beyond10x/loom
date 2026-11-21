@@ -222,7 +222,11 @@ arranges no prefixed principal for Decide's kind guards and no Decided request w
 record selects `RecordProduced`'s `recorded`, `already-recorded` or `produced-conflict`
 (ESS-SYNTH-003: "no candidate of the 11 tried satisfies `loom.decision.DecisionRequest` stored
 decided_option,options,produced_record selecting this branch"); it still synthesizes
-`option-produces-none` from a Decided request.
+`option-produces-none` from a Decided request. The conformance run checks no invariant after the
+steps of an authored scenario, so a cover of an `invariant/after/` occurrence needs a test of its
+own: the invariant after `recorded` and after `already-recorded` is tested by
+`the_stored_request_keeps_every_invariant_after_recorded_and_already_recorded` in
+`crates/loom-decision/tests/decision_request.rs`.
 
 No story is implemented while the gate is red, whether or not it edits `ess/`. The `UNMAPPED:`
 scan stands in for ESS until ESS refuses open entries itself: the `UNMAPPED:` scan is removed when
