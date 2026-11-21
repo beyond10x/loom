@@ -516,6 +516,23 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
             "source fetch helper omitted {setting}"
         );
     }
+    // The vendor helper reads a maintainer's checkout, whose own configuration may name an
+    // `ext::` promisor remote and allow `ext`: a `-c` for the same key outranks the repository,
+    // and no lazy fetch is made. Each setting is matched as a string literal, so a comment that
+    // names it does not count.
+    let vendor = std::fs::read_to_string(root.join(VENDOR_HELPER)).unwrap();
+    for setting in [
+        "\"protocol.ext.allow=never\"",
+        "\"protocol.allow=never\"",
+        "\"GIT_NO_LAZY_FETCH\"",
+        "\"--no-replace-objects\"",
+        "\"GIT_CONFIG_GLOBAL\"",
+    ] {
+        assert!(
+            vendor.contains(setting),
+            "protocols vendor helper omitted {setting}"
+        );
+    }
 
     // Substrate's pinned host driver implements its own Git source service. Loom never
     // enables that service. Every dependency path outside that exact foundation still

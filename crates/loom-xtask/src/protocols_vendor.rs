@@ -36,6 +36,9 @@ pub(crate) fn protocols_vendor(root: &Path, checkout: &Path, tag: &str) -> Resul
             checkout.display()
         ));
     }
+    // Before any other Git call: an older Git ignores `GIT_NO_LAZY_FETCH`.
+    let version = git(checkout, &["--version"]).map_err(|e| format!("git --version: {e}"))?;
+    supported_git(&String::from_utf8_lossy(&version))?;
     // A revision expression (`t1^0`, `t1~1`) would resolve to a commit the tag does not name.
     let tag_ref = format!("refs/tags/{tag}");
     if tag.is_empty() || git(checkout, &["check-ref-format", &tag_ref]).is_err() {
@@ -120,15 +123,55 @@ fn destination(root: &Path) -> Result<PathBuf, String> {
     Ok(target)
 }
 
-/// The commit `refs/tags/<tag>` names in the checkout, as 40 lowercase hex digits.
+/// The oldest Git whose `GIT_NO_LAZY_FETCH` the command relies on.
+const MINIMUM_GIT: (u64, u64, u64) = (2, 44, 0);
+
+/// Accepts the output of `git --version` when it names Git 2.44.0 or newer, read by the first three
+/// numbers of its version (`git version 2.44.0.windows.1`, `git version 2.45.2 (Apple Git-154)`);
+/// refuses an older Git, naming the version found, and an output it cannot read.
+fn supported_git(printed: &str) -> Result<(), String> {
+    let (major, minor, patch) = MINIMUM_GIT;
+    let found = printed.trim();
+    let refusal = |why: &str| {
+        format!(
+            "git: {why} {found:?}; this command needs Git {major}.{minor}.{patch} or newer, whose \
+             GIT_NO_LAZY_FETCH keeps a checkout's promisor remote from running; nothing is written"
+        )
+    };
+    let numbers: Option<Vec<u64>> = found
+        .strip_prefix("git version ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .map(|version| {
+            version
+                .split('.')
+                .take(3)
+                .map_while(|part| {
+                    let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
+                    digits.parse().ok()
+                })
+                .collect()
+        });
+    match numbers.as_deref() {
+        Some(&[a, b, c]) if (a, b, c) >= MINIMUM_GIT => Ok(()),
+        Some(&[_, _, _]) => Err(refusal("older Git")),
+        _ => Err(refusal("unreadable version")),
+    }
+}
+
+/// The commit `refs/tags/<tag>` names in the checkout, as 40 lowercase hex digits. The exact ref
+/// is resolved first: `rev-parse refs/tags/<tag>` would also find a branch of that name.
 fn commit(checkout: &Path, tag: &str, tag_ref: &str) -> Result<String, String> {
-    let reference = format!("{tag_ref}^{{commit}}");
-    let out = git(checkout, &["rev-parse", "--verify", "--quiet", &reference]).map_err(|_| {
+    let missing = || {
         format!(
             "tag {tag}: not in the checkout {}; fetch it there first (this command never fetches)",
             checkout.display()
         )
-    })?;
+    };
+    let object =
+        git(checkout, &["show-ref", "--verify", "--hash", tag_ref]).map_err(|_| missing())?;
+    let reference = format!("{}^{{commit}}", String::from_utf8_lossy(&object).trim());
+    let out =
+        git(checkout, &["rev-parse", "--verify", "--quiet", &reference]).map_err(|_| missing())?;
     let commit = String::from_utf8_lossy(&out).trim().to_owned();
     if commit.len() != 40
         || !commit
@@ -245,8 +288,11 @@ fn write(target: &Path, files: &[(String, Vec<u8>)], lock: &[u8]) -> Result<(), 
 /// Every `GIT_*` variable of the caller is removed (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
 /// object directories and the rest), so the repository read is the checkout's; neither system
 /// nor global configuration is read, hooks and the file-system monitor are off, replace refs are
-/// ignored, pathspecs are literal, no transport is allowed and no lazy fetch is made, so a missing
-/// object is an error and never a network call; standard input is null.
+/// ignored and pathspecs are literal; standard input is null. A missing object is an error, never a
+/// fetch: `GIT_NO_LAZY_FETCH` stops a lazy fetch (a Git older than 2.44.0, which ignores it, is
+/// refused before the first other call), `protocol.allow=never` is the default for every transport
+/// the checkout's configuration does not name, and `protocol.ext.allow=never` overrides the
+/// checkout's own setting for `ext`, the transport that starts a program.
 fn git(checkout: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
@@ -267,6 +313,8 @@ fn git(checkout: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
             "-c",
             "protocol.allow=never",
             "-c",
+            "protocol.ext.allow=never",
+            "-c",
             "credential.helper=",
         ])
         .args(args)
@@ -285,5 +333,48 @@ fn git(checkout: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
             args.join(" "),
             String::from_utf8_lossy(&out.stderr).trim()
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supported_git;
+
+    #[test]
+    fn a_git_older_than_2_44_0_is_refused_naming_the_version_found() {
+        for printed in ["git version 2.43.9\n", "git version 2.39.3 (Apple Git-146)"] {
+            let refusal = supported_git(printed).expect_err(printed);
+            let version = printed.trim().trim_start_matches("git version ");
+            assert!(refusal.contains(version), "{refusal}");
+            assert!(refusal.contains("2.44.0"), "{refusal}");
+        }
+    }
+
+    #[test]
+    fn git_2_44_0_and_newer_are_accepted() {
+        for printed in [
+            "git version 2.44.0\n",
+            "git version 2.56.1",
+            "git version 3.0.0",
+            "git version 2.44.0.windows.1",
+            "git version 2.45.2 (Apple Git-154)",
+            "git version 2.44.1-rc0",
+        ] {
+            assert_eq!(supported_git(printed), Ok(()), "{printed}");
+        }
+    }
+
+    #[test]
+    fn a_version_that_cannot_be_read_is_refused() {
+        for printed in [
+            "",
+            "git version",
+            "git version 2.44",
+            "git version two",
+            "2.44.0",
+        ] {
+            let refusal = supported_git(printed).expect_err(printed);
+            assert!(refusal.contains("2.44.0"), "{refusal}");
+        }
     }
 }
