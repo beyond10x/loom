@@ -9,8 +9,9 @@ use b10x_loom_resource::model::{
     LoomAgentCompleted, LoomAgentDegraded, LoomAgentDeleted, LoomAgentFailed, LoomAgentNotFound,
     LoomAgentObserved, LoomAgentRecovered, LoomAgentRefused, LoomAgentRunObserved,
     LoomAgentRunning, LoomAgentState, LoomAgentStateConflict, LoomAgents, ObserveDeployment,
-    ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, RecordCheck, RecordCheckOutcome,
-    ResourceName, RunEnd, RunPhase, StaleGeneration,
+    ObserveDeploymentOutcome, ObserveRun, ObserveRunOutcome, ObserveScheduledRun,
+    ObserveScheduledRunOutcome, RecordCheck, RecordCheckOutcome, ResourceName, RunEnd, RunPhase,
+    StaleGeneration,
 };
 use b10x_loom_resource::{LoomAgentRecord, ResourceEvent, Timestamp};
 
@@ -412,6 +413,58 @@ fn a_resource_the_record_does_not_hold_is_not_found() {
     );
     assert_eq!(record.events(), [].as_slice());
     assert_eq!(row(&record), None);
+}
+
+/// `ObserveScheduledRun` on a name the record holds no row for answers `unknown` in every phase
+/// and changes nothing: no event, no row, and another resource's row as it was (story
+/// ess-format-31, a regression test that holds on the `ess/25` synthesis and on the `ess/31` one).
+#[test]
+fn a_scheduled_run_of_a_resource_the_record_does_not_hold_is_not_found() {
+    let observation = |phase| ObserveScheduledRun {
+        name: name(),
+        phase,
+        exit_code: Some(1),
+        finished_at: Some(Timestamp("2026-11-21T08:00:00Z".to_owned())),
+        reason: Some("Error".to_owned()),
+    };
+    let not_found = || ObserveScheduledRunOutcome::Unknown {
+        error: LoomAgentNotFound { name: name() },
+    };
+
+    let mut empty = LoomAgentRecord::default();
+    for phase in [RunPhase::Active, RunPhase::Succeeded, RunPhase::Failed] {
+        assert_eq!(
+            empty
+                .observe_scheduled_run(observation(phase))
+                .expect("the generated behaviour answers every scheduled-run observation"),
+            not_found()
+        );
+    }
+    assert_eq!(empty.events(), [].as_slice());
+    assert_eq!(row(&empty), None);
+
+    let other = ResourceName("triage".to_owned());
+    let mut holding_another = LoomAgentRecord::default();
+    holding_another
+        .apply_loom_agent(ApplyLoomAgent {
+            name: other.clone(),
+            generation: 1,
+        })
+        .expect("apply");
+    let rows = holding_another.loom_agents().expect("the view");
+    let events = holding_another.events().to_vec();
+    for phase in [RunPhase::Active, RunPhase::Succeeded, RunPhase::Failed] {
+        assert_eq!(
+            holding_another
+                .observe_scheduled_run(observation(phase))
+                .expect("the generated behaviour answers every scheduled-run observation"),
+            not_found()
+        );
+    }
+    assert_eq!(holding_another.events(), events.as_slice());
+    assert_eq!(holding_another.loom_agents().expect("the view"), rows);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, other);
 }
 
 #[test]

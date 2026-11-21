@@ -33,6 +33,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Removed
 
 - **Breaking:** `loom_sdk::intake::router::RouterError::Registry` is removed; a catalog that cannot be built stays `RouterError::Catalog` (story:engineering-registry-calls-replaced)
+- `ess/system.yaml` declares format `ess/31` on the pinned `ess` 0.86.0; the regenerated `loom` model answers as before (story:ess-format-31)
 
 ## [0.57.2] - 2026-11-05
 

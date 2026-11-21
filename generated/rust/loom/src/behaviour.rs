@@ -495,6 +495,10 @@ where
 {
     fn delete_loom_agent(&mut self, input: crate::resource::DeleteLoomAgent) -> Result<crate::resource::DeleteLoomAgentOutcome, UnmetObligation> {
         let _ = &input;
+        // The addressed row's existence, at step 2 of the one precedence rule.
+        if LoomAgentStorage::get(&self.ports, &input.name).is_none() {
+            return Ok(crate::resource::DeleteLoomAgentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        }
         // `deleted`: the default.
         let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
             return Ok(crate::resource::DeleteLoomAgentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
@@ -513,6 +517,10 @@ where
 {
     fn observe_deployment(&mut self, input: crate::resource::ObserveDeployment) -> Result<crate::resource::ObserveDeploymentOutcome, UnmetObligation> {
         let _ = &input;
+        // The addressed row's existence, at step 2 of the one precedence rule.
+        if LoomAgentStorage::get(&self.ports, &input.name).is_none() {
+            return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        }
         // The addressed row, read before the branches that select by it.
         let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
             return Ok(crate::resource::ObserveDeploymentOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
@@ -594,6 +602,10 @@ where
 {
     fn observe_run(&mut self, input: crate::resource::ObserveRun) -> Result<crate::resource::ObserveRunOutcome, UnmetObligation> {
         let _ = &input;
+        // The addressed row's existence, at step 2 of the one precedence rule.
+        if LoomAgentStorage::get(&self.ports, &input.name).is_none() {
+            return Ok(crate::resource::ObserveRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        }
         // The addressed row, read before the branches that select by it.
         let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
             return Ok(crate::resource::ObserveRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
@@ -670,6 +682,10 @@ where
 {
     fn observe_scheduled_run(&mut self, input: crate::resource::ObserveScheduledRun) -> Result<crate::resource::ObserveScheduledRunOutcome, UnmetObligation> {
         let _ = &input;
+        // The addressed row's existence, at step 2 of the one precedence rule.
+        if LoomAgentStorage::get(&self.ports, &input.name).is_none() {
+            return Ok(crate::resource::ObserveScheduledRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        }
         // The addressed row, read before the branches that select by it.
         let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
             return Ok(crate::resource::ObserveScheduledRunOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
@@ -730,6 +746,10 @@ where
 {
     fn record_check(&mut self, input: crate::resource::RecordCheck) -> Result<crate::resource::RecordCheckOutcome, UnmetObligation> {
         let _ = &input;
+        // The addressed row's existence, at step 2 of the one precedence rule.
+        if LoomAgentStorage::get(&self.ports, &input.name).is_none() {
+            return Ok(crate::resource::RecordCheckOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
+        }
         // The addressed row, read before the branches that select by it.
         let Some(held) = LoomAgentStorage::get(&self.ports, &input.name) else {
             return Ok(crate::resource::RecordCheckOutcome::Unknown { error: crate::resource::LoomAgentNotFound { name: input.name.clone() } });
@@ -846,11 +866,15 @@ where
         // reference reads no row and selects no related branch.
         let reference = Some(&input.selection_id);
         let related = reference.and_then(|identity| SelectionStorage::get(&self.ports, identity));
+        let _ = &related;
+        // The addressed row's existence and held state, for the branch the request selects
+        // before any present related row's refusal.
+        {
+        }
         // `selection-unknown`: the reference names an identity no row carries.
         if reference.is_some() && related.is_none() {
             return Ok(crate::run::RecordSelectionOutcome::SelectionUnknown { error: crate::run::SelectionNotFound { selection_id: input.selection_id.clone() } });
         }
-        let _ = &related;
         // `recorded`: the default.
         let identity: crate::run::SelectionRecordId = input.selection_record_id.clone();
         let data = crate::run::SelectionRecordData {
@@ -882,12 +906,16 @@ where
         // reference reads no row and selects no related branch.
         let reference = Some(&input.selection_id);
         let related = reference.and_then(|identity| SelectionStorage::get(&self.ports, identity));
+        let _ = &related;
+        // The addressed row's existence and held state, for the branch the request selects
+        // before any present related row's refusal.
+        {
+        }
         // `selection-unknown`: the reference names an identity no row carries.
         if reference.is_some() && related.is_none() {
             return Ok(crate::run::RequestArgumentsOutcome::SelectionUnknown { error: crate::run::SelectionNotFound { selection_id: input.selection_id.clone() } });
         }
-        let _ = &related;
-        // `selection-not-selected`: selected by the present related row, in declaration order.
+        // `selection-not-selected`: a present related row's refusal, before every accepting branch.
         if let Some(related) = &related {
         if decided(equal(Some(&related.state).map(|value| match value { crate::run::SelectionState::Admitted => "Admitted", crate::run::SelectionState::Overruled => "Overruled", crate::run::SelectionState::Refused => "Refused", crate::run::SelectionState::Selected => "Selected" }.to_owned()), Some("Selected".to_owned())).map(|value| !value), "loom.run.RequestArguments")? {
             return Ok(crate::run::RequestArgumentsOutcome::SelectionNotSelected { error: crate::run::SelectionNotSelected { selection_id: input.selection_id.clone() } });

@@ -2190,10 +2190,10 @@ pub fn failure_refusal(failure: &SessionFailure) -> Option<RecordFailedSessionOu
 
 /// `loom.session.RecordFailedSession`, an obligation of the generated model. It refuses a failure
 /// no harness child ends with ([`failure_refusal`]). Its `failed` outcome leaves `files`
-/// undetermined, because the specification's format (`ess/25`) has no empty-list literal, and
-/// `failure.reason` generated: a failed session proposes nothing, so its files are none, and its
-/// reason is the one the executor put in `failure` ([`ChildEnd::failure`]). Every other field is
-/// the one the outcome's `sets:` names, and the event is its declared payload.
+/// undetermined, because the specification stores no empty list there (`ess/31` would allow it),
+/// and `failure.reason` generated: a failed session proposes nothing, so its files are none, and
+/// its reason is the one the executor put in `failure` ([`ChildEnd::failure`]). Every other field
+/// is the one the outcome's `sets:` names, and the event is its declared payload.
 impl RecordFailedSessionBehavior for SessionRecord {
     fn record_failed_session(
         &mut self,
