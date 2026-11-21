@@ -519,3 +519,23 @@ fn a_child_bindings_file_at_the_size_bound_is_read_and_one_over_it_is_refused_be
         "child@1"
     );
 }
+
+#[test]
+fn a_bindings_document_naming_host_case_outcomes_is_refused_as_an_undeclared_member() {
+    let top = format!(
+        "host_case_outcomes: true\n{}",
+        parent_bindings("{kind: open, name: review, bindings: sub/child.yaml}")
+    );
+    let executor = parent_bindings(
+        "{kind: open, name: review, bindings: sub/child.yaml, host_case_outcomes: true}",
+    );
+    let child = format!("host_case_outcomes: true\n{}", child_bindings("reviewer"));
+    for text in [top, executor, child] {
+        let refused = decode(&text).map(|_| ()).expect_err("refused");
+        assert_eq!(
+            refused.0.reason,
+            Reason::UndeclaredMember,
+            "{refused}\n{text}"
+        );
+    }
+}

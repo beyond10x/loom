@@ -291,6 +291,21 @@ impl<S: FallibleCaseStore, T> CanonGovernor<S, T> {
     pub fn store(&self) -> &S {
         &self.store
     }
+
+    /// Lets the evidence port receive a `case_outcome` record a host submits for a case whose
+    /// protocol declares `case_open`, for a host that composes cases itself and runs no child
+    /// cases through [`CanonGovernor::open_children`]. Off by default: then such a record is
+    /// refused at any time, before the first opening, after it and after termination, since a
+    /// child's outcome is the governor's to write. Even with it on, a record for a case holding a
+    /// parent or child link, or naming a case the store holds, is refused. A protocol that declares
+    /// no `case_open` is received as before either way. Host configuration, given when the governor
+    /// is built: never read from a protocol, a bindings document, a case or a request, and not
+    /// stored with a case.
+    #[must_use]
+    pub fn with_host_case_outcomes(mut self) -> Self {
+        self.host_case_outcomes = true;
+        self
+    }
 }
 
 impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
@@ -300,15 +315,22 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     }
 
     /// Refuses `data`, submitted through the evidence port, when it is a `case_outcome` record and
-    /// either `held` opened a child or the record names a case the store holds: a child's outcome
-    /// is written by the governor alone, when it opens and terminates the child.
+    /// `ir`, the protocol of `held`, declares `case_open` while host case outcomes are not allowed
+    /// ([`CanonGovernor::with_host_case_outcomes`]), or `held` holds a link, or the record names a
+    /// case the store holds: a child's outcome is written by the governor alone, when it opens and
+    /// terminates the child.
     pub(crate) fn refuse_submitted_outcome(
         &self,
         held: &CaseState,
+        ir: &Ir,
         data: &EvidenceData,
     ) -> Result<(), GovernorError> {
         if !is_case_outcome(data) {
             return Ok(());
+        }
+        if !self.host_case_outcomes && ir.actions.values().any(|action| action.case_open.is_some())
+        {
+            return Err(GovernorError::GovernorUnavailable);
         }
         if !held.children.is_empty() || held.parent.is_some() {
             return Err(GovernorError::GovernorUnavailable);

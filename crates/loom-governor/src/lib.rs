@@ -747,6 +747,9 @@ pub struct CanonGovernor<S, T = NoEvaluationTime> {
     /// The documents behind the frontiers this governor issued, keyed by case id
     /// ([`CanonGovernor::decision_document`]).
     kept: Mutex<BTreeMap<String, KeptDocuments>>,
+    /// Whether the evidence port receives a `case_outcome` record for a case whose protocol declares
+    /// `case_open` ([`CanonGovernor::with_host_case_outcomes`]); host code alone sets it.
+    host_case_outcomes: bool,
 }
 
 impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
@@ -759,6 +762,7 @@ impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
             time: T::default(),
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
+            host_case_outcomes: false,
         }
     }
 }
@@ -790,6 +794,7 @@ impl<S: FallibleCaseStore> CanonGovernor<S> {
             time: NoEvaluationTime,
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
+            host_case_outcomes: false,
         }
     }
 }
@@ -918,6 +923,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             time,
             completion_rule: self.completion_rule,
             kept: self.kept,
+            host_case_outcomes: self.host_case_outcomes,
         }
     }
 
@@ -1553,7 +1559,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, 
         let data = evidence.into_evidence().into_data();
         let (held, ir) = self.held_with_ir(&data.case_id)?;
         // A child's outcome is written by the governor alone (see "Child cases").
-        self.refuse_submitted_outcome(&held, &data)?;
+        self.refuse_submitted_outcome(&held, &ir, &data)?;
         // Commission's `GovernorError` names no record; `check_evidence` names it for the host.
         self.check_evidence(&data)
             .map_err(|_| GovernorError::GovernorUnavailable)?;

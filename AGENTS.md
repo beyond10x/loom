@@ -604,11 +604,14 @@ parent's record (result, `observed_at`, `subject_revision`: the child's own revi
 subject when its protocol declares it, else the parent's at opening). Terminating again through
 the same outcome completes an interrupted replacement. A terminated case is evaluated with its
 termination, its frontier blocks every action (reason `{"terminated":"<outcome>"}`) and
-`completion` reports the stored outcome. `receive` refuses a `case_outcome` record for a case with
-a link, or naming a held case. `tree(case)` lists a tree, root first, a link counting only when
-both sides hold it. `FileCaseStore` writes `parent`, `children` and `termination` only when present
-and refuses a file whose links name another case; Loom 0.58.0 and earlier refuse a file holding
-them. No `CaseStore` or `FallibleCaseStore` method is added.
+`completion` reports the stored outcome. A `case_outcome` record is written by the governor alone:
+`receive` refuses one for a case whose protocol declares `case_open`, unless the host built the
+governor `with_host_case_outcomes()` because it composes cases itself (host code only, never
+stored or read from a document), and even then for a case with a link or naming a held case.
+`tree(case)` lists a tree, root first, a link counting only when both sides hold it.
+`FileCaseStore` writes `parent`, `children` and `termination` only when present and refuses a file
+whose links name another case; Loom 0.58.0 and earlier refuse a file holding them. No `CaseStore` or
+`FallibleCaseStore` method is added.
 
 ## Connectors
 

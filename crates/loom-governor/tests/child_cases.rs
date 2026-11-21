@@ -1151,13 +1151,84 @@ fn children_passed_beside_an_approval_and_a_gate_opens_the_release_and_the_outco
 }
 
 #[test]
-fn a_host_case_outcome_of_a_lone_case_is_read_by_that_case_alone_and_passes_no_child_it_links_later()
- {
+fn by_default_a_host_case_outcome_for_a_case_open_protocol_is_refused_and_satisfies_no_claim() {
     let (governor, _dir) = governor();
     let lone = root(&governor, "parent@1");
     let sibling = open_root(&governor, "case-2", "parent@1", &[("idea", "idea-1")]);
-    // Accepted: no children, no parent, naming no held case (case_composition requires it), and
-    // read by that case, as the record of a child it never opened.
+    // Before the first opening: refused, so neither the case nor a sibling reads it.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.review",
+        "passed"
+    ));
+    assert!(outcomes(&governor, &lone).is_empty());
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    assert_eq!(
+        claim(&governor, &sibling, "children.passed"),
+        Truth::Unknown
+    );
+    // A later child of that name is opened under it, and its own record alone decides the claim.
+    let child = open_children(&governor, &lone, &["review"]).remove(0);
+    assert_eq!(child.0, "case-1.review");
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    // After an opening: refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.other",
+        "passed"
+    ));
+    verdict(&governor, &child, "failed");
+    governor.terminate(&child, "failed", T2).unwrap();
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::False);
+    // After termination of the child, and of a case that never opened one: refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.other",
+        "passed"
+    ));
+    let held = outcomes(&governor, &lone);
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0]["child_case"], "case-1.review");
+    assert_eq!(held[0]["result"], "failed");
+    let epic = open_root(
+        &governor,
+        "case-3",
+        "epic@1",
+        &[("roadmap", "roadmap-1"), ("spec", "spec-1")],
+    );
+    let story = open_through(&governor, &epic, "story.open", "child@1", "spec", &["s"]).remove(0);
+    pass(&governor, &story);
+    record(
+        &governor, &epic, "approval", "roadmap", "approved", "approver",
+    );
+    record(&governor, &epic, "gate", "spec", "passed", "gate");
+    governor.terminate(&epic, "passed", T2).unwrap();
+    assert!(!submit_outcome(
+        &governor,
+        &epic,
+        "spec",
+        "case-3.late",
+        "failed"
+    ));
+    assert_eq!(outcomes(&governor, &epic).len(), 1);
+}
+
+#[test]
+fn with_host_case_outcomes_a_lone_case_receives_the_record_as_before_until_it_holds_a_link() {
+    let dir = dir();
+    let governor = CanonGovernor::new(FileCaseStore::open(&dir).unwrap())
+        .with_host_case_outcomes()
+        .with_catalog(&catalog())
+        .unwrap();
+    let lone = root(&governor, "parent@1");
+    let sibling = open_root(&governor, "case-2", "parent@1", &[("idea", "idea-1")]);
+    // Received, no link and naming no held case, and read by that case alone.
     assert!(submit_outcome(
         &governor,
         &lone,
@@ -1166,36 +1237,106 @@ fn a_host_case_outcome_of_a_lone_case_is_read_by_that_case_alone_and_passes_no_c
         "passed"
     ));
     assert_eq!(claim(&governor, &lone, "children.passed"), Truth::True);
-    // A sibling does not read it.
     assert_eq!(
         claim(&governor, &sibling, "children.passed"),
         Truth::Unknown
     );
     let cousin = open_children(&governor, &sibling, &["review"]).remove(0);
-    assert_eq!(
-        claim(&governor, &sibling, "children.passed"),
-        Truth::Unknown
-    );
-    pass(&governor, &cousin);
-    assert_eq!(claim(&governor, &sibling, "children.passed"), Truth::True);
-    // The case later opens a child of the record's name: the child gets the next id and its own
-    // record, which the claim waits for; the host's record does not pass it.
-    let child = open_children(&governor, &lone, &["review"]).remove(0);
-    assert_eq!(child.0, "case-1.review.2");
-    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    // A record naming a held case is refused.
     assert!(!submit_outcome(
         &governor,
         &lone,
         "idea",
-        "case-1.review.2",
+        "case-2.review",
+        "passed"
+    ));
+    pass(&governor, &cousin);
+    assert_eq!(claim(&governor, &sibling, "children.passed"), Truth::True);
+    // A child the case opens later of the record's name gets the next id and its own record.
+    let child = open_children(&governor, &lone, &["review"]).remove(0);
+    assert_eq!(child.0, "case-1.review.2");
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    // Once the case holds a link: refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.other",
         "passed"
     ));
     verdict(&governor, &child, "failed");
     governor.terminate(&child, "failed", T2).unwrap();
     assert_eq!(claim(&governor, &lone, "children.passed"), Truth::False);
-    // The child's record is the governor's, not the host's.
     let held = outcomes(&governor, &lone);
     assert_eq!(held.len(), 2);
     assert_eq!(held[1]["child_case"], "case-1.review.2");
-    assert_eq!(held[1]["result"], "failed");
+    // The setting is not stored: the same store reopened by a governor without it refuses.
+    let third = open_root(&governor, "case-3", "parent@1", &[("idea", "idea-1")]);
+    drop(governor);
+    let reopened = governor_over(FileCaseStore::open(&dir).unwrap());
+    assert!(!submit_outcome(
+        &reopened,
+        &third,
+        "idea",
+        "case-3.review",
+        "passed"
+    ));
+    assert!(outcomes(&reopened, &third).is_empty());
+}
+
+/// A protocol that reads `case_outcome` records and declares no `case_open` action.
+const COMPOSED: &str = "format: protocol/1\nprotocol: {id: composed, revision: 1}\n\
+                        artifacts: {idea: {}}\nevidence_kinds: {case_outcome: {}}\n\
+                        claims:\n  children.passed:\n    true_when:\n      children: {in: [passed]}\n\
+                        actions:\n  idea.note: {effect: write}\n\
+                        outcomes:\n  delivered:\n    requires: {claim: children.passed}\n";
+
+#[test]
+fn a_protocol_without_case_open_receives_a_host_case_outcome_under_either_setting() {
+    for allowed in [false, true] {
+        let governor = CanonGovernor::new(loom_governor::MemoryCaseStore::default());
+        let governor = if allowed {
+            governor.with_host_case_outcomes()
+        } else {
+            governor
+        };
+        let governor = governor
+            .with_protocol_yaml("composed@1", COMPOSED)
+            .expect("a protocol without case_open registers");
+        let case = open_root(&governor, "case-1", "composed@1", &[("idea", "idea-1")]);
+        assert!(
+            submit_outcome(&governor, &case, "idea", "case-1.part", "passed"),
+            "allowed {allowed}"
+        );
+        assert_eq!(
+            claim(&governor, &case, "children.passed"),
+            Truth::True,
+            "allowed {allowed}"
+        );
+    }
+}
+
+#[test]
+fn no_protocol_or_case_file_member_turns_host_case_outcomes_on() {
+    // A protocol naming the setting is refused by Canon's loader as an unknown member.
+    let named = PARENT.replacen("artifacts:", "host_case_outcomes: true\nartifacts:", 1);
+    let mut catalog = ProtocolCatalog::default();
+    let refused = catalog.add_yaml("parent@1", &named, source());
+    assert!(refused.is_err(), "the catalog took {named}");
+    let refused = CanonGovernor::new(loom_governor::MemoryCaseStore::default())
+        .with_protocol_yaml("parent@1", &named)
+        .map(|_| ());
+    assert!(refused.is_err(), "the governor took {named}");
+    // A case file naming it is refused on read.
+    let dir = dir();
+    let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+    let case = root(&governor, "parent@1");
+    let path = dir.join(format!("{}.json", loom_governor::case_file_stem(&case.0)));
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    document["host_case_outcomes"] = serde_json::Value::Bool(true);
+    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let read = FileCaseStore::open(&dir).unwrap().get(&case);
+    assert!(read.is_err(), "{read:?}");
+    assert!(governor.frontier(&case).is_err());
 }

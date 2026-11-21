@@ -153,6 +153,7 @@ fn assert_evaluate_equals_the_governor(label: &str, records: &[Value]) {
     let decision = evaluate(&catalog(), &request(records))
         .unwrap_or_else(|refusal| panic!("{label}: evaluate refused {refusal:?}"));
     let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_host_case_outcomes()
         .with_protocol_yaml(NAME, PROTOCOL)
         .expect("registers");
     let case = governor
