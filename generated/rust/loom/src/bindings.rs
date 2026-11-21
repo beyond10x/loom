@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest b8861e6c0dcd516ae6a61f772ec91a14f639811cafa340e3d466e8a1ef368f96
+// contract digest c340617801a3fca5a88d9621a36c9a687ca510348010cf4434a40db3257f03e0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -28,6 +28,17 @@ pub struct ArtifactPath {
     pub artifact: String,
     /// `path` — `String`.
     pub path: String,
+}
+
+/// ArtifactPlacement — `loom.bindings.ArtifactPlacement`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactPlacement {
+    /// `artifact` — `String`.
+    pub artifact: String,
+    /// `path` — `String`.
+    pub path: String,
+    /// `revision` — `String`.
+    pub revision: String,
 }
 
 /// ArtifactRevision — `loom.bindings.ArtifactRevision`.
@@ -137,6 +148,28 @@ pub struct BoundAction {
     pub handoff: Option<String>,
 }
 
+/// BoundStep — `loom.bindings.BoundStep`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundStep {
+    /// `action` — `String`.
+    pub action: String,
+    /// `outcome` — `loom.bindings.StepOutcome`.
+    pub outcome: StepOutcome,
+    /// `discarded` — `Optional<loom.bindings.DiscardReason>`.
+    pub discarded: Option<DiscardReason>,
+    /// `placements` — `List<loom.bindings.ArtifactPlacement>`.
+    pub placements: Vec<ArtifactPlacement>,
+    /// `moves` — `List<loom.bindings.RevisionMove>`.
+    pub moves: Vec<RevisionMove>,
+}
+
+/// DiscardReason — `loom.bindings.DiscardReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscardReason {
+    /// `ChangedByNonWriter`.
+    ChangedByNonWriter,
+}
+
 /// EvidenceEntry — `loom.bindings.EvidenceEntry`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceEntry {
@@ -233,6 +266,8 @@ pub enum ProgramRefusalReason {
     RunsSpent,
     /// `CaseOfAnotherProtocol`.
     CaseOfAnotherProtocol,
+    /// `ArtifactUnreadable`.
+    ArtifactUnreadable,
 }
 
 /// ProgramRun — `loom.bindings.ProgramRun`.
@@ -298,6 +333,52 @@ pub struct RetryCondition {
     pub kind: String,
     /// `results` — `List<String>`.
     pub results: Vec<String>,
+}
+
+/// RevisionMove — `loom.bindings.RevisionMove`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevisionMove {
+    /// `artifact` — `String`.
+    pub artifact: String,
+    /// `from` — `String`.
+    pub from: String,
+    /// `to` — `String`.
+    pub to: String,
+}
+
+/// RevisionRefusal — `loom.bindings.RevisionRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevisionRefusal {
+    /// `reason` — `loom.bindings.RevisionRefusalReason`.
+    pub reason: RevisionRefusalReason,
+    /// `artifact` — `String`.
+    pub artifact: String,
+    /// `path` — `String`.
+    pub path: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// RevisionRefusalReason — `loom.bindings.RevisionRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevisionRefusalReason {
+    /// `OutsideWorkspace`.
+    OutsideWorkspace,
+    /// `TooLarge`.
+    TooLarge,
+    /// `ChangedWhileRead`.
+    ChangedWhileRead,
+    /// `Unreadable`.
+    Unreadable,
+}
+
+/// StepOutcome — `loom.bindings.StepOutcome`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepOutcome {
+    /// `Recorded`.
+    Recorded,
+    /// `Discarded`.
+    Discarded,
 }
 
 /// ToolAllowList — `loom.bindings.ToolAllowList`.
