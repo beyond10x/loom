@@ -519,15 +519,20 @@ the audience of a projected service-account token. The pod then gets a second co
 image: it alone mounts the tokens, one per upstream, each valid 600 s, and the agent container
 gets only loopback URLs (`LOOM_BOUNDARY_MODEL_URL`, `LOOM_BOUNDARY_CONNECTORS_URL`,
 `LOOM_BOUNDARY_GIT_URL`); with `boundary.model` the default routes name the model relay. The
-NetworkPolicy opens DNS and each upstream's namespace on its port, and nothing else. The values
+NetworkPolicy opens DNS, each upstream's namespace on its port and each namespace egress entry
+the operator allows (below), and nothing else. The values
 must list each upstream in `allowedBoundaryUpstreams` (empty by default) as an entry of its
 `kind` (`model`, `connectors` or `git`), its `url` and its token `audience`, which the resource
 must give exactly, and optionally the `port` of the upstream's pods that its Service targets,
 which the NetworkPolicy then opens in place of the URL's port. The controller refuses a
 boundary beside `spec.secretRef` or `spec.secretFiles` (`BoundaryWithSecret`), an upstream that
 is no cluster service or is `https` (`BoundaryUpstreamInvalid`), one no entry of its kind lists
-or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host or namespace
-egress entry (`BoundaryEgressHost`, `BoundaryEgressNamespace`), empty routes on an `AgentServe`
+or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host egress entry
+(`BoundaryEgressHost`), a namespace egress entry in an allowed upstream's namespace or without a
+selector (`BoundaryEgressNamespace`), one no `GET` `http` binding without a `bearer_env` reads by
+a cluster-service `base_url` in that namespace (`BoundaryEgressUnbound`), one no single
+`allowedBoundaryHttpEgress` entry (`{namespace, selector, port}`, empty by default) equals
+(`BoundaryEgressNotAllowed`), empty routes on an `AgentServe`
 resource without `boundary.model` (`NoModelRoute`; a `Command` resource gets an empty
 `routes.yaml`), and an audience, operation id (at most 256 bytes) or repository out of form
 (`Malformed`). Native sidecars need Kubernetes 1.29 or newer.

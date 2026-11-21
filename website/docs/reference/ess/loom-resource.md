@@ -18,7 +18,7 @@ The `LoomAgent` custom resource (group `loom.beyond10x.dev`, version `v1alpha1`)
 
 ### `AdmissionRefusalReason`
 
-`loom.resource.AdmissionRefusalReason` is one of `Malformed`, `SecretLiteral`, `UnknownFormat`, `BlankText`, `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`, `EmptyChannelAllow`, `NoModelRoute`, `TooLarge`, `BoundaryWithSecret`, `BoundaryUpstreamInvalid`, `BoundaryUpstreamNotAllowed`, `BoundaryEgressHost`, `BoundaryEgressNamespace`, `SecretNotAllowed`, `NamespaceMismatch`, `EgressHostNotAllowed`, `EnvNameConflict`, `ConfigFileInvalid`, `ConfigFileConflict`, `MountPathInvalid`, `ClaimNotAllowed`, `ProfileInvalid`, `ProfileNotAllowed` and `ResourcesRequired`.
+`loom.resource.AdmissionRefusalReason` is one of `Malformed`, `SecretLiteral`, `UnknownFormat`, `BlankText`, `NotAVariableName`, `PortOutOfRange`, `NotAPlainPath`, `NotAnInstant`, `UnknownProtocol`, `UnknownAction`, `UnboundSource`, `HttpMethod`, `SendWithoutWrites`, `EmptyChannelAllow`, `NoModelRoute`, `TooLarge`, `BoundaryWithSecret`, `BoundaryUpstreamInvalid`, `BoundaryUpstreamNotAllowed`, `BoundaryEgressHost`, `BoundaryEgressNamespace`, `BoundaryEgressUnbound`, `BoundaryEgressNotAllowed`, `SecretNotAllowed`, `NamespaceMismatch`, `EgressHostNotAllowed`, `EnvNameConflict`, `ConfigFileInvalid`, `ConfigFileConflict`, `MountPathInvalid`, `ClaimNotAllowed`, `ProfileInvalid`, `ProfileNotAllowed` and `ResourcesRequired`.
 
 ### `AgentVariant`
 
@@ -352,7 +352,7 @@ It takes:
 
 - `path` — `String`
 
-It has 33 outcomes.
+It has 35 outcomes.
 
 **`malformed`** — Decided outside the input: a member of the resource does not decode, or breaks a rule no other reason names. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
@@ -394,7 +394,11 @@ It has 33 outcomes.
 
 **`boundary-egress-host`** — Decided outside the input: beside spec.boundary, an egress entry of spec.agent names a host. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
-**`boundary-egress-namespace`** — Decided outside the input: beside spec.boundary, an egress entry of spec.agent names a namespace. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+**`boundary-egress-namespace`** — Decided outside the input: beside spec.boundary, an egress entry of spec.agent names the namespace of an allowedBoundaryUpstreams upstream, or gives no pod selector. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-egress-unbound`** — Decided outside the input: beside spec.boundary, no GET http binding of spec.agent without a bearer_env has a base_url that is a cluster service in the namespace an egress entry names. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`boundary-egress-not-allowed`** — Decided outside the input: beside spec.boundary, no allowedBoundaryHttpEgress entry equals a namespace egress entry of spec.agent in namespace, selector and port. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
 **`secret-not-allowed`** — Decided outside the input: spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.resource.AdmissionRefused`, carrying `reason`, `member` and `detail`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
@@ -732,7 +736,7 @@ It carries:
 - `member` — `String`
 - `detail` — `String`
 
-Reported by `loom.resource.AdmitLoomAgent` on its `malformed`, `secret-literal`, `unknown-format`, `blank-text`, `not-a-variable-name`, `port-out-of-range`, `not-a-plain-path`, `not-an-instant`, `unknown-protocol`, `unknown-action`, `unbound-source`, `http-method`, `send-without-writes`, `empty-channel-allow`, `no-model-route`, `too-large`, `boundary-with-secret`, `boundary-upstream-invalid`, `boundary-upstream-not-allowed`, `boundary-egress-host`, `boundary-egress-namespace`, `secret-not-allowed`, `namespace-mismatch`, `egress-host-not-allowed`, `env-name-conflict`, `config-file-invalid`, `config-file-conflict`, `mount-path-invalid`, `claim-not-allowed`, `profile-invalid`, `profile-not-allowed` and `resources-required` outcomes.
+Reported by `loom.resource.AdmitLoomAgent` on its `malformed`, `secret-literal`, `unknown-format`, `blank-text`, `not-a-variable-name`, `port-out-of-range`, `not-a-plain-path`, `not-an-instant`, `unknown-protocol`, `unknown-action`, `unbound-source`, `http-method`, `send-without-writes`, `empty-channel-allow`, `no-model-route`, `too-large`, `boundary-with-secret`, `boundary-upstream-invalid`, `boundary-upstream-not-allowed`, `boundary-egress-host`, `boundary-egress-namespace`, `boundary-egress-unbound`, `boundary-egress-not-allowed`, `secret-not-allowed`, `namespace-mismatch`, `egress-host-not-allowed`, `env-name-conflict`, `config-file-invalid`, `config-file-conflict`, `mount-path-invalid`, `claim-not-allowed`, `profile-invalid`, `profile-not-allowed` and `resources-required` outcomes.
 
 ### `LoomAgentNotFound`
 
@@ -787,4 +791,4 @@ Reported by `loom.resource.RecordCheck` on its `stale` outcome.
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:02c85846c98e9ded70113e651e60ed9396a7aa19ca2b8d87bd8fa1b7b7a73d56`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:507eaf9ec3025c2491b02de05367b03eeb9d95beeb0514cd58401f50d76408dc`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

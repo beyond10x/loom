@@ -50,7 +50,7 @@ fn refusal(name: &str) -> Refusal {
 }
 
 /// Each fixture, the reason it is refused with and the member it is refused at.
-const REFUSED: [(&str, &str, &str); 35] = [
+const REFUSED: [(&str, &str, &str); 37] = [
     ("malformed", "Malformed", "spec.agent"),
     (
         "secret-literal",
@@ -148,6 +148,16 @@ const REFUSED: [(&str, &str, &str); 35] = [
         "spec.agent.deploy.kubernetes.egress[0].namespace",
     ),
     (
+        "boundary-egress-unbound",
+        "BoundaryEgressUnbound",
+        "spec.agent.deploy.kubernetes.egress[0]",
+    ),
+    (
+        "boundary-egress-not-allowed",
+        "BoundaryEgressNotAllowed",
+        "spec.agent.deploy.kubernetes.egress[0]",
+    ),
+    (
         "secret-not-allowed",
         "SecretNotAllowed",
         "spec.secretRef.name",
@@ -218,7 +228,11 @@ fn each_fixture_is_refused_with_its_reason_at_its_member() {
 
 #[test]
 fn the_admitted_fixtures_are_admitted() {
-    for name in ["admitted", "admitted-command"] {
+    for name in [
+        "admitted",
+        "admitted-command",
+        "boundary-http-egress-allowed",
+    ] {
         if let Err(refusal) = answer(name) {
             panic!("{name}: {}", refusal.message());
         }

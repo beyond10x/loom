@@ -34,10 +34,15 @@ allowedClaimNames: [takt-workspace]
 ";
 
 fn config() -> Config {
+    config_with("")
+}
+
+/// [`config`] with `extra` (further members of the configuration) after its upstreams.
+fn config_with(extra: &str) -> Config {
     Config::parse(&format!(
         "{CONFIG}allowedBoundaryUpstreams:\n- {{kind: model, url: '{MODEL}', audience: \
          llm-gateway}}\n- {{kind: connectors, url: '{CONNECTORS}', audience: connectors}}\n- \
-         {{kind: git, url: '{GIT}', audience: connectors-git}}\n"
+         {{kind: git, url: '{GIT}', audience: connectors-git}}\n{extra}"
     ))
     .expect(
         "the test configuration (story:boundary-container-projected-token: an \
@@ -278,20 +283,46 @@ fn the_connectors_upstream_cannot_be_declared_as_the_model_relay() {
 /// upstream, ... its namespace on its port, and nothing else"; design D243 § 2: "DNS plus the
 /// credential namespace on the declared ports". A namespace egress entry naming the upstream's
 /// namespace on another port (a database beside the Connectors instance) opens that port too.
+/// `story:boundary-admits-declared-http-egress`: the entry carries a selector, an `http` binding
+/// without a bearer reads that namespace and the configuration allows it in
+/// `allowedBoundaryHttpEgress`, so condition 1 alone refuses it, at its namespace.
 #[test]
 fn an_egress_namespace_entry_does_not_open_an_upstream_namespace_on_another_port() {
-    let entry = "      - {name: connectors-store, namespace: connectors, port: 5432}\n";
-    let agent = credential_free_agent(entry);
+    let entry = "      - {name: connectors-store, namespace: connectors, selector: [{name: app, \
+                 value: store}], port: 5432}\n";
+    let agent = credential_free_agent(entry).replace(
+        "http://logs.monitoring.svc:3100",
+        "http://store.connectors.svc:5432",
+    );
     assert!(agent.contains(entry), "the entry sits in the egress list");
+    assert!(agent.contains("base_url: http://store.connectors.svc:5432"));
+    // Its routes given, so a serve agent without a model relay passes step 4 and reaches step 5.
     let resource = serve(
         &agent,
         &format!(
-            "  routes: {{}}\n  boundary:\n    connectors: {{upstream: '{CONNECTORS}', audience: \
-             connectors, operations: [merge_request.get]}}\n"
+            "  routes:\n    format: llm.routes/1\n    endpoints:\n      lab: {{base_url: \
+             'http://lab.example/v1', protocol: messages, auth: {{kind: anonymous}}}}\n    \
+             routes: {{small: lab/small}}\n  boundary:\n    connectors: {{upstream: \
+             '{CONNECTORS}', audience: connectors, operations: [merge_request.get]}}\n"
         ),
     );
-    let rendered = match render_document(&resource, &config()) {
-        Err(RenderError::Refused(_)) => return,
+    let config = config_with(
+        "allowedBoundaryHttpEgress:\n- {namespace: connectors, selector: [{name: app, value: \
+         store}], port: 5432}\n",
+    );
+    let rendered = match render_document(&resource, &config) {
+        Err(RenderError::Refused(refusal)) => {
+            assert_eq!(
+                (refusal.reason.as_str(), refusal.member.as_str()),
+                (
+                    "BoundaryEgressNamespace",
+                    "spec.agent.deploy.kubernetes.egress[0].namespace"
+                ),
+                "story:boundary-admits-declared-http-egress: condition 1 refuses it: {}",
+                refusal.message()
+            );
+            return;
+        }
         Err(other) => panic!("not rendered: {other}"),
         Ok(rendered) => rendered,
     };
@@ -307,6 +338,10 @@ fn an_egress_namespace_entry_does_not_open_an_upstream_namespace_on_another_port
          on {opened:?}, not only on the declared {declared}: the spec's namespace egress entries \
          are rendered beside a boundary unfiltered (render.rs:1043), so the agent container \
          reaches the credential namespace's other services past the boundary"
+    );
+    panic!(
+        "story:boundary-admits-declared-http-egress: an entry in an allowed upstream's namespace \
+         is admitted"
     );
 }
 

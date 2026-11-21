@@ -9,8 +9,13 @@ use clap::{Args, Parser, Subcommand};
 pub const RUN_HELP: &str =
     "The configuration names the one namespace watched, the default agent image and resources, the
 model route a resource with empty routes is given, the Secret names and egress hosts a resource may
-use, and the upstreams a credential-free resource's boundary may relay to. The cluster is the
-in-cluster service account's, else the current kubeconfig context's.
+use, the upstreams a credential-free resource's boundary may relay to, and the namespace egress
+entries (allowedBoundaryHttpEgress: namespace, selector, port) it may declare beside them.
+Every allowedBoundaryHttpEgress entry must name read-path pods and a port that serves only reads,
+and never a pod that forwards requests with a credential of its own: the pod reaches them by
+network position alone, with any method on that port, and so does every credential-free resource
+of the namespace that declares a matching entry and binding.
+The cluster is the in-cluster service account's, else the current kubeconfig context's.
 Each resource is checked in-process before any child exists; a refused one has no children and its
 status names the refusal. The record of the resources lives in memory: after a restart every
 resource is checked again and its status rewritten.
@@ -25,7 +30,7 @@ pub const RENDER_HELP: &str = "The resource's namespace is its metadata.namespac
 built-in configuration applies: namespace default, the agent image registry.example/loom-agent at
 this version, 250m CPU and 256Mi memory for an AgentServe resource, no default size for a Command
 resource (one without spec.agent.deploy.kubernetes.resources is refused ResourcesRequired), no
-model route, and no Secret name, egress host or boundary upstream admitted.
+model route, and no Secret name, egress host, boundary upstream or boundary http egress admitted.
 The children carry the resource as owner only when the document has a metadata.uid.
 
 Exit status:
@@ -69,7 +74,8 @@ pub enum Command {
 pub struct RunArgs {
     /// The controller's configuration, YAML: namespace, defaultImage, defaultResources,
     /// defaultCommandResources, modelRoute, allowedSecretNames, allowedEgressHosts, allowedClaimNames, allowUnconfinedProfiles,
-    /// allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles, allowedBoundaryUpstreams.
+    /// allowedSeccompLocalhostProfiles, allowedAppArmorLocalhostProfiles, allowedBoundaryUpstreams,
+    /// allowedBoundaryHttpEgress.
     #[arg(long, value_name = "FILE")]
     pub config: PathBuf,
 }

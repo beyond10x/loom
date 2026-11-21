@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 077f4e4e6548832cdab0185ef7b7f4e65f130d090c84f28346747b75d9e33239
+// contract digest 01980d1e8aea39946398e18a513b683940fa24f213d6ef98da0bb583aaf66efd
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Metering — `loom.metering`.
