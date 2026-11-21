@@ -18,7 +18,15 @@ The compatibility API opens a case on a protocol of the
 
 - **It evaluates afresh every time.** Each frontier and completion compiles the protocol and
   evaluates the case's evidence with Canon. It reads no clock, makes no network or model call, and
-  supplies no authority decision.
+  supplies no authority decision. The one decision it keeps is a termination: once the host
+  terminates a case through an outcome Canon judges legitimate (`terminate`), the case is
+  evaluated with it, admits no action and completes with that outcome.
+- **A case can open child cases.** Performing an action that declares Canon's `case_open`
+  (`open_children`) opens each child under the protocol `case_open` names, each artifact it
+  declares at the parent's revision of that artifact or at `r0` when the parent holds none,
+  and writes one
+  `case_outcome` record per child into the parent, `open` until the child is terminated, then its
+  outcome. The parent's `children` claims read those records; `tree` lists the cases of one tree.
 - **It never invents authority.** An action that requires a capability is at best *approval
   required*; Commission asks its authority provider.
 - **It decides and never acts.** It reports the frontier and whether one outcome is legitimate. It

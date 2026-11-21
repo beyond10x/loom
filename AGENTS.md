@@ -582,7 +582,33 @@ by `Cargo.lock`. A different reference builds a second Canon whose types do not 
 with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
 adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
-register and are decided like any other construct, and Loom opens no child case itself.
+register and are decided like any other construct. A catalog or a registration whose openings form
+a cycle is refused `InvalidProtocol` with Canon's `check_openings` text (`case-open-cycle: ... a ->
+b -> a`).
+
+Child cases (`story:child-case-runtime`, `crates/loom-governor/src/children.rs`,
+`crates/loom-governor/tests/child_cases.rs`). `CanonGovernor::open_children(parent, action,
+expected_revision, children, records, at)` performs a `case_open` action: the parent open, at
+`expected_revision`, the action not blocked, each child under a registration whose protocol id is
+the one `case_open` names, with no input, its own independence and the parent's revision of each
+artifact it declares (`UNREVISED`, `r0`, for one the parent lacks). A child is `<parent>.<name>`
+(a name of ASCII letters, digits, `-`, `_`), then `.2`, `.3` past an id a case or a parent record
+holds. Each child is written first with its `parent` link (`loom.governor.CaseLink`); then the
+parent once, with the links in `children`, one `case_outcome` record per child (producer
+`CHILD_OUTCOME_PRODUCER`, result `open`, the subject's revision at opening) and the action's own
+records. A child whose parent does not list it (a restart between the writes) is taken over by
+the next opening of its name by the same action at the same subject revision. `terminate(case,
+outcome, instant)` needs Canon to judge the termination legitimate and the parent to hold the
+child's link, else writes nothing; it stores `loom.governor.CaseTermination`, then replaces the
+parent's record (result, `observed_at`, `subject_revision`: the child's own revision of the
+subject when its protocol declares it, else the parent's at opening). Terminating again through
+the same outcome completes an interrupted replacement. A terminated case is evaluated with its
+termination, its frontier blocks every action (reason `{"terminated":"<outcome>"}`) and
+`completion` reports the stored outcome. `receive` refuses a `case_outcome` record for a case with
+a link, or naming a held case. `tree(case)` lists a tree, root first, a link counting only when
+both sides hold it. `FileCaseStore` writes `parent`, `children` and `termination` only when present
+and refuses a file whose links name another case; Loom 0.58.0 and earlier refuse a file holding
+them. No `CaseStore` or `FallibleCaseStore` method is added.
 
 ## Connectors
 
@@ -1266,6 +1292,18 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   once more (`story:bound-program-run-cap-holds-across-ports`). Held by
   `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
   `crates/loom-governor` is not changed by it.
+- `check_case_open` (`open.rs`, beside `check` at load) refuses an `open` executor on an action
+  with no `case_open`, a `case_open` action bound to another executor (`MemberNotForExecutor`,
+  `executor.kind`) and an evidence entry of kind `case_outcome` (`KindNotProducible`). It is not in
+  `check`: `an_evidence_source_must_fit_the_executor_the_story_states` binds `change.open` to every
+  executor. `OpenEffects::new(governor, case, document, bindings_file, catalog)` checks the
+  document, resolves each `open` binding's `case_open` protocol id to the one registration of the
+  host catalog, and loads the child's `bindings` file from the directory of the absolute
+  `bindings_file` (never the working directory or the workspace), decoded and checked against that
+  protocol; a refusal is the constructor's, nothing written. A step names the children (`name`
+  literal, or each string of the argument `each` names), keeps one observation (`OPEN_SOURCE`,
+  `loom/open`), builds the `from: effect` records citing it and calls `open_children`. Held by
+  `crates/loom-bindings/tests/bound_open.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 

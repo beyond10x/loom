@@ -18,6 +18,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `bindings::admit_bound_program_runner` and `bindings::bound_program_child`: a bound program's runner admission and child (story:bound-program-result-table)
 - `b10x_loom_bindings::ProgramEffects` runs a `program` binding through the host's runner; its result table alone makes evidence, every call of the runner counts against `budget.max_runs`, and a case of another protocol is refused `CaseOfAnotherProtocol` (story:bound-program-result-table)
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
+- `CanonGovernor::open_children`, `terminate` and `tree`: a `case_open` action opens child cases, each child's outcome replaces its `case_outcome` record in the parent (story:child-case-runtime)
+- `b10x_loom_bindings::OpenEffects` performs an `open` binding; `check_case_open` holds `open` to `case_open` at load (story:child-case-runtime)
 
 ### Changed
 
@@ -33,6 +35,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
 - **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
 - A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
+- **Breaking:** `CaseState` gains `parent`, `children` and `termination`; Loom 0.58.0 and earlier refuse a case file that holds them (story:child-case-runtime)
+- **Breaking:** `loom.governor.StoredCase` gains `parent`, `children` and `termination`, with the new `CaseLink` and `CaseTermination` (story:child-case-runtime)
+- **Breaking:** `with_catalog` and `with_protocol` refuse protocols whose `case_open` openings form a cycle, `InvalidProtocol` (story:child-case-runtime)
+- **Breaking:** the evidence port refuses a `case_outcome` record for a case with a parent or child link, or naming a held case (story:child-case-runtime)
 
 ### Removed
 
