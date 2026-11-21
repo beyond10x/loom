@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest c758f5f11113e183054756382575f65c4c89d30c0a8c3bff06fb4597cb584925
+// contract digest 8c68eb9f9d600aec0de35057af0205203e30b03ee18d4541adb4b46f23f05478
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -389,6 +389,10 @@ pub struct RetryRecord {
     pub producer: String,
     /// `observed_at` — `Timestamp`.
     pub observed_at: crate::primitives::Timestamp,
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `exit` — `Optional<Integer>`.
+    pub exit: Option<i64>,
     /// `blob_sha256` — `Optional<String>`.
     pub blob_sha256: Option<String>,
 }
