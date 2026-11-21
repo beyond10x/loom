@@ -27,10 +27,8 @@ pub struct ProtocolPick {
 pub enum RouterError {
     /// The threshold is not a number from 0 to 1, so no confidence could be held to it.
     InvalidThreshold(f64),
-    /// A built-in protocol of the registry cannot be read: Canon cannot parse it or finds it
-    /// invalid.
-    Registry(canon_engineering::registry::Error),
-    /// The host catalog cannot be assembled.
+    /// The host catalog cannot be assembled: for [`classify`], the vendored engineering catalog
+    /// cannot be built, its lock refusing included.
     Catalog(String),
     /// The forced call gave no usable answer.
     Model(ModelError),
@@ -53,7 +51,6 @@ impl fmt::Display for RouterError {
             Self::InvalidThreshold(threshold) => {
                 write!(f, "the threshold {threshold} is not a number from 0 to 1")
             }
-            Self::Registry(error) => write!(f, "the protocol registry cannot be read: {error}"),
             Self::Catalog(error) => write!(f, "the protocol catalog cannot be read: {error}"),
             Self::Model(error) => write!(f, "no protocol was picked: {error}"),
             Self::Malformed(why) => write!(f, "the model's pick is malformed: {why}"),
@@ -78,14 +75,14 @@ impl fmt::Display for RouterError {
 impl std::error::Error for RouterError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Registry(error) => Some(error),
             Self::Model(error) => Some(error),
             _ => None,
         }
     }
 }
 
-/// Proposes the protocol of the ELS registry `intent` should run under.
+/// Proposes the protocol of the vendored engineering catalog (`ProtocolCatalog::engineering`)
+/// `intent` should run under.
 ///
 /// One forced `pick_protocol` call on `model`: the instructions describe every registry entry by
 /// its Canon description and artifact descriptions, the intent is the one user item, and the
@@ -93,8 +90,9 @@ impl std::error::Error for RouterError {
 ///
 /// # Errors
 /// [`RouterError::InvalidThreshold`] for a threshold outside 0 to 1 (before any call),
-/// [`RouterError::Catalog`] when the engineering catalog cannot be assembled, [`RouterError::Model`] when the call
-/// gives no answer, [`RouterError::Malformed`] for arguments that are not a pick,
+/// [`RouterError::Catalog`] when the engineering catalog cannot be built, a lock refusal
+/// included, with its error text and before any call, [`RouterError::Model`] when the call gives
+/// no answer, [`RouterError::Malformed`] for arguments that are not a pick,
 /// [`RouterError::OutsideRegistry`] for a protocol the registry does not hold and
 /// [`RouterError::Unsure`] for a confidence below `threshold`.
 pub async fn classify(
@@ -102,10 +100,22 @@ pub async fn classify(
     model: &dyn Model,
     threshold: f64,
 ) -> Result<ProtocolPick, RouterError> {
+    classify_in(intent, model, threshold, ProtocolCatalog::engineering()).await
+}
+
+/// [`classify`] over `catalog`, the engineering catalog as it was built or why it was not: a
+/// catalog that could not be built is [`RouterError::Catalog`] with its error text, before any
+/// call.
+async fn classify_in(
+    intent: &str,
+    model: &dyn Model,
+    threshold: f64,
+    catalog: Result<ProtocolCatalog, String>,
+) -> Result<ProtocolPick, RouterError> {
     if !(0.0..=1.0).contains(&threshold) {
         return Err(RouterError::InvalidThreshold(threshold));
     }
-    let catalog = ProtocolCatalog::engineering().map_err(RouterError::Catalog)?;
+    let catalog = catalog.map_err(RouterError::Catalog)?;
     classify_with_catalog(intent, model, threshold, &catalog).await
 }
 
@@ -260,4 +270,130 @@ fn string(fields: &Map<String, Value>, name: &str) -> Result<String, RouterError
         .and_then(Value::as_str)
         .map(str::to_owned)
         .ok_or_else(|| RouterError::Malformed(format!("`{name}` is not a string")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use llm_core::{
+        BoxFuture, CallId, Cancel, Capabilities, Error, Id, Protocol, Provenance, StopReason,
+        StreamSink, ToolCall, TurnObservation, TurnOutcome, TurnRequest,
+    };
+    use loom_protocols::{ENGINEERING_FILES, ENGINEERING_LOCK};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A recorded model that counts its turns and answers each with a confident pick of
+    /// `software-change@1`.
+    struct Counted {
+        provenance: Provenance,
+        capabilities: Capabilities,
+        turns: AtomicUsize,
+    }
+
+    impl Counted {
+        fn new() -> Self {
+            let id = |value: &str| Id::new(value).expect("fixture identifier");
+            Self {
+                provenance: Provenance {
+                    protocol: Protocol::Responses,
+                    provider: id("recorded"),
+                    account: id("recorded"),
+                    endpoint: id("recorded"),
+                    model: id("recorded-model"),
+                    binding_revision: id("rev-1"),
+                },
+                capabilities: Capabilities {
+                    tools: true,
+                    tool_choice: true,
+                    ..Capabilities::text(32_768, 2_048)
+                },
+                turns: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Model for Counted {
+        fn provenance(&self) -> &Provenance {
+            &self.provenance
+        }
+        fn capabilities(&self) -> &Capabilities {
+            &self.capabilities
+        }
+        fn turn<'a>(
+            &'a self,
+            _request: &'a TurnRequest,
+            _sink: &'a mut dyn StreamSink,
+            _cancel: &'a Cancel,
+        ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+            self.turns.fetch_add(1, Ordering::SeqCst);
+            let mut observation = TurnObservation::new(self.provenance.clone());
+            observation.final_usage = true;
+            let outcome = TurnOutcome {
+                stop_reason: StopReason::ToolCalls,
+                items: vec![Item::ToolCall(ToolCall {
+                    call_id: CallId::new("call_1").expect("call id"),
+                    name: ToolName::new(PICK_TOOL).expect("tool name"),
+                    arguments: json!({
+                        "protocol": "software-change@1",
+                        "confidence": 0.9,
+                        "reasons": ["a change"]
+                    }),
+                })],
+                observation,
+            };
+            Box::pin(async move { Ok(outcome) })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_catalog_failing_its_lock_is_a_catalog_error_and_asks_no_model() {
+        let mut files: Vec<(&str, Vec<u8>)> = ENGINEERING_FILES
+            .iter()
+            .map(|(path, bytes)| (*path, bytes.to_vec()))
+            .collect();
+        let (_, bytes) = files
+            .iter_mut()
+            .find(|(path, _)| *path == "software-change/1.yaml")
+            .expect("software-change/1.yaml is vendored");
+        let at = bytes
+            .windows(b"Deliver a change".len())
+            .position(|window| window == b"Deliver a change")
+            .expect("the description");
+        bytes[at] = b'd';
+        let borrowed: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(path, bytes)| (*path, bytes.as_slice()))
+            .collect();
+        let catalog = ProtocolCatalog::from_vendored(&borrowed, ENGINEERING_LOCK)
+            .map_err(|error| error.to_string());
+        let refusal = catalog
+            .clone()
+            .expect_err("the lock refuses the changed file");
+        let model = Counted::new();
+        match classify_in("change the parser", &model, 0.5, catalog).await {
+            Err(RouterError::Catalog(text)) => {
+                assert!(
+                    text.starts_with(
+                        "engineering protocol lock refused: DigestMismatch software-change/1.yaml"
+                    ),
+                    "{text}"
+                );
+                assert_eq!(text, refusal, "the catalog's error text, unchanged");
+            }
+            other => panic!("a lock refusal is RouterError::Catalog, got {other:?}"),
+        }
+        assert_eq!(model.turns.load(Ordering::SeqCst), 0, "no model was asked");
+
+        // The same model, over the catalog as built, is asked once and its pick returned.
+        let pick = classify_in(
+            "change the parser",
+            &model,
+            0.5,
+            ProtocolCatalog::engineering(),
+        )
+        .await
+        .expect("a pick");
+        assert_eq!(pick.protocol, "software-change@1");
+        assert_eq!(model.turns.load(Ordering::SeqCst), 1);
+    }
 }

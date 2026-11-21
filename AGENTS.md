@@ -459,7 +459,11 @@ that evaluates protocols with Canon, and it adds no clock, network or model call
 It depends on Commission by path, never the reverse.
 
 Host-reviewed protocols enter through `CanonGovernor::with_protocol`; compile and frontier
-representability checks remain in the governor. `EvaluationTime` is a trusted host callback,
+representability checks remain in the governor. A governor built without a catalog takes any other
+protocol from the vendored engineering catalog (`ProtocolCatalog::engineering`). While that
+catalog cannot be built, a lock refusal included, a name ending in `@<major>` (a canonical number)
+is `OpenError::InvalidProtocol` with the catalog's error text, never an unknown protocol; a name
+without one is still `UnknownProtocol`. `EvaluationTime` is a trusted host callback,
 never a model argument. Durable stores implement `FallibleCaseStore` atomically and report
 failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters.
 `FileCaseStore` is one: a file per case, written as `loom.governor`'s `StoredCase` to a temporary
@@ -1903,7 +1907,8 @@ Keep original statuses and capture completeness explicit; stored text is data, n
 verified evidence. The store expires with its briefing and grants no cross-run access. The
 `result_reference_workflow` integration suite holds the inspect-to-edit path and bounded context.
 
-- `b10x-loom-intake-router` classifies an intent against the host catalog (legacy wrappers use engineering definitions) and
+- `b10x-loom-intake-router` classifies an intent against the host catalog (the legacy `classify` against
+  `ProtocolCatalog::engineering`, a catalog that cannot be built being `RouterError::Catalog`) and
   refuses a pick outside it or below the confidence threshold. A routing proposal is never
   authority; whoever opens the case checks it.
 - `b10x-loom-intake-references` extracts tracker keys, chat permalinks, merge and pull requests and

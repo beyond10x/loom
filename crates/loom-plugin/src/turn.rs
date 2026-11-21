@@ -278,11 +278,9 @@ pub fn propose_case(
             detail: None,
             steps: Vec::new(),
         }),
-        Err(
-            error @ (RouterError::Model(_) | RouterError::Catalog(_) | RouterError::Registry(_)),
-        ) => Err(PluginError::Unavailable(format!(
-            "the router could not pick: {error}"
-        ))),
+        Err(error @ (RouterError::Model(_) | RouterError::Catalog(_))) => Err(
+            PluginError::Unavailable(format!("the router could not pick: {error}")),
+        ),
         Err(error) => Ok(stopped(
             Vec::new(),
             &format!("no case is proposed: {error}"),

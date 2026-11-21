@@ -12,7 +12,7 @@
 //! A document naming a member its declaration does not, or one member twice, is refused on read,
 //! and so is one missing a member: a case stored without its `inputs`, as Loom 0.19.0 and earlier
 //! wrote every case, is a [`FileStoreError`] naming the case, never read with inputs filled in.
-//! So is a case whose inputs name one input twice, and a case of an ELS built-in protocol
+//! So is a case whose inputs name one input twice, and a case of a vendored engineering protocol
 //! (`software-change@1`) whose inputs that protocol refuses as an opening would (a declared input
 //! missing, an empty list included, an undeclared one, an unlisted value), naming the case and
 //! the input. A case's explicit decisions are its `decisions` member, left out when none was

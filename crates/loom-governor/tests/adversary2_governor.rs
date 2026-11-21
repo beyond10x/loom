@@ -25,6 +25,7 @@ use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_commission_testkit::kits::governor::{Check, GovernorFixture, run};
 use loom_governor::{CanonGovernor, CaseState, CaseStore, MemoryCaseStore, OpenError, UpdateError};
+use loom_protocols::ProtocolCatalog;
 
 const SOFTWARE_CHANGE: &str = "software-change@1";
 
@@ -640,8 +641,11 @@ fn artifact_names_match_exactly() {
 // ---------------------------------------------------------------------------------------------
 
 fn ir_of(name: &str, major: u32) -> Ir {
-    let builtin = canon_engineering::registry::get(name, major).expect("ELS holds it");
-    compile(&builtin.model).expect("compiles")
+    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
+    let entry = catalog
+        .get(&format!("{name}@{major}"))
+        .expect("the catalog holds it");
+    compile(&entry.model).expect("compiles")
 }
 
 fn software_change_revisions() -> BTreeMap<String, String> {
