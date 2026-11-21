@@ -178,7 +178,8 @@ fn an_upstream_url_in_any_cluster_service_spelling_closes_its_namespace() {
             url,
         );
         assert_eq!(
-            refusal.reason, "BoundaryEgressNamespace",
+            refusal.reason,
+            "BoundaryEgressNamespace",
             "{url}: {}",
             refusal.message()
         );
@@ -187,16 +188,22 @@ fn an_upstream_url_in_any_cluster_service_spelling_closes_its_namespace() {
 
 /// Brief invariant 2, the open-door question: an `allowedBoundaryUpstreams` URL whose host is a
 /// short service name (`gw.store`, which in-cluster DNS resolves to the Service `gw` of the
-/// namespace `store`) names that namespace all the same; `upstream_namespace` reads no namespace
-/// from it and condition 1 then lets an entry open `store`.
+/// namespace `store`) names that namespace all the same. Pass 2: the configuration read refuses
+/// it, naming the member; and admission, given a configuration that holds it anyway (built
+/// without the read), still admits no entry in a namespace it cannot rule out.
 #[test]
 fn an_upstream_named_by_a_short_service_name_still_closes_its_namespace() {
-    let config = Config::parse(&config_text(
-        MODEL_ROUTE,
-        "http://gw.store:8080",
-        &["{namespace: store, selector: [{name: app, value: read}], port: 3100}"],
-    ))
-    .expect("the configuration");
+    let allowed = ["{namespace: store, selector: [{name: app, value: read}], port: 3100}"];
+    let error = Config::parse(&config_text(MODEL_ROUTE, "http://gw.store:8080", &allowed))
+        .expect_err("the configuration read refuses a short service name");
+    assert!(
+        error
+            .0
+            .starts_with("allowedBoundaryUpstreams[1].url: \"http://gw.store:8080\""),
+        "{error}"
+    );
+    let mut config = config(&allowed);
+    config.allowed_boundary_upstreams[1].url = "http://gw.store:8080".to_owned();
     let answer = outcome(
         &resource(
             &[get("read", "http://read.store.svc:3100")],
@@ -205,7 +212,12 @@ fn an_upstream_named_by_a_short_service_name_still_closes_its_namespace() {
         &config,
     );
     match answer {
-        Err(refusal) => assert_eq!(refusal.reason, "BoundaryEgressNamespace", "{}", refusal.message()),
+        Err(refusal) => assert_eq!(
+            refusal.reason,
+            "BoundaryEgressNamespace",
+            "{}",
+            refusal.message()
+        ),
         Ok(_) => panic!(
             "an entry in the namespace of the allowedBoundaryUpstreams URL http://gw.store:8080 is \
              admitted: condition 1 reads no namespace from a short service name"
@@ -220,21 +232,71 @@ fn an_upstream_named_by_a_short_service_name_still_closes_its_namespace() {
 /// agent container reaches a credential-holding proxy past the boundary.
 #[test]
 fn the_model_route_namespace_is_not_opened_beside_a_boundary() {
-    let config = config(&["{namespace: agents, selector: [{name: app, value: model-route}], port: 8080}"]);
+    let config =
+        config(&["{namespace: agents, selector: [{name: app, value: model-route}], port: 8080}"]);
     let answer = outcome(
         &resource(
             &[get("route", "http://model-route.agents.svc:8080")],
-            &["{name: route, namespace: agents, selector: [{name: app, value: model-route}], port: 8080}"],
+            &[
+                "{name: route, namespace: agents, selector: [{name: app, value: model-route}], port: 8080}",
+            ],
         ),
         &config,
     );
     match answer {
-        Err(refusal) => assert_eq!(refusal.reason, "BoundaryEgressNamespace", "{}", refusal.message()),
+        Err(refusal) => assert_eq!(
+            refusal.reason,
+            "BoundaryEgressNamespace",
+            "{}",
+            refusal.message()
+        ),
         Ok(rendered) => panic!(
             "an entry opening the modelRoute's namespace (agents) on its port is admitted beside a \
              boundary: {:?}",
             egress_rules(&rendered)
         ),
+    }
+}
+
+/// Pass 2, point 1: every spelling of a `modelRoute` URL the configuration read accepts closes
+/// the namespace admission reads from it, in every spelling of the entry's namespace, with the
+/// same reason, member and detail as an upstream's namespace; and the resource's own
+/// `spec.routes` does not change the model route.
+#[test]
+fn the_model_route_namespace_in_any_spelling_is_closed() {
+    let allowed = |namespace: &str| {
+        format!("{{namespace: {namespace}, selector: [{{name: app, value: read}}], port: 3100}}")
+    };
+    for url in [
+        "http://mr.store.svc",
+        "http://mr.store.svc:8080/v1",
+        "http://mr.store.svc.cluster.local.:8080/v1",
+        "http://MR.STORE.SVC:8080/v1",
+        "https://mr.store.svc/v1",
+        "http://user@mr.store.svc:8080/v1",
+    ] {
+        for namespace in ["store", "STORE", "store."] {
+            let config = Config::parse(&config_text(url, CONNECTORS, &[&allowed(namespace)]))
+                .unwrap_or_else(|error| panic!("{url}: {error}"));
+            let entry = format!(
+                "{{name: e, namespace: {namespace}, selector: [{{name: app, value: read}}], port: \
+                 3100}}"
+            );
+            let text = resource(&[get("read", "http://read.store.svc:3100")], &[&entry]).replace(
+                "  routes: {}\n",
+                "  routes:\n    format: llm.routes/1\n    endpoints:\n      lab: {base_url: \
+                 'http://lab.example/v1', protocol: messages, auth: {kind: anonymous}}\n    \
+                 routes: {small: lab/small}\n",
+            );
+            let refusal = refused(&text, &config, &format!("{namespace} under {url}"));
+            assert_eq!(
+                refusal.message(),
+                "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: \
+                 a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
+                 NetworkPolicy opens no namespace",
+                "{namespace} under {url}"
+            );
+        }
     }
 }
 
@@ -297,8 +359,10 @@ fn each_entry_needs_a_binding_in_its_own_namespace() {
 /// Connectors binding tie nothing.
 #[test]
 fn a_binding_out_of_shape_ties_no_entry() {
-    let entry = "{name: e, namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}";
-    let config = config(&["{namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}"]);
+    let entry =
+        "{name: e, namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}";
+    let config =
+        config(&["{namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}"]);
     let mut bindings: Vec<(String, String)> = [
         "http://logs.monitoring.svc.evil.example:3100",
         "http://logs.monitoring.svc.cluster.local.evil.example",
@@ -368,7 +432,11 @@ fn the_allow_list_matches_one_entry_exactly() {
             "http://logs.observability.svc:3100",
         ),
     ] {
-        let refusal = refused(&resource(&[get("b", binding)], &[entry]), &config(&allowed), entry);
+        let refusal = refused(
+            &resource(&[get("b", binding)], &[entry]),
+            &config(&allowed),
+            entry,
+        );
         assert_eq!(
             (refusal.reason.as_str(), refusal.member.as_str()),
             (
@@ -386,7 +454,8 @@ fn the_allow_list_matches_one_entry_exactly() {
 /// labels on one TCP port; the other rules and the pod are what they are without it.
 #[test]
 fn an_admitted_entry_renders_one_peer_no_wider_and_changes_nothing_else() {
-    let config = config(&["{namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}"]);
+    let config =
+        config(&["{namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}"]);
     let binding = get("logs", "http://logs.monitoring.svc:3100");
     let without = outcome(&resource(std::slice::from_ref(&binding), &[]), &config)
         .unwrap_or_else(|refusal| panic!("without: {}", refusal.message()));
@@ -410,7 +479,12 @@ fn an_admitted_entry_renders_one_peer_no_wider_and_changes_nothing_else() {
     let added: Vec<&Value> = after.iter().filter(|rule| !before.contains(rule)).collect();
     assert_eq!(added, [&expected], "{after:?}");
     for rule in &after {
-        assert!(rule["ports"].as_sequence().is_some_and(|ports| !ports.is_empty()), "{rule:?}");
+        assert!(
+            rule["ports"]
+                .as_sequence()
+                .is_some_and(|ports| !ports.is_empty()),
+            "{rule:?}"
+        );
         for peer in rule["to"].as_sequence().into_iter().flatten() {
             assert!(peer["ipBlock"].is_null(), "{rule:?}");
             assert!(!peer["namespaceSelector"].is_null(), "{rule:?}");
