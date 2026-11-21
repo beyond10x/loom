@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest 3a328dc948904436c12e838eb0b1eef21b3344259c68398f095f34b168e70799
-  contract digest c87e5c015377bb0ba7fae4424851c7c85d000bd207002f7306bda748b90be72f
+  model digest 6181dfb310c03f86cc43cd7e3017d3d28520fd63b547955c8bd5068c31112dfc
+  contract digest 954f60a97e2f8faa37296c29dfbac6d00b24f2fbcf915c0be4cbc1e7bbd014db
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-297 capabilities: **292 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+311 capabilities: **306 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -62,6 +62,20 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.authority.HostContext` |
 | domain type | `loom.authority.MandateHost` |
 | domain type | `loom.authority.Outcome` |
+| domain type | `loom.bindings.ActionBudget` |
+| domain type | `loom.bindings.ArtifactPath` |
+| domain type | `loom.bindings.BindingsDocument` |
+| domain type | `loom.bindings.BindingsRefusal` |
+| domain type | `loom.bindings.BindingsRefusalReason` |
+| domain type | `loom.bindings.BoundAction` |
+| domain type | `loom.bindings.EvidenceEntry` |
+| domain type | `loom.bindings.Executor` |
+| domain type | `loom.bindings.ExecutorSpec` |
+| domain type | `loom.bindings.ProducerIndependence` |
+| domain type | `loom.bindings.ResultRule` |
+| domain type | `loom.bindings.ResultSource` |
+| domain type | `loom.bindings.RetryCondition` |
+| domain type | `loom.bindings.ToolAllowList` |
 | domain type | `loom.datasource.AdapterAlias` |
 | domain type | `loom.datasource.ConnectionId` |
 | domain type | `loom.datasource.ConnectorsCliConfig` |
