@@ -1,0 +1,309 @@
+format: protocol/1
+
+protocol:
+  id: software.change
+  revision: 1
+  description: >-
+    Deliver a change to a software system: implement it, verify the current implementation
+    revision, merge it under authority, release and deploy it, and accept it once its objective is
+    realized; or close it declined, superseded or abandoned on an explicit decision, or rolled
+    back on a complete rollback result. A case fixes its risk, which selects the obligations that
+    apply, and its change kind, which selects whether a regression must be reproduced before the
+    implementation is edited, and whether its regression test must fail on its first run, before
+    the implementation is first changed; and whether it affects a security boundary, in which case
+    the implementation is verified only once a principal other than the implementer approved its
+    security review. A deployment is healthy only on an observation at most 30 minutes old.
+
+case:
+  inputs:
+    risk:
+      description: >-
+        how much proof the change must carry; each level applies every obligation of the level
+        below it and one more
+      values: [trivial, standard, elevated, critical]
+    change_kind:
+      description: >-
+        what the change is; a bugfix must reproduce its regression with a failing test before the
+        implementation is edited, and its regression test must fail on its first run, before the
+        implementation is first changed
+      values: [feature, bugfix, refactor]
+    affects_security_boundary:
+      description: >-
+        whether the change affects a security boundary; one that does needs an approving security
+        review from a principal other than the implementer before its implementation is verified
+      values: [true, false]
+
+independence_dimensions:
+  different_principal:
+    description: the producer is another principal than the one who did the case's work
+  different_agent_run:
+    description: the producer is another agent run than the one that did the case's work
+
+artifacts:
+  intent:
+    description: what the change is meant to achieve
+  system_specification:
+    description: the specified behaviour of the system concerned
+  plan:
+    description: the intended steps toward the intent
+  implementation:
+    description: a revision of the code that realizes the plan
+  release:
+    description: a versioned, deployable unit of the system
+  deployment:
+    description: a release running in an environment
+
+evidence_kinds:
+  test_result:
+    description: >-
+      the result of running tests against an implementation revision; its result is pass or fail
+  code_review:
+    description: a review of an implementation revision; its result is approved or rejected
+  operational_observation:
+    description: >-
+      an observation of the running system; its result is healthy or unhealthy, and it applies
+      for 30 minutes after it is observed, after which it no longer says anything
+    max_age: 30m
+  build_provenance:
+    description: the record of how a release was built from an implementation
+  objective_observation:
+    description: >-
+      an observation of whether the intent's objective is met; its result is satisfied or
+      unsatisfied
+  rollback_result:
+    description: >-
+      the result of returning a release to the one before it; its result is complete or partial
+  regression_test_result:
+    description: >-
+      the result of running a bugfix's regression test against an implementation revision; its
+      result is pass or fail
+  implementation_change:
+    description: >-
+      the record that the implementation was changed, moving it to a new revision
+  security_review:
+    description: >-
+      a review of an implementation revision's effect on a security boundary; its result is
+      approved or rejected
+
+claims:
+  tests.pass:
+    description: the tests pass for the current implementation revision
+    true_when:
+      evidence:
+        kind: test_result
+        result: pass
+        subject: implementation
+  implementation.reviewed:
+    description: the current implementation revision is reviewed
+    true_when:
+      evidence:
+        kind: code_review
+        result: approved
+        subject: implementation
+  security.reviewed:
+    description: >-
+      the current implementation revision's security review is approved by a producer the case
+      lists as another principal than the implementer
+    true_when:
+      evidence:
+        kind: security_review
+        result: approved
+        subject: implementation
+        independent_on: [different_principal]
+  implementation.verified:
+    description: >-
+      the current implementation revision is verified: its tests pass and, when the change
+      affects a security boundary, it is security reviewed
+    true_when:
+      all:
+        - evidence:
+            kind: test_result
+            result: pass
+            subject: implementation
+        - any:
+            - input: affects_security_boundary
+              in: [false]
+            - claim: security.reviewed
+  release.proven:
+    description: >-
+      the current implementation revision is verified and the current release revision carries
+      build provenance; nothing here ties that release to the verified implementation revision
+    true_when:
+      all:
+        - claim: implementation.verified
+        - evidence:
+            kind: build_provenance
+            subject: release
+  deployment.healthy:
+    description: the deployment is running healthily
+    true_when:
+      evidence:
+        kind: operational_observation
+        result: healthy
+        subject: deployment
+  objective.realized:
+    description: the intent's objective is met
+    true_when:
+      evidence:
+        kind: objective_observation
+        result: satisfied
+        subject: intent
+  regression.reproduced:
+    description: >-
+      the regression a bugfix repairs is reproduced: a test has failed on the current
+      implementation revision, or the first run of the regression test, on any revision of the
+      implementation, failed
+    true_when:
+      any:
+        - evidence:
+            kind: test_result
+            result: fail
+            subject: implementation
+        - first:
+            kind: regression_test_result
+            result: fail
+            subject: implementation
+  regression.shown_first:
+    description: >-
+      the regression test failed first, before the implementation was first changed: the first
+      regression test result about the implementation failed, and it was observed before the
+      implementation's first change
+    true_when:
+      all:
+        - first:
+            kind: regression_test_result
+            result: fail
+            subject: implementation
+        - before:
+            first: regression_test_result
+            then: implementation_change
+            subject: implementation
+
+obligations:
+  tests.required:
+    description: the tests pass for the current implementation revision; applies at every risk
+    applicable_when:
+      input: risk
+      in: [trivial, standard, elevated, critical]
+    discharged_when:
+      claim: tests.pass
+  review.required:
+    description: >-
+      the current implementation revision is reviewed; applies at standard risk and above
+    applicable_when:
+      input: risk
+      in: [standard, elevated, critical]
+    discharged_when:
+      claim: implementation.reviewed
+  provenance.required:
+    description: the release is proven; applies at elevated risk and above
+    applicable_when:
+      input: risk
+      in: [elevated, critical]
+    discharged_when:
+      claim: release.proven
+  health.required:
+    description: the deployment is healthy; applies at critical risk
+    applicable_when:
+      input: risk
+      in: [critical]
+    discharged_when:
+      claim: deployment.healthy
+  red_first.required:
+    description: >-
+      the regression test failed on its first run, before the implementation was first changed;
+      applies to a bugfix, at every risk
+    applicable_when:
+      input: change_kind
+      in: [bugfix]
+    discharged_when:
+      claim: regression.shown_first
+  security_review.required:
+    description: >-
+      the current implementation revision is security reviewed by another principal than the
+      implementer; applies to a change that affects a security boundary, at every risk
+    applicable_when:
+      input: affects_security_boundary
+      in: [true]
+    discharged_when:
+      claim: security.reviewed
+
+actions:
+  repository.inspect:
+    description: read the repository
+    effect: read
+  tests.write:
+    description: change the tests in the repository's working revision
+    effect: write
+  implementation.edit:
+    description: >-
+      change the implementation in the repository's working revision; a bugfix needs its
+      regression reproduced first
+    effect: write
+    may_produce:
+      - evidence: implementation_change
+    precondition:
+      any:
+        - input: change_kind
+          in: [feature, refactor]
+        - claim: regression.reproduced
+  tests.run:
+    description: run the tests against an implementation revision
+    effect: read
+    may_produce:
+      - evidence: test_result
+      - evidence: regression_test_result
+  repository.merge:
+    description: >-
+      merge a revision into the repository's mainline; needs the current implementation revision
+      verified and authority to merge, never only a connection to the repository host
+    effect: write
+    precondition:
+      claim: implementation.verified
+      is: true
+    requires:
+      - capability: repository.merge
+  release.rollback:
+    description: >-
+      return to a previous release; needs authority to roll back, and invoking it earns no outcome
+      until a rollback result says it is complete
+    effect: write
+    requires:
+      - capability: release.rollback
+    may_produce:
+      - evidence: rollback_result
+
+outcomes:
+  accepted:
+    description: >-
+      the case closed with its result accepted; needs the release proven, the deployment healthy
+      and the objective realized
+    requires:
+      all:
+        - claim: objective.realized
+        - claim: deployment.healthy
+        - claim: release.proven
+  declined:
+    description: >-
+      the case closed because the change was explicitly declined; needs no implementation
+    requires:
+      decision: explicitly_declined
+  rolled_back:
+    description: >-
+      the case closed with its release rolled back; needs a rollback result about the current
+      release revision that says the rollback is complete
+    requires:
+      evidence:
+        kind: rollback_result
+        result: complete
+        subject: release
+  superseded:
+    description: the case closed because another change explicitly superseded it
+    requires:
+      decision: explicitly_superseded
+  abandoned:
+    description: >-
+      the case closed because the change was explicitly abandoned without reaching any planned
+      outcome
+    requires:
+      decision: explicitly_abandoned

@@ -1,0 +1,217 @@
+format: protocol/1
+
+protocol:
+  id: self.improvement
+  revision: 1
+  description: >-
+    One improvement turn on takt: a finding that names a machine-checkable predicate on a scenario or on a repository at a seed
+    is reproduced on the promoted baseline, a candidate fix is delivered and merged under the
+    authority its surface needs, the finding is verified gone on the candidate by another run than
+    the one that delivered it, the scorecard shows no regression against the baseline, and the
+    candidate's binary is promoted. Accepted once promoted; declined when the candidate still
+    reproduces the finding; unreproducible when the baseline never did. Claims about the baseline
+    and about the candidate are about separate artifacts, so a commit to the candidate leaves the
+    baseline's claims standing.
+
+case:
+  inputs:
+    surface:
+      description: >-
+        whether the candidate's change, base to head, touches a judge surface: every path outside
+        the allow-list held at the baseline revision is one
+      values: [judge, non_judge]
+
+independence_dimensions:
+  different_agent_run:
+    description: the producer is another agent run than the one that delivered the candidate
+
+artifacts:
+  finding:
+    description: >-
+      a finding filed in the planning store with its expected_before predicate (a command, a named
+      scenario, the expected exit status or output) and the path of the record that produced it
+  baseline:
+    description: the promoted takt revision the finding was observed on
+  candidate:
+    description: a takt revision that is meant to make the finding's predicate fail
+  promotion:
+    description: the takt binary installed for runs, built from a named revision
+
+evidence_kinds:
+  finding_record:
+    description: >-
+      the finding as filed: it carries an expected_before predicate that parses and a source path
+      that exists; its result is filed or malformed
+  scenario_result:
+    description: >-
+      the finding's predicate run on its scenario, or on its repository at its seed, with a takt built from a revision; its result is
+      reproduced or not_reproduced, or error when the command ended with a status the predicate
+      names neither as the defect's nor as the healthy one, or with the defect's exit but without
+      its output, which makes no claim true
+  merge_observation:
+    description: the candidate revision merged into the mainline; its result is merged
+  scorecard_result:
+    description: >-
+      every scenario of the corpus run at the candidate revision and compared with the baseline's
+      record for the same scenario, tokens read from the runs' events only; its result is
+      no_regression or regression
+  promotion_record:
+    description: >-
+      the installed binary's embedded revision compared with the merged candidate revision; its
+      result is promoted or mismatch
+
+claims:
+  finding.cited:
+    description: the finding is filed with a predicate that parses and a source that exists
+    true_when:
+      evidence:
+        kind: finding_record
+        result: filed
+        subject: finding
+  scenario.reproduced_before:
+    description: the finding's predicate holds on the baseline revision
+    true_when:
+      evidence:
+        kind: scenario_result
+        result: reproduced
+        subject: baseline
+  scenario.passes_after:
+    description: >-
+      the finding's predicate fails on the current candidate revision, observed by another agent
+      run than the one that delivered the candidate
+    true_when:
+      evidence:
+        kind: scenario_result
+        result: not_reproduced
+        subject: candidate
+        independent_on: [different_agent_run]
+  fix.merged:
+    description: the current candidate revision is merged into the mainline
+    true_when:
+      evidence:
+        kind: merge_observation
+        result: merged
+        subject: candidate
+  scorecard.no_regression:
+    description: no scenario of the corpus is worse at the current candidate revision than at the baseline
+    true_when:
+      evidence:
+        kind: scorecard_result
+        result: no_regression
+        subject: candidate
+  promoted:
+    description: the installed takt binary was built from the merged candidate revision
+    true_when:
+      evidence:
+        kind: promotion_record
+        result: promoted
+        subject: promotion
+
+obligations:
+  reproduction.required:
+    description: the finding is reproduced on the baseline before a candidate counts
+    discharged_when:
+      claim: scenario.reproduced_before
+  verification.required:
+    description: the finding is verified gone on the candidate by another run
+    discharged_when:
+      claim: scenario.passes_after
+  regression.required:
+    description: the scorecard shows no regression at the candidate
+    discharged_when:
+      claim: scorecard.no_regression
+
+actions:
+  finding.file:
+    description: file the finding in the planning store with its predicate and its source
+    effect: write
+    may_produce:
+      - evidence: finding_record
+  scenario.reproduce:
+    description: run the finding's predicate on its scenario or repository with a takt built from the baseline
+    effect: read
+    precondition:
+      claim: finding.cited
+    may_produce:
+      - evidence: scenario_result
+  scenario.verify:
+    description: run the finding's predicate on its scenario or repository with a takt built from the candidate
+    effect: read
+    precondition:
+      claim: scenario.reproduced_before
+    may_produce:
+      - evidence: scenario_result
+  candidate.merge:
+    description: >-
+      merge a candidate that touches no judge surface; the planner's grant suffices
+    effect: write
+    precondition:
+      all:
+        - claim: scenario.passes_after
+        - input: surface
+          in: [non_judge]
+    requires:
+      - capability: repository.merge
+    may_produce:
+      - evidence: merge_observation
+  candidate.merge_judge_surface:
+    description: >-
+      merge a candidate that touches a judge surface; the owner holds this capability, or a role
+      the owner delegated it to by a revocable record, and a revoked delegation grants nothing
+      (story:judge-guard enforces it)
+    effect: write
+    precondition:
+      all:
+        - claim: scenario.passes_after
+        - input: surface
+          in: [judge]
+    requires:
+      - capability: repository.merge.judge_surface
+    may_produce:
+      - evidence: merge_observation
+  scorecard.compare:
+    description: run the scenario corpus at the merged candidate and compare it with the baseline
+    effect: read
+    precondition:
+      claim: fix.merged
+    may_produce:
+      - evidence: scorecard_result
+  binary.promote:
+    description: build the merged candidate, embed its revision, install it for runs
+    effect: write
+    precondition:
+      all:
+        - claim: fix.merged
+        - claim: scorecard.no_regression
+    requires:
+      - capability: takt.promote
+    may_produce:
+      - evidence: promotion_record
+
+outcomes:
+  accepted:
+    description: >-
+      the turn closed with the finding verified gone, no regression and the candidate promoted
+    requires:
+      all:
+        - claim: scenario.passes_after
+        - claim: scorecard.no_regression
+        - claim: promoted
+  declined:
+    description: the turn closed because the candidate did not move the finding's predicate
+    requires:
+      evidence:
+        kind: scenario_result
+        result: reproduced
+        subject: candidate
+  unreproducible:
+    description: the turn closed because the finding's predicate does not hold on the baseline
+    requires:
+      evidence:
+        kind: scenario_result
+        result: not_reproduced
+        subject: baseline
+  abandoned:
+    description: the turn closed because it was explicitly abandoned
+    requires:
+      decision: explicitly_abandoned
