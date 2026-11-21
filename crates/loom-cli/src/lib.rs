@@ -126,6 +126,7 @@ Exit status:
       not given, or with --mandate Mandate did not clear its approval
   17  NotPerformed: nothing performs the request's action
   18  RunNotSuspended: the run store does not hold the run suspended
+  19  HeldForDecision: the commission's Suspension holds the run for a decision request; nothing is performed
   20  the suspension store could not be read; nothing was resumed
   21  the governor could not answer before the run resumed; nothing was resumed
   22  the run could not be resumed, the Suspension could not be taken or released, or the resumed
@@ -147,6 +148,11 @@ pub fn resume_refusal_status(refusal: &ResumeRefusal) -> u8 {
         ResumeRefusal::NotGranted(_) => 16,
         ResumeRefusal::NotPerformed => 17,
         ResumeRefusal::RunNotSuspended(_) => 18,
+        // `HeldForAuthority` and `OtherDecision` come only from `resume_after_decision`, which no
+        // command calls (`story:decision-suspension-reason`); the help does not list them.
+        ResumeRefusal::HeldForDecision
+        | ResumeRefusal::HeldForAuthority
+        | ResumeRefusal::OtherDecision { .. } => 19,
     }
 }
 
@@ -1144,6 +1150,30 @@ mod tests {
                 ),
             }
         }
+    }
+
+    /// A resume of a run held for a decision exits 19 naming `HeldForDecision`, as the help says;
+    /// the two refusals only `resume_after_decision` gives map to 19 too, and the help lists
+    /// neither (`story:decision-suspension-reason`).
+    #[test]
+    fn a_decision_hold_is_refused_with_its_own_resume_status() {
+        let status = resume_refusal_status(&ResumeRefusal::HeldForDecision);
+        assert_eq!(status, 19);
+        assert!(RESUME_HELP.contains(
+            "  19  HeldForDecision: the commission's Suspension holds the run for a decision \
+             request; nothing is performed"
+        ));
+        for refusal in [
+            ResumeRefusal::HeldForAuthority,
+            ResumeRefusal::OtherDecision {
+                request_id: "DR-2".to_owned(),
+                held_request_id: "DR-1".to_owned(),
+            },
+        ] {
+            assert_eq!(resume_refusal_status(&refusal), 19, "{refusal:?}");
+        }
+        assert!(!RESUME_HELP.contains("HeldForAuthority"));
+        assert!(!RESUME_HELP.contains("OtherDecision"));
     }
 
     /// A run or a resume with a state directory that stopped at its human gate holding no

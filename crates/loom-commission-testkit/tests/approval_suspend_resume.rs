@@ -195,8 +195,11 @@ fn suspend_child(dir: &Path) {
     record.set("run_id", &end.run_id.0.0);
     record.set("run_state", run_state(&runs, &end.run_id));
     record.set("revision_at_suspension", revision);
-    record.set("suspension_action", &stored.action);
-    record.set("suspension_request", &stored.action_request_id.0.0);
+    record.set("suspension_action", stored.action.as_deref().unwrap());
+    record.set(
+        "suspension_request",
+        &stored.action_request_id.clone().unwrap().0.0,
+    );
     record.set(
         "suspension_reason",
         match &stored.reason {
@@ -205,7 +208,7 @@ fn suspend_child(dir: &Path) {
         },
     );
     assert_eq!(stored.run_id, end.run_id);
-    assert_eq!(stored.expected_case_revision, revision);
+    assert_eq!(stored.expected_case_revision, Some(revision));
     assert_eq!(stored.case_id, case);
     record.set("invoked", adapter.invoked().join(","));
     record.write(&dir.join("suspend.txt"));
@@ -489,7 +492,7 @@ fn a_take_or_a_release_for_another_request_is_refused_naming_both_and_changes_no
         resumed.err(),
         Some(ResumeError::Refused(ResumeRefusal::OtherRequest {
             action_request_id: read.clone(),
-            held_action_request_id: held.data.action_request_id.clone(),
+            held_action_request_id: held.data.action_request_id.clone().unwrap(),
         })),
         "the take names both requests"
     );
@@ -506,6 +509,7 @@ fn a_take_or_a_release_for_another_request_is_refused_naming_both_and_changes_no
     let taken = suspensions.take(TakeSuspension {
         suspension: key.clone(),
         action_request_id: held.data.action_request_id.clone(),
+        decision_request_id: None,
     });
     assert!(
         matches!(taken, TakeSuspensionOutcome::Taken { .. }),
@@ -514,13 +518,14 @@ fn a_take_or_a_release_for_another_request_is_refused_naming_both_and_changes_no
     assert_eq!(
         suspensions.release(ReleaseSuspension {
             suspension: key.clone(),
-            action_request_id: read.clone(),
+            action_request_id: Some(read.clone()),
+            decision_request_id: None,
         }),
         ReleaseSuspensionOutcome::OtherRequest {
             error: SuspensionRequestMismatch {
                 suspension: key,
                 held_action_request_id: held.data.action_request_id.clone(),
-                action_request_id: read,
+                action_request_id: Some(read),
             },
         }
     );
@@ -559,7 +564,7 @@ impl SuspensionPort for ReadsAnotherRequest<'_> {
         commission: &CommissionId,
     ) -> Result<Option<SuspensionSnapshot>, SuspensionStoreError> {
         Ok(self.store.get(commission)?.map(|mut stored| {
-            stored.data.action_request_id = self.request.clone();
+            stored.data.action_request_id = Some(self.request.clone());
             stored
         }))
     }
@@ -604,7 +609,7 @@ fn a_hold_the_host_settled_holds_no_suspension_and_ends_the_run_without_a_loop_e
     );
     let asked = lock(&settling.asked).clone();
     assert_eq!(asked.len(), 1, "the port was asked to hold once: {asked:?}");
-    assert_eq!(asked[0].action, MERGE);
+    assert_eq!(asked[0].action.as_deref(), Some(MERGE));
     assert_eq!(asked[0].run_id, end.run_id);
     assert_eq!(adapter.invoked(), [TESTS_RUN], "nothing was merged");
     let commission_id = commission(&case).data().commission_id.clone();
@@ -1328,7 +1333,9 @@ fn suspended_on_merge(
         .expect("the store reads")
         .expect("the Suspension is held");
     assert_eq!(held.state, SuspensionState::Pending);
-    held.data.action_request_id
+    held.data
+        .action_request_id
+        .expect("the Suspension holds the merge request")
 }
 
 /// A commission holding a Suspension starts no new Run through `run_with_suspension`: the start is
@@ -1363,7 +1370,7 @@ fn a_new_run_of_a_commission_holding_a_suspension_is_refused_and_performs_nothin
         refused.failure,
         LoopFailure::CommissionSuspended(SuspensionStateConflict {
             state: SuspensionState::Pending,
-            action_request_id: request,
+            action_request_id: Some(request),
         }),
         "the refusal names the Suspension's state and request"
     );
@@ -1422,7 +1429,7 @@ fn an_effect_port_failing_after_the_take_leaves_the_request_in_doubt() {
         SuspensionState::Resuming,
         "taken, never released"
     );
-    assert_eq!(held.data.action_request_id, request);
+    assert_eq!(held.data.action_request_id, Some(request.clone()));
 
     let retry = Adapter::new(&governor, &case, &ids);
     let model = Model::picking([MERGE]);
@@ -1459,7 +1466,7 @@ fn an_effect_port_failing_after_the_take_leaves_the_request_in_doubt() {
         rerun.err().map(|error| error.failure),
         Some(LoopFailure::CommissionSuspended(SuspensionStateConflict {
             state: SuspensionState::Resuming,
-            action_request_id: request,
+            action_request_id: Some(request),
         })),
         "no new Run starts while the request is in doubt"
     );

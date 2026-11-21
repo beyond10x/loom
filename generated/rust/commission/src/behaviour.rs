@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 13cc0558175429879e963bf7c04bdfe9e35b2c66d61ec900197077546340ca2e
-// contract digest 08d3ce481bae0546b594ce01e47eee1e824d3a2be8bddc909791bd308f005d05
+// model digest 6bb42a5810efc385adb384b6bdb1a8e8f7ea869e6a7b5118c38b9bf6c06741d9
+// contract digest f4007876e52f5a84b65c3374f0ec1653ebdbe1365fd1cc7b6b4484aac89aa9c6
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -203,6 +203,9 @@ where
                 commission_id: held.data.commission_id,
                 run_id: held.data.run_id,
                 action_request_id: held.data.action_request_id,
+                expected_case_revision: held.data.expected_case_revision,
+                action: held.data.action,
+                arguments: held.data.arguments,
                 state: held.state,
             })
             .collect())

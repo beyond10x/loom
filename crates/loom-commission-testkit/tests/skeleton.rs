@@ -290,6 +290,7 @@ fn skeleton_lands_port_vocabulary_and_modules() {
             ("ExternalAvailability", "Json"),
             ("RunBudget", "RunBudgetBreach"),
             ("HostStop", "HostStop"),
+            ("Decision", "DecisionHold"),
         ],
     );
     assert_struct(

@@ -346,7 +346,14 @@ puts the Run back `Running` (`ResumeRun`, so `run_with_suspension`'s run store i
 and the run ends as without a port, with no loop error. The production store is the governor's
 `FileSuspensionStore`.
 `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds it across a real process
-restart. An effect port's `Refused` changed nothing, and an ordinary refusal is an idle iteration
+restart. A run an executor suspends for `SuspensionReason::Decision` (`DecisionHold`: a decision
+request's id and what it unblocks) holds a Suspension too, with no action request, expected case
+revision, action or arguments (`null` in the store's file); only `resume_after_decision`, given the
+decided hold (`DecidedHold`, `Recorded` with the produced record or `NoRecord`), takes and releases
+it, naming its decision request (`decision_request_id`; the port refuses another, or none, as
+`other-decision`), and goes on from the case's current revision, performing nothing held; `resume_after_grant`
+refuses it `HeldForDecision` and `approve` `OtherCapability`
+(`crates/loom-commission-testkit/tests/decision_suspend_resume.rs`). An effect port's `Refused` changed nothing, and an ordinary refusal is an idle iteration
 toward the idle bound. One the port marks final (`EffectOutcomeRefused.ends_run`) ends the run at
 once with `EffectRefused`, naming the request and the reason, once the refusal was recorded and
 observed: after a proposal, after a fan-out once every read answered (beside a stale read it is

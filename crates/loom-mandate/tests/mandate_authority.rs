@@ -583,7 +583,7 @@ fn an_approval_required_decision_suspends_as_the_gate_does() {
         .unwrap_or_else(|error| panic!("the suspension store reads: {error:?}"))
         .unwrap_or_else(|| panic!("the run holds a Suspension"));
     assert_eq!(held.state, SuspensionState::Pending);
-    assert_eq!(held.data.action, "merge");
+    assert_eq!(held.data.action.as_deref(), Some("merge"));
     match &held.data.reason {
         SuspensionReason::Authority(reason) => {
             assert_eq!(

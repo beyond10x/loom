@@ -1067,11 +1067,11 @@ fn a_resume_under_a_deadline_that_is_not_rfc_3339_takes_nothing() {
         commission_id: commission_id.clone(),
         run_id: RunId(uuid(0x101)),
         run_case_revision: 1,
-        action_request_id: ActionRequestId(uuid(0x301)),
+        action_request_id: Some(ActionRequestId(uuid(0x301))),
         case_id: case.clone(),
-        expected_case_revision: 1,
-        action: EVALUATE.to_owned(),
-        arguments: ProposedActionArguments(Value::Null),
+        expected_case_revision: Some(1),
+        action: Some(EVALUATE.to_owned()),
+        arguments: Some(ProposedActionArguments(Value::Null)),
         reason: SuspensionReason::Authority(Value::Null),
     });
     assert!(matches!(held, HoldSuspensionOutcome::Held { .. }));
@@ -1128,11 +1128,11 @@ fn holding(name: &str, commission: &Commission<commission_state::Assigned>) -> F
         commission_id,
         run_id: RunId(uuid(0x101)),
         run_case_revision: 1,
-        action_request_id: ActionRequestId(uuid(0x301)),
+        action_request_id: Some(ActionRequestId(uuid(0x301))),
         case_id: commission.data().case_id.clone(),
-        expected_case_revision: 1,
-        action: EVALUATE.to_owned(),
-        arguments: ProposedActionArguments(Value::Null),
+        expected_case_revision: Some(1),
+        action: Some(EVALUATE.to_owned()),
+        arguments: Some(ProposedActionArguments(Value::Null)),
         reason: SuspensionReason::Authority(Value::Null),
     });
     assert!(matches!(held, HoldSuspensionOutcome::Held { .. }));

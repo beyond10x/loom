@@ -457,6 +457,16 @@
 //! as its durable trace; every later resume is refused [`ResumeRefusal::InDoubt`], and settling the
 //! request is the host's.
 //!
+//! A run held for a decision request (`story:decision-suspension-reason`): an executor that
+//! returns `Suspended` with `SuspensionReason::Decision` suspends the Run as for any executor
+//! suspension, and under [`run_with_suspension`] the commission's Suspension is also held `Pending`
+//! with that reason, the Run, its case and no action request, expected case revision, action or
+//! arguments. [`resume_after_grant`] refuses it [`ResumeRefusal::HeldForDecision`] right after it
+//! reads it. [`resume_after_decision`], given the decided hold, refuses one held for authority
+//! ([`ResumeRefusal::HeldForAuthority`]) or for another request ([`ResumeRefusal::OtherDecision`]),
+//! then takes it, resumes the Run, releases it and goes on from the case's current revision,
+//! performing nothing held; a `Resuming` one is released and goes on without a second take.
+//!
 //! Every loop hands its events to the sink [`LoopContext::events`] returns (`story:runtime-events`;
 //! [`crate::ports::events`]), in the order it does what they report: `StepStarted` before each
 //! executor call (naming the frontier it is handed) and before each invocation that is no executor
@@ -489,17 +499,18 @@ use crate::model::responsibility::{
 use crate::model::responsibility::{
     ActionNeedsAuthority, ActionNotAdmitted, ActionRequest, ActionRequestData, ActionRequestId,
     ActionRequestStale, ActionStatus, Admission, AnyRun, AuthorityVerdict, CaseId, Commission,
-    CompletionDetermination, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction,
-    ExecutorStep, ExecutorUsage, Frontier, FrontierAction, FrontierData, FrontierId, GovernorError,
-    HoldSuspension, HoldSuspensionOutcome, HostStop, JudgeBudgetStop, JudgeBudgetStopOutcome,
-    JudgeEffectRefusal, JudgeEffectRefusalOutcome, JudgeIdleIteration, JudgeIdleIterationOutcome,
-    JudgePerformableActions, JudgePerformableActionsOutcome, Observation, ObservationData,
-    ObservationId, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
-    RevalidateActionRequestOutcome, Run, RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval,
-    RunOutcomeCaseMovedOn, RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound,
-    RunOutcomeNeedsAuthority, RunOutcomeNoPerformableAction, RunOutcomeSuspended,
-    RunOutcomeWaiting, RunStarted, RunStorageFailed, StartRun, StartRunOutcome, StopPolicy,
-    SuspendRun, SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionState,
+    CompletionDetermination, DecidedHold, EffectOutcome, ExecutorOutcome,
+    ExecutorOutcomeProposedAction, ExecutorStep, ExecutorUsage, Frontier, FrontierAction,
+    FrontierData, FrontierId, GovernorError, HoldSuspension, HoldSuspensionOutcome, HostStop,
+    JudgeBudgetStop, JudgeBudgetStopOutcome, JudgeEffectRefusal, JudgeEffectRefusalOutcome,
+    JudgeIdleIteration, JudgeIdleIterationOutcome, JudgePerformableActions,
+    JudgePerformableActionsOutcome, Observation, ObservationData, ObservationId, ReleaseSuspension,
+    ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome, RevalidateActionRequestOutcome, Run,
+    RunData, RunId, RunOutcome, RunOutcomeAwaitingApproval, RunOutcomeCaseMovedOn,
+    RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
+    RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunOutcomeWaiting, RunStarted, RunState,
+    RunStorageFailed, StartRun, StartRunOutcome, StopPolicy, SuspendRun, SuspendRunOutcome,
+    SuspensionDecisionMismatch, SuspensionKey, SuspensionReason, SuspensionState,
     SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Truth, Unit, commission_state,
     frontier_state, observation_state,
 };
@@ -793,11 +804,14 @@ pub enum LoopFailure {
 
 /// A release of the Suspension a resume took that did not remove it: after its request was
 /// performed (the effect port answered for it and the governor observed the answer), or after the
-/// resume found the case moved off the request's revision before invoking it, and invoked nothing.
+/// resume found the case moved off the request's revision before invoking it, and invoked nothing;
+/// or, for a Suspension held for a decision, once the decision was taken
+/// ([`resume_after_decision`]), with nothing performed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnreleasedSuspension {
-    /// The request the resume took the Suspension for: performed, or stale and not performed.
-    pub action_request_id: ActionRequestId,
+    /// The request the resume took the Suspension for: performed, or stale and not performed;
+    /// `None` for a Suspension held for a decision, which holds no request.
+    pub action_request_id: Option<ActionRequestId>,
     /// What `ReleaseSuspension` answered, and so what is stored for the commission:
     ///
     /// * `storage-failed`: the port changed nothing, and the Suspension stays `Resuming` for this
@@ -820,21 +834,35 @@ impl fmt::Display for LoopFailure {
             Self::NotSuspended(outcome) => write!(f, "run not suspended: {outcome:?}"),
             Self::Effect(error) => error.fmt(f),
             Self::RunStorage(failed) => write!(f, "run store failed: {}", failed.reason),
-            Self::CommissionSuspended(held) => write!(
-                f,
-                "the commission holds a {:?} Suspension for request {}",
-                held.state, held.action_request_id.0.0
-            ),
+            Self::CommissionSuspended(held) => match &held.action_request_id {
+                Some(request) => write!(
+                    f,
+                    "the commission holds a {:?} Suspension for request {}",
+                    held.state, request.0.0
+                ),
+                None => write!(
+                    f,
+                    "the commission holds a {:?} Suspension for a decision, holding no request",
+                    held.state
+                ),
+            },
             Self::SuspensionStore(error) => error.fmt(f),
             Self::SuspensionNotHeld(outcome) => write!(f, "suspension not held: {outcome:?}"),
             Self::NotResumed(outcome) => {
                 write!(f, "run not resumed after a settled hold: {outcome:?}")
             }
-            Self::SuspensionNotReleased(unreleased) => write!(
-                f,
-                "suspension not released after request {} was performed or found stale: {:?}",
-                unreleased.action_request_id.0.0, unreleased.outcome
-            ),
+            Self::SuspensionNotReleased(unreleased) => match &unreleased.action_request_id {
+                Some(request) => write!(
+                    f,
+                    "suspension not released after request {} was performed or found stale: {:?}",
+                    request.0.0, unreleased.outcome
+                ),
+                None => write!(
+                    f,
+                    "suspension not released after its decision was taken: {:?}",
+                    unreleased.outcome
+                ),
+            },
             Self::InvalidDeadline(text) => {
                 write!(f, "the run budget's deadline is not RFC 3339: {text:?}")
             }
@@ -890,8 +918,8 @@ impl fmt::Display for LoopError {
 
 impl std::error::Error for LoopError {}
 
-/// Why [`resume_after_grant`] resumed nothing. Nothing was performed, and the Suspension, when one
-/// was stored, is stored as it was.
+/// Why [`resume_after_grant`] or [`resume_after_decision`] resumed nothing. Nothing was performed,
+/// and the Suspension, when one was stored, is stored as it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResumeRefusal {
     /// The suspension port holds no Suspension for the commission, or another resume took and
@@ -932,6 +960,21 @@ pub enum ResumeRefusal {
     NotPerformed,
     /// The run store does not hold the Run suspended: `ResumeRun` answered this.
     RunNotSuspended(ResumeRunOutcome),
+    /// [`resume_after_grant`]: the commission's Suspension holds the run for a decision request
+    /// (`SuspensionReason::Decision`), not for an approval; nothing is performed, and only
+    /// [`resume_after_decision`] resumes it (`story:decision-suspension-reason`).
+    HeldForDecision,
+    /// [`resume_after_decision`]: the commission's Suspension is not held for a decision but holds
+    /// an action request, which only [`resume_after_grant`] performs.
+    HeldForAuthority,
+    /// [`resume_after_decision`]: the commission's Suspension is held for another decision request
+    /// than the decided one.
+    OtherDecision {
+        /// The request the decided hold names.
+        request_id: String,
+        /// The request the Suspension is held for.
+        held_request_id: String,
+    },
 }
 
 /// Why [`resume_after_grant`] returned no run outcome.
@@ -1343,7 +1386,8 @@ impl<'p, R: ResumeRunBehavior + ?Sized> Suspensions<'p, R> {
 
 /// Puts the Run `run_id`, which the loop suspended for an approval whose hold the host settled,
 /// back `Running` (`ResumeRun`): no Suspension stands behind it, so it is left as a loop without a
-/// suspension port leaves a Run that ends on an approval.
+/// suspension port leaves a Run that ends on an approval. [`resume_after_decision`] resumes a Run
+/// held for a decision through it too.
 fn unsuspend<R: ResumeRunBehavior + ?Sized>(
     runs: &mut R,
     run_id: &RunId,
@@ -1357,13 +1401,21 @@ fn unsuspend<R: ResumeRunBehavior + ?Sized>(
     }
 }
 
-/// A suspended request [`resume_after_grant`] revalidated and admitted, which the resumed loop
-/// hands to the effect port before its first iteration.
-struct Resumed {
-    request: ActionRequestData,
-    answer: RevalidateActionRequestOutcome,
-    /// The Suspension the resume took, released once the effect port answered for the request.
-    taken: SuspensionKey,
+/// How a resumed Run's loop begins.
+enum Resumed {
+    /// A suspended request [`resume_after_grant`] revalidated and admitted, which the resumed loop
+    /// hands to the effect port before its first iteration.
+    Request {
+        request: Box<ActionRequestData>,
+        answer: RevalidateActionRequestOutcome,
+        /// The Suspension the resume took, released once the effect port answered for the
+        /// request.
+        taken: SuspensionKey,
+    },
+    /// A Run held for a decision, whose Suspension [`resume_after_decision`] released: nothing is
+    /// performed, and the first iteration loads the case and holds it at its current revision, a
+    /// move since the hold included.
+    Decision,
 }
 
 /// The requests the effect port last answered `Pending`, which the next iteration invokes again
@@ -1565,12 +1617,21 @@ where
     // as reached right before the invoke, or else the host's own stop, releases the Suspension the
     // resume took, and the Run is suspended for it with nothing invoked, as before an executor
     // call.
-    if let Some(Resumed {
+    // A Run resumed after a decision performs nothing first: its first iteration loads the case
+    // and holds it where it is now, since the decision may have moved it (an answered question
+    // moves an artifact), and the loop goes on from there (`story:decision-suspension-reason`).
+    let mut adopt = false;
+    if let Some(Resumed::Decision) = resumed {
+        first = false;
+        adopt = true;
+    }
+    if let Some(Resumed::Request {
         request: data,
         answer,
         taken,
     }) = resumed
     {
+        let data = *data;
         first = false;
         if let Some(reason) = stopped_before_step(deadline, context) {
             release_taken(suspensions, taken, &data)?;
@@ -1669,9 +1730,10 @@ where
             });
             return Ok(track.end(run_id, outcome));
         }
-        if effected {
+        if effected || adopt {
             held = loaded;
             effected = false;
+            adopt = false;
         } else if loaded != held {
             // The runtime found the move itself, as after a stale proposal (2).
             let ended = found_moved(
@@ -1909,10 +1971,20 @@ where
             let reason = suspended.reason.clone();
             let suspension = suspend(runs, run_id, reason.clone()).err();
             return match (observed, suspension) {
-                (Ok(()), None) => Ok(track.end(
-                    run_id,
-                    RunOutcome::Suspended(RunOutcomeSuspended { reason }),
-                )),
+                (Ok(()), None) => {
+                    // A run held for a decision request also holds the commission's Suspension,
+                    // with that reason and no action request, so only a resume given the decided
+                    // hold continues it (`story:decision-suspension-reason`).
+                    if let (Some(suspending), SuspensionReason::Decision(_)) =
+                        (suspensions, &reason)
+                    {
+                        hold_suspension(runs, suspending, run, case, None, reason.clone())?;
+                    }
+                    Ok(track.end(
+                        run_id,
+                        RunOutcome::Suspended(RunOutcomeSuspended { reason }),
+                    ))
+                }
                 (Ok(()), Some(failure)) => Err(Stopped {
                     failure,
                     suspended: Some((Box::new(reason), None)),
@@ -2240,14 +2312,27 @@ fn release_taken<R: ?Sized>(
     let Some(Suspensions { port, .. }) = suspensions else {
         return Ok(());
     };
+    release(port, taken, Some(request.action_request_id.clone()), None)
+}
+
+/// Releases `taken` for `request` (`ReleaseSuspension`), `None` for a Suspension held for a
+/// decision, which holds no request and is named by its `decision` request instead. A release the
+/// port does not answer `released` is [`LoopFailure::SuspensionNotReleased`].
+fn release(
+    port: &dyn SuspensionPort,
+    taken: SuspensionKey,
+    request: Option<ActionRequestId>,
+    decision: Option<String>,
+) -> Result<(), LoopFailure> {
     match port.release(ReleaseSuspension {
         suspension: taken,
-        action_request_id: request.action_request_id.clone(),
+        action_request_id: request.clone(),
+        decision_request_id: decision,
     }) {
         ReleaseSuspensionOutcome::Released { .. } => Ok(()),
         outcome => Err(LoopFailure::SuspensionNotReleased(Box::new(
             UnreleasedSuspension {
-                action_request_id: request.action_request_id.clone(),
+                action_request_id: request,
                 outcome,
             },
         ))),
@@ -2315,6 +2400,29 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
             suspended: Some((Box::new(reason), None)),
         });
     }
+    hold_suspension(
+        runs,
+        suspending,
+        run,
+        &request.case_id,
+        Some(request),
+        reason,
+    )
+}
+
+/// Holds the commission's Suspension of the Run `run`, which the loop already suspended for
+/// `reason`, through the port (`HoldSuspension`): holding `request` on its case, or, for a run held
+/// for a decision, the case `case` and no request (`story:decision-suspension-reason`). A hold the
+/// host settled (`settled`) stores nothing: the Run is put back `Running` ([`unsuspend`]) and the
+/// run ends as it would without a port.
+fn hold_suspension<R: SuspendRunBehavior + ?Sized>(
+    runs: &mut R,
+    suspending: Suspensions<'_, R>,
+    run: &RunStarted,
+    case: &CaseId,
+    request: Option<&ActionRequestData>,
+    reason: SuspensionReason,
+) -> Result<(), Stopped> {
     let failure = match suspending.port.hold(HoldSuspension {
         suspension: SuspensionKey {
             commission_id: run.commission_id.clone(),
@@ -2322,11 +2430,11 @@ fn suspend_for_approval<R: SuspendRunBehavior + ?Sized>(
         commission_id: run.commission_id.clone(),
         run_id: run.run_id.clone(),
         run_case_revision: run.case_revision,
-        action_request_id: request.action_request_id.clone(),
-        case_id: request.case_id.clone(),
-        expected_case_revision: request.expected_case_revision,
-        action: request.action.clone(),
-        arguments: request.arguments.clone(),
+        action_request_id: request.map(|request| request.action_request_id.clone()),
+        case_id: case.clone(),
+        expected_case_revision: request.map(|request| request.expected_case_revision),
+        action: request.map(|request| request.action.clone()),
+        arguments: request.map(|request| request.arguments.clone()),
         reason: reason.clone(),
     }) {
         HoldSuspensionOutcome::Held { .. } => return Ok(()),
@@ -2403,10 +2511,25 @@ where
     else {
         return refused(ResumeRefusal::NothingSuspended);
     };
+    // A Suspension held for a decision holds no request to perform: only a resume given the
+    // decided hold continues it (`story:decision-suspension-reason`).
+    if matches!(stored.data.reason, SuspensionReason::Decision(_)) {
+        return refused(ResumeRefusal::HeldForDecision);
+    }
+    // Every other Suspension holds its request whole; one that does not is no Suspension this
+    // resume can perform, and nothing is.
+    let (Some(action_request_id), Some(expected_case_revision), Some(action), Some(arguments)) = (
+        stored.data.action_request_id.clone(),
+        stored.data.expected_case_revision,
+        stored.data.action.clone(),
+        stored.data.arguments.clone(),
+    ) else {
+        return Err(ResumeError::Store(SuspensionStoreError::new(
+            "the Suspension holds no action request, and its reason is no decision",
+        )));
+    };
     if stored.state == SuspensionState::Resuming {
-        return refused(ResumeRefusal::InDoubt {
-            action_request_id: stored.data.action_request_id,
-        });
+        return refused(ResumeRefusal::InDoubt { action_request_id });
     }
     let stored = stored.data;
     if stored.commission_id != held.commission_id
@@ -2418,19 +2541,19 @@ where
     let current = governor
         .current_revision(&held.case_id)
         .map_err(ResumeError::Governor)?;
-    if current != stored.expected_case_revision {
+    if current != expected_case_revision {
         return refused(ResumeRefusal::CaseMoved {
-            expected_case_revision: stored.expected_case_revision,
+            expected_case_revision,
             current_case_revision: current,
         });
     }
     let request = ActionRequestData {
-        action_request_id: stored.action_request_id.clone(),
+        action_request_id,
         run_id: stored.run_id.clone(),
         case_id: stored.case_id.clone(),
-        expected_case_revision: stored.expected_case_revision,
-        action: stored.action.clone(),
-        arguments: stored.arguments.clone(),
+        expected_case_revision,
+        action,
+        arguments,
     };
     let answer = revalidate(governor, &ActionRequest::new(request.clone()))
         .map_err(ResumeError::Governor)?;
@@ -2518,16 +2641,27 @@ where
     let key = stored.suspension.clone();
     let failure = match suspensions.take(TakeSuspension {
         suspension: key.clone(),
-        action_request_id: stored.action_request_id.clone(),
+        action_request_id: Some(request.action_request_id.clone()),
+        decision_request_id: None,
     }) {
         TakeSuspensionOutcome::Taken { .. } => None,
-        TakeSuspensionOutcome::OtherRequest { error } => Some(Err(ResumeRefusal::OtherRequest {
-            action_request_id: error.action_request_id,
-            held_action_request_id: error.held_action_request_id,
-        })),
+        // A Suspension held since that holds no request is held for a decision.
+        TakeSuspensionOutcome::OtherRequest { error } => {
+            Some(Err(match error.held_action_request_id {
+                Some(held_action_request_id) => ResumeRefusal::OtherRequest {
+                    action_request_id: request.action_request_id.clone(),
+                    held_action_request_id,
+                },
+                None => ResumeRefusal::HeldForDecision,
+            }))
+        }
+        // A take that names no decision request is refused this only by a decision hold.
+        TakeSuspensionOutcome::OtherDecision { .. } => Some(Err(ResumeRefusal::HeldForDecision)),
         TakeSuspensionOutcome::NotFound { .. } => Some(Err(ResumeRefusal::NothingSuspended)),
         TakeSuspensionOutcome::WrongState { error } => Some(Err(ResumeRefusal::InDoubt {
-            action_request_id: error.action_request_id,
+            action_request_id: error
+                .action_request_id
+                .unwrap_or_else(|| request.action_request_id.clone()),
         })),
         TakeSuspensionOutcome::StorageFailed { error } => {
             Some(Ok(LoopFailure::RunStorage(RunStorageFailed {
@@ -2569,12 +2703,219 @@ where
         runs,
         context,
         &run,
-        stored.expected_case_revision,
-        Some(Resumed {
-            request,
+        request.expected_case_revision,
+        Some(Resumed::Request {
+            request: Box::new(request),
             answer,
             taken: key,
         }),
+    );
+    let ended = finish(runs, run_id.clone(), result);
+    stopped(context, &run_id, ended.as_ref());
+    ended.map_err(ResumeError::Loop)
+}
+
+/// Continues the Run `commission`'s stored Suspension holds for a decision request, once that
+/// request is decided, as `decided` says (`story:decision-suspension-reason`). In this order:
+///
+/// 1. the Suspension is read: none is [`ResumeRefusal::NothingSuspended`];
+/// 2. one whose reason is not `Decision`, which holds an action request, is refused
+///    [`ResumeRefusal::HeldForAuthority`], and one held for another request than `decided`'s
+///    [`ResumeRefusal::OtherDecision`]; neither changes the Suspension. One that names another
+///    commission or case, or whose Run the run store holds for another commission or revision, is
+///    [`ResumeRefusal::OtherCommission`];
+/// 3. a `Pending` one is taken (`TakeSuspension`, no request), and
+/// 4. the Run resumed (`ResumeRun`; a run store that does not hold it gets it back `Suspended`
+///    first); a `Resuming` one, left by a resume that stopped between its take and its release,
+///    is not taken again: a Decision hold performs nothing that could be in doubt;
+/// 5. the Suspension is released (`ReleaseSuspension`, no request). For a `Resuming` one the
+///    release comes first, so of two resumes only the one whose release removes it goes on, and
+///    the Run is then resumed when the run store holds it `Suspended`;
+/// 6. the loop goes on, its first iteration loading the case at its current revision: a revision
+///    that moved since the hold is expected, not a refusal.
+///
+/// Nothing held is performed. `decided`'s record is the caller's, which recorded it before the
+/// resume when the decided option produces one; Commission reads neither the request nor Canon.
+///
+/// # Errors
+///
+/// [`ResumeError::Refused`] as above, and when another resume took and released the Suspension
+/// first; nothing is performed. [`ResumeError::Store`] when the suspension port cannot be read, or
+/// holds a Decision Suspension naming an action request. [`ResumeError::Loop`] when the run
+/// budget's deadline is not RFC 3339 or the stop policy lists a limit twice (before the Suspension
+/// is read), the take, `ResumeRun` or the release fails, or the resumed loop stops without a run
+/// outcome.
+// The ports of `run_until_blocked`, the suspension port and the decided hold.
+#[allow(clippy::too_many_arguments)]
+pub fn resume_after_decision<G, E, A, F, R, C>(
+    governor: &G,
+    executor: &E,
+    authority: &A,
+    effects: &F,
+    commission: &Commission<commission_state::Assigned>,
+    runs: &mut R,
+    suspensions: &dyn SuspensionPort,
+    decided: &DecidedHold,
+    context: &mut C,
+) -> Result<LoopEnd, ResumeError>
+where
+    G: Governor + ObservationPort + ?Sized,
+    E: AgentExecutor + ?Sized,
+    A: AuthorityProvider + ?Sized,
+    F: EffectPort + ?Sized,
+    R: RunStorage + SuspendRunBehavior + ResumeRunBehavior + ?Sized,
+    C: LoopContext + ?Sized,
+{
+    let refused = |refusal| Err(ResumeError::Refused(refusal));
+    deadline_of(context.run_budget().as_ref())
+        .map_err(|failure| ResumeError::Loop(unstarted(failure)))?;
+    check_stop_policy(&context.stop_policy())
+        .map_err(|failure| ResumeError::Loop(unstarted(failure)))?;
+    let held = commission.data();
+    let Some(stored) = suspensions
+        .get(&held.commission_id)
+        .map_err(ResumeError::Store)?
+    else {
+        return refused(ResumeRefusal::NothingSuspended);
+    };
+    let SuspensionReason::Decision(hold) = &stored.data.reason else {
+        return refused(ResumeRefusal::HeldForAuthority);
+    };
+    if hold.request_id != decided.request_id {
+        return refused(ResumeRefusal::OtherDecision {
+            request_id: decided.request_id.clone(),
+            held_request_id: hold.request_id.clone(),
+        });
+    }
+    let state = stored.state;
+    let stored = stored.data;
+    if stored.commission_id != held.commission_id
+        || stored.suspension.commission_id != held.commission_id
+        || stored.case_id != held.case_id
+    {
+        return refused(ResumeRefusal::OtherCommission);
+    }
+    if stored.action_request_id.is_some() {
+        return Err(ResumeError::Store(SuspensionStoreError::new(
+            "the Suspension is held for a decision and names an action request",
+        )));
+    }
+    let run_id = stored.run_id.clone();
+    match RunStorage::get(runs, &run_id) {
+        None => {
+            let run = Run::new(RunData {
+                run_id: run_id.clone(),
+                commission_id: stored.commission_id.clone(),
+                case_revision: stored.run_case_revision,
+            });
+            RunStorage::put(runs, AnyRun::Suspended(run.suspend()).snapshot());
+        }
+        Some(held_run)
+            if held_run.data.commission_id != stored.commission_id
+                || held_run.data.case_revision != stored.run_case_revision =>
+        {
+            return refused(ResumeRefusal::OtherCommission);
+        }
+        Some(_) => {}
+    }
+    let failed = |failure: LoopFailure| {
+        ResumeError::Loop(LoopError {
+            run_id: Some(run_id.clone()),
+            failure,
+            suspension: None,
+            suspension_reason: None,
+        })
+    };
+    let key = stored.suspension.clone();
+    // The take and the release name the decision request, and the port refuses them unless the
+    // Suspension still holds the Run for it: one held since for another decision, or for an action
+    // request, is not this decision's to resume.
+    let decision = Some(decided.request_id.clone());
+    let other_decision = |error: SuspensionDecisionMismatch| match error.held_decision_request_id {
+        Some(held_request_id) => ResumeRefusal::OtherDecision {
+            request_id: decided.request_id.clone(),
+            held_request_id,
+        },
+        None => ResumeRefusal::HeldForAuthority,
+    };
+    // A `Pending` Suspension is taken; one already `Resuming`, read so or found so by the take
+    // (another resume took it since), is not taken again.
+    let taken = state == SuspensionState::Pending
+        && match suspensions.take(TakeSuspension {
+            suspension: key.clone(),
+            action_request_id: None,
+            decision_request_id: decision.clone(),
+        }) {
+            TakeSuspensionOutcome::Taken { .. } => true,
+            TakeSuspensionOutcome::WrongState { .. } => false,
+            TakeSuspensionOutcome::NotFound { .. } => {
+                return refused(ResumeRefusal::NothingSuspended);
+            }
+            // Held since for a request: it is no longer this decision's to resume.
+            TakeSuspensionOutcome::OtherRequest { .. } => {
+                return refused(ResumeRefusal::HeldForAuthority);
+            }
+            TakeSuspensionOutcome::OtherDecision { error } => {
+                return refused(other_decision(error));
+            }
+            TakeSuspensionOutcome::StorageFailed { error } => {
+                return Err(failed(LoopFailure::RunStorage(RunStorageFailed {
+                    reason: error.reason,
+                })));
+            }
+        };
+    if taken {
+        unsuspend(runs, &run_id).map_err(failed)?;
+        if let Err(failure) = release(suspensions, key, None, decision) {
+            let error = failed(failure);
+            stopped(context, &run_id, Err(&error));
+            return Err(error);
+        }
+    } else {
+        // The release comes first: of two resumes of one `Resuming` Suspension, only the one
+        // whose release removes it goes on.
+        match release(suspensions, key, None, decision) {
+            Ok(()) => {}
+            Err(LoopFailure::SuspensionNotReleased(unreleased)) => match &unreleased.outcome {
+                ReleaseSuspensionOutcome::NotFound { .. } => {
+                    return refused(ResumeRefusal::NothingSuspended);
+                }
+                ReleaseSuspensionOutcome::OtherDecision { error } => {
+                    return refused(other_decision(error.clone()));
+                }
+                _ => return Err(failed(LoopFailure::SuspensionNotReleased(unreleased))),
+            },
+            Err(failure) => return Err(failed(failure)),
+        }
+        if RunStorage::get(runs, &run_id).map(|run| run.state) == Some(RunState::Suspended)
+            && let Err(failure) = unsuspend(runs, &run_id)
+        {
+            let error = failed(failure);
+            stopped(context, &run_id, Err(&error));
+            return Err(error);
+        }
+    }
+
+    let ports = Ports {
+        governor,
+        executor,
+        authority,
+        effects,
+        suspensions: Some(Suspensions::new(suspensions)),
+    };
+    let run = RunStarted {
+        run_id: run_id.clone(),
+        commission_id: stored.commission_id,
+        case_revision: stored.run_case_revision,
+    };
+    let result = iterate(
+        &ports,
+        commission,
+        runs,
+        context,
+        &run,
+        stored.run_case_revision,
+        Some(Resumed::Decision),
     );
     let ended = finish(runs, run_id.clone(), result);
     stopped(context, &run_id, ended.as_ref());

@@ -30,7 +30,11 @@ use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_commission::model::primitives::Uuid;
-use b10x_loom_commission::model::responsibility::{CommissionId, SuspensionState};
+use b10x_loom_commission::model::responsibility::{
+    CommissionId, DecisionHold, DecisionUnblocks, HoldSuspension, HoldSuspensionOutcome,
+    ReleaseSuspension, ReleaseSuspensionOutcome, SuspensionReason, SuspensionState, TakeSuspension,
+    TakeSuspensionOutcome,
+};
 use b10x_loom_commission::ports::suspension::SuspensionPort;
 use b10x_loom_intake_slice::resume::ResumeContextStore;
 use loom_governor::FileSuspensionStore;
@@ -255,6 +259,75 @@ fn approve_refuses_another_capability_and_a_commission_with_nothing_suspended() 
         "no grant is written"
     );
     assert_eq!(held.suspension_state(), Some(SuspensionState::Pending));
+}
+
+/// What `resume` and `approve` exit with on a commission held for a decision
+/// (`story:decision-suspension-reason`).
+const HELD_FOR_DECISION: i32 = 19;
+const OTHER_CAPABILITY: i32 = 19;
+
+/// A commission whose Suspension holds its run for a decision request, not for the merge: `resume`
+/// exits 19 naming `HeldForDecision`, performs nothing and leaves the Suspension file
+/// byte-identical, and `approve` exits 19 (`OtherCapability`) and writes no grant.
+#[test]
+fn a_decision_hold_is_neither_resumed_nor_approved() {
+    let scratch = Scratch::new("decision-hold");
+    let held = scratch.suspend();
+    let file = held.hold_for_decision("DR-1");
+    let before = std::fs::read(&file).unwrap();
+    let written: Value = serde_json::from_slice(&before).unwrap();
+    assert_eq!(written["action_request_id"], Value::Null, "{written}");
+    assert_eq!(written["reason"]["kind"], json!("Decision"), "{written}");
+
+    let (base_url, server) = Script::serve(vec![]);
+    scratch.catalog(&base_url);
+    let resumed = scratch.command(&["resume", &held.commission, "--state", held.state_text()]);
+    let calls = server.finish();
+    assert_eq!(
+        resumed.status.code(),
+        Some(HELD_FOR_DECISION),
+        "{}",
+        shown(&resumed)
+    );
+    assert!(
+        String::from_utf8_lossy(&resumed.stderr).contains("HeldForDecision"),
+        "{}",
+        shown(&resumed)
+    );
+    assert!(calls.is_empty(), "no model is called: {calls:?}");
+    assert_eq!(
+        scratch.files(&held.state, "merge-"),
+        0,
+        "nothing handed off"
+    );
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        before,
+        "the Suspension file is unchanged"
+    );
+
+    let approved = approve(&scratch, &held);
+    assert_eq!(
+        approved.status.code(),
+        Some(OTHER_CAPABILITY),
+        "{}",
+        shown(&approved)
+    );
+    assert!(
+        String::from_utf8_lossy(&approved.stderr).contains("OtherCapability"),
+        "{}",
+        shown(&approved)
+    );
+    assert_eq!(
+        scratch.files(&held.state, "grant-"),
+        0,
+        "no grant is written"
+    );
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        before,
+        "the Suspension file is unchanged"
+    );
 }
 
 fn approve(scratch: &Scratch, held: &Held) -> Output {
@@ -814,6 +887,65 @@ impl Held {
             .expect("the suspension store reads")
             .map(|held| held.state)
     }
+
+    /// Replaces the commission's Suspension of the merge by one holding the same Run for the
+    /// decision request `request`, with no action request, through the store, and names its file.
+    fn hold_for_decision(&self, request: &str) -> PathBuf {
+        let store = FileSuspensionStore::open(&self.state).expect("the suspension store opens");
+        let commission = CommissionId(Uuid(self.commission.clone()));
+        let merge = store
+            .get(&commission)
+            .expect("the suspension store reads")
+            .expect("the commission holds a Suspension");
+        let key = merge.data.suspension.clone();
+        let named = merge.data.action_request_id.clone();
+        assert!(matches!(
+            store.take(TakeSuspension {
+                suspension: key.clone(),
+                action_request_id: named.clone(),
+                decision_request_id: None,
+            }),
+            TakeSuspensionOutcome::Taken { .. }
+        ));
+        assert!(matches!(
+            store.release(ReleaseSuspension {
+                suspension: key.clone(),
+                action_request_id: named,
+                decision_request_id: None,
+            }),
+            ReleaseSuspensionOutcome::Released { .. }
+        ));
+        let held = store.hold(HoldSuspension {
+            suspension: key,
+            commission_id: commission,
+            run_id: merge.data.run_id,
+            run_case_revision: merge.data.run_case_revision,
+            action_request_id: None,
+            case_id: merge.data.case_id,
+            expected_case_revision: None,
+            action: None,
+            arguments: None,
+            reason: SuspensionReason::Decision(DecisionHold {
+                request_id: request.to_owned(),
+                unblocks: DecisionUnblocks::Approval,
+            }),
+        });
+        assert!(
+            matches!(held, HoldSuspensionOutcome::Held { .. }),
+            "{held:?}"
+        );
+        let files: Vec<PathBuf> = std::fs::read_dir(&self.state)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("suspension-"))
+            })
+            .collect();
+        assert_eq!(files.len(), 1, "one Suspension file: {files:?}");
+        files[0].clone()
+    }
 }
 
 fn shown(output: &Output) -> String {
@@ -930,11 +1062,11 @@ impl Scratch {
             .expect("the suspension store reads")
             .expect("the commission holds a Suspension");
         assert_eq!(suspension.state, SuspensionState::Pending);
-        assert_eq!(suspension.data.action, "repository.merge");
+        assert_eq!(suspension.data.action.as_deref(), Some("repository.merge"));
         Held {
             state,
             commission,
-            action_request_id: suspension.data.action_request_id.0.0,
+            action_request_id: suspension.data.action_request_id.unwrap().0.0,
             workspace,
         }
     }
