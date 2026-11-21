@@ -272,7 +272,9 @@ The port is a Commission effect port: it performs the actions bound to `program`
   the revision the case holds for its subject, in the order the case received them. A record
   about a subject at `none`, a record of another case and a record of another kind or result are
   none. Each names the record's evidence id, kind, subject, subject revision, result, producer and
-  instant, and the SHA-256 of the blob of the bound program's run the record cites.
+  instant and, read from the bound program's run the record cites in that case, the `action` that
+  run was for, its `exit` code and the SHA-256 of its blob. A record that cites no such run names
+  none of the three (`null`); a run killed at its timeout or refused by its runner has no `exit`.
 - After the run count and before anything starts, a step with retry records keeps one
   `loom.retry-feedback/1` document, `loom.bindings.RetryFeedback`, as `blobs/<sha256>`: the case,
   the action, the retry records and, per cited blob that still hashes to its name, its last 60
@@ -284,6 +286,31 @@ The port is a Commission effect port: it performs the actions bound to `program`
   step is refused `RunsSpent` before any record is read. A document that cannot be kept (a
   `blobs` that is a link) fails the step before anything starts, with nothing observed. The run's
   observation names the records it was given in `retry_of`.
+
+The feedback document has this shape (one record, ids and digests shortened here):
+
+```json
+{
+  "format": "loom.retry-feedback/1",
+  "case": "case-1",
+  "action": "draft.write",
+  "records": [
+    {
+      "evidence_id": "5f0c…",
+      "kind": "draft_check",
+      "subject": "draft",
+      "subject_revision": "t3e1f…",
+      "result": "invalid",
+      "producer": "checker",
+      "observed_at": "2026-11-21T22:14:03Z",
+      "action": "draft.check",
+      "exit": 1,
+      "blob_sha256": "9b2a…"
+    }
+  ],
+  "logs": [{"blob_sha256": "9b2a…", "tail": "the check failed\n"}]
+}
+```
 
 The step refusals are the members of `loom.bindings.ProgramRefusalReason` in the
 [reference](../reference/ess/loom-bindings.md).
