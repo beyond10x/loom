@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-registry-calls-replaced
 kind: story
-status: proposed
+status: active
 title: The governor fallback, the router and every test read the vendored catalog, and no Rust source names canon_engineering
 summary: builtin() over ProtocolCatalog::engineering, a lock refusal is InvalidProtocol (unit test over a tampered set); 12 test calls; RouterError::Registry removed (Breaking)
 tags:
@@ -36,9 +36,10 @@ scope:
   path: crates/loom-protocols/tests/engineering_lock.rs
 - confidence: cited
   path: crates/loom-xtask/tests/release_check.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 8}
+- {from: "proposed", to: "active", at: "2026-11-21T07:20:39Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-format-31
 kind: story
-status: proposed
+status: active
 title: Loom's main ESS system declares ess/31 on the pinned ess 0.86.0, with the raise's resource-command changes taken
 summary: ess/system.yaml from ess/25 to ess/31, regenerated; five loom.resource commands gain an existence check and a refusal order, with tests and Breaking notes; the intake and commission systems and the toolchain unchanged
 tags:
@@ -19,9 +19,10 @@ scope:
   path: ess/domains/resource.yaml
 - confidence: cited
   path: ess/system.yaml
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T07:20:39Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 

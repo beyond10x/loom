@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocols-vendor-command
 kind: story
-status: proposed
+status: active
 title: loom-xtask protocols-vendor rewrites the vendored files and the lock from a local engineering-protocols checkout at a tag
 summary: Reads Git objects only, never fetches; writes the lock through loom_protocols::lock with the constant repository; tested on a temporary repository whose output loads through from_vendored
 tags:
@@ -22,9 +22,10 @@ scope:
   path: crates/loom-xtask/src/protocols_vendor.rs
 - confidence: cited
   path: crates/loom-xtask/tests/protocols_vendor.rs
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 10}
+- {from: "proposed", to: "active", at: "2026-11-21T07:20:40Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 

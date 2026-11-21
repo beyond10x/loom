@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:confinement-opens-from-engine-config
 kind: story
-status: proposed
+status: active
 title: A host names Loom's confinement once in engine configuration, and local runs through Substrate's contract with the operator's reason
 summary: EngineConfinement and one constructor; local, with a reason, opened through confinement::open; linux stays on today's host-driver route until story:child-launches-through-confinement-adapters
 tags:
@@ -41,9 +41,10 @@ scope:
   path: website/docs/guides/run-an-intent.md
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 16
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:44Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-11-21T07:20:39Z", actor: "agent:sdc", revision: 18, decided_on: {"recorded":{"review_outcome":6}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w4"}
 ---
 ## Outcome
 
@@ -147,7 +148,7 @@ What a `local` record carries, and what it changes in the public types:
 Resume: the resume context keeps only `Backend` (`crates/loom-intake-slice/src/resume.rs:509-512`),
 and `resume` rebuilds a runner from it (`crates/loom-cli/src/main.rs:670-671`). A `local` run kept
 for resume would come back under another adapter with no word. So `b10x-loom run` refuses
-`--confinement local` together with `--state`, exit 2, naming both flags: a `local` run is not
+`--confinement local` together with `--state`, exit 2, naming both flags (the command line's usage refusal: no refusal variant is declared for it): a `local` run is not
 kept for resume, and an operator who wants one runs again with the flags and the reason.
 
 With `linux`, the constructor wraps today's `SubstrateRunner` unchanged. Launches stay on the
