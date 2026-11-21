@@ -224,22 +224,30 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `{}`; any other value, `null` included, reaches the program as written. An `arguments_from` argv
   that does not exit 0, or prints anything but one JSON object of at most 1 MiB, refuses the step
   `ArgumentsUnreadable`, and the bound program does not start.
-- An action runs at most `budget.max_runs` times in a case: the count is the observations the
-  port kept for that action in that case, kept in the case's store, so it survives a reopen. One
-  more is refused `RunsSpent`, and nothing starts.
+- A case held under another protocol than the document's `protocol` refuses the step
+  `CaseOfAnotherProtocol`, naming both, before anything starts, and nothing is recorded.
+- A port hands an action's program to its runner at most `budget.max_runs` times in a case,
+  whatever the runner answers: the count is the observations the port kept for that action
+  in that case, kept in the case's store, so it survives a reopen. One more is refused
+  `RunsSpent`, and nothing starts. The cap holds for one port that drives the case; two hosts that
+  drive one case store at the same time can each start the action once more.
 - Each run's standard output followed by its standard error is kept as one file, `blobs/<sha256>`
   in the store directory, written to a temporary file there and renamed; a link at that name is
-  replaced, never written through, and a `blobs` that is a link fails the step with nothing
-  written or recorded. The port keeps one
-  observation of the run (`loom.bindings.ProgramRun`): the case, the action, the exit code, the
-  blob's SHA-256 and whether the program was killed at its timeout.
+  replaced, never written through, and a `blobs` that is a link fails the step with no blob
+  written and no evidence recorded. The port keeps one observation (`loom.bindings.ProgramRun`)
+  for every call of the runner, whatever it answered: the case, the action, the exit code, the
+  blob's SHA-256 (absent when the blob was not kept), whether the program was killed at its
+  timeout and, when the runner refused the child (a program ended by a signal under `local`
+  is one), the refusal's text. That run counts, and the step then answers the runner's refusal or
+  the blob failure.
 - For each `evidence` entry the port reads the value its `from` names: the exit code, `timeout`
   for a program killed at its timeout, or the value at the JSON pointer of the report, the program's
   standard output read as one JSON object of at most 1 MiB, nested at most 64 deep, that names no
   member of an object twice; a text value is read as its text, any other as its JSON. The
   `arguments_from` output is read by the same rule. It looks the value up in `results`,
   falling to `*`. A value neither lists refuses the step `ResultNotInTable`; a report that cannot be
-  read, or that lacks the pointer, refuses it `ReportUnreadable`. A refused step records nothing.
+  read, or that lacks the pointer, refuses it `ReportUnreadable`. A refused step records no
+  evidence.
 - Otherwise the port records one record per entry (`loom.bindings.RecordedEvidence`), of the
   entry's `kind` about its `subject`, with the entry's `producer`, the observation's instant, the
   revision the case holds for the subject and, as `upstream_revisions`, for each `upstream`

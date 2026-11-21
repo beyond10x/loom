@@ -1012,7 +1012,7 @@ fn a_link_or_a_stale_file_at_the_blob_name_is_replaced_never_written_through() {
 }
 
 /// Beyond the Acceptance: a blob directory that is a link is never written through; the step
-/// fails, and no observation and no record is kept.
+/// fails, no record is kept, and the run's one observation names no blob.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn a_blob_directory_that_is_a_link_is_never_written_through() {
@@ -1032,7 +1032,11 @@ fn a_blob_directory_that_is_a_link_is_never_written_through() {
     let failed = try_drive(&governor, &effects, CASE, CHECK, args("{}"));
     assert!(failed.is_err(), "{failed:?}");
     assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
-    assert!(port_observations(&governor).is_empty());
+    // The run still counts: its one observation names no blob.
+    let observations = port_observations(&governor);
+    assert_eq!(observations.len(), 1, "{observations:#?}");
+    let run = plain(&observations[0].payload);
+    assert!(run["blob_sha256"].is_null(), "{run}");
     assert!(records(&governor).is_empty());
 }
 
@@ -1199,6 +1203,8 @@ fn the_run_count_tests_drive_an_action_whose_effect_class_is_write() {
 struct Recording {
     reason: Option<&'static str>,
     preflight: Option<ConfinementError>,
+    /// What `run_child` answers instead of a run, when set.
+    run_error: Option<ConfinementError>,
     children: Mutex<Vec<ChildCommand>>,
     roots: Mutex<Vec<PathBuf>>,
 }
@@ -1234,6 +1240,9 @@ impl TestRunner for Recording {
 
     fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         self.children.lock().unwrap().push(child.clone());
+        if let Some(error) = &self.run_error {
+            return Err(error.clone());
+        }
         Ok(TestExecution {
             exit_code: Some(0),
             timed_out: false,
@@ -1619,4 +1628,125 @@ fn a_non_utf8_path_records_nothing() {
     };
     assert_eq!(step.port_observations, 0, "{}", step.reason);
     assert_eq!(step.records, 0, "{}", step.reason);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Security pass 1: every call of `run_child` counts, and a case of another protocol starts nothing
+
+#[test]
+fn a_runner_error_is_one_observation_and_the_next_step_at_the_cap_is_runs_spent() {
+    let scratch = Scratch::new();
+    let program = "/opt/stub/program";
+    let document = document(&bound(
+        CHECK,
+        &[program],
+        "    budget: {max_runs: 1}\n",
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let error = ConfinementError {
+        reason: ConfinementRefusal::CapabilityUnserved,
+        detail: "the child ended with no exit status (signal Some(9))".to_owned(),
+    };
+    let runner = Arc::new(Recording {
+        run_error: Some(error.clone()),
+        ..Recording::default()
+    });
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        CASE,
+        Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+    )
+    .unwrap();
+    let first = refusal(&drive(&governor, &effects, CASE, CHECK, args("{}")));
+    assert_eq!(
+        first,
+        format!("{program} was refused by its runner: {error}")
+    );
+    let observations = port_observations(&governor);
+    assert_eq!(observations.len(), 1, "{observations:#?}");
+    let run = plain(&observations[0].payload);
+    assert_eq!(run["case"], json!(CASE), "{run}");
+    assert_eq!(run["action"], json!(CHECK), "{run}");
+    assert_eq!(run["runner_refusal"], json!(error.to_string()), "{run}");
+    assert!(
+        run["exit"].is_null() && run["blob_sha256"].is_null(),
+        "{run}"
+    );
+    assert!(records(&governor).is_empty());
+    let second = refusal(&drive(&governor, &effects, CASE, CHECK, args("{}")));
+    assert!(second.starts_with("RunsSpent"), "{second}");
+    assert_eq!(
+        runner.children().len(),
+        1,
+        "the capped action started again"
+    );
+}
+
+/// A protocol with the fixture's artifacts and [`CHECK`] that declares no `gate` kind.
+const OTHER_PROTOCOL: &str = r"format: protocol/1
+protocol:
+  id: other
+  revision: 1
+artifacts:
+  spec: {}
+  impl: {}
+evidence_kinds:
+  review: {}
+actions:
+  spec.check:
+    effect: write
+    may_produce:
+      - evidence: review
+";
+
+#[test]
+fn a_case_of_another_protocol_starts_no_program() {
+    let scratch = Scratch::new();
+    let members = format!(
+        "    arguments_from: {}\n",
+        serde_json::to_string(&["/opt/stub/arguments"]).unwrap()
+    );
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        &members,
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor_over(MemoryCaseStore::default())
+        .with_protocol_yaml("other@1", OTHER_PROTOCOL)
+        .expect("the other protocol registers");
+    governor
+        .open_case(
+            CaseId(CASE.to_owned()),
+            "other@1",
+            revisions(),
+            CaseInputs::none(),
+        )
+        .expect("the case opens");
+    let runner = Arc::new(Recording::default());
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        CASE,
+        Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+    )
+    .unwrap();
+    let reason = refusal(&drive(&governor, &effects, CASE, CHECK, args("{}")));
+    assert!(reason.starts_with("CaseOfAnotherProtocol"), "{reason}");
+    assert!(
+        reason.contains("other@1") && reason.contains(REGISTRATION),
+        "{reason}"
+    );
+    assert!(
+        runner.children().is_empty(),
+        "a program started: {:?}",
+        runner.children()
+    );
+    assert!(port_observations(&governor).is_empty());
+    assert!(records(&governor).is_empty());
+    assert!(scratch.blob_names().is_empty());
 }

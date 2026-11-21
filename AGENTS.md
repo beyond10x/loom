@@ -1221,20 +1221,26 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `CommandUnconfined`), then `preflight_child` on the workspace root, its refusal passed on. Every
   program, the `arguments_from` argv included, starts through that runner's `run_child`, as
   `bound_program_child` builds the child (the one definition the intake slice's `CommandRunner`
-  also uses). A step: the run count (observations of source `PROGRAM_SOURCE`,
-  `loom/bound-program`, naming the case and the action; `RunsSpent` at `budget.max_runs`, nothing
-  started), the arguments (the request's unless they are `{}`, else the literal, else the
+  also uses). A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
+  naming both, nothing started or recorded), the run count (observations of source
+  `PROGRAM_SOURCE`, `loom/bound-program`, naming the case and the action; `RunsSpent` at
+  `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
   `arguments_from` object, `ArgumentsUnreadable` when it does not exit 0 or is not one JSON object
   within 1 MiB, the bound program not started), the run, the blob `blobs/<sha256>` of the store
   directory (stdout then stderr, temporary file and rename; a link at the name is replaced, a
-  `blobs` link fails the step), one observation (`loom.bindings.ProgramRun`), then per entry the
+  `blobs` link fails the step), one observation (`loom.bindings.ProgramRun`) for every call of
+  `run_child`, kept before a runner refusal or a blob failure ends the step (then with no blob, and
+  the refusal text in `runner_refusal`), so every such call counts, then per entry the
   value (exit code, `timeout` for a killed run, or the pointer into the report, one JSON object
   within 1 MiB naming no member twice) looked up in `results` falling to
   `*`: `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry
   (`loom.bindings.RecordedEvidence`) with the entry's producer, the observation's instant and, in
   `facts`, the revisions the case held for the subject and as `upstream_revisions`. Nothing the
-  program prints names a result, revision, producer or instant. Held by
-  `crates/loom-bindings/tests/bound_program.rs`; `crates/loom-governor` is not changed by it.
+  program prints names a result, revision, producer or instant. The cap holds for one port that
+  drives the case; two hosts that drive one case store at the same time can each start the action
+  once more (`story:bound-program-run-cap-holds-across-ports`). Held by
+  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
+  `crates/loom-governor` is not changed by it.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 

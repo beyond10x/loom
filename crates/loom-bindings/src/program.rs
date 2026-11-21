@@ -12,15 +12,18 @@
 //! JSON on standard input and never in an argv, `PATH` alone, the binding's timeout, the workspace
 //! root as its start directory.
 //!
-//! A step, in order: the action's run count (the observations this port kept for the action in the
-//! case, [`PROGRAM_SOURCE`]) below its `budget.max_runs`, else `RunsSpent` and nothing starts; the
+//! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
+//! and nothing starts; the action's run count (the observations this port kept for the action in
+//! the case, [`PROGRAM_SOURCE`]) below its `budget.max_runs`, else `RunsSpent` and nothing starts; the
 //! revisions the case holds, read before the program starts; the arguments (the request's, else the
 //! binding's literal `arguments`, else the object the `arguments_from` argv prints, else `{}`; a
 //! request has none when its arguments are the empty object), an `arguments_from` that does not
 //! exit 0 or prints anything but one JSON object within [`MAX_REPORT_BYTES`] refused
 //! `ArgumentsUnreadable` before the bound program starts; the run; the blob of its standard output
 //! followed by its standard error, kept as `blobs/<sha256>` in the store directory through a
-//! temporary file and a rename; one observation of the run (`loom.bindings.ProgramRun`); then, for
+//! temporary file and a rename; one observation of the run (`loom.bindings.ProgramRun`), kept for
+//! every call of `run_child` whatever it answered and whether the blob was kept or not, before a
+//! runner refusal or a blob failure ends the step; then, for
 //! each `evidence` entry, the value its `from` names (the exit code, `timeout` for a run killed at
 //! its timeout, or the JSON pointer into the report, one JSON object within [`MAX_REPORT_BYTES`])
 //! looked up in its `results`, falling to `*`. A value neither lists is `ResultNotInTable`, a
@@ -155,6 +158,18 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 request.case_id.0, self.case.0
             )));
         }
+        // The document's kinds are the protocol's: a case held under another protocol takes none.
+        let held = self.governor.protocol(&self.case).map_err(governor)?;
+        if held != self.document.protocol {
+            return Ok(refusal(
+                ProgramRefusalReason::CaseOfAnotherProtocol,
+                action,
+                format!(
+                    "case {} is held under {held}, and the bindings document binds {}",
+                    self.case.0, self.document.protocol
+                ),
+            ));
+        }
         let runs = self.runs(action)?;
         if runs >= binding.budget.max_runs {
             return Ok(refusal(
@@ -197,29 +212,38 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             Ok(child) => child,
             Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
         };
+        // Read before the program starts, so the run's observation has an instant even when the
+        // clock cannot be read after it.
+        let started_at = instant(&SystemClock).map_err(EffectError::new)?;
         // The one start of a bound program: through the admitted runner, never here.
-        let execution = match self.runner.run_child(&child) {
-            Ok(execution) => execution,
-            Err(refusal) => {
-                return Ok(refused(format!(
-                    "{program} was refused by its runner: {refusal}"
-                )));
-            }
-        };
-        let output = &execution.child_output;
-        let mut blob = output.stdout.clone();
-        blob.extend_from_slice(&output.stderr);
-        let digest = sha256(&blob);
-        keep_blob(&self.store, &digest, &blob)
-            .map_err(|error| EffectError::new(format!("the blob {digest}: {error}")))?;
-        let observed_at = instant(&SystemClock).map_err(EffectError::new)?;
-        let run = ProgramRun {
+        let answer = self.runner.run_child(&child);
+        // Every call above is a run: its observation is kept whatever the runner answered and
+        // whether the blob can be kept or not, so it counts against `budget.max_runs`.
+        let mut run = ProgramRun {
             case: self.case.0.clone(),
             action: action.to_owned(),
-            exit: execution.exit_code.map(i64::from),
-            blob_sha256: digest,
-            timed_out: execution.timed_out,
+            exit: None,
+            blob_sha256: None,
+            timed_out: false,
+            runner_refusal: None,
         };
+        let mut blob_failure = None;
+        match &answer {
+            Ok(execution) => {
+                let output = &execution.child_output;
+                let mut blob = output.stdout.clone();
+                blob.extend_from_slice(&output.stderr);
+                let digest = sha256(&blob);
+                run.exit = execution.exit_code.map(i64::from);
+                run.timed_out = execution.timed_out;
+                match keep_blob(&self.store, &digest, &blob) {
+                    Ok(()) => run.blob_sha256 = Some(digest),
+                    Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
+                }
+            }
+            Err(refusal) => run.runner_refusal = Some(refusal.to_string()),
+        }
+        let observed_at = instant(&SystemClock).unwrap_or(started_at);
         let observation = ObservationId(fresh_uuid("program-observation", &self.case.0));
         self.governor
             .observe(Observation::new(ObservationData {
@@ -230,6 +254,17 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 payload: commission_value(&run_json(&run))?,
             }))
             .map_err(governor)?;
+        let execution = match answer {
+            Ok(execution) => execution,
+            Err(refusal) => {
+                return Ok(refused(format!(
+                    "{program} was refused by its runner: {refusal}"
+                )));
+            }
+        };
+        if let Some(failure) = blob_failure {
+            return Err(EffectError::new(failure));
+        }
         let mut report = None;
         let mut recorded = Vec::new();
         for entry in &binding.evidence {
@@ -596,6 +631,7 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
         "exit": run.exit,
         "blob_sha256": run.blob_sha256,
         "timed_out": run.timed_out,
+        "runner_refusal": run.runner_refusal,
     })
 }
 
