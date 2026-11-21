@@ -1,14 +1,15 @@
 //! Adversary pass 1 for the engineering-protocols 0.3.0 pin.
 //!
 //! The pin is written in three places that nothing compares: the manifests (`tag = "…"`), the
-//! lockfile, and the literal `revision` that `ProtocolCatalog::engineering` stamps on every entry
-//! (`src/lib.rs`). These cases tie them together, so the next pin cannot move one and leave the
-//! others, and hold the catalog to what the CHANGELOG says callers now see.
+//! lockfile, and the `revision` that `ProtocolCatalog::engineering` stamps on every entry, which
+//! is the `tag` of `protocols/engineering/lock.json`. These cases tie them together, so the next
+//! pin cannot move one and leave the others, and hold the catalog to what the CHANGELOG says
+//! callers now see.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use loom_protocols::{ProtocolCatalog, SourceKind};
+use loom_protocols::{ENGINEERING_LOCK, ProtocolCatalog, SourceKind, lock};
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -75,9 +76,14 @@ fn one_tag(dependency: &str) -> String {
     distinct.into_iter().next().expect("one").to_owned()
 }
 
+/// Each entry's revision is also the tag of the vendored files' lock (story:engineering-protocol-lock),
+/// so the manifests, the lockfile and `protocols/engineering/lock.json` name one release.
 #[test]
 fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
     let tag = one_tag("b10x-canon-engineering");
+    let locked = lock::decode(ENGINEERING_LOCK)
+        .expect("the committed lock decodes")
+        .tag;
     let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
     let mut seen = 0;
     for entry in catalog.iter() {
@@ -91,6 +97,13 @@ fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
             entry.definition.source.revision,
             tag,
             "{} says it comes from engineering-protocols {} while the manifests pin {tag}",
+            entry.name(),
+            entry.definition.source.revision
+        );
+        assert_eq!(
+            entry.definition.source.revision,
+            locked,
+            "{} says it comes from engineering-protocols {} while the vendored lock names {locked}",
             entry.name(),
             entry.definition.source.revision
         );

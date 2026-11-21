@@ -1,0 +1,106 @@
+format: protocol/1
+
+protocol:
+  id: protocol.adopt
+  revision: 1
+  description: >-
+    Adopt one revision of a generated protocol: it is adopted only with a canon diff report within
+    the organization floor, a passing canon check report and an approval under the capability
+    protocol.adopt, each about the revision under adoption. Evaluation reads the two reports as
+    evidence and runs neither tool.
+
+artifacts:
+  generated_protocol:
+    description: >-
+      the generated protocol under adoption, at one revision; the case pins that revision, and a
+      new revision of the protocol needs its own reports and its own approval
+
+independence_dimensions:
+  different_principal:
+    description: >-
+      the producer is another principal than the one that generated the protocol, as the case
+      lists it
+
+evidence_kinds:
+  diff_report:
+    description: >-
+      canon diff of one revision of the generated protocol against the organization floor; its
+      result is within_floor when the revision is within the floor, any other result when it is not
+  check_report:
+    description: >-
+      canon check on one revision of the generated protocol; its result is passed or failed
+  adoption_approval:
+    description: >-
+      the record that a holder of protocol.adopt decided on one revision of the generated
+      protocol; its result is approved or rejected
+
+claims:
+  floor.respected:
+    description: the current revision is within the organization floor, by a canon diff report
+    true_when:
+      evidence:
+        kind: diff_report
+        result: within_floor
+        subject: generated_protocol
+  checks.pass:
+    description: canon check passed on the current revision
+    true_when:
+      evidence:
+        kind: check_report
+        result: passed
+        subject: generated_protocol
+  adoption.approved:
+    description: >-
+      a principal the case lists as independent of the generation, a holder of protocol.adopt,
+      approved the current revision, and the first canon diff report came before the first
+      approval
+    true_when:
+      all:
+        - evidence:
+            kind: adoption_approval
+            result: approved
+            subject: generated_protocol
+            independent_on: [different_principal]
+        - before:
+            first: diff_report
+            then: adoption_approval
+            subject: generated_protocol
+
+actions:
+  protocol.diff:
+    description: >-
+      run canon diff of the current revision against the organization floor, as a runner outside
+      evaluation does, and record its report
+    effect: read
+    may_produce:
+      - evidence: diff_report
+  protocol.check:
+    description: run canon check on the current revision and record its report
+    effect: read
+    may_produce:
+      - evidence: check_report
+  protocol.approve:
+    description: >-
+      approve or reject the current revision for adoption, under authority; only once it is within
+      the floor and its checks pass. Held by a person by default; a deployment may grant it by
+      policy for a generation built only from trusted fragments
+    effect: none
+    precondition:
+      all:
+        - claim: floor.respected
+        - claim: checks.pass
+    requires:
+      - capability: protocol.adopt
+    may_produce:
+      - evidence: adoption_approval
+
+outcomes:
+  adopted:
+    description: >-
+      the current revision of the generated protocol is adopted: within the floor, its checks
+      passed, and approved under protocol.adopt
+    requires:
+      all:
+        - claim: floor.respected
+        - claim: checks.pass
+        - claim: adoption.approved

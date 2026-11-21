@@ -1,0 +1,122 @@
+format: protocol/1
+
+protocol:
+  id: incident.response
+  revision: 1
+  description: >-
+    Respond to an incident through two obligations that progress independently: restore_service,
+    on which emergency mode is left, and investigate_cause, which stays open after emergency mode
+    ends until a cause analysis of a current revision of the service or the release identifies
+    the cause. A rollback of the release is verified only on a complete rollback result from a
+    verifier the case lists as another principal than the one who rolled it back. The service is
+    healthy only on an observation at most 30 minutes old.
+
+independence_dimensions:
+  different_principal:
+    description: the producer is another principal than the one who did the case's work
+
+artifacts:
+  service:
+    description: the running service a case concerns
+  release:
+    description: a versioned, deployable unit of the system
+
+evidence_kinds:
+  impact_assessment:
+    description: an assessment of who and what an incident affects
+  operational_observation:
+    description: >-
+      an observation of the running system; its result is healthy or unhealthy, and it applies
+      for 30 minutes after it is observed, after which it no longer says anything
+    max_age: 30m
+  cause_analysis:
+    description: an analysis of why an incident happened
+  rollback_result:
+    description: >-
+      the result of returning a release to the one before it; its result is complete or partial
+
+claims:
+  impact.bounded:
+    description: the incident's impact is known and contained
+    true_when:
+      evidence:
+        kind: impact_assessment
+        result: bounded
+        subject: service
+  service.healthy:
+    description: the service is running healthily
+    true_when:
+      evidence:
+        kind: operational_observation
+        result: healthy
+        subject: service
+  cause.identified:
+    description: the incident's cause is known
+    true_when:
+      evidence:
+        kind: cause_analysis
+        result: identified
+  rollback.verified:
+    description: >-
+      the release's rollback is complete, by a rollback result from a producer the case lists as
+      another principal than the one who rolled it back
+    true_when:
+      evidence:
+        kind: rollback_result
+        result: complete
+        subject: release
+        independent_on: [different_principal]
+
+obligations:
+  restore_service:
+    description: urgent; bring the affected service back to health
+    discharged_when:
+      claim: service.healthy
+      is: true
+  investigate_cause:
+    description: >-
+      establish why the incident happened; stays open after emergency mode ends until a cause
+      analysis of a current revision of the service or the release identifies the cause
+    discharged_when:
+      claim: cause.identified
+      is: true
+
+actions:
+  metrics.inspect:
+    description: read the system's metrics
+    effect: read
+    may_produce:
+      - evidence: operational_observation
+      - evidence: impact_assessment
+  logs.search:
+    description: search the system's logs
+    effect: read
+    may_produce:
+      - evidence: cause_analysis
+  release.inspect:
+    description: read what a release contains
+    effect: read
+    may_produce:
+      - evidence: cause_analysis
+  traffic.shift:
+    description: move traffic between deployments
+    effect: write
+    requires:
+      - capability: traffic.shift
+  release.rollback:
+    description: return to a previous release
+    effect: write
+    requires:
+      - capability: release.rollback
+    may_produce:
+      - evidence: rollback_result
+  emergency.leave:
+    description: >-
+      leave emergency mode; admissible once restore_service is discharged and the impact is
+      bounded, whatever is known of the cause
+    precondition:
+      all:
+        - claim: service.healthy
+          is: true
+        - claim: impact.bounded
+          is: true

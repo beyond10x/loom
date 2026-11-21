@@ -18,12 +18,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `SelectionStrategy` gains `Deterministic`, the strategy of the model-free `DeterministicSelector` (story:deterministic-default-selector)
 - `CanonGovernor` and `ProtocolCatalog` take a protocol with `case_open` or a `children` form; `action_facts` reads its `case_outcome` (story:canon-0-9-0-pin)
 - `b10x-loom-runlog` keeps a hash-chained run log per case; `loom_governor::LockedDir` and `case_file_stem` are public (story:hash-chained-run-log)
+- `loom_sdk::protocols` gains `ProtocolCatalog::from_vendored`, `VendoredError`, `ENGINEERING_FILES`, `ENGINEERING_LOCK` and the `lock` module (story:engineering-protocol-lock)
 
 ### Changed
 
 - Substrate moves from `0.14.0` to `0.21.0` (`adfde402`, host without its `kubernetes` feature, so no `aws-lc-rs`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
 - **Breaking:** `ChildCommand` refuses `ScopeInvalid` a root or file mounted on, under or containing `/etc/alternatives`, which a confined child now sees read-only where the host has it (story:substrate-0-21-pin)
 - **Breaking:** Canon `0.8.0` -> `0.9.0`, `b10x-canon-engineering` `0.15.2` -> `0.16.0`: `ProtocolEntry::model` is Canon 0.9.0's `Protocol`; Canon reserves the evidence kind `case_outcome`, refusing its records without `child_case` or `result` (story:canon-0-9-0-pin)
+- `ProtocolCatalog::engineering` reads the vendored files of engineering-protocols `0.16.0`, held to `protocols/engineering/lock.json` (story:engineering-protocol-lock)
 
 ## [0.57.2] - 2026-11-05
 

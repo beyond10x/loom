@@ -1,14 +1,14 @@
 <!--
   generated from intake v1
-  model digest 91e7b24c1442a41a622f4feaa84db250d7769d7784122bae93f2e0cda0c64c8e
-  contract digest 99df8d6f24c0dac87f11d99d24d6f1ffae8788936b89c7b0d0c7979db6533769
+  model digest ad4851e311c6a7fdc68e8ce2cf55fc1cbff7b3735079a14e0262180a35e0aa16
+  contract digest 152401f55905b6a2328cf03fddfa2be27c5b0984c1c0792e8039492f21443eda
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-104 capabilities: **101 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+107 capabilities: **104 generated**, **3 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -55,7 +55,10 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `intake.events.ToolCallEvent` |
 | domain type | `intake.events.TurnEvent` |
 | domain type | `intake.events.UsageEvent` |
+| domain type | `intake.protocols.LockRefusal` |
+| domain type | `intake.protocols.LockedFile` |
 | domain type | `intake.protocols.ProtocolDefinition` |
+| domain type | `intake.protocols.ProtocolLock` |
 | domain type | `intake.protocols.ProtocolSource` |
 | domain type | `intake.protocols.SourceKind` |
 | domain type | `intake.query.TimeObservation` |

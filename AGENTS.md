@@ -45,7 +45,16 @@ again.
 
 Loom owns `protocols/system-query/1.yaml`, a read-only local clock query. Canon still owns protocol
 semantics, and engineering-protocols still owns engineering definitions. `b10x-loom-protocols`
-composes bundled and explicitly installed definitions. Intake routing, artifact declarations and
+composes bundled and explicitly installed definitions. The engineering definitions are vendored:
+`protocols/engineering/` holds engineering-protocols' `protocols/<name>/<major>.yaml` files byte for
+byte from one tag, and `protocols/engineering/lock.json` (`loom.protocol-lock/1`, written and read
+only by `loom_protocols::lock`) names the repository, tag and commit and each file's sha256.
+`ProtocolCatalog::engineering` is `from_vendored` over them: a changed digest, a file the lock does
+not name, a locked file that is absent and a malformed lock each refuse the whole catalog before any
+definition is admitted, and each entry's revision is the lock's tag
+(`crates/loom-protocols/tests/engineering_lock.rs`). Copy the files from the tag's commit
+(`git show <commit>:protocols/<path>`), never from a working tree, and never edit them here.
+Intake routing, artifact declarations and
 host admission must use the same immutable catalog; a remote package never installs executable
 code or authority. Protocol installation is explicit and runs read verified snapshots offline.
 
