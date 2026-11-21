@@ -22,3 +22,4 @@ domains:
   - loom.agent
   - loom.resource
   - loom.bindings
+  - loom.runlog

@@ -19,14 +19,14 @@ const LINE: &str = "intake.events.RunEventLine";
 const UNION: &str = "intake.events.RunEvent";
 const VERSION: &str = "intake.events.SchemaVersion";
 
-fn declared<'a>(model: &'a Value, name: &str) -> Result<&'a Value> {
+pub(crate) fn declared<'a>(model: &'a Value, name: &str) -> Result<&'a Value> {
     model["types"]
         .get(name)
         .map(|declaration| &declaration["body"])
         .with_context(|| format!("compiled model: {name} is not declared"))
 }
 
-fn field_names(body: &Value) -> Vec<&str> {
+pub(crate) fn field_names(body: &Value) -> Vec<&str> {
     body["fields"]
         .as_array()
         .into_iter()
@@ -141,7 +141,7 @@ const FAILED_RUN: &str = "failed";
 /// What a run with `--state` that reached its human gate holding no Suspension exits with.
 const NOTHING_SUSPENDED: &str = "ApprovalRequired, nothing suspended";
 
-fn variants(model: &Value, name: &str) -> Result<Vec<String>> {
+pub(crate) fn variants(model: &Value, name: &str) -> Result<Vec<String>> {
     let mut variants: Vec<String> = declared(model, name)?["variants"]
         .as_array()
         .with_context(|| format!("compiled model: {name} is not an enum"))?
@@ -157,7 +157,7 @@ fn variants(model: &Value, name: &str) -> Result<Vec<String>> {
 /// enum it names and, for a record it holds (alone, optional or in a list), the record's own
 /// fields, each stated the same way. A record inside such a record is refused: the contract states
 /// one level of records.
-fn field_type(model: &Value, type_ref: &Value) -> Result<Value> {
+pub(crate) fn field_type(model: &Value, type_ref: &Value) -> Result<Value> {
     stated_type(model, type_ref, true)
 }
 

@@ -17,6 +17,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-bindings` decodes a `loom.bindings/1` document and checks it against its protocol at load (story:bindings-document)
 - **Breaking:** `SelectionStrategy` gains `Deterministic`, the strategy of the model-free `DeterministicSelector` (story:deterministic-default-selector)
 - `CanonGovernor` and `ProtocolCatalog` take a protocol with `case_open` or a `children` form; `action_facts` reads its `case_outcome` (story:canon-0-9-0-pin)
+- `b10x-loom-runlog` keeps a hash-chained run log per case; `loom_governor::LockedDir` and `case_file_stem` are public (story:hash-chained-run-log)
 
 ### Changed
 

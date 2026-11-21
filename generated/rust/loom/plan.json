@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "fbeaebade33f9bae0fee878b4ac2ed2d464d4ad92289ab370b697eb4163ce3d5",
-    "contract_digest": "f4ad0d5c16c875e74b035f1a0641820afec1c749de0636dc8a78651dab8edd95"
+    "source_digest": "dab0e9b0b131719fb6d54b29aa318e3ed2ca817df946678486108672bd614274",
+    "contract_digest": "077f4e4e6548832cdab0185ef7b7f4e65f130d090c84f28346747b75d9e33239"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1231,6 +1231,111 @@
     {
       "kind": "domain_type",
       "source": "loom.run.TurnId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.ActionFinished",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.ActionStarted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.AuthorityRecorded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.CaseOpened",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.ChildClosed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.ChildOpened",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.Discarded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.Evaluated",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.RevisionMove",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.RunLogEvent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.RunLogLine",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.RunLogRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.RunLogRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.Stopped",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.Terminated",
       "disposition": {
         "disposition": "generated"
       }

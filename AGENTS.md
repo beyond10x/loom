@@ -303,6 +303,7 @@ Where a test puts its scratch depends on what it needs from the directories abov
 | `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
 | `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
 | `docs/contracts/run-events-v1.json` | `loom-docs`, the V1 contract of `run --output jsonl` from `ess/intake/` and `b10x_loom_cli::events` | `task docs-generate` | `task docs-check`, failing only on a break |
+| `docs/contracts/run-log-v1.json` | `loom-docs`, the contract of a case's run log from `loom.runlog` (`ess/`) | `task docs-generate` | `task docs-check`, failing on any difference |
 | `website/docs/reference/commission/` | `loom-commission-docs`, from `ess/commission/` | `task commission:docs` | `task commission:docs-drift` |
 
 Never edit these by hand; change the source and regenerate. The generated Rust is never formatted:
@@ -448,7 +449,7 @@ failures explicitly; the legacy `CaseStore` bridge is only for infallible adapte
 `FileCaseStore` is one: a file per case, written as `loom.governor`'s `StoredCase` to a temporary
 file and renamed, under a per-operation lock; `crates/loom-governor/tests/restart_durability.rs`
 holds a case across a real process restart. `FileSuspensionStore` is Commission's suspension port
-over the same lock and write (the private `locked_dir` module), a file per commission, so the two
+over the same lock and write (`LockedDir`, public so `b10x-loom-runlog` takes the same lock), a file per commission, so the two
 may share one directory; the testkit's `FileSuspensionStore` re-exports it, and
 `crates/loom-commission-testkit/tests/approval_suspend_resume.rs` holds both in one directory
 across a restart. `FileWorkflowRunStore` is the governor's `WorkflowRunStore`, the port a
@@ -1156,6 +1157,39 @@ names, so a Canon pin moves both manifests.
   same test file decodes it and checks it against the protocol on the page.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
+
+## Run log
+
+`b10x-loom-runlog` (`crates/loom-runlog`, `story:hash-chained-run-log`, epic
+`protocol-tree-on-bindings`) keeps one run log per case: `runlog-<stem>.jsonl` beside the case file
+`<stem>.json`, the stem `loom_governor::case_file_stem` (`case-<hex>`, or `case-sha256-<hex>` for
+an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); the contract
+`docs/contracts/run-log-v1.json` is generated from them (§ Generated files).
+
+- A line is one JSON object ended by a line feed: `seq` (0, 1, 2, ... with no gap), `prev` (the
+  SHA-256 of the previous line's bytes without its line feed, 64 lower-case hex digits; absent on
+  line 0), `at`, and the event's `kind` with its members beside them. Lines are counted from 0, as
+  `seq` counts them.
+- `RunLog::append` holds the governor's `LockedDir` lock, the one every `FileCaseStore` operation
+  takes, reads and verifies the log, and writes the whole log with the new line to a `.tmp-`
+  file in the directory, synced and renamed over the log. A log that does not verify is refused
+  with the reader's refusal and no byte changes; a line that would not read back as given (an `at`
+  that is no RFC 3339 instant) is refused before anything is written. `LockedDir::open` removes a
+  temporary file a crashed append left. `append_until` stops at an `AppendStep` as a crash would,
+  for the crash test. `LockedDir::temporary` is public with its precondition (call it holding the
+  lock) unchecked, and `LockedDir::locked` is not re-entrant: an append made inside `locked` on
+  the same directory waits for itself forever.
+- `verify` refuses, naming the first failing line: `CutLine` (the last line has no line feed or
+  does not read), `SequenceGap` (`seq` is not the position: a deleted or swapped line),
+  `BrokenChain` (`prev` does not match, or is present on line 0 or absent later; a changed byte is
+  named by the line after it). A change to the last line alone is not detected, as a cut at a
+  line boundary is not, and the next append makes it permanent; a log rewritten from a line on
+  with a fresh chain also verifies: the log is not signed.
+- The crate declares the events and writes what it is given; emitting them is
+  `story:tree-run-command`'s. It depends on the governor for the lock and the stem, so the executor
+  and Canon reach it only through the governor.
+  `crates/loom-runlog/tests/run_log.rs` holds every refusal, the 400-line two-process append, a
+  crash at each step and the held lock.
 
 ## Operator
 
