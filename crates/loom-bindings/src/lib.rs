@@ -32,9 +32,12 @@ pub const DEFAULT_MAX_RUNS: i64 = 8;
 pub const MIN_TIMEOUT_SECONDS: i64 = 1;
 /// The longest `timeout_seconds` an action may name.
 pub const MAX_TIMEOUT_SECONDS: i64 = 3600;
-/// The deepest nesting [`decode`] reads: levels of indentation (two columns each), leading `- `
-/// entries and open brackets or braces, counted on the text before it is parsed.
+/// The deepest nesting [`decode`] reads, counted on the decoded values.
 pub const MAX_NESTING: usize = 64;
+/// The most flow openers (`[` and `{`) net of closers [`decode`] lets the text hold before it is
+/// parsed: a guard against a parser cost, far beyond any text. It counts brackets in comments and
+/// strings too.
+pub const MAX_OPEN_BRACKETS: usize = 2048;
 /// The most values [`decode`] reads, an alias counted each time it is used.
 pub const MAX_NODES: usize = 100_000;
 /// The most bytes of a document [`decode`] reads.

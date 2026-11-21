@@ -17,7 +17,9 @@ use std::collections::BTreeSet;
 /// executor (`tools`, a budget member other than `max_runs`, any executor member of another
 /// kind), an evidence `kind` outside the action's `may_produce`, a `subject` or `upstream` entry
 /// that is not a declared artifact, a `timeout_seconds` outside 1 to 3600, and an `inputs` or
-/// `outputs` path, or an `open` executor's `bindings` path, that is absolute or leaves the workspace;
+/// `outputs` path that is absolute or leaves the workspace, and an `open` executor's `bindings` path
+/// that is absolute, leaves the directory of the bindings file or names no file (`.`, a trailing
+/// `/`);
 /// a `retry_when` kind that is not an evidence kind of the protocol; and an evidence `from` that does
 /// not fit the executor (`effect` on a program, anything but `effect` on a person or an open).
 ///
@@ -199,6 +201,14 @@ pub fn check(
         }
         if let Some(path) = &bound.executor.bindings {
             in_workspace(Some(id), "executor.bindings", path)?;
+            if matches!(path.rsplit(['/', '\\']).next(), Some("" | ".")) {
+                return Err(refuse(
+                    Reason::PathNotInWorkspace,
+                    Some(id),
+                    "executor.bindings",
+                    format!("{path:?} names no file; it is relative to the directory of this file"),
+                ));
+            }
         }
     }
     Ok(())

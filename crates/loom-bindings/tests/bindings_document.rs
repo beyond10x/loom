@@ -875,12 +875,15 @@ fn a_retry_result_that_is_empty_is_refused() {
 }
 
 #[test]
-fn the_child_bindings_path_of_an_open_executor_stays_in_the_workspace() {
+fn the_child_bindings_path_of_an_open_executor_names_a_file_beside_the_bindings_file() {
     for bad in [
         "/abs/child.yaml",
         "../child.yaml",
         "a/../../c.yaml",
         "C:/c.yaml",
+        ".",
+        "sub/",
+        "sub/.",
     ] {
         let text = document(&format!(
             "  - action: change.open\n    executor: {{kind: open, name: n, bindings: \"{bad}\"}}\n"

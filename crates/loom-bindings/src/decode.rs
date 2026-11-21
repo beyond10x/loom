@@ -731,7 +731,7 @@ fn json(value: &Value, action: Option<&str>, member: &str) -> Decoded<Json> {
                     "holds a number JSON cannot write",
                 ));
             }
-            Json::Number(number.to_string())
+            Json::Number(format!("{number:?}"))
         }
         Value::String(text) => Json::Text(text.clone()),
         Value::Sequence(items) => Json::Array(

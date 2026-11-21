@@ -1117,8 +1117,10 @@ names, so a Canon pin moves both manifests.
   independence dimension the protocol does not declare. An action with no binding is not an error;
   `unbound` lists them.
 - `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
-  returns and expands an alias at each use: `MAX_NESTING` (64, counted on the text before the parse),
-  `MAX_NODES` (100,000, aliases expanded) and `MAX_DOCUMENT_BYTES`. A mapping key is read as written
+  returns and expands an alias at each use: `MAX_NESTING` (64, on the decoded values), `MAX_NODES`
+  (100,000, aliases expanded), the bytes of scalars (`MAX_DOCUMENT_BYTES`, aliases expanded) and,
+  on the text before the parse, `MAX_OPEN_BRACKETS` (2048, a parser-cost guard that counts brackets
+  in comments and strings). A mapping key is read as written
   (`0` and `"0"` are one key), a key twice, a `<<` key and a tagged key or value are refused.
   `protocol` follows the registry's rule (`parse_registration` in `crates/loom-protocols`) without a
   dependency on that crate; keep the two together. `check` also refuses a `retry_when` kind the

@@ -1,12 +1,14 @@
 //! The text of a document as a tree, read from YAML under the bounds a bindings document needs.
 //!
 //! The parser (`serde_yaml_ng`) reads a whole document before it hands a value back, and expands
-//! an alias each time it is used, so the bounds that keep a hostile document cheap are applied
-//! twice: on the text before it is parsed ([`bounded`]: nesting), and on the values as they are
-//! produced (the node count, which aliases cannot get past). A mapping key is read as the text the
-//! operator wrote, so `0` and `"0"` are one key and `1.50` is not `1.5`.
+//! an alias each time it is used. Structure is bounded on the values as they are produced: nesting
+//! ([`MAX_NESTING`]), the node count and the bytes of the scalars, which aliases cannot get past.
+//! The text is checked before the parse for one thing only ([`bounded`]): flow openers net of
+//! closers past [`MAX_OPEN_BRACKETS`], a guard against a parser cost that counts brackets in
+//! comments and strings too. A mapping key is read as the text the operator wrote, so `0` and
+//! `"0"` are one key and `1.50` is not `1.5`.
 
-use crate::{MAX_NESTING, MAX_NODES};
+use crate::{MAX_DOCUMENT_BYTES, MAX_NESTING, MAX_NODES, MAX_OPEN_BRACKETS};
 use serde::de::{
     self, DeserializeSeed, Deserializer, EnumAccess, IgnoredAny, MapAccess, SeqAccess,
     VariantAccess, Visitor,
@@ -67,9 +69,11 @@ impl Map {
     }
 }
 
-/// Reads `text`: refused when its nesting is past [`MAX_NESTING`], when it holds a tag, a `<<`
-/// merge key or a key twice, or when it expands to more than [`MAX_NODES`] values.
+/// Reads `text` without a leading byte order mark: refused when its nesting is past
+/// [`MAX_NESTING`], when it holds a tag, a `<<` merge key or a key twice, or when it expands to
+/// more than [`MAX_NODES`] values or [`MAX_DOCUMENT_BYTES`] bytes of scalars.
 pub(crate) fn parse(text: &str) -> Result<Node, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     bounded(text)?;
     let state = RefCell::new(State::default());
     let deserializer = serde_yaml_ng::Deserializer::from_str(text);
@@ -78,49 +82,22 @@ pub(crate) fn parse(text: &str) -> Result<Node, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Refuses text whose nesting is past [`MAX_NESTING`], counted on the text and before any parse: a
-/// line's indentation (two columns a level), its run of leading `- ` entries, and the brackets
-/// and braces left open (quoted or not: a count that errs toward refusing).
+/// Refuses text that holds more than [`MAX_OPEN_BRACKETS`] flow openers net of closers, before any
+/// parse.
 fn bounded(text: &str) -> Result<(), String> {
     let mut open = 0usize;
-    for (number, line) in text.split('\n').enumerate() {
-        let rest = line.trim_start_matches(' ');
-        let indent = line.len() - rest.len();
-        let mut dashes = 0usize;
-        let mut tail = rest;
-        while let Some(after) = tail.strip_prefix('-') {
-            if !after.is_empty() && !after.starts_with(' ') {
-                break;
-            }
-            dashes += 1;
-            tail = after.trim_start_matches(' ');
-            if indent / 2 + dashes > MAX_NESTING {
-                break;
-            }
-        }
-        let base = indent / 2 + dashes;
-        let mut depth = base + open;
-        for c in tail.chars() {
-            if depth > MAX_NESTING {
-                break;
-            }
-            match c {
-                '[' | '{' => {
-                    open += 1;
-                    depth += 1;
+    for c in text.chars() {
+        match c {
+            '[' | '{' => {
+                open += 1;
+                if open > MAX_OPEN_BRACKETS {
+                    return Err(format!(
+                        "the text holds more than {MAX_OPEN_BRACKETS} open brackets or braces"
+                    ));
                 }
-                ']' | '}' if open > 0 => {
-                    open -= 1;
-                    depth -= 1;
-                }
-                _ => {}
             }
-        }
-        if depth > MAX_NESTING {
-            return Err(format!(
-                "line {} nests deeper than {MAX_NESTING} levels",
-                number + 1
-            ));
+            ']' | '}' => open = open.saturating_sub(1),
+            _ => {}
         }
     }
     Ok(())
@@ -129,6 +106,7 @@ fn bounded(text: &str) -> Result<(), String> {
 #[derive(Default)]
 struct State {
     nodes: usize,
+    bytes: usize,
     depth: usize,
     path: Vec<String>,
 }
@@ -147,6 +125,16 @@ impl State {
         if self.nodes > MAX_NODES {
             return Err(E::custom(format!(
                 "the document holds more than {MAX_NODES} values, aliases expanded"
+            )));
+        }
+        Ok(())
+    }
+
+    fn text<E: de::Error>(&mut self, length: usize) -> Result<(), E> {
+        self.bytes += length;
+        if self.bytes > MAX_DOCUMENT_BYTES {
+            return Err(E::custom(format!(
+                "the document holds more than {MAX_DOCUMENT_BYTES} bytes of text, aliases expanded"
             )));
         }
         Ok(())
@@ -213,6 +201,7 @@ impl<'de> Visitor<'de> for NodeVisitor<'_> {
     }
 
     fn visit_str<E: de::Error>(self, value: &str) -> Result<Node, E> {
+        self.state.borrow_mut().text(value.len())?;
         Ok(Node::String(value.to_owned()))
     }
 

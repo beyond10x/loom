@@ -146,7 +146,8 @@ actions:
   `argv`, a list of strings and never a shell string. An `agent` names an `adapter`, a `model`
   (`claude-haiku-5-5` when it names none), and `inputs` and `outputs` as paths in the workspace. A
   `person` names the `principal` who alone takes the action. An `open` takes a `name` or an `each`
-  argument and the child's `bindings` file, a path in the workspace. A `copy` names the evidence
+  argument and the child's `bindings` file, a path relative to the directory of the bindings file that names it, naming a
+  file (not `.`, not ending in `/`). A `copy` names the evidence
   kind it copies as `evidence` and the protocol id of the case it copies from as `from`.
 - `arguments` is a literal object; `arguments_from` is an argv whose standard output is the
   object. They are alternatives.
@@ -166,19 +167,22 @@ actions:
   work; a result is never empty.
   `handoff` is the text a run shows when this writer has done what it may and a person continues.
 - `artifacts` maps an artifact id of the protocol to a path in the workspace; `independence` maps
-  a producer to dimensions the protocol declares. Every path member (`artifacts`, `inputs`,
-  `outputs` and `bindings`) is relative to the workspace root, never absolute, with no `..`
-  segment.
+  a producer to dimensions the protocol declares. The `artifacts`, `inputs` and `outputs`
+  paths are relative to the workspace root, and an `open` executor's `bindings` is relative to the
+  directory of the file that names it; none is absolute, empty or holds a `..` segment.
 - `protocol` is the registration the protocol catalog holds, `name@major`: lowercase letters,
   digits and hyphens in `name`, starting with a lowercase letter and at most 100 bytes, then a
   positive major written without leading zeros. A protocol whose id is `software.change` at
   revision 1 is registered as `software-change@1`: dots and underscores become hyphens.
 - A mapping key is read as written, so `0` and `"0"` are the same key and `1.50` is not `1.5`; a
   key named twice (also through two spellings), a `<<` merge key and a tag such as `!x` are
-  refused. YAML aliases are read, and a document that expands to more than 100,000 values, or
-  nests deeper than 64 levels (counted on the text: two columns of indentation, a leading `- ` or
-  an open bracket or brace each add one), or is larger than 1 MiB, is refused before it costs
-  more.
+  refused; the standard `!!` tags (`!!str`, `!!int`) are resolved by the parser and load. Keys of
+  a `results` table are kept as written, so `01` and `1` are two rows, and an exit status matches
+  the row written as its decimal number. YAML aliases are read, and a document that nests deeper
+  than 64 levels, expands to more than 100,000 values or to more than 1 MiB of text, or is larger
+  than 1 MiB, is refused. As a guard against a parser cost, text that holds more than 2048 open
+  brackets or braces net of closers is refused before it is parsed; the count includes brackets in
+  comments and strings.
 
 ## What Loom refuses
 
