@@ -388,3 +388,126 @@ fn a_case_outcome_record_naming_no_child_is_refused_by_canon_and_never_applies()
         );
     }
 }
+
+/// `evaluate`'s decision over `records`, in that order, and the decision document the governor
+/// issues for the same records received in the same order: the two must be equal, byte for byte
+/// as Canon renders them. Returns the claim `findings.resolved` as `evaluate` gives it.
+fn evaluate_equals_the_governor(label: &str, records: &[Value]) -> ClaimValue {
+    let catalog = catalog();
+    let snapshot = json!({
+        "format": "canon-case/1",
+        "id": "case-1",
+        "protocol": "audit",
+        "artifacts": {"findings": {"revision": "f1"}},
+        "revision": "r1",
+    });
+    let decision = evaluate(
+        &catalog,
+        &EvaluationRequest {
+            protocol: ProtocolName(NAME.into()),
+            snapshot: CaseSnapshot(json::parse(&snapshot.to_string()).expect("JSON")),
+            evidence: records
+                .iter()
+                .map(|record| EvidenceRecord(json::parse(&record.to_string()).expect("JSON")))
+                .collect(),
+            at: None,
+            decisions: Vec::new(),
+        },
+    )
+    .unwrap_or_else(|refusal| panic!("{label}: evaluate refused {refusal:?}"));
+    for (admission, governor) in governors() {
+        let case = open(&governor);
+        assert_eq!(case.0, "case-1", "{label}, {admission}");
+        for (n, record) in records.iter().enumerate() {
+            receive(&governor, &case, n as u64 + 1, record);
+        }
+        let frontier = governor.frontier(&case).expect("the frontier");
+        let document = governor
+            .decision_document(&case, &frontier.data().frontier_id)
+            .expect("the governor holds the case")
+            .expect("the governor keeps the document it just issued");
+        assert_eq!(
+            decision.canon, document,
+            "{label}, {admission}: evaluate decides what the governor decides for the same history"
+        );
+    }
+    decision
+        .claims
+        .iter()
+        .find(|claim| claim.claim == "findings.resolved")
+        .expect("findings.resolved")
+        .value
+        .clone()
+}
+
+/// Two records for one child: whichever comes first applies and the later one is set aside, by
+/// `evaluate` as by the governor (Canon refuses the two together, `duplicate-child-case`).
+#[test]
+fn of_two_records_for_one_child_the_first_applies_in_either_order() {
+    let open_first = [
+        outcome("o1", Some("CHG-1"), "open"),
+        outcome("o2", Some("CHG-1"), "accepted"),
+    ];
+    assert_eq!(
+        evaluate_equals_the_governor("open, then accepted", &open_first),
+        ClaimValue::Unknown,
+        "the open record came first"
+    );
+    let accepted_first = [
+        outcome("o1", Some("CHG-1"), "accepted"),
+        outcome("o2", Some("CHG-1"), "open"),
+    ];
+    assert_eq!(
+        evaluate_equals_the_governor("accepted, then open", &accepted_first),
+        ClaimValue::True,
+        "the accepted record came first"
+    );
+}
+
+/// Records for two children both apply, by `evaluate` as by the governor.
+#[test]
+fn records_for_two_children_both_apply() {
+    let records = [
+        outcome("o1", Some("CHG-1"), "accepted"),
+        outcome("o2", Some("CHG-2"), "open"),
+    ];
+    assert_eq!(
+        evaluate_equals_the_governor("two children", &records),
+        ClaimValue::Unknown,
+        "the second child is still open, so both records were read"
+    );
+    let reversed = [
+        outcome("o1", Some("CHG-1"), "open"),
+        outcome("o2", Some("CHG-2"), "declined"),
+    ];
+    assert_eq!(
+        evaluate_equals_the_governor("two children, one open", &reversed),
+        ClaimValue::Unknown
+    );
+    let ended = [
+        outcome("o1", Some("CHG-1"), "accepted"),
+        outcome("o2", Some("CHG-2"), "declined"),
+    ];
+    assert_eq!(
+        evaluate_equals_the_governor("two children, both ended", &ended),
+        ClaimValue::True,
+        "both records apply: every child ended in the set"
+    );
+}
+
+/// A record set aside on its own (no child named) and a second record for one child, in one
+/// history: both are set aside and the decision is the governor's.
+#[test]
+fn a_record_set_aside_alone_and_one_set_aside_with_the_rest_are_both_set_aside() {
+    let records = [
+        outcome("o0", None, "accepted"),
+        outcome("o1", Some("CHG-1"), "open"),
+        outcome("o2", Some("CHG-1"), "accepted"),
+        outcome("o3", Some("CHG-2"), "accepted"),
+    ];
+    assert_eq!(
+        evaluate_equals_the_governor("mixed", &records),
+        ClaimValue::Unknown,
+        "CHG-1 is still open by its first record"
+    );
+}
