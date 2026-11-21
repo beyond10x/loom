@@ -62,8 +62,8 @@ use b10x_loom_commission::ports::governor::Governor;
 pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments, OverruleRefused};
 pub use metering::{MeteredExecutor, MeteredModel, RateCard, RunMeter};
 pub use selection::{
-    ActionSelector, Confidence, FirstAdmissibleSelector, HybridSelector, InvalidThreshold,
-    SelectorError,
+    ActionFactsPort, ActionSelector, CaseFacts, Confidence, DeterministicSelector,
+    FirstAdmissibleSelector, HybridSelector, InvalidThreshold, SelectorError, StepHistory,
 };
 
 use arguments::RequestRecord;

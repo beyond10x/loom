@@ -156,8 +156,8 @@ use b10x_canon::eval::{
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
     ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord,
-    IndependenceDimensionId, InputId, InputValue, Principal, Revision, Truth as CanonTruth,
-    is_identifier,
+    ExclusionReason, IndependenceDimensionId, InputId, InputValue, Principal, Revision,
+    Truth as CanonTruth, is_identifier,
 };
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -168,6 +168,8 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
 use b10x_loom_commission::ports::governor::Governor;
+use b10x_loom_executor::{ActionFactsPort, CaseFacts};
+use loom::run::ActionFacts;
 
 mod file_run_store;
 mod file_store;
@@ -1131,6 +1133,58 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
+    /// The facts of every action the case's protocol declares, in identifier order, at the case's
+    /// current revision (`loom.run.ActionFacts`, for the executor's `DeterministicSelector`): the
+    /// effect class the protocol declares for it (none when it declares none), the evidence kinds
+    /// it may produce, and its open evidence, the kinds among those Canon counted no record of.
+    ///
+    /// A record counts when it applies to the case (see the crate documentation, "Evidence") and
+    /// Canon's decision of the case as held now, at the trusted time, excludes it under no claim
+    /// as bound to a superseded revision of its subject, expired or invalidated; a record Canon
+    /// sets aside only as not independent still counts. A kind no claim reads is never named in
+    /// the decision's exclusions, so its record counts only while it is about its subject's
+    /// current revision, the rule Canon's revision binding applies. Whether a held record applies
+    /// is decided once, when it arrives; whether it counts is decided at every call, so a kind
+    /// counted at one revision of its subject is open again once that subject moves, the record
+    /// still held.
+    ///
+    /// # Errors
+    /// As `frontier` refuses the case: `UnknownCase` when it is not held, and `GovernorUnavailable`
+    /// when its store fails, its protocol is not registered, its held inputs or independence
+    /// declarations do not satisfy the protocol, or Canon refuses to decide it.
+    pub fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, GovernorError> {
+        let (state, ir, decision) = self.decided(case)?;
+        let counted = counted_kinds(&state, &decision);
+        let actions = ir
+            .actions
+            .iter()
+            .map(|(id, declared)| {
+                let may_produce: Vec<String> = declared
+                    .may_produce
+                    .iter()
+                    .map(|kind| kind.as_str().to_owned())
+                    .collect();
+                ActionFacts {
+                    action: id.as_str().to_owned(),
+                    effect: declared
+                        .effect
+                        .as_ref()
+                        .map(|effect| effect.as_str().to_owned()),
+                    open_evidence: may_produce
+                        .iter()
+                        .filter(|kind| !counted.contains(kind.as_str()))
+                        .cloned()
+                        .collect(),
+                    may_produce,
+                }
+            })
+            .collect();
+        Ok(CaseFacts {
+            case_revision: state.revision,
+            actions,
+        })
+    }
+
     /// The `canon-decision/1` document behind the frontier `frontier` this governor issued for the
     /// case: the whole document Canon wrote, its explanation included, whose rendering gives that
     /// frontier id, as the generated JSON value [`evaluate`] returns as `canon`. `None` when this
@@ -1430,6 +1484,19 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, 
             })
             .map_err(|_| GovernorError::GovernorUnavailable)?
             .ok_or(GovernorError::UnknownCase)
+    }
+}
+
+/// The executor's [`ActionFactsPort`], answered by [`CanonGovernor::action_facts`]; a case the
+/// governor cannot answer for is the port's error, naming the case.
+impl<S: FallibleCaseStore, T: EvaluationTime> ActionFactsPort for CanonGovernor<S, T> {
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String> {
+        CanonGovernor::action_facts(self, case).map_err(|error| match error {
+            GovernorError::UnknownCase => format!("the governor holds no case `{}`", case.0),
+            GovernorError::GovernorUnavailable => {
+                format!("the governor cannot decide case `{}`", case.0)
+            }
+        })
     }
 }
 
@@ -1772,6 +1839,35 @@ impl JsonTree for loom::json::Value {
             Self::Object(members) => Node::Object(members),
         }
     }
+}
+
+/// The evidence kinds of which `state` holds a record Canon counts in `decision`, the case's
+/// current decision ([`CanonGovernor::action_facts`]): a record that applies, that no claim of the
+/// decision excludes as bound to a superseded revision, expired or invalidated, and that is about
+/// its subject's current revision.
+fn counted_kinds(state: &CaseState, decision: &Decision) -> BTreeSet<String> {
+    let excluded: BTreeSet<&str> = decision
+        .claims
+        .iter()
+        .flat_map(|(_, claim)| claim.excluded_evidence.iter())
+        .filter(|exclusion| exclusion.reason != ExclusionReason::NotIndependent)
+        .map(|exclusion| exclusion.evidence.as_str())
+        .collect();
+    state
+        .evidence
+        .iter()
+        .filter(|held| held.applies)
+        .filter_map(|held| canon_record(&held.data))
+        .filter(|record| !excluded.contains(record.id.as_str()))
+        .filter(|record| {
+            state
+                .artifacts
+                .get(record.subject.as_str())
+                .map(String::as_str)
+                == Some(record.subject_revision.as_str())
+        })
+        .map(|record| record.kind.as_str().to_owned())
+        .collect()
 }
 
 /// Whether `data` applies to the case: its facts carry a record of its kind, and Canon evaluates

@@ -134,6 +134,36 @@ The embedding host reads the records through `Loom::selection_records`, and a tr
 Loom's decision records (Atlas ADR 0101); metaharness never depends on loom-sdk (Atlas ADR 0098).
 They are never evidence (Atlas ADR 0074).
 
+## Deterministic selection
+
+`DeterministicSelector` (`crates/loom-executor/src/selection.rs`, strategy `Deterministic`) is the
+selector that calls no model. From the candidates it keeps only the `Admissible` ones whose action
+is useful, orders them with every action whose effect class is not `write` (an action whose effect
+the protocol does not declare included) before every `write` action and then by action id, and
+takes the first. With no useful candidate it answers `SelectorError::NothingAdmissible`, which Loom
+answers with `NoUsefulAction`; a port that cannot answer makes it `SelectorError::Unavailable`. Its
+pick has no confidence and reports no tokens, so its `SelectionRecord` names `Deterministic`, 0
+tokens and no confidence.
+
+What it knows besides a candidate's id and status comes from two host ports, never from a model and
+never from the candidate list:
+
+- `ActionFactsPort::action_facts(case)` answers the case revision and, per action,
+  `loom.run.ActionFacts` (`ess/domains/run.yaml`): its effect class, the evidence kinds it may
+  produce and its open evidence, the kinds among those Canon counted no record of at the subject's
+  current revision. `CanonGovernor` answers it from the protocol's IR and the case's current
+  decision (`CanonGovernor::action_facts`), so a kind is open again once its subject's revision
+  moves, the earlier record still held.
+- `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
+
+An action is useful while `due` is true; otherwise, when it may produce evidence, while its open
+evidence is not empty, and when it may produce none, until `performed_at` is true for the case
+revision the facts were read at. A candidate the facts do not name is not useful, and an action
+the facts name that is not a candidate is never returned: the choice passes Loom's membership rule
+like every other. The same candidates, facts and history give the same choice
+(`crates/loom-executor/tests/deterministic_selector.rs`,
+`crates/loom-governor/tests/action_facts.rs`).
+
 ## Safety rules
 
 1. Candidate labels originate from the current frontier.

@@ -16,20 +16,27 @@
 //! so Loom records a fallback as two selections, each with its own selector's strategy
 //! ([`resolve`]).
 //!
+//! [`DeterministicSelector`] is the selector whose strategy is `Deterministic`: it calls no model,
+//! keeps only admissible candidates that are useful, takes reads before writes and then orders by
+//! action id. What it knows beyond a candidate's id and status comes from two host ports,
+//! [`ActionFactsPort`] and [`StepHistory`], never from a model or the candidate list.
+//!
 //! [`select_action`] is `loom.run.SelectAction` as a command over stored catalogues and
 //! selections: the one behaviour ESS leaves to Loom (`generated/rust/loom/PLAN.md`), answered by
 //! the same membership rule as [`select`].
 
 use std::time::Instant;
 
+use b10x_loom_commission::model::responsibility::CaseId;
+
 use crate::model::behaviour::{ActionCatalogueStorage, SelectionStorage};
 use crate::model::json::{Value, decimal_at};
 use crate::model::primitives::Decimal;
 use crate::model::run::{
-    ActionCatalogue, ActionNotInCatalogue, ActionSelected, AnyActionCatalogue, AnySelection,
-    CatalogueEntry, CatalogueEntryStatus, CatalogueNotFound, CatalogueRevisionMismatch,
-    SelectAction, SelectActionOutcome, Selection, SelectionData, SelectionExists, SelectionId,
-    SelectionStrategy, action_catalogue_state, selection_state,
+    ActionCatalogue, ActionFacts, ActionNotInCatalogue, ActionSelected, AnyActionCatalogue,
+    AnySelection, CatalogueEntry, CatalogueEntryStatus, CatalogueNotFound,
+    CatalogueRevisionMismatch, SelectAction, SelectActionOutcome, Selection, SelectionData,
+    SelectionExists, SelectionId, SelectionStrategy, action_catalogue_state, selection_state,
 };
 
 /// What a selector is told besides the candidates.
@@ -159,6 +166,156 @@ impl ActionSelector for FirstAdmissibleSelector {
 
     fn strategy(&self) -> SelectionStrategy {
         SelectionStrategy::Rule
+    }
+}
+
+/// The facts of a case's actions, as the host answers them for the [`DeterministicSelector`]: the
+/// case revision they were read at, and per action its effect class, the evidence kinds it may
+/// produce and its open evidence (`loom.run.ActionFacts`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseFacts {
+    /// The case revision the facts were read at: the one [`StepHistory::performed_at`] is asked
+    /// about.
+    pub case_revision: i64,
+    /// The facts of each action the host knows of. An action listed twice is read at its first
+    /// entry.
+    pub actions: Vec<ActionFacts>,
+}
+
+/// The host port that answers a case's action facts for the [`DeterministicSelector`]: never a
+/// model, and never the candidate list. The governor answers it from the protocol and the case's
+/// current decision (`loom_governor::CanonGovernor::action_facts`).
+pub trait ActionFactsPort {
+    /// The facts of `case`'s actions at its current revision; `Err` with the reason when the host
+    /// cannot answer.
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String>;
+}
+
+impl<P: ActionFactsPort + ?Sized> ActionFactsPort for &P {
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String> {
+        (**self).action_facts(case)
+    }
+}
+
+/// The host port that answers what the run already did, for the [`DeterministicSelector`]: the
+/// history half of usefulness, which is the runtime's and not Canon's.
+pub trait StepHistory {
+    /// Whether `action` was performed at the case revision `case_revision`. An action that may
+    /// produce no evidence is useful until this is true for the revision the facts were read at.
+    fn performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String>;
+
+    /// Whether `action` is due again whatever its evidence and its history, as for a retry or a
+    /// pending copy: while it is, an admissible `action` is useful.
+    fn due(&self, action: &str) -> Result<bool, String>;
+}
+
+impl<H: StepHistory + ?Sized> StepHistory for &H {
+    fn performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String> {
+        (**self).performed_at(action, case_revision)
+    }
+
+    fn due(&self, action: &str) -> Result<bool, String> {
+        (**self).due(action)
+    }
+}
+
+/// The effect class that sorts an action after every other: `write`.
+const WRITE: &str = "write";
+
+/// The selector whose strategy is `Deterministic`: it calls no model, and the same candidates,
+/// facts and history give the same choice.
+///
+/// From the candidates it keeps only the `Admissible` ones whose action is useful, orders them
+/// with every action whose effect class is not `write` (an undeclared one included) before every
+/// `write` action and then by action id, and takes the first. An action is useful while
+/// [`StepHistory::due`] is true; otherwise, when it may produce evidence, while its open evidence
+/// is not empty, and when it may produce none, until [`StepHistory::performed_at`] is true for
+/// the case revision the facts were read at. A candidate the facts do not name is not useful, and
+/// an action the facts name that is not a candidate is never returned. With no useful candidate it
+/// answers [`SelectorError::NothingAdmissible`]; a port that cannot answer makes it
+/// [`SelectorError::Unavailable`] with the port's reason. Its pick has no confidence and reports no
+/// tokens.
+pub struct DeterministicSelector<F, H> {
+    case: CaseId,
+    facts: F,
+    history: H,
+}
+
+impl<F: ActionFactsPort, H: StepHistory> DeterministicSelector<F, H> {
+    /// A selector for `case`, reading its action facts from `facts` and its step history from
+    /// `history`.
+    pub fn new(case: CaseId, facts: F, history: H) -> Self {
+        Self {
+            case,
+            facts,
+            history,
+        }
+    }
+
+    /// Whether `action`, whose facts are `facts`, is useful at `case_revision`.
+    fn useful(
+        &self,
+        action: &str,
+        facts: &ActionFacts,
+        case_revision: i64,
+    ) -> Result<bool, SelectorError> {
+        if self
+            .history
+            .due(action)
+            .map_err(SelectorError::Unavailable)?
+        {
+            return Ok(true);
+        }
+        if facts.may_produce.is_empty() {
+            return self
+                .history
+                .performed_at(action, case_revision)
+                .map(|performed| !performed)
+                .map_err(SelectorError::Unavailable);
+        }
+        Ok(!facts.open_evidence.is_empty())
+    }
+}
+
+impl<F: ActionFactsPort, H: StepHistory> ActionSelector for DeterministicSelector<F, H> {
+    fn select(
+        &self,
+        _context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        let facts = self
+            .facts
+            .action_facts(&self.case)
+            .map_err(SelectorError::Unavailable)?;
+        // (whether it writes, action id): `false` orders before `true`, then ids by code point.
+        let mut useful: Vec<(bool, &str)> = Vec::new();
+        for entry in candidates
+            .iter()
+            .filter(|entry| entry.status == CatalogueEntryStatus::Admissible)
+        {
+            let Some(known) = facts
+                .actions
+                .iter()
+                .find(|known| known.action == entry.action)
+            else {
+                continue;
+            };
+            if self.useful(&entry.action, known, facts.case_revision)? {
+                useful.push((known.effect.as_deref() == Some(WRITE), &entry.action));
+            }
+        }
+        useful
+            .into_iter()
+            .min()
+            .map(|(_, action)| Choice {
+                action: action.to_owned(),
+                confidence: None,
+            })
+            .ok_or(SelectorError::NothingAdmissible)
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::Deterministic
     }
 }
 

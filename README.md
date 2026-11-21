@@ -155,7 +155,10 @@ posted.
 Since `0.12.0` the executor offers two more action selectors: a reasoning-model selector chooses
 one of the given candidates, and `HybridSelector` takes a fast selector's choice at or above a
 confidence threshold the host supplies, else the stronger selector's. The experimental
-`b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint.
+`b10x-loom-selector-laya` crate is a fast selector over a Laya endpoint. `DeterministicSelector`
+calls no model: it takes the first useful admissible action, reads before writes, then by action
+id, from facts the governor answers (`CanonGovernor::action_facts`) and a step history the host
+supplies.
 
 ## Run the command line
 
