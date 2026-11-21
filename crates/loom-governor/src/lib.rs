@@ -2236,8 +2236,10 @@ fn first_declared(decision: &Decision, order: &[String]) -> Option<String> {
 /// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
 /// aside when it arrives, and the decision is made from the rest; the decision does not list it.
 /// The records are judged in the order `evidence` gives them, as the governor judges records in
-/// the order received: one Canon refuses only together with records kept before it (a second
-/// `case_outcome` record for one child) is set aside, and the earlier one is kept.
+/// the order received: of the `case_outcome` records for one child that Canon takes alone, the
+/// first is kept and every later one is set aside, as Canon refuses them together
+/// (`duplicate-child-case`). Whatever Canon still refuses over the records kept is refused as
+/// the snapshot, as for its termination.
 ///
 /// Two inputs differ from `CanonGovernor`: a record that is not a readable `canon-evidence/1`
 /// record, and a record repeating an earlier record's id. The governor sets either aside (for a
@@ -2250,8 +2252,7 @@ fn first_declared(decision: &Decision, order: &[String]) -> Option<String> {
 /// that repeats an earlier record's id (by its position in `evidence`, the later one); a time
 /// Canon cannot read; or decisions Canon refuses (an entry that is not an identifier, one given
 /// twice, one for an undeclared outcome or for an outcome that does not require it). The time,
-/// the decisions and the records are judged before the decision is made, once each, except
-/// records Canon refuses only together, which are judged again in order (see above).
+/// the decisions and the records are judged before the decision is made, once each.
 pub fn evaluate(
     catalog: &ProtocolCatalog,
     request: &EvaluationRequest,
@@ -2331,28 +2332,24 @@ pub fn evaluate(
             // As `CanonGovernor` does on arrival, a record Canon refuses with the records kept
             // before it is set aside; what Canon still refuses with the rest is the snapshot's
             // termination. A record Canon refuses alone is refused with any others, so each is
-            // first judged alone, once. Only when Canon still refuses those that pass alone
-            // together (two `case_outcome` records for one child) are they judged in order, each
-            // with those kept before it, as `applies` judges them.
-            let alone: Vec<EvidenceRecord> = records
+            // judged alone, once. Of those that pass, Canon refuses together only a later
+            // `case_outcome` record for a child an earlier one names (`duplicate-child-case`;
+            // a repeated id was refused above): in request order, the first per child is kept.
+            let mut children = BTreeSet::new();
+            let applying: Vec<EvidenceRecord> = records
                 .iter()
                 .filter(|record| {
                     decide_case(&ir, &open, std::slice::from_ref(record), at, decisions).is_ok()
                 })
+                .filter(|record| {
+                    record.kind.as_str() != CASE_OUTCOME
+                        || record
+                            .child_case
+                            .as_ref()
+                            .is_none_or(|child| children.insert(child.as_str()))
+                })
                 .cloned()
                 .collect();
-            let applying = if decide_case(&ir, &open, &alone, at, decisions).is_ok() {
-                alone
-            } else {
-                let mut kept = Vec::with_capacity(alone.len());
-                for record in alone {
-                    kept.push(record);
-                    if decide_case(&ir, &open, &kept, at, decisions).is_err() {
-                        kept.pop();
-                    }
-                }
-                kept
-            };
             decide_case(&ir, &case, &applying, at, decisions)
                 .map_err(|refusal| canon_refused(EvaluationInput::Snapshot, None, &refusal))?
         }

@@ -478,10 +478,10 @@ the caller. Its request, decision and refusal are the `loom.evaluation` domain
 private `decide_case` and `project` that `CanonGovernor` uses, never a second evaluator, and a
 refusal names the input (protocol, snapshot, evidence record by position, time). A readable
 record that does not apply is set aside as `CanonGovernor` sets it aside; an unreadable record or
-a repeated id is refused. The time and the records are judged once each, in the request's order;
-only records Canon refuses together though each passes alone (two `case_outcome` records for one
-child) are judged again in order, each with those kept before it, so the earlier one is kept as by
-the governor (`crates/loom-governor/tests/case_composition.rs`). `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
+a repeated id is refused. The time and the records are judged once each, never by re-running Canon
+on prefixes, in the request's order: of the `case_outcome` records for one child Canon takes alone,
+the first is kept and later ones are set aside, as by the governor
+(`crates/loom-governor/tests/case_composition.rs`). `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
 `CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
 `CanonGovernor::decision_document(case, frontier)` returns the whole `canon-decision/1` document
 behind a frontier id the governor issued, as the generated JSON value `evaluate` returns in
