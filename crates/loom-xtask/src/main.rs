@@ -148,8 +148,8 @@ enum Command {
     },
     /// Rewrite `<root>/protocols/engineering/` and its `lock.json` from the
     /// `protocols/<name>/<major>.yaml` files of a tag in a local engineering-protocols checkout.
-    /// Reads Git objects only and never fetches: fetch the tag into the checkout first. A refusal
-    /// changes nothing under the root.
+    /// Reads Git objects only and never fetches: fetch the tag into the checkout first. Needs Git
+    /// 2.44.0 or newer. A refusal changes nothing under the root.
     ProtocolsVendor {
         /// A local Git checkout of engineering-protocols that holds the tag.
         #[arg(long)]

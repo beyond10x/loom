@@ -59,6 +59,7 @@ reads that tag's commit from Git objects only, never fetches, writes every
 `protocols/<name>/<major>.yaml` byte for byte, removes a file the tag no longer holds and writes
 `lock.json` through `loom_protocols::lock` with its constant repository, validating everything
 before its first write (`crates/loom-xtask/tests/protocols_vendor.rs`); then run `task check`.
+The command needs Git 2.44.0 or newer and refuses an older one before it reads anything.
 Intake routing, artifact declarations and
 host admission must use the same immutable catalog; a remote package never installs executable
 code or authority. Protocol installation is explicit and runs read verified snapshots offline.

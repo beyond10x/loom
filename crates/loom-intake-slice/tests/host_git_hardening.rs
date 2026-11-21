@@ -524,12 +524,21 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
     for setting in [
         "\"protocol.ext.allow=never\"",
         "\"protocol.allow=never\"",
-        "\"GIT_NO_LAZY_FETCH\"",
         "\"--no-replace-objects\"",
-        "\"GIT_CONFIG_GLOBAL\"",
     ] {
         assert!(
             vendor.contains(setting),
+            "protocols vendor helper omitted {setting}"
+        );
+    }
+    // Where the value matters, the variable is matched with its value, whitespace aside.
+    let squeezed_vendor: String = vendor.chars().filter(|c| !c.is_whitespace()).collect();
+    for setting in [
+        ".env(\"GIT_NO_LAZY_FETCH\",\"1\")",
+        ".env(\"GIT_CONFIG_GLOBAL\",\"/dev/null\")",
+    ] {
+        assert!(
+            squeezed_vendor.contains(setting),
             "protocols vendor helper omitted {setting}"
         );
     }

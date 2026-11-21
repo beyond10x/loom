@@ -536,6 +536,19 @@ fn at_t3_bytes_that_are_not_utf8_are_written_unchanged_and_locked_by_their_sha25
 }
 
 #[test]
+fn a_tag_that_names_a_tree_is_refused_as_naming_no_commit_not_as_missing() {
+    let checkout = checkout();
+    let tree = git(checkout.path(), &["rev-parse", "t1^{tree}"]);
+    git(checkout.path(), &["tag", "tree", &tree]);
+    assert_refused_changing_nothing(&checkout, "tag tree: names no commit", |root| {
+        vendor(root, checkout.path(), "tree")
+    });
+    let out = vendor(Dir::new("root").0.as_path(), checkout.path(), "tree");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("not in the checkout"), "{stderr}");
+}
+
+#[test]
 fn a_tag_the_checkout_does_not_hold_is_refused_naming_it_and_is_not_fetched() {
     let checkout = checkout();
     // A local remote that does hold the tag: a command that fetched would find it there.

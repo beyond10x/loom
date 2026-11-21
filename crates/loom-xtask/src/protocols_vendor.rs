@@ -170,8 +170,12 @@ fn commit(checkout: &Path, tag: &str, tag_ref: &str) -> Result<String, String> {
     let object =
         git(checkout, &["show-ref", "--verify", "--hash", tag_ref]).map_err(|_| missing())?;
     let reference = format!("{}^{{commit}}", String::from_utf8_lossy(&object).trim());
-    let out =
-        git(checkout, &["rev-parse", "--verify", "--quiet", &reference]).map_err(|_| missing())?;
+    let out = git(checkout, &["rev-parse", "--verify", "--quiet", &reference]).map_err(|_| {
+        format!(
+            "tag {tag}: names no commit; it is in the checkout {} but points at a tree or a blob",
+            checkout.display()
+        )
+    })?;
     let commit = String::from_utf8_lossy(&out).trim().to_owned();
     if commit.len() != 40
         || !commit
@@ -292,7 +296,10 @@ fn write(target: &Path, files: &[(String, Vec<u8>)], lock: &[u8]) -> Result<(), 
 /// fetch: `GIT_NO_LAZY_FETCH` stops a lazy fetch (a Git older than 2.44.0, which ignores it, is
 /// refused before the first other call), `protocol.allow=never` is the default for every transport
 /// the checkout's configuration does not name, and `protocol.ext.allow=never` overrides the
-/// checkout's own setting for `ext`, the transport that starts a program.
+/// checkout's own setting for `ext`. `ext` is not the only transport that starts a program: `file`
+/// starts `remote.<name>.uploadpack` and `ssh` starts `core.sshCommand`, and a checkout's own
+/// configuration may allow either; for those, `GIT_NO_LAZY_FETCH` with the Git 2.44.0 gate is the
+/// only guard.
 fn git(checkout: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let mut command = Command::new("git");
     for (key, _) in std::env::vars_os() {
