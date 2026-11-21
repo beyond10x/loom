@@ -1278,7 +1278,12 @@ entities:
   # decision request and no action request, so `action_request_id`, `expected_case_revision`,
   # `action` and `arguments` are absent on it and present on every other. A take and a release of
   # it name no action request, and the `other-request` guard reads an absent input as matching an
-  # absent held member.
+  # absent held member. They name its decision request instead (`decision_request_id`): one that
+  # names another, or none, is refused (`other-decision`, naming both) and kept, so a resume that
+  # read the hold for one decision never takes or releases a later hold for another; a take or a
+  # release naming a decision request on a Suspension held for an action request is refused the
+  # same way. ess/22 refuses a guard that reads `reason`'s `Decision` payload (`unobservable_fact`),
+  # so `other-decision` is decided by the suspension port, in the same step as the change.
   - name: commission.responsibility.Suspension
     identity:
       name: suspension
@@ -1545,6 +1550,18 @@ errors:
       - name: action_request_id
         type: Optional<commission.responsibility.ActionRequestId>
 
+  # story:decision-suspension-reason: a take or a release names the decision request a Suspension
+  # held for a decision holds, and the Suspension holds another (or none, being held for an
+  # action request), or names none while it holds one; nothing was changed. It names both.
+  - name: commission.responsibility.SuspensionDecisionMismatch
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+      - name: held_decision_request_id
+        type: Optional<String>
+      - name: decision_request_id
+        type: Optional<String>
+
   # story:handoff-holds-no-suspension: the host already settled the request the Suspension would
   # hold; nothing was stored. It names the Suspension, the request and the host's reason.
   # story:decision-suspension-reason: the request when the hold names one.
@@ -1741,13 +1758,16 @@ commands:
   # and kept as it is. A Suspension already `Resuming` is refused, naming its request: that request
   # may have been performed, and is never performed again from it.
   # story:decision-suspension-reason: a resume of a Decision Suspension names no request; an
-  # absent input matches an absent held member.
+  # absent input matches an absent held member. It names the decision request instead, and the
+  # take is refused `other-decision` unless that is the one the Suspension holds.
   - name: commission.responsibility.TakeSuspension
     input:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: action_request_id
         type: Optional<commission.responsibility.ActionRequestId>
+      - name: decision_request_id
+        type: Optional<String>
     outcomes:
       - name: other-request
         when_subject:
@@ -1778,6 +1798,9 @@ commands:
         payload:
           commission.responsibility.SuspensionStateConflict:
             action_request_id: {subject: action_request_id}
+      - name: other-decision
+        external: the held Suspension's decision request is not the one the input names
+        error: commission.responsibility.SuspensionDecisionMismatch
       - name: storage-failed
         external: the suspension port cannot record the take
         error: commission.responsibility.SuspensionStorageFailed
@@ -1789,13 +1812,15 @@ commands:
   # case moved off the request's revision before invoking it releases it the same way, since the
   # request bound to that revision can never be performed, and performs nothing.
   # story:decision-suspension-reason: a release of a Decision Suspension names no request, as its
-  # take did.
+  # take did, and names its decision request, refused `other-decision` as the take is.
   - name: commission.responsibility.ReleaseSuspension
     input:
       - name: suspension
         type: commission.responsibility.SuspensionKey
       - name: action_request_id
         type: Optional<commission.responsibility.ActionRequestId>
+      - name: decision_request_id
+        type: Optional<String>
     outcomes:
       - name: other-request
         when_subject:
@@ -1826,6 +1851,9 @@ commands:
         payload:
           commission.responsibility.SuspensionNotFound:
             suspension: input.suspension
+      - name: other-decision
+        external: the held Suspension's decision request is not the one the input names
+        error: commission.responsibility.SuspensionDecisionMismatch
       - name: storage-failed
         external: the suspension port cannot remove the Suspension
         error: commission.responsibility.SuspensionStorageFailed
