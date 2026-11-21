@@ -6,7 +6,8 @@
 //! and [`FileWorkflowRunStore`](crate::FileWorkflowRunStore) all keep their files through a
 //! [`LockedDir`], so any of them opened over one directory, in one process or in two, take the same
 //! lock and never interleave a read and a write; their file names never meet (`case-…`,
-//! `observations.json`, `suspension-…`, `workflow-run-…`). Temporary files are named
+//! `observations.json`, `suspension-…`, `workflow-run-…`, and the run logs `b10x-loom-runlog`
+//! keeps through this type, `runlog-…`). Temporary files are named
 //! `.tmp-<process id>-<counter>` from one counter for the whole process, and a store that opens
 //! removes the ones a dead process left, holding the lock, so it never removes one a live write
 //! is using.
@@ -42,14 +43,14 @@ pub(crate) fn failed(path: &Path, problem: impl std::fmt::Display) -> FileStoreE
 
 /// A directory a store keeps its files in, with its lock.
 #[derive(Debug)]
-pub(crate) struct LockedDir {
+pub struct LockedDir {
     dir: PathBuf,
 }
 
 impl LockedDir {
     /// The directory `dir`, created with its lock file when it does not exist yet, without the
     /// temporary files an earlier life left behind, and proven to take a write.
-    pub(crate) fn open(dir: PathBuf) -> Result<Self, FileStoreError> {
+    pub fn open(dir: PathBuf) -> Result<Self, FileStoreError> {
         fs::create_dir_all(&dir).map_err(|error| failed(&dir, error))?;
         let lock = dir.join(LOCK);
         OpenOptions::new()
@@ -81,7 +82,7 @@ impl LockedDir {
     }
 
     /// The directory.
-    pub(crate) fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         &self.dir
     }
 
@@ -102,7 +103,7 @@ impl LockedDir {
 
     /// Runs `operation` holding the directory's lock. The outer error is the lock's: `operation`
     /// did not run.
-    pub(crate) fn locked<T>(&self, operation: impl FnOnce() -> T) -> Result<T, FileStoreError> {
+    pub fn locked<T>(&self, operation: impl FnOnce() -> T) -> Result<T, FileStoreError> {
         let path = self.dir.join(LOCK);
         let lock = OpenOptions::new()
             .write(true)
@@ -137,7 +138,7 @@ impl LockedDir {
     }
 
     /// A new temporary file in the directory, created for writing. Only called holding the lock.
-    fn temporary(&self) -> Result<(PathBuf, File), FileStoreError> {
+    pub fn temporary(&self) -> Result<(PathBuf, File), FileStoreError> {
         // A name in use, left by an earlier life with the same process id, is skipped for the
         // next one rather than reported: it says nothing about this write.
         let mut attempts = 0;
