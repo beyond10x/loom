@@ -49,9 +49,11 @@ fn render(arguments: &RenderArgs) -> ExitCode {
 }
 
 fn run(arguments: &RunArgs) -> ExitCode {
-    // kube builds its TLS client on rustls' process-level provider. This binary's graph enables
-    // both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`), so rustls cannot choose
-    // one and panics at the first client: install `ring`, the provider kube's `rustls-tls` names.
+    // kube builds its TLS client on rustls' process-level provider. A graph enabling both `ring`
+    // (kube, reqwest) and `aws-lc-rs` leaves rustls unable to choose, and it panics at the first
+    // client; `b10x-substrate-host` brought `aws-lc-rs` until Loom took it without its
+    // `kubernetes` feature (Substrate 0.21.0), and any dependency may bring it back: install
+    // `ring`, the provider kube's `rustls-tls` names.
     // An `Err` means a provider is installed already, which is all the client needs.
     let _ = rustls::crypto::ring::default_provider().install_default();
     let config = match Config::load(&arguments.config) {

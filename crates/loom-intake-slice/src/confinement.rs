@@ -848,7 +848,8 @@ fn settle(
         backend: Backend::Substrate,
         profile_digest: digest,
         capability_snapshot: record.capability_snapshot.clone(),
-        cgroup: record.cgroup.clone(),
+        // `check_record` refused a record naming no cgroup or an empty one, so this is never empty.
+        cgroup: record.cgroup.clone().unwrap_or_default(),
         filesystem: enum_name(&record.filesystem),
         network: Some(applied_apertures(&record.network)),
         profile: enum_name(&record.profile),
@@ -1025,8 +1026,8 @@ impl TestRunner for SubstrateRunner {
 /// trusts there
 /// ([`ChildCommand::with_ca_bundle`]); without one it cannot verify the host's certificate.
 ///
-/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/proc`, `/dev`, a private `/tmp` and its workspace,
-/// a child sees only the host directories and files the host names, read-only, each at the mount
+/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/etc/alternatives` (where the host has it),
+/// `/proc`, `/dev`, a private `/tmp` and its workspace, a child sees only the host directories and files the host names, read-only, each at the mount
 /// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
 /// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
 /// where a host path is inside. The child starts in `/workspace` unless the host names another
@@ -1118,9 +1119,9 @@ impl ChildCommand {
     /// - a host path that does not exist, is no directory, or is reached through a symbolic link
     ///   in any component;
     /// - a mount on, under or containing one Substrate owns: `/`, `/usr`, `/bin`, `/lib`, `/lib64`,
-    ///   `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts` and
-    ///   `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace or the
-    ///   certificate bundle a child trusts;
+    ///   `/etc/alternatives`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`,
+    ///   `/etc/hosts` and `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace,
+    ///   the system view or the certificate bundle a child trusts;
     /// - a mount equal to, under or containing another root's or file's mount (`/opt/a` and
     ///   `/opt/ab` do not overlap);
     /// - more than [`ChildCommand::MAX_READ_ONLY_ROOTS`] roots;
@@ -1534,6 +1535,7 @@ impl ChildCommand {
                 },
                 profile: self.profile,
                 required: true,
+                requires: None,
             },
             limits: limits(self.timeout),
             wait: true,
@@ -2198,10 +2200,17 @@ impl Mount<'_> {
     }
 }
 
+/// The one part of `/etc` Substrate's Linux base view binds into every confined run, read-only and
+/// only where the host has it (Substrate 0.21.0, `crates/substrate-host/src/process.rs`, ADR 0049
+/// decision 1). Substrate exports no constant for it.
+const BASE_VIEW_ALTERNATIVES: &str = "/etc/alternatives";
+
 /// The mounts Substrate owns, which no read-only root or file may equal, lie under or contain:
-/// Substrate's reserved mounts, the execution capsule, the scratch directory, the hosts file and
-/// the certificate bundle path of an egress aperture.
-const OWNED_MOUNTS: [&str; 13] = [
+/// Substrate's reserved mounts, `/etc/alternatives` (bound read-only from the host where it has
+/// one since Substrate 0.21.0, before the roots and files, which would cover it; not in
+/// Substrate's `RESERVED_MOUNTS`), the execution capsule, the scratch directory, the hosts file
+/// and the certificate bundle path of an egress aperture.
+const OWNED_MOUNTS: [&str; 14] = [
     RESERVED_MOUNTS[0],
     RESERVED_MOUNTS[1],
     RESERVED_MOUNTS[2],
@@ -2211,6 +2220,7 @@ const OWNED_MOUNTS: [&str; 13] = [
     RESERVED_MOUNTS[6],
     RESERVED_MOUNTS[7],
     RESERVED_MOUNTS[8],
+    BASE_VIEW_ALTERNATIVES,
     EXECUTION_CAPSULE_MOUNT,
     EXEC_SCRATCH_MOUNT,
     APERTURE_HOSTS_PATH,
@@ -2780,9 +2790,11 @@ fn check_workdir_served(
 /// Accept Substrate's record of what it applied only when it is the confinement `input` required:
 /// its workspace access (exactly the writable paths requested, so a record reporting a wider or
 /// another writable set is refused), profile, read-only roots, read-only files and capability
-/// snapshot, no secret slot, a cgroup, and exactly the requested network ([`network_applied`]),
-/// the apertures `input` asked for by name being exactly `egress`, in order; exactly the working
-/// directory requested, or none when none was ([`ChildCommand::with_workdir`]); no writable root
+/// snapshot, no secret slot, a cgroup (named and not empty), and exactly the requested network
+/// ([`network_applied`]), the apertures `input` asked for by name being exactly `egress`, in
+/// order; exactly the working directory requested, or none when none was
+/// ([`ChildCommand::with_workdir`]); no confinement requirement (`requires`, Substrate 0.18.0),
+/// which Loom never sends, in the request or echoed in the record; no writable root
 /// or execution capsule, which Loom never requests, and so the filesystem Substrate applies without a capsule. A test's launch and a child's are held to the
 /// same record. The record is taken apart without `..`, so a member a later Substrate adds does
 /// not compile until it is judged here.
@@ -2804,6 +2816,7 @@ fn check_record(
         secret_slots,
         workdir,
         writable_roots,
+        requires,
     } = record;
     if *workspace_access != input.workspace_access
         || !network_applied(input.sandbox.network, egress, network)
@@ -2819,7 +2832,9 @@ fn check_record(
         || *filesystem != substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly
         || !secret_slots.is_empty()
         || *capability_snapshot != input.sandbox.capability_snapshot
-        || cgroup.is_empty()
+        || cgroup.as_deref().is_none_or(str::is_empty)
+        || input.sandbox.requires.is_some()
+        || requires.is_some()
     {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
@@ -3248,6 +3263,7 @@ impl RustClosure {
                 apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
+                requires: None,
             },
             limits: limits(command.timeout()),
             wait: true,
@@ -3537,12 +3553,18 @@ mod tests {
             "exec.read-only-files": {"max_files": 16},
         });
         let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
+        // story:substrate-0-21-pin: since Substrate 0.15.0 the `linux` adapter also proves
+        // `stdin_pipe` and `output_live` whenever its floor (argv-only exec and namespaces) holds,
+        // as it does here, and `FACT_ORDER` places them last; the three facts of 0.14.0 keep their
+        // place.
         assert_eq!(
             facts,
             [
                 "whole_tree_kill",
                 "ipc_socket_allowlist",
-                "ipc_signals_contained"
+                "ipc_signals_contained",
+                "stdin_pipe",
+                "output_live"
             ],
             "the proved facts, exactly, in FACT_ORDER's spelling"
         );
@@ -3934,6 +3956,75 @@ mod tests {
         }
     }
 
+    /// Substrate 0.18.0 makes the record's `cgroup` optional (present exactly when the adapter
+    /// applied one) and echoes a start's `requires`. Every Loom launch runs in a cgroup and sends
+    /// no `requires`, so a record naming no cgroup is refused as one naming an empty cgroup is,
+    /// with the same refusal, and a record echoing requirements Loom did not send is refused, for a
+    /// child run to its end and a live child alike (story:substrate-0-21-pin).
+    #[test]
+    fn a_record_naming_no_cgroup_or_unrequested_requirements_is_refused() {
+        let child = ChildCommand::new("true", [] as [&str; 0], "/work/space");
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        let requires = substrate_wire::ConfinementRequires {
+            families: Some(vec![substrate_wire::ConfinementFamily::ProcessRun]),
+            facts: Some(vec![substrate_wire::ConfinementProperty::WholeTreeKill]),
+        };
+        for input in [&run, &live] {
+            assert_eq!(input.sandbox.requires, None, "Loom sends no requirements");
+            let exact = record_for(input, AppliedNetwork::None);
+            check_record(input, &[], &exact).unwrap();
+            let refusal = |record: &substrate_wire::AppliedConfinement| {
+                let error = check_record(input, &[], record).unwrap_err();
+                (error.reason, error.detail)
+            };
+            let empty = refusal(&substrate_wire::AppliedConfinement {
+                cgroup: Some(String::new()),
+                ..exact.clone()
+            });
+            assert_eq!(empty.0, ConfinementRefusal::CapabilityUnserved);
+            assert!(
+                empty.1.contains(
+                    "Substrate's applied confinement does not match the required profile"
+                ),
+                "{empty:?}"
+            );
+            let absent = refusal(&substrate_wire::AppliedConfinement {
+                cgroup: None,
+                ..exact.clone()
+            });
+            assert_eq!(absent, empty, "no cgroup is refused as an empty one is");
+            let echoed = refusal(&substrate_wire::AppliedConfinement {
+                requires: Some(requires.clone()),
+                ..exact.clone()
+            });
+            assert_eq!(
+                echoed, empty,
+                "unrequested requirements are not the launch requested"
+            );
+            let mut asked = input.clone();
+            asked.sandbox.requires = Some(requires.clone());
+            let record = substrate_wire::AppliedConfinement {
+                requires: Some(requires.clone()),
+                ..exact.clone()
+            };
+            assert!(
+                check_record(&asked, &[], &record).is_err(),
+                "a request carrying requirements is not one Loom makes"
+            );
+            // The request alone: a record echoing nothing is refused for the request, not for
+            // the record.
+            let unechoed = check_record(&asked, &[], &exact).expect_err(
+                "a request carrying requirements is refused with no echo in the record",
+            );
+            assert_eq!(
+                (unechoed.reason, unechoed.detail),
+                empty,
+                "a request carrying requirements is refused as a record mismatch is"
+            );
+        }
+    }
+
     #[test]
     fn a_child_request_is_exactly_what_the_host_named_and_requires_substrate() {
         let environment = ExecEnvironment {
@@ -3956,6 +4047,7 @@ mod tests {
                 apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
+                requires: None,
             }
         );
         assert_eq!(
@@ -4201,7 +4293,7 @@ mod tests {
     ) -> substrate_wire::AppliedConfinement {
         substrate_wire::AppliedConfinement {
             capability_snapshot: input.sandbox.capability_snapshot.clone(),
-            cgroup: "substrate-ex_loom_1_0".to_owned(),
+            cgroup: Some("substrate-ex_loom_1_0".to_owned()),
             filesystem: substrate_wire::AppliedFilesystem::WorkspaceReadWriteSystemReadOnly,
             network,
             profile: input.sandbox.profile,
@@ -4212,6 +4304,7 @@ mod tests {
             secret_slots: Vec::new(),
             workdir: None,
             writable_roots: Vec::new(),
+            requires: None,
         }
     }
 
@@ -4864,6 +4957,7 @@ mod tests {
                 apertures: Vec::new(),
                 profile: SandboxProfile::Workspace,
                 required: true,
+                requires: None,
             }
         );
         let profile = requested_profile(&input, &[model()]);

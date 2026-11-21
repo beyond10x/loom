@@ -1,8 +1,9 @@
 //! `b10x-loom-operator run`, started as a process, builds its cluster client over TLS and reaches
-//! the API server instead of panicking. The binary's graph enables both rustls providers (`ring`
-//! through kube and reqwest, `aws-lc-rs` through `b10x-substrate-host`), so rustls cannot pick a
-//! process default and the binary installs one itself. Loom 0.50.1's image exited 101 at start
-//! with "Could not automatically determine the process-level CryptoProvider".
+//! the API server instead of panicking. With both rustls providers in its graph (`ring` through
+//! kube and reqwest, `aws-lc-rs` through `b10x-substrate-host` until Loom took Substrate 0.21.0
+//! without its `kubernetes` feature) rustls cannot pick a process default, so the binary installs
+//! one itself. Loom 0.50.1's image exited 101 at start with "Could not automatically determine
+//! the process-level CryptoProvider".
 //!
 //! The API server is a local listener: the test passes once the process opens a connection to
 //! it, which it does only after the TLS client was built. Nothing leaves the host.

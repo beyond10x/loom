@@ -85,19 +85,27 @@ fn real_confinement_rust_system_tools_and_cleanup() {
             Some("linux"),
             "story:substrate-0-12-pin: a Substrate launch names its adapter"
         );
+        // story:substrate-0-21-pin: since Substrate 0.15.0 the `linux` adapter also proves
+        // `stdin_pipe` and `output_live` wherever it serves a launch at all (its floor), so a
+        // confined launch records five facts, the three of 0.14.0 first.
         assert_eq!(
             result.applied.facts.as_deref(),
             Some(
                 &[
                     "whole_tree_kill".to_owned(),
                     "ipc_socket_allowlist".to_owned(),
-                    "ipc_signals_contained".to_owned()
+                    "ipc_signals_contained".to_owned(),
+                    "stdin_pipe".to_owned(),
+                    "output_live".to_owned()
                 ][..]
             ),
             "story:substrate-0-12-pin: a Substrate launch records exactly the facts it proved"
         );
         let record = result.driver_record.as_ref().expect("actual driver record");
-        assert_eq!(record.cgroup, result.applied.cgroup);
+        assert_eq!(
+            record.cgroup.as_deref(),
+            Some(result.applied.cgroup.as_str())
+        );
         assert!(
             !record
                 .read_only_roots

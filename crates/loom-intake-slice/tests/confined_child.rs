@@ -87,7 +87,10 @@ fn a_named_child_runs_confined_and_reports_what_was_applied() {
             let record = result.driver_record.as_ref().expect("the driver's record");
             assert_eq!(record.profile, SandboxProfile::Workspace);
             assert_eq!(record.network, substrate_wire::AppliedNetwork::None);
-            assert_eq!(record.cgroup, result.applied.cgroup);
+            assert_eq!(
+                record.cgroup.as_deref(),
+                Some(result.applied.cgroup.as_str())
+            );
             assert_eq!(
                 record.capability_snapshot,
                 result.applied.capability_snapshot
@@ -740,7 +743,10 @@ fn the_applied_record_names_the_egress() {
             assert_eq!(applied.destination, address.to_string());
             assert_eq!(applied.mechanism, ApertureMechanism::LoopbackForwarder);
             assert_eq!(applied.max_bytes, None);
-            assert_eq!(record.cgroup, result.applied.cgroup);
+            assert_eq!(
+                record.cgroup.as_deref(),
+                Some(result.applied.cgroup.as_str())
+            );
 
             let plain = runner
                 .run_child(&ChildCommand::new("true", [] as [&str; 0], workspace))
@@ -1320,7 +1326,10 @@ fn a_live_child_echoes_what_it_is_written() {
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert_eq!(result.applied.profile_digest.len(), 64);
             assert_eq!(result.driver_record.network, AppliedNetwork::None);
-            assert_eq!(result.driver_record.cgroup, result.applied.cgroup);
+            assert_eq!(
+                result.driver_record.cgroup.as_deref(),
+                Some(result.applied.cgroup.as_str())
+            );
         },
     );
 }
@@ -1726,10 +1735,12 @@ fn a_read_only_file_is_mounted_where_named() {
 }
 
 /// A mount on, under or containing a mount Substrate owns (`/`, `/usr`, `/bin`, `/lib`,
-/// `/lib64`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts`,
-/// `/etc/ssl/certs/ca-certificates.crt`) is refused `ScopeInvalid` before anything starts, naming
-/// the mount, for a root and a file, through `run_child` and `spawn_child`; a mount beside them
-/// gets past every check, to the missing cgroup.
+/// `/lib64`, `/etc/alternatives`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`,
+/// `/etc/hosts`, `/etc/ssl/certs/ca-certificates.crt`) is refused `ScopeInvalid` before anything
+/// starts, naming the mount, for a root and a file, through `run_child` and `spawn_child`; a mount
+/// beside them gets past every check, to the missing cgroup. Substrate 0.21.0 binds
+/// `/etc/alternatives` read-only where the host has it, before the roots and files, so a mount
+/// there would cover it (story:substrate-0-21-pin).
 #[test]
 fn a_mount_under_a_reserved_path_is_refused_before_launch() {
     let (_held, base) = host_directory();
@@ -1759,6 +1770,8 @@ fn a_mount_under_a_reserved_path_is_refused_before_launch() {
         "/etc/hosts",
         "/etc/ssl",
         APERTURE_CA_BUNDLE_PATH,
+        "/etc/alternatives",
+        "/etc/alternatives/cc",
     ] {
         assert_refused(
             &runner,
