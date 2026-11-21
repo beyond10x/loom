@@ -26,6 +26,9 @@ pub use intake_model::confinement::{
     BaselineVariable, ChildAperture, ChildEnvironment, ChildNetwork, ChildProfile, ConfinementSpec,
     WritableRoot,
 };
+/// A host's confinement, named once as engine configuration, and the adapter it names: the one
+/// value [`EngineRunner::open`] builds the runner from.
+pub use intake_model::confinement::{ConfinementAdapter, EngineConfinement};
 use sha2::{Digest as _, Sha256};
 /// Substrate's own declaration of the egress aperture a [`ChildCommand`] may reach: its name, the
 /// host and port the host names, the address that host was resolved to and an optional byte
@@ -53,6 +56,7 @@ use substrate_wire::{
 pub use substrate_wire::{BaselineEnvironment, ExecEnvironment, NetworkMode, SandboxProfile};
 
 mod child;
+mod engine;
 #[cfg(test)]
 mod security_w20261023w1_u3;
 #[cfg(test)]
@@ -61,6 +65,7 @@ mod spec;
 #[cfg(test)]
 mod workdir;
 pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
+pub use engine::EngineRunner;
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
@@ -73,6 +78,91 @@ const CACHE_DIRS: [&str; 3] = ["registry", "git/db", "git/checkouts"];
 pub trait TestRunner: Send + Sync {
     fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError>;
     fn backend(&self) -> Backend;
+    /// How a run names this runner's confinement on its `confinement:` line: by default the
+    /// backend's name (`substrate`, `none`); [`EngineRunner`] under `local` answers
+    /// `local (<reason>)`.
+    fn label(&self) -> String {
+        crate::executor::backend_name(self.backend()).to_owned()
+    }
+    /// The operator's reason when this runner launches through Substrate's `local` adapter, and
+    /// `None` for any other runner: a run that answers `Some` is not kept for resume.
+    ///
+    /// A runner that launches through another runner answers what the inner runner answers. A
+    /// runner that answers `None` for a `local` launch has its run kept for resume, and a resume
+    /// reopens it under another adapter with no reason.
+    fn local_reason(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// How a `local` run names its confinement wherever it is printed or recorded:
+/// `local (<reason>)`, the reason passed through [`escape_reason`].
+pub fn local_label(reason: &str) -> String {
+    format!("local ({})", escape_reason(reason))
+}
+
+/// How a run names a `local` record's reason, already passed through [`escape_reason`] when
+/// [`EngineRunner`] recorded it: every character that breaks or hides a line is escaped once more
+/// (a no-op on such a record), the backslash left as it is so the record reads as recorded.
+pub(crate) fn recorded_label(recorded: &str) -> String {
+    format!("local ({})", escape(recorded, false))
+}
+
+/// The format characters, Unicode category Cf, as inclusive ranges, and the whole tag block
+/// (`U+E0000` to `U+E007F`): each renders as nothing or reorders the text around it.
+const FORMAT_CHARACTERS: [(char, char); 22] = [
+    ('\u{00AD}', '\u{00AD}'),
+    ('\u{0600}', '\u{0605}'),
+    ('\u{061C}', '\u{061C}'),
+    ('\u{06DD}', '\u{06DD}'),
+    ('\u{070F}', '\u{070F}'),
+    ('\u{0890}', '\u{0891}'),
+    ('\u{08E2}', '\u{08E2}'),
+    ('\u{180E}', '\u{180E}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{2064}'),
+    ('\u{2066}', '\u{206F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFF9}', '\u{FFFB}'),
+    ('\u{110BD}', '\u{110BD}'),
+    ('\u{110CD}', '\u{110CD}'),
+    ('\u{13430}', '\u{1343F}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0000}', '\u{E0000}'),
+    ('\u{E0001}', '\u{E0001}'),
+    ('\u{E0020}', '\u{E007F}'),
+];
+
+/// `reason` with every character that can break, hide or reorder a line escaped as `\u{…}`:
+/// control characters (C0, DEL and C1, `U+0085` among them, and the tab), the line and paragraph
+/// separators (`U+2028`, `U+2029`, the categories Zl and Zp), and every format character
+/// (`FORMAT_CHARACTERS`: category Cf, the bidirectional controls and the tag block among them).
+/// The backslash itself is written `\\`, so two different reasons never escape to the same text.
+/// A letter, a digit, a space and punctuation of any script pass unchanged.
+pub fn escape_reason(reason: &str) -> String {
+    escape(reason, true)
+}
+
+/// [`escape_reason`], the backslash escaped when `backslash` is set.
+fn escape(text: &str, backslash: bool) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        let hides = character.is_control()
+            || matches!(character, '\u{2028}' | '\u{2029}')
+            || FORMAT_CHARACTERS
+                .iter()
+                .any(|&(first, last)| (first..=last).contains(&character));
+        if hides {
+            shown.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+        } else if backslash && character == '\\' {
+            shown.push_str("\\\\");
+        } else {
+            shown.push(character);
+        }
+    }
+    shown
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -864,6 +954,8 @@ fn settle(
         // Named by the driver that settled the launch (`OpenDriver::adapted`); absent until then.
         adapter: None,
         facts: None,
+        // Only a `local` run carries the operator's reason; a `linux` one has none.
+        local_reason: None,
     };
     let described = format!(
         "state {}, refusal {}, output complete {}",
@@ -977,7 +1069,7 @@ fn live_result(launched: Launched, signalled: bool) -> Result<ChildResult, Confi
         exit,
         output: execution.child_output,
         applied: execution.applied,
-        driver_record,
+        driver_record: Some(driver_record),
     })
 }
 
@@ -4128,6 +4220,7 @@ mod tests {
             workdir: None,
             adapter: None,
             facts: None,
+            local_reason: None,
         }
     }
 
@@ -4464,7 +4557,7 @@ mod tests {
         assert_eq!(result.applied.profile_digest, "digest");
         assert_eq!(
             result.driver_record,
-            record_for(input, AppliedNetwork::None)
+            Some(record_for(input, AppliedNetwork::None))
         );
 
         let error = settle(

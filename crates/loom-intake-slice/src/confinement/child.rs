@@ -1,5 +1,7 @@
-//! A live confined child: one Substrate raw-pipe session the host writes, reads, signals and
-//! waits for while it runs ([`SubstrateRunner::spawn_child`](super::SubstrateRunner::spawn_child)).
+//! A live child the host writes, reads, signals and waits for while it runs: under `linux` one
+//! Substrate raw-pipe session ([`SubstrateRunner::spawn_child`](super::SubstrateRunner::spawn_child)),
+//! under `local` one run of Substrate's `local` adapter
+//! ([`EngineRunner::spawn_child`](super::EngineRunner::spawn_child)).
 
 use std::fmt;
 use std::sync::Arc;
@@ -10,14 +12,15 @@ use substrate_host::{
 };
 use substrate_wire::{ExecSignalInput, ExecStartInput, PipeSessionStartInput, Signal};
 
+use super::engine::LocalChild;
 use super::{
     AppliedConfinement, ChildExit, ChildOutput, ChildStream, ConfinementError, ConfinementRefusal,
     Ending, FRAME_BYTES, OpenDriver, Prepared, READ_STEP, Running, dispatched, drain_deadline,
     is_terminal, live_result, observation_error, refuse, settle,
 };
 
-/// How long a child the host interrupts or terminates has to end before Substrate kills it.
-const SIGNAL_GRACE: Duration = Duration::from_secs(5);
+/// How long a child the host interrupts or terminates has to end before it is killed.
+pub(super) const SIGNAL_GRACE: Duration = Duration::from_secs(5);
 
 /// One frame of a live child's output: the bytes it wrote on one stream, as they arrived.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,13 +64,14 @@ impl ChildSignal {
 
 /// A live child's result ([`ConfinedChild::wait`]): how it ended, its two streams whole and apart
 /// as Substrate kept them (each up to its output limit, flagged cut past it), the confinement
-/// Substrate applied and the driver's own record of it, which was checked against the request.
+/// Substrate applied and, under `linux`, the driver's own record of it, which was checked against
+/// the request. A `local` child has no host-driver record: `driver_record` is `None` there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChildResult {
     pub exit: ChildExit,
     pub output: ChildOutput,
     pub applied: AppliedConfinement,
-    pub driver_record: substrate_wire::AppliedConfinement,
+    pub driver_record: Option<substrate_wire::AppliedConfinement>,
 }
 
 /// A live child's session failed one call: a read that waited its whole timeout with no frame,
@@ -106,7 +110,10 @@ impl From<DriverError> for ChildError {
     }
 }
 
-/// A child running confined, live ([`SubstrateRunner::spawn_child`](super::SubstrateRunner::spawn_child)).
+/// A child running live ([`SubstrateRunner::spawn_child`](super::SubstrateRunner::spawn_child),
+/// [`EngineRunner::spawn_child`](super::EngineRunner::spawn_child)): confined under `linux`, a
+/// Substrate raw-pipe session on the host driver; unconfined, declared insecure, under `local`,
+/// a run of Substrate's `local` adapter.
 ///
 /// Its methods block on the runtime the child owns, which keeps Substrate's supervision of it
 /// (its output, its timeout) running between calls; call them outside an async runtime, as
@@ -114,8 +121,104 @@ impl From<DriverError> for ChildError {
 /// second is ended by Substrate, and its result is refused naming
 /// `session.output-backpressure`. Dropped before it ended, inside an async runtime or not, it is
 /// killed; either way its execution is released from the driver and it stops counting as a
-/// launch under its cgroup root.
+/// launch under its cgroup root. Under `local` Loom holds its timeout: at the deadline its whole
+/// process group is killed.
 pub struct ConfinedChild {
+    live: Live,
+}
+
+/// The route a live child runs on.
+enum Live {
+    Driver(Box<DriverChild>),
+    Local(LocalChild),
+}
+
+impl fmt::Debug for ConfinedChild {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.live {
+            Live::Driver(child) => child.fmt(f),
+            Live::Local(child) => child.fmt(f),
+        }
+    }
+}
+
+impl ConfinedChild {
+    /// Start `session` in `workspace` on `open`, the host-driver route.
+    pub(super) fn start(
+        open: Arc<OpenDriver>,
+        workspace: &str,
+        session: PipeSessionStartInput,
+        timeout: Duration,
+    ) -> Result<Self, ConfinementError> {
+        DriverChild::start(open, workspace, session, timeout).map(|child| Self {
+            live: Live::Driver(Box::new(child)),
+        })
+    }
+
+    /// A child the `local` adapter runs.
+    pub(super) fn local(child: LocalChild) -> Self {
+        Self {
+            live: Live::Local(child),
+        }
+    }
+
+    /// Write `bytes` to the child's standard input, in frames of at most 64 KiB; nothing for no
+    /// bytes. Past [`ChildCommand::MAX_INPUT_BYTES`](super::ChildCommand::MAX_INPUT_BYTES) in all
+    /// Substrate refuses it (`session.input-limit`), once closed `session.input-closed`, and a
+    /// child that no longer reads it `session.write-failed`.
+    pub fn write_stdin(&mut self, bytes: &[u8]) -> Result<(), ChildError> {
+        match &mut self.live {
+            Live::Driver(child) => child.write_stdin(bytes),
+            Live::Local(child) => child.write_stdin(bytes),
+        }
+    }
+
+    /// Close the child's standard input: it reads end of file once it read what was written.
+    pub fn close_stdin(&mut self) -> Result<(), ChildError> {
+        match &mut self.live {
+            Live::Driver(child) => child.close_stdin(),
+            Live::Local(child) => child.close_stdin(),
+        }
+    }
+
+    /// The next frame of the child's output, waiting at most `timeout` for one
+    /// ([`ChildError::ReadTimedOut`] when none came), or `None` once both its streams closed and
+    /// it ended. A zero timeout is refused.
+    pub fn read(&mut self, timeout: Duration) -> Result<Option<ChildFrame>, ChildError> {
+        match &mut self.live {
+            Live::Driver(child) => child.read(timeout),
+            Live::Local(child) => child.read(timeout),
+        }
+    }
+
+    /// Send `signal` to every process of the child, and return once it ended: an interrupt or a
+    /// termination it has not ended from 5 s later is followed by a kill. A child that already
+    /// ended is left as it is. Its output stops being delivered: frames already queued can still
+    /// be read, then `None`.
+    pub fn signal(&mut self, signal: ChildSignal) -> Result<(), ChildError> {
+        match &mut self.live {
+            Live::Driver(child) => child.signal(signal),
+            Live::Local(child) => child.signal(signal),
+        }
+    }
+
+    /// Close the child's standard input, read what is left of its output, and return its result
+    /// once it ended, checked as [`SubstrateRunner::run_child`](super::SubstrateRunner::run_child)
+    /// checks a child run to its end: refused when the confinement Substrate applied is not the
+    /// one requested, or when it reports no exit status unless the child's timeout ended it or a
+    /// signal the host sent did. A child still running past its timeout and a margin is killed
+    /// here, and so refused; under `local`, past its timeout it is killed with its process group
+    /// and its result is timed out.
+    pub fn wait(self) -> Result<ChildResult, ConfinementError> {
+        match self.live {
+            Live::Driver(child) => child.wait(),
+            Live::Local(child) => child.wait(),
+        }
+    }
+}
+
+/// A live child on the host-driver route: one Substrate raw-pipe session.
+pub(super) struct DriverChild {
     open: Arc<OpenDriver>,
     id: String,
     input: ExecStartInput,
@@ -128,7 +231,7 @@ pub struct ConfinedChild {
     _running: Running,
 }
 
-impl fmt::Debug for ConfinedChild {
+impl fmt::Debug for DriverChild {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConfinedChild")
             .field("id", &self.id)
@@ -138,10 +241,10 @@ impl fmt::Debug for ConfinedChild {
     }
 }
 
-impl ConfinedChild {
+impl DriverChild {
     /// Start `session` in `workspace` on `open`. The child is held before it starts, so a start
     /// whose outcome Substrate does not know is still killed and released when it is refused.
-    pub(super) fn start(
+    fn start(
         open: Arc<OpenDriver>,
         workspace: &str,
         session: PipeSessionStartInput,
@@ -192,7 +295,7 @@ impl ConfinedChild {
     /// bytes. Past [`ChildCommand::MAX_INPUT_BYTES`](super::ChildCommand::MAX_INPUT_BYTES) in all
     /// Substrate refuses it (`session.input-limit`), once closed `session.input-closed`, and a
     /// child that no longer reads it `session.write-failed`.
-    pub fn write_stdin(&mut self, bytes: &[u8]) -> Result<(), ChildError> {
+    fn write_stdin(&mut self, bytes: &[u8]) -> Result<(), ChildError> {
         for frame in bytes.chunks(FRAME_BYTES) {
             self.block_on(|driver, id| driver.write_pipe_session(id, frame))?;
         }
@@ -200,7 +303,7 @@ impl ConfinedChild {
     }
 
     /// Close the child's standard input: it reads end of file once it read what was written.
-    pub fn close_stdin(&mut self) -> Result<(), ChildError> {
+    fn close_stdin(&mut self) -> Result<(), ChildError> {
         self.block_on(|driver, id| driver.close_pipe_session_input(id))?;
         Ok(())
     }
@@ -208,7 +311,7 @@ impl ConfinedChild {
     /// The next frame of the child's output, waiting at most `timeout` for one
     /// ([`ChildError::ReadTimedOut`] when none came), or `None` once both its streams closed and
     /// it ended. A zero timeout is refused.
-    pub fn read(&mut self, timeout: Duration) -> Result<Option<ChildFrame>, ChildError> {
+    fn read(&mut self, timeout: Duration) -> Result<Option<ChildFrame>, ChildError> {
         let frame = self.block_on(|driver, id| driver.read_pipe_session(id, timeout))?;
         Ok(frame.map(ChildFrame::from))
     }
@@ -217,7 +320,7 @@ impl ConfinedChild {
     /// termination it has not ended from 5 s later is followed by a kill. A child that already
     /// ended is left as it is. Its output stops being delivered: frames already queued can still
     /// be read, then `None`.
-    pub fn signal(&mut self, signal: ChildSignal) -> Result<(), ChildError> {
+    fn signal(&mut self, signal: ChildSignal) -> Result<(), ChildError> {
         let sent = self.block_on(|driver, id| async move {
             if is_terminal(driver.observe_exec(id).await?.resource.state) {
                 return Ok(false);
@@ -238,7 +341,7 @@ impl ConfinedChild {
     /// one requested, or when it reports no exit status unless the child's timeout ended it or a
     /// signal the host sent did. A child still running past its timeout and a margin is killed
     /// here, and so refused.
-    pub fn wait(mut self) -> Result<ChildResult, ConfinementError> {
+    fn wait(mut self) -> Result<ChildResult, ConfinementError> {
         let deadline = self.deadline;
         let observed = self.block_on(|driver, id| async move {
             // Already closed, or a child that ended, is no reason not to wait for it.
@@ -294,7 +397,7 @@ async fn terminal(driver: &HostDriver, id: &str) -> Result<ExecObservation, Conf
     }
 }
 
-impl Drop for ConfinedChild {
+impl Drop for DriverChild {
     fn drop(&mut self) {
         // A drop runs wherever its host drops the child, inside an async runtime too, where no
         // runtime may be blocked on: the kill runs as a task on the child's own runtime, and this

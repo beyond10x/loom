@@ -779,9 +779,14 @@ pub struct RunArgs {
     /// Write payload-free measurements, including routing and startup failures.
     #[arg(long, value_name = "PATH")]
     pub context_report: Option<PathBuf>,
-    /// Confine tests with Substrate, or explicitly run with the operator's rights.
+    /// Confine tests with Substrate, or explicitly run with the operator's rights: `local`, with
+    /// --local-reason, through Substrate's local adapter (not with --state); `none` is deprecated.
     #[arg(long, value_enum, default_value_t = Confinement::Substrate)]
     pub confinement: Confinement,
+    /// The operator's reason for --confinement local, recorded on every launch and printed on the
+    /// run's confinement line; required with it, and not blank.
+    #[arg(long, value_name = "TEXT", required_if_eq("confinement", "local"))]
+    pub local_reason: Option<String>,
     /// An explicitly delegated cgroup v2 root for confined tests.
     #[arg(long, value_name = "DIR")]
     pub cgroup_root: Option<PathBuf>,
@@ -991,7 +996,11 @@ pub enum Output {
 pub enum Confinement {
     /// Require Substrate and refuse when unavailable.
     Substrate,
-    /// Run unconfined. This opt-out is reported in every test observation.
+    /// Run unconfined, declared insecure, through Substrate's local adapter with
+    /// --local-reason; adapter and reason are recorded on every launch.
+    Local,
+    /// Deprecated: use `local`. Run unconfined. This opt-out is reported in every test
+    /// observation.
     None,
 }
 

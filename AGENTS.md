@@ -2073,7 +2073,29 @@ missing `limits` is refused `CgroupUndelegated`, one missing `process_run`, `wai
 family (`a_driver_missing_a_family_is_refused_naming_it`). Every Substrate launch records
 `AppliedConfinement::adapter` (`linux`) and `facts` (the proved facts, in `FACT_ORDER`: on Substrate
 0.21.0 `whole_tree_kill`, `ipc_socket_allowlist`, `ipc_signals_contained`, `stdin_pipe`, `output_live`);
-an unconfined launch records neither.
+an `UnconfinedRunner` launch records neither.
+A host names its confinement once, as engine configuration (`intake.confinement.EngineConfinement`:
+the adapter `Linux` or `Local`, `local_reason`, `cgroup_root`), and `EngineRunner::open`
+(`confinement/engine.rs`) is the one constructor; a request never names an adapter
+(`story:confinement-opens-from-engine-config`). `linux` wraps `SubstrateRunner` on the host-driver
+route and opens nothing at build. `local` is the only call of `substrate_host::confinement::open`
+(`AdapterRequest::Local`; no `AdapterRequest::Linux` until
+`story:child-launches-through-confinement-adapters`): a blank reason is refused
+`LocalReasonMissing`, a host policy forbidding it (`local_permitted` unproved,
+`SUBSTRATE_CONFINEMENT_LOCAL`) `CapabilityUnserved`, both before any child; on a host that leaves
+`SUBSTRATE_CONFINEMENT_LOCAL` unset Substrate permits `local`, so the configuration and the reason
+are the whole opt-in. Every `local` launch runs
+unconfined, declared insecure, and records backend `None`, filesystem `unconfined`, no network, adapter
+`local`, its facts and `local_reason`, with no driver record; egress and its bundle are refused naming
+`network_egress`, read-only roots, files and host paths naming `filesystem_view`; the workspace is
+read-write, paths are host paths (`EngineRunner::child_path`, `/workspace/<dir>` sent as `<dir>`),
+and a test gets the host's `PATH`, `HOME`, `RUSTUP_HOME`, `CARGO_HOME` and the workspace's `target`.
+`local` serves no limits, so Loom holds each launch's timeout and kills the run's process group
+through the adapter; each launch starts, reads and waits on a runtime it owns (`local` spawns its
+drain and reaper on the caller's). `TestRunner::label` names the run's `confinement:` line
+(`local (<reason>)`). `b10x-loom run --confinement local` needs `--local-reason`, refuses `--state`
+(exit 2: a `local` run is not kept for resume), and `--confinement none` prints its deprecation.
+`crates/loom-intake-slice/tests/engine_confinement.rs` holds it.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
 under `target/`, and resource bounds. Mount dependency-cache subdirectories only; never Cargo's
 credential/config files or the operator's home. Dependencies are prefetched explicitly by the

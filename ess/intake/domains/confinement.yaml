@@ -9,7 +9,21 @@ types:
     variants: [Substrate, None]
   - name: intake.confinement.ConfinementRefusal
     kind: enum
-    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined]
+    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined, LocalReasonMissing]
+  # The Substrate confinement adapter a host names for Loom's launches (ADR 0109): `linux`, which
+  # confines, or `local`, which runs the child unconfined, declared insecure, as the operator.
+  - name: intake.confinement.ConfinementAdapter
+    kind: enum
+    variants: [Linux, Local]
+  # A host's confinement, named once as engine configuration and never by a request: the adapter,
+  # the operator's reason for `local` (required there, non-blank), and for `linux` the optional
+  # delegated cgroup root its launches run under.
+  - name: intake.confinement.EngineConfinement
+    kind: struct
+    fields:
+      - {name: adapter, type: intake.confinement.ConfinementAdapter}
+      - {name: local_reason, type: "Optional<String>"}
+      - {name: cgroup_root, type: "Optional<String>"}
   - name: intake.confinement.EnvironmentEntry
     kind: struct
     fields:
@@ -65,10 +79,14 @@ types:
       - {name: read_only_files, type: "List<intake.confinement.ReadOnlyFile>"}
       - {name: workdir, type: "Optional<String>"}
       # The Substrate confinement adapter the run went through (ADR 0109) and the facts it proved at
-      # open, in Substrate's FACT_ORDER spelling. Both are absent on an unconfined run, and on a
-      # record written before Loom read them.
+      # open, in Substrate's FACT_ORDER spelling. Both are present on a `local` run, which is
+      # unconfined, and absent on an `UnconfinedRunner` run and on a record written before Loom
+      # read them.
       - {name: adapter, type: "Optional<String>"}
       - {name: facts, type: "Optional<List<String>>"}
+      # The operator's reason for a `local` run, as its profile carried it; absent on every other
+      # run.
+      - {name: local_reason, type: "Optional<String>"}
   - name: intake.confinement.ChildStream
     kind: enum
     variants: [Stdout, Stderr]

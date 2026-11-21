@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "ad4851e311c6a7fdc68e8ce2cf55fc1cbff7b3735079a14e0262180a35e0aa16",
-    "contract_digest": "152401f55905b6a2328cf03fddfa2be27c5b0984c1c0792e8039492f21443eda"
+    "source_digest": "ec41dd24ef5ea19716f1e21bda53b331c389a76ec3b1f1ee86d40b4415617c8e",
+    "contract_digest": "269817d065f2141004a80e19c1657c4d5e71848ad914d839461bb42b30596827"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -110,6 +110,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "intake.confinement.ConfinementAdapter",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "intake.confinement.ConfinementProfile",
       "disposition": {
         "disposition": "generated"
@@ -125,6 +132,13 @@
     {
       "kind": "domain_type",
       "source": "intake.confinement.ConfinementSpec",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "intake.confinement.EngineConfinement",
       "disposition": {
         "disposition": "generated"
       }

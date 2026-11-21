@@ -30,7 +30,7 @@ use crate::case;
 use crate::clock::Clock;
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, MeasuredModel};
-use crate::executor::{RegressionTestCommand, TestCommand, TestPaths, backend_name};
+use crate::executor::{RegressionTestCommand, TestCommand, TestPaths};
 use crate::grant::{GrantAuthority, GrantStore, MandateApprovals};
 use crate::handoff::MergeHandoffStore;
 use crate::resume::{
@@ -370,7 +370,8 @@ impl ResumeHost {
     /// Checks that a resume context of `request` run on this host can be kept: every path and
     /// word it keeps as text (the workspace, made absolute, the test command, the cgroup root,
     /// the catalog path and the configuration path) is UTF-8, and `max_steps` fits its integer;
-    /// and that it names at most one of a catalog and a configuration. A host calls it before it
+    /// that it names at most one of a catalog and a configuration; and that its runner is not a
+    /// `local` one ([`TestRunner::local_reason`]), which is not kept for resume. A host calls it before it
     /// calls any model or opens any store, so a run that could not keep its context starts
     /// nothing.
     ///
@@ -394,6 +395,16 @@ struct HostText {
 
 impl HostText {
     fn of(request: &IntentRequest, host: &ResumeHost) -> Result<Self, SliceError> {
+        if request
+            .runner
+            .as_ref()
+            .is_some_and(|runner| runner.local_reason().is_some())
+        {
+            return Err(SliceError::State(
+                "a local run is not kept for resume: its runner launches through Substrate's local adapter with the operator's reason, which a resume context does not keep, so a resume would reopen it under another adapter"
+                    .into(),
+            ));
+        }
         if host.catalog.is_some() && host.config.is_some() {
             return Err(SliceError::State(
                 "a resume context names at most one of an llm catalog and a models configuration"
@@ -708,7 +719,7 @@ fn resume_prepared<S: FallibleCaseStore, T: EvaluationTime>(
         .as_ref()
         .ok_or_else(|| SliceError::Context("software-change@1 requires a test runner".into()))?;
     case::validate_workspace(workspace).map_err(SliceError::Case)?;
-    writeln!(out, "confinement: {}", backend_name(runner.backend()))?;
+    writeln!(out, "confinement: {}", runner.label())?;
     let grant = state
         .grants
         .get(&context.commission_id)
@@ -857,7 +868,7 @@ fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
             SliceError::Context("software-change@1 requires a test runner".into())
         })?;
         case::validate_workspace(workspace).map_err(SliceError::Case)?;
-        writeln!(out, "confinement: {}", backend_name(runner.backend()))?;
+        writeln!(out, "confinement: {}", runner.label())?;
         let case = case::open_with_catalog(
             governor,
             &prepared.protocol,

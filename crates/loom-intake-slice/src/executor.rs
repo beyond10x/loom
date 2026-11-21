@@ -414,7 +414,7 @@ impl TestRun {
         };
         format!(
             "{ended}{tree}\nconfinement: {}",
-            backend_name(self.applied.backend)
+            applied_label(&self.applied)
         )
     }
 }
@@ -1191,10 +1191,24 @@ impl TestRunner for UnconfinedRunner {
                 // No Substrate adapter ran this, so none is named.
                 adapter: None,
                 facts: None,
+                local_reason: None,
             },
             driver_record: None,
             child_output: finished.child_output,
         })
+    }
+}
+
+/// How a run's `confinement:` line names the confinement `applied` records: `local (<reason>)`,
+/// the reason as recorded (already passed through [`escape_reason`]), when Substrate's `local`
+/// adapter ran it, the backend's name otherwise.
+///
+/// [`escape_reason`]: crate::confinement::escape_reason
+pub fn applied_label(applied: &AppliedConfinement) -> String {
+    if applied.adapter.as_deref() == Some("local") {
+        crate::confinement::recorded_label(applied.local_reason.as_deref().unwrap_or_default())
+    } else {
+        backend_name(applied.backend).to_owned()
     }
 }
 
@@ -1231,6 +1245,11 @@ fn observation_confinement(execution: &TestExecution) -> Value {
     }
     if let Some(facts) = &applied.facts {
         record["facts"] = serde_json::json!(facts);
+    }
+    // story:confinement-opens-from-engine-config: a launch Substrate's `local` adapter ran names
+    // the operator's reason; every other record has none.
+    if let Some(reason) = &applied.local_reason {
+        record["local_reason"] = serde_json::json!(reason);
     }
     fn convert(value: serde_json::Value) -> Value {
         match value {

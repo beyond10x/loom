@@ -125,7 +125,8 @@ fn security_w20261121w1_u1_a_live_child_records_the_five_facts() {
             child.close_stdin().unwrap();
             let result = child.wait().expect("the live child's result");
             assert_eq!(result.exit.exit_code, Some(0));
-            conforms("spawn_child", &result.applied, &result.driver_record);
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            conforms("spawn_child", &result.applied, record);
         },
     );
 }
