@@ -9,7 +9,25 @@ tags:
 - adr-0109
 relations:
 - decomposes: epic:loom-sdk-for-products
-revision: 5
+- depends_on: story:substrate-0-21-pin
+scope:
+- confidence: cited
+  path: crates/loom-intake-slice/src/confinement.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/confinement/child.rs
+- confidence: inferred
+  path: crates/loom-intake-slice/src/confinement/several_apertures.rs
+- confidence: inferred
+  path: crates/loom-intake-slice/src/confinement/workdir.rs
+- confidence: inferred
+  path: crates/loom-intake-slice/src/executor.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/confined_child.rs
+- confidence: cited
+  path: crates/loom-intake-slice/tests/confinement.rs
+- confidence: inferred
+  path: website/docs/reference/sdk-stability.md
+revision: 9
 ---
 ## Outcome
 
@@ -37,31 +55,42 @@ serves the workspace read-write only. The adapter route waits on Substrate's sto
 
 ## Waits on
 
-Read 2026-10-28 against Substrate 0.14.0 (tag commit `0b9d50c6`), which Loom pins; set 2026-10-28
-from substrate-0109's message relayed by session `b10x-chef-orchestrator` (D166).
+Read 2026-11-21 against Substrate 0.21.0 (tag commit `adfde402`); Loom pins 0.14.0
+(`crates/loom-intake-slice/Cargo.toml:31-32`). This section replaces the reading of 2026-10-28.
 
-Waits on Substrate's story:adapter-stdin-pipe and story:adapter-live-output; story:adapter-live-output
-depends on story:adapter-stdin-pipe. Substrate archived its egress story under D160.
+- Delivered in Substrate 0.14.0, already in Loom's pin: the `linux` adapter serves
+  `workspace_access: Scoped` on a host whose probe proved `exec.workspace-scoped-write`.
+- Delivered in Substrate 0.15.0: standard input through a confinement adapter
+  (`StdinMode::Piped`, fact `stdin_pipe`, `write_stdin`, `close_stdin`), proved by `local`,
+  `linux`, `macos` and `systemd` (Substrate `CHANGELOG.md`, entry 0.15.0). Substrate's
+  story:adapter-stdin-pipe is `implemented` at tag 0.21.0.
+- Delivered in Substrate 0.15.0: a live output stream (`OutputDelivery::Live`, fact
+  `output_live`, `read_output`). Substrate's story:adapter-live-output is `implemented` at tag
+  0.21.0.
+- Decided, Loom's side, unchanged: egress. A request names no destination, only an
+  operator-declared aperture (`Network::Egress { apertures: Vec<String> }`); Loom maps the
+  `host:port` of `ChildCommand::with_egress` to that aperture's name. That mapping is part of
+  this story when it is scoped.
 
-- Delivered: the `linux` adapter serves `workspace_access: Scoped` on a host whose probe proved
-  `exec.workspace-scoped-write` (Substrate 0.14.0 CHANGELOG, `### Added`). The scoped `target`
-  write no longer needs `HostDriver::open`.
-- Not delivered, planned: standard input through a confinement adapter. The adapter surface takes
-  `Command { argv, env }` only and every adapter starts the child with standard input null
-  (`substrate-host` `confinement/mod.rs` `ConfinementAdapter`, `local.rs:259`, `systemd.rs:434`,
-  `macos.rs:175`). Substrate answers with its story:adapter-stdin-pipe (substrate PR 189, head
-  `d1d1deb3`, not merged): adapter fact `stdin_pipe` (design 32), wave 1 on `local`, `linux` and
-  `systemd`; `pod` gets no standard input.
-- Not delivered, planned: a live output stream. Output is read after the run (`output`).
-  Substrate answers with its story:adapter-live-output (same PR), which depends on
-  story:adapter-stdin-pipe: adapter fact `output_live` (design 32), the same wave 1 adapters.
-  `run_child` with `ChildCommand::with_stdin` and `spawn_child` (`ConfinedChild::write_stdin`, live
-  `ChildStream`) need both facts; until then they go through the host driver's pipe sessions.
-- Decided, Loom's side: egress. Substrate's D160 keeps its ADR 0013 and archived its egress story: a
-  request names no destination, only an operator-declared aperture
-  (`Network::Egress { apertures: Vec<String> }`). Loom's operator declares one aperture per
-  destination, and Loom maps the `host:port` of `ChildCommand::with_egress`'s `EgressAperture` to
-  that aperture's name. That mapping is part of this story when it is scoped.
+The story no longer waits on a Substrate release. It waits on `story:substrate-0-21-pin`, which
+moves Loom's pin onto a release that has both facts.
 
-So the story waits on the Substrate release that ships story:adapter-stdin-pipe and
-story:adapter-live-output. It stays a draft.
+## Scope
+
+Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
+**inferred** (a reading that could be wrong).
+
+- **Primary surface:** `crates/loom-intake-slice/src/confinement.rs` — cited, the story names it and `HostDriver::open` (line 402)
+- **Files:** `crates/loom-intake-slice/src/confinement.rs:402`, `:475`, `:525` (`HostDriver::open`, `run_child`, `spawn_child`) — cited
+- **Files:** `crates/loom-intake-slice/src/confinement/child.rs` — cited, `ConfinedChild` calls `HostDriver` directly (`child.rs:9`, `:182`, `:188`, `:281`)
+- **Files:** `crates/loom-intake-slice/tests/confinement.rs`, `crates/loom-intake-slice/tests/confined_child.rs` — cited, named in Acceptance 2 as the cases that must still hold
+- **Symbols:** `SubstrateRunner::run_child`, `SubstrateRunner::spawn_child`, `HostDriver::open`, `substrate_host::confinement` (`open`, `AdapterRequest::Linux`, `LinuxRequest`, `ConfinementAdapter`) — cited
+- **Symbols:** `OpenDriver`, `Drivers`, `Release`, `SubstrateRunner::launch` / `launch_with_stdin`, `ConfinedChild`, `PipeStream` / `PipeFrame` — cited in the tree (`confinement.rs:243,274,556,594`; `child.rs`), inferred as the code that changes
+- **Also likely:** `crates/loom-intake-slice/src/confinement/workdir.rs`, `crates/loom-intake-slice/src/confinement/several_apertures.rs` — inferred, in-crate unit tests that call `settle`, `requested_profile` and `driver_config`, which sit on the launch path being rewritten
+- **Also likely:** `crates/loom-intake-slice/src/executor.rs` — inferred, it reads the applied record (`adapter`, `facts`, `cgroup`) that `OpenDriver::adapted` writes; it changes only if that record's shape changes
+- **Documents:** `website/docs/reference/sdk-stability.md` (lines 134, 136 describe "a Substrate pipe session" and the shared driver per directory) — inferred, it changes only if the wording of the launch path changes
+- **Confidence:** high on the primary surface and the two test files (the story and the tree agree). Medium on how many files change, because the adapter-to-launch mapping is not proved.
+- **Would collide with:** any unit touching `loom-intake-slice`'s `src/confinement.rs` or `src/confinement/` (in particular where a driver is opened, the `OpenDriver` / `Drivers` cache, `launch`, `ConfinedChild`), and any unit touching `crates/loom-intake-slice/Cargo.toml` Substrate pins
+- **Safety fact:** `HostDriver` is named only in `src/confinement.rs` and `src/confinement/child.rs`. No file under `tests/` names `HostDriver`, so the integration tests reach the runner only through its public API. Outside the crate, `SubstrateRunner` is reached through the `loom-sdk` re-export (`crates/loom-sdk/src/lib.rs:99-114`). — step 2 (`git grep -n 'HostDriver\|substrate_host'`), unproven
+- **Safety fact (second):** `HostDriver::open` at `confinement.rs:402` is shared by `TestRunner::run` (`:983-1010`), `run_child` and `spawn_child` through `SubstrateRunner::driver` (`:321`). Acceptance 1 ("no `HostDriver::open` remains outside it") therefore moves the `tests.run` path too, though the story names only the child launches. — step 2, unproven
+- **House-rule files:** `CHANGELOG.md`, `AGENTS.md` (line 2032 says "Substrate raw-pipe session"), `Cargo.lock`. No generated file or reference page is touched. `ess/intake/domains/confinement.yaml:67-70` already carries `adapter` and `facts`, and the acceptance asks for no new declaration.
