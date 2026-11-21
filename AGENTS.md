@@ -647,6 +647,30 @@ or owner, records nothing, and `WriteEvidenceError::Unreadable` says why. The go
 `tests/connectors_cli_write.rs` and `tests/support_triage_route.rs` (on `support-triage@1` and
 the Canon governor) hold it.
 
+`loom_connectors::relay::ConnectorsRelay` (`src/relay.rs`, `story:connectors-relay-client`) is the
+third client: the reads and the governed write of `ConnectorsCli`, under its signatures (`sources`,
+`describe`, `invoke_read`, `read`, `invoke_write`), over the Connectors wire at a credential
+boundary's Connectors relay. `relay::loopback_url` is its one URL rule: exactly
+`http://127.0.0.1:<port>`, with no path, user information, query or fragment, refused as
+`RelayUrlRefused`, which names the rule and never the value; `ConnectorsRelay::new(url, adapter,
+connection, sources)` calls it first. A client serves one adapter and connection pair (a boundary
+has one Connectors upstream) and refuses a source or operation of another pair before any request,
+`relay-other-instance`; `over(sources)` is the same client over other sources. It sends `GET
+/v1/describe` and `POST /v1alpha2/invoke` only, encoded and decoded with `connectors-core`'s types,
+on its own `reqwest` client (no redirect, no proxy, no idle connection, connect bound 5 s, request
+bound 20 s) on a Tokio runtime its clones share; it sends no `authorization` header and reads no
+credential. A read is the describe and one unkeyed invoke, its `ReadResult` the result and the
+response's `audit_ref`; a write keeps the command line's refusals (`admits`, the proof path rules,
+`not-a-write`) and its key (`cli::idempotency_key`), is sent once keyed, without the approval, and
+its `WriteResult` is classified from the typed response (`mutation.classification`, `Unknown`
+without one; a replay names the original request). A boundary refusal is `relay-refused`; no
+connection, or the boundary's `token_unavailable`, `upstream_unreachable` or `upstream_timeout`, is
+`relay-unavailable` (`Refused` at a write's invoke, since nothing was sent; `Failed` elsewhere);
+`upstream_failed`, a lost, late, uncorrelated or unreadable answer, is `Unknown` for a write's
+invoke and `Failed` otherwise. `src/relay.rs` starts no program and reaches `cli` only through the
+names `the_relay_module_starts_no_process` lists. `tests/connectors_relay.rs` holds it against a
+fake relay on `127.0.0.1:0` answering real v1alpha2 bodies.
+
 ## Credential boundary
 
 `b10x-loom-boundary` (`crates/loom-boundary`, `story:boundary-loopback-relays`) is the sidecar

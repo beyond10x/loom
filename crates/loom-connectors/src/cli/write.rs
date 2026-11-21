@@ -316,7 +316,7 @@ fn refused(
 /// Whether `input` is the JSON value of the `admitted` arguments: objects compared by their
 /// members whatever their order, numbers by their spelling, everything else by equality. A
 /// member named twice on either side is never the same value.
-fn admits(admitted: &b10x_loom_commission::model::json::Value, input: &Value) -> bool {
+pub(crate) fn admits(admitted: &b10x_loom_commission::model::json::Value, input: &Value) -> bool {
     let mut document = String::new();
     b10x_loom_commission::model::json::push_value(&mut document, admitted);
     json::parse(&document).is_ok_and(|admitted| same(&admitted, input))
