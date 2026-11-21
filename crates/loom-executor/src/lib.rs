@@ -213,7 +213,8 @@ impl<S: ActionSelector, G, V> Loom<S, G, V> {
     /// a [`HybridSelector`] that fell back answers with the stronger selector's strategy, one
     /// that accepted the fast pick with the fast selector's, never `Hybrid`. A fast pick a
     /// fallback overruled is not returned. An action the catalogue does not list is refused and
-    /// named, whatever the selector's confidence.
+    /// named, whatever the selector's confidence. A catalogue names no case, so the selector is
+    /// not told one: a [`DeterministicSelector`] answers for its own.
     pub fn select(
         &self,
         catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
@@ -494,17 +495,24 @@ impl<S: ActionSelector, G: ArgumentGenerator, V> Loom<S, G, V> {
             &selection_id.0.0,
             0,
         ));
-        let resolved =
-            match selection::resolve(selector, &context, catalogue, (selection_id, overruled_id)) {
-                Ok(resolved) => resolved,
-                Err(SelectionRefusal::NotInCatalogue(_))
-                | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
-                    return Err(no_useful_action());
-                }
-                Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
-                    return Err(outage(error));
-                }
-            };
+        // The selector is told the case of the frontier this run was handed, so one that answers
+        // for a single case refuses another.
+        let resolved = match selection::resolve_for_case(
+            selector,
+            &frontier.data().case_id,
+            &context,
+            catalogue,
+            (selection_id, overruled_id),
+        ) {
+            Ok(resolved) => resolved,
+            Err(SelectionRefusal::NotInCatalogue(_))
+            | Err(SelectionRefusal::Selector(SelectorError::NothingAdmissible)) => {
+                return Err(no_useful_action());
+            }
+            Err(SelectionRefusal::Selector(SelectorError::Unavailable(error))) => {
+                return Err(outage(error));
+            }
+        };
         let selection = resolved.selection;
         let selection_id = selection.data().selection_id.clone();
         let selected = selection.data().action.clone();

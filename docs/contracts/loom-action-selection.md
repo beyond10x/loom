@@ -153,14 +153,25 @@ never from the candidate list:
   produce and its open evidence, the kinds among those Canon counted no record of at the subject's
   current revision. `CanonGovernor` answers it from the protocol's IR and the case's current
   decision (`CanonGovernor::action_facts`), so a kind is open again once its subject's revision
-  moves, the earlier record still held.
+  moves, the earlier record still held. A record counts when it applies, is about its subject's
+  current revision, is not expired at the trusted time, is not invalidated, and an evidence match
+  of the protocol (in a claim, an obligation, a precondition or an outcome) reads it by kind and
+  subject; a kind no match reads counts any such record.
 - `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
 
 An action is useful while `due` is true; otherwise, when it may produce evidence, while its open
 evidence is not empty, and when it may produce none, until `performed_at` is true for the case
 revision the facts were read at. A candidate the facts do not name is not useful, and an action
 the facts name that is not a candidate is never returned: the choice passes Loom's membership rule
-like every other. The same candidates, facts and history give the same choice
+like every other. A selector is built for one case: a run of a commission for another case is
+`SelectorError::Unavailable` naming both, and no port is asked (`ActionSelector::resolve_for_case`,
+which Loom calls with the case of the frontier it was handed).
+
+A record Canon sets aside only as not independent (its producer is not declared independent on a
+dimension the match demands) still counts. A kind whose only records are set aside so is treated
+as produced: the selector does not pick the action again for it, and a run can end
+`NothingAdmissible` with the claim still unknown until a producer the case declares independent
+records the kind. Not counting such a record would take the same producer again and again. The same candidates, facts and history give the same choice
 (`crates/loom-executor/tests/deterministic_selector.rs`,
 `crates/loom-governor/tests/action_facts.rs`).
 

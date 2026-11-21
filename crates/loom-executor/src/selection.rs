@@ -133,6 +133,20 @@ pub trait ActionSelector {
             overruled: None,
         })
     }
+
+    /// [`ActionSelector::resolve`] for a run of `case`: what Loom asks when it runs a commission,
+    /// naming the case of the frontier it was handed. By default the case is not read; a selector
+    /// whose answer depends on the case ([`DeterministicSelector`]) refuses a case it does not
+    /// answer for, and [`HybridSelector`] hands the case on to both its selectors.
+    fn resolve_for_case(
+        &self,
+        case: &CaseId,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        let _ = case;
+        self.resolve(context, candidates)
+    }
 }
 
 /// Why Loom made no selection.
@@ -235,6 +249,12 @@ const WRITE: &str = "write";
 /// answers [`SelectorError::NothingAdmissible`]; a port that cannot answer makes it
 /// [`SelectorError::Unavailable`] with the port's reason. Its pick has no confidence and reports no
 /// tokens.
+///
+/// It answers for the one case it was built for. A run of a commission for another case
+/// ([`ActionSelector::resolve_for_case`], which Loom calls with the case of the frontier it was
+/// handed) is [`SelectorError::Unavailable`] naming both cases, and no port is asked.
+/// [`ActionSelector::select`] and [`ActionSelector::resolve`] name no case and answer for the
+/// selector's own.
 pub struct DeterministicSelector<F, H> {
     case: CaseId,
     facts: F,
@@ -316,6 +336,24 @@ impl<F: ActionFactsPort, H: StepHistory> ActionSelector for DeterministicSelecto
 
     fn strategy(&self) -> SelectionStrategy {
         SelectionStrategy::Deterministic
+    }
+
+    /// [`ActionSelector::resolve`] when `case` is the case this selector was built for; for any
+    /// other case [`SelectorError::Unavailable`] naming both, and no port is asked, so a run is
+    /// never given a pick made from another case's facts.
+    fn resolve_for_case(
+        &self,
+        case: &CaseId,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        if *case != self.case {
+            return Err(SelectorError::Unavailable(format!(
+                "the deterministic selector answers for case `{}`, and the run is for case `{}`",
+                self.case.0, case.0
+            )));
+        }
+        self.resolve(context, candidates)
     }
 }
 
@@ -445,13 +483,42 @@ impl<F: ActionSelector, S: ActionSelector> ActionSelector for HybridSelector<F, 
         context: &SelectionContext,
         candidates: &[CatalogueEntry],
     ) -> Result<Resolution, SelectorError> {
-        let fast = self.fast.resolve(context, candidates);
+        self.fall_back(candidates, self.fast.resolve(context, candidates), || {
+            self.stronger.resolve(context, candidates)
+        })
+    }
+
+    /// [`ActionSelector::resolve`] as [`HybridSelector`] resolves, with `case` handed on to both
+    /// selectors' own [`ActionSelector::resolve_for_case`].
+    fn resolve_for_case(
+        &self,
+        case: &CaseId,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        self.fall_back(
+            candidates,
+            self.fast.resolve_for_case(case, context, candidates),
+            || self.stronger.resolve_for_case(case, context, candidates),
+        )
+    }
+}
+
+impl<F: ActionSelector, S: ActionSelector> HybridSelector<F, S> {
+    /// `fast` when it is accepted from `candidates`; otherwise the resolution `stronger` gives,
+    /// with the fast pick as the one it overruled when the fast selector answered at all.
+    fn fall_back(
+        &self,
+        candidates: &[CatalogueEntry],
+        fast: Result<Resolution, SelectorError>,
+        stronger: impl FnOnce() -> Result<Resolution, SelectorError>,
+    ) -> Result<Resolution, SelectorError> {
         if let Ok(resolution) = &fast
             && self.accepts(&resolution.chosen.choice, candidates)
         {
             return fast;
         }
-        let stronger = self.stronger.resolve(context, candidates)?;
+        let stronger = stronger()?;
         Ok(Resolution {
             chosen: stronger.chosen,
             overruled: fast.ok().map(|resolution| resolution.chosen),
@@ -505,11 +572,34 @@ pub fn resolve(
     selector: &impl ActionSelector,
     context: &SelectionContext,
     catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    ids: (SelectionId, SelectionId),
+) -> Result<Resolved, SelectionRefusal> {
+    let resolution = selector.resolve(context, &catalogue.data().entries);
+    resolved(catalogue, resolution, ids)
+}
+
+/// [`resolve`] for a run of `case` ([`ActionSelector::resolve_for_case`]): what Loom asks when it
+/// runs a commission, naming the case of the frontier it was handed. Refused as [`resolve`]
+/// refuses, and when the selector does not answer for `case`.
+pub fn resolve_for_case(
+    selector: &impl ActionSelector,
+    case: &CaseId,
+    context: &SelectionContext,
+    catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    ids: (SelectionId, SelectionId),
+) -> Result<Resolved, SelectionRefusal> {
+    let resolution = selector.resolve_for_case(case, context, &catalogue.data().entries);
+    resolved(catalogue, resolution, ids)
+}
+
+/// The selections `resolution`, a selector's answer from `catalogue`, makes, as [`resolve`]
+/// describes them.
+fn resolved(
+    catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    resolution: Result<Resolution, SelectorError>,
     (selection_id, overruled_id): (SelectionId, SelectionId),
 ) -> Result<Resolved, SelectionRefusal> {
-    let resolution = selector
-        .resolve(context, &catalogue.data().entries)
-        .map_err(SelectionRefusal::Selector)?;
+    let resolution = resolution.map_err(SelectionRefusal::Selector)?;
     let selection = chosen(
         catalogue,
         in_range(resolution.chosen.choice.clone()),

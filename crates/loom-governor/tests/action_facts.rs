@@ -93,6 +93,27 @@ fn record<G>(governor: &G, case: &CaseId, n: u64, kind: &str, subject_revision: 
 where
     G: b10x_loom_commission::ports::evidence::EvidencePort + ObservationPort,
 {
+    record_named(
+        governor,
+        case,
+        n,
+        &format!("{kind}-{n}"),
+        kind,
+        subject_revision,
+    );
+}
+
+/// [`record`], with the `canon-evidence/1` id `canon_id`.
+fn record_named<G>(
+    governor: &G,
+    case: &CaseId,
+    n: u64,
+    canon_id: &str,
+    kind: &str,
+    subject_revision: &str,
+) where
+    G: b10x_loom_commission::ports::evidence::EvidencePort + ObservationPort,
+{
     let observation = ObservationId(uuid(0x100 + n));
     ObservationPort::observe(
         governor,
@@ -106,7 +127,7 @@ where
     )
     .unwrap();
     let facts = json::parse(&format!(
-        r#"{{"format":"canon-evidence/1","id":"{kind}-{n}","kind":"{kind}","subject":"implementation","subject_revision":"{subject_revision}","result":"pass"}}"#
+        r#"{{"format":"canon-evidence/1","id":"{canon_id}","kind":"{kind}","subject":"implementation","subject_revision":"{subject_revision}","result":"pass"}}"#
     ))
     .unwrap();
     submit_evidence(
@@ -240,4 +261,30 @@ fn an_unknown_case_has_no_facts() {
         Err(GovernorError::UnknownCase)
     );
     assert!(ActionFactsPort::action_facts(&governor, &CaseId("CASE-NOT-HELD".to_owned())).is_err());
+}
+
+#[test]
+fn a_held_record_that_does_not_apply_counts_for_nothing() {
+    let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_protocol_yaml("facts-delivery@1", PROTOCOL)
+        .unwrap();
+    let case = governor
+        .open("facts-delivery@1", revisions(), CaseInputs::none())
+        .unwrap();
+    record_named(&governor, &case, 1, "shared-id", "built", "r1");
+    // A second record reusing the first one's `canon-evidence/1` id: Canon refuses the pair, so
+    // it does not apply, and is kept only.
+    record_named(&governor, &case, 2, "shared-id", "reviewed", "r1");
+    assert_eq!(
+        governor.evidence(&case).unwrap().len(),
+        2,
+        "both records are held"
+    );
+    let facts = governor.action_facts(&case).unwrap();
+    assert!(open_of(&facts, "build").is_empty(), "{facts:?}");
+    assert_eq!(
+        open_of(&facts, "review"),
+        ["reviewed"],
+        "a record that does not apply counts for nothing: {facts:?}"
+    );
 }
