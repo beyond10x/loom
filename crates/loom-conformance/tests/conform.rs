@@ -57,6 +57,14 @@ const UNNAMED_SKIP: &str = "loom.run.Unnamed/outcome/not-in-skipped-md";
 /// The scenario expectation 4 adds to a copy of the report as unsupported.
 const UNNAMED_UNSUPPORTED: &str = "loom.run.Unnamed/outcome/unsupported-not-in-skipped-md";
 
+/// The authored scenarios of `ess/scenarios/decision/` that cover the ten `loom.decision`
+/// refusals (AGENTS.md § ESS item 3).
+const COVERS: [&str; 3] = [
+    "loom.decision/authored/expired-request-refuses-every-command",
+    "loom.decision/authored/escalated-request-is-superseded",
+    "loom.decision/authored/produced-record-is-recorded-once",
+];
+
 /// The two statuses a report carries, each checked against what its counts and coverage come to.
 const STATUSES: [&str; 2] = ["execution_status", "conformance_status"];
 
@@ -252,6 +260,66 @@ fn violations(report: &Value, named: &BTreeSet<String>) -> Vec<String> {
     found
 }
 
+/// The authored scenarios the suite marks as covering a refusal: every `covered_by` of
+/// `coverage.refused`, the scenarios a `covers:` list made count for a refusal.
+fn covering_scenarios(suite: &Value) -> BTreeSet<String> {
+    suite["coverage"]["refused"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the suite carries no `coverage.refused` array"))
+        .iter()
+        .filter_map(|refusal| refusal["covered_by"].as_str())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Every covering scenario the report does not record as executed (passed or failed), each named
+/// with the category the report lists it under. A cover counts only when the run executes it: one
+/// reported skipped or unsupported, or not reported, leaves its refusal unanswered, whatever
+/// `ess/SKIPPED.md` says.
+fn unexecuted_covers(covers: &BTreeSet<String>, report: &Value) -> Vec<String> {
+    let executed: BTreeSet<String> = ["passed", "failed"]
+        .into_iter()
+        .flat_map(|category| outcome_ids(report, category))
+        .collect();
+    covers
+        .iter()
+        .filter(|cover| !executed.contains(*cover))
+        .map(|cover| {
+            let listed = ["error", "unsupported", "skipped"]
+                .into_iter()
+                .find(|category| outcome_ids(report, category).contains(cover))
+                .unwrap_or("not reported");
+            format!(
+                "covers: the covering scenario `{cover}` is not executed (report: {listed}); \
+                 a refusal it covers counts only when the run executes it"
+            )
+        })
+        .collect()
+}
+
+/// A copy of `report` in which `scenario` is no longer passed but listed under `category`, with
+/// the counts moved.
+fn moved_to(report: &Value, scenario: &str, category: &str) -> Value {
+    let mut copy = report.clone();
+    let passed = copy["outcomes"]["passed"]
+        .as_array_mut()
+        .unwrap_or_else(|| panic!("the report lists an `outcomes.passed` array"));
+    let before = passed.len();
+    passed.retain(|id| id != scenario);
+    assert_eq!(
+        passed.len() + 1,
+        before,
+        "`{scenario}` is passed once in the report"
+    );
+    copy["counts"]["passed"] = Value::from(count(report, "passed") - 1);
+    copy["outcomes"][category]
+        .as_array_mut()
+        .unwrap_or_else(|| panic!("the report lists an `outcomes.{category}` array"))
+        .push(Value::String(scenario.to_owned()));
+    copy["counts"][category] = Value::from(count(report, category) + 1);
+    copy
+}
+
 /// The qualification `task conform` requires: the report's `conformance_status` is `passed`. A
 /// status that agrees with its counts is not enough; an `inconclusive` run, such as one over a
 /// suite that declares no coverage inventory, does not pass. Empty means the report qualifies.
@@ -272,7 +340,9 @@ fn qualification(report: &Value) -> Vec<String> {
 /// Execution fails on a failed or unsupported scenario, is inconclusive on an errored or skipped
 /// one, and passes otherwise. Conformance fails when execution fails, passes when execution passes
 /// over a suite that is not empty and whose coverage is a complete inventory with no in-scope
-/// refusal, and is inconclusive otherwise.
+/// refusal left uncovered, and is inconclusive otherwise. A refusal is covered when its
+/// `covered_by` names an authored scenario the run selected (`coverage.rs` `Inventory::covers`):
+/// one the report lists under any category.
 fn derived_statuses(report: &Value) -> [&'static str; 2] {
     let execution = if count(report, "failed") > 0 || count(report, "unsupported") > 0 {
         "failed"
@@ -281,11 +351,20 @@ fn derived_statuses(report: &Value) -> [&'static str; 2] {
     } else {
         "passed"
     };
+    let selected = |id: &str| {
+        CATEGORIES.into_iter().any(|category| {
+            report["outcomes"][category]
+                .as_array()
+                .is_some_and(|ids| ids.iter().any(|listed| listed == id))
+        })
+    };
     let coverage = &report["coverage"];
     let complete = coverage["knowledge"] == "complete_inventory"
-        && !coverage["refused"]
-            .as_array()
-            .is_some_and(|refused| refused.iter().any(|one| one["scope"] == "in_scope"));
+        && !coverage["refused"].as_array().is_some_and(|refused| {
+            refused.iter().any(|one| {
+                one["scope"] == "in_scope" && !one["covered_by"].as_str().is_some_and(selected)
+            })
+        });
     let conformance = match execution {
         "failed" => "failed",
         "passed" if count(report, "total") > 0 && complete => "passed",
@@ -482,6 +561,38 @@ fn ess_conformance_report() {
          naming conformance_status; it added {added:?}"
     );
 
+    // Covers: every authored scenario that covers a refusal is executed. The three covers of
+    // `ess/scenarios/decision/` are among them, and a copy of the report in which one of them is
+    // skipped, unsupported or not reported fails the check naming it.
+    let covers = covering_scenarios(&suite);
+    for cover in COVERS {
+        assert!(
+            covers.contains(cover),
+            "the suite marks no refusal covered by `{cover}`: {covers:?}"
+        );
+        for category in ["skipped", "unsupported"] {
+            let copy = moved_to(&base, cover, category);
+            let added = unexecuted_covers(&covers, &copy);
+            assert!(
+                added.len() == 1 && added[0].contains(cover) && added[0].contains(category),
+                "covers: a copy of the report with `{cover}` {category} must fail the check \
+                 naming it; it found {added:?}"
+            );
+        }
+        let mut dropped = moved_to(&base, cover, "skipped");
+        dropped["outcomes"]["skipped"]
+            .as_array_mut()
+            .expect("skipped array")
+            .retain(|id| id != cover);
+        let added = unexecuted_covers(&covers, &dropped);
+        assert!(
+            added.len() == 1 && added[0].contains(cover) && added[0].contains("not reported"),
+            "covers: a copy of the report without `{cover}` must fail the check naming it; it \
+             found {added:?}"
+        );
+    }
+    found.extend(unexecuted_covers(&covers, &report));
+
     // Expectation 2, on the suite.
     let commands = compiled_commands();
     let missing = uncovered(&commands, &scenarios);
@@ -510,18 +621,22 @@ fn ess_conformance_report() {
 }
 
 /// A report reduced to what [`derived_statuses`] reads: one scenario in each category of
-/// `categories`, and `coverage`.
+/// `categories`, the `n`th listed as `<category>-<n>`, and `coverage`.
 fn rated_report(categories: &[&str], coverage: Value) -> Value {
     let mut counts = serde_json::Map::new();
+    let mut outcomes = serde_json::Map::new();
     for category in CATEGORIES {
-        let listed = categories
+        let listed: Vec<Value> = categories
             .iter()
             .filter(|listed| **listed == category)
-            .count();
-        counts.insert(category.to_owned(), Value::from(listed));
+            .enumerate()
+            .map(|(n, _)| Value::from(format!("{category}-{n}")))
+            .collect();
+        counts.insert(category.to_owned(), Value::from(listed.len()));
+        outcomes.insert(category.to_owned(), Value::from(listed));
     }
     counts.insert("total".to_owned(), Value::from(categories.len()));
-    serde_json::json!({"counts": counts, "coverage": coverage})
+    serde_json::json!({"counts": counts, "outcomes": outcomes, "coverage": coverage})
 }
 
 /// [`derived_statuses`] rates each report as ESS does (ess-conformance `counts.rs`, `execution`,
@@ -537,8 +652,16 @@ fn derived_statuses_rate_reports_as_ess_does() {
         "knowledge": "complete_inventory",
         "refused": [{"scope": "outside_component"}]
     });
+    let refused_covered = serde_json::json!({
+        "knowledge": "complete_inventory",
+        "refused": [{"scope": "in_scope", "covered_by": "passed-0"}]
+    });
+    let refused_covered_unselected = serde_json::json!({
+        "knowledge": "complete_inventory",
+        "refused": [{"scope": "in_scope", "covered_by": "not-selected"}]
+    });
     let unknown = serde_json::json!({"knowledge": "unknown"});
-    let cases: [(&str, &[&str], &Value, [&str; 2]); 9] = [
+    let cases: [(&str, &[&str], &Value, [&str; 2]); 11] = [
         (
             "every scenario passed, complete inventory",
             &["passed"],
@@ -549,6 +672,18 @@ fn derived_statuses_rate_reports_as_ess_does() {
             "every scenario passed, an in-scope refusal",
             &["passed"],
             &refused_in_scope,
+            ["passed", "inconclusive"],
+        ),
+        (
+            "every scenario passed, an in-scope refusal covered by a selected authored scenario",
+            &["passed"],
+            &refused_covered,
+            ["passed", "passed"],
+        ),
+        (
+            "every scenario passed, an in-scope refusal covered by a scenario not selected",
+            &["passed"],
+            &refused_covered_unselected,
             ["passed", "inconclusive"],
         ),
         (

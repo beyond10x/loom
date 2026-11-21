@@ -59,7 +59,7 @@ tasks:
       - cargo run -q --locked -p loom-xtask -- intake-drift
 
   ess-gate:
-    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.
+    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize (--suite-format 5) with 0 refusals not covered by authored scenarios, no open question.
     cmds:
       - cargo test -p b10x-loom-executor --test ess_gate --locked
 

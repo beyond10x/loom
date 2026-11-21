@@ -203,15 +203,28 @@ conditions fails `task check`:
 
 1. `ess specify validate --path ess --strict-requires` exits 0;
 2. `ess specify compile --path ess --format json` exits 0;
-3. `ess verify conform synthesize` exits 0 with 0 refusals;
+3. `ess verify conform synthesize --suite-format 5` exits 0 and every refusal occurrence on its
+   summary line is covered by an authored `covers:` scenario (`ess-scenario/7`), so 0 refusals
+   remain uncovered; an uncovered refusal fails the gate. `task conform` adds that a covering
+   scenario counts only when the conformance run executes it
+   (`crates/loom-conformance/tests/conform.rs`): one reported skipped or unsupported fails it;
 4. no file under `ess/` contains `UNMAPPED:`, so the specification carries no open question.
+
+A refusal is removed by a change of the specification that keeps its behaviour, where one exists.
+It is covered by an authored scenario only where none exists, and that scenario's `summary` (the
+suite's `purpose`) says why: the refusal code and the cause, with the reasoning in the comment
+above it. The three `ess/scenarios/decision/` covers are the example: ess 0.96.0 reaches no
+Expired or Escalated decision request once `DecisionClassId` is a text newtype and `Request` has
+`record-key-open` (ESS-SYNTH-004), and withdraws its `RecordProduced/recorded` witness for a second
+row under a held `DecisionRequestId` (ESS-SYNTH-001).
 
 No story is implemented while the gate is red, whether or not it edits `ess/`. The `UNMAPPED:`
 scan stands in for ESS until ESS refuses open entries itself: the `UNMAPPED:` scan is removed when
 the ESS release that refuses open entries (beyond10x/ess `epic:typed-open-questions`) is pinned.
 
-Commission's specification is its own ESS system under `ess/commission/`, held to the same four
-conditions with `--path ess/commission` by `task commission:ess-gate`
+Commission's specification is its own ESS system under `ess/commission/`, held to conditions 1,
+2 and 4, and to 0 refusals in the default synthesis format, with `--path ess/commission` by
+`task commission:ess-gate`
 (`crates/loom-commission/tests/ess_gate.rs`), which `task check` also runs. Intake's
 `intake.routing` domain is `ess/intake/`, validated by `task intake-spec` and held to the suite
 synthesized from it by `task intake-conform` (`crates/loom-intake-conformance/tests/conform.rs`),
