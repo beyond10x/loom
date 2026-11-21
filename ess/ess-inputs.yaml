@@ -123,3 +123,6 @@ scenarios:
   - scenarios/resource-stage-files/an-absent-destination-is-staged-private.yaml
   - scenarios/resource-stage-files/an-existing-directory-is-staged-private.yaml
   - scenarios/decision/merge-a5-veto.yaml
+  - scenarios/decision/expired-request-refuses-every-command.yaml
+  - scenarios/decision/escalated-request-is-superseded.yaml
+  - scenarios/decision/produced-record-is-recorded-once.yaml
