@@ -1942,8 +1942,9 @@ proves when it opens (`confinement::linux::proof`, ADR 0109), never by an operat
 missing `limits` is refused `CgroupUndelegated`, one missing `process_run`, `wait`, `output_read`,
 `workspace` or `filesystem_view` `CapabilityUnserved`, each naming `confinement.family-unserved` and the
 family (`a_driver_missing_a_family_is_refused_naming_it`). Every Substrate launch records
-`AppliedConfinement::adapter` (`linux`) and `facts` (the proved facts, in `FACT_ORDER`); an unconfined
-launch records neither.
+`AppliedConfinement::adapter` (`linux`) and `facts` (the proved facts, in `FACT_ORDER`: on Substrate
+0.21.0 `whole_tree_kill`, `ipc_socket_allowlist`, `ipc_signals_contained`, `stdin_pipe`, `output_live`);
+an unconfined launch records neither.
 Tests get no network, a cleared environment, read-only source and Rust toolchain, writes only
 under `target/`, and resource bounds. Mount dependency-cache subdirectories only; never Cargo's
 credential/config files or the operator's home. Dependencies are prefetched explicitly by the
@@ -2061,7 +2062,9 @@ projects both; a record naming another working directory than the one requested 
 was), a writable root, which Loom never requests, or several apertures where it asked for one or none, is refused (`a_record_reporting_a_workdir_writable_roots_or_apertures_is_refused`),
 as is one naming an execution capsule or its filesystem, or a single aperture naming a listen
 address (`security_a_record_naming_an_unrequested_capsule_is_refused`,
-`security_a_single_aperture_record_naming_a_listen_address_is_refused`); `check_record` takes
+`security_a_single_aperture_record_naming_a_listen_address_is_refused`), and one naming no
+cgroup or an empty one, or echoing confinement requirements (`requires`), which Loom never sends
+(`a_record_naming_no_cgroup_or_unrequested_requirements_is_refused`); `check_record` takes
 the record apart without `..`, so a member a later Substrate adds does not compile until judged.
 What remains after the check: Substrate's admission opens each root and file once,
 refusing a link at any component (`openat2` with `RESOLVE_NO_SYMLINKS`), and bubblewrap binds

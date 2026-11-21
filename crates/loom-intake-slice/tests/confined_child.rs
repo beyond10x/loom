@@ -87,7 +87,10 @@ fn a_named_child_runs_confined_and_reports_what_was_applied() {
             let record = result.driver_record.as_ref().expect("the driver's record");
             assert_eq!(record.profile, SandboxProfile::Workspace);
             assert_eq!(record.network, substrate_wire::AppliedNetwork::None);
-            assert_eq!(record.cgroup, result.applied.cgroup);
+            assert_eq!(
+                record.cgroup.as_deref(),
+                Some(result.applied.cgroup.as_str())
+            );
             assert_eq!(
                 record.capability_snapshot,
                 result.applied.capability_snapshot
@@ -740,7 +743,10 @@ fn the_applied_record_names_the_egress() {
             assert_eq!(applied.destination, address.to_string());
             assert_eq!(applied.mechanism, ApertureMechanism::LoopbackForwarder);
             assert_eq!(applied.max_bytes, None);
-            assert_eq!(record.cgroup, result.applied.cgroup);
+            assert_eq!(
+                record.cgroup.as_deref(),
+                Some(result.applied.cgroup.as_str())
+            );
 
             let plain = runner
                 .run_child(&ChildCommand::new("true", [] as [&str; 0], workspace))
@@ -1320,7 +1326,10 @@ fn a_live_child_echoes_what_it_is_written() {
             assert_eq!(result.applied.writable_scopes, ["target"]);
             assert_eq!(result.applied.profile_digest.len(), 64);
             assert_eq!(result.driver_record.network, AppliedNetwork::None);
-            assert_eq!(result.driver_record.cgroup, result.applied.cgroup);
+            assert_eq!(
+                result.driver_record.cgroup.as_deref(),
+                Some(result.applied.cgroup.as_str())
+            );
         },
     );
 }

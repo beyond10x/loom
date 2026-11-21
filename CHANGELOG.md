@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- Substrate moves from `0.14.0` to `0.21.0` (`adfde402`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
+
 ## [0.57.2] - 2026-11-05
 
 No breaking changes.
