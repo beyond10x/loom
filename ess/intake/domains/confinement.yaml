@@ -1,15 +1,17 @@
 domain: intake.confinement
 summary: >-
-  Requested and observed confinement of local test commands. No automatic fallback. A command bound
-  to a protocol's action runs outside Substrate, so a run that would start one is refused
-  CommandUnconfined unless the operator opts out of confinement for those commands explicitly.
+  Requested and observed confinement of local test commands and of the commands bound to a
+  protocol's actions. No automatic fallback. A bound command starts only through the runner the
+  host injected: a run that would start one with no runner is refused NoRunner before anything
+  starts, and one whose host names a runner that confines nothing, without the operator's opt-in to
+  the `local` adapter for those commands, is refused CommandUnconfined.
 types:
   - name: intake.confinement.Backend
     kind: enum
     variants: [Substrate, None]
   - name: intake.confinement.ConfinementRefusal
     kind: enum
-    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined, LocalReasonMissing]
+    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined, LocalReasonMissing, NoRunner]
   # The Substrate confinement adapter a host names for Loom's launches (ADR 0109): `linux`, which
   # confines, or `local`, which runs the child unconfined, declared insecure, as the operator.
   - name: intake.confinement.ConfinementAdapter
