@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:boundary-admits-declared-http-egress
 kind: story
-status: active
+status: implemented
 title: A credential-free LoomAgent may reach an in-cluster http source it declares, through a namespace egress peer the operator allows
 summary: Namespace entry admitted beside spec.boundary only outside every allowed upstream's namespace, with a selector, tied by namespace to an http binding with no bearer and listed in allowedBoundaryHttpEgress; the operator's list is the gate; chart and operator page change
 tags:
@@ -21,7 +21,11 @@ scope:
 - confidence: cited
   path: charts/loom-agents/values.yaml
 - confidence: cited
+  path: crates/loom-conformance/src/admission.rs
+- confidence: cited
   path: crates/loom-operator/src/admission.rs
+- confidence: cited
+  path: crates/loom-operator/src/cli.rs
 - confidence: cited
   path: crates/loom-operator/src/config.rs
 - confidence: cited
@@ -37,17 +41,29 @@ scope:
 - confidence: cited
   path: crates/loom-operator/tests/render.rs
 - confidence: cited
+  path: crates/loom-operator/tests/security_w20261121w6_u2.rs
+- confidence: cited
   path: ess/domains/resource.yaml
 - confidence: cited
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/scenarios/resource-admission/a-boundary-beside-an-allowed-http-egress-is-admitted.yaml
 - confidence: cited
+  path: ess/scenarios/resource-admission/a-boundary-beside-an-egress-in-the-model-route-namespace-is-refused.yaml
+- confidence: cited
+  path: ess/scenarios/resource-admission/a-boundary-beside-an-egress-namespace-is-refused.yaml
+- confidence: cited
   path: ess/scenarios/resource-admission/a-boundary-beside-an-egress-namespace-the-configuration-does-not-give-is-refused.yaml
+- confidence: cited
+  path: ess/scenarios/resource-admission/a-boundary-beside-an-egress-namespace-without-a-selector-is-refused.yaml
+- confidence: cited
+  path: ess/scenarios/resource-admission/a-boundary-beside-an-egress-that-names-no-namespace-is-refused.yaml
 - confidence: cited
   path: ess/scenarios/resource-admission/a-boundary-beside-an-unbound-egress-namespace-is-refused.yaml
 - confidence: cited
   path: ess/scenarios/resource-admission/config.yaml
+- confidence: cited
+  path: ess/scenarios/resource-admission/resources/boundary-egress-namespace-name.yaml
 - confidence: cited
   path: ess/scenarios/resource-admission/resources/boundary-egress-namespace.yaml
 - confidence: cited
@@ -55,11 +71,16 @@ scope:
 - confidence: cited
   path: ess/scenarios/resource-admission/resources/boundary-egress-unbound.yaml
 - confidence: cited
+  path: ess/scenarios/resource-admission/resources/boundary-egress-unselected.yaml
+- confidence: cited
   path: ess/scenarios/resource-admission/resources/boundary-http-egress-allowed.yaml
-revision: 13
+- confidence: cited
+  path: ess/scenarios/resource-admission/resources/with-model-route
+revision: 26
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:54:03Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "sdc-accepts-boundary-epic-2026-11-21"}
 - {from: "proposed", to: "active", at: "2026-11-21T10:53:57Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w6"}
+- {from: "active", to: "implemented", at: "2026-11-21T12:56:32Z", actor: "agent:sdc", revision: 26, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w6"}
 ---
 ## Outcome
 
@@ -278,6 +299,47 @@ CHANGELOG: `### Changed`, a namespace egress entry beside `spec.boundary` is adm
 and renders the same, and the default list admits nothing new. The chart changes (`values.yaml`,
 `templates/configmap.yaml`); the CRD does not.
 
+## As built, wave 2026-11-21-w6
+
+Where the unit's commits (`9b4170fb..527a3147`) differ from the text above, the commits are what
+holds:
+
+- Condition 1 closes more than the text says. Security pass 1
+  (`review-result:boundary-admits-declared-http-egress-security-1`) found that the namespace of
+  the configuration's `modelRoute`, a proxy holding a credential, stayed open (F1), and that an
+  upstream URL with a short service name or an IP host read as no namespace, so its namespace
+  stayed open (F2). The planner decided on 2026-11-21: condition 1 also refuses the namespace of
+  `modelRoute`, and the configuration read refuses an `allowedBoundaryUpstreams` or `modelRoute`
+  URL whose host is no `<service>.<namespace>.svc[.cluster.local]`.
+- Security pass 2 (`review-result:boundary-admits-declared-http-egress-security-2`) found that
+  admission, given such a URL on a `Config` built without `Config::parse`, still admitted the
+  entry (F2-b). Condition 1 now fails closed (`crates/loom-operator/src/admission.rs`,
+  `fn boundary_http_egress`): one URL whose namespace cannot be read refuses every namespace
+  entry beside a boundary with `BoundaryEgressNamespace` at the entry's `namespace`, the detail
+  naming the setting and the URL. The detail quotes the controller's URL; the shipped binary
+  does not reach that branch, because the configuration read refuses such a URL first.
+- After the upstream and model-route check, condition 1 refuses a namespace that is no DNS-1123
+  label, with the same reason and member and its own detail.
+- Condition 3 reads only a binding whose method is `GET`.
+- The CHANGELOG has two `**Breaking:**` bullets where the text says none:
+  `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed` and
+  operator `Config` gains `allowed_boundary_http_egress`; and the configuration read refuses a
+  configuration it accepted before (a short service name or an IP address as the host of an
+  `allowedBoundaryUpstreams` or `modelRoute` URL).
+- Six scenarios under `ess/scenarios/resource-admission/` where the text names three: the three
+  more state the model route's namespace, an entry without a selector and a namespace that is no
+  DNS-1123 label (findings F1 and F4 of pass 1).
+- Files the list below does not name: `crates/loom-conformance/src/admission.rs` (the
+  conformance target reads a `config.yaml` beside a resource when its directory holds one; one
+  directory has one, `resources/with-model-route/`), `crates/loom-operator/src/cli.rs`
+  (`RUN_HELP` and the `--config` text), `crates/loom-operator/tests/security_w20261121w6_u2.rs`
+  (the reviewer's cases, committed as written in `ffcd7c0a` and `3a6ef6a3`).
+- A test of the base that asserted nothing is fixed by the unit
+  (`crates/loom-operator/tests/adversary_d243_u1.rs`, finding F3 of pass 1: its resource was
+  refused `NoModelRoute` before the egress check).
+- No third security pass ran: the coordinator read the diff `0c9d56e3..527a3147` after
+  correction 2 (evidence of kind `verification` on this story).
+
 ## Files
 
 - `ess/domains/resource.yaml`, `ess/scenarios/resource-admission/` (`config.yaml`,
@@ -300,26 +362,34 @@ Mapping a Service to its pods or ports at admission. A per-resource field on an
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w6 from the unit's commits (`git diff --stat 9b4170fb 527a3147`: 61 files, 2735 insertions, 122 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-operator` (admission step 5, NetworkPolicy render, controller config) — cited
-- **Files (code):** `crates/loom-operator/src/admission.rs:1361` (`fn boundary`; egress loop `:1462-1481`), `src/render.rs:1178-1206` (egress entries skipped beside a boundary at `:1180-1184`), `src/config.rs:51-91,118-133` (`Config`, `AllowedUpstream`; new `AllowedHttpEgress`), `tests/render.rs`, `tests/admission_reasons.rs`, `tests/adversary_d243_u1.rs`, `tests/chart.rs`, new `tests/golden/credential-free-http-egress.yaml` — cited
-- **Files (ESS):** `ess/domains/resource.yaml:403-430,1038-1147` (`AdmissionRefusalReason`, `AdmitLoomAgent`), `ess/scenarios/resource-admission/{config.yaml,resources/boundary-egress-namespace.yaml}`, three new scenarios, `ess/ess-inputs.yaml:94-98` — cited
-- **Files (chart):** `charts/loom-agents/values.yaml:17`, `charts/loom-agents/templates/configmap.yaml:36`, `Taskfile.yml:96` (`chart-check` overrides) — cited
-- **Files (resource files of the three new scenarios):** `ess/scenarios/resource-admission/resources/{boundary-egress-unbound,boundary-egress-not-allowed,boundary-http-egress-allowed}.yaml` — cited (named by the story)
-- **Symbols:** `Reason::BoundaryEgressNamespace`/`BoundaryEgressHost` (`admission.rs:1467,1475`), `admission::cluster_service` (`:1203`; `ClusterService.namespace` at `:1167`), `Config.allowed_boundary_upstreams`, `AllowedUpstream` (`config.rs:118`), `RELAYS` (`render.rs:245`), `HttpMethod` (`ess/domains/agent.yaml:498`), `Binding.bearer_env` (`generated/rust/loom/src/agent.rs:245`) — cited
-- **Symbols (new):** `BoundaryEgressUnbound`, `BoundaryEgressNotAllowed`, `config::AllowedHttpEgress`, `allowedBoundaryHttpEgress` — cited (the story names them; none exists yet)
-- **Also likely:** `crates/loom-conformance/src/admission.rs:116` reads the configuration through `Config::parse`, so it needs no edit once `config.rs` has the member — inferred
-- **Documents:** `website/docs/reference/operator-cli.md` (`--config` row at `:36`, new read-path sentence), `AGENTS.md` § Operator (`:1225-1228` holds the egress rule) and § Resource (boundary paragraph at about `:1027`), `CHANGELOG.md` — cited
-- **Confidence:** high — the story names files, lines and symbols, and I checked each cite against the tree (the defects below are the exceptions).
-- **Would collide with** (`depends_on` read from `aep plan artifact graph --format json`):
-  - `story:send-input-in-the-declared-shape` on `ess/ess-inputs.yaml`. It `depends_on` this story, so the edge orders them. — cited
-  - `story:agent-selects-the-connectors-relay` on `admission.rs`, `tests/render.rs`, `ess/ess-inputs.yaml`. It `depends_on` this story, so the edge orders them. — cited
-  - `story:credential-free-workspace-isolation` (draft) on `admission.rs`, `tests/render.rs`, AGENTS.md § Operator. **No edge.** The story's "Out of scope" says so ("the second to land rebases"). — cited
-  - `story:egress-by-host` (draft) on `render.rs` (NetworkPolicy), `ess/domains/resource.yaml` and `charts/loom-agents`. **No edge** (it decomposes `epic:loom-agent-command-variant`), and this story does not mention it. — cited from its `path:` scope
-  - `story:secret-files-several-secrets` (draft) on `admission.rs`, `render.rs`, `ess/domains/resource.yaml`. **No edge**, not mentioned. — cited
-  - `story:command-home-survives-pod-replacement` (draft) on `render.rs`, `admission.rs`, `ess/domains/resource.yaml`; its scope is inferred. **No edge**, not mentioned. — cited
-  - `ess/ess-inputs.yaml` is also a list append for `story:engine-configuration-document`, `story:autonomy-grant-table` and `story:decision-request-entity` (all draft, no edge). A trivial merge. — inferred
-  - `story:connectors-relay-client` shares no file with this one except `CHANGELOG.md`. — cited
-- **Safety fact:** admitted resources render unchanged because the new code runs only for an entry with a namespace beside a boundary. Today that is refused at `admission.rs:1473-1480`, so nothing rendered today reaches it. Render's `entries` is `&[]` whenever `upstreams` is non-empty (`render.rs:1180-1184`), and the story changes only that branch. Level 2, unproven.
+- **Primary surface:** `crates/loom-operator` — cited, 10 of the 61 changed files are under it (four in `src/`, six in `tests/`, one of them the new golden file); `ess/` holds 18 more (296 insertions, 7 deletions) and `generated/` 23
+- **Files (ESS sources):** `ess/domains/resource.yaml` (22 insertions, 4 deletions: `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed` after `BoundaryEgressNamespace`, `AdmitLoomAgent` an `external:` outcome for each, the `boundary-egress-namespace` outcome text widens, the comment above the enum gives the six checks in order), `ess/ess-inputs.yaml` (6 lines: six new scenarios listed), `ess/scenarios/resource-admission/config.yaml` (2 lines: `allowedBoundaryHttpEgress`), six new scenarios (`a-boundary-beside-an-allowed-http-egress-is-admitted`, `...-an-egress-namespace-the-configuration-does-not-give-is-refused`, `...-an-unbound-egress-namespace-is-refused`, `...-an-egress-in-the-model-route-namespace-is-refused`, `...-an-egress-namespace-without-a-selector-is-refused`, `...-an-egress-that-names-no-namespace-is-refused`), seven new resource files under `resources/` (`boundary-egress-not-allowed`, `boundary-egress-unbound`, `boundary-http-egress-allowed`, `boundary-egress-namespace-name`, `boundary-egress-unselected`, and in the new directory `resources/with-model-route/` `boundary-egress-model-route` and `config`) — cited; the existing scenario `a-boundary-beside-an-egress-namespace-is-refused.yaml` (comment only, 2 insertions, 1 deletion) and its resource `resources/boundary-egress-namespace.yaml` (the entry moves from namespace `monitoring` to `llm`, 3 insertions, 2 deletions)
+- **Files (generated output):** `generated/rust/loom/` — cited, 23 files (42 insertions, 28 deletions) rewritten by `ess synthesize --layout crate` (`task generate`): the contract digest line in each of 20 `src/*.rs` and in `Cargo.toml`, `PLAN.md` and `plan.json`, plus the two new reasons and two new outcomes in `src/resource.rs` (17 insertions, 3 deletions)
+- **Files (source):**
+  - `crates/loom-operator/src/admission.rs` (149 insertions, 12 deletions): new `fn boundary_http_egress` holds conditions 2 to 4, condition 1 now also closes the `modelRoute` URL's namespace and refuses an unreadable one, new `fn upstream_namespace`, `reason_spelling` gains two arms
+  - `crates/loom-operator/src/config.rs` (302 insertions, 2 deletions): `Config` gains `allowed_boundary_http_egress`, new `AllowedHttpEgress` and `SelectorLabel`, `Config::allowed_http_egress`, `Config::parse` reads each entry and refuses an upstream or `modelRoute` URL whose host names no namespace (`names_namespace`), `Config::builtin` sets the empty list
+  - `crates/loom-operator/src/render.rs` (24 insertions, 7 deletions): beside a boundary the NetworkPolicy keeps an egress entry that has no host, a namespace, a selector and an equal allowed entry, as a peer after DNS
+  - `crates/loom-operator/src/cli.rs` (13 insertions, 4 deletions): `RUN_HELP` and the `--config` doc name `allowedBoundaryHttpEgress` and the closed namespaces
+  - `crates/loom-conformance/src/admission.rs` (11 insertions, 2 deletions): the target reads the `config.yaml` beside a resource when its directory holds one
+- **Files (chart and tasks):** `charts/loom-agents/values.yaml` (1 line, `allowedBoundaryHttpEgress: []`), `charts/loom-agents/templates/configmap.yaml` (1 line), `Taskfile.yml` (6 lines, the `chart-check` overrides) — cited
+- **Files (new tests):**
+  - `crates/loom-operator/tests/security_w20261121w6_u2.rs` (585 lines, 12 `#[test]` cases: the two security passes' cases)
+  - `crates/loom-operator/tests/golden/credential-free-http-egress.yaml` (458 lines, the golden render of the example agent with one entry)
+  - the 18 new cases in `tests/render.rs` and the 4 in `src/config.rs` are counted below
+- **Files (existing tests):**
+  - `crates/loom-operator/tests/render.rs` (634 insertions, 14 deletions): 65 `#[test]` before, 83 after, so 18 new cases, among them `a_declared_http_egress_beside_a_boundary_is_admitted_and_rendered`, `a_credential_free_agent_with_an_http_egress_renders_as_its_golden_file`, eight `allowedBoundaryHttpEgress` match cases, `an_egress_in_the_model_route_namespace_is_refused`, `an_http_egress_adds_no_credential_variable_or_volume`; `a_namespace_egress_entry_beside_a_boundary_is_refused` now expects `BoundaryEgressNotAllowed` at the entry and `egress[0].selector` for the entry without a selector; the `allowing` helper sets the upstreams on a parsed `Config` instead of reading them
+  - `crates/loom-operator/tests/chart.rs` (54 insertions, 2 deletions): 9 `#[test]` before, 10 after; `OVERRIDES` grows from 18 to 24, the `Config` literals gain `allowed_boundary_http_egress`, one new case `the_values_reference_says_what_an_http_egress_entry_may_name`
+  - `crates/loom-operator/tests/admission_reasons.rs` (46 insertions, 9 deletions): `REFUSED` grows from 35 to 40 rows, `boundary-http-egress-allowed` joins the admitted fixtures, `answer` reads a `config.yaml` beside the fixture (4 `#[test]` before and after)
+  - `crates/loom-operator/tests/adversary_d243_u1.rs` (42 insertions, 7 deletions): `an_egress_namespace_entry_does_not_open_an_upstream_namespace_on_another_port` now carries a selector, a binding and an allow-list entry and asserts `BoundaryEgressNamespace` at the namespace instead of returning on any refusal; new helper `config_with` (5 `#[test]` before and after)
+  - `crates/loom-operator/src/config.rs` unit tests: 5 `#[test]` before, 9 after, 4 new
+- **Files (documents):** `AGENTS.md` (33 insertions, 14 deletions: § Operator and § Resource), `README.md` (13 insertions, 4 deletions), `CHANGELOG.md` (3 insertions: one `### Changed` bullet and two `**Breaking:**` bullets), `website/docs/reference/operator-cli.md` (12 insertions, 4 deletions), `website/docs/reference/ess/loom-resource.md` (9 insertions, 5 deletions, generated), `website/data/status.json` (1 line) — cited
+- **Symbols:**
+  - added (public, `b10x_loom_operator::config`): `AllowedHttpEgress` (`namespace`, `selector`, `port`), `SelectorLabel` (`name`, `value`), field `Config::allowed_boundary_http_egress`, method `Config::allowed_http_egress`
+  - added (generated, `b10x_loom_resource::model`): `AdmissionRefusalReason::BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`, `AdmitLoomAgentOutcome::BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`
+  - changed behaviour: `Config::parse` refuses an `allowedBoundaryUpstreams` or `modelRoute` URL whose host is no `<service>.<namespace>.svc[.cluster.local]`; `Config::builtin` gains the empty list; `admission::reason_spelling` gains two arms; the `BoundaryEgressNamespace` outcome text widens
+  - removed: none
+- **Not predicted and touched:** `crates/loom-operator/src/cli.rs`, `crates/loom-conformance/src/admission.rs` (the stored Scope says "inferred" it needs no edit, and the story's Files says "only if"), `crates/loom-operator/tests/security_w20261121w6_u2.rs`, four scenarios and three resource files (`a-boundary-beside-an-egress-in-the-model-route-namespace-is-refused`, `a-boundary-beside-an-egress-namespace-without-a-selector-is-refused`, `a-boundary-beside-an-egress-that-names-no-namespace-is-refused`, `a-boundary-beside-an-egress-namespace-is-refused` (comment), `resources/boundary-egress-namespace-name`, `resources/boundary-egress-unselected`, and the two files of `resources/with-model-route/`); documents `README.md` and `website/data/status.json` (the stored Scope names AGENTS.md, CHANGELOG.md and `operator-cli.md`), and the generated `website/docs/reference/ess/loom-resource.md` — cited
+- **Predicted and not touched:** none — cited; all 22 paths of the typed scope are in the diff
+- **Review:** `ls .engineering/planning/review-result | grep boundary-admits-declared-http-egress` shows two results, `-security-1.md` and `-security-2.md`, both red. `review-result:boundary-admits-declared-http-egress-security-1` (head `984ce66e`): F1 condition 1 ignored the `modelRoute` namespace (warning, confirmed), F2 an upstream URL with a short name read as no namespace (warning, infeasible), F3 the d243 adversary case tested nothing at the base (note, pre-existing), F4 no scenario for the selector refusal or an invalid namespace name (note), F5 AGENTS.md put the checks in the code's reverse order (note); 12 cases written, 2 red. `review-result:boundary-admits-declared-http-egress-security-2` (head `0c9d56e3`): F1, F4 and F5 closed, F2 closed at the configuration read; one finding left, F2-b, admission treats a URL with no readable namespace as no upstream there (warning, infeasible in the binary, introduced); fixed by `527a3147` ("condition 1 fails closed on an unreadable upstream namespace"), which neither review re-ran

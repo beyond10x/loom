@@ -4,7 +4,7 @@ id: story:decision-request-entity
 kind: story
 status: proposed
 title: loom.decision declares the decision request and its eight commands, and b10x-loom-decision applies them
-summary: 'The final SDC contract moved into Loom''s ESS: class ids, the decided case revision, one open request per record id, and the DecisionStore port with the records kept beside a request'
+summary: 'The final SDC contract moved into Loom''s ESS at ess/37, ordered Strength and AutonomyLevel kept: class ids, the decided case revision, one open request per record id, and the DecisionStore port with the records kept beside a request'
 tags:
 - sdc
 relations:
@@ -36,7 +36,7 @@ scope:
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/ess/loom-decision.domain-graph.json
-revision: 14
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -109,7 +109,7 @@ Changes from the SDC file:
   `open_for_record`, the Open or Escalated request the runtime found in the store for that key, if
   any. With `open_for_record` given, `Request` is refused `RecordKeyOpen` naming that request, and
   nothing is opened (answer g; the coordinator chose refusal over supersession). The SDC file
-  states this rule in prose only (`:546`; `~/beyond10x/sdc/docs/decisions.md:225-226`), so Loom
+  states this rule in prose only (`:546`; `~/beyond10x/sdc/docs/decisions.md:263-264`), so Loom
   enforces it here.
 - `EscalationSuppressedRecord` is declared: the request id, class, subject at revision, reasons,
   `best` if any, and the cause (`SuppressionCause`: `escalate`, `failure`, `withheld`, `veto`,
@@ -121,23 +121,48 @@ Changes from the SDC file:
   keep their commands.
 
 Format. Loom pins `ess` 0.96.0 since `story:ess-096-upgrade` (wave 2026-11-21-w5;
-`ess/ess-inputs.yaml:2`, `.github/workflows/check.yml:60`). The rest of this paragraph and the two
-lists under it were written for the 0.86.0 pin: whether the copy still stays at `ess/31` or follows
-the SDC file to `ess/37` is open and is settled by a revision of this story before a wave takes
-it. As written for 0.86.0: Loom pinned that release, and
-`story:ess-format-31` raises `ess/system.yaml` from `ess/25` to `ess/31` before this story; the
-SDC file declares `format: ess/37` and needs `ess 0.96` (`~/beyond10x/sdc/ess/system.yaml:1`,
-`~/beyond10x/sdc/ess/ess-inputs.yaml:2`). At `ess/31` the copy keeps, as the SDC file writes them:
+`ess/ess-inputs.yaml:2`, `.github/workflows/check.yml:60`), and `story:ess-format-37` raises
+`ess/system.yaml` from `ess/31` to `ess/37` before this story and changes nothing else. The SDC
+file declares `format: ess/37` and needs `ess 0.96` (`~/beyond10x/sdc/ess/system.yaml:1`,
+`~/beyond10x/sdc/ess/ess-inputs.yaml:2`), so the copy is made at the format of its source and
+keeps, as the SDC file writes them:
 
+- `ordered: true` on `Strength` (`~/beyond10x/sdc/ess/domains/decision.yaml:109`, variants
+  `none, weak, moderate, strong` at `:110`) and on `AutonomyLevel` (`:171`, variants `A0` to `A5`
+  at `:172`), valid from `ess/36` (0.91.1; `website/docs/reference/spec-versions.md:78` in
+  `~/beyond10x/ess` at tag `0.96.0`);
 - `[]` stored by `sets:` into the required lists `grounds` and `decision_reasons`
-  (`~/beyond10x/sdc/ess/domains/decision.yaml:446-447`, `:507`), valid from `ess/31` (0.69.0);
+  (`:446-447`, `:507`), valid from `ess/31` (0.69.0);
 - `coalesce(produced_record.record, "") == input.produced.record` in `already-recorded`
   (`:710`), a call on the left of a comparison, valid from `ess/29` (0.67.0).
 
-It drops one construct: `ordered: true` on `Strength` (`:109`) and `AutonomyLevel` (`:171`),
-which needs `ess/36` (0.91.1). Session `sdc` accepted the drop on 2026-11-21: no guard compares a
-strength or a level by order, and the partial order of holders is a rule of the grant table
-(`story:autonomy-grant-table`), not of the enum. So no guard of the copy changes.
+No construct of the SDC file is adapted or dropped for the format: `ess` 0.96.0 refuses a copy of
+`~/beyond10x/sdc/ess/` declaring `format: ess/31` at the two `ordered:` keys only
+(`unsupported_format_version`, naming `ess/36`) and validates it once they are removed, and the
+SDC file itself validates at `ess/37`. The changes listed above each rest on an answer of session
+`sdc`, none on the format.
+
+Session `sdc` decided on 2026-11-21 that the copy keeps `ordered: true` on both enums: the SDC
+compares both (an autonomy level at or above A5, a strength at or above a threshold), and a copy
+that drops the order is a second definition that can disagree with the source. This replaces its
+earlier choice, made while Loom pinned `ess` 0.86.0, which cannot read `ess/36`: stay at `ess/31`
+and drop `ordered: true` (`.engineering/drafts/e3-sdc-answers-6.md:9-11`).
+
+What the order changes at `ess` 0.96.0 (`~/beyond10x/ess`, tag `0.96.0`): a `min` or `max`
+measure over a field of the enum is admitted and reads the variant declared last as the greatest,
+and is refused as `type_mismatch` without the key
+(`crates/specify/ess-domain/src/view.rs:1084-1089`, `:1693-1709`); below `ess/36` the key is
+refused (`crates/specify/ess-domain/src/types.rs:1249-1270`); the compiled model carries
+`ordered: true` on the type (`crates/specify/ess-compiler/src/ir.rs:402-407`); and
+`ess verify diff` reports a flipped flag as `ordered-changed`
+(`crates/verify/ess-diff/src/diff.rs:748-753`). Nothing else changes. A guard's comparison reads
+no `ordered` flag (`crates/specify/ess-domain/src/expression.rs:3065`, `compare`), and the Rust
+generator writes every enum with `#[derive(Debug, Clone, Copy, PartialEq, Eq)]`, flag or no flag
+(`crates/generate/ess-synth/src/rust/items.rs:150-153`), so the generated `Strength` and
+`AutonomyLevel` have no `PartialOrd` and no guard of the copy changes. The SDC file uses neither
+order in its own declarations: its guards test strength by equality (`decision.yaml:277`, `:475`)
+and its views (`:892-983`) declare no `min` or `max`. What holds the copy's order to the source is
+the copy's variant lists, which a test holds to the SDC file's (Acceptance).
 
 Its code goes in its own modules of `crates/loom-decision`, so a later story adds a module and a
 `mod` line, not edits to this story's code.
@@ -145,31 +170,37 @@ Its code goes in its own modules of `crates/loom-decision`, so a later story add
 ## Why
 
 Item 4 of the request: the entity "as the contract, moved into Loom's ESS when it is taken"
-(`~/beyond10x/sdc/docs/decisions.md:313-315`). Loom's three ESS systems hold no decision-request
+(`~/beyond10x/sdc/docs/decisions.md:351-353`). Loom's three ESS systems hold no decision-request
 entity; Commission's `HumanDecisionRequest` is untyped JSON, "Commission's sources declare no
 structure for it" (`ess/commission/domains/responsibility.yaml:106-109`). Every later story of
 the epic reads or writes this entity, and the routing, file-store and inbox stories share the
 records kept beside a request, so the port that carries them is declared here. Session `sdc`
-chose on 2026-11-21 to raise Loom's main system to `ess/31` in its own story, keep `[]` and
-`coalesce` as written, and drop `ordered: true` (`.engineering/drafts/e3-sdc-answers-6.md`).
+decided on 2026-11-21 that a format story first raises Loom's main system to `ess/37`
+(`story:ess-format-37`) and that the copy keeps `ordered: true`, `[]` and `coalesce` as written.
+It replaced its earlier choice, `ess/31` with `ordered: true` dropped
+(`.engineering/drafts/e3-sdc-answers-6.md`), which the 0.86.0 pin forced.
 
 ## Waits on
 
-`story:ess-format-31`: `ess/system.yaml` at `ess/31`, which `[]` in `sets:` and the `coalesce`
-guard need; both stories change `ess/system.yaml`.
+`story:ess-format-37` (wave 2026-11-21-w6): `ess/system.yaml` at `ess/37`, which `ordered: true` on `Strength`
+and `AutonomyLevel` needs (from `ess/36`); both stories change `ess/system.yaml`. The two stories
+it named before are implemented at `9b4170fb`: `story:ess-format-31` (`ess/31`, which `[]` in
+`sets:` and the `coalesce` guard need) and `story:ess-096-upgrade` (the `ess` 0.96.0 pin).
 
 ## ESS first
 
 `ess/domains/decision.yaml`, declared in `ess/system.yaml` and listed in `ess/ess-inputs.yaml`:
-the types (with `DecisionClassId`, `EscalationSuppressedRecord` and `SuppressionCause`), entity,
-actors, errors (the fourteen of the SDC file at `00e3557`, `OptionOrAnswer` and `AnswerNotAllowed`
-included, and `RecordKeyOpen`), commands, events (the nine of the SDC file) and views above, under
-`format: ess/31`. The copy holds every declaration of the contract, its guards included: the goals
-ground source, the citation's `entry` and `digest`, the optional `Ground.supports`, and the free
-answer (`recommended_answer`, `decided_answer`, `Decide.answer`) with its two guards. The crate
-answers those guards as it answers every outcome. The behaviour behind the goals and answer
-members is `story:goals-grounds-and-free-answers`, whose tests hold the free-answer guards and add
-only Loom's own declarations to this file. On that commit `task drift` fails, and
+the types (with `DecisionClassId`, `EscalationSuppressedRecord` and `SuppressionCause`, and
+`Strength` and `AutonomyLevel` with `ordered: true`), entity, actors, errors (the fourteen of the
+SDC file at `00e3557`, `OptionOrAnswer` and `AnswerNotAllowed` included, and `RecordKeyOpen`),
+commands, events (the nine of the SDC file) and views above, under `format: ess/37`, which
+`story:ess-format-37` sets; this story adds only a `domains:` line to `ess/system.yaml`. The copy
+holds every declaration of the contract, its guards included: the goals ground source, the
+citation's `entry` and `digest`, the optional `Ground.supports`, and the free answer
+(`recommended_answer`, `decided_answer`, `Decide.answer`) with its two guards. The crate answers
+those guards as it answers every outcome. The behaviour behind the goals and answer members is
+`story:goals-grounds-and-free-answers`, whose tests hold the free-answer guards and add only
+Loom's own declarations to this file. On that commit `task drift` fails, and
 `crates/loom-decision/tests/decision_request.rs` and `crates/loom-conformance/src/decision.rs` do
 not compile.
 
@@ -228,8 +259,20 @@ not compile.
   beside an unknown request is refused `NoSuchRequest`.
 - `OpenDecisionsForPrincipal` lists Open and Escalated requests addressed to the principal and
   nothing else.
-- `ess/domains/decision.yaml` declares no `ordered:` key (a test reads the file), and
-  `ess/system.yaml` declares `format: ess/31`.
+- `crates/loom-decision/tests/decision_request.rs` reads `ess/domains/decision.yaml` and
+  `ess/system.yaml` from the repository and asserts that the declaration of
+  `loom.decision.Strength` carries `ordered: true` and the variants `none, weak, moderate, strong`
+  in that order, that the declaration of `loom.decision.AutonomyLevel` carries `ordered: true` and
+  the variants `A0, A1, A2, A3, A4, A5` in that order, and that `ess/system.yaml` declares
+  `format: ess/37`. The two lists are those of `~/beyond10x/sdc/ess/domains/decision.yaml:110`
+  and `:172` at `00e3557`, written into the test, since CI has no SDC checkout. The test fails
+  when either key is removed, two variants of either enum swap places, or the format is lowered.
+- `ess specify compile --path ess --format json` on the commit carries `"ordered": true` on
+  `types."loom.decision.Strength"` and `types."loom.decision.AutonomyLevel"` and on no other type
+  of `loom.decision`. That is the one place the order shows in generated output: the generated
+  `loom` crate declares both enums with `#[derive(Debug, Clone, Copy, PartialEq, Eq)]`, as it
+  declares every enum (`crates/generate/ess-synth/src/rust/items.rs:150-153` in `~/beyond10x/ess`
+  at tag `0.96.0`), and no code of this story compares a strength or a level by order.
 - A `Request` stores `grounds` and `decision_reasons` as empty lists, and a `Recommend` withheld
   stores `grounds` as an empty list (the `[]` of the SDC file's `sets:`).
 - `crates/loom-decision/Cargo.toml` names no Commission, Canon, executor, `llm` or Mandate crate
@@ -242,8 +285,9 @@ Durable storage (`story:decision-request-file-store`). Resolving a holder or val
 (`story:autonomy-grant-table`). The grounding check (`story:decider-port-and-grounding-check`).
 Computing the record key of a stop, and deciding when a suppressed escalation is kept
 (`story:decision-routing-by-holder`). Writing any Canon record. Any CLI command. The format
-raise (`story:ess-format-31`), an ESS toolchain change, and `ordered:` enums. A guide or a `website/data/status.json` entry: the crate is an internal
-library with no command.
+raise (`story:ess-format-37`), an ESS toolchain change, and any `min` or `max` measure or Rust
+order over `Strength` or `AutonomyLevel`. A guide or a `website/data/status.json` entry: the
+crate is an internal library with no command.
 
 ## Scope
 
@@ -261,6 +305,7 @@ Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the sto
 - **Documents:** none beyond the generated reference page. The story ships no guide, so `website/data/status.json` is not scoped (see "could not establish").
 - **Confidence:** high for the ESS files and the crate, which the story names. Medium for `loom-conformance/src/lib.rs` and the scenario path: the dispatch is a closed `match` over command ids that returns `unavailable` for an unknown command (`lib.rs:256-261`), so the new commands cannot pass without an arm.
 - **Would collide with:**
+  - `ess/system.yaml`: `story:ess-format-37` (wave 2026-11-21-w6) changes its `format:` line from `ess/31` to `ess/37`, and this story adds a `domains:` line — ordered, this story `depends_on` it.
   - `ess/system.yaml`, `ess/ess-inputs.yaml`: `story:hash-chained-run-log` (`loom.runlog`) — no `depends_on` path; `story:tree-run-command` (`loom.tree`) — no path; `story:engine-configuration-document` (`loom.engine`) — no path; `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`, `story:boundary-admits-declared-http-egress` (scenario lines in `ess-inputs.yaml`) — no path; `story:autonomy-grant-table` (`loom.autonomy`) — ordered, it `depends_on` this story.
   - `crates/loom-executor/tests/crate_names.rs`: `story:hash-chained-run-log`, `story:tree-run-command` — no path. A merge of any two of them must both bump `[..; 29]` and add a tuple.
   - `crates/loom-conformance/src/lib.rs`: `story:tree-run-command`, `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`, `story:revalidation-membership-conformance` — no path (the first three also touch `loom-conformance/Cargo.toml`, except `revalidation-membership-conformance`, which touches `lib.rs` only).

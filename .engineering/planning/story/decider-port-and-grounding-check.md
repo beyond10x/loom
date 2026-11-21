@@ -24,7 +24,7 @@ scope:
   path: crates/loom-decision/tests/grounding_check.rs
 - confidence: cited
   path: ess/domains/decision.yaml
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:19Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -64,9 +64,9 @@ transitions:
   subject revision is not current ("supersede the request"); no ground; an option that is not one
   of the request's; strength `none`; a default on silence that is not strong; a ground that
   supports a letter that is not an option; no ground supporting the chosen option; any citation
-  refused. Strength is tested by membership (`none`, `strong`), never by order: Loom's `Strength`
-  carries no order: the Loom copy drops `ordered: true`, which `ess/31` does not have
-  (`story:decision-request-entity`).
+  refused. Strength is tested by membership (`none`, `strong`), never by order: the Loom copy
+  keeps `ordered: true` on `Strength` (`story:decision-request-entity`), and the Rust enum
+  `ess` 0.96.0 generates for it carries no order (no `PartialOrd`).
 - An `Escalate` short-circuits: the report is `no recommendation: no option proposed (the
   proposer escalated)` and nothing else, where the script would add "no ground cited", "strength
   none" and "no ground supports null" (`decision-grounds.sh:89-95`). A failure gives

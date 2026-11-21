@@ -10,7 +10,7 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 17
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 11, decided_on: {"recorded":{"review_outcome":12}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -445,7 +445,9 @@ Session `sdc`, 2026-11-21: the relayed request, nine answers, the second answers
 `escalate_when` and the budget and limit requests, the third message with the final contract, the
 fourth message on a decider's review independence, the fifth message on the four points of the
 e3r3 ledger, the sixth message choosing `ess/31` for Loom's main system
-(`.engineering/drafts/e3-sdc-answers-6.md`, with the probe `e3-ess-format-probe.md`), and the
+(`.engineering/drafts/e3-sdc-answers-6.md`, with the probe `e3-ess-format-probe.md`), the
+message deciding wave 2026-11-21-w6, which raises it to `ess/37` so that the copy of the
+decision domain keeps `ordered: true` (`approval-record:loom-wave-2026-11-21-w6`), and the
 accepted design calls (an Escalate moves the existing request; a Supersede of
 a Decided request does not revoke the Canon record; the host hands in eligible principals; the
 inbox is a store plus CLI and SDK calls). Session `canon`, 2026-11-21: the three Canon stories

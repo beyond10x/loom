@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T12:43:00Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-commands-run-confined",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "correction 2 (0b0a50ce): CHANGELOG states where a bound program starts (Breaking) and the text of a program that cannot be started; the reviewer's case committed in a88871c7",
+    "review": "review-result:bound-commands-run-confined-security-2",
+    "outcome": "fixed"
+  }
+}

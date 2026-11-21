@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T11:18:28Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-format-37",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "story revision 4 (two commits; checks against the parent commit), epic revision 17 (story 0b, ess/37), and the reworded clauses of story:autonomy-grant-table and story:decider-port-and-grounding-check",
+    "review": "review-result:ess-format-37-design-1",
+    "outcome": "fixed"
+  }
+}

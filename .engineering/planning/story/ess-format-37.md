@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-format-37
 kind: story
-status: active
+status: implemented
 title: Loom's main ESS system declares ess/37 on the pinned ess 0.96.0, no generated file changed
 summary: ess/system.yaml from ess/31 to ess/37 in two commits; compiled model, suite and generated files keep their bytes against the parent commit
 tags:
@@ -14,10 +14,11 @@ relations:
 scope:
 - confidence: cited
   path: ess/system.yaml
-revision: 8
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T11:15:51Z", actor: "agent:sdc", revision: 7, decided_on: {"recorded":{"review_outcome":3}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 - {from: "proposed", to: "active", at: "2026-11-21T11:16:57Z", actor: "agent:sdc", revision: 8, decided_on: {"recorded":{"review_outcome":3}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w6"}
+- {from: "active", to: "implemented", at: "2026-11-21T12:56:31Z", actor: "agent:sdc", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w6"}
 ---
 ## Outcome
 
@@ -129,39 +130,16 @@ that name `ess/31` as a reason. Any change of a command's outcome.
 
 ## Scope
 
-## Scope
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w6 from the unit's commits (`git diff --stat f51c2141 d3fa9878`: 2 files, 2 insertions, 1 deletion). Every line is cited from that diff.
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree)
-or **inferred** (a reading that could be wrong).
-
-- **Primary surface:** `ess/system.yaml`: cited (story Outcome; probe diff is `format: ess/31`
-  -> `ess/37` at line 1 only)
-- **Files:** `ess/system.yaml:1` (one line): cited; `CHANGELOG.md` (one `### Changed` bullet
-  under `[Unreleased]`, `CHANGELOG.md:13`, `:28`): cited (story Acceptance)
-- **Symbols:** none; the change is a format declaration, no code symbol: cited
-- **Also likely:** none: inferred (the story's own commit is exactly the two files above)
-- **Documents:** `CHANGELOG.md` only; read-only checks on `ess/ess-inputs.yaml:2`,
-  `ess/intake/system.yaml:1` (`ess/26`), `ess/commission/system.yaml:1` (`ess/22`): cited
-- **Confidence:** high: the story names the file and a probe diff confirms the one-line change
-- **Would collide with** (all on `ess/system.yaml`; cited, from `aep plan artifact graph
-  --format json`, and the edge added on 2026-11-21 after this section was derived):
-  - `story:decision-request-entity` (proposed): scope cites the file (one `domains:` line).
-    Ordered after this story by its `depends_on: story:ess-format-37`.
-  - `story:autonomy-grant-table` (proposed): scope cites the file. Ordered after this story
-    through `story:decision-request-entity`.
-  - `story:tree-run-command` (proposed): scope cites the file (`domains:` line). Unordered.
-  - `story:observe-executor-reads-workspace-files` (proposed): scope cites the file.
-    Unordered.
-  - `story:gates-document-evaluated-in-the-governor` (proposed): scope cites the file.
-    Unordered.
-  - `story:engine-configuration-document` (draft): body only, `:74` declares `loom.engine` in
-    the file; no scope entry. Unordered.
-  - Ordered, so no collision: `story:ess-format-31` (implemented) is an ancestor of this story,
-    as is `story:ess-096-upgrade` (implemented).
-  - The other stories' edits are `domains:` lines (`ess/system.yaml:10-24`), this one is line 1
-    with eight lines between, so a textual merge is likely clean: inferred
-- **Safety fact:** no test asserts a main-system format string, so the raise breaks none. Only
-  `ess/system.yaml:1` carries `format: ess/31` in `ess/`. Format strings in test code are
-  `ess/20` (`crates/loom-commission/tests/ess_gate.rs:636`, `crates/loom-commission-xtask/tests/checks.rs:732`)
-  and the `ess/22` prose comments: step 2 (`git grep`), unproven (byte-identical compile and
-  suite output rests on the story's probe, not re-run)
+- **Primary surface:** `ess/system.yaml` — cited, 1 of the 2 changed files is under `ess/` (the other is `CHANGELOG.md`)
+- **Files (ESS sources):** `ess/system.yaml` (1 line changed, 1 insertion and 1 deletion: line 1 `format: ess/31` becomes `format: ess/37`; commit `8b2535c1`) — cited
+- **Files (generated output):** none changed — cited; `git diff --numstat f51c2141 d3fa9878` names no path under `generated/`, `website/`, `deploy/`, `charts/` or `docs/`
+- **Files (source):** none — cited; no file under `crates/` or `src/`
+- **Files (new tests):** none — cited
+- **Files (existing tests):** none — cited
+- **Files (documents):** `CHANGELOG.md` (1 line added under `[Unreleased]` `### Changed`, at line 42 of the file: the raise of `ess/system.yaml` to `ess/37` on `ess` 0.96.0, naming `story:ess-format-37`; commit `d3fa9878`) — cited
+- **Symbols:** none added, changed or removed — cited; the change is a format declaration
+- **Not predicted and touched:** none — cited; both changed files are named by the stored Scope (`ess/system.yaml` typed, `CHANGELOG.md` in its Files bullet)
+- **Predicted and not touched:** none — cited; the read-only checks the stored Scope names (`ess/ess-inputs.yaml:2`, `ess/intake/system.yaml:1`, `ess/commission/system.yaml:1`) are untouched, as stated
+- **Review:** `ls .engineering/planning/review-result | grep ess-format-37` shows `ess-format-37-acceptance-1.md` (needs-revision: suite bytes, one commit), `ess-format-37-acceptance-2.md` (approve), `ess-format-37-design-1.md` (needs-revision: numbers tied to `9b4170fb`, one commit, two sibling stories' reasons) and `ess-format-37-design-2.md` (approve). These are plan-time critic results; no security review was listed for this unit, and the coordinator read both commits (`8b2535c1`, `d3fa9878`)
