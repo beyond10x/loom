@@ -24,10 +24,15 @@
 //! It writes the V1 contract of that stream, `docs/contracts/run-events-v1.json`
 //! ([`run_events::contract`]), and in check mode compares the committed one with the declaration,
 //! failing on a difference that breaks a reader ([`run_events::differences`]).
+//!
+//! It writes the contract of the run log a case keeps, `docs/contracts/run-log-v1.json`
+//! ([`run_log::contract`]), from the `loom.runlog` declaration, and in check mode fails unless
+//! the committed file is exactly that.
 mod cli;
 mod crates;
 mod graph;
 mod run_events;
+mod run_log;
 
 use std::{
     collections::BTreeMap,
@@ -523,6 +528,30 @@ fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
     Ok(())
 }
 
+/// Writes the run log contract ([`run_log::CONTRACT`]) from the `loom.runlog` declaration, or,
+/// with `check`, fails unless the committed file is exactly what the declaration gives.
+fn run_log_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
+    let model = compile(ess, &root.join(run_log::SYSTEM))?;
+    let declared = run_log::text(&model)?;
+    let path = root.join(run_log::CONTRACT);
+    if !check {
+        fs::write(&path, declared).with_context(|| format!("writing {}", run_log::CONTRACT))?;
+        println!("{}: written", run_log::CONTRACT);
+        return Ok(());
+    }
+    match fs::read_to_string(&path) {
+        Ok(found) if found == declared => {
+            println!("{}: the declared loom.runlog", run_log::CONTRACT);
+            Ok(())
+        }
+        Ok(_) => bail!(
+            "{} is stale or edited; run `task docs-generate`",
+            run_log::CONTRACT
+        ),
+        Err(_) => bail!("{} is missing; run `task docs-generate`", run_log::CONTRACT),
+    }
+}
+
 /// Generated pages that stand alone, keyed by path relative to the repository root.
 fn single_pages(root: &Path) -> Result<Pages> {
     Ok(Pages::from([
@@ -606,6 +635,7 @@ fn main() -> Result<()> {
                 }
             }
             run_events_contract(&root, &ess, check)?;
+            run_log_contract(&root, &ess, check)?;
         }
         Action::Provenance { site, commit } => {
             write_provenance(&site, &commit)?;

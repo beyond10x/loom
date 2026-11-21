@@ -728,6 +728,7 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-bindings` | Decodes the `loom.bindings/1` document, which declares per protocol action its executor, result table, tools, budget and timeout, and refuses at load each defect against the compiled protocol, naming the action and the member; executes nothing |
 | `b10x-loom-operator` | The `b10x-loom-operator` controller: reconciles a `LoomAgent` into a pod and its children, and renders them; installed by `charts/loom-agents` |
 | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
+| `b10x-loom-runlog` | The run log of a case, `runlog-<stem>.jsonl` beside its case file: one JSON line per event, each naming the SHA-256 of the line before, appended atomically under the store's lock; its reader refuses a cut, shortened, reordered or changed log, naming the first line that fails |
 | `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |
 | `b10x-loom-intake-router`, `-references`, `-slice` | Route an intent to a protocol, extract its references, and run the local slice over a git work tree |

@@ -143,7 +143,10 @@ fn log_with(name: &str, count: usize) -> (RunLog, PathBuf) {
 
 /// The lines of `bytes`, each without its line feed; a last line without one is kept.
 fn lines(bytes: &[u8]) -> Vec<Vec<u8>> {
-    let mut lines: Vec<Vec<u8>> = bytes.split(|byte| *byte == b'\n').map(<[u8]>::to_vec).collect();
+    let mut lines: Vec<Vec<u8>> = bytes
+        .split(|byte| *byte == b'\n')
+        .map(<[u8]>::to_vec)
+        .collect();
     if bytes.ends_with(b"\n") {
         lines.pop();
     }
@@ -176,7 +179,13 @@ fn refused(result: Result<Vec<RunLogLine>, RunLogRefused>) -> (RunLogRefusal, i6
 fn temporaries(dir: &Path) -> Vec<String> {
     fs::read_dir(dir)
         .expect("the store directory reads")
-        .map(|entry| entry.expect("an entry").file_name().to_string_lossy().into_owned())
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .filter(|name| name.starts_with(".tmp-"))
         .collect()
 }
@@ -203,7 +212,10 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
             "seq is gapless from 0"
         );
         if index == 0 {
-            assert!(!object.contains_key("prev"), "line 0 names no previous line");
+            assert!(
+                !object.contains_key("prev"),
+                "line 0 names no previous line"
+            );
         } else {
             assert_eq!(
                 object.get("prev").and_then(serde_json::Value::as_str),
@@ -221,7 +233,11 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     for (index, line) in read.iter().enumerate() {
         assert_eq!(line.seq, i64::try_from(index).expect("small"));
         assert_eq!(line.at, at(index));
-        assert_eq!(line.event, event(index), "line {index} holds the event appended");
+        assert_eq!(
+            line.event,
+            event(index),
+            "line {index} holds the event appended"
+        );
         let prev = (index > 0).then(|| sha256_hex(&raw[index - 1]));
         assert_eq!(line.prev, prev);
     }
@@ -269,7 +285,10 @@ fn a_changed_byte_in_line_3_is_refused_broken_chain_naming_line_4() {
     fs::write(&path, joined(&changed)).expect("writes");
     match log.read(CASE) {
         Err(RunLogError::Refused(refused)) => {
-            assert_eq!((refused.refusal, refused.line), (RunLogRefusal::BrokenChain, 4));
+            assert_eq!(
+                (refused.refusal, refused.line),
+                (RunLogRefusal::BrokenChain, 4)
+            );
         }
         other => panic!("the reader took a changed log: {other:?}"),
     }
@@ -353,14 +372,20 @@ fn a_prev_on_line_0_or_none_on_a_later_line_is_a_broken_chain() {
             1,
         )
         .into_bytes();
-    assert_eq!(refused(verify(&joined(&first))), (RunLogRefusal::BrokenChain, 0));
+    assert_eq!(
+        refused(verify(&joined(&first))),
+        (RunLogRefusal::BrokenChain, 0)
+    );
 
     let mut later = raw.clone();
     let text = String::from_utf8(later[2].clone()).expect("utf-8");
     let prev = format!(",\"prev\":\"{}\"", sha256_hex(&raw[1]));
     assert!(text.contains(&prev), "line 2 names line 1");
     later[2] = text.replacen(&prev, "", 1).into_bytes();
-    assert_eq!(refused(verify(&joined(&later))), (RunLogRefusal::BrokenChain, 2));
+    assert_eq!(
+        refused(verify(&joined(&later))),
+        (RunLogRefusal::BrokenChain, 2)
+    );
 }
 
 #[test]
@@ -383,9 +408,21 @@ fn an_append_to_a_log_that_does_not_verify_is_refused_and_changes_no_byte() {
     let cut = bytes[..start + raw[5].len() / 2].to_vec();
 
     for (tampering, tampered, expected) in [
-        ("a changed byte", joined(&changed), (RunLogRefusal::BrokenChain, 4)),
-        ("a deleted line", joined(&deleted), (RunLogRefusal::SequenceGap, 3)),
-        ("swapped lines", joined(&swapped), (RunLogRefusal::SequenceGap, 3)),
+        (
+            "a changed byte",
+            joined(&changed),
+            (RunLogRefusal::BrokenChain, 4),
+        ),
+        (
+            "a deleted line",
+            joined(&deleted),
+            (RunLogRefusal::SequenceGap, 3),
+        ),
+        (
+            "swapped lines",
+            joined(&swapped),
+            (RunLogRefusal::SequenceGap, 3),
+        ),
         ("a cut last line", cut, (RunLogRefusal::CutLine, 5)),
     ] {
         fs::write(&path, &tampered).expect("writes");
@@ -473,8 +510,16 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
             .push(index.parse().expect("an index"));
     }
     let expected: Vec<usize> = (0..LINES_PER_PROCESS).collect();
-    assert_eq!(seen.get("first"), Some(&expected), "each process's lines in its order");
-    assert_eq!(seen.get("second"), Some(&expected), "each process's lines in its order");
+    assert_eq!(
+        seen.get("first"),
+        Some(&expected),
+        "each process's lines in its order"
+    );
+    assert_eq!(
+        seen.get("second"),
+        Some(&expected),
+        "each process's lines in its order"
+    );
 }
 
 #[test]
@@ -497,14 +542,25 @@ fn a_crash_at_each_step_of_an_append_leaves_n_or_n_plus_1_lines_that_verify() {
             })
             .expect("a crash is no error of the append");
         assert_eq!(stopped, None, "{step:?}: the append stopped there");
-        assert_eq!(seen.last(), Some(&step), "{step:?}: the append reached the step");
+        assert_eq!(
+            seen.last(),
+            Some(&step),
+            "{step:?}: the append reached the step"
+        );
 
         let after = fs::read(&path).expect("the log still reads");
         let verified = verify(&after).expect("the log verifies after the crash");
         if step.renamed() {
-            assert_eq!(verified.len(), EXISTING + 1, "{step:?}: the new line is whole");
+            assert_eq!(
+                verified.len(),
+                EXISTING + 1,
+                "{step:?}: the new line is whole"
+            );
             assert_eq!(verified[EXISTING].event, event(EXISTING));
-            assert!(after.starts_with(&before), "{step:?}: earlier lines unchanged");
+            assert!(
+                after.starts_with(&before),
+                "{step:?}: earlier lines unchanged"
+            );
         } else {
             assert_eq!(after, before, "{step:?}: before the rename no byte changed");
             assert_eq!(
@@ -524,8 +580,16 @@ fn a_crash_at_each_step_of_an_append_leaves_n_or_n_plus_1_lines_that_verify() {
             .append(CASE, at(EXISTING + 1), event(EXISTING + 1))
             .expect("the log takes the next append after a crash");
         let lines_now = reopened.read(CASE).expect("verifies");
-        let expected = if step.renamed() { EXISTING + 2 } else { EXISTING + 1 };
-        assert_eq!(lines_now.len(), expected, "{step:?}: n or n+1 lines, then one more");
+        let expected = if step.renamed() {
+            EXISTING + 2
+        } else {
+            EXISTING + 1
+        };
+        assert_eq!(
+            lines_now.len(),
+            expected,
+            "{step:?}: n or n+1 lines, then one more"
+        );
         assert_eq!(lines_now.last(), Some(&next));
     }
 }
@@ -548,7 +612,10 @@ fn an_append_does_not_return_while_the_governors_lock_is_held() {
                 appended.recv_timeout(Duration::from_millis(500)).is_err(),
                 "the append returned while the governor held the lock"
             );
-            assert!(!path.exists(), "nothing was written while the lock was held");
+            assert!(
+                !path.exists(),
+                "nothing was written while the lock was held"
+            );
             handle
         })
         .expect("the governor takes the lock");
@@ -580,11 +647,18 @@ fn the_log_of_a_case_id_over_100_bytes_sits_beside_its_case_sha256_file() {
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("the run log opens over the same directory");
-    log.append(&id, at(0), event(0)).expect("the append is taken");
+    log.append(&id, at(0), event(0))
+        .expect("the append is taken");
 
     let mut names: Vec<String> = fs::read_dir(&dir)
         .expect("reads")
-        .map(|entry| entry.expect("an entry").file_name().to_string_lossy().into_owned())
+        .map(|entry| {
+            entry
+                .expect("an entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .filter(|name| !name.starts_with('.'))
         .collect();
     names.sort();
