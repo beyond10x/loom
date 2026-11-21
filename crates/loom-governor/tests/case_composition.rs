@@ -437,7 +437,6 @@ fn evaluate_equals_the_governor(label: &str, records: &[Value]) -> ClaimValue {
         .find(|claim| claim.claim == "findings.resolved")
         .expect("findings.resolved")
         .value
-        .clone()
 }
 
 /// Two records for one child: whichever comes first applies and the later one is set aside, by
