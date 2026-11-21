@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:canon-0-9-0-pin
 kind: story
-status: active
+status: implemented
 title: Loom builds on Canon 0.9.0 and the engineering-protocols tag built on it, one copy of each
 summary: case_open, case_outcome and the children form load; on engineering-protocols tag 0.16.0, which pins both Canon crates at 0.9.0
 tags:
@@ -15,15 +15,27 @@ relations:
 - depends_on: story:bindings-document
 scope:
 - confidence: cited
-  path: crates/loom-bindings/Cargo.toml
+  path: AGENTS.md
 - confidence: cited
-  path: crates/loom-executor/tests/intake_import.rs
+  path: CHANGELOG.md
+- confidence: cited
+  path: Cargo.lock
+- confidence: cited
+  path: crates/loom-bindings/Cargo.toml
 - confidence: cited
   path: crates/loom-governor/Cargo.toml
 - confidence: cited
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
   path: crates/loom-governor/tests/adversary2_governor.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w1_u3.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w1_u3_pass2.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w2_u1.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w2_u1_pass2.rs
 - confidence: cited
   path: crates/loom-governor/tests/canon_decision_bytes.rs
 - confidence: cited
@@ -42,18 +54,17 @@ scope:
   path: crates/loom-protocols/src/lib.rs
 - confidence: cited
   path: crates/loom-protocols/tests/adversary_w8_pin.rs
-- confidence: inferred
-  path: crates/loom-protocols/tests/catalog.rs
 - confidence: cited
-  path: crates/loom-xtask/tests/pinned_consumer.rs
+  path: docs/contracts/loom-action-selection.md
 - confidence: cited
   path: website/docs/guides/move-to-loom.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 13
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "active", to: "implemented", at: "2026-11-21T04:16:30Z", actor: "human:timo", revision: 16, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}}
 ---
 ## Outcome
 
@@ -162,31 +173,16 @@ this story any more.
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w2 from the unit's commits (`git diff --stat 61fd500b c9816cfd`: 23 files, 1217 insertions, 57 deletions). Every line is cited from that diff.
 
-- **Primary surface:** the `b10x-canon` and `b10x-canon-engineering` pins in the five manifests that name them, plus `crates/loom-governor/src/lib.rs` — cited
-- **Files (manifests):** `crates/loom-governor/Cargo.toml:15,19`, `crates/loom-protocols/Cargo.toml:14,15`, `crates/loom-intake-slice/Cargo.toml:18`, `crates/loom-intake-router/Cargo.toml:15` — cited (story Acceptance; tree lines read). Only governor and protocols name `b10x-canon` today. Slice and router name only `b10x-canon-engineering`.
-- **Files (fifth manifest):** `crates/loom-bindings/Cargo.toml` — cited (story Order paragraph). The path does not exist in this tree, because `story:bindings-document` creates it.
-- **Files (code):** `crates/loom-protocols/src/lib.rs:169` (entry `revision: "0.15.2"`), `crates/loom-governor/src/lib.rs:129-132` (`# Dependencies` doc comment naming Canon `0.8.0` and engineering `0.15.2`) — cited
-- **Files (tests):** `crates/loom-protocols/tests/adversary_w8_pin.rs` (comments at :125 and :150 name `0.15.2`), `crates/loom-governor/tests/canon_decision_bytes.rs:8` — cited
-- **Files (tests, must keep passing):** `crates/loom-executor/tests/intake_import.rs`, `crates/loom-xtask/tests/pinned_consumer.rs` — cited. The story names them as single-copy tests, and I found no tag literal in either, so they probably need no edit.
-- **Files (tests, compile break):** `crates/loom-governor/tests/adversary2_governor.rs:685` builds `EvidenceRecord` with a struct literal. Canon 0.9.0 adds `child_case: Option<CaseId>` (`~/beyond10x/canon/CHANGELOG.md`, "Breaking for Rust consumers"). The literal therefore will not compile and needs `child_case: None` — cited (literal read in tree, break read in Canon's changelog)
-- **Files (test doc comments):** `crates/loom-governor/tests/governed_case.rs:9`, `crates/loom-governor/tests/incident_response_slice.rs:23` — inferred. They name `0.15.2` in prose, and the 0.8.0 pin commit `8a99f26c` edited the same two files.
-- **Files (tests, catalog list):** `crates/loom-protocols/tests/catalog.rs` — inferred. The 0.15 pin edited it because the catalog changed, and the engineering tag built on 0.9.0 may change the catalog again.
-- **Files (new test):** one new file under `crates/loom-governor/tests/`. It holds the `case_open` and `children` registration through `CanonGovernor::with_protocol_yaml` and `ProtocolCatalog::add_yaml`, plus the `case_outcome` records. — inferred. The story names no path. `crates/loom-governor/tests/adversary_w20261021w7_completion.rs:81-93` already uses both entry points together.
-- **Symbols:** `ProtocolEntry::model`, `CanonGovernor::with_protocol_yaml`, `ProtocolCatalog::add_yaml`, `ProtocolCatalog::engineering`, `canon_record` (`crates/loom-governor/src/lib.rs:1699`), `EvidenceRecord`, `check_evidence` (`:1363`) — cited
-- **Also likely:** none beyond the lines above.
-- **Documents:** `website/docs/reference/sdk-stability.md:69` (pin table row `| 0.57.2 | 0.8.0 | 0.15.2 |`), `website/docs/guides/move-to-loom.md:49,57` — cited. Whether the table gets a new row or the current row changes is inferred, since the release owns that row.
-- **House-rule files:** `AGENTS.md` (§ Governor, lines 506-509; § Connectors, lines 511-516), `CHANGELOG.md` (`**Breaking:**` bullet), `Cargo.lock`.
-- **Confidence:** high for the manifests, `lib.rs` pins, docs and the one compile break, because the story and the tree both state them. Medium for the new test's path and for any change to `crates/loom-governor/src/lib.rs` beyond the doc comment (see "could not establish").
-- **Would collide with:** any unit touching these surfaces:
-  - `Cargo.lock`, `AGENTS.md` and `CHANGELOG.md`.
-  - The `[dependencies]` of `crates/loom-intake-slice/Cargo.toml`, `crates/loom-governor/Cargo.toml`, `crates/loom-protocols/Cargo.toml`, `crates/loom-intake-router/Cargo.toml` and `crates/loom-bindings/Cargo.toml`.
-  - `crates/loom-governor/src/lib.rs` (evaluation and evidence code).
-  - `crates/loom-governor/tests/adversary2_governor.rs`.
-  - The pin table in `website/docs/reference/sdk-stability.md`.
-  - `crates/loom-protocols/tests/adversary_w8_pin.rs`.
-
-  The story's Order paragraph already names `story:substrate-0-21-pin`, `story:deterministic-default-selector` and `story:bindings-document`.
-- **Safety fact:** every `b10x-canon` consumer that builds Canon values by struct literal is in `crates/loom-governor/tests/adversary2_governor.rs:685` (`EvidenceRecord`). The production path (`canon_record`, `lib.rs:1699`) goes through `evidence_from_value`, so it needs no literal change. No other `Action {` or `Predicate::` literal over Canon types turned up in `crates/` — step 3 (`git grep`), unproven
+- **Primary surface:** `crates/loom-governor` — cited, 11 of the 23 changed files are under it (manifest, `src/lib.rs`, three new test files, six existing test files)
+- **Files (manifests):** `crates/loom-governor/Cargo.toml` (4 lines), `crates/loom-protocols/Cargo.toml` (4 lines), `crates/loom-intake-slice/Cargo.toml`, `crates/loom-intake-router/Cargo.toml`, `crates/loom-bindings/Cargo.toml` (2 lines each) — cited, `b10x-canon` moves to tag `0.9.0` (`8f1f4527`) and `b10x-canon-engineering` to tag `0.16.0` (`70e6eff4`)
+- **Files:** `Cargo.lock` — cited, 20 lines changed for the two new revisions
+- **Files:** `crates/loom-governor/src/lib.rs` — cited, 79 lines: the `# Dependencies` doc names the two versions, the claim mapping handles Canon 0.9.0's `children` form, and `evaluate` keeps the first `case_outcome` record per child among the records Canon takes alone, in one pass, and sets later ones aside
+- **Files:** `crates/loom-protocols/src/lib.rs` — cited, 2 lines: the engineering entry's `revision`
+- **Files (new tests):** `crates/loom-governor/tests/case_composition.rs` (512 lines, the story's case-composition test), `crates/loom-governor/tests/adversary_w20261121w2_u1.rs` (346 lines) and `crates/loom-governor/tests/adversary_w20261121w2_u1_pass2.rs` (257 lines), the two adversary passes' cases, committed unchanged
+- **Files (existing tests):** `crates/loom-governor/tests/adversary2_governor.rs` (1 line, the `EvidenceRecord` literal gains `child_case`), `crates/loom-governor/tests/adversary_w20261121w1_u3.rs` (3 lines), `crates/loom-governor/tests/adversary_w20261121w1_u3_pass2.rs`, `crates/loom-governor/tests/canon_decision_bytes.rs`, `crates/loom-governor/tests/governed_case.rs`, `crates/loom-governor/tests/incident_response_slice.rs` (2 lines each), `crates/loom-protocols/tests/adversary_w8_pin.rs` (7 lines) — cited
+- **Files (documents):** `AGENTS.md` (15 lines: the pins in § Governor and the `evaluate` set-aside rule for a second `case_outcome` record), `CHANGELOG.md` (2 lines: the move and the reserved kind `case_outcome`), `docs/contracts/loom-action-selection.md` (3 lines), `website/docs/guides/move-to-loom.md` (4 lines), `website/docs/reference/sdk-stability.md` (1 line, the pin table) — cited
+- **Symbols:** no public symbol added or removed — cited; `loom_governor::evaluate` keeps its signature, and its documented behaviour gains the first-per-child rule
+- **Not predicted and touched:** `crates/loom-governor/tests/adversary_w20261121w1_u3.rs`, `crates/loom-governor/tests/adversary_w20261121w1_u3_pass2.rs`, `docs/contracts/loom-action-selection.md`, the two adversary test files
+- **Predicted and not touched:** `crates/loom-executor/tests/intake_import.rs`, `crates/loom-xtask/tests/pinned_consumer.rs` (both named as tests that must keep passing), `crates/loom-protocols/tests/catalog.rs` (inferred; the catalog list did not change)

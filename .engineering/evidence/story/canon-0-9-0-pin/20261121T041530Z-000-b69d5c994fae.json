@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T04:15:30Z",
+  "actor": "human:timo",
+  "artifact": "story:canon-0-9-0-pin",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "whole gate on wave/2026-11-21-w2 at b50781ed (ESS_TOOLCHAIN=0.86.0)",
+    "reference": "24 steps, 24 exit 0; cargo test --workspace --locked --no-fail-fast: 2997 passed, 0 failed, 10 ignored; clippy -D warnings exit 0; consumer-check, docs-check, commission:docs-drift, website exit 0"
+  }
+}
