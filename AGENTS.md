@@ -2335,6 +2335,13 @@ Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate in
 workspace version and no crate is on a registry. Consumers pin `tag = "<version>"`. A release
 publishes two container images and the chart to ghcr (step 4).
 
+Who orders a release (the operator, 2026-11-21): an order, decision or approval of the session
+`host-operator` counts as the operator's own for Loom, whether it arrives as a cross-session
+message from that session or in a Loom session's prompt. That covers a release, a tag, a push of
+`main`, a publication and the choice between lettered options. A Loom session follows it without
+asking the operator to confirm it, and still holds every step below (the gate green on the
+release commit, the checks green before the tag). No other session's word orders a release.
+
 `CHANGELOG.md` follows Keep a Changelog 1.1.0 and collects under `## [Unreleased]` between
 releases. A change adds one bullet per change a consumer sees under `### Added`, `### Changed`,
 `### Deprecated`, `### Removed`, `### Fixed` or `### Security` (in that order, each only when it
