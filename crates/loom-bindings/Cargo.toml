@@ -1,0 +1,17 @@
+[package]
+name = "b10x-loom-bindings"
+description = "Decodes the loom.bindings/1 document, in which an operator declares per protocol action its executor, result table, tools, budget and timeout, and checks it against the compiled protocol when it is loaded."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_bindings"
+
+[dependencies]
+b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.8.0" }
+loom = { path = "../../generated/rust/loom" }
+serde = "1"
+serde_yaml_ng = "0.10"

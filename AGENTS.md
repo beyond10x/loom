@@ -1092,6 +1092,49 @@ on ESS 0.69.0 admits no list (marked in `resource.yaml`), so the controller comp
 it publishes (§ Operator). `b10x-loom-resource` talks to no cluster; `crates/loom-operator` is the
 only crate that does.
 
+## Bindings document
+
+`b10x-loom-bindings` (`crates/loom-bindings`, `story:bindings-document`, epic
+`protocol-tree-on-bindings`) decodes the `loom.bindings/1` document and checks it against a compiled
+protocol. Its types are `loom.bindings` (`ess/domains/bindings.yaml`); the generated model is the
+document, and the crate holds the decoder (`decode.rs`, YAML or JSON into the generated types) and the
+load-time check (`load.rs`, `check` and `unbound`). It executes nothing, starts no process and opens no
+network connection, and it depends on `b10x-canon` by the reference `crates/loom-governor/Cargo.toml`
+names, so a Canon pin moves both manifests.
+
+- A document names one protocol (`name@major`) and holds one `actions` list item per bound action.
+  Each action has an `executor` (`program`, `agent`, `person`, `open`, `copy`), `evidence` entries
+  (`from` is `exit`, `effect` or a JSON pointer into the program's report), `tools`, `budget`,
+  `timeout_seconds`, `retry_when` and `handoff`. An adapter, an aperture and a remote endpoint are
+  engine configuration and never binding data.
+- `decode` refuses at the first defect, naming the action and the member: an undeclared member at any
+  level, a `format` other than `loom.bindings/1`, an `argv` that is empty or not a list of strings, a
+  tool name that is empty or holds a comma or white space (the session executor joins the names with
+  commas), an `effect` entry whose `results` has a key other than `performed`. `check` refuses an
+  action the protocol does not declare, a duplicate, an evidence kind outside `may_produce`, an
+  artifact the protocol does not declare, a member that does not belong to the action's executor, a
+  `timeout_seconds` outside 1 to 3600, a path that is absolute or leaves the workspace, and an
+  independence dimension the protocol does not declare. An action with no binding is not an error;
+  `unbound` lists them.
+- `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
+  returns and expands an alias at each use: `MAX_NESTING` (64, on the decoded values), `MAX_NODES`
+  (100,000, aliases expanded), the bytes of scalars (`MAX_DOCUMENT_BYTES`, aliases expanded) and,
+  on the text before the parse, `MAX_OPEN_BRACKETS` (2048, a parser-cost guard that counts brackets
+  in comments and strings). A mapping key is read as written
+  (`0` and `"0"` are one key), a key twice, a `<<` key and a tagged key or value are refused.
+  `protocol` follows the registry's rule (`parse_registration` in `crates/loom-protocols`) without a
+  dependency on that crate; keep the two together. `check` also refuses a `retry_when` kind the
+  protocol does not declare, an `open` `bindings` path outside the workspace, and an evidence `from`
+  the executor does not take (`effect` on a program; anything but `effect` on a person or an open).
+- A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no
+  `budget.max_runs` holds 8.
+- Every `BindingsRefusalReason` is reachable from a document: `every_refusal_reason_is_reachable_from_a_document`
+  matches the enum exhaustively, so a reason added to the specification fails the file's compilation until a
+  case reaches it. The guide page `website/docs/guides/bindings.md` holds one complete file, and the
+  same test file decodes it and checks it against the protocol on the page.
+- `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
+  there is another story's.
+
 ## Operator
 
 `b10x-loom-operator` (`crates/loom-operator`, `story:loom-operator`, design

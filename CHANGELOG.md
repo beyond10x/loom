@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `b10x-loom-bindings` decodes a `loom.bindings/1` document and checks it against its protocol at load (story:bindings-document)
+
 ### Changed
 
 - Substrate moves from `0.14.0` to `0.21.0` (`adfde402`, host without its `kubernetes` feature, so no `aws-lc-rs`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
