@@ -99,10 +99,12 @@ fn run_gate_on(repo: &Path) -> (Output, String) {
     (output, both)
 }
 
+/// A command creating a Frontier. Since ess 0.95.0 synthesis refuses an input naming a `Case` row
+/// no command creates (ESS-SYNTH-001) and a copied input no branch keeps inside an invariant
+/// (ESS-SYNTH-025), so `case_id` is a literal the invariant below holds for, and the one refusal
+/// left is the unwitnessed invariant (ESS-SYNTH-011).
 const ISSUING_COMMAND: &str = "  - name: commission.responsibility.IssueFrontier
     input:
-      - name: case_id
-        type: commission.responsibility.CaseId
       - name: case_revision
         type: Integer
     outcomes:
@@ -114,7 +116,7 @@ const ISSUING_COMMAND: &str = "  - name: commission.responsibility.IssueFrontier
           commission.responsibility.FrontierIssued:
             frontier_id: {generated: true}
         sets:
-          case_id: input.case_id
+          case_id: case-mutant
           case_revision: input.case_revision
 ";
 
@@ -198,13 +200,13 @@ fn adversary2_gate_refuses_an_older_required_ess() {
     let inputs = scratch.dir.join("ess/commission/ess-inputs.yaml");
     let text = fs::read_to_string(&inputs).unwrap();
     assert_eq!(
-        text.matches("requires: ess 0.86.0").count(),
+        text.matches("requires: ess 0.96.0").count(),
         1,
         "ess-inputs"
     );
     fs::write(
         &inputs,
-        text.replace("requires: ess 0.86.0", "requires: ess 0.51.0"),
+        text.replace("requires: ess 0.96.0", "requires: ess 0.51.0"),
     )
     .unwrap();
 

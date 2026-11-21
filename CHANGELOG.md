@@ -36,6 +36,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `AppliedConfinement.local_reason`, the operator's reason on a `local` run, is a new field (story:confinement-opens-from-engine-config)
 - **Breaking:** `ChildResult.driver_record` is `Option`, `None` for a `local` live child (story:confinement-opens-from-engine-config)
 - **Breaking:** `ConfinementRefusal` gains `LocalReasonMissing`, a blank or absent `local` reason (story:confinement-opens-from-engine-config)
+- ESS moves from 0.86.0 to 0.96.0 (`ess-conformance`, `ess-primitives`, the CLI CI installs); generated files drop their `model digest` line (story:ess-096-upgrade)
+- **Breaking:** `HoldSuspensionOutcome` gains `IncompleteRequest` (`SuspensionRequestIncomplete`): a mixed hold answers it, before `AlreadyHeld`, not `StorageFailed` (story:ess-096-upgrade)
 
 ### Deprecated
 

@@ -110,6 +110,7 @@ const SUSPENSION_HELD: &str = "commission.responsibility.SuspensionHeld";
 const SUSPENSION_TAKEN: &str = "commission.responsibility.SuspensionTaken";
 const SUSPENSION_RELEASED: &str = "commission.responsibility.SuspensionReleased";
 const SUSPENSION_ALREADY_HELD: &str = "commission.responsibility.SuspensionAlreadyHeld";
+const SUSPENSION_REQUEST_INCOMPLETE: &str = "commission.responsibility.SuspensionRequestIncomplete";
 const SUSPENSION_NOT_FOUND: &str = "commission.responsibility.SuspensionNotFound";
 const SUSPENSION_STATE_CONFLICT: &str = "commission.responsibility.SuspensionStateConflict";
 const SUSPENSION_REQUEST_MISMATCH: &str = "commission.responsibility.SuspensionRequestMismatch";
@@ -570,6 +571,14 @@ fn hold_suspension(
     };
     Some(match live.suspensions.hold_suspension(command).ok()? {
         HoldSuspensionOutcome::Settled { error: settled } => suspension_settled(settled),
+        HoldSuspensionOutcome::IncompleteRequest { error: incomplete } => {
+            took(HOLD_SUSPENSION, "incomplete-request").with_error(
+                error(SUSPENSION_REQUEST_INCOMPLETE).with(
+                    "suspension",
+                    codec::from_suspension_key(&incomplete.suspension),
+                ),
+            )
+        }
         HoldSuspensionOutcome::Held { suspension_held } => {
             let published = live.publish(
                 event_naming(

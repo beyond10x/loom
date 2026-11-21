@@ -243,7 +243,6 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 |---|---|---|---|---|
 | `run` | references | [Run](#run) | one | `run_id` |
 | `action_request` | references | [ActionRequest](#actionrequest) | one | `action_request_id` |
-| `case` | references | [Case](#case) | one | `case_id` |
 
 - Invariant: `\{"any":[\{"all":["defined(action_request_id)","defined(expected_case_revision)","defined(action)","defined(arguments)"]\},\{"all":[\{"not":"defined(action_request_id)"\},\{"not":"defined(expected_case_revision)"\},\{"not":"defined(action)"\},\{"not":"defined(arguments)"\}]\}]\}`
 ### Commands
@@ -266,6 +265,7 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | Outcome | When | Effect | Emits | Error |
 |---|---|---|---|---|
 | `settled` | external | none | none | `SuspensionSettled` |
+| `incomplete-request` | when | none | none | `SuspensionRequestIncomplete` |
 | `held` | otherwise | creates Suspension | `SuspensionHeld` | none |
 | `already-held` | existing instance | none | none | `SuspensionAlreadyHeld` |
 | `storage-failed` | external | none | none | `SuspensionStorageFailed` |
@@ -530,6 +530,12 @@ Lifecycle: states `Pending`, `Resuming`; initial `Pending`; terminal `Resuming`.
 | `decision_request_id` | optional `string` |
 
 #### SuspensionNotFound
+
+| Field | Type |
+|---|---|
+| `suspension` | [`SuspensionKey`](./types.mdx#suspensionkey) |
+
+#### SuspensionRequestIncomplete
 
 | Field | Type |
 |---|---|

@@ -1,6 +1,5 @@
 // generated from commission v1
-// model digest 6bb42a5810efc385adb384b6bdb1a8e8f7ea869e6a7b5118c38b9bf6c06741d9
-// contract digest f4007876e52f5a84b65c3374f0ec1653ebdbe1365fd1cc7b6b4484aac89aa9c6
+// contract digest a768326b3103b2edb6d2eca60929a99c298632ba47baee78d331ebebf8954cdb
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -2652,8 +2651,6 @@ pub struct SuspensionData {
     /// Carries `action_request`: `commission.responsibility.Suspension` references one `commission.responsibility.ActionRequest`.
     pub action_request_id: Option<ActionRequestId>,
     /// `case_id` — `commission.responsibility.CaseId`.
-    ///
-    /// Carries `case`: `commission.responsibility.Suspension` references one `commission.responsibility.Case`.
     pub case_id: CaseId,
     /// `expected_case_revision` — `Optional<Integer>`.
     pub expected_case_revision: Option<i64>,
@@ -2864,6 +2861,11 @@ pub enum HoldSuspensionOutcome {
     Settled {
         /// Why it was refused: `commission.responsibility.SuspensionSettled`.
         error: SuspensionSettled,
+    },
+    /// `incomplete-request` — when `not (((defined(action_request_id) and defined(expected_case_revision) and defined(action) and defined(arguments)) or (not (defined(action_request_id)) and not (defined(expected_case_revision)) and not (defined(action)) and not (defined(arguments)))))`.
+    IncompleteRequest {
+        /// Why it was refused: `commission.responsibility.SuspensionRequestIncomplete`.
+        error: SuspensionRequestIncomplete,
     },
     /// `held` — otherwise.
     Held {
@@ -3405,6 +3407,13 @@ pub struct SuspensionNotFound {
     pub suspension: SuspensionKey,
 }
 
+/// The declared error `commission.responsibility.SuspensionRequestIncomplete`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionRequestIncomplete {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+}
+
 /// The declared error `commission.responsibility.SuspensionRequestMismatch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuspensionRequestMismatch {
@@ -3495,7 +3504,7 @@ pub mod obligations {
     ///
     /// Why it is not generated: kept an obligation by the fields of error `commission.responsibility.SuspensionSettled`, which the specification gives no source, in `settled`.
     ///
-    /// Contract: given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `settled` externally decided (the host already settled the request the Suspension would hold), error `commission.responsibility.SuspensionSettled`; `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
+    /// Contract: given `commission.responsibility.HoldSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `settled` externally decided (the host already settled the request the Suspension would hold), error `commission.responsibility.SuspensionSettled`; `incomplete-request` when `not (((defined(action_request_id) and defined(expected_case_revision) and defined(action) and defined(arguments)) or (not (defined(action_request_id)) and not (defined(expected_case_revision)) and not (defined(action)) and not (defined(arguments)))))`, error `commission.responsibility.SuspensionRequestIncomplete`; `held` otherwise, creates `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionHeld`; `already-held` for an identity a record already carries, error `commission.responsibility.SuspensionAlreadyHeld`; `storage-failed` externally decided (the suspension port cannot hold the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
     pub trait HoldSuspensionBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.HoldSuspension`.
         ///
