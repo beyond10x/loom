@@ -5,7 +5,9 @@
 # in the old JSON format. The document is YAML, JSON is read as YAML. This domain declares the
 # decoded document and the refusals that decoding and the load-time check against a compiled
 # protocol give, and (story bound-program-result-table) the run of a `program` binding, the
-# evidence its result table records and the refusals of that step. An adapter, an aperture and a
+# evidence its result table records and the refusals of that step, and (story
+# record-copy-between-cases) the record a `copy` binding copies from another case of the same tree
+# and the refusals of that step. An adapter, an aperture and a
 # remote endpoint are engine configuration and never binding data.
 domain: loom.bindings
 
@@ -325,6 +327,49 @@ types:
     fields:
       - name: reason
         type: loom.bindings.ProgramRefusalReason
+      - name: action
+        type: String
+      - name: detail
+        type: String
+
+  # One record the copy effect port (story record-copy-between-cases) copies into a case, the
+  # payload of the observation the copy cites: the receiving case and the action, the case of the
+  # same tree the record is copied from and that record's evidence id, and the artifacts of its
+  # `upstream_revisions` the receiving protocol does not declare, which the copy drops. The copy
+  # keeps the record's kind, subject, subject revision, result, producer and instant; the
+  # observation's instant is the record's.
+  - name: loom.bindings.CopiedRecord
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: source_case
+        type: String
+      - name: source_evidence
+        type: String
+      - name: dropped_upstream
+        type: List<String>
+
+  # Why the copy effect port refuses a step: no case of the receiving case's tree but itself is held
+  # under the protocol the binding's `from` names (`NoSourceCase`); no such case holds an applying
+  # record of the binding's kind about the current revision of its subject (`NoSourceRecord`); the
+  # record to copy is about an artifact the receiving protocol does not declare
+  # (`SubjectUndeclared`). A refused step writes nothing.
+  - name: loom.bindings.CopyRefusalReason
+    kind: enum
+    variants:
+      - NoSourceRecord
+      - NoSourceCase
+      - SubjectUndeclared
+
+  # A refused copy: the reason, the action and what is wrong.
+  - name: loom.bindings.CopyRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.CopyRefusalReason
       - name: action
         type: String
       - name: detail
