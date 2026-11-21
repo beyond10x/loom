@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "2d3fdabc05ca80c549f8a76dcfa32938a9e8b98e2bf1f272a95549fea2adaa22",
-    "contract_digest": "03a4fc948ecc8c56f554376674e3477aca9cfb4b05fd51d3cae6948310aa1cc1"
+    "source_digest": "e76a4bd7080ebe1587d6b48ff0d0297edd9405e4944d2daf4fa5b894dd0fb69a",
+    "contract_digest": "766ae041e62eba8cd59f8cc057ff7ed98bfe459f6f62b30cfd67b55c9b7c2630"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -545,6 +545,237 @@
     {
       "kind": "domain_type",
       "source": "loom.datasource.WriteResult",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.ActionId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.ArtifactId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.ArtifactRevisionCitation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.AutonomyLevel",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.CapabilityId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.CaseId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.CheckVerdict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Citation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Consequence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.DecisionClassId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.DecisionOption",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.DecisionRequest.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.DecisionRequestId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.EscalationSuppressedRecord",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Grant",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Ground",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.GroundSource",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Holder",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.OptionLetter",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.OutcomeId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.PathLineCitation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Principal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.PrincipalKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.ProducedDocument",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.ProducedRecord",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.ProposerKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.RecordCitation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.RecordStore",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Revision",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Strength",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.SuppressionCause",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.UnblockKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.decision.Unblocks",
       "disposition": {
         "disposition": "generated"
       }
@@ -1538,6 +1769,13 @@
     },
     {
       "kind": "entity_lifecycle",
+      "source": "loom.decision.DecisionRequest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
       "source": "loom.resource.LoomAgent",
       "disposition": {
         "disposition": "generated"
@@ -1707,6 +1945,158 @@
       "source": "loom.agent.RunOnce",
       "disposition": {
         "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.Decide",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.Decide",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NotEligible`, which the specification gives no source, in `silence-takes-recommendation`"
+        },
+        "contract": "given `loom.decision.Decide` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `silence-takes-recommendation` when `principal_kind == silence`, error `loom.decision.NotEligible`; `option-or-answer` when `((defined(option) and defined(answer)) or (not (defined(option)) and not (defined(answer))))`, error `loom.decision.OptionOrAnswer`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `answer-not-allowed` when the existing subject's stored fields satisfy `unblocks.kind != question` and `defined(answer)`, error `loom.decision.AnswerNotAllowed`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `principal_kind != person`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))`, error `loom.decision.NotEligible`; `decider-under-rule` when the existing subject's stored fields satisfy `(holder == rule or holder == rule_final or holder == rule_and_decider or (holder == rule_and_decider_final and not (exists o in options: ((o.letter == input.option and o.consequence.grant == denied)))))` and `principal_kind == decider`, error `loom.decision.NotEligible`; `rule-not-holder` when the existing subject's stored fields satisfy `not ((holder == rule or holder == rule_final))` and `principal_kind == rule`, error `loom.decision.NotEligible`; `decided` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.Escalate",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.Escalate",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request`"
+        },
+        "contract": "given `loom.decision.Escalate` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `suppressed` when the existing subject's stored fields satisfy `(holder == decider_final or holder == rule_final or holder == rule_and_decider_final)`, error `loom.decision.EscalationSuppressed`; `escalated` otherwise, takes `escalate` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionEscalated`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.Expire",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.Expire",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request`"
+        },
+        "contract": "given `loom.decision.Expire` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `not-due` when the existing subject's stored fields satisfy `(not (defined(expires_at)) or expires_at > input.at as timestamp)`, error `loom.decision.NotDue`; `has-default` when the existing subject's stored fields satisfy `default_on_silence == true`, error `loom.decision.SilenceHasDefault`; `expired` otherwise, takes `expire` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionExpired`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.Recommend",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.Recommend",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.UngroundedRecommendation`, which the specification gives no source, in `ungrounded`"
+        },
+        "contract": "given `loom.decision.Recommend` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `ungrounded` when `(check_verdict == verified and (grounds.count < 1 or strength == none))`, error `loom.decision.UngroundedRecommendation`; `silence-needs-strong` when `(check_verdict == verified and default_on_silence == true and strength != strong)`, error `loom.decision.NoDefaultOnSilence`; `option-or-answer` when `(check_verdict == verified and ((defined(recommended_option) and defined(recommended_answer)) or (not (defined(recommended_option)) and not (defined(recommended_answer)))))`, error `loom.decision.OptionOrAnswer`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `answer-not-allowed` when the existing subject's stored fields satisfy `unblocks.kind != question` and `(check_verdict == verified and defined(recommended_answer))`, error `loom.decision.AnswerNotAllowed`; `withheld` when `check_verdict == refused`, takes `recommend` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationWithheld`; `recommended` otherwise, takes `recommend` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationRecorded`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.RecordProduced",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.RecordProduced",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request`"
+        },
+        "contract": "given `loom.decision.RecordProduced` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `already-recorded` when the existing subject's stored fields satisfy `{expr: \"coalesce(produced_record.record, \"\")\"} == input.produced.record`, preserves `loom.decision.DecisionRequest`; `produced-conflict` when the existing subject's stored fields satisfy `defined(produced_record)`, error `loom.decision.ProducedRecordConflict`; `option-produces-none` when the existing subject's stored fields satisfy `(defined(decided_option) and not (exists o in options: ((o.letter == {fact: decided_option} and defined(o.consequence.produces)))))`, error `loom.decision.NoRecordToProduce`; `recorded` otherwise, takes `record_produced` of `loom.decision.DecisionRequest`, emits `loom.decision.ProducedRecordRecorded`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.Request",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.Request",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NotARequestClass`, which the specification gives no source, in `escalation-is-not-a-class`"
+        },
+        "contract": "given `loom.decision.Request` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `escalation-is-not-a-class` when `decision_class == escalation`, error `loom.decision.NotARequestClass`; `too-few-options` when `options.count < 2`, error `loom.decision.TooFewOptions`; `record-key-open` when `defined(open_for_record)`, error `loom.decision.RecordKeyOpen`; `requested` otherwise, creates `loom.decision.DecisionRequest`, emits `loom.decision.DecisionRequested`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.Supersede",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.Supersede",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request`"
+        },
+        "contract": "given `loom.decision.Supersede` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `superseded` otherwise, takes `supersede` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionSuperseded`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "loom.decision.TakeRecommendation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.decision.TakeRecommendation",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "undetermined",
+          "construct": "the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request`"
+        },
+        "contract": "given `loom.decision.TakeRecommendation` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `(principal_kind == decider or principal_kind == rule)`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))` and `principal_kind != silence`, error `loom.decision.NotEligible`; `not-strong` when the existing subject's stored fields satisfy `recommendation_strength != strong`, error `loom.decision.NotEligible`; `silence-without-default` when the existing subject's stored fields satisfy `default_on_silence == false` and `principal_kind == silence`, error `loom.decision.NoDefaultOnSilence`; `silence-not-due` when the existing subject's stored fields satisfy `(not (defined(expires_at)) or expires_at > input.decided_at as timestamp)` and `principal_kind == silence`, error `loom.decision.NotDue`; `taken` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict`"
       }
     },
     {
@@ -1955,6 +2345,69 @@
     },
     {
       "kind": "event_type",
+      "source": "loom.decision.DecisionEscalated",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.DecisionExpired",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.DecisionRequested",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.DecisionSuperseded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.DecisionTaken",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.ProducedRecordRecorded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.RecommendationRecorded",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.RecommendationTaken",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.decision.RecommendationWithheld",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
       "source": "loom.resource.LoomAgentApplied",
       "disposition": {
         "disposition": "generated"
@@ -2151,6 +2604,111 @@
     },
     {
       "kind": "error_type",
+      "source": "loom.decision.AnswerNotAllowed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.DecisionStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.EscalationSuppressed",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.NoDefaultOnSilence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.NoRecordToProduce",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.NoSuchRequest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.NotARequestClass",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.NotDue",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.NotEligible",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.OptionOrAnswer",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.ProducedRecordConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.RecordKeyOpen",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.SilenceHasDefault",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.TooFewOptions",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "loom.decision.UngroundedRecommendation",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
       "source": "loom.resource.AdmissionRefused",
       "disposition": {
         "disposition": "generated"
@@ -2256,6 +2814,48 @@
     },
     {
       "kind": "view_type",
+      "source": "loom.decision.ArtifactDecisionHistory",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.decision.ArtifactDecisionHistory",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.decision.DecisionRequests",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.decision.DecisionRequests",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.decision.OpenDecisionsForPrincipal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.decision.OpenDecisionsForPrincipal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
       "source": "loom.resource.LoomAgents",
       "disposition": {
         "disposition": "generated"
@@ -2322,6 +2922,36 @@
       "source": "loom.session.AgentSessions",
       "disposition": {
         "disposition": "generated"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "loom.decision.Decider",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "may invoke `loom.decision.Decide`, `loom.decision.Escalate`, `loom.decision.TakeRecommendation`; generated as data, not enforced: the grant is available as the declared actors and the qualified commands each may invoke, and enforcement stays with the caller, because a grant is checked against a caller identity, which types do not carry"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "loom.decision.Person",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "may invoke `loom.decision.Decide`, `loom.decision.Escalate`, `loom.decision.TakeRecommendation`; generated as data, not enforced: the grant is available as the declared actors and the qualified commands each may invoke, and enforcement stays with the caller, because a grant is checked against a caller identity, which types do not carry"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "loom.decision.Runtime",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "may invoke `loom.decision.Expire`, `loom.decision.Recommend`, `loom.decision.RecordProduced`, `loom.decision.Request`, `loom.decision.Supersede`, `loom.decision.TakeRecommendation`; generated as data, not enforced: the grant is available as the declared actors and the qualified commands each may invoke, and enforcement stays with the caller, because a grant is checked against a caller identity, which types do not carry"
       }
     }
   ]
