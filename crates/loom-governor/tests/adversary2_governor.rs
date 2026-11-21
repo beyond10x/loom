@@ -692,6 +692,7 @@ fn canon_record(
         observed_at: None,
         upstream_revisions: Declarations::default(),
         producer: None,
+        child_case: None,
     }
 }
 
