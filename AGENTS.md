@@ -2069,7 +2069,9 @@ route and opens nothing at build. `local` is the only call of `substrate_host::c
 (`AdapterRequest::Local`; no `AdapterRequest::Linux` until
 `story:child-launches-through-confinement-adapters`): a blank reason is refused
 `LocalReasonMissing`, a host policy forbidding it (`local_permitted` unproved,
-`SUBSTRATE_CONFINEMENT_LOCAL`) `CapabilityUnserved`, both before any child. Every `local` launch runs
+`SUBSTRATE_CONFINEMENT_LOCAL`) `CapabilityUnserved`, both before any child; on a host that leaves
+`SUBSTRATE_CONFINEMENT_LOCAL` unset Substrate permits `local`, so the configuration and the reason
+are the whole opt-in. Every `local` launch runs
 unconfined, declared insecure, and records backend `None`, filesystem `unconfined`, no network, adapter
 `local`, its facts and `local_reason`, with no driver record; egress and its bundle are refused naming
 `network_egress`, read-only roots, files and host paths naming `filesystem_view`; the workspace is

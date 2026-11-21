@@ -153,7 +153,6 @@ use crate::clock::{Clock, ClockTime, HostTime, SystemClock};
 use crate::confinement::TestRunner;
 use crate::context_metrics::{ContextMetrics, ContextPolicy, MeasuredModel};
 use crate::effect::{Console, LocalEffects, refuse};
-use crate::executor::backend_name;
 use crate::executor::{ExecuteError, LocalExecutor, TestCommand, TestPaths, fresh_uuid, now};
 use crate::handoff::{HandoffEffects, MergeHandoffStore, SettledHandoffs};
 use crate::selector::{ArgumentsError, Briefing, ModelArguments, ModelSelector, NO_ACTION};
@@ -471,11 +470,7 @@ fn run_measured<S: FallibleCaseStore, T: EvaluationTime>(
         )?;
     }
 
-    writeln!(
-        out,
-        "confinement: {}",
-        backend_name(request.runner.backend())
-    )?;
+    writeln!(out, "confinement: {}", request.runner.label())?;
     let pick = match pick(request, classifier)? {
         Ok(pick) => pick,
         Err((protocol, detail, why)) => {

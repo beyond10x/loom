@@ -24,7 +24,7 @@ use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement, EngineRunner,
-    SubstrateRunner, TestRunner, prepare_delegated_cgroup,
+    SubstrateRunner, TestRunner, local_label, prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -1173,7 +1173,7 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
             Confinement::None => Arc::new(UnconfinedRunner) as Arc<dyn TestRunner>,
             Confinement::Local => {
                 let reason = arguments.local_reason.clone();
-                let label = format!("local ({})", printable(reason.as_deref().unwrap_or("")));
+                let label = local_label(reason.as_deref().unwrap_or_default());
                 let opened = EngineRunner::open(&EngineConfinement {
                     adapter: ConfinementAdapter::Local,
                     local_reason: reason,

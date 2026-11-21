@@ -25,9 +25,9 @@ use std::time::Duration;
 
 use substrate_host::confinement::local::{LOCAL_POLICY_ENV, LocalRequest};
 use substrate_host::confinement::{
-    AdapterRequest, AdmittedProfile, ConfinementAdapter as Adapter, FACT_ORDER, Fact,
-    LOCAL_REFUSED, OutputDelivery, OutputEvent, PipeStream, RunExit, RunId, RunObservation,
-    RunOutput, RunState, STDIN_CHUNK_BYTES, StdinMode,
+    AdmittedProfile, ConfinementAdapter as Adapter, FACT_ORDER, Fact, LOCAL_REFUSED,
+    OutputDelivery, OutputEvent, PipeStream, RunExit, RunId, RunObservation, RunOutput, RunState,
+    STDIN_CHUNK_BYTES, StdinMode,
 };
 use substrate_wire::{BaselineEnvironment, Signal};
 
@@ -37,7 +37,7 @@ use super::{
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement, NetworkMode,
     QUEUED_FRAMES, READ_STEP, SANDBOX_WORKSPACE, SubstrateRunner, TestExecution, TestRunner,
     canonical_workspace, check_program, check_stdin, check_workdir, check_writable, enum_name,
-    refuse, scope_error, tail,
+    escape_reason, local_label, refuse, scope_error, tail,
 };
 use crate::executor::TestCommand;
 
@@ -105,6 +105,9 @@ impl EngineRunner {
                     ));
                 }
                 let reason = local_reason(confinement.local_reason.as_deref())?;
+                // Named here alone: no other function in the crates' sources names an adapter
+                // request (`tests/engine_confinement.rs` fails on one).
+                use substrate_host::confinement::AdapterRequest;
                 let adapter = substrate_host::confinement::open(AdapterRequest::Local(
                     LocalRequest::default(),
                 ))
@@ -173,12 +176,18 @@ impl TestRunner for EngineRunner {
         }
     }
 
-    /// `substrate` under `linux`; `local (<reason>)` under `local`, its control characters
-    /// escaped.
+    /// `substrate` under `linux`; under `local`, [`local_label`] of the reason.
     fn label(&self) -> String {
         match &self.route {
             Route::Linux(runner) => runner.label(),
-            Route::Local(local) => format!("local ({})", escape_controls(&local.reason)),
+            Route::Local(local) => local_label(&local.reason),
+        }
+    }
+
+    fn local_reason(&self) -> Option<&str> {
+        match &self.route {
+            Route::Linux(_) => None,
+            Route::Local(local) => Some(&local.reason),
         }
     }
 }
@@ -199,19 +208,6 @@ fn local_reason(reason: Option<&str>) -> Result<String, ConfinementError> {
             ),
         )
     })
-}
-
-/// `text` with each control character escaped (`\n`, `\u{1b}`), so it stays one line.
-fn escape_controls(text: &str) -> String {
-    text.chars()
-        .map(|character| {
-            if character.is_control() {
-                character.escape_default().to_string()
-            } else {
-                character.to_string()
-            }
-        })
-        .collect()
 }
 
 /// A refusal of Substrate's confinement contract or of the `local` adapter, as Loom's: a reason
@@ -296,7 +292,8 @@ impl LocalRoute {
             workdir: None,
             adapter: Some("local".to_owned()),
             facts: Some(self.facts.clone()),
-            local_reason: Some(self.reason.clone()),
+            // Recorded as it is printed, so no reader of the record splits or hides a line.
+            local_reason: Some(escape_reason(&self.reason)),
         }
     }
 

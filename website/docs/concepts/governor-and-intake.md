@@ -133,7 +133,8 @@ Tests use [Substrate](https://beyond10x.github.io/substrate/)
 and workspace writes only to `target/`. Dependencies are prefetched explicitly. A missing
 confinement guarantee stops the run; only `--confinement local` with `--local-reason` (Substrate's
 `local` adapter, declared insecure, the reason recorded on every launch) and the deprecated
-`--confinement none` opt out. Every executed test observation names its actual confinement.
+`--confinement none` opt out. On a host that leaves `SUBSTRATE_CONFINEMENT_LOCAL` unset, the flag
+and the reason are the whole opt-in. Every executed test observation names its actual confinement.
 These changes shipped in 0.2.0.
 The slice's own git calls run none of
 the work tree's hooks, no `core.fsmonitor` command and no signing program, a case does not open

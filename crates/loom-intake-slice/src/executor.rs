@@ -414,7 +414,7 @@ impl TestRun {
         };
         format!(
             "{ended}{tree}\nconfinement: {}",
-            backend_name(self.applied.backend)
+            applied_label(&self.applied)
         )
     }
 }
@@ -1196,6 +1196,18 @@ impl TestRunner for UnconfinedRunner {
             driver_record: None,
             child_output: finished.child_output,
         })
+    }
+}
+
+/// How a run's `confinement:` line names the confinement `applied` records: `local (<reason>)`
+/// ([`local_label`]) when Substrate's `local` adapter ran it, the backend's name otherwise.
+///
+/// [`local_label`]: crate::confinement::local_label
+pub fn applied_label(applied: &AppliedConfinement) -> String {
+    if applied.adapter.as_deref() == Some("local") {
+        crate::confinement::local_label(applied.local_reason.as_deref().unwrap_or_default())
+    } else {
+        backend_name(applied.backend).to_owned()
     }
 }
 

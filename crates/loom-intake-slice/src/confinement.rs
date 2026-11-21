@@ -84,6 +84,45 @@ pub trait TestRunner: Send + Sync {
     fn label(&self) -> String {
         crate::executor::backend_name(self.backend()).to_owned()
     }
+    /// The operator's reason when this runner launches through Substrate's `local` adapter, and
+    /// `None` for any other runner: a run that answers `Some` is not kept for resume.
+    fn local_reason(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// How a `local` run names its confinement wherever it is printed or recorded:
+/// `local (<reason>)`, the reason passed through [`escape_reason`].
+pub fn local_label(reason: &str) -> String {
+    format!("local ({})", escape_reason(reason))
+}
+
+/// `reason` with every character that can break or hide a line escaped as `\u{…}`: control
+/// characters (C0, DEL and C1, `U+0085` among them, and the tab), the line and paragraph
+/// separators (`U+2028`, `U+2029`, the categories Zl and Zp) and the bidirectional controls
+/// (`U+061C`, `U+200E`, `U+200F`, `U+202A` to `U+202E`, `U+2066` to `U+2069`). Escaping is
+/// idempotent: what it writes is ASCII it leaves unchanged.
+pub fn escape_reason(reason: &str) -> String {
+    let mut shown = String::with_capacity(reason.len());
+    for character in reason.chars() {
+        let breaks = character.is_control()
+            || matches!(
+                character,
+                '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{061C}'
+                    | '\u{200E}'
+                    | '\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2066}'..='\u{2069}'
+            );
+        if breaks {
+            shown.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+        } else {
+            shown.push(character);
+        }
+    }
+    shown
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

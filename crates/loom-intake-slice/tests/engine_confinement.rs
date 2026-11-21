@@ -25,12 +25,12 @@ use b10x_loom_intake_slice::clock::Clock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, BaselineEnvironment, ChildCommand, ChildError, ChildOutput,
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EgressAperture, EngineConfinement,
-    EngineRunner, ExecEnvironment, TestRunner as _, discover_cgroup_root,
+    EngineRunner, ExecEnvironment, TestRunner, discover_cgroup_root,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
-use b10x_loom_intake_slice::executor::TestCommand;
+use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner, applied_label};
 use b10x_loom_intake_slice::intent::{IntentRequest, run_intent_with_options};
-use b10x_loom_intake_slice::run::RunOptions;
+use b10x_loom_intake_slice::run::{RunOptions, SliceRequest, run_with_options};
 use chrono::{DateTime, FixedOffset};
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
@@ -319,6 +319,34 @@ fn only_the_constructor_opens_an_adapter() {
         argument.starts_with("AdapterRequest::Local("),
         "the constructor opens local: {argument}"
     );
+}
+
+/// An adapter request named anywhere but in `EngineRunner::open`, an import at the top of a file
+/// included, is a second open point however `open` is reached: an imported `open` too.
+#[test]
+fn no_adapter_request_is_named_outside_the_constructor() {
+    let mut named = Vec::new();
+    for (path, text) in squeezed_sources() {
+        for (at, _) in text.match_indices("AdapterRequest") {
+            let inside_a_function = text[..at]
+                .match_indices("fn")
+                .any(|(start, _)| keyword_at(&text, start, "fn"));
+            let place = if inside_a_function {
+                enclosing(&text, at)
+            } else {
+                (String::new(), String::new())
+            };
+            named.push((path.clone(), place));
+        }
+    }
+    assert!(!named.is_empty(), "the constructor names its request");
+    for (path, (implementation, function)) in &named {
+        assert!(
+            implementation == "EngineRunner" && function == "open",
+            "{path} names AdapterRequest in `{implementation}::{function}`, outside \
+             EngineRunner::open: {named:?}"
+        );
+    }
 }
 
 #[test]
@@ -951,6 +979,119 @@ fn a_local_run_prints_its_adapter_and_reason() {
     assert!(
         printed.lines().any(|line| line == "confinement: local (x)"),
         "{printed}"
+    );
+}
+
+/// The `confinement:` lines a slice run of `runner` prints. The classifier is unsure, so the run
+/// stops right after its confinement line and no test runs.
+fn slice_run_lines(runner: Arc<dyn TestRunner>) -> Vec<String> {
+    let fixture = Fixture::new();
+    let request = SliceRequest {
+        runner,
+        intent: "Run the tests.".into(),
+        workspace: fixture.workspace.clone(),
+        test: TestCommand::new("true", Vec::<String>::new()),
+        max_steps: 1,
+        threshold: 0.5,
+        inputs: b10x_loom_intake_slice::case::RUN_DEFAULTS,
+        test_paths: b10x_loom_intake_slice::test_paths::TestPaths::default(),
+    };
+    let classifier = Recorded::new(vec![(
+        "pick_protocol",
+        json!({"protocol":"software-change@1", "confidence":0.1, "reasons":["unsure"]}),
+    )]);
+    let agent = Recorded::new(Vec::new());
+    let governor = CanonGovernor::new(MemoryCaseStore::default());
+    let mut out = Vec::new();
+    let _ = run_with_options(
+        &request,
+        &governor,
+        &governor,
+        &classifier,
+        &agent,
+        &mut out,
+        &RunOptions {
+            context_policy: ContextPolicy::Legacy,
+            context_report: None,
+        },
+    );
+    String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .filter(|line| line.starts_with("confinement:"))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_linux_slice_run_prints_substrate_as_before() {
+    let linux = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Linux,
+        local_reason: None,
+        cgroup_root: None,
+    })
+    .expect("linux builds");
+    assert_eq!(slice_run_lines(Arc::new(linux)), ["confinement: substrate"]);
+}
+
+#[test]
+fn an_unconfined_slice_run_prints_none_as_before() {
+    assert_eq!(
+        slice_run_lines(Arc::new(UnconfinedRunner)),
+        ["confinement: none"]
+    );
+}
+
+/// The applied record a test run's summary is named from (`TestRun::summary`, which the briefing
+/// quotes): `local` with its reason escaped, `substrate` and `none` as before.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_test_run_summary_names_local_and_its_reason() {
+    let fixture = Fixture::new();
+    let local = EngineRunner::open(&local_confinement(Some("x\u{2028}y")))
+        .expect("local opens")
+        .run(
+            &TestCommand::new("true", Vec::<String>::new()),
+            &fixture.workspace,
+        )
+        .expect("true runs");
+    assert_eq!(applied_label(&local.applied), "local (x\\u{2028}y)");
+    let mut linux = local.applied.clone();
+    linux.backend = Backend::Substrate;
+    linux.adapter = Some("linux".to_owned());
+    linux.local_reason = None;
+    assert_eq!(applied_label(&linux), "substrate");
+    let mut none = local.applied;
+    none.adapter = None;
+    none.local_reason = None;
+    assert_eq!(applied_label(&none), "none");
+}
+
+/// Every character that breaks or hides a line is escaped wherever the reason is printed or
+/// recorded: the label and the applied record agree.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_reason_breaks_no_line_in_its_label_or_record() {
+    let reason = "x\u{2028}\u{2029}\u{85}\u{202e}\u{2066}\u{200f}\u{61c}\t\nend";
+    let runner = EngineRunner::open(&local_confinement(Some(reason))).expect("local opens");
+    let label = runner.label();
+    assert_eq!(
+        label,
+        "local (x\\u{2028}\\u{2029}\\u{85}\\u{202e}\\u{2066}\\u{200f}\\u{61c}\\u{9}\\u{a}end)"
+    );
+    let fixture = Fixture::new();
+    let ran = runner
+        .run(
+            &TestCommand::new("true", Vec::<String>::new()),
+            &fixture.workspace,
+        )
+        .expect("true runs");
+    assert_eq!(
+        ran.applied
+            .local_reason
+            .as_deref()
+            .map(|recorded| format!("local ({recorded})")),
+        Some(label)
     );
 }
 

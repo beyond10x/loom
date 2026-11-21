@@ -133,7 +133,8 @@ host's file system and network. `local` needs `--local-reason <TEXT>`: the run g
 Substrate's `local` adapter, declared insecure, prints `confinement: local (<reason>)`, and every
 test observation names adapter `local` and the reason. Tests run in the workspace with your
 `PATH`, `HOME`, `RUSTUP_HOME` and `CARGO_HOME` and nothing else of your environment, and are
-killed with their whole process group at their timeout. A host policy of
+killed with their whole process group at their timeout. On a host that leaves
+`SUBSTRATE_CONFINEMENT_LOCAL` unset, the flag and the reason are the whole opt-in. A host policy of
 `SUBSTRATE_CONFINEMENT_LOCAL` other than `permit` refuses `local` (`ConfinementUnavailable`), and
 a `local` run is not kept for resume: `--state` with it is refused, exit 2. `none` prints its
 deprecation on standard error. The run output and every test observation name the choice.

@@ -22,6 +22,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `resume_after_decision` resumes a run held for `SuspensionReason::Decision`; `b10x-loom resume` refuses that hold `HeldForDecision`, exit 19 (story:decision-suspension-reason)
 - `EngineRunner::open(&EngineConfinement)` builds the one runner; `local` runs through Substrate's `local` adapter with a reason (story:confinement-opens-from-engine-config)
 - `b10x-loom run --confinement local --local-reason <TEXT>`; with `--state` it is refused, exit 2 (story:confinement-opens-from-engine-config)
+- `TestRunner::local_reason`, `confinement::local_label`: every confinement line names `local (<reason>)`; `ResumeHost::check` refuses it (story:confinement-opens-from-engine-config)
 
 ### Changed
 
