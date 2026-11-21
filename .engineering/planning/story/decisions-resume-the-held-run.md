@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:decisions-resume-the-held-run
 kind: story
-status: draft
+status: proposed
 title: decisions decide, take and record over a state directory resume the run held for the request in the same invocation
 summary: After a recorded decision, decide, take and record over a state directory resume the commission whose Suspension names the request, for approval holds of software-change@1 runs, through resume_after_grant with DecisionAuthority. A question or outcome hold resumes through resume_decided_request with the executor the host's ResumeBuilder supplies, and the command line refuses it NotRebuildable (31). A failed resume is retried by repeating the command. tick --resume resumes every run held on a request decided by silence, and b10x-loom stop keeps a stopped run from any resume, reported as Stopped
 tags:
@@ -42,7 +42,9 @@ scope:
   path: website/docs/guides/decisions.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 10
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T04:44:11Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -59,8 +61,12 @@ it (below).
   (`story:decision-inbox-commands`). `take` resumes as `decide` does: it is the same act of a
   person, and without it a taken request's run would stay held with no command to continue it.
 - `decisions record ID --revision ARTIFACT@REV --state DIR`
-  (`story:question-and-outcome-decisions-hold-runs`) resumes once `RecordProduced` is applied,
-  `already-recorded` included. A question's `decide` cannot resume: its option produces an
+  (`story:question-and-outcome-decisions-hold-runs`) goes to the resume step once
+  `RecordProduced` is applied, `already-recorded` included. `record` applies to question requests
+  only, and the command line cannot rebuild a question hold (below). So on the command line, a
+  `record` whose request a commission holds sets the record, then exits 31 `NotRebuildable` and
+  resumes nothing. A host resumes that run through `resume_decided_request`. A question's
+  `decide` cannot resume either: its option produces an
   `artifact_revision` record that only `record` sets, so `decide` on a held question request is
   refused `DecisionNotRecorded` by `resume_decision_hold`. `decide` therefore does not try: it
   prints the `decisions record` command as that story says and resumes nothing.
@@ -312,7 +318,7 @@ only, because no command input comes from it (the epic's host-port rule). As a p
 implements, it gets:
 
 - a `host_ports!` row in `crates/loom-sdk/tests/host_ports.rs` (the invocation at `:48`);
-- a row under "Ports a host implements" in `website/docs/reference/sdk-stability.md` (`:73`).
+- a row under "Ports a host implements" in `website/docs/reference/sdk-stability.md` (`:74`).
 
 The SDK equivalent is `loom_sdk::intake::slice::decided_resume::resume_decided_request`, through
 the existing re-export (`crates/loom-sdk/src/lib.rs:81`), listed under "Types and functions an
@@ -348,13 +354,26 @@ library function `stop_held_run` in `decided_resume.rs`, which a host calls too:
   `10`, `11` and `20` are `resume`'s numbers for the same causes (`crates/loom-cli/src/lib.rs:119`,
   `:120`, `:129`). As `resume` gives an unusable resume context `1` (`:133`), so does `stop`.
 
-Three tests of `crates/loom-cli/tests/approval_decisions.rs` change, because `decide` and `take`
-with `--state` now resume:
+Five tests of `crates/loom-cli/tests/approval_decisions.rs` change, because `decide` and `take`
+with `--state` now resume. Three are `story:approval-decisions-resume-held-runs`'s:
 
 - The `A0` decide test: `decide` performs the merge once, and a later `resume` exits 10.
 - The case-moved test: it decides through `loom_sdk::decisions::decide` before it moves the case.
 - The `path_line` take test: it takes through `loom_sdk::decisions::take` before it rewrites the
-  lines.
+  lines, so its supersede assertions stand.
+
+Two are `story:approvals-supplied-to-canon-evaluation`'s, written there with `decide` and `take`
+going through `loom_sdk::decisions` with no resume step:
+
+- `authority_supplied_after_decide`: `decisions decide DR-… A --as timo --state DIR` performs the
+  merge in the same invocation (the stub merge program records one call), and a later
+  `b10x-loom resume --commission <commission> --state DIR` exits 10 (`NothingSuspended`) and
+  performs nothing.
+- `authority_withheld_after_moved_ground`: `decisions take DR-… --as timo --state DIR` performs
+  the merge in the same invocation (one call). After lines 1-3 of `notes.md` are rewritten, the
+  next evaluation still shows `repository.merge` approval-required with no authority entry
+  handed over; a later `resume` exits 10 and the stub records no second call. Its assertions on a
+  refused `resume` superseding the request go: the `path_line` take test above keeps them.
 
 The tests of `crates/loom-cli/tests/question_outcome_decisions.rs` hold no commission, so their
 requests print `resumed: nothing …` and their assertions stand.
@@ -370,7 +389,7 @@ Files:
   `RunStopped` is kept beside the resume contexts (`crates/loom-intake-slice/src/resume.rs`).
 - `ess/intake/domains/routing.yaml`.
 - `crates/loom-cli/tests/decisions_resume.rs` (new), `crates/loom-intake-slice/tests/decided_resume.rs`
-  (new), and `crates/loom-cli/tests/approval_decisions.rs` (the three tests above).
+  (new), and `crates/loom-cli/tests/approval_decisions.rs` (the five tests above).
 - `website/docs/reference/sdk-stability.md` and `crates/loom-sdk/tests/host_ports.rs` (the port
   row and the function path), `website/docs/guides/decisions.md`, and
   `website/docs/reference/cli.md` (regenerated).
@@ -453,20 +472,26 @@ recorded llm catalog, so the resume context names that file (`crates/loom-cli/sr
 The command line resumes approval holds only (§ Outcome), so the command-line bullets resume
 approval holds of the approval fixture. A question or outcome hold cannot be built through
 `b10x-loom run`, and the command line cannot resume one. The command-line bullets that need such a
-hold (the `NotRebuildable` bullet, the question `decide`, `stop` and `record` after `stop`, and the
-`awaits_record` tick) use a state directory the test builds through the entries
-`story:question-and-outcome-decisions-hold-runs` uses (its § Acceptance):
+hold (the `NotRebuildable` bullets, the question `decide`, `stop` and `record` after `stop`, and
+the `awaits_record` tick) use a state directory the test builds through Commission's entry that
+`story:question-and-outcome-decisions-hold-runs` uses for its question bullets (its § Acceptance):
 
 - the fixture protocol of `crates/loom-intake-slice/tests/decision_hold.rs` (root outcome `close`
   blocked on decision `release`, artifacts `intent` and `answers`), installed with
   `b10x-loom protocols install` into the user protocol store under the test's `XDG_DATA_HOME`
   (`crates/loom-protocols/src/store.rs:22-40`), so the command's governor knows the case's
   protocol;
-- an outcome hold for `DR-o`, built by the slice's `run_with_clock`
-  (`crates/loom-intake-slice/src/run.rs:417`) with the decision flags and a recorded agent the test
-  asserts is never called;
-- a question hold for `DR-q`, built by Commission's `run_with_suspension`
-  (`crates/loom-commission/src/runtime.rs:1181`) with `DecisionHoldingExecutor` wrapping a
+- the state directory's `FileSuspensionStore`, opened by the test with
+  `FileSuspensionStore::open(DIR)` (`crates/loom-governor/src/file_suspension.rs:93`), as
+  `b10x-loom` opens it (`crates/loom-cli/src/main.rs:627`). Both holds are built through
+  Commission's `run_with_suspension` (`crates/loom-commission/src/runtime.rs:1181`), and the test
+  passes it this store, so each Suspension is kept in `DIR` where the resume step reads it. The
+  slice's `run_with_clock` (`crates/loom-intake-slice/src/run.rs:417`) is not used here: it runs
+  `Mode::Once` (`run.rs:528`) and keeps no Suspension;
+- an outcome hold for `DR-o`: `run_with_suspension` with `DecisionHoldingExecutor` wrapping a
+  recorded inner executor that the test asserts is never called. The frontier of the fixture
+  protocol admits no action and blocks `close` on `release`, so the wrapper holds the run;
+- a question hold for `DR-q`: `run_with_suspension` with `DecisionHoldingExecutor` wrapping a
   scripted inner executor that returns `NeedsHumanJudgment` with a question and options `A`, `B`;
 - for each held commission, its resume context, kept by the setup through
   `ResumeContextStore::keep` (`crates/loom-intake-slice/src/resume.rs:190`) when the entry keeps
@@ -508,6 +533,10 @@ No model is called.
 - In the library-built state directory, `decisions decide DR-q A --as timo --state DIR` prints the
   `decisions record` command, prints no `resumed:` line, and leaves the question commission's
   Suspension file byte-identical.
+- After that `decide`, `decisions record DR-q --revision answers@a2 --state DIR` (the run not
+  stopped) sets `produced_record` `answers@a2` and exits 31. Standard error names
+  `NotRebuildable` and says the decision is recorded, and the question commission's Suspension
+  file is byte-identical.
 - `decisions decide --help` lists the statuses 30, 31, 33 and 34, and no 32.
 
 `stop` bullets, in the same file:
@@ -587,9 +616,10 @@ sets it (`story:approval-decisions-resume-held-runs`). `run` takes no instant, s
 - `decisions tick --help` lists the status 35.
 
 As a library test (`crates/loom-intake-slice/tests/decided_resume.rs`), with no model call. The
-holds are built as in the library-built state directory above: an outcome hold through
-`run_with_clock`, a question hold through `run_with_suspension` with `DecisionHoldingExecutor`
-over a scripted inner executor, and each context kept through `ResumeContextStore::keep`.
+holds are built as in the library-built state directory above: both through
+`run_with_suspension` over the directory's `FileSuspensionStore`, the outcome hold with a recorded
+inner executor that is never called, the question hold with a scripted inner executor, and each
+context kept through `ResumeContextStore::keep`.
 Decisions go through `loom_sdk::decisions` with the `--state` writer set. The test's
 `ResumeBuilder` counts its calls. Its `decision_executor` returns the scripted inner executor of
 `crates/loom-intake-slice/tests/decision_hold.rs`, and its `approval` answers `NotRebuildable`.
@@ -627,8 +657,13 @@ Decisions go through `loom_sdk::decisions` with the `--state` writer set. The te
 - `crates/loom-sdk/tests/host_ports.rs` passes with
   `loom_sdk::intake::slice::decided_resume::resume_decided_request` on
   `website/docs/reference/sdk-stability.md`.
-- `crates/loom-cli/tests/approval_decisions.rs` passes, with only its three tests named in the
+- `crates/loom-cli/tests/approval_decisions.rs` passes, with only its five tests named in the
   Outcome edited.
+- In `crates/loom-cli/tests/approval_decisions.rs`, `authority_supplied_after_decide` passes:
+  `decisions decide` performs the merge in the same invocation and a later `resume` exits 10.
+- In `crates/loom-cli/tests/approval_decisions.rs`, `authority_withheld_after_moved_ground`
+  passes: `decisions take` performs the merge in the same invocation, and after the rewrite the
+  next evaluation shows `repository.merge` approval-required with no authority entry.
 - `crates/loom-cli/tests/question_outcome_decisions.rs` passes unchanged.
 - `task docs-check` exits 0, with `website/docs/reference/cli.md` regenerated.
 - `task check` exits 0.

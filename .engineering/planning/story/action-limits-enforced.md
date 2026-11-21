@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:tree-run-command
 - depends_on: story:confinement-level-required
-revision: 6
+revision: 7
 ---
 ## Outcome
 
@@ -44,10 +44,10 @@ Whether the confinement can enforce limits is read through the mapping of
 `story:confinement-level-required`. A confinement that does not serve the family `limits` (`local`)
 refuses to start a run whose engine configuration has a `limits` section or whose bindings state
 `limits`, unless the section declares limits advisory, and then each step's confinement record says
-`enforced: false`. Under `local` the runner never sends bounds, which `local` would refuse, and
-ends a child at its `timeout_seconds` itself, killing it and the processes it started as the
-unconfined runner's `finish` does (`crates/loom-intake-slice/src/bindings.rs:560-580`); memory, CPU
-and processes are unbounded there, and the per-run wall budget is counted as everywhere. With no
+`enforced: false`. Under `local` the runner sends no bounds, which `local` would refuse, and ends a
+child at its `timeout_seconds` by killing its process group, which
+`story:confinement-opens-from-engine-config` delivers and this story relies on; memory, CPU and
+processes are unbounded there, and the per-run wall budget is counted as everywhere. With no
 `limits` section and no `limits` in the bindings a run behaves as today, under the fixed bounds
 where the confinement serves `limits` and under that deadline on `local`.
 

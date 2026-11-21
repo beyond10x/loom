@@ -34,7 +34,7 @@ scope:
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/ess/loom-decision.domain-graph.json
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -99,9 +99,11 @@ Changes from the SDC file:
   as `decided_case_revision` (answer e); the SDC inputs (`:547-554`, `:633-638`) have none. The
   record is written at that revision (`story:decided-record-written-then-recorded`).
 - `Request` takes `record_key`, the record id the request's decision would produce at the case
-  revision when it is opened (`<capability>@r<N>` for an approval, `<outcome>/<decision>@r<N>`
+  revision when it is opened (`<capability>@r<N>` for an approval with no scope and
+  `<capability>[<key>=<value>,…]@r<N>` for one with a scope, `<outcome>/<decision>@r<N>`
   for an outcome, `question:<question id>@<subject revision>` for a question, N the governor's
-  case revision; `story:decision-routing-by-holder` computes it), and stores it. It also takes
+  case revision; `story:decision-routing-by-holder` states the form and computes it), and stores
+  it. It also takes
   `open_for_record`, the Open or Escalated request the runtime found in the store for that key, if
   any. With `open_for_record` given, `Request` is refused `RecordKeyOpen` naming that request, and
   nothing is opened (answer g; the coordinator chose refusal over supersession). The SDC file

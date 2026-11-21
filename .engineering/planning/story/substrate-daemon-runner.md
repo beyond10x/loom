@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:confinement-opens-from-engine-config
 - depends_on: story:engine-configuration-document
-revision: 6
+revision: 7
 ---
 ## Outcome
 
@@ -84,10 +84,11 @@ lease lapses.
 ## Why
 
 `story:confinement-opens-from-engine-config` opens `local` or `linux` in process. The daemon path
-is the only one with a durable event log, leases, a named reason for a stopped run once
-`story:child-launches-through-confinement-adapters` moved in-process launches onto the adapter
-route (epic `## Why`), and remote transport (Substrate 0.21.0:
+is the only one with a durable event log, leases and remote transport (Substrate 0.21.0:
 `crates/substrate-daemon/src/app/routes.rs:113-124`, `crates/b10x-substrate-sdk/src/lib.rs:534-540`).
+In process, the host-driver route names the limit that stopped a run, and
+`story:child-launches-through-confinement-adapters` must keep that reason when it moves those
+launches onto the adapter route (epic `## Why`).
 Nothing in Loom depends on the SDK today (`~/beyond10x/sdc/docs/layers.md` § 3, "nothing in Loom
 picks a daemon").
 
@@ -114,9 +115,14 @@ the SDK feature `linked-daemon`, the test binary itself re-executed, which needs
   `ess/domains/engine.yaml`, which the next stories edit after this one.
 - `story:confinement-opens-from-engine-config`: the one constructor that opens the confinement,
   which gains the `Daemon` arm. Through it this story comes after
-  `story:child-launches-through-confinement-adapters` and `story:bound-commands-run-confined`,
-  which edit `ess/intake/domains/confinement.yaml` and `SubstrateRunner::run_child`
-  (`crates/loom-intake-slice/src/confinement.rs:475`) before it.
+  `story:bound-commands-run-confined`, which edits `ess/intake/domains/confinement.yaml` and
+  `SubstrateRunner::run_child` (`crates/loom-intake-slice/src/confinement.rs:475`) before it.
+- No edge to `story:child-launches-through-confinement-adapters`, which also edits the constructor
+  and `run_child` in `crates/loom-intake-slice/src/confinement.rs`: neither needs the other, and
+  an edge would hold this story behind that story's upstream blocker. `aep plan artifact waves`
+  keeps two stories that share a scope path out of one wave. That story's typed scope lists
+  `confinement.rs`; this story has no typed scope yet, so `waves` lists it `unassessed` and places
+  it in no wave until it is scoped with that path.
 - Through the chain: `story:tree-run-command`, which records the tree's workspace at `tree open`.
 
 ## ESS first

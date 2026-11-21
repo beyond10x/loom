@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:engineering-protocol-lock
 kind: story
-status: active
+status: implemented
 title: ProtocolCatalog::engineering reads ten vendored files from engineering-protocols 0.16.0, each checked against a sha256 lock at load
 summary: intake.protocols.ProtocolLock with one encoder and decoder (loom_protocols::lock); ProtocolCatalog::from_vendored refuses a digest mismatch, an unlocked file, a missing locked file and a malformed lock; ten literal sha256 digests
 tags:
@@ -19,19 +19,20 @@ scope:
 - confidence: cited
   path: crates/loom-protocols/src/lock.rs
 - confidence: cited
+  path: crates/loom-protocols/tests/adversary_w20261121w3_u3.rs
+- confidence: cited
   path: crates/loom-protocols/tests/adversary_w8_pin.rs
-- confidence: inferred
-  path: crates/loom-protocols/tests/catalog.rs
 - confidence: cited
   path: crates/loom-protocols/tests/engineering_lock.rs
 - confidence: cited
   path: ess/intake/domains/protocols.yaml
 - confidence: cited
   path: protocols/engineering
-revision: 10
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:30Z", actor: "human:timo", revision: 9}
 - {from: "proposed", to: "active", at: "2026-11-21T04:23:21Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
+- {from: "active", to: "implemented", at: "2026-11-21T07:04:54Z", actor: "agent:sdc", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
 ---
 ## Outcome
 
@@ -243,29 +244,19 @@ comparison in `adversary_w8_pin.rs`. `protocols/vocabulary.yaml`. The upstream c
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or **inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w3 from the unit's commits (`git diff --stat 39283f1b a5c527c5`: 46 files, 3684 insertions, 65 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-protocols` (`ProtocolCatalog::engineering`, a new `lock` module, a new `build.rs`) — cited, § Outcome and § Files
-- **Files (code):** `crates/loom-protocols/src/lib.rs:157-175` (`engineering()`: `:160,162` call the registry, `:169` stamps `"0.15.2"`) — cited, verified in tree
-- **Files (code):** `crates/loom-protocols/src/lock.rs` (new) — cited
-- **Files (code):** `crates/loom-protocols/build.rs` (new; none exists under `crates/*/build.rs` today) — cited
-- **Files (tests):** `crates/loom-protocols/tests/engineering_lock.rs` (new) — cited
-- **Files (tests):** `crates/loom-protocols/tests/adversary_w8_pin.rs:79-98` (`every_engineering_entry_carries_the_tag_the_manifest_pins`) — cited
-- **Files (ESS):** `ess/intake/domains/protocols.yaml` (adds `ProtocolLock`, `LockedFile`, `LockRefusal`; `List<…>` syntax is in use in sibling domains, e.g. `bindings.yaml:54`) — cited
-- **Files (data):** `protocols/engineering/**` (ten `<name>/<major>.yaml` + `lock.json`), new, beside `protocols/{system-query,inbound-answer,operator-reply}` — cited
-- **Generated (regenerated, house rule):** `generated/rust/intake/src/protocols.rs` — cited
-- **Symbols:** `ProtocolCatalog::engineering`, `ProtocolCatalog::add_yaml` (`lib.rs:183`; sha256 at `:215`), `ProtocolCatalog::from_vendored`, `VendoredError`, `ENGINEERING_FILES`, `ENGINEERING_LOCK`, `loom_protocols::lock::{REPOSITORY, FORMAT, encode, decode, locked_file, check}` — cited
-- **Also likely:** `crates/loom-protocols/tests/catalog.rs` is asserted unchanged; it calls `engineering()` and `bundled()` (`catalog.rs:25-30`), so it is exercised, not edited — inferred
-- **Also likely:** `crates/loom-protocols/Cargo.toml` is not edited by this story. `sha2` and `serde_json` are already dependencies, `build.rs` is auto-detected, and `b10x-canon-engineering` stays (§ Outcome last line) — cited (Cargo.toml read)
-- **Documents:** none beyond `CHANGELOG.md`. `loom_sdk::protocols` is `pub use loom_protocols as protocols` (`crates/loom-sdk/src/lib.rs:72`), so the new items surface with no sdk edit — cited
-- **Confidence:** high — every file, line and symbol in § Files and § Why resolves in the tree, and the ten digests and the commit were re-derived from `~/beyond10x/engineering-protocols` tag `0.16.0`
-- **Would collide with `story:canon-0-9-0-pin`** on `crates/loom-protocols/src/lib.rs` and `tests/adversary_w8_pin.rs` (its scope lists both) — ordered: direct `depends_on`
-- **Would collide with `story:engineering-registry-calls-replaced`** on `crates/loom-protocols/tests/engineering_lock.rs` (new here, edited there; its § Files) — ordered: direct `depends_on` this story
-- **Would collide with `story:engineering-protocols-dependency-removed`** on `crates/loom-protocols/tests/adversary_w8_pin.rs` (its § Files) — ordered: `dependency-removed -> registry-calls-replaced -> engineering-protocol-lock`, transitive
-- **Would collide with `story:engineering-protocols-vendor-command`** on `crates/loom-protocols/src/lock.rs` (it calls `lock::encode`, edits no file here) and on the content of `protocols/engineering/**` (it rewrites them) — ordered: direct `depends_on`
-- **Would collide with `story:protocol-argument-schema`** (draft, `decomposes epic:fast-selector`) on `crates/loom-protocols/src/lib.rs` (its body, line 163) and `tests/catalog.rs` — **not ordered**: it has no `depends_on` edge
-- **Would collide with `story:dw-workflow-into-protocol`** (draft, depends on `dw-bugfix-workflow` and `dw-incident-workflow`) on `crates/loom-protocols/src/lib.rs` (its body, line 55) — **not ordered**: no `depends_on` path to this story
-- **Would collide with every story that edits `CHANGELOG.md`** — house rule, ordered only where the stories above are
-- **Safety fact:** the ten files are byte-equal to the `0.15.2` registry the crate builds from today, so every `definition.sha256` the governor admits a catalog by (`crates/loom-governor/src/lib.rs:771,809`) is unchanged — re-ran `git show 0.15.2:<p> | sha256sum` and `git show 0.16.0:<p> | sha256sum` for all ten, all equal and equal to the story's literals; level 4 for the digests, unproven for the governor path
-- **Safety fact:** container images copy the whole repository (`deploy/images/loom-agent/Dockerfile:4` and `loom-operator/Dockerfile:4`, `COPY . .`; `.dockerignore` does not exclude `protocols/`), so a `build.rs` reading `../../protocols/engineering` finds it there — level 2, unproven
-- **Safety fact:** `crates/loom-protocols` is `publish = false` (`Cargo.toml:7`), so reading files outside the crate directory breaks no `cargo package` — level 2, unproven
+- **Primary surface:** `crates/loom-protocols` — cited, 6 of the 46 changed files are under it (`build.rs`, `src/lib.rs`, `src/lock.rs`, three test files); `protocols/engineering/` holds 11 more (ten definitions and the lock)
+- **Files (ESS sources):** `ess/intake/domains/protocols.yaml` (28 lines: the summary paragraph on vendored definitions, `ProtocolLock`, `LockedFile`, `LockRefusal`) — cited
+- **Files (generated):** `generated/rust/intake/**` (16 files: `src/protocols.rs` 40 insertions and 3 deletions, `PLAN.md`, `plan.json`, `Cargo.toml` and 12 other modules, a 4-line change each, `task generate`), `website/docs/reference/ess/**` (9 files: `intake-protocols.md` 27 lines, `index.mdx` and 7 pages with 2 lines each), `website/data/ess/intake-protocols.domain-graph.json` (1 line) — cited
+- **Files (data):** `protocols/engineering/` (new, 11 files, 2038 lines): `eval-gated-change/1.yaml` (217), `incident-response/1.yaml` (122), `loop-improvement/1.yaml` (164), `ml-experiment/1.yaml` (136), `protocol-adopt/1.yaml` (106), `self-improvement/1.yaml` (217), `software-change/1.yaml` (309), `story-delivery/1.yaml` (213), `story-delivery/2.yaml` (306), `support-triage/1.yaml` (200) and `lock.json` (48) — cited
+- **Files (source):** `crates/loom-protocols/src/lock.rs` (291 lines, new: the encoder, the decoder, `check`), `crates/loom-protocols/build.rs` (98 lines, new: embeds `protocols/engineering/` into `$OUT_DIR`), `crates/loom-protocols/src/lib.rs` (72 insertions, 14 deletions: `pub mod lock`, the two constants, `VendoredError`, `from_vendored`, and `engineering()` reads the vendored files with the lock's tag as revision in place of the registry calls and the literal) — cited
+- **Files (new tests):** `crates/loom-protocols/tests/engineering_lock.rs` (594 lines, 17 cases, the story's) and `crates/loom-protocols/tests/adversary_w20261121w3_u3.rs` (406 lines, 11 cases, the adversary's pass 1, committed unchanged) — cited
+- **Files (existing tests):** `crates/loom-protocols/tests/adversary_w8_pin.rs` (17 insertions, 4 deletions: `every_engineering_entry_carries_the_tag_the_manifest_pins` also compares each revision with the tag of `lock::decode(ENGINEERING_LOCK)`; the module doc names the lock) — cited
+- **Files (documents):** `CHANGELOG.md` (2 lines: one under Added, one under Changed), `AGENTS.md` (10 insertions, 1 deletion: the vendored definitions and the lock rules in § protocols) — cited
+- **Symbols (`loom_protocols`):** added `ENGINEERING_FILES`, `ENGINEERING_LOCK`, `VendoredError` (`Lock(lock::LockError)`, `Definition { path, problem }`; `Display`, `Error`), `ProtocolCatalog::from_vendored`, and the public module `lock`; changed `ProtocolCatalog::engineering` (same signature, now `from_vendored` over the two constants, its error the text `VendoredError` prints). Nothing removed — cited
+- **Symbols (`loom_protocols::lock`, new):** `REPOSITORY`, `FORMAT`, `LockError` (`refusal`, `path`, `digests`, `problem`), `locked_file`, `encode`, `decode`, `check`; re-exports `LockRefusal`, `LockedFile`, `ProtocolLock`; `registration` is `pub(crate)` — cited
+- **Symbols (generated, `intake::protocols`):** `ProtocolLock`, `LockedFile`, `LockRefusal` (`Malformed`, `DigestMismatch`, `Unlocked`, `Missing`) — cited
+- **Not predicted and touched:** `crates/loom-protocols/tests/adversary_w20261121w3_u3.rs` (the adversary's cases); `AGENTS.md` (house-rule file, not named by the stored Scope section)
+- **Predicted and not touched:** `crates/loom-protocols/tests/catalog.rs` (inferred; "asserted unchanged", the diff does not hold it). `crates/loom-protocols/Cargo.toml` and `Cargo.lock` are not in the diff either, as the stored Scope section said
+- **Review:** `review-result:engineering-protocol-lock-adversary-1` (head 3e768c32, green: 11 cases added, executed 59 to 70, red 0; three unchecked guards in `lock.rs` (the commit form, an empty tag, Missing before parsing) covered by the added cases; notes on `engineering()`'s error text, `build.rs` link refusals, and the `check` doc saying every file) — the only review result recorded for the story

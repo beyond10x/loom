@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:daemon-continues-a-decided-request
 kind: story
-status: draft
+status: proposed
 title: On a served tree, decisions decide, take and tick go through the daemon, and the daemon continues the decided case with no further command
 summary: ServedTree gains Decide and Tick in ess/domains/tree.yaml. decisions --tree on a served store goes through the daemon's socket instead of being refused StoreServed (exit 37). The decided case leaves Waiting and takes a slot or queues for one, and the tree's state is derived. It continues after a restart too, and a denied approval stops as a direct tree run would. The host ticks a served tree; a dropped connection exits 36
 tags:
@@ -35,7 +35,9 @@ scope:
   path: ess/scenarios
 - confidence: cited
   path: website/docs/guides/decisions.md
-revision: 6
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T04:44:12Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 

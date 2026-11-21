@@ -11,7 +11,7 @@ relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
 - depends_on: epic:protocol-tree-on-bindings
-revision: 8
+revision: 9
 ---
 ## Outcome
 
@@ -55,14 +55,15 @@ Read at Substrate tag `0.21.0` on 2026-11-21:
 - Which limit ended a run is the exec's refusal code, `exec.timeout`, `exec.cpu-limit`,
   `exec.memory-limit` or `exec.aperture-byte-limit` (`crates/substrate-host/src/process.rs:3280-3322`);
   a memory end is no `exec.cancelled` (`forced_cancellation` leaves it out, `:3151-3155`) but an
-  `Exited` run with that code (`:3221`). The host driver and the daemon both set it. Today Loom's
-  in-process `run_child` launches through the host driver and reads the code
-  (`settle`, `crates/loom-intake-slice/src/confinement.rs:836-839`), but
-  `story:child-launches-through-confinement-adapters`, which this epic comes after through
-  `story:confinement-opens-from-engine-config`, moves in-process launches onto Substrate's adapter
-  route, whose `RunObservation` has an exit, a signal and, on `pod` only, OOM kills
-  (`crates/substrate-host/src/confinement/mod.rs:694-706`). So once this epic lands, the code
-  reaches Loom from the daemon only.
+  `Exited` run with that code (`:3221`). The host driver and the daemon both set it. Loom's
+  in-process `run_child` launches `linux` through the host driver and reads the code
+  (`settle`, `crates/loom-intake-slice/src/confinement.rs:836-839`), and
+  `story:confinement-opens-from-engine-config` keeps `linux` there.
+  `story:child-launches-through-confinement-adapters`, which no story of this epic waits on, later
+  moves in-process launches onto Substrate's adapter route, whose `RunObservation` has an exit, a
+  signal and, on `pod` only, OOM kills (`crates/substrate-host/src/confinement/mod.rs:694-706`);
+  it must keep the reason, which is what its upstream blocker waits for. So the code reaches Loom
+  in process from the host driver and on the wire from the daemon.
 - The daemon reports each exec's usage when a start asks for it (`ExecUsage::Observed` of
   `ResourceUsage`: CPU time, memory peak, process peak, process-limit hits;
   `crates/substrate-wire/src/lib.rs:2149-2184`).
@@ -206,12 +207,13 @@ Substrate's side, as session `substrate` reported it on 2026-11-21 (drafts under
 
 - Which limit ended a run, on the in-process adapter route:
   `story:run-observation-names-the-limit-that-ended-it` and `story:audit-records-run-end-and-limit`.
-  `story:limit-hits-in-run-log` reads the refusal code the daemon reports and records only the
-  wall-time hit in process; it does not wait on them.
+  `story:limit-hits-in-run-log` reads the refusal code the host driver reports in process and the
+  daemon reports on the wire; it does not wait on them.
+  `story:child-launches-through-confinement-adapters` does, through its upstream blocker.
 - A process-count hit as an observation: `story:process-count-limit-hit-is-observed` (in
   process) and `story:exec-observation-reports-process-count-hits` (on the wire).
-  `story:limit-hits-in-run-log` reports that hit from the daemon's measured counter
-  (`process_limit_hits`) until then.
+  `story:limit-hits-in-run-log` reports that hit from the measured counter (`process_limit_hits`)
+  of the host driver in process and of the daemon until then.
 - Executable lists: `story:linux-executable-allow-list`, `story:executable-deny-list`,
   `story:executable-lists-on-oci-and-pod`, `story:exec-start-carries-executable-lists`
   (`upstream-blocker:substrate-executable-allow-list`, which holds

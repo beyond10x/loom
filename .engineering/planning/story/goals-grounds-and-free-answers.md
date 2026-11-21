@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:goals-grounds-and-free-answers
 kind: story
-status: draft
+status: proposed
 title: A ground can cite one goals entry, checked by rule D93 at the request's opened_at through a host port, and a question request takes a free answer, behind the contract members story 1 copies at 00e3557
 summary: 'Story 1''s copy of the contract already declares the goals ground and the free answer. This story adds Loom''s declarations: GoalsRefusalCause, the GoalsEntry refusal carrying every cause, the revision_moved note kept in grounding_report, GoalsEntryState, the host port GoalsEntries, the answer on DeciderReply::Propose, and the answer on the ServedTree command Decide. It adds the behaviour too. HeldCaseGrounds::with_goals_entries checks a goals ground by rule D93, and the slice and the tree pass the port. Decode, inbox printing and --answer, the tree and daemon Decide, the question record and the tick carry the free answer'
 tags:
@@ -20,7 +20,6 @@ relations:
 - depends_on: story:daemon-continues-a-decided-request
 - depends_on: story:decider-port-and-grounding-check
 - depends_on: story:decision-request-entity
-- depends_on: story:non-independent-review-becomes-decision-request
 scope:
 - confidence: cited
   path: crates/loom-cli/src/decisions.rs
@@ -50,17 +49,27 @@ scope:
   path: crates/loom-governor/tests/held_case_goals.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/run.rs
-- confidence: inferred
+- confidence: cited
+  path: crates/loom-intake-slice/tests/goals_port.rs
+- confidence: cited
   path: crates/loom-sdk/src/decisions.rs
 - confidence: cited
+  path: crates/loom-sdk/tests/host_ports.rs
+- confidence: cited
   path: crates/loom-tree
+- confidence: cited
+  path: crates/loom-tree/tests/goals_port.rs
 - confidence: cited
   path: ess/domains/decision.yaml
 - confidence: cited
   path: ess/domains/tree.yaml
 - confidence: inferred
   path: website/docs/guides/decisions.md
-revision: 8
+- confidence: cited
+  path: website/docs/reference/sdk-stability.md
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T04:44:13Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -124,7 +133,8 @@ resolver still reads none (`story:grounds-resolve-against-held-cases`, § Accept
 
 - `GoalsEntries` is a host port in `crates/loom-decision`. Given an entry id and an instant, it
   answers `GoalsEntryState`:
-  - whether the goals document validates;
+  - whether the goals document validates, and when it does not, the reason (a provider names
+    there what it found, for example two revisions that differ);
   - and, when the entry is present, its digest, its `valid_from`, its optional `valid_until`,
     and the id of the applying lower-layer entry that overrides it at that instant, if any.
 
@@ -152,6 +162,16 @@ resolver still reads none (`story:grounds-resolve-against-held-cases`, § Accept
   `invalid_goals`. Session `sdc` accepts this until a file-backed provider lands
   (`.engineering/drafts/e3-sdc-answers-11.md`, (c); `story:goals-entries-from-a-resolved-document`).
   The `decisions` commands run no grounding check.
+
+**A port a host implements.** A host implements `GoalsEntries` and passes it in through
+`RunOptions.goals` or the tree's host argument. So, as `story:decisions-resume-the-held-run` does
+for `ResumeBuilder`, and as `AGENTS.md:172` requires:
+
+- `crates/loom-sdk/src/decisions.rs` (the module `story:decision-inbox-commands` creates)
+  re-exports it as `loom_sdk::decisions::GoalsEntries`, with `GoalsEntryState`;
+- it gets a `host_ports!` row in `crates/loom-sdk/tests/host_ports.rs` (the invocation at `:48`);
+- it gets a row under "Ports a host implements" in `website/docs/reference/sdk-stability.md`
+  (`:74`).
 
 **Where `revision_moved` is kept.** It is kept in the contract's `grounding_report`
 (`decision.yaml:250`), which `Recommend` sets from `check_report` on a verified check (`:526`).
@@ -253,9 +273,13 @@ free-answer guards (`crates/loom-decision/tests/free_answer.rs`).
     `Decide.answer` is new and `Ground.supports` is optional.
 - `crates/loom-executor`: the LLM decider's tool schema and decode.
 - `crates/loom-cli/src/decisions.rs`: `--answer`, the optional `OPTION`, and the printing.
+- `crates/loom-sdk/src/decisions.rs` (the re-export), `crates/loom-sdk/tests/host_ports.rs` (the
+  row) and `website/docs/reference/sdk-stability.md` (the row).
 - Tests:
   - `crates/loom-decision/tests/goals_grounds.rs`;
   - `crates/loom-governor/tests/held_case_goals.rs`;
+  - `crates/loom-intake-slice/tests/goals_port.rs`;
+  - `crates/loom-tree/tests/goals_port.rs`;
   - `crates/loom-decision/tests/free_answer.rs`;
   - `crates/loom-executor/tests/llm_decider_answer.rs`;
   - `crates/loom-cli/tests/decisions_free_answer.rs`.
@@ -289,11 +313,15 @@ story of its own (`.engineering/drafts/e3-sdc-answers-11.md`, (c)).
   this story's type changes force an edit in. Story 16 (`story:tree-waits-open-decision-requests`,
   `decisions … --tree` and the tree's `HeldCaseGrounds` build) comes first through it. So this
   story lands after both, and their `decisions.rs` and `crates/loom-tree` edits are in place.
-- `story:non-independent-review-becomes-decision-request`: it changes the same files
-  (`ess/domains/decision.yaml`, the decider-port module, `ModelDecider` and `crates/loom-tree`), and
-  it has no typed scope, so `aep plan artifact waves` cannot keep the two apart by path. A direct
-  edge orders this story after it. Neither reads the other's members, so the order is arbitrary,
-  and this story is the one of lower priority.
+- `story:non-independent-review-becomes-decision-request` comes after this story and depends on it.
+  - This story changes `DeciderReply::Propose` (an optional answer, the option optional) and the
+    `ModelDecider` tool schema and decode.
+  - That story extends `ModelDecider` with its identity report, and its review decisions are
+    decided by `decider:stub`, whose replies are `Propose` replies (its § Acceptance; that its tests
+    build `Propose` values is inferred).
+  - So whichever lands second edits the other's code. It goes second: it is an unscoped draft that
+    also waits on `story:selector-stop-names-set-aside-record`, and this story should not wait on
+    that chain.
 
 ## ESS first
 
@@ -305,14 +333,14 @@ contract member and guard named above. Loom's own declarations in `ess/domains/d
 - the `GroundingRefusal` variant `GoalsEntry`: the citation and a list of `GoalsRefusalCause`;
 - `CitationNote` `revision_moved` (cited revision, current revision), optional on
   `CitationVerdict`;
-- `GoalsEntryState`: `document_valid`, and an optional entry holding `digest`, `valid_from`,
+- `GoalsEntryState`: `document_valid`, an optional `invalid_reason`, and an optional entry holding `digest`, `valid_from`,
   optional `valid_until` and optional `overridden_by`;
 - the host port `GoalsEntries` (entry id, instant → `GoalsEntryState`). It is declared here by the
   epic's rule, because the digest it answers becomes part of the `Recommend` input;
 - the optional answer of `DeciderReply::Propose`.
 
 `ess/domains/tree.yaml`: the `ServedTree` command `Decide` gains an optional `answer`, and its
-option becomes optional. On that commit `task drift` fails for these declarations, and the five
+option becomes optional. On that commit `task drift` fails for these declarations, and the seven
 test files above do not compile.
 
 ## Acceptance
@@ -334,11 +362,18 @@ at `2026-11-21T12:00:00Z`.
 - A state with digest `sha256:bb`, `overridden_by: request/r1`, and the request opened at
   `2026-12-01T00:00:01Z` is refused with the causes exactly
   `[digest_changed, expired, overridden]`.
-- A state whose document does not validate is refused `[invalid_goals]`.
+- A state whose document does not validate, with `invalid_reason` "x", is refused
+  `[invalid_goals]`, and the reason names "x".
 - A goals citation with no digest is verified, and the ground in the `Recommend` input carries the
   digest `sha256:aa`.
 - A recommendation whose one ground is refused `digest_changed` is withheld:
   `no_recommendation_reason` names `goals@g3#product/p1` and `digest_changed`.
+- A `Take` reply on a request whose recorded recommendation cites `goals@g3#product/p1` with
+  `sha256:aa`, checked against a state whose digest is now `sha256:bb`, gives a refused `Recommend`
+  input naming `digest_changed`: the `Take` is withheld.
+- A `Propose` built from a Decided prior (proposer `prior_decision`, first ground citing the prior
+  request, then the prior's goals ground with `sha256:aa`), checked against a state whose digest is
+  now `sha256:bb`, is refused naming `digest_changed`: the prior is not reused.
 
 In `crates/loom-governor/tests/held_case_goals.rs`, over a held case declaring artifact `goals`
 at revision `g3`, a counting `EvaluationTime`, and a recording fixture `GoalsEntries` port:
@@ -353,7 +388,57 @@ at revision `g3`, a counting `EvaluationTime`, and a recording fixture `GoalsEnt
   `no goals port`.
 - A held case that declares no `goals` artifact verifies the citation with no note.
 
+In `crates/loom-intake-slice/tests/goals_port.rs`, with the fixture of
+`crates/loom-intake-slice/tests/decision_authority_rule.rs` (`story:approval-decisions-resume-held-runs`:
+a `software-change@1` run, `DecisionAuthority`, a clock fixed at `2026-11-21T12:00:00Z`).
+
+The held run is built through the slice's state entry `run_prepared_intent_with_state`
+(`crates/loom-intake-slice/src/intent.rs:453`), which `b10x-loom run --state` calls. It runs
+through Commission's `run_with_suspension` and leaves a withheld approval's Suspension in the state
+directory's `FileSuspensionStore` (`intent.rs:439-441`). That store is opened with
+`FileSuspensionStore::open(DIR)`, as `story:decisions-resume-the-held-run` opens it.
+
+`run_with_clock` is not used for the hold, because it runs `Mode::Once`
+(`crates/loom-intake-slice/src/run.rs:528`) and keeps no Suspension. Nothing in
+`story:approval-decisions-resume-held-runs` changes that: its library bullets hold no Suspension
+(its § Acceptance, `decision_authority_rule.rs`: `A4` runs through and `A5` holds none). Story 21
+builds its approval holds through `b10x-loom run --state`, which is the same entry, so the two
+stories agree.
+
+At `A1`, a recorded decider recommendation `A`, strong, cites `goals@g3#product/p1` with digest
+`sha256:aa`. `RunOptions.goals` holds a recording fixture port, and no model is called.
+
+- The run through `run_prepared_intent_with_state` holds an `Authority` Suspension in `DIR`,
+  records the recommendation verified, and the port records a
+  call for `product/p1` at the request's `opened_at`: the port reached `with_goals_entries` through
+  the slice's entry, not through a direct build.
+- After `loom_sdk::decisions::take` of that request, with the port now answering digest
+  `sha256:bb`, the governor's `canon-decision/1` document for the case does not list
+  `repository.merge` granted: the slice's `AuthorityRecords` withholds the record.
+- After the same `take` and the same change, the slice's resume refuses `repository.merge` as not
+  granted. The request is Superseded naming a new Open request, and nothing is performed.
+
+In `crates/loom-tree/tests/goals_port.rs`, with the three-level fixture tree and the tree routing
+of `story:tree-waits-open-decision-requests` (its fixture autonomy documents and principals,
+`crates/loom-cli/tests/fixtures/tree/decisions/`, at level `A1`, where the recorded decider is
+asked for a recommendation and the person `timo` decides), a recorded decider recommendation citing `goals@g3#product/p1` with `sha256:aa`, `tree run` driven
+through `crates/loom-tree`'s library entry with a recording fixture port as the host's port, and
+no model call:
+
+- The run records the recommendation verified, and the port records a call for `product/p1`: the
+  tree's port reached `with_goals_entries` through the entry.
+- After the request is decided `A` with `decisions decide … --tree STORE`, and with the port now
+  answering `sha256:bb`, the next `tree run` supersedes the request and opens a new one for the
+  same stop, and the case does not continue past the wait.
+
 In `crates/loom-decision/tests/free_answer.rs`, over the in-memory store:
+
+- `check_grounds` on a question request with a `Propose` reply naming the answer "ship both", no
+  option, strength `strong`, and one `path_line` ground with no `supports` that a fixture
+  `PathLineResolver` resolves gives a `Recommend` input with `check_verdict` `verified` and
+  `recommended_answer` "ship both".
+- The same reply with its one ground carrying `supports: A` gives `check_verdict` `refused`,
+  because no ground supports the answer.
 
 - `Recommend` on a question request, with `recommended_answer` "ship both", strength `strong` and
   one ground with no `supports`, leaves the request with that `recommended_answer`.
@@ -402,6 +487,8 @@ and the `grounding_report` from the `revision_moved` bullet above:
   leaves `decided_answer` "neither".
 - With `b10x-loom tree serve STORE` running, the same command exits 0 through the daemon's
   `Decide`, and the request is Decided with `decided_answer` "neither".
+- `crates/loom-sdk/tests/host_ports.rs` passes with the `host_ports!` row for
+  `loom_sdk::decisions::GoalsEntries` and its row under "Ports a host implements".
 - `task check` exits 0.
 
 ## Out of scope

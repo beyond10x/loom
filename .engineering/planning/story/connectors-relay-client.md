@@ -27,7 +27,7 @@ scope:
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:54:03Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "sdc-accepts-boundary-epic-2026-11-21"}
 ---
@@ -361,6 +361,6 @@ Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the sto
   - `story:consumer-sdk-paths` (draft): `website/docs/reference/sdk-stability.md`. No `depends_on` path to this story. Its edges are `decomposes epic:loom-foundation-for-consumers` and `serves vision:governed-autonomy` only. A table-row collision, textual only.
   - `story:breaks-between-releases` (draft): `website/docs/reference/sdk-stability.md`. No `depends_on` path to this story, and its own edges are the same two as `story:consumer-sdk-paths`.
   - `story:child-launches-through-confinement-adapters` (draft): `website/docs/reference/sdk-stability.md`. No path to this story; it depends on `story:substrate-0-21-pin` only.
-  - `story:confinement-opens-from-engine-config` (proposed): `crates/loom-sdk/src/lib.rs`. No path to this story; it depends on `story:child-launches-through-confinement-adapters`.
+  - `story:confinement-opens-from-engine-config` (proposed): `crates/loom-sdk/src/lib.rs`. No path to this story; it depends on no story, and `story:child-launches-through-confinement-adapters` depends on it.
   - `Cargo.lock`: shared by every pin story. `story:canon-0-9-0-pin` (active) edits `Cargo.toml`s, so `Cargo.lock` differs, but it touches no `crates/loom-connectors` file.
 - **Safety fact:** adding `pub mod relay` and a `reqwest` dependency changes no existing caller. `ConnectorsCli` and `ConnectorsInvoker` keep their paths, and `reqwest` is already in the lock through `connectors-client` and `crates/loom-agent/Cargo.toml:22`. Step 2 (`lib.rs:70-71`, `loom-agent/Cargo.toml:22`), unproven.

@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T05:39:15Z",
+  "actor": "agent:loom",
+  "artifact": "story:hash-chained-run-log",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/hash-chained-run-log 03c668fa, 942bceab",
+    "review": "review-result:hash-chained-run-log-adversary-2",
+    "outcome": "fixed"
+  }
+}

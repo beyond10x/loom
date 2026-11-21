@@ -4,7 +4,7 @@ id: story:limit-hits-in-run-log
 kind: story
 status: draft
 title: Every limit a process hits is one event in its case's run log, and a result table can key on it
-summary: 'From the daemon''s refusal code and usage: memory, CPU time, wall time, process count; in process the wall time only'
+summary: 'From the refusal code and usage Substrate reports, in process on the host-driver route and from the daemon: memory, CPU time, wall time, process count; under local the wall time only'
 tags:
 - sdc
 relations:
@@ -13,7 +13,7 @@ relations:
 - depends_on: story:action-limits-enforced
 - depends_on: story:substrate-daemon-runner
 - depends_on: story:agent-node-run-records
-revision: 6
+revision: 8
 ---
 ## Outcome
 
@@ -37,9 +37,17 @@ What is recorded depends on the route:
 - `Daemon`: all four kinds. The memory and CPU ends come from the refusal code on the applied
   record's `ended_by` (`exec.memory-limit`, `exec.cpu-limit`), the wall end from `timed_out`, and the
   process-count hit from the usage counter `process_limit_hits` above 0.
-- In-process `linux` and `local`: the wall-time hit only, from `timed_out`. The adapter route names
-  no reason and reports no usage, until the Substrate stories named in the epic's `## Upstream`
-  report them there.
+- In-process `linux`, on the host-driver route: all four kinds, from the same sources. This story
+  makes `settle` (`crates/loom-intake-slice/src/confinement.rs:822-839`) set `ended_by` from the
+  host driver's refusal code, which the driver sets for a memory, CPU or wall end whether or not
+  usage was asked for (`crates/substrate-host/src/process.rs:3182`, `:3280-3322`). In-process
+  starts ask for `ExecMeasurement::ResourceUsage` when the driver publishes `exec_resource_usage`,
+  and `usage` comes from the driver's `ExecUsage::Observed` (`process.rs:1363-1367`,
+  `:4172-4201`). On a driver that does not publish it a start asks for nothing, since one asking
+  would be refused (`process.rs:2475-2479`): the memory and CPU lines then carry no `measured`,
+  and no `processes` line is written, because that driver reports no count.
+- `local`: the wall-time hit only, from `timed_out` at Loom's own deadline
+  (`story:confinement-opens-from-engine-config`). `local` serves no limits and reports no usage.
 
 A memory or CPU end reaches the result table: this story changes `child_result` and `live_result`
 in `crates/loom-intake-slice/src/confinement.rs` (today `:939-960`, where any end with a refusal
@@ -56,10 +64,14 @@ is not an `exec.cancelled`: `forced_cancellation` covers timeout, CPU, aperture,
 requested cancel, not memory (`:3151-3155`), so the run ends `Exited` (`:3221`) with that refusal
 code. The reason is read from the refusal, never from the event's name. Today's in-process
 `run_child` reads that code from the host driver (`settle`,
-`crates/loom-intake-slice/src/confinement.rs:836-839`), but
-`story:child-launches-through-confinement-adapters`, which comes before this epic, moves launches
-onto the adapter route, whose `RunObservation` carries an exit and a signal, and OOM kills only on
-`pod` (`crates/substrate-host/src/confinement/mod.rs:694-706`). The daemon reports each exec's usage
+`crates/loom-intake-slice/src/confinement.rs:836-839`), and in-process `linux` launches stay on
+that route after `story:confinement-opens-from-engine-config`, so this story reads memory, CPU and
+process ends there. Loom asks the host driver for no usage today (`measurements` is empty,
+`confinement.rs:1546`, `:3274`). `story:child-launches-through-confinement-adapters` moves those
+launches onto the adapter route, whose `RunObservation` carries an exit and a signal, and OOM kills
+only on `pod` (`crates/substrate-host/src/confinement/mod.rs:694-706`); when it lands it must keep
+these reasons, which is what its `upstream-blocker:substrate-run-observation-names-the-limit`
+waits for. The daemon reports each exec's usage
 as `ExecUsage::Observed(ResourceUsage)` (`cpu_time_us`, `memory_peak_bytes`, `processes_peak`,
 `process_limit_hits`; `crates/substrate-wire/src/lib.rs:2149-2184`), which the daemon runner asks for
 (`story:substrate-daemon-runner`, `TestExecution.usage`). A process-count hit ends nothing and is only
@@ -72,7 +84,7 @@ and falls to `*`.
   it edits before this story (`ess/domains/bindings.yaml`, `ess/domains/tree.yaml`,
   `ess/domains/engine.yaml`, `crates/loom-tree`, `crates/loom-intake-slice/src/confinement.rs`).
 - `story:substrate-daemon-runner`: `ended_by`, the daemon's refusal code on the applied record,
-  and `usage`.
+  and `usage`. This story fills both in process from the host driver as well.
 - `story:agent-node-run-records`: the last story to add to `RunLogEvent` in
   `ess/domains/runlog.yaml` before this one.
 
@@ -98,26 +110,33 @@ commit `task drift` fails and `crates/loom-tree/tests/limit_events.rs` does not 
 
 ## Acceptance
 
-Under `Daemon` with a managed daemon, with stub programs:
+Each bullet runs with stub programs under the route it names. "Both" means under `Daemon` with a
+managed daemon, and under the in-process `linux` adapter on the host-driver route, on a host whose
+driver proves `limits` and publishes `exec_resource_usage`, gated as the delegated tests are.
 
-- A program stopped at its memory limit gives one `LimitHit` line of kind `memory` whose
+- Both: a program stopped at its memory limit gives one `LimitHit` line of kind `memory` whose
   `configured` is the configured bytes and whose `measured` equals the exec's `memory_peak_bytes`;
   one stopped at its CPU limit a `cpu-time` line in milliseconds with `measured` the CPU time used;
   one stopped at `timeout_seconds` a `wall-time` line in seconds with no `measured`; each says
   `enforced: true`.
-- A child ended by `exec.memory-limit` and one ended by `exec.cpu-limit` each come back from
+- Both: a child ended by `exec.memory-limit` and one ended by `exec.cpu-limit` each come back from
   `run_child` as a result with no exit status and that `ended_by`, not as `CapabilityUnserved`.
-- A program whose forks failed at the process limit and that then exited 0 gives one `LimitHit`
-  line of kind `processes` with the process peak, and the step's result comes from exit 0.
-- A step with `results: {"limit:memory": exhausted, "*": failed}` records `exhausted` when the
-  memory limit ended it; one with `results: {"timeout": slow, "*": failed}` records `slow` when the
-  wall limit ended it and its `ProgramRun` has `limit` `wall-time`; one with only
+- Both: a program whose forks failed at the process limit and that then exited 0 gives one
+  `LimitHit` line of kind `processes` with the process peak, and the step's result comes from
+  exit 0.
+- Both: a step with `results: {"limit:memory": exhausted, "*": failed}` records `exhausted` when
+  the memory limit ended it; one with `results: {"timeout": slow, "*": failed}` records `slow` when
+  the wall limit ended it and its `ProgramRun` has `limit` `wall-time`; one with only
   `{"limit:wall-time": x, "*": failed}` records `failed`.
-- A program that prints `exec.memory-limit` and exits 1 gives no `LimitHit` line.
-- A kill by signal 9 with no refusal code gives no line.
-
-Under the in-process `linux` adapter: a run stopped at its wall limit gives one `wall-time` line;
-one stopped at its memory limit gives no `memory` line.
+- Both: a program that prints `exec.memory-limit` and exits 1 gives no `LimitHit` line.
+- Both: a kill by signal 9 with no refusal code gives no line.
+- In process, the start input built for a driver whose facts publish `exec_resource_usage` carries
+  `ExecMeasurement::ResourceUsage`, and the one built for a driver that does not carries none (a
+  unit test in `crates/loom-intake-slice/src/confinement.rs`, no driver).
+- In process, `settle` given an ended observation with the refusal `exec.memory-limit` and no
+  `usage` returns `ended_by` `exec.memory-limit` and no `usage` (a unit test, no driver).
+- `crates/loom-tree` builds from a result with `ended_by` `exec.memory-limit` and no `usage` one
+  `memory` line with no `measured`, and from a result with no `usage` no `processes` line.
 
 Under `local` with the engine's limits declared advisory, a sleep past `timeout_seconds` gives one
 `wall-time` line that says `enforced: false`.
@@ -130,5 +149,5 @@ Under `local` with the engine's limits declared advisory, a sleep past `timeout_
 
 A per-connection event for a refused connection: Substrate reports none. Output and egress bytes:
 neither has a ceiling in this epic. A `LimitHit` for an agent harness
-(`story:agent-session-through-substrate`). Alerting. Memory, CPU and process-count hits in process
-(the epic's `## Upstream`).
+(`story:agent-session-through-substrate`). Alerting. Memory, CPU and process-count hits under
+`local`, which serves no limits and reports no usage.

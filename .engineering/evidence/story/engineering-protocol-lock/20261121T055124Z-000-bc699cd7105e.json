@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T05:51:24Z",
+  "actor": "agent:loom",
+  "artifact": "story:engineering-protocol-lock",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/engineering-protocol-lock a39a9aef, 68fcbf01, a5c527c5",
+    "review": "review-result:engineering-protocol-lock-adversary-1",
+    "outcome": "fixed"
+  }
+}

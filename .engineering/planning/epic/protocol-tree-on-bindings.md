@@ -10,7 +10,7 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:38Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"review_outcome":1}}}
 ---
@@ -56,8 +56,10 @@ drive`. Atlas ADR 0090 and ADR 0096 name Loom as the one governed runtime. What 
 ## Stories
 
 In dependency order. `story:child-launches-through-confinement-adapters` is an existing draft under
-`epic:loom-sdk-for-products`; this epic depends on it and does not re-plan it (only its stale
-"Waits on" section was rewritten, and it gained `depends_on story:substrate-0-21-pin`).
+`epic:loom-sdk-for-products`; since 2026-11-21 it comes after this epic's
+`story:confinement-opens-from-engine-config`, no story of this epic waits on it, and it is planned
+under its own epic (its "Waits on" section was rewritten, and it gained
+`depends_on story:substrate-0-21-pin`).
 
 1. `story:substrate-0-21-pin`
 2. `story:confinement-opens-from-engine-config`

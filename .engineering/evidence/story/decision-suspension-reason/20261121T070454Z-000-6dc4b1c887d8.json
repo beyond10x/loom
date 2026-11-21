@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T07:04:54Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-suspension-reason",
+  "kind": "story",
+  "revision": 24,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "whole gate on wave/2026-11-21-w3 at e38ee19f (ESS_TOOLCHAIN=0.86.0), 2026-11-21 06:39 to 07:04 UTC",
+    "reference": "24 steps, 24 exit 0; cargo test --workspace --locked --no-fail-fast exit 0 in 1002 s: 3089 passed, 0 failed, 10 ignored over 506 test result lines; cargo test -- --list lists 3099 tests; clippy --workspace --all-targets -D warnings exit 0; consumer-check, docs-check, commission:docs-drift (ess 0.86.0 first on PATH), website exit 0; no path outside .engineering changed by the gate"
+  }
+}

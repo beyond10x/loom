@@ -10,7 +10,7 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 11, decided_on: {"recorded":{"review_outcome":12}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -167,9 +167,9 @@ Loom pins today. Stories 16 and 20 wait on `story:tree-run-command`, and through
 `story:canon-0-9-0-pin`, which is unblocked (engineering-protocols `0.16.0` pins Canon `0.9.0`) and
 not yet delivered. Story 22 waits on story 16 and on `story:tree-daemon`
 (`epic:tree-daemon-under-enforced-limits`): a decision on a served tree goes through the daemon,
-and story 16 does not wait on the daemon chain. Story 23 waits on stories 20 and 22. Story 24
-waits on story 23 and on the stories of `epic:tree-daemon-under-enforced-limits` and
-`epic:concurrent-and-standing-case-trees` that edit the engine configuration. Stories 17,
+and story 16 does not wait on the daemon chain. Story 23 waits on story 22, and story 20 waits on
+story 23. Story 24 waits on story 23, `story:engine-configuration-document` and `story:tree-daemon`.
+Stories 17,
 18 and 19 wait on Canon (§ Upstream). Each story's code goes in its own module, so a crate's
 `lib.rs` shared by several stories gains one `mod` line per story; the order is kept, and the wave
 planner keeps two stories that share a file apart. Story 13 depends on story 10 because the type
@@ -185,15 +185,29 @@ on story 12 (the tick it resumes after), and story 16 depends on it (both edit
 stories 16 and 21 (story 21 for `crates/loom-cli/src/decisions.rs`), `story:tree-daemon`, and
 `story:concurrent-cases-in-the-tree-daemon` (`epic:concurrent-and-standing-case-trees`), whose
 per-case states `Decide` and `Tick` move a case through. Story 23 comes after stories 1 to 14 and
-holds none of them. It depends on eleven stories:
+holds none of them. It depends on ten stories:
 - stories 2, 5, 6, 11, 12, 14 and 21, the surfaces it extends;
 - story 22, its eighth edge: its type changes to `Decide` and `Ground.supports` force an edit in
   the `--tree` and daemon code, so it lands after story 22, and through it after story 16;
-- stories 1 and 4, whose declarations and `check_grounds` it cites;
-- story 20, which changes the same files and has no typed scope.
+- stories 1 and 4, whose declarations and `check_grounds` it cites.
 
-Story 24 depends on story 23 and on every story that edits `ess/domains/engine.yaml` and is not
-already before it. A host port
+Story 20 depends on story 23 for two reasons. Story 23's change to `DeciderReply::Propose` and to
+the `ModelDecider` schema meets story 20's extension of `ModelDecider` and its `decider:stub`
+replies, so whichever lands second edits the other's code. And story 20 also waits on
+`story:selector-stop-names-set-aside-record`, which should not hold story 23.
+
+Story 24 has three edges:
+- story 23 (the port, `goals_verdict` and the tree's port);
+- `story:engine-configuration-document` (`loom.engine/1` and its loader);
+- `story:tree-daemon` (`tree serve --engine`).
+
+No edge orders it against the other stories that add a section to `ess/domains/engine.yaml`. Each
+adds a section of its own and reads none of the others', the typed scope names the shared file,
+and `aep plan artifact waves` keeps two stories with one path out of one wave. The coordinator
+removed seven such edges, because five of those stories are drafts of an epic nobody has accepted
+(story 24 § Waits on).
+
+A host port
 whose answer becomes a command input is declared in `ess/domains/decision.yaml`: `CaseRevisions`
 (the `case_revision` of `Decide` and `TakeRecommendation`, story 11) and `ExpiryInstant` (the
 `expires_at` of `Request`, story 7). A port no command input comes from, such as `DecisionStore`,
@@ -249,8 +263,8 @@ is declared in Rust only.
     (blocked).
 20. `story:non-independent-review-becomes-decision-request`: a review recorded by a producer that
     is not independent becomes a `code_review` or `spec_acceptance` request in `tree run`, decided
-    by a person or an independent decider, never re-run; it also waits on story 7 and
-    `story:selector-stop-names-set-aside-record`.
+    by a person or an independent decider, never re-run; it also waits on story 7, on
+    `story:selector-stop-names-set-aside-record`, and on story 23 (listed later, landing before it).
 21. `story:decisions-resume-the-held-run`: `decisions decide`, `take` and `record` over
     `--state` resume the run held for the request in the same invocation and print its next
     state, for approval holds of `software-change@1` runs. A held question or outcome resumes
@@ -266,7 +280,9 @@ is declared in Rust only.
     and the behaviour.
 24. `story:goals-entries-from-a-resolved-document`: a file-backed `GoalsEntries` provider. It
     reads the resolved goals document (`sdc.goals/1`, as `sdc-goals resolve` writes it) that the
-    engine configuration names, for `tree run` and the daemon (low priority).
+    engine configuration names, for `tree run` and the daemon (low priority). It reads the
+    document only when its sha256, written as SDC writes a revision, is the root case's `goals`
+    revision.
 
 Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enforced-limits`:
 `story:run-log-references-exec-file-changes` (the per-exec file-change reference) and
@@ -407,6 +423,8 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
 - A goals ground read from a fixture resolved goals document named in the engine configuration is
   verified by `tree run`, and one whose entry digest differs is refused `digest_changed`
   (story 24).
+- A goals document whose revision is not the root case's `goals` revision is refused
+  `invalid_goals` (story 24).
 - On a tree served by `tree serve` that waits on `DR-…`, `decisions decide DR-… A --as timo
   --tree STORE` exits 0, and the daemon brings the root to its terminal outcome with no further
   command (story 22).

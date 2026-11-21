@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:tree-run-command
 - depends_on: story:substrate-daemon-runner
-revision: 7
+revision: 8
 ---
 ## Outcome
 
@@ -40,7 +40,7 @@ nothing else, by route:
 | --- | --- | --- | --- |
 | `image_digest_pinned` | not proved | not proved | not proved: no wire property names it |
 | `network_held` | not proved: `local` proves `host_network` | the snapshot's `exec.no-egress` | `Machine.exec_no_egress` |
-| `cpu_time_usage` | not proved | not proved: the adapter route reports no usage | `exec_resource_usage.cpu_time` |
+| `cpu_time_usage` | not proved | not proved: the mapping reads no in-process usage, which the host driver reports only on request and the adapter route that replaces it does not report | `exec_resource_usage.cpu_time` |
 
 In process the families are the adapter's `served_families`; under `Daemon` they are
 `Machine::served_families()`, converted. The adapter's name is never read.

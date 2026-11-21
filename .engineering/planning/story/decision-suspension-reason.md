@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:decision-suspension-reason
 kind: story
-status: active
+status: implemented
 title: Commission holds a run for a decision request and resumes it only once it is decided and any record it produces is recorded
 summary: SuspensionReason::Decision, a hold with no action request, resume_after_decision with Recorded or NoRecord; the optional Suspension members reach the slice's grant and handoff modules and the CLI's resume refusals, so the approval and inbox stories wait on it
 tags:
@@ -54,6 +54,12 @@ scope:
 - confidence: inferred
   path: crates/loom-commission-testkit/tests/run_and_action_budgets.rs
 - confidence: cited
+  path: crates/loom-commission-testkit/tests/security_w20261121w3_u2.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/security_w20261121w3_u2_pass2.rs
+- confidence: cited
+  path: crates/loom-commission-testkit/tests/skeleton.rs
+- confidence: cited
   path: crates/loom-commission-testkit/tests/stop_policy.rs
 - confidence: cited
   path: crates/loom-commission/src/ports/suspension.rs
@@ -70,13 +76,16 @@ scope:
 - confidence: cited
   path: crates/loom-intake-slice/src/handoff.rs
 - confidence: cited
+  path: crates/loom-intake-slice/tests/security_w20261121w3_u2_approve.rs
+- confidence: cited
   path: crates/loom-mandate/tests/mandate_authority.rs
 - confidence: cited
   path: ess/commission/domains/responsibility.yaml
-revision: 17
+revision: 25
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:21Z", actor: "agent:sdc", revision: 14, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 - {from: "proposed", to: "active", at: "2026-11-21T04:23:21Z", actor: "agent:sdc", revision: 17, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
+- {from: "active", to: "implemented", at: "2026-11-21T07:04:55Z", actor: "agent:sdc", revision: 25, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w3"}
 ---
 ## Outcome
 
@@ -97,13 +106,29 @@ none). In this order it:
 2. refuses a Suspension whose reason is not `Decision`, which holds an action request, with
    `HeldForAuthority`, and one whose `DecisionHold` names another request id with `OtherDecision`;
    neither changes the Suspension;
-3. takes it (`TakeSuspension` with no action request id; the held Suspension has none, so the
-   `other-request` guard passes); a `Resuming` Decision Suspension, left by a resume that stopped
-   between the take and the release, is not taken again but goes straight to step 5, because a
-   Decision hold performs nothing that could be in doubt;
+3. takes it (`TakeSuspension` with no action request id and the decided request's id as
+   `decision_request_id`). A Decision hold is taken and released only by naming its decision
+   request: a take or a release that names another request than the held one, names one on a hold
+   of another reason, or names none on a Decision hold changes nothing and is answered
+   `other-decision` (`SuspensionDecisionMismatch`, both ids), which this function returns as
+   `OtherDecision`. So a stale resume for one request cannot consume a later hold for another
+   (`review-result:decision-suspension-reason-security-1`, finding 1). A `Resuming` Decision
+   Suspension, left by a resume that stopped between the take and the release, is not taken again:
+   it is released first (step 5 before step 4), and `ResumeRun` then runs only if the run store
+   still holds the Run Suspended, so of two concurrent resumes only the one whose release succeeds
+   continues;
 4. resumes the Run (`ResumeRun`);
-5. releases the Suspension (`ReleaseSuspension` with no action request id);
+5. releases the Suspension (`ReleaseSuspension` with no action request id and the same
+   `decision_request_id`); a release that fails after `ResumeRun` ends the function with that
+   error, the Run is not suspended again, and the hold stays `Resuming` for a later resume;
 6. continues the loop from the case's current revision.
+
+One case ends in an error where a refusal would describe it better: a stale resume that read its
+own hold `Resuming` and then meets a later `Pending` hold for another request gets `not-taken`
+from its release, because the held-state outcomes are checked before `other-decision`, and ends
+in the loop error `SuspensionNotReleased`, not in `OtherDecision`. Nothing changes and nothing
+continues (`review-result:decision-suspension-reason-security-2`; accepted as it is at the close
+of wave 2026-11-21-w3).
 
 It performs no held request, and a case revision that moved since the hold is expected (an
 answered question moves an artifact), not a refusal. After a `NoRecord` hold the loop continues as
@@ -136,8 +161,11 @@ replaces this answer by its own refusal.
 The Suspension file of `FileSuspensionStore` keeps all ten members (`MEMBERS`,
 `crates/loom-governor/src/file_suspension.rs:56-67`, checked by `exactly` at `:437`): an absent
 `action_request_id`, `expected_case_revision`, `action` or `arguments` is written as JSON `null`,
-and the decoder reads `null` as absent for those four members only. A file written before this
-story has all four and decodes unchanged.
+and the reason decides how the decoder reads those four members: all four absent (`null`) for a
+`Decision` hold, all four present for any other reason, so a `null` `arguments` of an approval
+hold stays a value. A file written before this story has all four and decodes unchanged; a file
+whose reason and members disagree is refused, and `decide_hold` refuses to hold such a
+Suspension in any store.
 
 Making those four members optional reaches past Commission. `git grep -n 'HoldSuspension {'` and
 `git grep -n action_request_id -- crates ess`, narrowed to the Suspension types, give every file
@@ -229,7 +257,11 @@ file above are in the typed scope, and `aep plan artifact waves` keeps them apar
   carries `action_request_id` when given;
 - `TakeSuspension` (`:1682-1720`) and `ReleaseSuspension` (`:1728-1766`): `action_request_id`
   becomes optional; the `other-request` guard is unchanged (an absent input matches an absent held
-  member);
+  member). Both gain the optional input `decision_request_id` and the external outcome
+  `other-decision` with the error `SuspensionDecisionMismatch`, declared after the held-state
+  outcomes (ESS-COMMAND-004), so a take answers `wrong-state` and a release `not-taken` before
+  it. `ess/22` refuses the comparison as a guard (ESS-COMMAND-003: the held reason's request id
+  cannot be selected), so `decide_take` and `decide_release` make it;
 - `SuspensionHeld`, `SuspensionTaken` (`:1949-1963`), `SuspensionSettled` (`:1493-1500`),
   `SuspensionStateConflict` (`:1473-1478`) and `SuspensionRequestMismatch` (`:1482-1490`, both
   request ids): every `ActionRequestId` member becomes optional;
@@ -291,32 +323,16 @@ Any timer. Changing the approval path. `approve`'s own refusal of a decision-hel
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w3 from the unit's commits (`git diff --stat 39283f1b 5317683b`: 50 files, 4311 insertions, 388 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-commission` (`src/runtime.rs`, `src/ports/suspension.rs`) with `ess/commission/domains/responsibility.yaml` — cited
-- **Files, ESS first:** `ess/commission/domains/responsibility.yaml:145-158` (`SuspensionReason`), `:1234-1262` (`Suspension`), `:1618-1650` (`HoldSuspension`) — cited
-- **Files, Commission:** `crates/loom-commission/src/ports/suspension.rs:150,179-181,230,267`; `src/runtime.rs:1207,2408-2433,2521,2572` and the `HoldSuspension` literal `:2318-2330` — cited
-- **Files, stores and conformance:** `crates/loom-governor/src/file_suspension.rs:281-301,452-497`; `crates/loom-commission-conformance/src/codec.rs:198-216` (+ inverse `:221-247`) and `src/lib.rs:512-523` — cited
-- **Files, slice:** `crates/loom-intake-slice/src/grant.rs:293,300,315,332,402-403`; `src/handoff.rs:706` — cited
-- **Files, tests:** the 16 test files the story names (see `paths`) plus new `crates/loom-commission-testkit/tests/decision_suspend_resume.rs` — cited
-- **Symbols:** `SuspensionReason::Decision`, `DecisionHold`, `DecidedHold`, `DecidedRecord`, `resume_after_decision`, `run_with_suspension`, `SuspensionData` members `action_request_id`, `action`, `arguments`, `expected_case_revision` — cited
-- **Also forced, not in the story:** `file_suspension.rs:61-65` (`MEMBERS`, checked by `exactly` at `:437`), encoder `:261-270`, decoder `:459-463` — cited from code
-- **Also forced, not in the story:** `commission-conformance/src/lib.rs:462,479,536,575,656` and `src/store.rs:222` (events, settled, conflict, view row, all `action_request_id.0.0`) — cited from code
-- **Also forced, not in the story:** `runtime.rs:826` (`LoopFailure::CommissionSuspended` Display), `ports/suspension.rs:148,204,212,256` — cited from code
-- **Also forced, not in the story:** `HoldSuspension { .. }` literals now needing `Some(..)`: `loom-cli/tests/security_w10_u3.rs:92`, `grant.rs:660,763`, `handoff.rs:655`, `loom-governor/tests/suspension_budget_limits.rs:34`, `suspension_host_stop.rs:33`, testkit `adversary_w20261021w7_deadline_after_call.rs:656`, `adversary_w20261021w7_runtime.rs:657,1797`, `adversary_w20261022w1_host_stop.rs:520`, `host_stop.rs:665`, `run_and_action_budgets.rs:1063,1124`, `adversary_w6_suspend_resume_pass2.rs:545,564` — cited from code (`git grep 'HoldSuspension {'`)
-- **Also likely:** `crates/loom-cli/src/lib.rs:140-150` — inferred, `resume_refusal_status` matches `ResumeRefusal` with no wildcard; it breaks only if the new refusals become `ResumeRefusal` variants, which the story does not say
-- **Documents:** none beyond the ESS file — cited (story's Acceptance is code and tests); `docs/commission/design/approval-gate.md` would only describe the new hold — inferred, optional
-- **Confidence:** high for the primary surface and the story's own list (every cited line was read and says what the story says); medium for the full file set, because the story's list is short by about eight files (below)
-- **Would collide with:**
-  - `story:approval-decisions-resume-held-runs` — `grant.rs`, `runtime.rs`, `resume_after_grant.rs`, `loom-cli/src/lib.rs`; `depends_on` this story, ordered — cited
-  - `story:question-and-outcome-decisions-hold-runs` — `runtime.rs`, `responsibility.yaml`; `depends_on` this story, ordered — cited
-  - `story:approvals-supplied-to-canon-evaluation` — `runtime.rs`, `grant.rs`; ordered through `approval-decisions-resume-held-runs` — cited
-  - `story:child-case-runtime` (proposed) — `responsibility.yaml` (`Case` lifecycle `Terminated`), body also cites `runtime.rs`; no `depends_on` path either way, unordered — cited
-  - `story:frontier-action-names-its-claims` (draft) — scope has `runtime.rs` and `responsibility.yaml`; depends only on `unperformable-names-actions` (implemented), unordered — cited
-  - `story:frontier-names-movers`, `story:needs-authority-before-host-stop`, `story:unperformable-names-the-claim` (draft) — bodies edit `runtime.rs` and `responsibility.yaml`, no scope recorded; the last two depend on `frontier-names-movers`, none on this story, unordered — cited from bodies
-  - `story:managed-composition` (draft) — scope has `responsibility.yaml`; no edge, unordered — cited
-  - `story:decision-inbox-commands` and the tree stories — `loom-cli/src/lib.rs` only if the refusals reach it; no path to this story — inferred
-  - not a collision: `story:decision-request-file-store` names `file_suspension.rs` as a model only; `story:tree-run-command` cites `grant.rs` and `runtime.rs` as reading
-- **Contradicted by code:** the story's file list is incomplete, and its `ESS first` section leaves `TakeSuspension` and `ReleaseSuspension` taking a required `action_request_id` (see Story defects) — cited
-- **Safety fact:** a pre-story Suspension file still decodes because the decoder reads `action_request_id`, `action`, `arguments` and `expected_case_revision` unchanged when present (`file_suspension.rs:452-464`); only `MEMBERS`' strict `exactly` must admit absence — step 2, unproven
+- **Primary surface:** `crates/loom-commission` with `ess/commission/domains/responsibility.yaml` — cited, 2 of the 50 changed files are under the crate (`src/runtime.rs`, `src/ports/suspension.rs`) and 1 is the ESS source; the most files by count are tests in `crates/loom-commission-testkit` (14), `crates/loom-cli` (7 incl. its source) and the fifteen generated and documentation files
+- **Files (ESS sources):** `ess/commission/domains/responsibility.yaml` (120 insertions, 18 deletions) — cited: adds `DecisionHold`, `DecisionUnblocks`, `DecidedHold`, `DecidedRecord`, `SuspensionDecisionMismatch` and the `Decision` variant of `SuspensionReason`; makes the four request members of `Suspension`, `HoldSuspension` and the Suspension events optional with the reason-versus-members invariant; adds the optional input `decision_request_id` and the outcome `other-decision` to `TakeSuspension` and `ReleaseSuspension`
+- **Files (generated):** `generated/rust/commission/**` (Cargo.toml, PLAN.md, plan.json and six `src/` files, 9 files) and `website/docs/reference/commission/{domain-graph.json,domain-model.mdx,types.mdx}` (3 files) — cited, regenerated from the ESS source by `commission:drift` and `commission:docs-drift`; not hand-edited. `generated/rust/commission/src/primitives.rs` (401 insertions) also gains the generator's rule-evaluation helpers (`Number`, `Fact`, `Op`, `TextOp`, `all`, `any`, `forall`, `compare` and the like), which the story does not name
+- **Files (source):** `crates/loom-commission/src/runtime.rs` (406 insertions, 65 deletions: `ResumeRefusal` gains three variants, `Resumed` becomes an enum with a `Decision` arm, `hold_suspension` and `release` take an optional request, `resume_after_grant` reads the optional members and refuses a decision hold, new `resume_after_decision`); `crates/loom-commission/src/ports/suspension.rs` (85, 16: `decide_hold` refuses a reason and members that disagree, `decide_take` and `decide_release` answer `other-decision`, new private `other_decision`); `crates/loom-governor/src/file_suspension.rs` (136, 14: the four members are written `null` and decoded by reason, the `Decision` payload encoder and decoder, `UNBLOCKS` and `REQUEST_MEMBERS`); `crates/loom-commission-conformance/src/codec.rs` (78, 2: the `Decision` reason codec and its inverse, `optional`, `optional_json`); `crates/loom-commission-conformance/src/lib.rs` (150, 73: optional members and `decision_request_id` in the take, release, hold, settled, conflict and view rows, the `other-decision` answer); `crates/loom-commission-conformance/src/store.rs` (59, 3: the member reads made optional, the scenario store's `misname_next`); `crates/loom-intake-slice/src/grant.rs` (31, 17: `approve` answers `OtherCapability { held: None }` for a hold with no action request, `GrantAuthority` compares the optional members); `crates/loom-intake-slice/src/handoff.rs` (7, 7: the merge check reads `action` as optional, its test module wraps members in `Some`); `crates/loom-cli/src/lib.rs` (30, 0: the `RESUME_HELP` line for 19 and the arms of `resume_refusal_status`, one new unit test)
+- **Files (new tests):** `crates/loom-commission-testkit/tests/decision_suspend_resume.rs` (907 lines, 16 cases, the story's acceptance file, six added in pass 2); `crates/loom-commission-testkit/tests/security_w20261121w3_u2.rs` (739 lines, 8 cases) and `security_w20261121w3_u2_pass2.rs` (518 lines, 4 cases), the two security passes' cases; `crates/loom-intake-slice/tests/security_w20261121w3_u2_approve.rs` (108 lines, 1 case)
+- **Files (existing tests):** `crates/loom-cli/tests/resume_after_grant.rs` (135 insertions, 3 deletions, 1 new case, `a_decision_hold_is_neither_resumed_nor_approved`, and a `hold_for_decision` helper); `crates/loom-commission-testkit/tests/adversary_w6_suspend_resume_pass2.rs` (50, 19) and `approval_suspend_resume.rs` (19, 12) unwrap the optional members; `crates/loom-commission-testkit/tests/skeleton.rs` (1 line, the `("Decision", "DecisionHold")` entry); in the remaining 17 files (`crates/loom-agent/tests/serve.rs`, `crates/loom-cli/tests/{adversary_w10_u3,adversary_w7_u2_state,adversary_w7_u3_resume,run_state,security_w10_u3}.rs`, `crates/loom-governor/tests/{suspension_budget_limits,suspension_host_stop}.rs`, `crates/loom-mandate/tests/mandate_authority.rs`, `crates/loom-commission-testkit/tests/{adversary_w20261021w7_deadline_after_call,adversary_w20261021w7_runtime,adversary_w20261022w1_host_stop,adversary_w6_suspend_resume,host_stop,pending_effect,run_and_action_budgets,stop_policy}.rs`) 1 to 8 lines each unwrap an optional member or wrap one in `Some` and add `decision_request_id: None`; no expected value changes and no `#[ignore]` is added
+- **Files (documents):** `AGENTS.md` (8 insertions, 1 deletion: the Decision hold, `resume_after_decision`, `decision_request_id` and `other-decision`), `CHANGELOG.md` (2 lines: the new function with exit 19, and the breaking `Option` members), `website/docs/reference/cli.md` (1 line, the exit status 19 row)
+- **Symbols:** added — `loom_commission::resume_after_decision`; `ResumeRefusal::{HeldForDecision, HeldForAuthority, OtherDecision { .. }}`; from the generated crate `SuspensionReason::Decision`, `DecisionHold`, `DecisionUnblocks`, `DecidedHold`, `DecidedRecord`, `SuspensionDecisionMismatch`, `TakeSuspensionOutcome::OtherDecision`, `ReleaseSuspensionOutcome::OtherDecision`, the input `decision_request_id` of `TakeSuspension` and `ReleaseSuspension`, `held_decision_request_id` of the mismatch error, and `broken_invariant` on the Suspension; `loom_commission_conformance::codec::{optional, optional_json}`. Changed (signature) — `action_request_id`, `expected_case_revision`, `action` and `arguments` become `Option` in `SuspensionData` and the `HoldSuspension` input, `action_request_id` in the take, release, held, taken, settled, conflict and mismatch types and the `SuspensionStates` row, and `LoopFailure::CommissionSuspended`'s `action_request_id`. Removed — none
+- **Not predicted and touched:** `crates/loom-commission-testkit/tests/security_w20261121w3_u2.rs`, `crates/loom-commission-testkit/tests/security_w20261121w3_u2_pass2.rs`, `crates/loom-intake-slice/tests/security_w20261121w3_u2_approve.rs` (the security passes' new cases), `crates/loom-commission-testkit/tests/skeleton.rs`; and, outside the typed scope by house rule, `AGENTS.md`, `CHANGELOG.md`, `generated/rust/commission/**`, `website/docs/reference/cli.md`, `website/docs/reference/commission/**`
+- **Predicted and not touched:** none of the 31 typed scope paths is untouched; the stored Scope section's optional `docs/commission/design/approval-gate.md` (inferred) is not in the diff
+- **Review:** `review-result:decision-suspension-reason-security-1` (head 794fa6c2, red: 1 blocker, a stale resume for one decision consumed a later hold for another, fixed by `0c716b3a` and `61e38aad`; 1 note on the conformance codec reading a `null` `arguments`; 1 judgement note on a crash between release and first step); `review-result:decision-suspension-reason-security-2` (head 61e38aad, last pass, green: the blocker is closed on every path, 1 note that a stale resume of a `Resuming` hold ends `SuspensionNotReleased` instead of `OtherDecision`, accepted as it is and written into the story's Outcome)

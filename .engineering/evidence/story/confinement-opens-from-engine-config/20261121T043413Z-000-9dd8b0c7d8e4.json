@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T04:34:13Z",
+  "actor": "human:timo",
+  "artifact": "story:confinement-opens-from-engine-config",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "c1-changes.md: story narrowed to engine configuration and the local route; edge reversed",
+    "review": "review-result:confinement-opens-from-engine-config-design-edge-check",
+    "outcome": "fixed"
+  }
+}

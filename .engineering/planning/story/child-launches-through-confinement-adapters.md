@@ -3,13 +3,14 @@ format: aep.planning-md/3
 id: story:child-launches-through-confinement-adapters
 kind: story
 status: draft
-title: run_child and spawn_child launch through Substrate's confinement adapters, not HostDriver directly
-summary: '''ADR 0109 decision 6, second half for loom: launches go through the contract; b10x-substrate-host regains its kubernetes feature so pod opens, which brings aws-lc-rs back into the operator''''s graph'''
+title: linux launches join Substrate's confinement contract route, and the host-driver route is deleted
+summary: '''ADR 0109 decision 6, second half for loom: linux joins the contract route story:confinement-opens-from-engine-config built and HostDriver goes; b10x-substrate-host regains its kubernetes feature so pod opens, which brings aws-lc-rs back into the operator''''s graph'''
 tags:
 - adr-0109
 relations:
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:substrate-0-21-pin
+- depends_on: story:confinement-opens-from-engine-config
 scope:
 - confidence: inferred
   path: Cargo.lock
@@ -35,14 +36,40 @@ scope:
   path: crates/loom-operator/tests/startup.rs
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 12
+revision: 17
 ---
 ## Outcome
 
-`SubstrateRunner::run_child` and `spawn_child` launch through Substrate's confinement contract
-(`substrate_host::confinement`, ADR 0109) and the adapter it selects, not by building
-`HostDriver` requests themselves. Writes stay scoped to the paths the host names, and each launch
-records the adapter and facts it ran under, as `tests.run` does.
+`linux` joins the confinement-contract route that `story:confinement-opens-from-engine-config`
+built for `local`, and the host-driver route is deleted. The one constructor
+(`crates/loom-intake-slice/src/confinement.rs`) opens `linux` through
+`substrate_host::confinement::open` with `AdapterRequest::Linux`, as it opens `local`, and
+`SubstrateRunner::run_child`, `spawn_child` and the test runner's `run` launch on the adapter it
+returns (ADR 0109), not by building `HostDriver` requests themselves. `EngineConfinement`
+(`ess/intake/domains/confinement.yaml`) keeps its `Linux` value; what changes is the route behind
+it. Writes stay scoped to the paths the host names, and each launch records the adapter and facts
+it ran under, as `tests.run` does.
+
+From the first story's adapter launch code this story reuses the launch on a
+`ConfinementAdapter` (admission of the profile, start, `write_stdin` and `close_stdin`,
+`read_output` for a live child, `signal`, `wait`, `output`) and the result built from the run's
+`RunObservation` and `RunOutput`, with the adapter and facts on the record. What `linux` adds to
+that code is what `local` refuses: a scoped workspace, process and output bounds, egress apertures
+and their bundle, and read-only roots and files.
+
+How the open is keyed after the move. A `linux` adapter is fixed when it opens to one host
+configuration (`LinuxRequest { config: HostConfig }`, `crates/substrate-host/src/confinement/linux.rs:67-72`;
+its open runs `HostDriver::open`, `:144`): one workspace root, under which a workspace must lie
+directly (`root_name`, `:342-349`), one set of egress apertures and one certificate bundle.
+Today's runner opens one driver per workspace parent, egress set and bundle, at the first launch
+that needs it (`crates/loom-intake-slice/src/confinement.rs:116-124`, `:321-359`). After the move
+the runner keeps that key: it opens one `linux` adapter per workspace parent and `DriverEgress`
+at the first launch that needs it and caches it as `Drivers` caches an `OpenDriver` today, so
+children in workspaces of several directories, or naming different egress sets or bundles, keep
+running side by side. `confinement::open(` stays in one function, the runner's opener, which
+opens `local` once at construction and `linux` per key. No adapter opens on a cgroup root while a
+launch of this process runs under it (the `running()` count, `:392-401`), since opening `linux`
+ends every run under that root (`:116-124`).
 
 Loom builds `b10x-substrate-host` with the `kubernetes` feature again, so that the contract can
 open `pod` as it opens `oci`, `linux` and `local`. Since wave 2026-11-21-w1 the manifest reads
@@ -74,6 +101,11 @@ code". story:substrate-0-12-pin moved admission onto the `linux` adapter's facts
 served the workspace read-write only. The adapter route waited on Substrate's story
 "linux adapter serves a scoped workspace write" (requested 2026-10-27), delivered in 0.14.0.
 
+`story:confinement-opens-from-engine-config` comes first (order reversed 2026-11-21): it puts
+`local` on the contract route and leaves `linux` on the host driver as a stated intermediate
+state, which this story ends. That story needs no `linux` adapter launch, so the stories behind it
+do not wait on the Substrate release this story waits on.
+
 The `kubernetes` feature was turned off in `story:substrate-0-21-pin` (security review pass 1 of
 wave 2026-11-21-w1), which took `aws-lc-rs` out of the graph and left the operator with `ring`
 only. Pass 2 recorded the cost for this story: with `["git"]` the `pod` adapter is not openable;
@@ -95,7 +127,29 @@ only. Pass 2 recorded the cost for this story: with `["git"]` the `pod` adapter 
    at `crates/loom-operator/src/main.rs:52-56` and `crates/loom-operator/tests/startup.rs:2-6`
    say both providers are in the graph and `run` installs `ring`; and `CHANGELOG.md` names
    `aws-lc-rs` back in the graph.
-5. `task check` passes.
+5. `crates/loom-intake-slice/tests/engine_confinement.rs` finds `confinement::open(` in exactly
+   one function of `crates/`, the runner's opener, called with `AdapterRequest::Local` and
+   `AdapterRequest::Linux`; the grep of the first story that allowed only `Local` is replaced by
+   this one.
+6. The unit test `a_driver_is_keyed_by_the_whole_set_and_declares_each_aperture`
+   (`crates/loom-intake-slice/src/confinement/several_apertures.rs`) holds with the cache of
+   `linux` adapters in place of the cache of drivers.
+7. `crates/loom-intake-slice/tests/engine_confinement.rs` (`two_parents_open_two_linux_adapters`,
+   gated as the delegated tests are): under `linux`, a `run_child` in a workspace of each of two
+   parents first opens both parents' adapters, so the second parent's adapter opens before the
+   first live child starts, as the `running()` guard requires (`confinement.rs:392-401`). Then two
+   `spawn_child` children, one in each parent, run at once, each ends with its own exit status, and
+   the runner reports two `linux` adapters opened through `confinement::open`, one per parent.
+   Today's runner opens drivers, not adapters, so the test fails before this story.
+8. `crates/loom-intake-slice/tests/engine_confinement.rs` (`no_launch_path_names_a_host_driver`)
+   reads every `src/` file under `crates/`, whitespace removed, as
+   `every_host_git_command_goes_through_a_hardened_helper` scans for git starts
+   (`crates/loom-intake-slice/tests/host_git_hardening.rs:444`), and finds no `HostDriver`. Today it
+   finds it in `crates/loom-intake-slice/src/confinement.rs` (`:243`, `:274`, `:402`) and
+   `crates/loom-intake-slice/src/confinement/child.rs` (`:9`, `:182`, `:281`), so the test fails
+   while any part of the host-driver launch route remains: the change that moves `linux` onto the
+   contract route deletes that route, and the two-route state ends with this story.
+9. `task check` passes.
 
 ## Waits on
 
@@ -116,9 +170,23 @@ replaces the reading of 2026-10-28.
   operator-declared aperture (`Network::Egress { apertures: Vec<String> }`); Loom maps the
   `host:port` of `ChildCommand::with_egress` to that aperture's name. That mapping is part of
   this story when it is scoped.
+- `story:confinement-opens-from-engine-config`: the constructor, `EngineConfinement` and the
+  adapter launch code for `local`, which this story extends to `linux`. They join this story's
+  files: the constructor in `crates/loom-intake-slice/src/confinement.rs`, `EngineConfinement` in
+  `ess/intake/domains/confinement.yaml`, and `crates/loom-intake-slice/tests/engine_confinement.rs`.
 
-The story waits on nothing: `story:substrate-0-21-pin`, which moved the pin onto a release with
-both facts, is `implemented`.
+`story:substrate-0-21-pin`, which moved the pin onto a release with both facts, is `implemented`.
+The hold by `upstream-blocker:substrate-run-observation-names-the-limit` and the conditions it
+names are unchanged. When this story lands, the limit reasons `story:limit-hits-in-run-log` reads
+in process on the host-driver route (the refusal codes `exec.memory-limit`, `exec.cpu-limit` and
+`exec.timeout`, and the usage with `process_limit_hits`) must still reach Loom; that is what the
+blocker waits for.
+
+No edge orders this story and `story:substrate-daemon-runner`, which also edits the constructor
+and `run_child` in `crates/loom-intake-slice/src/confinement.rs`: neither needs the other, and an
+edge would hold the daemon runner behind this story's blocker. `aep plan artifact waves` keeps two
+stories that share a scope path out of one wave. This story's typed scope lists `confinement.rs`;
+the daemon runner has no typed scope yet, so `waves` places it in no wave until it is scoped.
 
 ## Scope
 

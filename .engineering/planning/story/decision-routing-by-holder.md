@@ -20,7 +20,7 @@ scope:
   path: crates/loom-decision/tests/routing.rs
 - confidence: cited
   path: ess/domains/decision.yaml
-revision: 18
+revision: 19
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:20Z", actor: "agent:sdc", revision: 17, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -60,7 +60,9 @@ reason for an absent decider.
 Opening:
 
 - The stop's `action` (`Unblocks.action`, `decision.yaml:75`): for an approval, the protocol action
-  that is approval-required, with its `capability`; for an outcome, the outcome id, with
+  that is approval-required, with its `capability` and, when the requirement has one, its scope
+  (`DecisionStop.scope`, an optional map of key to value, read only by `record_key` below); for
+  an outcome, the outcome id, with
   `Unblocks.outcome` set to it and the decision in the stop (`close` for the outcome `close`,
   decision `taken`); for a question, the protocol action whose writer handed the question off,
   with `question_id` set (`decision.yaml:77`).
@@ -90,13 +92,29 @@ Opening:
   `DR-<case>-<action or question id>-<n>`, `n` one more than the requests already stored under the
   key (`decision.yaml:13`, `:229`).
 - `record_key` is the record id the decision would produce at the stop's case revision, the case
-  revision written `r<N>` as the governor stamps it (`crates/loom-governor/src/lib.rs:1074`):
-  `<capability>@r<N>` for an approval, `<outcome>/<decision>@r<N>` for an outcome (session `sdc`,
-  2026-11-21, answer g), and `question:<question id>@<subject revision>` for a question, whose
-  record revision is not known before the answer. The contract has no field for an outcome's
-  decision name, so the record writer parses it back out of `record_key`
-  (`story:decided-record-written-then-recorded`). An outcome request decided "leave it untaken"
-  keeps the outcome's `record_key`, though it produces no record.
+  revision written `r<N>` as the governor stamps it (`crates/loom-governor/src/lib.rs:1075`).
+  This is the one statement of its form; `story:requests-from-canon-pending-decisions` reads it.
+  - An approval's key is built by program from the stop's fields, in this order: the capability,
+    then the scope's pairs in key order when the stop has a scope, then `r<N>`.
+    - With no scope it is `<capability>@r<N>`.
+    - With a scope it is `<capability>[<key>=<value>,<key>=<value>…]@r<N>`. The pairs are joined
+      by `,` and sorted by key, keys compared by code point, as Canon orders a scope
+      (`~/beyond10x/canon/crates/canon/src/eval/pending.rs:15-18` at `49ff2ce`). An empty scope
+      is no scope.
+    - In the capability, in each key and in each value, the characters `%`, `[`, `]`, `=`, `,`
+      and `@` are written `%25`, `%5B`, `%5D`, `%3D`, `%2C` and `%40`. No other character is
+      escaped. A capability that holds none of them, such as `repository.merge`, is written as
+      it is.
+    - Two stops that differ in capability, scope or case revision never give one key.
+    - The record writer parses a key back from the right. The last `@` starts `r<N>`. A key
+      whose part before that `@` ends in `]` holds a scope, from its first `[`. Pairs split at
+      `,`, a key from its value at `=`, and each part is unescaped.
+  - An outcome's key is `<outcome>/<decision>@r<N>` (session `sdc`, 2026-11-21, answer g). The
+    contract has no field for an outcome's decision name, so the record writer parses it back out
+    of `record_key` (`story:decided-record-written-then-recorded`). An outcome request decided
+    "leave it untaken" keeps the outcome's `record_key`, though it produces no record.
+  - A question's key is `question:<question id>@<subject revision>`, because its record revision
+    is not known before the answer.
 - `expires_at` is `ExpiryInstant::after(expires_after(class))`, where the classes document gives
   the class an `expires_after`; otherwise the request has none and only a person, a decider or a
   rule ends it.
@@ -227,7 +245,7 @@ two files.
 
 ## ESS first
 
-`ess/domains/decision.yaml` gains `DecisionStop` (with the optional `builtin_class`),
+`ess/domains/decision.yaml` gains `DecisionStop` (with the optional `builtin_class` and `scope`),
 `EligiblePrincipals`, `RouteOutcome` (`AwaitsPrincipal`, `Decided`, `RunEnds`), `DeciderAbsence`
 (`NotConfigured`), the port `ExpiryInstant` and the refusal `UnclassifiedAction`. On that commit `task drift` fails, and
 `crates/loom-decision/tests/routing.rs` does not compile.
@@ -259,6 +277,9 @@ at `r3` unless a bullet moves them.
   gives `A` with `produces: canon_decisions` and `B` "leave it untaken" with no `produces`, and
   `record_key` `close/taken@r3`; a question stop with host options `A`, `B`, `C` keeps them, each
   `produces: artifact_revision`.
+- The approval stop of `owner.approve` with scope `{namespace: b, cluster: a}` at `r3` gets the
+  `record_key` `owner.approve[cluster=a,namespace=b]@r3`. With scope `{team: "x,y"}` it gets
+  `owner.approve[team=x%2Cy]@r3`, and with an empty scope `owner.approve@r3`.
 - With `roadmap: {expires_after: 86400}`, the `ExpiryInstant` fixture is asked for 86400 seconds
   and the request's `expires_at` is `2026-11-22T12:00:00Z`; a `vision` request has no `expires_at`
   and the fixture is not asked.
