@@ -35,7 +35,10 @@ fn lock_refusal(files: &[(String, Vec<u8>)], lock: &[u8], case: &str) -> LockErr
     match ProtocolCatalog::from_vendored(&borrowed(files), lock) {
         Err(VendoredError::Lock(error)) => error,
         Err(other) => panic!("{case}: refused, but not by the lock: {other}"),
-        Ok(catalog) => panic!("{case}: built a catalog of {} entries", catalog.iter().count()),
+        Ok(catalog) => panic!(
+            "{case}: built a catalog of {} entries",
+            catalog.iter().count()
+        ),
     }
 }
 
@@ -225,7 +228,10 @@ fn the_same_lock_in_other_bytes_is_malformed() {
         reordered = reordered.replacen(from, to, 1);
     }
     for (case, bytes) in [
-        ("byte-order mark", [b"\xef\xbb\xbf".as_slice(), ENGINEERING_LOCK].concat()),
+        (
+            "byte-order mark",
+            [b"\xef\xbb\xbf".as_slice(), ENGINEERING_LOCK].concat(),
+        ),
         ("CR LF", text.replace('\n', "\r\n").into_bytes()),
         (
             "no final newline",
@@ -234,7 +240,8 @@ fn the_same_lock_in_other_bytes_is_malformed() {
         ("two final newlines", [ENGINEERING_LOCK, b"\n"].concat()),
         (
             "an escaped character",
-            text.replacen("\"0.16.0\"", "\"\\u0030.16.0\"", 1).into_bytes(),
+            text.replacen("\"0.16.0\"", "\"\\u0030.16.0\"", 1)
+                .into_bytes(),
         ),
         (
             "an entry member given twice",
@@ -247,7 +254,10 @@ fn the_same_lock_in_other_bytes_is_malformed() {
         ),
         ("files out of order", reordered.into_bytes()),
     ] {
-        assert_ne!(bytes, ENGINEERING_LOCK, "{case}: the case changes the bytes");
+        assert_ne!(
+            bytes, ENGINEERING_LOCK,
+            "{case}: the case changes the bytes"
+        );
         let refusal = lock_refusal(&files, &bytes, case);
         assert_eq!(refusal.refusal, LockRefusal::Malformed, "{case}");
         assert_eq!(refusal.path, "lock.json", "{case}");
@@ -262,7 +272,9 @@ fn a_missing_file_is_refused_before_any_definition_is_parsed() {
     files.retain(|(path, _)| path != "support-triage/1.yaml");
     files.insert(0, ("aaa/1.yaml".to_owned(), b"garbage".to_vec()));
     let mut locked = committed();
-    locked.files.push(lock::locked_file("aaa/1.yaml", b"garbage"));
+    locked
+        .files
+        .push(lock::locked_file("aaa/1.yaml", b"garbage"));
     let refusal = lock_refusal(&files, &lock::encode(&locked), "missing and garbage");
     assert_eq!(refusal.refusal, LockRefusal::Missing);
     assert_eq!(refusal.path, "support-triage/1.yaml");
@@ -302,7 +314,11 @@ fn a_path_given_twice_in_the_files_builds_no_catalog() {
 /// `Unlocked`.
 #[test]
 fn a_near_miss_path_is_unlocked() {
-    for path in ["Software-change/1.yaml", "./software-change/1.yaml", "lock.json"] {
+    for path in [
+        "Software-change/1.yaml",
+        "./software-change/1.yaml",
+        "lock.json",
+    ] {
         let mut files = vendored();
         let bytes = files
             .iter()
@@ -334,7 +350,10 @@ fn a_locked_file_of_zero_bytes_is_a_definition_refusal() {
             assert_eq!(path, "zero/1.yaml");
             let line = error.to_string();
             assert!(!line.contains('\n'), "{line}");
-            assert!(line.starts_with("engineering protocol zero/1.yaml: "), "{line}");
+            assert!(
+                line.starts_with("engineering protocol zero/1.yaml: "),
+                "{line}"
+            );
         }
         Err(other) => panic!("refused otherwise: {other}"),
         Ok(_) => panic!("built a catalog"),
