@@ -1260,6 +1260,41 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   `crates/loom-runlog/tests/run_log.rs` holds every refusal, the 400-line two-process append, a
   crash at each step and the held lock.
 
+## Decision requests
+
+`b10x-loom-decision` (`crates/loom-decision`, `story:decision-request-entity`, epic
+`decision-requests-in-the-runtime`) applies the eight commands of `loom.decision`
+(`ess/domains/decision.yaml`) to a decision request. The domain is a copy of the SDC's contract
+(`~/beyond10x/sdc/ess/domains/decision.yaml` at `00e3557`, declared final by session `sdc`); the
+comment at its head lists what Loom changed. Change it only on an answer of session `sdc` or a
+story that names the change. The crate depends on the generated `loom` crate only: no Commission,
+executor, Canon, model provider or Mandate (`decision_request.rs` reads the manifest).
+
+- ESS keeps all eight behaviours obligations (their errors' fields have no declared source), so
+  `src/apply.rs` writes them against the generated types in ESS's `ess/37` precedence: the
+  command alone, then whether the request exists, then what it holds, then `wrong-state`, then
+  acceptance. Guards read three-valued; an unknown guard, an instant that is no RFC 3339, or an
+  outcome that would break an invariant is `DecisionError::Undecided`. Who may decide is read
+  from the stored request, never from the command.
+- Every command reads the request from the `DecisionStore` port and writes it back from that
+  read only on an outcome that creates or moves it; a refusal and `already-recorded` write
+  nothing. A write whose read is stale is `StoreConflict` (request id, state read, state found);
+  a store that cannot read or write is `StoreFailure`. Neither is an ESS error. `Request`
+  refuses `RecordKeyOpen` for the Open or Escalated request the store finds for its record key,
+  or the one the command names when the store finds none. A `Request` for an id the store
+  already holds writes from no read and is `StoreConflict`: the domain declares no outcome for it.
+- `InMemoryDecisionStore` is the only store; durable storage is
+  `story:decision-request-file-store`. The `EscalationSuppressedRecord`s kept beside a request
+  are read back in append order; appending beside an unknown request is `NoSuchRequest`.
+- The views are the generated queries over what the store lists. `task conform` runs the
+  domain's synthesized scenarios and `ess/scenarios/decision/` against the crate
+  (`crates/loom-conformance/src/decision.rs`). Three of those scenarios cover, with `covers:`,
+  the obligations ESS 0.96.0 synthesis refuses for this domain (no route to Expired, none to
+  Escalated for `supersede`, no witness for `RecordProduced/recorded`).
+- `crates/loom-decision/tests/decision_request.rs` holds each refusal with the store unchanged,
+  random sequences of all eight commands against the invariants, and the declared order of
+  `Strength` and `AutonomyLevel` (both `ordered: true`) against the SDC's variant lists.
+
 ## Operator
 
 `b10x-loom-operator` (`crates/loom-operator`, `story:loom-operator`, design

@@ -15,6 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
+- `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
 
 ### Changed
 

@@ -565,6 +565,7 @@ version = "0.58.0"
 dependencies = [
  "b10x-loom-agent",
  "b10x-loom-commission",
+ "b10x-loom-decision",
  "b10x-loom-executor",
  "b10x-loom-operator",
  "b10x-loom-protocols",
@@ -589,6 +590,13 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tokio",
+]
+
+[[package]]
+name = "b10x-loom-decision"
+version = "0.58.0"
+dependencies = [
+ "loom",
 ]
 
 [[package]]
