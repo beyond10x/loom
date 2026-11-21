@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 632899303b49bcf671b4e762c3b8d19edd5f7342d8f6ad14265f46a3ea30c277
-// contract digest 828dc2b85329a2c3c12648cb014abeedbc7f5363d6eeca16f73421b527d928e7
+// model digest fbeaebade33f9bae0fee878b4ac2ed2d464d4ad92289ab370b697eb4163ce3d5
+// contract digest f4ad0d5c16c875e74b035f1a0641820afec1c749de0636dc8a78651dab8edd95
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Semantic types synthesised from the `loom` specification, v1.

@@ -155,9 +155,10 @@ use b10x_canon::eval::{
 };
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
-    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceRecord,
-    IndependenceDimensionId, InputId, InputValue, Principal, Revision, Truth as CanonTruth,
-    is_identifier,
+    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceKindId,
+    EvidenceRecord, ExclusionReason, IndependenceDimensionId, InputId, InputValue,
+    Instant as CanonInstant, OutcomeRequirement, Predicate, Principal, Revision,
+    Truth as CanonTruth, is_identifier,
 };
 use b10x_loom_commission::model::json;
 use b10x_loom_commission::model::primitives::Uuid;
@@ -168,6 +169,8 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::evidence::{AttributedEvidence, EvidencePort, ObservationPort};
 use b10x_loom_commission::ports::governor::Governor;
+use b10x_loom_executor::{ActionFactsPort, CaseFacts};
+use loom::run::ActionFacts;
 
 mod file_run_store;
 mod file_store;
@@ -1131,6 +1134,73 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
 
+    /// The facts of every action the case's protocol declares, in identifier order, at the case's
+    /// current revision (`loom.run.ActionFacts`, for the executor's `DeterministicSelector`): the
+    /// effect class the protocol declares for it (none when it declares none), the evidence kinds
+    /// it may produce, and its open evidence, the kinds among those Canon counted no record of.
+    ///
+    /// A record counts, at the case's current decision and its trusted time, when all of these
+    /// hold (see `counted_kinds`):
+    ///
+    /// - it applies to the case (see the crate documentation, "Evidence");
+    /// - it is about its subject's current revision, as Canon's revision binding requires;
+    /// - it is not expired at the trusted time, by Canon's freshness rule (whole seconds, older
+    ///   than its kind's `max_age` by more than that age, only with an instant and `observed_at`);
+    /// - the decision lists it under no claim as invalidated;
+    /// - an evidence match of the protocol (in a claim, an obligation, an action's precondition or
+    ///   an outcome) reads it by kind and subject (a match naming no subject, or its subject), as
+    ///   Canon reads a record for a match. A kind no evidence match reads at all counts any record
+    ///   that passes the rules above.
+    ///
+    /// A record Canon sets aside only as not independent still counts: the kind is treated as
+    /// produced, so the selector does not take the action again for it, and the claim stays
+    /// unknown until a producer the case declares independent records the kind. Whether a held
+    /// record applies is decided once, when it arrives; whether it counts is decided at every
+    /// call, so a kind counted at one revision of its subject is open again once that subject
+    /// moves, the record still held.
+    ///
+    /// # Errors
+    /// As `frontier` refuses the case: `UnknownCase` when it is not held, and `GovernorUnavailable`
+    /// when its store fails, its protocol is not registered, its held inputs or independence
+    /// declarations do not satisfy the protocol, or Canon refuses to decide it.
+    pub fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, GovernorError> {
+        let Decided {
+            state,
+            ir,
+            decision,
+            at,
+        } = self.decided_at(case)?;
+        let counted = counted_kinds(&ir, &state, &decision, at.as_deref());
+        let actions = ir
+            .actions
+            .iter()
+            .map(|(id, declared)| {
+                let may_produce: Vec<String> = declared
+                    .may_produce
+                    .iter()
+                    .map(|kind| kind.as_str().to_owned())
+                    .collect();
+                ActionFacts {
+                    action: id.as_str().to_owned(),
+                    effect: declared
+                        .effect
+                        .as_ref()
+                        .map(|effect| effect.as_str().to_owned()),
+                    open_evidence: may_produce
+                        .iter()
+                        .filter(|kind| !counted.contains(kind.as_str()))
+                        .cloned()
+                        .collect(),
+                    may_produce,
+                }
+            })
+            .collect();
+        Ok(CaseFacts {
+            case_revision: state.revision,
+            actions,
+        })
+    }
+
     /// The `canon-decision/1` document behind the frontier `frontier` this governor issued for the
     /// case: the whole document Canon wrote, its explanation included, whose rendering gives that
     /// frontier id, as the generated JSON value [`evaluate`] returns as `canon`. `None` when this
@@ -1248,6 +1318,12 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
 
     /// Canon's decision for the case as held now, and the compiled protocol it was made under.
     fn decided(&self, case: &CaseId) -> Result<(CaseState, Ir, Decision), GovernorError> {
+        self.decided_at(case)
+            .map(|decided| (decided.state, decided.ir, decided.decision))
+    }
+
+    /// [`Self::decided`], and the trusted time the decision was made at, when one was given.
+    fn decided_at(&self, case: &CaseId) -> Result<Decided, GovernorError> {
         let (state, ir) = self.held_with_ir(case)?;
         let records: Vec<EvidenceRecord> = state
             .evidence
@@ -1267,8 +1343,22 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             &state.decisions,
         )
         .map_err(|_| GovernorError::GovernorUnavailable)?;
-        Ok((state, ir, decision))
+        Ok(Decided {
+            state,
+            ir,
+            decision,
+            at,
+        })
     }
+}
+
+/// Canon's decision for a held case ([`CanonGovernor`]'s `decided_at`): the case as held, the
+/// compiled protocol, the decision, and the trusted time it was made at, when one was given.
+struct Decided {
+    state: CaseState,
+    ir: Ir,
+    decision: Decision,
+    at: Option<String>,
 }
 
 impl<S: CaseStore, T> CanonGovernor<S, T> {
@@ -1430,6 +1520,19 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, 
             })
             .map_err(|_| GovernorError::GovernorUnavailable)?
             .ok_or(GovernorError::UnknownCase)
+    }
+}
+
+/// The executor's [`ActionFactsPort`], answered by [`CanonGovernor::action_facts`]; a case the
+/// governor cannot answer for is the port's error, naming the case.
+impl<S: FallibleCaseStore, T: EvaluationTime> ActionFactsPort for CanonGovernor<S, T> {
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String> {
+        CanonGovernor::action_facts(self, case).map_err(|error| match error {
+            GovernorError::UnknownCase => format!("the governor holds no case `{}`", case.0),
+            GovernorError::GovernorUnavailable => {
+                format!("the governor cannot decide case `{}`", case.0)
+            }
+        })
     }
 }
 
@@ -1772,6 +1875,152 @@ impl JsonTree for loom::json::Value {
             Self::Object(members) => Node::Object(members),
         }
     }
+}
+
+/// The evidence kinds of which `state` holds a record Canon counts in `decision`, the case's
+/// current decision ([`CanonGovernor::action_facts`]), made at the trusted instant `at`: a record
+/// that applies, is about its subject's current revision (Canon's revision binding), is not
+/// expired at `at` (Canon's freshness rule), is listed under no claim of `decision` as
+/// invalidated, and is read by an evidence match of `ir` by kind and subject (Canon's rule for a
+/// match) or is of a kind no evidence match reads. A record of a kind only order forms read counts
+/// when an order form reads it by kind and subject, whatever its binding, freshness or
+/// invalidation: Canon's order forms read every record the evidence check accepted
+/// (`eval/order.rs`, `of`). A record Canon sets aside only as not independent still counts.
+fn counted_kinds(
+    ir: &Ir,
+    state: &CaseState,
+    decision: &Decision,
+    at: Option<&str>,
+) -> BTreeSet<String> {
+    let invalidated: BTreeSet<&str> = decision
+        .claims
+        .iter()
+        .flat_map(|(_, claim)| claim.excluded_evidence.iter())
+        .filter(|exclusion| exclusion.reason == ExclusionReason::Invalidated)
+        .map(|exclusion| exclusion.evidence.as_str())
+        .collect();
+    let (matches, orders) = evidence_reads(ir);
+    let at = at.and_then(|at| CanonInstant::new(at).seconds());
+    state
+        .evidence
+        .iter()
+        .filter(|held| held.applies)
+        .filter_map(|held| canon_record(&held.data))
+        .filter(|record| {
+            let left = || {
+                bound_to_current_revision(state, record)
+                    && !expired(ir, record, at)
+                    && !invalidated.contains(record.id.as_str())
+            };
+            if names_kind(&matches, record) {
+                left() && read_by(&matches, record)
+            } else if names_kind(&orders, record) {
+                read_by(&orders, record)
+            } else {
+                left()
+            }
+        })
+        .map(|record| record.kind.as_str().to_owned())
+        .collect()
+}
+
+/// Whether `record` is about its subject's current revision in `state`: Canon's revision binding
+/// (`eval/binding.rs`, `exclude`), which excludes a record whose subject revision is not the
+/// case's current revision of that artifact.
+fn bound_to_current_revision(state: &CaseState, record: &EvidenceRecord) -> bool {
+    state
+        .artifacts
+        .get(record.subject.as_str())
+        .map(String::as_str)
+        == Some(record.subject_revision.as_str())
+}
+
+/// Whether `record` is expired at the instant `at`, in whole seconds: Canon's freshness rule
+/// (`eval/freshness.rs`, `exclude`). Only a record of a kind with a `max_age`, that gives its
+/// `observed_at`, at a given instant, expires, and only when the instant is later than
+/// `observed_at` by more than the maximum age. A `max_age` Canon cannot read never reaches here:
+/// Canon refuses the evaluation, and no decision is made.
+fn expired(ir: &Ir, record: &EvidenceRecord, at: Option<i64>) -> bool {
+    let max_age = ir
+        .evidence_kinds
+        .get(&record.kind)
+        .and_then(|kind| kind.max_age.as_ref())
+        .and_then(|max_age| max_age.seconds());
+    let observed = record.observed_at.as_ref().and_then(CanonInstant::seconds);
+    match (at, max_age, observed) {
+        (Some(at), Some(max_age), Some(observed)) => at.saturating_sub(observed) > max_age,
+        _ => false,
+    }
+}
+
+/// What reads a record: a kind, and the subject it must be about when one is named.
+type Reader<'p> = (&'p EvidenceKindId, Option<&'p ArtifactId>);
+
+/// Every evidence match of `ir`, and every kind an order form reads, as (kind, subject): in each
+/// claim's `true_when`, each obligation's `discharged_when` and `applicable_when`, each action's
+/// precondition and each outcome's requirement, through every `all`, `any` and `not`. Order
+/// forms are kept apart: they read the whole history, excluded records included.
+fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
+    fn walk<'p>(predicate: &'p Predicate, found: &mut (Vec<Reader<'p>>, Vec<Reader<'p>>)) {
+        let (matches, orders) = found;
+        match predicate {
+            Predicate::All(members) | Predicate::Any(members) => {
+                for member in members {
+                    walk(member, found);
+                }
+            }
+            Predicate::Not(member) => walk(member, found),
+            Predicate::Evidence(matching) => {
+                matches.push((&matching.kind, matching.subject.as_ref()));
+            }
+            Predicate::First(form) => orders.push((&form.kind, form.subject.as_ref())),
+            Predicate::Before(form) => {
+                orders.push((&form.first, form.subject.as_ref()));
+                orders.push((&form.then, form.subject.as_ref()));
+            }
+            Predicate::After(form) => {
+                orders.push((&form.first, form.subject.as_ref()));
+                orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Since(form) => {
+                orders.push((&form.last, form.subject.as_ref()));
+                orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Input(_) | Predicate::Claim(_) => {}
+        }
+    }
+    let mut found = (Vec::new(), Vec::new());
+    for claim in ir.claims.values() {
+        walk(&claim.true_when, &mut found);
+    }
+    for obligation in ir.obligations.values() {
+        walk(&obligation.discharged_when, &mut found);
+        if let Some(applicable) = &obligation.applicable_when {
+            walk(applicable, &mut found);
+        }
+    }
+    for action in ir.actions.values() {
+        walk(&action.precondition, &mut found);
+    }
+    for outcome in ir.outcomes.values() {
+        if let OutcomeRequirement::Predicate(predicate) = &outcome.requires {
+            walk(predicate, &mut found);
+        }
+    }
+    found
+}
+
+/// Whether one of `readers` reads records of `record`'s kind.
+fn names_kind(readers: &[Reader<'_>], record: &EvidenceRecord) -> bool {
+    readers.iter().any(|(kind, _)| **kind == record.kind)
+}
+
+/// Whether one of `readers` reads `record`: a record of its kind and, when it names a subject,
+/// about that artifact, Canon's rule for every match and order form (`eval/claims.rs`, `reads`).
+fn read_by(readers: &[Reader<'_>], record: &EvidenceRecord) -> bool {
+    readers.iter().any(|(kind, subject)| {
+        **kind == record.kind && subject.is_none_or(|subject| *subject == record.subject)
+    })
 }
 
 /// Whether `data` applies to the case: its facts carry a record of its kind, and Canon evaluates

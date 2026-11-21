@@ -16,20 +16,27 @@
 //! so Loom records a fallback as two selections, each with its own selector's strategy
 //! ([`resolve`]).
 //!
+//! [`DeterministicSelector`] is the selector whose strategy is `Deterministic`: it calls no model,
+//! keeps only admissible candidates that are useful, takes reads before writes and then orders by
+//! action id. What it knows beyond a candidate's id and status comes from two host ports,
+//! [`ActionFactsPort`] and [`StepHistory`], never from a model or the candidate list.
+//!
 //! [`select_action`] is `loom.run.SelectAction` as a command over stored catalogues and
 //! selections: the one behaviour ESS leaves to Loom (`generated/rust/loom/PLAN.md`), answered by
 //! the same membership rule as [`select`].
 
 use std::time::Instant;
 
+use b10x_loom_commission::model::responsibility::CaseId;
+
 use crate::model::behaviour::{ActionCatalogueStorage, SelectionStorage};
 use crate::model::json::{Value, decimal_at};
 use crate::model::primitives::Decimal;
 use crate::model::run::{
-    ActionCatalogue, ActionNotInCatalogue, ActionSelected, AnyActionCatalogue, AnySelection,
-    CatalogueEntry, CatalogueEntryStatus, CatalogueNotFound, CatalogueRevisionMismatch,
-    SelectAction, SelectActionOutcome, Selection, SelectionData, SelectionExists, SelectionId,
-    SelectionStrategy, action_catalogue_state, selection_state,
+    ActionCatalogue, ActionFacts, ActionNotInCatalogue, ActionSelected, AnyActionCatalogue,
+    AnySelection, CatalogueEntry, CatalogueEntryStatus, CatalogueNotFound,
+    CatalogueRevisionMismatch, SelectAction, SelectActionOutcome, Selection, SelectionData,
+    SelectionExists, SelectionId, SelectionStrategy, action_catalogue_state, selection_state,
 };
 
 /// What a selector is told besides the candidates.
@@ -92,6 +99,10 @@ pub struct Resolution {
 }
 
 /// Picks the action Loom proposes next, from the projected catalogue only.
+///
+/// A selector that wraps another must forward [`ActionSelector::resolve_for_case`] to it, so the
+/// wrapped selector sees the case of the run; one that forwards only [`ActionSelector::select`]
+/// answers for the wrapped selector's own case.
 pub trait ActionSelector {
     /// One of `candidates`, chosen in `context`.
     fn select(
@@ -126,6 +137,24 @@ pub trait ActionSelector {
             overruled: None,
         })
     }
+
+    /// [`ActionSelector::resolve`] for a run of `case`: what Loom asks when it runs a commission,
+    /// naming the case of the frontier it was handed. By default the case is not read; a selector
+    /// whose answer depends on the case ([`DeterministicSelector`]) refuses a case it does not
+    /// answer for, and [`HybridSelector`] hands the case on to both its selectors.
+    ///
+    /// A selector that wraps another must forward this method to it. One that forwards only
+    /// [`ActionSelector::select`] answers for the wrapped selector's own case whatever `case` is,
+    /// as the default reads no case.
+    fn resolve_for_case(
+        &self,
+        case: &CaseId,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        let _ = case;
+        self.resolve(context, candidates)
+    }
 }
 
 /// Why Loom made no selection.
@@ -159,6 +188,181 @@ impl ActionSelector for FirstAdmissibleSelector {
 
     fn strategy(&self) -> SelectionStrategy {
         SelectionStrategy::Rule
+    }
+}
+
+/// The facts of a case's actions, as the host answers them for the [`DeterministicSelector`]: the
+/// case revision they were read at, and per action its effect class, the evidence kinds it may
+/// produce and its open evidence (`loom.run.ActionFacts`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseFacts {
+    /// The case revision the facts were read at: the one [`StepHistory::performed_at`] is asked
+    /// about.
+    pub case_revision: i64,
+    /// The facts of each action the host knows of. An action listed twice is read at its first
+    /// entry.
+    pub actions: Vec<ActionFacts>,
+}
+
+/// The host port that answers a case's action facts for the [`DeterministicSelector`]: never a
+/// model, and never the candidate list. The governor answers it from the protocol and the case's
+/// current decision (`loom_governor::CanonGovernor::action_facts`).
+pub trait ActionFactsPort {
+    /// The facts of `case`'s actions at its current revision; `Err` with the reason when the host
+    /// cannot answer.
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String>;
+}
+
+impl<P: ActionFactsPort + ?Sized> ActionFactsPort for &P {
+    fn action_facts(&self, case: &CaseId) -> Result<CaseFacts, String> {
+        (**self).action_facts(case)
+    }
+}
+
+/// The host port that answers what the run already did, for the [`DeterministicSelector`]: the
+/// history half of usefulness, which is the runtime's and not Canon's.
+pub trait StepHistory {
+    /// Whether `action` was performed at the case revision `case_revision`. While this is true for
+    /// the revision the facts were read at, an action that is not due is not useful, whatever it
+    /// may produce and whatever is still open; it is useful again once an artifact moves.
+    fn performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String>;
+
+    /// Whether `action` is due again whatever its evidence and its history, as for a retry
+    /// (`retry_when`) or a pending copy: while it is, an admissible `action` is useful.
+    fn due(&self, action: &str) -> Result<bool, String>;
+}
+
+impl<H: StepHistory + ?Sized> StepHistory for &H {
+    fn performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String> {
+        (**self).performed_at(action, case_revision)
+    }
+
+    fn due(&self, action: &str) -> Result<bool, String> {
+        (**self).due(action)
+    }
+}
+
+/// The effect class that sorts an action after every other: `write`.
+const WRITE: &str = "write";
+
+/// The selector whose strategy is `Deterministic`: it calls no model, and the same candidates,
+/// facts and history give the same choice.
+///
+/// From the candidates it keeps only the `Admissible` ones whose action is useful, orders them
+/// with every action whose effect class is not `write` (an undeclared one included) before every
+/// `write` action and then by action id, and takes the first. An action is useful while
+/// [`StepHistory::due`] is true; otherwise it is not useful once [`StepHistory::performed_at`] is
+/// true for the case revision the facts were read at, and before that it is useful when it may
+/// produce no evidence or when its open evidence is not empty. A candidate the facts do not name is not useful, and
+/// an action the facts name that is not a candidate is never returned. With no useful candidate it
+/// answers [`SelectorError::NothingAdmissible`]; a port that cannot answer makes it
+/// [`SelectorError::Unavailable`] with the port's reason. Its pick has no confidence and reports no
+/// tokens.
+///
+/// It answers for the one case it was built for. A run of a commission for another case
+/// ([`ActionSelector::resolve_for_case`], which Loom calls with the case of the frontier it was
+/// handed) is [`SelectorError::Unavailable`] naming both cases, and no port is asked.
+/// [`ActionSelector::select`] and [`ActionSelector::resolve`] name no case and answer for the
+/// selector's own.
+pub struct DeterministicSelector<F, H> {
+    case: CaseId,
+    facts: F,
+    history: H,
+}
+
+impl<F: ActionFactsPort, H: StepHistory> DeterministicSelector<F, H> {
+    /// A selector for `case`, reading its action facts from `facts` and its step history from
+    /// `history`.
+    pub fn new(case: CaseId, facts: F, history: H) -> Self {
+        Self {
+            case,
+            facts,
+            history,
+        }
+    }
+
+    /// Whether `action`, whose facts are `facts`, is useful at `case_revision`.
+    fn useful(
+        &self,
+        action: &str,
+        facts: &ActionFacts,
+        case_revision: i64,
+    ) -> Result<bool, SelectorError> {
+        if self
+            .history
+            .due(action)
+            .map_err(SelectorError::Unavailable)?
+        {
+            return Ok(true);
+        }
+        if self
+            .history
+            .performed_at(action, case_revision)
+            .map_err(SelectorError::Unavailable)?
+        {
+            return Ok(false);
+        }
+        Ok(facts.may_produce.is_empty() || !facts.open_evidence.is_empty())
+    }
+}
+
+impl<F: ActionFactsPort, H: StepHistory> ActionSelector for DeterministicSelector<F, H> {
+    fn select(
+        &self,
+        _context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Choice, SelectorError> {
+        let facts = self
+            .facts
+            .action_facts(&self.case)
+            .map_err(SelectorError::Unavailable)?;
+        // (whether it writes, action id): `false` orders before `true`, then ids by code point.
+        let mut useful: Vec<(bool, &str)> = Vec::new();
+        for entry in candidates
+            .iter()
+            .filter(|entry| entry.status == CatalogueEntryStatus::Admissible)
+        {
+            let Some(known) = facts
+                .actions
+                .iter()
+                .find(|known| known.action == entry.action)
+            else {
+                continue;
+            };
+            if self.useful(&entry.action, known, facts.case_revision)? {
+                useful.push((known.effect.as_deref() == Some(WRITE), &entry.action));
+            }
+        }
+        useful
+            .into_iter()
+            .min()
+            .map(|(_, action)| Choice {
+                action: action.to_owned(),
+                confidence: None,
+            })
+            .ok_or(SelectorError::NothingAdmissible)
+    }
+
+    fn strategy(&self) -> SelectionStrategy {
+        SelectionStrategy::Deterministic
+    }
+
+    /// [`ActionSelector::resolve`] when `case` is the case this selector was built for; for any
+    /// other case [`SelectorError::Unavailable`] naming both, and no port is asked, so a run is
+    /// never given a pick made from another case's facts.
+    fn resolve_for_case(
+        &self,
+        case: &CaseId,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        if *case != self.case {
+            return Err(SelectorError::Unavailable(format!(
+                "the deterministic selector answers for case `{}`, and the run is for case `{}`",
+                self.case.0, case.0
+            )));
+        }
+        self.resolve(context, candidates)
     }
 }
 
@@ -288,13 +492,42 @@ impl<F: ActionSelector, S: ActionSelector> ActionSelector for HybridSelector<F, 
         context: &SelectionContext,
         candidates: &[CatalogueEntry],
     ) -> Result<Resolution, SelectorError> {
-        let fast = self.fast.resolve(context, candidates);
+        self.fall_back(candidates, self.fast.resolve(context, candidates), || {
+            self.stronger.resolve(context, candidates)
+        })
+    }
+
+    /// [`ActionSelector::resolve`] as [`HybridSelector`] resolves, with `case` handed on to both
+    /// selectors' own [`ActionSelector::resolve_for_case`].
+    fn resolve_for_case(
+        &self,
+        case: &CaseId,
+        context: &SelectionContext,
+        candidates: &[CatalogueEntry],
+    ) -> Result<Resolution, SelectorError> {
+        self.fall_back(
+            candidates,
+            self.fast.resolve_for_case(case, context, candidates),
+            || self.stronger.resolve_for_case(case, context, candidates),
+        )
+    }
+}
+
+impl<F: ActionSelector, S: ActionSelector> HybridSelector<F, S> {
+    /// `fast` when it is accepted from `candidates`; otherwise the resolution `stronger` gives,
+    /// with the fast pick as the one it overruled when the fast selector answered at all.
+    fn fall_back(
+        &self,
+        candidates: &[CatalogueEntry],
+        fast: Result<Resolution, SelectorError>,
+        stronger: impl FnOnce() -> Result<Resolution, SelectorError>,
+    ) -> Result<Resolution, SelectorError> {
         if let Ok(resolution) = &fast
             && self.accepts(&resolution.chosen.choice, candidates)
         {
             return fast;
         }
-        let stronger = self.stronger.resolve(context, candidates)?;
+        let stronger = stronger()?;
         Ok(Resolution {
             chosen: stronger.chosen,
             overruled: fast.ok().map(|resolution| resolution.chosen),
@@ -348,11 +581,34 @@ pub fn resolve(
     selector: &impl ActionSelector,
     context: &SelectionContext,
     catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    ids: (SelectionId, SelectionId),
+) -> Result<Resolved, SelectionRefusal> {
+    let resolution = selector.resolve(context, &catalogue.data().entries);
+    resolved(catalogue, resolution, ids)
+}
+
+/// [`resolve`] for a run of `case` ([`ActionSelector::resolve_for_case`]): what Loom asks when it
+/// runs a commission, naming the case of the frontier it was handed. Refused as [`resolve`]
+/// refuses, and when the selector does not answer for `case`.
+pub fn resolve_for_case(
+    selector: &impl ActionSelector,
+    case: &CaseId,
+    context: &SelectionContext,
+    catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    ids: (SelectionId, SelectionId),
+) -> Result<Resolved, SelectionRefusal> {
+    let resolution = selector.resolve_for_case(case, context, &catalogue.data().entries);
+    resolved(catalogue, resolution, ids)
+}
+
+/// The selections `resolution`, a selector's answer from `catalogue`, makes, as [`resolve`]
+/// describes them.
+fn resolved(
+    catalogue: &ActionCatalogue<action_catalogue_state::Projected>,
+    resolution: Result<Resolution, SelectorError>,
     (selection_id, overruled_id): (SelectionId, SelectionId),
 ) -> Result<Resolved, SelectionRefusal> {
-    let resolution = selector
-        .resolve(context, &catalogue.data().entries)
-        .map_err(SelectionRefusal::Selector)?;
+    let resolution = resolution.map_err(SelectionRefusal::Selector)?;
     let selection = chosen(
         catalogue,
         in_range(resolution.chosen.choice.clone()),

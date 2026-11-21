@@ -1,6 +1,6 @@
 // generated from loom v1
-// model digest 632899303b49bcf671b4e762c3b8d19edd5f7342d8f6ad14265f46a3ea30c277
-// contract digest 828dc2b85329a2c3c12648cb014abeedbc7f5363d6eeca16f73421b527d928e7
+// model digest fbeaebade33f9bae0fee878b4ac2ed2d464d4ad92289ab370b697eb4163ce3d5
+// contract digest f4ad0d5c16c875e74b035f1a0641820afec1c749de0636dc8a78651dab8edd95
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -17,6 +17,19 @@
 pub enum ActionCatalogueState {
     /// `Projected`.
     Projected,
+}
+
+/// ActionFacts — `loom.run.ActionFacts`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionFacts {
+    /// `action` — `String`.
+    pub action: String,
+    /// `effect` — `Optional<String>`.
+    pub effect: Option<String>,
+    /// `may_produce` — `List<String>`.
+    pub may_produce: Vec<String>,
+    /// `open_evidence` — `List<String>`.
+    pub open_evidence: Vec<String>,
 }
 
 /// The states of `loom.run.ArgumentRequest`, as runtime values.
@@ -131,6 +144,8 @@ pub enum SelectionStrategy {
     Rule,
     /// `Hybrid`.
     Hybrid,
+    /// `Deterministic`.
+    Deterministic,
 }
 
 /// TurnId — `loom.run.TurnId`: a distinct wrapper around `Uuid`.

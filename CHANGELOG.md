@@ -15,6 +15,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - `b10x-loom-bindings` decodes a `loom.bindings/1` document and checks it against its protocol at load (story:bindings-document)
+- **Breaking:** `SelectionStrategy` gains `Deterministic`, the strategy of the model-free `DeterministicSelector` (story:deterministic-default-selector)
 
 ### Changed
 
