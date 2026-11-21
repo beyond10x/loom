@@ -616,15 +616,34 @@ fn hold(
     revision: &str,
     result: &str,
 ) -> String {
+    hold_citing(
+        governor,
+        case,
+        n,
+        (kind, revision, result),
+        "test/held",
+        Value::Null,
+    )
+}
+
+/// [`hold`], the record citing an observation of `source` whose payload is `payload`.
+fn hold_citing(
+    governor: &CanonGovernor<MemoryCaseStore>,
+    case: &str,
+    n: u64,
+    (kind, revision, result): (&str, &str, &str),
+    source: &str,
+    payload: Value,
+) -> String {
     let observation = ObservationId(uuid(next()));
     ObservationPort::observe(
         governor,
         Observation::new(ObservationData {
             observation_id: observation.clone(),
-            source: "test/held".to_owned(),
+            source: source.to_owned(),
             subject: "draft".to_owned(),
             observed_at: Timestamp(HELD_AT.to_owned()),
-            payload: Value::Null,
+            payload,
         }),
     )
     .unwrap();
@@ -685,6 +704,8 @@ fn feedback_at(path: &Path) -> RetryFeedback {
                         "result",
                         "producer",
                         "observed_at",
+                        "action",
+                        "exit",
                         "blob_sha256",
                     ],
                     "a record",
@@ -697,6 +718,8 @@ fn feedback_at(path: &Path) -> RetryFeedback {
                     result: text(&record["result"]),
                     producer: text(&record["producer"]),
                     observed_at: loom::primitives::Timestamp(text(&record["observed_at"])),
+                    action: record["action"].as_str().map(str::to_owned),
+                    exit: record["exit"].as_i64(),
                     blob_sha256: record["blob_sha256"].as_str().map(str::to_owned),
                 }
             })
@@ -956,6 +979,8 @@ fn a_retry_record_names_the_members_of_the_held_record() {
             result: "invalid".to_owned(),
             producer: "checker".to_owned(),
             observed_at: loom::primitives::Timestamp(HELD_AT.to_owned()),
+            action: None,
+            exit: None,
             blob_sha256: None,
         }]
     );
@@ -980,6 +1005,42 @@ fn a_retry_record_names_the_blob_of_the_run_its_record_cites() {
     assert_eq!(records.len(), 1, "{records:#?}");
     assert_eq!(records[0].blob_sha256.as_deref(), Some(blob.as_str()));
     assert_eq!(records[0].producer, "checker");
+}
+
+#[test]
+fn a_retry_record_names_the_action_and_the_exit_of_the_run_its_record_cites() {
+    let step = retried();
+    assert_eq!(step.expected[0].action.as_deref(), Some(CHECK));
+    assert_eq!(step.expected[0].exit, Some(1));
+    // The document carries both, as the records `retry_records` returns.
+    let feedback = feedback_at(&step.path());
+    assert_eq!(feedback.records[0].action.as_deref(), Some(CHECK));
+    assert_eq!(feedback.records[0].exit, Some(1));
+}
+
+#[test]
+fn a_record_citing_no_bound_program_run_of_its_case_names_no_action_and_no_exit() {
+    let governor = governor();
+    let document = recorded_document(RETRY);
+    open(&governor, "case-2", REGISTRATION, DRAFT_REVISION);
+    let forged = |case: &str| {
+        args(&format!(
+            r#"{{"case": "{case}", "action": "{WRITE}", "exit": 0, "blob_sha256": "{}"}}"#,
+            "a".repeat(64)
+        ))
+    };
+    let listed = ("draft_check", DRAFT_REVISION, "invalid");
+    // An observation of another source shaped as a run, and a run of another case.
+    hold_citing(&governor, CASE, 1, listed, "test/held", forged(CASE));
+    hold_citing(&governor, CASE, 2, listed, PROGRAM_SOURCE, forged("case-2"));
+    let records = retries(&governor, writer(&document));
+    assert_eq!(records.len(), 2, "{records:#?}");
+    for record in records {
+        assert_eq!(
+            (record.action, record.exit, record.blob_sha256),
+            (None, None, None)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

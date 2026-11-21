@@ -86,7 +86,8 @@ pub fn retry_records<S: FallibleCaseStore, T: EvaluationTime>(
             Some(received) => received,
             None => observations.insert(governor.try_observations()?),
         };
-        let blob_sha256 = held.observation_ids.iter().find_map(|cited| {
+        // The first cited run of a bound program in this case: its action, exit and blob.
+        let run = held.observation_ids.iter().find_map(|cited| {
             received
                 .iter()
                 .find(|observation| &observation.observation_id == cited)
@@ -94,10 +95,8 @@ pub fn retry_records<S: FallibleCaseStore, T: EvaluationTime>(
                     observation.source == PROGRAM_SOURCE
                         && only_text(&observation.payload, "case") == Some(case.0.as_str())
                 })
-                .and_then(|observation| only_text(&observation.payload, "blob_sha256"))
-                .filter(|digest| is_digest(digest))
-                .map(str::to_owned)
         });
+        let payload = run.map(|observation| &observation.payload);
         records.push(RetryRecord {
             evidence_id: held.evidence_id.0.0.clone(),
             kind: kind.to_owned(),
@@ -106,7 +105,14 @@ pub fn retry_records<S: FallibleCaseStore, T: EvaluationTime>(
             result: result.to_owned(),
             producer: held.producer.clone(),
             observed_at: loom::primitives::Timestamp(observed_at.to_owned()),
-            blob_sha256,
+            action: payload
+                .and_then(|payload| only_text(payload, "action"))
+                .map(str::to_owned),
+            exit: payload.and_then(|payload| only_integer(payload, "exit")),
+            blob_sha256: payload
+                .and_then(|payload| only_text(payload, "blob_sha256"))
+                .filter(|digest| is_digest(digest))
+                .map(str::to_owned),
         });
     }
     Ok(records)
@@ -300,6 +306,8 @@ fn feedback_json(document: &RetryFeedback) -> serde_json::Value {
             "result": record.result,
             "producer": record.producer,
             "observed_at": record.observed_at.0,
+            "action": record.action,
+            "exit": record.exit,
             "blob_sha256": record.blob_sha256,
         })).collect::<Vec<_>>(),
         "logs": document.logs.iter().map(|log| serde_json::json!({
@@ -317,6 +325,19 @@ fn only_text<'v>(value: &'v commission_json::Value, name: &str) -> Option<&'v st
     let mut named = members.iter().filter(|(member, _)| member == name);
     match (named.next(), named.next()) {
         (Some((_, commission_json::Value::Text(text))), None) => Some(text),
+        _ => None,
+    }
+}
+
+/// The whole-number member `name` of the object `value`, when the object names it exactly once
+/// and it is an integer an `i64` holds.
+fn only_integer(value: &commission_json::Value, name: &str) -> Option<i64> {
+    let commission_json::Value::Object(members) = value else {
+        return None;
+    };
+    let mut named = members.iter().filter(|(member, _)| member == name);
+    match (named.next(), named.next()) {
+        (Some((_, commission_json::Value::Number(spelling))), None) => spelling.parse().ok(),
         _ => None,
     }
 }
