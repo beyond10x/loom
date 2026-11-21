@@ -166,7 +166,8 @@ actions:
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
   `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 3600.
 - `retry_when` maps an evidence kind of the protocol to the results that send the action back to
-  work; a result is never empty.
+  work; a result is never empty. A retried `program` is given those records as
+  `LOOM_RETRY_FEEDBACK` (below).
   `handoff` is the text a run shows when this writer has done what it may and a person continues.
 - `artifacts` maps an artifact id of the protocol to a path in the workspace; `independence` maps
   a producer to dimensions the protocol declares. The `artifacts`, `inputs` and `outputs`
@@ -256,6 +257,24 @@ The port is a Commission effect port: it performs the actions bound to `program`
   revision the case holds for the subject and, as `upstream_revisions`, for each `upstream`
   artifact. The record cites the observation. A program never names a result, a revision, a
   producer or an instant: members of its report with those names change nothing.
+
+- An action whose `retry_when` is not empty is sent back to work by its retry records
+  (`retry_records`): each record the case holds whose `kind` and `result` `retry_when` lists, about
+  the revision the case holds for its subject, in the order the case received them. A record
+  about a subject at `none`, a record of another case and a record of another kind or result are
+  none. Each names the record's evidence id, kind, subject, subject revision, result, producer and
+  instant, and the SHA-256 of the blob of the bound program's run the record cites.
+- After the run count and before anything starts, a step with retry records keeps one
+  `loom.retry-feedback/1` document, `loom.bindings.RetryFeedback`, as `blobs/<sha256>`: the case,
+  the action, the retry records and, per cited blob that still hashes to its name, its last 60
+  lines, at most 65536 bytes, invalid UTF-8 replaced by U+FFFD. The bound program then has one
+  more variable, `LOOM_RETRY_FEEDBACK`, the canonical absolute path of that document, mounted
+  read-only at that path under a runner that is not `local`. With no retry records nothing is
+  written and the variable is not set; the `arguments_from` program is never given it, and no
+  argument, report or bindings member sets it. A retried run is a run: at `budget.max_runs` the
+  step is refused `RunsSpent` before any record is read. A document that cannot be kept (a
+  `blobs` that is a link) fails the step before anything starts, with nothing observed. The run's
+  observation names the records it was given in `retry_of`.
 
 The step refusals are the members of `loom.bindings.ProgramRefusalReason` in the
 [reference](../reference/ess/loom-bindings.md).

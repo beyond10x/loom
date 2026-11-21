@@ -18,6 +18,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `bindings::admit_bound_program_runner` and `bindings::bound_program_child`: a bound program's runner admission and child (story:bound-program-result-table)
 - `b10x_loom_bindings::ProgramEffects` runs a `program` binding through the host's runner; its result table alone makes evidence, every call of the runner counts against `budget.max_runs`, and a case of another protocol is refused `CaseOfAnotherProtocol` (story:bound-program-result-table)
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
+- `b10x_loom_bindings::retry_records`; a retried bound program is given its `loom.retry-feedback/1` document as `LOOM_RETRY_FEEDBACK` (story:bound-program-retry-records)
 
 ### Changed
 
@@ -33,6 +34,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
 - **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
 - A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
+- **Breaking:** `loom::bindings::ProgramRun` gains `retry_of`, the evidence ids of the retry records a run was given (story:bound-program-retry-records)
 
 ### Removed
 

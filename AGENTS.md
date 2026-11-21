@@ -1266,6 +1266,17 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   once more (`story:bound-program-run-cap-holds-across-ports`). Held by
   `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
   `crates/loom-governor` is not changed by it.
+- `retry_records(governor, case, binding)` (`retry.rs`, `story:bound-program-retry-records`) is
+  each held record of the case whose facts name, once each, a `kind` (the record's own) and a
+  `result` the binding's `retry_when` lists, about the revision the case holds for the facts'
+  `subject`, never `none`, in the order received; its `blob_sha256` only from a cited
+  `PROGRAM_SOURCE` observation of that case naming 64 lowercase hex digits. After the run count
+  and before the arguments, a step with records keeps the `loom.retry-feedback/1` document through
+  `keep_blob` and sets `LOOM_RETRY_FEEDBACK` (`RETRY_FEEDBACK_VARIABLE`) to its canonical path on
+  the bound child alone, mounted `at_host_path` unless the runner is `local`; with none the
+  variable is removed and nothing is written. A log is the last 60 lines, at most 65536 bytes of
+  text, of a blob that is a regular file hashing to its name, one per distinct blob. The run's
+  `ProgramRun.retry_of` names the records. Held by `crates/loom-bindings/tests/bound_retry.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 
