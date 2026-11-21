@@ -17,12 +17,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-bindings` decodes a `loom.bindings/1` document and checks it against its protocol at load (story:bindings-document)
 - **Breaking:** `SelectionStrategy` gains `Deterministic`, the strategy of the model-free `DeterministicSelector` (story:deterministic-default-selector)
 - `CanonGovernor` and `ProtocolCatalog` take a protocol with `case_open` or a `children` form; `action_facts` reads its `case_outcome` (story:canon-0-9-0-pin)
+- `resume_after_decision` resumes a run held for `SuspensionReason::Decision`; `b10x-loom resume` refuses that hold `HeldForDecision`, exit 19 (story:decision-suspension-reason)
 
 ### Changed
 
 - Substrate moves from `0.14.0` to `0.21.0` (`adfde402`, host without its `kubernetes` feature, so no `aws-lc-rs`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
 - **Breaking:** `ChildCommand` refuses `ScopeInvalid` a root or file mounted on, under or containing `/etc/alternatives`, which a confined child now sees read-only where the host has it (story:substrate-0-21-pin)
 - **Breaking:** Canon `0.8.0` -> `0.9.0`, `b10x-canon-engineering` `0.15.2` -> `0.16.0`: `ProtocolEntry::model` is Canon 0.9.0's `Protocol`; Canon reserves the evidence kind `case_outcome`, refusing its records without `child_case` or `result` (story:canon-0-9-0-pin)
+- **Breaking:** a Suspension's `action_request_id`, `expected_case_revision`, `action` and `arguments` are `Option`, so is each `ActionRequestId` of its commands and events; `ResumeRefusal` gains three variants (story:decision-suspension-reason)
 
 ## [0.57.2] - 2026-11-05
 

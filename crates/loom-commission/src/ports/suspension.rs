@@ -22,6 +22,10 @@
 //! * `ReleaseSuspension` removes a `Resuming` Suspension once its request was performed; a
 //!   `Pending` one is refused (`not-taken`).
 //!
+//! A Suspension held for a decision request (`SuspensionReason::Decision`,
+//! `story:decision-suspension-reason`) holds the Run and no action request: its request, expected
+//! case revision, action and arguments are absent, and a take and a release of it name no request.
+//!
 //! A take and a release name the action request the resume read and revalidated. A Suspension
 //! held for another request is refused (`other-request`, [`SuspensionRequestMismatch`] naming
 //! both) whatever its state, and kept as it is, so a resume that read one Suspension never takes
@@ -170,11 +174,13 @@ pub fn decide_hold(
 }
 
 /// The refusal `other-request` of a take or a release naming `requested` when `held` is held for
-/// another request; `None` when it is held for `requested`.
+/// another request; `None` when it is held for `requested`. A Decision Suspension holds no request
+/// and is named by none: an absent request matches only an absent one
+/// (`story:decision-suspension-reason`).
 fn other_request(
     held: &SuspensionSnapshot,
     suspension: &SuspensionKey,
-    requested: &ActionRequestId,
+    requested: &Option<ActionRequestId>,
 ) -> Option<SuspensionRequestMismatch> {
     (held.data.action_request_id != *requested).then(|| SuspensionRequestMismatch {
         suspension: suspension.clone(),

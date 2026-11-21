@@ -445,7 +445,7 @@
         },
         {
           "name": "action_request_id",
-          "type": "ActionRequestId"
+          "type": "Optional<ActionRequestId>"
         },
         {
           "name": "case_id",
@@ -453,15 +453,15 @@
         },
         {
           "name": "expected_case_revision",
-          "type": "integer"
+          "type": "Optional<integer>"
         },
         {
           "name": "action",
-          "type": "string"
+          "type": "Optional<string>"
         },
         {
           "name": "arguments",
-          "type": "ProposedActionArguments"
+          "type": "Optional<ProposedActionArguments>"
         },
         {
           "name": "reason",

@@ -193,7 +193,8 @@ fn a_crash_between_taking_the_suspension_and_the_merge_leaves_the_request_in_dou
         .expect("the store reads")
         .expect("the Suspension is stored")
         .data
-        .action_request_id;
+        .action_request_id
+        .expect("the Suspension holds an action request");
 
     // The first resume dies at the merge, before the effect port performed it.
     let crashed = std::panic::catch_unwind(|| {
@@ -248,7 +249,7 @@ fn a_crash_between_taking_the_suspension_and_the_merge_leaves_the_request_in_dou
         .get(&commission_id)
         .expect("the store reads")
         .expect("the Suspension stays stored as the request's durable trace");
-    assert_eq!(held.data.action_request_id, request);
+    assert_eq!(held.data.action_request_id, Some(request));
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 13cc0558175429879e963bf7c04bdfe9e35b2c66d61ec900197077546340ca2e
-// contract digest 08d3ce481bae0546b594ce01e47eee1e824d3a2be8bddc909791bd308f005d05
+// model digest 80727144504c944a2e6474f4ea2942968e297890e697d78f658c49ec5417f09c
+// contract digest 517ae7472a433ac632470e459ef5eaed9c1bd6fc880f470e3c89fa2284eeafe6
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -308,6 +308,44 @@ pub enum ConnectorOperationEffect {
 /// ConnectorOperationId — `commission.responsibility.ConnectorOperationId`: a distinct wrapper around `String`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConnectorOperationId(pub String);
+
+/// DecidedHold — `commission.responsibility.DecidedHold`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecidedHold {
+    /// `request_id` — `String`.
+    pub request_id: String,
+    /// `record` — `commission.responsibility.DecidedRecord`.
+    pub record: DecidedRecord,
+}
+
+/// DecidedRecord — `commission.responsibility.DecidedRecord`: one of a fixed set of shapes, tagged on the wire by `kind`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DecidedRecord {
+    /// Tagged `NoRecord` — `commission.responsibility.Unit`.
+    NoRecord(Unit),
+    /// Tagged `Recorded` — `Json`.
+    Recorded(crate::json::Value),
+}
+
+/// DecisionHold — `commission.responsibility.DecisionHold`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecisionHold {
+    /// `request_id` — `String`.
+    pub request_id: String,
+    /// `unblocks` — `commission.responsibility.DecisionUnblocks`.
+    pub unblocks: DecisionUnblocks,
+}
+
+/// DecisionUnblocks — `commission.responsibility.DecisionUnblocks`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecisionUnblocks {
+    /// `Approval`.
+    Approval,
+    /// `Question`.
+    Question,
+    /// `Outcome`.
+    Outcome,
+}
 
 /// EffectOutcome — `commission.responsibility.EffectOutcome`: one of a fixed set of shapes, tagged on the wire by `kind`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -895,6 +933,8 @@ pub enum SuspensionReason {
     Authority(crate::json::Value),
     /// Tagged `Budget` — `Json`.
     Budget(crate::json::Value),
+    /// Tagged `Decision` — `commission.responsibility.DecisionHold`.
+    Decision(DecisionHold),
     /// Tagged `Dependency` — `List<commission.responsibility.CaseId>`.
     Dependency(Vec<CaseId>),
     /// Tagged `Evidence` — `List<String>`.
@@ -2591,6 +2631,8 @@ impl AnyRun {
 ///
 /// The identity and every declared field. The state is deliberately not one: inside the domain it
 /// is carried by the type parameter of [`Suspension<S>`], and at a boundary by [`SuspensionSnapshot::state`].
+///
+/// Every value satisfies `((defined(action_request_id) and defined(expected_case_revision) and defined(action) and defined(arguments)) or (not (defined(action_request_id)) and not (defined(expected_case_revision)) and not (defined(action)) and not (defined(arguments))))` — checked by [`SuspensionData::broken_invariant`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuspensionData {
     /// The identity: `suspension` — `commission.responsibility.SuspensionKey`.
@@ -2605,22 +2647,38 @@ pub struct SuspensionData {
     pub run_id: RunId,
     /// `run_case_revision` — `Integer`.
     pub run_case_revision: i64,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
     ///
     /// Carries `action_request`: `commission.responsibility.Suspension` references one `commission.responsibility.ActionRequest`.
-    pub action_request_id: ActionRequestId,
+    pub action_request_id: Option<ActionRequestId>,
     /// `case_id` — `commission.responsibility.CaseId`.
     ///
     /// Carries `case`: `commission.responsibility.Suspension` references one `commission.responsibility.Case`.
     pub case_id: CaseId,
-    /// `expected_case_revision` — `Integer`.
-    pub expected_case_revision: i64,
-    /// `action` — `String`.
-    pub action: String,
-    /// `arguments` — `commission.responsibility.ProposedActionArguments`.
-    pub arguments: ProposedActionArguments,
+    /// `expected_case_revision` — `Optional<Integer>`.
+    pub expected_case_revision: Option<i64>,
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `arguments` — `Optional<commission.responsibility.ProposedActionArguments>`.
+    pub arguments: Option<ProposedActionArguments>,
     /// `reason` — `commission.responsibility.SuspensionReason`.
     pub reason: SuspensionReason,
+}
+
+impl SuspensionData {
+    /// The first declared invariant of `commission.responsibility.Suspension` this value breaks, as the specification declares it,
+    /// or `None` when it breaks none.
+    ///
+    /// An invariant is broken only when it is false of this value. One that reads something
+    /// absent — an empty `Optional`, a list position past the end, or `state`, which this
+    /// type does not hold — decides nothing, as the conformance interpreter reads it.
+    pub fn broken_invariant(&self) -> Option<&'static str> {
+        use crate::primitives::invariant as iv;
+        if iv::broken(iv::any([iv::all([Some(self.action_request_id.as_ref().map(|v| &v.0).is_some()), Some(self.expected_case_revision.as_ref().is_some()), Some(self.action.as_ref().is_some()), Some(self.arguments.as_ref().map(|v| &v.0).is_some())]), iv::all([iv::not(Some(self.action_request_id.as_ref().map(|v| &v.0).is_some())), iv::not(Some(self.expected_case_revision.as_ref().is_some())), iv::not(Some(self.action.as_ref().is_some())), iv::not(Some(self.arguments.as_ref().map(|v| &v.0).is_some()))])])) {
+            return Some("((defined(action_request_id) and defined(expected_case_revision) and defined(action) and defined(arguments)) or (not (defined(action_request_id)) and not (defined(expected_case_revision)) and not (defined(action)) and not (defined(arguments))))");
+        }
+        None
+    }
 }
 
 /// The states of `commission.responsibility.Suspension`, at the type level.
@@ -2781,16 +2839,16 @@ pub struct HoldSuspension {
     pub run_id: RunId,
     /// `run_case_revision` — `Integer`.
     pub run_case_revision: i64,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
     /// `case_id` — `commission.responsibility.CaseId`.
     pub case_id: CaseId,
-    /// `expected_case_revision` — `Integer`.
-    pub expected_case_revision: i64,
-    /// `action` — `String`.
-    pub action: String,
-    /// `arguments` — `commission.responsibility.ProposedActionArguments`.
-    pub arguments: ProposedActionArguments,
+    /// `expected_case_revision` — `Optional<Integer>`.
+    pub expected_case_revision: Option<i64>,
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `arguments` — `Optional<commission.responsibility.ProposedActionArguments>`.
+    pub arguments: Option<ProposedActionArguments>,
     /// `reason` — `commission.responsibility.SuspensionReason`.
     pub reason: SuspensionReason,
 }
@@ -2943,8 +3001,8 @@ pub enum JudgePerformableActionsOutcome {
 pub struct ReleaseSuspension {
     /// `suspension` — `commission.responsibility.SuspensionKey`.
     pub suspension: SuspensionKey,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
 }
 
 /// Everything `commission.responsibility.ReleaseSuspension` can result in — one variant per declared outcome.
@@ -3141,8 +3199,8 @@ pub enum SuspendRunOutcome {
 pub struct TakeSuspension {
     /// `suspension` — `commission.responsibility.SuspensionKey`.
     pub suspension: SuspensionKey,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
 }
 
 /// Everything `commission.responsibility.TakeSuspension` can result in — one variant per declared outcome.
@@ -3213,8 +3271,8 @@ pub struct SuspensionHeld {
     pub suspension: SuspensionKey,
     /// `run_id` — `commission.responsibility.RunId`.
     pub run_id: RunId,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
 }
 
 /// SuspensionReleased — the event `commission.responsibility.SuspensionReleased`.
@@ -3229,8 +3287,8 @@ pub struct SuspensionReleased {
 pub struct SuspensionTaken {
     /// `suspension` — `commission.responsibility.SuspensionKey`.
     pub suspension: SuspensionKey,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
 }
 
 /// The declared error `commission.responsibility.ActionNeedsAuthority`.
@@ -3327,10 +3385,10 @@ pub struct SuspensionNotFound {
 pub struct SuspensionRequestMismatch {
     /// `suspension` — `commission.responsibility.SuspensionKey`.
     pub suspension: SuspensionKey,
-    /// `held_action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub held_action_request_id: ActionRequestId,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `held_action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub held_action_request_id: Option<ActionRequestId>,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
 }
 
 /// The declared error `commission.responsibility.SuspensionSettled`.
@@ -3338,8 +3396,8 @@ pub struct SuspensionRequestMismatch {
 pub struct SuspensionSettled {
     /// `suspension` — `commission.responsibility.SuspensionKey`.
     pub suspension: SuspensionKey,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
     /// `reason` — `String`.
     pub reason: String,
 }
@@ -3349,8 +3407,8 @@ pub struct SuspensionSettled {
 pub struct SuspensionStateConflict {
     /// `state` — `commission.responsibility.Suspension.State`.
     pub state: SuspensionState,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
 }
 
 /// The declared error `commission.responsibility.SuspensionStorageFailed`.
@@ -3390,8 +3448,14 @@ pub struct SuspensionStates {
     pub commission_id: CommissionId,
     /// `run_id` — `commission.responsibility.RunId`.
     pub run_id: RunId,
-    /// `action_request_id` — `commission.responsibility.ActionRequestId`.
-    pub action_request_id: ActionRequestId,
+    /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
+    pub action_request_id: Option<ActionRequestId>,
+    /// `expected_case_revision` — `Optional<Integer>`.
+    pub expected_case_revision: Option<i64>,
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `arguments` — `Optional<commission.responsibility.ProposedActionArguments>`.
+    pub arguments: Option<ProposedActionArguments>,
     /// `state` — `commission.responsibility.Suspension.State`.
     pub state: SuspensionState,
 }

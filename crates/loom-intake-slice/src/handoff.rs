@@ -427,7 +427,7 @@ impl SuspensionPort for SettledHandoffs<'_> {
     /// A merge at a handed-off `HEAD` is `settled`; a `HEAD` or a hand-off that cannot be read is
     /// `storage-failed`, holding nothing; every other hold is `inner`'s.
     fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
-        if input.action != MERGE {
+        if input.action.as_deref() != Some(MERGE) {
             return self.inner.hold(input);
         }
         let unreadable = |reason: String| HoldSuspensionOutcome::StorageFailed {
@@ -659,13 +659,13 @@ mod tests {
             commission_id: HeldCommissionId(HeldUuid(commission.to_owned())),
             run_id: RunId(HeldUuid("00000000-0000-4000-8000-000000000003".to_owned())),
             run_case_revision: 1,
-            action_request_id: HeldRequestId(HeldUuid(
+            action_request_id: Some(HeldRequestId(HeldUuid(
                 "00000000-0000-4000-8000-0000000000a2".to_owned(),
-            )),
+            ))),
             case_id: CaseId("case-1".to_owned()),
-            expected_case_revision: 3,
-            action: action.to_owned(),
-            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+            expected_case_revision: Some(3),
+            action: Some(action.to_owned()),
+            arguments: Some(ProposedActionArguments(json::Value::Object(Vec::new()))),
             reason: SuspensionReason::Authority(json::Value::Object(vec![(
                 "capability".to_owned(),
                 json::Value::Text(action.to_owned()),
@@ -703,7 +703,7 @@ mod tests {
             "{edit:?}"
         );
         let stored = held(commission).expect("another action is held");
-        assert_eq!(stored.data.action, "implementation.edit");
+        assert_eq!(stored.data.action.as_deref(), Some("implementation.edit"));
 
         let suspensions = FileSuspensionStore::open(dir.path().join("fresh")).unwrap();
         let at_new_work: HeldHead<'_> = &|| Ok("4567cdef".to_owned());

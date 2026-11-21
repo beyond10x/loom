@@ -146,7 +146,10 @@ fn a_stale_resume_takes_a_later_suspension_and_merges_its_old_request_again() {
             left.as_ref()
                 .map(|s| (s.state, s.data.action_request_id.clone()))
         ),
-        (1, Some((SuspensionState::Pending, second_request.clone()))),
+        (
+            1,
+            Some((SuspensionState::Pending, Some(second_request.clone())))
+        ),
         "R1 was merged {} times ({merges:?}) and S2 (R2, never performed) is left as {left:?}; \
          process B, which read S1, ended {resumed_b:?}",
         merges.len()
@@ -168,7 +171,10 @@ fn a_governor_failing_after_the_merge_leaves_the_request_in_doubt_and_merged_onc
         .data()
         .commission_id
         .clone();
-    let request = stored(&dir, &commission_id).data.action_request_id;
+    let request = stored(&dir, &commission_id)
+        .data
+        .action_request_id
+        .expect("the Suspension holds an action request");
 
     let governor = governor(&dir);
     let case = CaseId(CASE.to_owned());
@@ -229,7 +235,10 @@ fn a_refused_release_leaves_the_request_in_doubt_and_merged_once() {
         .data()
         .commission_id
         .clone();
-    let request = stored(&dir, &commission_id).data.action_request_id;
+    let request = stored(&dir, &commission_id)
+        .data
+        .action_request_id
+        .expect("the Suspension holds an action request");
 
     let governor = governor(&dir);
     let case = CaseId(CASE.to_owned());
@@ -416,7 +425,10 @@ fn concurrent_takes_over_one_directory_take_once() {
             .hold(hold_input(
                 &data,
                 data.data.run_id.clone(),
-                data.data.action_request_id.clone(),
+                data.data
+                    .action_request_id
+                    .clone()
+                    .expect("the Suspension holds an action request"),
             ));
         assert!(
             matches!(held, HoldSuspensionOutcome::Held { .. }),
@@ -428,14 +440,18 @@ fn concurrent_takes_over_one_directory_take_once() {
                 let barrier = barrier.clone();
                 let root = root.clone();
                 let key = key.clone();
-                let request = data.data.action_request_id.clone();
+                let request = data
+                    .data
+                    .action_request_id
+                    .clone()
+                    .expect("the Suspension holds an action request");
                 std::thread::spawn(move || {
                     let store = FileSuspensionStore::open(&root).expect("opens");
                     barrier.wait();
                     matches!(
                         store.take(TakeSuspension {
                             suspension: key,
-                            action_request_id: request,
+                            action_request_id: Some(request),
                         }),
                         TakeSuspensionOutcome::Taken { .. }
                     )
@@ -462,12 +478,19 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     let held = template();
     let key = held.data.suspension.clone();
     let id = held.data.commission_id.clone();
-    let request = held.data.action_request_id.clone();
+    let request = held
+        .data
+        .action_request_id
+        .clone()
+        .expect("the Suspension holds an action request");
     let input = || {
         hold_input(
             &held,
             held.data.run_id.clone(),
-            held.data.action_request_id.clone(),
+            held.data
+                .action_request_id
+                .clone()
+                .expect("the Suspension holds an action request"),
         )
     };
 
@@ -478,7 +501,7 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.release(ReleaseSuspension {
             suspension: key.clone(),
-            action_request_id: request.clone()
+            action_request_id: Some(request.clone())
         }),
         ReleaseSuspensionOutcome::NotTaken { .. }
     ));
@@ -489,7 +512,7 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.take(TakeSuspension {
             suspension: key.clone(),
-            action_request_id: request.clone()
+            action_request_id: Some(request.clone())
         }),
         TakeSuspensionOutcome::Taken { .. }
     ));
@@ -500,7 +523,7 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.take(TakeSuspension {
             suspension: key.clone(),
-            action_request_id: request.clone()
+            action_request_id: Some(request.clone())
         }),
         TakeSuspensionOutcome::WrongState { .. }
     ));
@@ -511,14 +534,14 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.release(ReleaseSuspension {
             suspension: key.clone(),
-            action_request_id: request.clone()
+            action_request_id: Some(request.clone())
         }),
         ReleaseSuspensionOutcome::Released { .. }
     ));
     assert!(matches!(
         store.release(ReleaseSuspension {
             suspension: key,
-            action_request_id: request
+            action_request_id: Some(request)
         }),
         ReleaseSuspensionOutcome::NotFound { .. }
     ));
@@ -547,7 +570,7 @@ fn hold_input(
         commission_id: data.commission_id.clone(),
         run_id,
         run_case_revision: data.run_case_revision,
-        action_request_id: request,
+        action_request_id: Some(request),
         case_id: data.case_id.clone(),
         expected_case_revision: data.expected_case_revision,
         action: data.action.clone(),
@@ -568,12 +591,14 @@ fn template() -> SuspensionSnapshot {
             commission_id,
             run_id: RunId(uuid(0x56)),
             run_case_revision: 1,
-            action_request_id: ActionRequestId(uuid(0x57)),
+            action_request_id: Some(ActionRequestId(uuid(0x57))),
             case_id: CaseId(CASE.to_owned()),
-            expected_case_revision: 1,
-            action: MERGE.to_owned(),
-            arguments: b10x_loom_commission::model::responsibility::ProposedActionArguments(
-                json::Value::Object(Vec::new()),
+            expected_case_revision: Some(1),
+            action: Some(MERGE.to_owned()),
+            arguments: Some(
+                b10x_loom_commission::model::responsibility::ProposedActionArguments(
+                    json::Value::Object(Vec::new()),
+                ),
             ),
             reason: SuspensionReason::Authority(json::Value::Text(WITHHELD.to_owned())),
         },

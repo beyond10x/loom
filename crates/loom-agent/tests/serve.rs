@@ -625,7 +625,7 @@ fn a_send_is_held_until_approved() {
         .expect("the Suspension holds the send");
     // The request the turn suspended: its id carries the commission, so two turns taking the
     // same steps on two items never share one.
-    let suspended_request = stored.data.action_request_id.0.0.clone();
+    let suspended_request = stored.data.action_request_id.clone().unwrap().0.0;
     assert!(
         !suspended_request.starts_with("00000000-0000-"),
         "the request id is seeded with the commission: {suspended_request}"

@@ -350,6 +350,27 @@ fn event(name: &str) -> ObservedEvent {
     ObservedEvent::new(parse::<EventRef>(name))
 }
 
+/// `error` with the request `id` under `field`, the field left out when the error names none (a
+/// Decision Suspension holds no request, `story:decision-suspension-reason`).
+fn error_naming(
+    error: DeclaredErrorValue,
+    field: &str,
+    id: Option<ActionRequestId>,
+) -> DeclaredErrorValue {
+    match id {
+        Some(id) => error.with(field, Node::Text(id.0.0)),
+        None => error,
+    }
+}
+
+/// `event` with the request `id` under `field`, the field left out when the event names none.
+fn event_naming(event: ObservedEvent, field: &str, id: Option<ActionRequestId>) -> ObservedEvent {
+    match id {
+        Some(id) => event.with(field, Node::Text(id.0.0)),
+        None => event,
+    }
+}
+
 /// `wrong-state` with the run's actual state, or with no field for a run no record carries.
 fn wrong_state(command: &str, conflict: Option<RunStateConflict>) -> SemanticCommandResult {
     let declared = error(RUN_STATE_CONFLICT);
@@ -452,16 +473,15 @@ fn suspension_storage_failed(
 /// request and why; nothing was stored.
 fn suspension_settled(settled: SuspensionSettled) -> SemanticCommandResult {
     took(HOLD_SUSPENSION, SETTLED).with_error(
-        error(SUSPENSION_SETTLED)
-            .with(
+        error_naming(
+            error(SUSPENSION_SETTLED).with(
                 "suspension",
                 codec::from_suspension_key(&settled.suspension),
-            )
-            .with(
-                "action_request_id",
-                Node::Text(settled.action_request_id.0.0),
-            )
-            .with("reason", Node::Text(settled.reason)),
+            ),
+            "action_request_id",
+            settled.action_request_id,
+        )
+        .with("reason", Node::Text(settled.reason)),
     )
 }
 
@@ -471,14 +491,11 @@ fn suspension_conflict(
     outcome: &str,
     conflict: SuspensionStateConflict,
 ) -> SemanticCommandResult {
-    took(command, outcome).with_error(
-        error(SUSPENSION_STATE_CONFLICT)
-            .with("state", codec::suspension_state(conflict.state))
-            .with(
-                "action_request_id",
-                Node::Text(conflict.action_request_id.0.0),
-            ),
-    )
+    took(command, outcome).with_error(error_naming(
+        error(SUSPENSION_STATE_CONFLICT).with("state", codec::suspension_state(conflict.state)),
+        "action_request_id",
+        conflict.action_request_id,
+    ))
 }
 
 /// A take's or a release's `other-request` refusal, naming the Suspension, the request it is held
@@ -487,21 +504,19 @@ fn suspension_other_request(
     command: &str,
     mismatch: SuspensionRequestMismatch,
 ) -> SemanticCommandResult {
-    took(command, "other-request").with_error(
-        error(SUSPENSION_REQUEST_MISMATCH)
-            .with(
-                "suspension",
-                codec::from_suspension_key(&mismatch.suspension),
-            )
-            .with(
-                "held_action_request_id",
-                Node::Text(mismatch.held_action_request_id.0.0),
-            )
-            .with(
-                "action_request_id",
-                Node::Text(mismatch.action_request_id.0.0),
-            ),
-    )
+    let named = error_naming(
+        error(SUSPENSION_REQUEST_MISMATCH).with(
+            "suspension",
+            codec::from_suspension_key(&mismatch.suspension),
+        ),
+        "held_action_request_id",
+        mismatch.held_action_request_id,
+    );
+    took(command, "other-request").with_error(error_naming(
+        named,
+        "action_request_id",
+        mismatch.action_request_id,
+    ))
 }
 
 fn hold_suspension(
@@ -514,27 +529,28 @@ fn hold_suspension(
         commission_id: CommissionId(codec::uuid(input, "commission_id")?),
         run_id: RunId(codec::uuid(input, "run_id")?),
         run_case_revision: codec::integer(input, "run_case_revision")?,
-        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+        action_request_id: codec::optional(input, "action_request_id", codec::uuid)?
+            .map(ActionRequestId),
         case_id: CaseId(codec::text(input, "case_id")?),
-        expected_case_revision: codec::integer(input, "expected_case_revision")?,
-        action: codec::text(input, "action")?,
-        arguments: ProposedActionArguments(codec::json(input, "arguments")?),
+        expected_case_revision: codec::optional(input, "expected_case_revision", codec::integer)?,
+        action: codec::optional(input, "action", codec::text)?,
+        arguments: codec::optional_json(input, "arguments")?.map(ProposedActionArguments),
         reason: codec::suspension_reason(input.get("reason")?)?,
     };
     Some(match live.suspensions.hold_suspension(command).ok()? {
         HoldSuspensionOutcome::Settled { error: settled } => suspension_settled(settled),
         HoldSuspensionOutcome::Held { suspension_held } => {
             let published = live.publish(
-                event(SUSPENSION_HELD)
-                    .with(
-                        "suspension",
-                        codec::from_suspension_key(&suspension_held.suspension),
-                    )
-                    .with("run_id", Node::Text(suspension_held.run_id.0.0))
-                    .with(
-                        "action_request_id",
-                        Node::Text(suspension_held.action_request_id.0.0),
-                    ),
+                event_naming(
+                    event(SUSPENSION_HELD)
+                        .with(
+                            "suspension",
+                            codec::from_suspension_key(&suspension_held.suspension),
+                        )
+                        .with("run_id", Node::Text(suspension_held.run_id.0.0)),
+                    "action_request_id",
+                    suspension_held.action_request_id,
+                ),
                 correlation,
             );
             took(HOLD_SUSPENSION, "held").emitting(published)
@@ -557,7 +573,8 @@ fn take_suspension(
 ) -> Option<SemanticCommandResult> {
     let command = TakeSuspension {
         suspension: codec::suspension_key(input.get("suspension")?)?,
-        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+        action_request_id: codec::optional(input, "action_request_id", codec::uuid)?
+            .map(ActionRequestId),
     };
     Some(match live.suspensions.take_suspension(command).ok()? {
         TakeSuspensionOutcome::OtherRequest { error } => {
@@ -565,15 +582,14 @@ fn take_suspension(
         }
         TakeSuspensionOutcome::Taken { suspension_taken } => {
             let published = live.publish(
-                event(SUSPENSION_TAKEN)
-                    .with(
+                event_naming(
+                    event(SUSPENSION_TAKEN).with(
                         "suspension",
                         codec::from_suspension_key(&suspension_taken.suspension),
-                    )
-                    .with(
-                        "action_request_id",
-                        Node::Text(suspension_taken.action_request_id.0.0),
                     ),
+                    "action_request_id",
+                    suspension_taken.action_request_id,
+                ),
                 correlation,
             );
             took(TAKE_SUSPENSION, "taken").emitting(published)
@@ -599,7 +615,8 @@ fn release_suspension(
 ) -> Option<SemanticCommandResult> {
     let command = ReleaseSuspension {
         suspension: codec::suspension_key(input.get("suspension")?)?,
-        action_request_id: ActionRequestId(codec::uuid(input, "action_request_id")?),
+        action_request_id: codec::optional(input, "action_request_id", codec::uuid)?
+            .map(ActionRequestId),
     };
     Some(match live.suspensions.release_suspension(command).ok()? {
         ReleaseSuspensionOutcome::OtherRequest { error } => {
@@ -640,24 +657,45 @@ fn suspension_states(live: &Live, view: &str) -> Result<SemanticViewResult, Targ
             format!("{} is owed: {}", unmet.capability, unmet.source),
         )
     })?;
-    Ok(SemanticViewResult::of(rows.into_iter().map(|row| {
-        ViewRow::from([
-            (
-                "suspension".to_owned(),
-                codec::from_suspension_key(&row.suspension),
-            ),
-            (
-                "commission_id".to_owned(),
-                Node::Text(row.commission_id.0.0),
-            ),
-            ("run_id".to_owned(), Node::Text(row.run_id.0.0)),
-            (
-                "action_request_id".to_owned(),
-                Node::Text(row.action_request_id.0.0),
-            ),
-            ("state".to_owned(), codec::suspension_state(row.state)),
-        ])
-    })))
+    Ok(SemanticViewResult::of(
+        rows.into_iter()
+            .map(|row| {
+                let mut published = ViewRow::from([
+                    (
+                        "suspension".to_owned(),
+                        codec::from_suspension_key(&row.suspension),
+                    ),
+                    (
+                        "commission_id".to_owned(),
+                        Node::Text(row.commission_id.0.0),
+                    ),
+                    ("run_id".to_owned(), Node::Text(row.run_id.0.0)),
+                    ("state".to_owned(), codec::suspension_state(row.state)),
+                ]);
+                // A Decision Suspension holds no request, revision, action or arguments: each is left out
+                // of its row (`story:decision-suspension-reason`).
+                if let Some(id) = row.action_request_id {
+                    published.insert("action_request_id".to_owned(), Node::Text(id.0.0));
+                }
+                if let Some(revision) = row.expected_case_revision {
+                    published.insert("expected_case_revision".to_owned(), codec::number(revision));
+                }
+                if let Some(action) = row.action {
+                    published.insert("action".to_owned(), Node::Text(action));
+                }
+                if let Some(arguments) = row.arguments {
+                    published.insert("arguments".to_owned(), codec::read_json(&arguments.0)?);
+                }
+                Some(published)
+            })
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| {
+                TargetError::unavailable(
+                    format!("reading `{view}`"),
+                    "a Suspension's arguments hold a number the suite cannot read".to_owned(),
+                )
+            })?,
+    ))
 }
 
 /// `RevalidateActionRequest`: the request as the input names it, revalidated against the

@@ -131,7 +131,7 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
         .expect("the commission holds a Suspension");
     assert_eq!(held.state, SuspensionState::Pending);
     assert_eq!(held.data.commission_id, commission);
-    assert_eq!(held.data.action, "repository.merge");
+    assert_eq!(held.data.action.as_deref(), Some("repository.merge"));
     assert_eq!(held.data.case_id.0, context.case_id.0);
     let suspension_files = std::fs::read_dir(&state)
         .unwrap()
@@ -152,7 +152,7 @@ fn run_with_state_holds_a_suspension_on_a_withheld_approval() {
         .expect("the case store reads")
         .expect("the case is held");
     assert_eq!(case.protocol, "software-change@1");
-    assert_eq!(case.revision, held.data.expected_case_revision);
+    assert_eq!(Some(case.revision), held.data.expected_case_revision);
 }
 
 /// A resume context keeps the workspace, the cgroup root and the catalog path as text, so with

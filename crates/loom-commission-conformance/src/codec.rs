@@ -9,8 +9,9 @@ use std::collections::BTreeMap;
 use b10x_loom_commission::model::json::Value;
 use b10x_loom_commission::model::primitives::Uuid;
 use b10x_loom_commission::model::responsibility::{
-    BudgetLimit, CaseId, CommissionId, HostStop, HumanDecisionRequest, RunBudgetBreach, RunState,
-    SuspensionKey, SuspensionReason, SuspensionState,
+    BudgetLimit, CaseId, CommissionId, DecisionHold, DecisionUnblocks, HostStop,
+    HumanDecisionRequest, RunBudgetBreach, RunState, SuspensionKey, SuspensionReason,
+    SuspensionState,
 };
 use ess_primitives::facts::{Number, is_canonical_uuid};
 use ess_primitives::node::Node;
@@ -29,6 +30,28 @@ pub fn uuid(input: &Input, name: &str) -> Option<Uuid> {
     text(input, name)
         .filter(|text| is_canonical_uuid(text))
         .map(Uuid)
+}
+
+/// The optional field `name`, read by `read` when it holds a value: `Some(None)` when it is absent
+/// or null, and `None` when it holds a value `read` refuses.
+pub fn optional<T>(
+    input: &Input,
+    name: &str,
+    read: impl FnOnce(&Input, &str) -> Option<T>,
+) -> Option<Option<T>> {
+    match input.get(name) {
+        None | Some(Node::Null) => Some(None),
+        Some(_) => read(input, name).map(Some),
+    }
+}
+
+/// The optional `Json` field `name`: `Some(None)` only when it is absent, since a null there is
+/// a `Json` value (`arguments` may be null), and `None` when it holds no `Json` value.
+pub fn optional_json(input: &Input, name: &str) -> Option<Option<Value>> {
+    match input.get(name) {
+        None => Some(None),
+        Some(_) => json(input, name).map(Some),
+    }
 }
 
 /// The `Integer` field `name`.
@@ -213,6 +236,7 @@ pub fn suspension_reason(node: &Node) -> Option<SuspensionReason> {
         "Time" => SuspensionReason::Time(to_json(value)?),
         "RunBudget" => SuspensionReason::RunBudget(run_budget_breach(value)?),
         "HostStop" => SuspensionReason::HostStop(host_stop(value)?),
+        "Decision" => SuspensionReason::Decision(decision_hold(value)?),
         _ => return None,
     })
 }
@@ -241,6 +265,7 @@ pub(crate) fn from_suspension_reason(reason: &SuspensionReason) -> Option<Node> 
         SuspensionReason::Time(value) => ("Time", read_json(value)?),
         SuspensionReason::RunBudget(breach) => ("RunBudget", from_run_budget_breach(breach)),
         SuspensionReason::HostStop(stop) => ("HostStop", from_host_stop(stop)?),
+        SuspensionReason::Decision(hold) => ("Decision", from_decision_hold(hold)),
     };
     Some(Node::Map(BTreeMap::from([
         ("kind".to_owned(), Node::Text(kind.to_owned())),
@@ -322,6 +347,38 @@ fn from_host_stop(stop: &HostStop) -> Option<Node> {
     ])))
 }
 
+/// The names of `DecisionUnblocks`, as `ess/commission/` declares them.
+const UNBLOCKS: [(DecisionUnblocks, &str); 3] = [
+    (DecisionUnblocks::Approval, "Approval"),
+    (DecisionUnblocks::Question, "Question"),
+    (DecisionUnblocks::Outcome, "Outcome"),
+];
+
+/// A `DecisionHold`: its request id and what it unblocks, by name (`story:decision-suspension-reason`).
+fn decision_hold(node: &Node) -> Option<DecisionHold> {
+    let members = node.as_map()?;
+    let name = members.get("unblocks")?.as_text()?;
+    Some(DecisionHold {
+        request_id: members.get("request_id")?.as_text()?.to_owned(),
+        unblocks: UNBLOCKS
+            .iter()
+            .find(|(_, known)| *known == name)
+            .map(|(unblocks, _)| *unblocks)?,
+    })
+}
+
+/// A `DecisionHold` as a suite value.
+fn from_decision_hold(hold: &DecisionHold) -> Node {
+    let unblocks = UNBLOCKS
+        .iter()
+        .find(|(unblocks, _)| *unblocks == hold.unblocks)
+        .map_or("", |(_, name)| name);
+    Node::Map(BTreeMap::from([
+        ("request_id".to_owned(), Node::Text(hold.request_id.clone())),
+        ("unblocks".to_owned(), Node::Text(unblocks.to_owned())),
+    ]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,5 +406,24 @@ mod tests {
             Some("HostStop")
         );
         assert_eq!(suspension_reason(&node), Some(reason));
+    }
+
+    /// A decision hold is encoded as the suite reads it and decoded back unchanged, for each thing
+    /// it may unblock (`story:decision-suspension-reason`).
+    #[test]
+    fn a_decision_reason_round_trips_through_the_suite_codec() {
+        for (unblocks, _) in UNBLOCKS {
+            let reason = SuspensionReason::Decision(DecisionHold {
+                request_id: "DR-1".to_owned(),
+                unblocks,
+            });
+            let node = from_suspension_reason(&reason).expect("the reason encodes");
+            assert_eq!(
+                node.as_map()
+                    .and_then(|members| members.get("kind")?.as_text()),
+                Some("Decision")
+            );
+            assert_eq!(suspension_reason(&node), Some(reason));
+        }
     }
 }

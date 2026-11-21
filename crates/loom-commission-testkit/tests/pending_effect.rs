@@ -1224,8 +1224,11 @@ fn approval_required_when_a_pending_request_is_asked_again_ends_the_run_needing_
         .unwrap_or_else(|error| panic!("the store reads: {error:?}"))
         .unwrap_or_else(|| panic!("no Suspension holds the withheld request"));
     assert_eq!(held.state, SuspensionState::Pending);
-    assert_eq!(held.data.action_request_id, made.action_request_id);
-    assert_eq!(held.data.expected_case_revision, 7);
+    assert_eq!(
+        held.data.action_request_id,
+        Some(made.action_request_id.clone())
+    );
+    assert_eq!(held.data.expected_case_revision, Some(7));
     assert_eq!(
         held.data.reason,
         SuspensionReason::Authority(Value::Object(vec![

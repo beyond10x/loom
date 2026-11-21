@@ -288,16 +288,24 @@ pub fn approve(
         ))
         .map_err(|error| ApproveRefusal::Store(error.to_string()))?
         .ok_or(ApproveRefusal::NothingSuspended)?;
+    // A Suspension held for a decision holds no request, so no capability approves it, `Pending`
+    // or `Resuming`, and no grant is written (`story:decision-suspension-reason`).
+    let (Some(held_request), Some(held_action)) = (
+        held.data.action_request_id.clone(),
+        held.data.action.clone(),
+    ) else {
+        return Err(ApproveRefusal::OtherCapability { held: None });
+    };
     if held.state != SuspensionState::Pending {
         return Err(ApproveRefusal::InDoubt {
-            action_request_id: held.data.action_request_id.0.0,
+            action_request_id: held_request.0.0,
         });
     }
     let needed = needed_capability(&held.data.reason);
     if needed.as_deref() != Some(capability) {
         return Err(ApproveRefusal::OtherCapability { held: needed });
     }
-    if held.data.action == MERGE {
+    if held_action == MERGE {
         let head = head_of(&held.data.case_id).map_err(ApproveRefusal::Store)?;
         let commission_id = CommissionId(Uuid(commission.to_owned()));
         if handoffs
@@ -312,7 +320,7 @@ pub fn approve(
         }
     }
     let commission_id = CommissionId(Uuid(commission.to_owned()));
-    let action_request_id = ActionRequestId(Uuid(held.data.action_request_id.0.0));
+    let action_request_id = ActionRequestId(Uuid(held_request.0.0));
     let mandate_approval = match mandate {
         Some(mandate) => Some(
             mandate
@@ -329,7 +337,7 @@ pub fn approve(
     };
     let grant = GrantData {
         commission_id,
-        action: held.data.action,
+        action: held_action,
         capability: capability.to_owned(),
         granted: true,
         action_request_id,
@@ -399,8 +407,12 @@ impl<'a> GrantAuthority<'a> {
         Ok(held.is_some_and(|held| {
             held.state == SuspensionState::Pending
                 && held.data.commission_id.0.0 == grant.commission_id.0.0
-                && held.data.action_request_id.0.0 == grant.action_request_id.0.0
-                && held.data.action == grant.action
+                && held
+                    .data
+                    .action_request_id
+                    .as_ref()
+                    .is_some_and(|held_request| held_request.0.0 == grant.action_request_id.0.0)
+                && held.data.action.as_deref() == Some(grant.action.as_str())
                 && needed_capability(&held.data.reason).as_deref() == Some(capability)
         }))
     }
@@ -662,11 +674,11 @@ mod tests {
             commission_id: commission.commission_id.clone(),
             run_id: RunId(HeldUuid("00000000-0000-4000-8000-000000000003".to_owned())),
             run_case_revision: 1,
-            action_request_id: request.clone(),
+            action_request_id: Some(request.clone()),
             case_id: commission.case_id.clone(),
-            expected_case_revision: 3,
-            action: "repository.merge".to_owned(),
-            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+            expected_case_revision: Some(3),
+            action: Some("repository.merge".to_owned()),
+            arguments: Some(ProposedActionArguments(json::Value::Object(Vec::new()))),
             reason: SuspensionReason::Authority(json::Value::Object(vec![(
                 "capability".to_owned(),
                 json::Value::Text("repository.merge".to_owned()),
@@ -703,12 +715,12 @@ mod tests {
 
         suspensions.take(TakeSuspension {
             suspension: key.clone(),
-            action_request_id: request.clone(),
+            action_request_id: Some(request.clone()),
         });
         assert!(!allows(Some(granted.clone()), "repository.merge"), "taken");
         suspensions.release(ReleaseSuspension {
             suspension: key,
-            action_request_id: request,
+            action_request_id: Some(request),
         });
         assert!(!allows(Some(granted), "repository.merge"), "released");
     }
@@ -767,13 +779,13 @@ mod tests {
             commission_id,
             run_id: RunId(HeldUuid("00000000-0000-4000-8000-000000000003".to_owned())),
             run_case_revision: 1,
-            action_request_id: HeldRequestId(HeldUuid(
+            action_request_id: Some(HeldRequestId(HeldUuid(
                 "00000000-0000-4000-8000-0000000000a2".to_owned(),
-            )),
+            ))),
             case_id: CaseId("case-1".to_owned()),
-            expected_case_revision: 3,
-            action: MERGE.to_owned(),
-            arguments: ProposedActionArguments(json::Value::Object(Vec::new())),
+            expected_case_revision: Some(3),
+            action: Some(MERGE.to_owned()),
+            arguments: Some(ProposedActionArguments(json::Value::Object(Vec::new()))),
             reason: SuspensionReason::Authority(json::Value::Object(vec![(
                 "capability".to_owned(),
                 json::Value::Text(MERGE.to_owned()),
