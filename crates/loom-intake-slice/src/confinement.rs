@@ -1026,8 +1026,8 @@ impl TestRunner for SubstrateRunner {
 /// trusts there
 /// ([`ChildCommand::with_ca_bundle`]); without one it cannot verify the host's certificate.
 ///
-/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/proc`, `/dev`, a private `/tmp` and its workspace,
-/// a child sees only the host directories and files the host names, read-only, each at the mount
+/// Beside `/usr`, `/bin`, `/lib`, `/lib64`, `/etc/alternatives` (where the host has it),
+/// `/proc`, `/dev`, a private `/tmp` and its workspace, a child sees only the host directories and files the host names, read-only, each at the mount
 /// the host names ([`ChildCommand::with_read_only_root`], [`ChildCommand::with_read_only_file`])
 /// or at its own host path ([`ChildCommand::at_host_path`]). [`ChildCommand::sandbox_path`] says
 /// where a host path is inside. The child starts in `/workspace` unless the host names another
@@ -1119,9 +1119,9 @@ impl ChildCommand {
     /// - a host path that does not exist, is no directory, or is reached through a symbolic link
     ///   in any component;
     /// - a mount on, under or containing one Substrate owns: `/`, `/usr`, `/bin`, `/lib`, `/lib64`,
-    ///   `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts` and
-    ///   `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace or the
-    ///   certificate bundle a child trusts;
+    ///   `/etc/alternatives`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`,
+    ///   `/etc/hosts` and `/etc/ssl/certs/ca-certificates.crt`, so no mount shadows the workspace,
+    ///   the system view or the certificate bundle a child trusts;
     /// - a mount equal to, under or containing another root's or file's mount (`/opt/a` and
     ///   `/opt/ab` do not overlap);
     /// - more than [`ChildCommand::MAX_READ_ONLY_ROOTS`] roots;
@@ -2200,10 +2200,17 @@ impl Mount<'_> {
     }
 }
 
+/// The one part of `/etc` Substrate's Linux base view binds into every confined run, read-only and
+/// only where the host has it (Substrate 0.21.0, `crates/substrate-host/src/process.rs`, ADR 0049
+/// decision 1). Substrate exports no constant for it.
+const BASE_VIEW_ALTERNATIVES: &str = "/etc/alternatives";
+
 /// The mounts Substrate owns, which no read-only root or file may equal, lie under or contain:
-/// Substrate's reserved mounts, the execution capsule, the scratch directory, the hosts file and
-/// the certificate bundle path of an egress aperture.
-const OWNED_MOUNTS: [&str; 13] = [
+/// Substrate's reserved mounts, `/etc/alternatives` (bound read-only from the host where it has
+/// one since Substrate 0.21.0, before the roots and files, which would cover it; not in
+/// Substrate's `RESERVED_MOUNTS`), the execution capsule, the scratch directory, the hosts file
+/// and the certificate bundle path of an egress aperture.
+const OWNED_MOUNTS: [&str; 14] = [
     RESERVED_MOUNTS[0],
     RESERVED_MOUNTS[1],
     RESERVED_MOUNTS[2],
@@ -2213,6 +2220,7 @@ const OWNED_MOUNTS: [&str; 13] = [
     RESERVED_MOUNTS[6],
     RESERVED_MOUNTS[7],
     RESERVED_MOUNTS[8],
+    BASE_VIEW_ALTERNATIVES,
     EXECUTION_CAPSULE_MOUNT,
     EXEC_SCRATCH_MOUNT,
     APERTURE_HOSTS_PATH,
@@ -4003,6 +4011,16 @@ mod tests {
             assert!(
                 check_record(&asked, &[], &record).is_err(),
                 "a request carrying requirements is not one Loom makes"
+            );
+            // The request alone: a record echoing nothing is refused for the request, not for
+            // the record.
+            let unechoed = check_record(&asked, &[], &exact).expect_err(
+                "a request carrying requirements is refused with no echo in the record",
+            );
+            assert_eq!(
+                (unechoed.reason, unechoed.detail),
+                empty,
+                "a request carrying requirements is refused as a record mismatch is"
             );
         }
     }

@@ -1735,10 +1735,12 @@ fn a_read_only_file_is_mounted_where_named() {
 }
 
 /// A mount on, under or containing a mount Substrate owns (`/`, `/usr`, `/bin`, `/lib`,
-/// `/lib64`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`, `/etc/hosts`,
-/// `/etc/ssl/certs/ca-certificates.crt`) is refused `ScopeInvalid` before anything starts, naming
-/// the mount, for a root and a file, through `run_child` and `spawn_child`; a mount beside them
-/// gets past every check, to the missing cgroup.
+/// `/lib64`, `/etc/alternatives`, `/proc`, `/dev`, `/tmp`, `/workspace`, `/runtime`, `/scratch`,
+/// `/etc/hosts`, `/etc/ssl/certs/ca-certificates.crt`) is refused `ScopeInvalid` before anything
+/// starts, naming the mount, for a root and a file, through `run_child` and `spawn_child`; a mount
+/// beside them gets past every check, to the missing cgroup. Substrate 0.21.0 binds
+/// `/etc/alternatives` read-only where the host has it, before the roots and files, so a mount
+/// there would cover it (story:substrate-0-21-pin).
 #[test]
 fn a_mount_under_a_reserved_path_is_refused_before_launch() {
     let (_held, base) = host_directory();
@@ -1768,6 +1770,8 @@ fn a_mount_under_a_reserved_path_is_refused_before_launch() {
         "/etc/hosts",
         "/etc/ssl",
         APERTURE_CA_BUNDLE_PATH,
+        "/etc/alternatives",
+        "/etc/alternatives/cc",
     ] {
         assert_refused(
             &runner,

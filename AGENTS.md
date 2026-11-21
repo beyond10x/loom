@@ -1106,8 +1106,9 @@ from `ess/`; the crate's unit tests hold its group, version, kind, plural and se
 resource is refused `ResourcesRequired`), no model route, no Secret name, egress host or boundary
 upstream allowed.
 `run` installs rustls' `ring` provider as the process default before it builds the kube client:
-the binary's graph enables both `ring` (kube, reqwest) and `aws-lc-rs` (`b10x-substrate-host`),
-and with both rustls picks none and panics at the first TLS client
+with both `ring` (kube, reqwest) and `aws-lc-rs` in the graph rustls picks none and panics at the
+first TLS client; `b10x-substrate-host` brought `aws-lc-rs` until Loom took Substrate 0.21.0
+without its `kubernetes` feature, so the graph now holds `ring` alone
 (`crates/loom-operator/tests/startup.rs`, `run_builds_its_tls_client_and_connects_to_the_cluster`).
 
 `config.yaml` (`src/config.rs`, unknown members refused): `namespace`,
@@ -2050,8 +2051,9 @@ A child reads host paths read-only only where the host names them
 on disk at launch. `check_mounts` refuses `ScopeInvalid`, before `target/` is created and naming
 the path, a host path or mount that is not UTF-8, absolute and canonical (Substrate's wire text),
 a host path that is absent, reached through a link in any component or of the wrong kind, a mount
-on, under or containing one Substrate owns (`RESERVED_MOUNTS`, `/runtime`, `/scratch`,
-`/etc/hosts`, the bundle path), two mounts equal or nested (component-wise), more than 4 roots or
+on, under or containing one Substrate owns (`RESERVED_MOUNTS`, `/etc/alternatives`, which
+Substrate 0.21.0 binds read-only where the host has it, `/runtime`, `/scratch`, `/etc/hosts`,
+the bundle path), two mounts equal or nested (component-wise), more than 4 roots or
 16 files, a host path that holds the bundle the child names or the temporary directory the
 driver's state is made in, and one that is, holds or lies inside the workspace; then Substrate's
 own `validate_read_only_roots` and `validate_read_only_files`. Once the driver opened,

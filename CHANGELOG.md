@@ -14,7 +14,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
-- Substrate moves from `0.14.0` to `0.21.0` (`adfde402`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
+- Substrate moves from `0.14.0` to `0.21.0` (`adfde402`, host without its `kubernetes` feature, so no `aws-lc-rs`): a confined launch's `AppliedConfinement::facts` adds `stdin_pipe` and `output_live` (story:substrate-0-21-pin)
+- A confined child sees `/etc/alternatives` read-only where the host has it; `ChildCommand` refuses a mount on, under or containing it (story:substrate-0-21-pin)
 
 ## [0.57.2] - 2026-11-05
 
