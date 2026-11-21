@@ -1,0 +1,19 @@
+# story boundary-admits-declared-http-egress: beside a boundary a namespace egress entry opens a
+# namespace only for an http binding of spec.agent with no bearer_env whose base_url is a cluster
+# service there; an entry no such binding names is refused at that entry.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-unbound-egress-namespace-is-refused
+summary: A model boundary beside an egress namespace no credential-free http binding names is refused BoundaryEgressUnbound.
+
+timeline:
+  - at: 2026-11-21T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-egress-unbound.yaml}
+    outcome: boundary-egress-unbound
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryEgressUnbound
+        member: spec.agent.deploy.kubernetes.egress[0]
+        detail: "no GET http binding of spec.agent without a bearer_env has a base_url that is a cluster service in its namespace, so the agent reads nothing there"

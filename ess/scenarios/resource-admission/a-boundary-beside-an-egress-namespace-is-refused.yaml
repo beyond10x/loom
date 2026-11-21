@@ -1,5 +1,6 @@
 # story operator-constraints-in-ess: a pod behind a boundary reaches no other namespace; an
-# egress namespace in spec.agent is refused at that entry.
+# egress namespace in spec.agent is refused at that entry. Story
+# boundary-admits-declared-http-egress: the namespace is an allowed upstream's, which no entry opens.
 type: ess-scenario/4
 domain: loom.resource
 scenario: a-boundary-beside-an-egress-namespace-is-refused

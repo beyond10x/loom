@@ -409,8 +409,13 @@ types:
   # Kubernetes's 1 MiB (`TooLarge`); a `spec.boundary` beside a Secret (`BoundaryWithSecret`), an
   # upstream that is no plain `http://` URL of a cluster service (`BoundaryUpstreamInvalid`), an
   # upstream or audience no `allowedBoundaryUpstreams` entry gives (`BoundaryUpstreamNotAllowed`),
-  # an egress entry naming a host or a namespace beside it (`BoundaryEgressHost`,
-  # `BoundaryEgressNamespace`); a Secret outside `allowedSecretNames` (`SecretNotAllowed`); a
+  # an egress entry naming a host beside it (`BoundaryEgressHost`); beside it, in this order, an
+  # egress entry naming the namespace of any `allowedBoundaryUpstreams` upstream or giving no pod
+  # selector (`BoundaryEgressNamespace`), one no `GET` `http` binding without a `bearer_env` reads
+  # from, by a `base_url` that is a cluster service in its namespace (`BoundaryEgressUnbound`),
+  # and one no single `allowedBoundaryHttpEgress` entry equals in namespace, selector (a set of
+  # label pairs) and port (`BoundaryEgressNotAllowed`; story boundary-admits-declared-http-egress);
+  # a Secret outside `allowedSecretNames` (`SecretNotAllowed`); a
   # `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`); an egress entry
   # naming no destination or a host outside `allowedEgressHosts` (`EgressHostNotAllowed`); a
   # `spec.env` name the controller sets or an earlier entry gives (`EnvNameConflict`); a
@@ -426,7 +431,8 @@ types:
        NotAPlainPath, NotAnInstant, UnknownProtocol, UnknownAction, UnboundSource, HttpMethod,
        SendWithoutWrites, EmptyChannelAllow, NoModelRoute, TooLarge, BoundaryWithSecret,
        BoundaryUpstreamInvalid, BoundaryUpstreamNotAllowed, BoundaryEgressHost,
-       BoundaryEgressNamespace, SecretNotAllowed, NamespaceMismatch, EgressHostNotAllowed,
+       BoundaryEgressNamespace, BoundaryEgressUnbound, BoundaryEgressNotAllowed,
+       SecretNotAllowed, NamespaceMismatch, EgressHostNotAllowed,
        EnvNameConflict, ConfigFileInvalid, ConfigFileConflict, MountPathInvalid, ClaimNotAllowed,
        ProfileInvalid, ProfileNotAllowed, ResourcesRequired]
 
@@ -1142,10 +1148,20 @@ commands:
         payload:
           loom.resource.AdmissionRefused: {reason: BoundaryEgressHost}
       - name: boundary-egress-namespace
-        external: beside spec.boundary, an egress entry of spec.agent names a namespace
+        external: beside spec.boundary, an egress entry of spec.agent names the namespace of an allowedBoundaryUpstreams upstream, or gives no pod selector
         error: loom.resource.AdmissionRefused
         payload:
           loom.resource.AdmissionRefused: {reason: BoundaryEgressNamespace}
+      - name: boundary-egress-unbound
+        external: beside spec.boundary, no GET http binding of spec.agent without a bearer_env has a base_url that is a cluster service in the namespace an egress entry names
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryEgressUnbound}
+      - name: boundary-egress-not-allowed
+        external: beside spec.boundary, no allowedBoundaryHttpEgress entry equals a namespace egress entry of spec.agent in namespace, selector and port
+        error: loom.resource.AdmissionRefused
+        payload:
+          loom.resource.AdmissionRefused: {reason: BoundaryEgressNotAllowed}
       - name: secret-not-allowed
         external: spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames
         error: loom.resource.AdmissionRefused

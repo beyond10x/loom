@@ -97,6 +97,9 @@ scenarios:
   - scenarios/resource-admission/a-boundary-upstream-the-configuration-does-not-give-is-refused.yaml
   - scenarios/resource-admission/a-boundary-beside-an-egress-host-is-refused.yaml
   - scenarios/resource-admission/a-boundary-beside-an-egress-namespace-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-beside-an-unbound-egress-namespace-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-beside-an-egress-namespace-the-configuration-does-not-give-is-refused.yaml
+  - scenarios/resource-admission/a-boundary-beside-an-allowed-http-egress-is-admitted.yaml
   - scenarios/resource-admission/a-secret-the-configuration-does-not-allow-is-refused.yaml
   - scenarios/resource-admission/an-agent-deploying-to-another-namespace-is-refused.yaml
   - scenarios/resource-admission/an-egress-host-the-configuration-does-not-allow-is-refused.yaml

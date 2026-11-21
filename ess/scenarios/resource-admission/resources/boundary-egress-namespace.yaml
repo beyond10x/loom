@@ -1,5 +1,6 @@
 # story operator-constraints-in-ess: a Command resource with an allowed model boundary whose
-# spec.agent names an egress namespace.
+# spec.agent names an egress namespace; story boundary-admits-declared-http-egress: it is `llm`,
+# the namespace of the configuration's allowed model upstream, which no entry opens.
 apiVersion: loom.beyond10x.dev/v1alpha1
 kind: LoomAgent
 metadata: {name: nightly, namespace: agents}
@@ -13,7 +14,7 @@ spec:
         namespace: agents
         service_account: nightly
         resources: {cpu: 500m, memory: 512Mi}
-        egress: [{name: logs, namespace: monitoring, selector: [{name: app, value: logs}], port: 3100}]
+        egress: [{name: logs, namespace: llm, selector: [{name: app, value: logs}], port: 3100}]
   routes: {}
   command: {args: [--once]}
   boundary:
