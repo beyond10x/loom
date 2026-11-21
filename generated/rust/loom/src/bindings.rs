@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 004d68a2a719099c10bb6788dd3bb0bc72a08ac92be46dd7f655fadca0e817c2
+// contract digest 6da6157abf2cb1c60ccb98fd5e82be5c50013ae5d48c3e0bb00e0b6c02b065ce
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -231,6 +231,8 @@ pub enum ProgramRefusalReason {
     ArgumentsUnreadable,
     /// `RunsSpent`.
     RunsSpent,
+    /// `CaseOfAnotherProtocol`.
+    CaseOfAnotherProtocol,
 }
 
 /// ProgramRun — `loom.bindings.ProgramRun`.
@@ -242,10 +244,12 @@ pub struct ProgramRun {
     pub action: String,
     /// `exit` — `Optional<Integer>`.
     pub exit: Option<i64>,
-    /// `blob_sha256` — `String`.
-    pub blob_sha256: String,
+    /// `blob_sha256` — `Optional<String>`.
+    pub blob_sha256: Option<String>,
     /// `timed_out` — `Boolean`.
     pub timed_out: bool,
+    /// `runner_refusal` — `Optional<String>`.
+    pub runner_refusal: Option<String>,
 }
 
 /// RecordedEvidence — `loom.bindings.RecordedEvidence`.
