@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:connectors-relay-client
 kind: story
-status: active
+status: implemented
 title: ConnectorsRelay reads and performs one governed write over the Connectors wire at a loopback relay URL, holding no credential
 summary: GET /v1/describe and POST /v1alpha2/invoke on its own HTTP client over connectors-core v0.62.0 types, no authorization header, for one adapter and connection pair; one URL rule (loopback_url); one result per stage of a write; a write's answer classified from the typed InvokeResponse; the CLI's refusals, key and once-only rule kept; every relay and Connectors answer tested on a loopback fake with real v1alpha2 bodies
 tags:
@@ -24,13 +24,20 @@ scope:
 - confidence: cited
   path: crates/loom-connectors/tests/connectors_relay.rs
 - confidence: cited
+  path: crates/loom-connectors/tests/security_w20261121w5_u2.rs
+- confidence: cited
   path: crates/loom-sdk/src/lib.rs
 - confidence: cited
+  path: crates/loom-sdk/tests/host_ports.rs
+- confidence: cited
+  path: website/data/status.json
+- confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 15
+revision: 21
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:54:03Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "sdc-accepts-boundary-epic-2026-11-21"}
 - {from: "proposed", to: "active", at: "2026-11-21T09:18:22Z", actor: "agent:sdc", revision: 15, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w5"}
+- {from: "active", to: "implemented", at: "2026-11-21T10:50:27Z", actor: "agent:sdc", revision: 21, decided_on: {"recorded":{"test_result":1,"review_outcome":1,"verification":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w5"}
 ---
 ## Outcome
 
@@ -313,6 +320,40 @@ sends at `v0.62.0`, not by the command line's projection.
 CHANGELOG: `### Added`, `ConnectorsRelay`. No `**Breaking:**` bullet: `ConnectorsCli` keeps its
 paths and signatures. The chart and the CRD do not change.
 
+## As built, wave 2026-11-21-w5
+
+Where the unit's commits (`29e5d199..cbf96e1e`) differ from the text above, the commits are what
+holds:
+
+- `Described` and `text` (`src/cli.rs:609`, `:716`) stay private: the relay client does not use
+  them. `mod write` and `admits` are `pub(crate)` as written.
+- In `src/lib.rs`, beside `pub mod relay`: `code_name` is `pub(crate)` (`:500`), and the
+  standing-grant remedy text moved, unchanged, into `pub(crate) fn standing_grant_remedy`
+  (`:487-497`), which the invoker and the relay both call. Nothing became public outside
+  `loom_connectors::relay`.
+- `ConnectorsRelay::new` returns `Result<Self, RelayUrlRefused>` (`src/relay.rs:228-233`). When
+  the runtime or the HTTP client cannot start, every call answers `relay-unavailable` and sends
+  nothing.
+- Four files the list below does not name: `crates/loom-sdk/tests/host_ports.rs` (four `use`
+  lines, so the stability page's path check covers the four relay paths),
+  `website/data/status.json` (one entry), `README.md` (the crate's row) and
+  `crates/loom-connectors/tests/security_w20261121w5_u2.rs` (14 cases of the security review,
+  `review-result:connectors-relay-client-security-1`: the URL rule over 66 spellings, no
+  redirect followed, no proxy and no credential variable read, the pair check on all five
+  methods, 13 answers that are neither the boundary's nor Connectors', the 4 MiB response limit,
+  the connect bound, clones and nested runtimes).
+- Decided by the implementor where the text is silent, read by the security review: the request
+  id is `loom-relay-<32 hex>` and is neither a secret nor an idempotency key; an operation the
+  descriptor does not list is `Refused` with `not_found` after one describe and no invoke; a
+  read's error that carries a `mutation` is `Failed` with `upstream-protocol`; `WriteResult.code`
+  is absent when the answer did not come from Connectors; the descriptor's `instance` and
+  `adapter` are not compared with the pair (the boundary's operation allowlist is the guard for
+  a write).
+- A write answered `token_unavailable`, `upstream_unreachable` or `upstream_timeout` is reported
+  as not sent. That rests on the boundary sending those answers before or at connecting
+  upstream (`crates/loom-boundary/src/lib.rs:430-431`, `:595-602`), read in the code and not
+  held by a test of this crate.
+
 ## Files
 
 - `crates/loom-connectors/src/relay.rs` (new), `src/lib.rs` (`pub mod relay`)
@@ -345,23 +386,16 @@ requester's deployed host version is unverified, `.engineering/drafts/e6-request
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w5 from the unit's commits (`git diff --stat 29e5d199 cbf96e1e`: 15 files, 4494 insertions, 12 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-connectors` (package `b10x-loom-connectors`) — cited, Outcome and Files
-- **Files:** `crates/loom-connectors/src/relay.rs` (new), `crates/loom-connectors/src/lib.rs` (`pub mod relay`; its modules are `pub mod cli;` `pub mod evidence;` at `:70-71`), `crates/loom-connectors/Cargo.toml` (no `reqwest` today), `crates/loom-connectors/tests/connectors_relay.rs` (new) — cited, story Files
-- **Symbols:** `loom_connectors::relay::ConnectorsRelay` with `sources`, `describe`, `invoke_read`, `read`, `invoke_write` (the signatures of `ConnectorsCli`, `src/cli.rs:165,187,203,219`, and `invoke_write` `src/cli/write.rs:150`); `RelayUrlRefused`; `CliError`, `WriteError`, `cli::idempotency_key` (`src/cli/write.rs:79`) — cited. Read from `connectors-core` v0.62.0: `v1alpha2::InvokeRequest` (`v1alpha2.rs:270`), `KeyedInvokeRequest` (`:368`), `InvokeResponse::decode` (`:659`) and `decode_keyed` (`:717`), `Descriptor` (`lib.rs:103`) — cited
-- **Files (visibility widened):** `crates/loom-connectors/src/cli/write.rs` and `crates/loom-connectors/src/cli.rs` — cited, story Files. `mod write;` (`cli.rs:59`) becomes `pub(crate)`; `admits` (`write.rs:319`), `Described` (`cli.rs:609`) and `text` (`:716`) become `pub(crate)`; `WRITE_PROFILES` (`cli.rs:92`) is already `pub`; `classified` (`write.rs:366`) is not reused.
-- **Also likely:** `crates/loom-sdk/src/lib.rs` — cited by the story as "(re-export)", but see Story defects: the line-14 doc table is the only thing that would change.
-- **Documents:** `website/docs/reference/sdk-stability.md` (a new row near `:137-141`, which hold the `loom_sdk::connectors::cli::*` rows) — cited, story Files
-- **Confidence:** high — the story names every file and symbol, and I read them at the tree. The `connectors-client` and `connectors-core` lines it cites say what it says at `v0.62.0`. The boundary lines it cites also hold: `lib.rs:544-569`, `lib.rs:646-656`, `lib.rs:385-414`, `lib.rs:472-476`, `route.rs:38-60`, and `route.rs:106-111` (only `GET /v1/describe` and `POST /v1alpha2/invoke` are relayed). `cli.rs` and `cli/write.rs` are cited: the story names the items it widens there.
-- **Would collide with:**
-  - `story:send-input-in-the-declared-shape`: `src/relay.rs`, `src/cli/write.rs`, `tests/connectors_relay.rs` and `Cargo.lock`. A `depends_on` path orders the two: it depends on this story directly.
-  - `story:agent-selects-the-connectors-relay`: `crates/loom-connectors/src/lib.rs` (the `Connectors` enum), `crates/loom-sdk/src/lib.rs`, `website/docs/reference/sdk-stability.md`, `Cargo.lock`. Ordered: it depends on this story directly.
-  - `story:boundary-admits-declared-http-egress`: none. It lands in `crates/loom-operator`.
-  - `story:consumer-sdk-paths` (draft): `website/docs/reference/sdk-stability.md`. No `depends_on` path to this story. Its edges are `decomposes epic:loom-foundation-for-consumers` and `serves vision:governed-autonomy` only. A table-row collision, textual only.
-  - `story:breaks-between-releases` (draft): `website/docs/reference/sdk-stability.md`. No `depends_on` path to this story, and its own edges are the same two as `story:consumer-sdk-paths`.
-  - `story:child-launches-through-confinement-adapters` (draft): `website/docs/reference/sdk-stability.md`. No path to this story; it depends on `story:substrate-0-21-pin` only.
-  - `story:confinement-opens-from-engine-config` (proposed): `crates/loom-sdk/src/lib.rs`. No path to this story; it depends on no story, and `story:child-launches-through-confinement-adapters` depends on it.
-  - `Cargo.lock`: shared by every pin story. `story:canon-0-9-0-pin` (active) edits `Cargo.toml`s, so `Cargo.lock` differs, but it touches no `crates/loom-connectors` file.
-- **Safety fact:** adding `pub mod relay` and a `reqwest` dependency changes no existing caller. `ConnectorsCli` and `ConnectorsInvoker` keep their paths, and `reqwest` is already in the lock through `connectors-client` and `crates/loom-agent/Cargo.toml:22`. Step 2 (`lib.rs:70-71`, `loom-agent/Cargo.toml:22`), unproven.
+- **Primary surface:** `crates/loom-connectors` (package `b10x-loom-connectors`) — cited, 9 of the 15 changed files are under it (manifest, `src/lib.rs`, `src/cli.rs`, `src/cli/write.rs`, new `src/relay.rs`, two new test files)
+- **Files (manifests):** `crates/loom-connectors/Cargo.toml` (1 line: `reqwest = { version = "0.12", default-features = false }`) — cited
+- **Files:** `Cargo.lock` — cited, 1 line: `reqwest 0.12.28` under `b10x-loom-connectors`
+- **Files (source):** `crates/loom-connectors/src/relay.rs` (new, 1299 lines: `ConnectorsRelay`, the URL rule, the request and answer handling over `connectors-core` v0.62.0 types), `crates/loom-connectors/src/lib.rs` (29 lines changed, 21 added and 8 removed: `pub mod relay`, a module-doc paragraph on the relay client, the standing-grant remedy text moved out of `ConnectorsInvoker`'s refusal into `standing_grant_remedy`, `code_name` made `pub(crate)`), `crates/loom-connectors/src/cli.rs` (1 line: `mod write;` becomes `pub(crate) mod write;`), `crates/loom-connectors/src/cli/write.rs` (1 line: `admits` becomes `pub(crate)`), `crates/loom-sdk/src/lib.rs` (1 line, a doc-comment table row: the `connectors` row names `connectors::relay::ConnectorsRelay`; no code change) — cited
+- **Files (new tests):** `crates/loom-connectors/tests/connectors_relay.rs` (1708 lines, 34 cases, the story's acceptance; the last commit holds its unreachable port in a bound, never-listening `TcpSocket` for the whole case) and `crates/loom-connectors/tests/security_w20261121w5_u2.rs` (1429 lines, 14 cases, the security review's) — cited
+- **Files (existing tests):** `crates/loom-sdk/tests/host_ports.rs` (4 lines: `use` lines for `ConnectorsRelay`, `RelayUrl`, `RelayUrlRefused` and `loopback_url` in the `connectors` module) — cited
+- **Files (documents):** `AGENTS.md` (24 lines: the relay client's paragraph in § Connectors), `CHANGELOG.md` (1 line, `### Added`), `README.md` (1 line changed: the `b10x-loom-connectors` crate row names the relay client), `website/docs/reference/sdk-stability.md` (1 line: the table row for the four relay paths), `website/data/status.json` (1 line: the entry "Connectors through the credential boundary's relay") — cited
+- **Symbols:** public items added in `loom_connectors::relay`: `ConnectorsRelay` (`Clone`, `Debug`) with `new(url, adapter, connection, sources) -> Result<Self, RelayUrlRefused>`, `over`, `sources`, `describe`, `invoke_read`, `read`, `invoke_write`; `RelayUrl` (`port()`, `Display`); `RelayUrlRefused` (`RULE`, `Display`, `Error`); `loopback_url(&str) -> Result<RelayUrl, RelayUrlRefused>` — cited. Crate-private: `cli::write` (module, was private), `cli::write::admits`, `standing_grant_remedy`, `code_name` (was private). Private in `relay.rs`: `write_result`, `exchange`, `legacy_code_name`. No public symbol changed or removed; `Described` and `text` in `src/cli.rs` stay private (`cli.rs:609`, `:716`)
+- **Not predicted and touched:** `crates/loom-connectors/tests/security_w20261121w5_u2.rs`, `crates/loom-sdk/tests/host_ports.rs`, `website/data/status.json`, `README.md`; `AGENTS.md`, `CHANGELOG.md` and `Cargo.lock` are named by the story's Files but not by its typed scope or Scope section
+- **Predicted and not touched:** none; all eight typed scope paths are in the diff
+- **Review:** `review-result:connectors-relay-client-security-1` — green at `69793e4d` plus the untracked test file (14 cases added, none red, 149 to 163 executed); all eight invariants hold; one note, `unreachable_url` in `tests/connectors_relay.rs` could hand a closed port to another process, fixed in `cbf96e1e`; two facts not settled (the boundary's pre-connect answers walked through code only, the connect-bound mutation reasoned and not run)

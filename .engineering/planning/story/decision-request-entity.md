@@ -35,7 +35,7 @@ scope:
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/ess/loom-decision.domain-graph.json
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -119,7 +119,11 @@ Changes from the SDC file:
 - The actor `Driver` (`decision.yaml:291-301`) is `loom.decision.Runtime`; `Person` and `Decider`
   keep their commands.
 
-Format. Loom pins `ess` 0.86.0 (`ess/ess-inputs.yaml:2`, `.github/workflows/check.yml:60`), and
+Format. Loom pins `ess` 0.96.0 since `story:ess-096-upgrade` (wave 2026-11-21-w5;
+`ess/ess-inputs.yaml:2`, `.github/workflows/check.yml:60`). The rest of this paragraph and the two
+lists under it were written for the 0.86.0 pin: whether the copy still stays at `ess/31` or follows
+the SDC file to `ess/37` is open and is settled by a revision of this story before a wave takes
+it. As written for 0.86.0: Loom pinned that release, and
 `story:ess-format-31` raises `ess/system.yaml` from `ess/25` to `ess/31` before this story; the
 SDC file declares `format: ess/37` and needs `ess 0.96` (`~/beyond10x/sdc/ess/system.yaml:1`,
 `~/beyond10x/sdc/ess/ess-inputs.yaml:2`). At `ess/31` the copy keeps, as the SDC file writes them:

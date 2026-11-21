@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T10:04:04Z",
+  "actor": "agent:loom",
+  "artifact": "story:connectors-relay-client",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "impl/connectors-relay-client cbf96e1e: the reviewer's 14 cases committed unchanged (1e835ae5); the unreachable port is held bound and not listening for the life of its case",
+    "review": "review-result:connectors-relay-client-security-1",
+    "outcome": "fixed"
+  }
+}

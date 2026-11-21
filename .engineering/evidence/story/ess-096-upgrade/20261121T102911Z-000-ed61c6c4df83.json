@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T10:29:11Z",
+  "actor": "agent:loom",
+  "artifact": "story:ess-096-upgrade",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "coordinator read of diff 12469d71..590b01f8",
+    "reference": "8 files: two security test files added (7ffc43fa); incomplete_request extracted from decide_hold with the same expression and asked by FileSuspensionStore::hold before its identity check; two cases added to hold_incomplete_request.rs; documentation of ResumeError::Store, exit status 20 (cli.md regenerated), decide_take and decide_release; no assertion removed; unit gate on 590b01f8 exit 0 in 10 commands, 546 commission, 557 governor and intake-slice and 243 CLI cases passed"
+  }
+}
