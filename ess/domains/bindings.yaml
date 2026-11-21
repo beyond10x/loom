@@ -247,11 +247,14 @@ types:
         type: String
 
   # One run of a `program` binding's argv by the program effect port (story
-  # bound-program-result-table), the payload of the observation the port keeps for it: the case and
-  # the action it ran for, the exit code (absent when the program was killed at its timeout or its
-  # status could not be read), the SHA-256 of the blob that holds its standard output followed by
-  # its standard error (the file `blobs/<sha256>` in the store directory), and whether it was killed
-  # at its timeout. The observations of one action in one case from the port are its run count.
+  # bound-program-result-table), the payload of the observation the port keeps for every call of
+  # its runner's `run_child`, whatever that call answered: the case and the action it ran for, the
+  # exit code (absent when the program was killed at its timeout, its status could not be read or
+  # the runner answered a refusal), the SHA-256 of the blob that holds its standard output followed
+  # by its standard error (the file `blobs/<sha256>` in the store directory; absent when the runner
+  # answered a refusal or the blob could not be kept), whether it was killed at its timeout, and the
+  # runner's refusal as text (absent when the runner answered a run). The observations of one
+  # action in one case from the port are its run count.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -262,9 +265,11 @@ types:
       - name: exit
         type: Optional<Integer>
       - name: blob_sha256
-        type: String
+        type: Optional<String>
       - name: timed_out
         type: Boolean
+      - name: runner_refusal
+        type: Optional<String>
 
   # An artifact and the revision the case holds for it when the program started.
   - name: loom.bindings.ArtifactRevision
@@ -302,7 +307,9 @@ types:
   # object within 1 MiB or lacks the pointer (`ReportUnreadable`); the `arguments_from` argv did
   # not exit 0 or printed anything but one JSON object within 1 MiB (`ArgumentsUnreadable`, the
   # bound program is not started); the action has run its `budget.max_runs` times in the case
-  # (`RunsSpent`, nothing is started). A refused step records no evidence.
+  # (`RunsSpent`, nothing is started); the case is held under another protocol than the one the
+  # bindings document binds (`CaseOfAnotherProtocol`, nothing is started or recorded). A refused
+  # step records no evidence.
   - name: loom.bindings.ProgramRefusalReason
     kind: enum
     variants:
@@ -310,6 +317,7 @@ types:
       - ReportUnreadable
       - ArgumentsUnreadable
       - RunsSpent
+      - CaseOfAnotherProtocol
 
   # A refused step: the reason, the action and what is wrong.
   - name: loom.bindings.ProgramRefusal
