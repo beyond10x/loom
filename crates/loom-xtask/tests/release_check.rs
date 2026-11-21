@@ -578,15 +578,17 @@ fn a_breaking_entry_on_a_patch_tag_is_refused() {
 /// The variant `story:engineering-registry-calls-replaced` removes.
 const ROUTER_REGISTRY: &str = "`loom_sdk::intake::router::RouterError::Registry`";
 
-/// The bullets under `### Removed` in the `## [Unreleased]` section of `changelog`.
-fn unreleased_removed(changelog: &str) -> Vec<String> {
-    let unreleased = changelog
-        .split_once("## [Unreleased]")
+/// The bullets under `### Removed` in the `## [<version>]` section of `changelog`; the date after
+/// the `]` is ignored.
+fn section_removed(changelog: &str, version: &str) -> Vec<String> {
+    let heading = format!("## [{version}]");
+    let section = changelog
+        .split_once(heading.as_str())
         .map(|(_, rest)| rest.split("\n## [").next().unwrap_or(rest))
-        .unwrap_or_else(|| panic!("CHANGELOG.md has no `## [Unreleased]` section"));
+        .unwrap_or_else(|| panic!("CHANGELOG.md has no `{heading}` section"));
     let mut bullets = Vec::new();
     let mut in_removed = false;
-    for line in unreleased.lines() {
+    for line in section.lines() {
         if let Some(heading) = line.strip_prefix("### ") {
             in_removed = heading.trim() == "Removed";
         } else if in_removed && line.starts_with("- ") {
@@ -599,11 +601,11 @@ fn unreleased_removed(changelog: &str) -> Vec<String> {
 #[test]
 fn the_router_registry_removal_passes_release_check() {
     let changelog = read(&repository().join("CHANGELOG.md"));
-    let bullet = unreleased_removed(&changelog)
+    let bullet = section_removed(&changelog, "0.58.0")
         .into_iter()
         .find(|bullet| bullet.contains(ROUTER_REGISTRY))
         .unwrap_or_else(|| {
-            panic!("CHANGELOG.md [Unreleased] has no `### Removed` bullet naming {ROUTER_REGISTRY}")
+            panic!("CHANGELOG.md [0.58.0] has no `### Removed` bullet naming {ROUTER_REGISTRY}")
         });
     // 0.1.0's page lists the module the variant lives in, as the repository's page does.
     let page = "# SDK stability\n\n| Path | What |\n|---|---|\n\

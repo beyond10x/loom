@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-11-21
+
 ### Added
 
 - `b10x-loom-bindings` decodes a `loom.bindings/1` document and checks it against its protocol at load (story:bindings-document)
@@ -1462,7 +1464,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.57.2...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.58.0...HEAD
+[0.58.0]: https://github.com/beyond10x/loom/releases/tag/0.58.0
 [0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2
 [0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1
 [0.57.0]: https://github.com/beyond10x/loom/releases/tag/0.57.0
