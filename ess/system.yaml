@@ -21,3 +21,4 @@ domains:
   - loom.session
   - loom.agent
   - loom.resource
+  - loom.bindings
