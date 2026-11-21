@@ -1,5 +1,6 @@
 //! Decoding: the text of a `loom.bindings/1` document into the generated types.
 
+use crate::tree::{self, Map as Mapping, Node as Value};
 use crate::{DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, FORMAT, MAX_DOCUMENT_BYTES, Refusal, refuse};
 use loom::bindings::{
     ActionBudget, ArtifactPath, BindingsDocument, BindingsRefusalReason as Reason, BoundAction,
@@ -7,7 +8,6 @@ use loom::bindings::{
     RetryCondition, ToolAllowList,
 };
 use loom::json::Value as Json;
-use serde_yaml_ng::{Mapping, Value};
 
 type Decoded<T> = Result<T, Refusal>;
 
@@ -65,8 +65,8 @@ pub fn decode(text: &str) -> Decoded<BindingsDocument> {
             ),
         ));
     }
-    let value: Value = serde_yaml_ng::from_str(text)
-        .map_err(|e| refuse(Reason::Malformed, None, "document", e.to_string()))?;
+    let value: Value =
+        tree::parse(text).map_err(|e| refuse(Reason::Malformed, None, "document", e))?;
     let top = object(&value, None, "document")?;
     known(top, &TOP, None, "")?;
     let format = match top.get("format") {
@@ -116,16 +116,25 @@ pub fn decode(text: &str) -> Decoded<BindingsDocument> {
     })
 }
 
+/// The rule the protocol registry holds a registration to: lowercase letters, digits and hyphens
+/// before `@`, starting with a lowercase letter and at most 100 bytes, then a positive major in
+/// canonical form (`software.change/1` is registered as `software-change@1`).
 fn registration(text: &str) -> bool {
-    let Some((name, major)) = text.split_once('@') else {
+    let Some((stem, version)) = text.split_once('@') else {
         return false;
     };
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        && !major.is_empty()
-        && major.chars().all(|c| c.is_ascii_digit())
+    if stem.is_empty()
+        || stem.len() > 100
+        || !stem.as_bytes()[0].is_ascii_lowercase()
+        || !stem
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return false;
+    }
+    version
+        .parse::<u64>()
+        .is_ok_and(|major| major != 0 && major.to_string() == version)
 }
 
 fn artifacts(top: &Mapping) -> Decoded<Vec<ArtifactPath>> {
@@ -134,8 +143,8 @@ fn artifacts(top: &Mapping) -> Decoded<Vec<ArtifactPath>> {
     };
     let map = object(value, None, "artifacts")?;
     let mut out = Vec::new();
-    for (key, path) in map {
-        let artifact = key_text(key, None, "artifacts")?;
+    for (key, path) in map.iter() {
+        let artifact = key.clone();
         let member = format!("artifacts.{artifact}");
         let path = text_of(path, None, &member)?;
         out.push(ArtifactPath { artifact, path });
@@ -149,8 +158,8 @@ fn independence(top: &Mapping) -> Decoded<Vec<ProducerIndependence>> {
     };
     let map = object(value, None, "independence")?;
     let mut out = Vec::new();
-    for (key, dimensions) in map {
-        let producer = key_text(key, None, "independence")?;
+    for (key, dimensions) in map.iter() {
+        let producer = key.clone();
         let member = format!("independence.{producer}");
         let dimensions = strings(dimensions, None, &member, Reason::Malformed)?;
         out.push(ProducerIndependence {
@@ -527,8 +536,8 @@ fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<
         }
         Some(Value::Mapping(rows)) if !rows.is_empty() => {
             let mut table = Vec::new();
-            for (key, result) in rows {
-                let value = key_text(key, action, &results_member)?;
+            for (key, result) in rows.iter() {
+                let value = key.clone();
                 let member = format!("{results_member}.{value}");
                 let result = match result {
                     Value::Null => None,
@@ -667,8 +676,8 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
     };
     let map = object(value, action, "budget")?;
     known(map, &BUDGET, action, "budget.")?;
-    for (key, member) in map {
-        let name = key_text(key, action, "budget")?;
+    for (key, member) in map.iter() {
+        let name = key.clone();
         let number = member.as_i64().filter(|n| *n >= 1).ok_or_else(|| {
             refuse(
                 Reason::InvalidBudget,
@@ -690,8 +699,8 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
 fn retry_when(value: &Value, action: Option<&str>) -> Decoded<Vec<RetryCondition>> {
     let map = object(value, action, "retry_when")?;
     let mut out = Vec::new();
-    for (key, results) in map {
-        let kind = key_text(key, action, "retry_when")?;
+    for (key, results) in map.iter() {
+        let kind = key.clone();
         let member = format!("retry_when.{kind}");
         let results = strings(results, action, &member, Reason::Malformed)?;
         if let Some(index) = results.iter().position(String::is_empty) {
@@ -711,8 +720,10 @@ fn json(value: &Value, action: Option<&str>, member: &str) -> Decoded<Json> {
     Ok(match value {
         Value::Null => Json::Null,
         Value::Bool(flag) => Json::Bool(*flag),
-        Value::Number(number) => {
-            if number.as_f64().is_some_and(|n| !n.is_finite()) {
+        Value::Int(number) => Json::Number(number.to_string()),
+        Value::Big(digits) => Json::Number(digits.clone()),
+        Value::Real(number) => {
+            if !number.is_finite() {
                 return Err(refuse(
                     Reason::Malformed,
                     action,
@@ -732,20 +743,12 @@ fn json(value: &Value, action: Option<&str>, member: &str) -> Decoded<Json> {
         ),
         Value::Mapping(map) => {
             let mut members = Vec::new();
-            for (key, item) in map {
-                let name = key_text(key, action, member)?;
+            for (key, item) in map.iter() {
+                let name = key.clone();
                 let inner = json(item, action, &format!("{member}.{name}"))?;
                 members.push((name, inner));
             }
             Json::Object(members)
-        }
-        Value::Tagged(_) => {
-            return Err(refuse(
-                Reason::Malformed,
-                action,
-                member,
-                "holds a tagged value; a literal object holds JSON values only",
-            ));
         }
     })
 }
@@ -763,13 +766,7 @@ fn object<'a>(value: &'a Value, action: Option<&str>, member: &str) -> Decoded<&
 
 /// Refuses the first member of `map` that is not one of `allowed`.
 fn known(map: &Mapping, allowed: &[&str], action: Option<&str>, prefix: &str) -> Decoded<()> {
-    for key in map.keys() {
-        let place = prefix.trim_end_matches('.');
-        let name = key_text(
-            key,
-            action,
-            if place.is_empty() { "document" } else { place },
-        )?;
+    for name in map.keys() {
         if !allowed.contains(&name.as_str()) {
             return Err(refuse(
                 Reason::UndeclaredMember,
@@ -783,21 +780,6 @@ fn known(map: &Mapping, allowed: &[&str], action: Option<&str>, prefix: &str) ->
         }
     }
     Ok(())
-}
-
-/// A mapping key as text: a string, or a number or boolean spelled as written.
-fn key_text(key: &Value, action: Option<&str>, member: &str) -> Decoded<String> {
-    match key {
-        Value::String(text) => Ok(text.clone()),
-        Value::Number(number) => Ok(number.to_string()),
-        Value::Bool(flag) => Ok(flag.to_string()),
-        other => Err(refuse(
-            Reason::Malformed,
-            action,
-            member,
-            format!("has a key that is {}; keys are text", shown(other)),
-        )),
-    }
 }
 
 fn text_of(value: &Value, action: Option<&str>, member: &str) -> Decoded<String> {
@@ -854,10 +836,11 @@ fn shown(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
         Value::Bool(flag) => flag.to_string(),
-        Value::Number(number) => number.to_string(),
+        Value::Int(number) => number.to_string(),
+        Value::Big(digits) => digits.clone(),
+        Value::Real(number) => number.to_string(),
         Value::String(text) => format!("{text:?}"),
         Value::Sequence(_) => "a list".to_owned(),
         Value::Mapping(_) => "an object".to_owned(),
-        Value::Tagged(_) => "a tagged value".to_owned(),
     }
 }

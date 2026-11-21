@@ -1116,6 +1116,14 @@ names, so a Canon pin moves both manifests.
   `timeout_seconds` outside 1 to 3600, a path that is absolute or leaves the workspace, and an
   independence dimension the protocol does not declare. An action with no binding is not an error;
   `unbound` lists them.
+- `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
+  returns and expands an alias at each use: `MAX_NESTING` (64, counted on the text before the parse),
+  `MAX_NODES` (100,000, aliases expanded) and `MAX_DOCUMENT_BYTES`. A mapping key is read as written
+  (`0` and `"0"` are one key), a key twice, a `<<` key and a tagged key or value are refused.
+  `protocol` follows the registry's rule (`parse_registration` in `crates/loom-protocols`) without a
+  dependency on that crate; keep the two together. `check` also refuses a `retry_when` kind the
+  protocol does not declare, an `open` `bindings` path outside the workspace, and an evidence `from`
+  the executor does not take (`effect` on a program; anything but `effect` on a person or an open).
 - A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no
   `budget.max_runs` holds 8.
 - Every `BindingsRefusalReason` is reachable from a document: `every_refusal_reason_is_reachable_from_a_document`

@@ -2,7 +2,9 @@
 
 use crate::{FORMAT, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, Refusal, refuse, workspace_path};
 use b10x_canon::model::Protocol;
-use loom::bindings::{BindingsDocument, BindingsRefusalReason as Reason, BoundAction, Executor};
+use loom::bindings::{
+    BindingsDocument, BindingsRefusalReason as Reason, BoundAction, Executor, ResultSource,
+};
 use std::collections::BTreeSet;
 
 /// Holds `document` against `protocol`, the compiled protocol registered as `registration`
@@ -15,7 +17,9 @@ use std::collections::BTreeSet;
 /// executor (`tools`, a budget member other than `max_runs`, any executor member of another
 /// kind), an evidence `kind` outside the action's `may_produce`, a `subject` or `upstream` entry
 /// that is not a declared artifact, a `timeout_seconds` outside 1 to 3600, and an `inputs` or
-/// `outputs` path that is absolute or leaves the workspace.
+/// `outputs` path, or an `open` executor's `bindings` path, that is absolute or leaves the workspace;
+/// a `retry_when` kind that is not an evidence kind of the protocol; and an evidence `from` that does
+/// not fit the executor (`effect` on a program, anything but `effect` on a person or an open).
 ///
 /// An action the document binds nothing to is not an error; [`unbound`] lists them.
 ///
@@ -75,6 +79,11 @@ pub fn check(
             }
         }
     }
+    let declared_kinds: BTreeSet<String> = protocol
+        .evidence_kinds
+        .ids()
+        .map(ToString::to_string)
+        .collect();
     let mut seen = BTreeSet::new();
     for bound in &document.actions {
         let id = bound.action.as_str();
@@ -104,8 +113,35 @@ pub fn check(
             .map(|production| production.evidence.to_string())
             .collect();
         fit(bound)?;
+        for condition in &bound.retry_when {
+            if !declared_kinds.contains(&condition.kind) {
+                return Err(refuse(
+                    Reason::UndeclaredEvidenceKind,
+                    Some(id),
+                    format!("retry_when.{}", condition.kind),
+                    format!(
+                        "{} is not an evidence kind {registration} declares",
+                        condition.kind
+                    ),
+                ));
+            }
+        }
         for (index, entry) in bound.evidence.iter().enumerate() {
             let slot = format!("evidence[{index}]");
+            let kind = bound.executor.kind;
+            let source_fits = match kind {
+                Executor::Program => entry.from != ResultSource::Effect,
+                Executor::Person | Executor::Open => entry.from == ResultSource::Effect,
+                Executor::Agent | Executor::Copy => true,
+            };
+            if !source_fits {
+                return Err(refuse(
+                    Reason::MemberNotForExecutor,
+                    Some(id),
+                    format!("{slot}.from"),
+                    format!("{:?} is not a source of a {kind:?} executor", entry.from),
+                ));
+            }
             if !produces.contains(&entry.kind) {
                 return Err(not_producible(
                     id,
@@ -160,6 +196,9 @@ pub fn check(
             for (index, path) in paths.iter().flatten().enumerate() {
                 in_workspace(Some(id), &format!("executor.{name}[{index}]"), path)?;
             }
+        }
+        if let Some(path) = &bound.executor.bindings {
+            in_workspace(Some(id), "executor.bindings", path)?;
         }
     }
     Ok(())

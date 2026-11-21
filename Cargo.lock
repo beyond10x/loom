@@ -499,6 +499,7 @@ version = "0.57.2"
 dependencies = [
  "b10x-canon",
  "loom",
+ "serde",
  "serde_yaml_ng",
 ]
 

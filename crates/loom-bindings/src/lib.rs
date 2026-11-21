@@ -14,6 +14,7 @@
 
 mod decode;
 mod load;
+mod tree;
 
 pub use decode::decode;
 pub use load::{check, unbound};
@@ -31,6 +32,11 @@ pub const DEFAULT_MAX_RUNS: i64 = 8;
 pub const MIN_TIMEOUT_SECONDS: i64 = 1;
 /// The longest `timeout_seconds` an action may name.
 pub const MAX_TIMEOUT_SECONDS: i64 = 3600;
+/// The deepest nesting [`decode`] reads: levels of indentation (two columns each), leading `- `
+/// entries and open brackets or braces, counted on the text before it is parsed.
+pub const MAX_NESTING: usize = 64;
+/// The most values [`decode`] reads, an alias counted each time it is used.
+pub const MAX_NODES: usize = 100_000;
 /// The most bytes of a document [`decode`] reads.
 pub const MAX_DOCUMENT_BYTES: usize = 1024 * 1024;
 

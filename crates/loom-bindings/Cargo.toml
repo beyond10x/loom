@@ -13,4 +13,5 @@ name = "b10x_loom_bindings"
 [dependencies]
 b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.8.0" }
 loom = { path = "../../generated/rust/loom" }
+serde = "1"
 serde_yaml_ng = "0.10"

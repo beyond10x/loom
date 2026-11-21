@@ -146,35 +146,52 @@ actions:
   `argv`, a list of strings and never a shell string. An `agent` names an `adapter`, a `model`
   (`claude-haiku-5-5` when it names none), and `inputs` and `outputs` as paths in the workspace. A
   `person` names the `principal` who alone takes the action. An `open` takes a `name` or an `each`
-  argument and the child's `bindings` file. A `copy` names the evidence `kind` it copies and the
-  protocol id of the case it copies from.
+  argument and the child's `bindings` file, a path in the workspace. A `copy` names the evidence
+  kind it copies as `evidence` and the protocol id of the case it copies from as `from`.
 - `arguments` is a literal object; `arguments_from` is an argv whose standard output is the
   object. They are alternatives.
 - Each `evidence` entry says what the action records: the `kind` (one the action `may_produce`),
   the `subject` and `upstream` artifacts, the `producer`, and where the value comes from. `from:
   exit` reads the program's exit code; `from: effect` is Loom's own report that it performed the
   action, whose one value is `performed`, and an effect that was refused or failed records nothing;
-  a JSON pointer such as `/summary/state` reads the program's report. `results` maps each value,
-  or `*` for any other, to the evidence result; `null` records no result.
+  a JSON pointer such as `/summary/state` reads the program's report. A `program` executor's
+  entries read `exit` or a pointer and never `effect`; a `person` or `open` executor's entries read
+  `effect` alone; an `agent` or `copy` executor's are not restricted. `results` maps each value, or
+  `*` for any other, to the evidence result; `null` records no result.
 - `tools.allow` lists the tool names an `agent` may be offered. An entry is never empty and holds
   no comma and no white space, because the session executor joins the names with commas.
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
   `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 3600.
-- `retry_when` maps an evidence kind to the results that send the action back to work.
+- `retry_when` maps an evidence kind of the protocol to the results that send the action back to
+  work; a result is never empty.
   `handoff` is the text a run shows when this writer has done what it may and a person continues.
 - `artifacts` maps an artifact id of the protocol to a path in the workspace; `independence` maps
-  a producer to dimensions the protocol declares.
+  a producer to dimensions the protocol declares. Every path member (`artifacts`, `inputs`,
+  `outputs` and `bindings`) is relative to the workspace root, never absolute, with no `..`
+  segment.
+- `protocol` is the registration the protocol catalog holds, `name@major`: lowercase letters,
+  digits and hyphens in `name`, starting with a lowercase letter and at most 100 bytes, then a
+  positive major written without leading zeros. A protocol whose id is `software.change` at
+  revision 1 is registered as `software-change@1`: dots and underscores become hyphens.
+- A mapping key is read as written, so `0` and `"0"` are the same key and `1.50` is not `1.5`; a
+  key named twice (also through two spellings), a `<<` merge key and a tag such as `!x` are
+  refused. YAML aliases are read, and a document that expands to more than 100,000 values, or
+  nests deeper than 64 levels (counted on the text: two columns of indentation, a leading `- ` or
+  an open bracket or brace each add one), or is larger than 1 MiB, is refused before it costs
+  more.
 
 ## What Loom refuses
 
 Decoding refuses an undeclared member at any level, a `format` that is missing or is not
-`loom.bindings/1`, an empty `argv` or one that is not a list of strings, an `effect` entry whose
-`results` has a key other than `performed`, and a tool name that is empty or holds a comma or white
-space. Loading against the protocol refuses an action the protocol does not declare, a duplicate
+`loom.bindings/1`, a `protocol` that is not a registration, an empty `argv` or one that is not a
+list of strings, an `effect` entry whose `results` has a key other than `performed`, a key named
+twice, a tag, a merge key, text nested or expanded past the bounds above, and a tool name that is
+empty or holds a comma or white space. Loading against the protocol refuses an action the protocol does not declare, a duplicate
 action, an evidence `kind` outside the action's `may_produce`, a `subject`, `upstream` entry or
 `artifacts` key that is not a declared artifact, a `tools` member, an agent budget member, `inputs`
 or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 3600, an
-`artifacts`, `inputs` or `outputs` path that is absolute or leaves the workspace, and an
-`independence` dimension the protocol does not declare. Each refusal names the action and the
+`artifacts`, `inputs`, `outputs` or `open` `bindings` path that is absolute or leaves the
+workspace, a `retry_when` kind the protocol does not declare, an evidence `from` the executor does
+not take, and an `independence` dimension the protocol does not declare. Each refusal names the action and the
 member, such as `action draft.write, member tools.allow[1]`. The reasons are the members of
 `loom.bindings.BindingsRefusalReason` in the [reference](../reference/ess/loom-bindings.md).

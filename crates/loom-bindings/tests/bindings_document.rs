@@ -761,6 +761,7 @@ fn index(reason: Reason) -> usize {
         Reason::TimeoutOutOfRange => 16,
         Reason::PathNotInWorkspace => 17,
         Reason::UndeclaredDimension => 18,
+        Reason::UndeclaredEvidenceKind => 19,
     }
 }
 
@@ -768,6 +769,7 @@ fn index(reason: Reason) -> usize {
 fn every_refusal_reason_is_reachable_from_a_document() {
     let documents = [
         "[1, 2]".to_owned(),
+        document(&format!("{GATE}    retry_when: {{nothing: [failed]}}\n")),
         "format: loom.bindings/1\nprotocol: story@1\nextra: 1\n".to_owned(),
         "format: loom.bindings/1\n".to_owned(),
         "protocol: story@1\n".to_owned(),
@@ -799,7 +801,7 @@ fn every_refusal_reason_is_reachable_from_a_document() {
         .iter()
         .map(|text| index(refused(text).unwrap_or_else(|| panic!("{text}")).0.reason))
         .collect();
-    let all: BTreeSet<usize> = (0..19).collect();
+    let all: BTreeSet<usize> = (0..20).collect();
     assert_eq!(reached, all);
 }
 
@@ -844,4 +846,143 @@ fn the_guide_page_shows_a_complete_file_that_decodes_and_checks() {
         .flat_map(|action| action.evidence.iter().map(|e| e.from as usize))
         .collect();
     assert_eq!(sources.len(), 3, "and all three result sources");
+}
+
+#[test]
+fn a_retry_kind_the_protocol_declares_is_kept_and_an_undeclared_one_is_refused() {
+    let ok = document(&format!("{GATE}    retry_when: {{ess_gate: [failed]}}\n"));
+    assert!(refused(&ok).is_none());
+    let bad = document(&format!("{GATE}    retry_when: {{ess_gat: [failed]}}\n"));
+    assert_refused(
+        &bad,
+        Reason::UndeclaredEvidenceKind,
+        Some("spec.gate"),
+        "retry_when.ess_gat",
+    );
+}
+
+#[test]
+fn a_retry_result_that_is_empty_is_refused() {
+    let text = document(&format!(
+        "{GATE}    retry_when: {{ess_gate: [failed, \"\"]}}\n"
+    ));
+    assert_refused(
+        &text,
+        Reason::Malformed,
+        Some("spec.gate"),
+        "retry_when.ess_gate[1]",
+    );
+}
+
+#[test]
+fn the_child_bindings_path_of_an_open_executor_stays_in_the_workspace() {
+    for bad in [
+        "/abs/child.yaml",
+        "../child.yaml",
+        "a/../../c.yaml",
+        "C:/c.yaml",
+    ] {
+        let text = document(&format!(
+            "  - action: change.open\n    executor: {{kind: open, name: n, bindings: \"{bad}\"}}\n"
+        ));
+        assert_refused(
+            &text,
+            Reason::PathNotInWorkspace,
+            Some("change.open"),
+            "executor.bindings",
+        );
+    }
+    let ok = document(
+        "  - action: change.open\n    executor: {kind: open, name: n, bindings: sub/child.yaml}\n",
+    );
+    assert!(refused(&ok).is_none());
+}
+
+#[test]
+fn an_evidence_source_must_fit_the_executor_the_story_states() {
+    let program = "{kind: program, argv: [a]}";
+    let person = "{kind: person, principal: p}";
+    let open = "{kind: open, name: n, bindings: c.yaml}";
+    let agent = "{kind: agent, adapter: a}";
+    let copy = "{kind: copy, evidence: child_outcome, from: other@1}";
+    let text = |executor: &str, from: &str| {
+        let results = if from == "effect" {
+            "{performed: opened}"
+        } else {
+            "{\"0\": opened}"
+        };
+        document(&format!(
+            "  - action: change.open\n    executor: {executor}\n    evidence:\n      \
+             - {{kind: child_outcome, subject: impl, producer: p, from: \"{from}\", results: {results}}}\n"
+        ))
+    };
+    for from in ["exit", "/report/state"] {
+        for executor in [person, open] {
+            assert_refused(
+                &text(executor, from),
+                Reason::MemberNotForExecutor,
+                Some("change.open"),
+                "evidence[0].from",
+            );
+        }
+        assert!(refused(&text(program, from)).is_none(), "program {from}");
+    }
+    assert_refused(
+        &text(program, "effect"),
+        Reason::MemberNotForExecutor,
+        Some("change.open"),
+        "evidence[0].from",
+    );
+    for executor in [person, open] {
+        assert!(refused(&text(executor, "effect")).is_none());
+    }
+    for executor in [agent, copy] {
+        for from in ["exit", "/report/state", "effect"] {
+            assert!(
+                refused(&text(executor, from)).is_none(),
+                "{executor} {from}"
+            );
+        }
+    }
+}
+
+#[test]
+fn prose_with_yaml_punctuation_is_text_and_ordinary_nesting_decodes() {
+    let text = document(&format!(
+        "{GATE}    handoff: \"Done! Fish & chips *now*, then [review] {{soon}}\"\n    arguments: {{a: {}1{}}}\n",
+        "[".repeat(30),
+        "]".repeat(30)
+    ));
+    let doc = decode(&text).expect("decodes");
+    assert_eq!(
+        doc.actions[0].handoff.as_deref(),
+        Some("Done! Fish & chips *now*, then [review] {soon}")
+    );
+    let block = document(&format!(
+        "{GATE}    handoff: |\n      first line\n      - second & *third*\n"
+    ));
+    assert!(decode(&block).is_ok());
+}
+
+#[test]
+fn nesting_at_the_cap_decodes_and_one_past_is_refused() {
+    let at = |depth: usize| {
+        document(&format!(
+            "{GATE}    arguments: {{a: {}1{}}}\n",
+            "[".repeat(depth),
+            "]".repeat(depth)
+        ))
+    };
+    assert!(decode(&at(40)).is_ok());
+    let refusal = decode(&at(b10x_loom_bindings::MAX_NESTING + 1)).expect_err("refused");
+    assert_eq!(refusal.0.reason, Reason::Malformed);
+    assert_eq!(refusal.0.member, "document");
+}
+
+#[test]
+fn an_alias_used_within_the_node_bound_decodes() {
+    let once = document(&format!(
+        "{GATE}    arguments: {{base: &a [1, 2], again: *a}}\n"
+    ));
+    assert!(decode(&once).is_ok());
 }
