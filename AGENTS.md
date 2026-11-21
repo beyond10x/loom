@@ -212,6 +212,19 @@ conditions fails `task check`:
    that file in both directions, so a new cover is a change of that file, which a reviewer reads;
 4. no file under `ess/` contains `UNMAPPED:`, so the specification carries no open question.
 
+Synthesizing `ess/` takes minutes since the decision domain joined it (218 to 277 s with ess
+0.96.0, 0.9 s before), so it runs once per change of `ess/`, never per test. `task suite-generate`
+writes the suite to `generated/ess/loom/suite.json` and `generated/ess/loom/synthesis.txt`, which
+records synthesize's exit status and output, the suite's SHA-256 and the SHA-256 of its inputs
+(every file under `ess/` by sorted path, and the version line of the `ess` that ran). Step 3 and
+`task conform` read the committed files once that input digest equals this tree's, and fail naming
+`task suite-generate` otherwise. `task slow` synthesizes again and fails unless both files are
+equal byte for byte (§ Gate). A change under `ess/` runs `task suite-generate`, commits both files
+and runs `task slow`. A test that synthesizes a changed copy of `ess/` leaves out the decision
+domain unless it is about it (`drop_decision` in `crates/loom-executor/tests/support/ess_suite.rs`)
+and goes through `synthesize_once`, which keeps one result per distinct input for every test
+process.
+
 A refusal is removed by a change of the specification that keeps its behaviour, where one exists.
 It is covered by an authored scenario only where none exists, and that scenario's `summary` (the
 suite's `purpose`) says why: the refusal code and the cause, with the reasoning in the comment
@@ -267,6 +280,10 @@ moved without its digest fails the install step of every job in under 30 s.
 ## Gate
 
 Needs Rust, Task, `ess`, Helm 3 (`task chart-check`) and bubblewrap (`/usr/bin/bwrap`).
+The `ess` release every step runs comes from the line `requires: ess X.Y.Z` of
+`ess/ess-inputs.yaml` alone: both Taskfiles set `ESS_TOOLCHAIN` from it, and the tests and
+`loom-xtask` set it on each `ess` they start (`Ess` in `crates/loom-executor/tests/support/ess_suite.rs`),
+unless the caller set it, so an `ess` dispatcher newer than the pin runs the pinned release.
 CI installs the backend before
 running the delegation-refusal tests. Every workflow installs Rust 1.99.1, the toolchain the local
 gate runs on, and the pin moves by a story that also fixes the tests that depend on Cargo's layout
@@ -293,6 +310,12 @@ Before a change is reported done, in this order:
 3. `task website` when anything under `website/` changed, or a generated page did. CI's
    `Documentation validation` (`pages.yml`) builds the site and runs the `loom-docs` and
    `loom-commission-docs` tests.
+
+The slow lane is `task slow`, started on its own and never by `task check`: it synthesizes `ess/`
+again and fails unless `generated/ess/loom/` is equal byte for byte (§ ESS), then runs every test
+named `slow_` (`cargo nextest run --profile slow`, `.config/nextest.toml`). Run it after every
+change under `ess/`, with `task suite-generate` before it. A test that cannot meet the budget of
+`~/beyond10x/AGENTS.md` § Tests stay fast is renamed `slow_…` and runs there, never deleted.
 
 There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchain`), and a local
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
@@ -335,6 +358,7 @@ Where a test puts its scratch depends on what it needs from the directories abov
 | Path | Generator | Regenerate | Drift check |
 |---|---|---|---|
 | `generated/rust/loom/` | `ess generate synthesize` over `ess/`, via `loom-xtask` | `task generate` | `task drift` |
+| `generated/ess/loom/suite.json`, `generated/ess/loom/synthesis.txt` | `ess verify conform synthesize --suite-format 5` over `ess/`, via `loom-xtask suite-generate`, with the digest of its inputs (§ ESS) | `task suite-generate` | `task ess-gate` and `task conform` (the input digest); `task slow` (bytes) |
 | `generated/rust/commission/` | the same over `ess/commission/`, via `loom-commission-xtask` | `task commission:generate` | `task commission:drift` |
 | `generated/rust/intake/` | synthesis over `ess/intake/`, via `loom-xtask` | `task intake-generate` | `task intake-drift` |
 | `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `loom-xtask crd-generate`, projecting the JSON Schemas `ess generate --kind schema` writes for `ess/` through `b10x_loom_resource::crd` | `task crd-generate` | `task crd-drift` |
