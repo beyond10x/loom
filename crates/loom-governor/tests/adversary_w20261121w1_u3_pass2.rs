@@ -1,5 +1,5 @@
 //! Adversary pass 2, wave 2026-11-21-w1, unit 3 (`story:deterministic-default-selector`), the
-//! governor half: `counted_kinds` re-implements three Canon 0.8.0 rules (revision binding,
+//! governor half: `counted_kinds` re-implements three Canon rules (revision binding,
 //! freshness, "read by a match"). Each case here compares it with the governor's own Canon
 //! decision in the same test, never with a reading of Canon. No model or network call is made.
 

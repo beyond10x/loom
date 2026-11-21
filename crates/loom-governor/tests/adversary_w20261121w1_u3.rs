@@ -1,5 +1,6 @@
 //! Adversary, wave 2026-11-21-w1, unit 3 (`story:deterministic-default-selector`), the governor
-//! half: `CanonGovernor::action_facts` against Canon 0.8.0's own counting.
+//! half: `CanonGovernor::action_facts` against the pinned Canon's own counting
+//! (written on Canon 0.8.0; Canon 0.9.0 left these rules as they were).
 //!
 //! A kind leaves an action's open evidence only when Canon counts a record of it. These cases
 //! build records Canon does not count for anything the protocol reads, and records Canon sets

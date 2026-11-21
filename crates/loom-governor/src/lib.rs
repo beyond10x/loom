@@ -126,10 +126,10 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library `b10x-canon-engineering` uses, tag `0.8.0`, pinned by `Cargo.lock` to
-//! commit `cf17175`, so the protocol model the ELS registry returns is the one this crate
+//! Canon is the library `b10x-canon-engineering` uses, tag `0.9.0`, pinned by `Cargo.lock` to
+//! commit `8f1f452`, so the protocol model the ELS registry returns is the one this crate
 //! compiles. Commission is the path dependency `b10x-loom-commission`, built from this
-//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.15.2` of
+//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.16.0` of
 //! beyond10x/engineering-protocols.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -155,8 +155,8 @@ use b10x_canon::eval::{
 };
 use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
-    ArtifactId, CASE_FORMAT, Case, CaseArtifact, Decision, Declarations, EvidenceKindId,
-    EvidenceRecord, ExclusionReason, IndependenceDimensionId, InputId, InputValue,
+    ArtifactId, CASE_FORMAT, CASE_OUTCOME, Case, CaseArtifact, Decision, Declarations,
+    EvidenceKindId, EvidenceRecord, ExclusionReason, IndependenceDimensionId, InputId, InputValue,
     Instant as CanonInstant, OutcomeRequirement, Predicate, Principal, Revision,
     Truth as CanonTruth, is_identifier,
 };
@@ -1152,6 +1152,10 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     ///   Canon reads a record for a match. A kind no evidence match reads at all counts any record
     ///   that passes the rules above.
     ///
+    /// A kind only order forms or `children` forms read (a `children` form reads `case_outcome`)
+    /// counts any applying record one of them reads, whatever its binding, freshness or
+    /// invalidation, as Canon reads every accepted record for those forms.
+    ///
     /// A record Canon sets aside only as not independent still counts: the kind is treated as
     /// produced, so the selector does not take the action again for it, and the claim stays
     /// unknown until a producer the case declares independent records the kind. Whether a held
@@ -1882,10 +1886,11 @@ impl JsonTree for loom::json::Value {
 /// that applies, is about its subject's current revision (Canon's revision binding), is not
 /// expired at `at` (Canon's freshness rule), is listed under no claim of `decision` as
 /// invalidated, and is read by an evidence match of `ir` by kind and subject (Canon's rule for a
-/// match) or is of a kind no evidence match reads. A record of a kind only order forms read counts
-/// when an order form reads it by kind and subject, whatever its binding, freshness or
-/// invalidation: Canon's order forms read every record the evidence check accepted
-/// (`eval/order.rs`, `of`). A record Canon sets aside only as not independent still counts.
+/// match) or is of a kind no evidence match reads. A record of a kind only order forms and
+/// `children` forms read counts when one of them reads it by kind and subject, whatever its
+/// binding, freshness or invalidation: Canon's order forms read every record the evidence check
+/// accepted (`eval/order.rs`, `of`), and a `children` form every accepted `case_outcome` record
+/// (`eval/composition.rs`). A record Canon sets aside only as not independent still counts.
 fn counted_kinds(
     ir: &Ir,
     state: &CaseState,
@@ -1956,20 +1961,26 @@ fn expired(ir: &Ir, record: &EvidenceRecord, at: Option<i64>) -> bool {
 /// What reads a record: a kind, and the subject it must be about when one is named.
 type Reader<'p> = (&'p EvidenceKindId, Option<&'p ArtifactId>);
 
-/// Every evidence match of `ir`, and every kind an order form reads, as (kind, subject): in each
-/// claim's `true_when`, each obligation's `discharged_when` and `applicable_when`, each action's
-/// precondition and each outcome's requirement, through every `all`, `any` and `not`. Order
-/// forms are kept apart: they read the whole history, excluded records included.
+/// Every evidence match of `ir`, and every kind an order form or a `children` form reads, as
+/// (kind, subject): in each claim's `true_when`, each obligation's `discharged_when` and
+/// `applicable_when`, each action's precondition and each outcome's requirement, through every
+/// `all`, `any` and `not`. Order forms and `children` forms are kept apart: they read the whole
+/// history, excluded records included. A `children` form reads the kind `case_outcome` about any
+/// artifact (Canon's `eval/composition.rs`, `value`), which a protocol with such a form declares.
 fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
-    fn walk<'p>(predicate: &'p Predicate, found: &mut (Vec<Reader<'p>>, Vec<Reader<'p>>)) {
+    fn walk<'p>(
+        predicate: &'p Predicate,
+        case_outcome: Option<&'p EvidenceKindId>,
+        found: &mut (Vec<Reader<'p>>, Vec<Reader<'p>>),
+    ) {
         let (matches, orders) = found;
         match predicate {
             Predicate::All(members) | Predicate::Any(members) => {
                 for member in members {
-                    walk(member, found);
+                    walk(member, case_outcome, found);
                 }
             }
-            Predicate::Not(member) => walk(member, found),
+            Predicate::Not(member) => walk(member, case_outcome, found),
             Predicate::Evidence(matching) => {
                 matches.push((&matching.kind, matching.subject.as_ref()));
             }
@@ -1986,25 +1997,30 @@ fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
                 orders.push((&form.last, form.subject.as_ref()));
                 orders.push((&form.then.kind, form.subject.as_ref()));
             }
+            Predicate::Children(_) => orders.extend(case_outcome.map(|kind| (kind, None))),
             Predicate::Input(_) | Predicate::Claim(_) => {}
         }
     }
+    let case_outcome = ir
+        .evidence_kinds
+        .get_key_value(&EvidenceKindId::new(CASE_OUTCOME))
+        .map(|(kind, _)| kind);
     let mut found = (Vec::new(), Vec::new());
     for claim in ir.claims.values() {
-        walk(&claim.true_when, &mut found);
+        walk(&claim.true_when, case_outcome, &mut found);
     }
     for obligation in ir.obligations.values() {
-        walk(&obligation.discharged_when, &mut found);
+        walk(&obligation.discharged_when, case_outcome, &mut found);
         if let Some(applicable) = &obligation.applicable_when {
-            walk(applicable, &mut found);
+            walk(applicable, case_outcome, &mut found);
         }
     }
     for action in ir.actions.values() {
-        walk(&action.precondition, &mut found);
+        walk(&action.precondition, case_outcome, &mut found);
     }
     for outcome in ir.outcomes.values() {
         if let OutcomeRequirement::Predicate(predicate) = &outcome.requires {
-            walk(predicate, &mut found);
+            walk(predicate, case_outcome, &mut found);
         }
     }
     found
@@ -2219,6 +2235,11 @@ fn first_declared(decision: &Decision, order: &[String]) -> Option<String> {
 /// A record that reads as a `canon-evidence/1` record but that Canon refuses for this case (a kind
 /// or subject the protocol does not declare, for instance) is set aside, as `CanonGovernor` sets it
 /// aside when it arrives, and the decision is made from the rest; the decision does not list it.
+/// The records are judged in the order `evidence` gives them, as the governor judges records in
+/// the order received: of the `case_outcome` records for one child that Canon takes alone, the
+/// first is kept and every later one is set aside, as Canon refuses them together
+/// (`duplicate-child-case`). Whatever Canon still refuses over the records kept is refused as
+/// the snapshot, as for its termination.
 ///
 /// Two inputs differ from `CanonGovernor`: a record that is not a readable `canon-evidence/1`
 /// record, and a record repeating an earlier record's id. The governor sets either aside (for a
@@ -2308,12 +2329,24 @@ pub fn evaluate(
     let decision = match decide_case(&ir, &case, &records, at, decisions) {
         Ok(decision) => decision,
         Err(_) => {
-            // As `CanonGovernor` does on arrival, a record Canon refuses for this case is set
-            // aside; what Canon still refuses with the rest is the snapshot's termination.
+            // As `CanonGovernor` does on arrival, a record Canon refuses with the records kept
+            // before it is set aside; what Canon still refuses with the rest is the snapshot's
+            // termination. A record Canon refuses alone is refused with any others, so each is
+            // judged alone, once. Of those that pass, Canon refuses together only a later
+            // `case_outcome` record for a child an earlier one names (`duplicate-child-case`;
+            // a repeated id was refused above): in request order, the first per child is kept.
+            let mut children = BTreeSet::new();
             let applying: Vec<EvidenceRecord> = records
                 .iter()
                 .filter(|record| {
                     decide_case(&ir, &open, std::slice::from_ref(record), at, decisions).is_ok()
+                })
+                .filter(|record| {
+                    record.kind.as_str() != CASE_OUTCOME
+                        || record
+                            .child_case
+                            .as_ref()
+                            .is_none_or(|child| children.insert(child.as_str()))
                 })
                 .cloned()
                 .collect();

@@ -479,7 +479,9 @@ private `decide_case` and `project` that `CanonGovernor` uses, never a second ev
 refusal names the input (protocol, snapshot, evidence record by position, time). A readable
 record that does not apply is set aside as `CanonGovernor` sets it aside; an unreadable record or
 a repeated id is refused. The time and the records are judged once each, never by re-running Canon
-on prefixes. `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
+on prefixes, in the request's order: of the `case_outcome` records for one child Canon takes alone,
+the first is kept and later ones are set aside, as by the governor
+(`crates/loom-governor/tests/case_composition.rs`). `crates/loom-governor/tests/evaluate.rs` and `evaluate_adversary.rs` hold it against
 `CanonGovernor`; `crates/loom-cli/tests/evaluate.rs` holds the subcommand against the library.
 `CanonGovernor::decision_document(case, frontier)` returns the whole `canon-decision/1` document
 behind a frontier id the governor issued, as the generated JSON value `evaluate` returns in
@@ -498,7 +500,8 @@ expired at the trusted time (Canon's freshness rule), is listed under no claim a
 an evidence match of the protocol (claim, obligation, precondition or outcome) reads it by kind
 and subject; a kind no match reads counts any such record. A kind only order forms read counts
 any applying record an order form reads by kind and subject, whatever its binding, as Canon's
-order forms read every accepted record. One set aside only as not independent still counts
+order forms read every accepted record; a `children` form reads `case_outcome` so, about any
+artifact (`crates/loom-governor/tests/case_composition.rs`). One set aside only as not independent still counts
 (`docs/contracts/loom-action-selection.md` § Deterministic selection). The deterministic selector
 answers for the one case it was built for and refuses a run of another; a selector wrapping it
 must forward `resolve_for_case`
@@ -520,17 +523,19 @@ refuses such a case of a built-in protocol naming the case and the input
 `a_stored_case_with_unusable_inputs_is_never_decided`). An obligation is `open` only when Canon
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
-Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.8.0"`), pinned by
+Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.9.0"`), pinned by
 `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
 `cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
-tag (now `0.15.2`); any other crate that adds Canon uses the same reference.
+tag (now `0.16.0`); any other crate that adds Canon uses the same reference. Canon 0.9.0 lets a
+protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
+register and are decided like any other construct, and Loom opens no child case itself.
 
 ## Connectors
 
 `b10x-loom-connectors` (`crates/loom-connectors`, `loom_sdk::connectors`) is the one crate that
 links Connectors: `connectors-client` and `connectors-core` at tag `v0.62.0`. Move both together.
 `serde_json`'s `arbitrary_precision` was already on for `b10x-loom-sdk` through `b10x-canon-expr`
-`0.8.0` and `b10x-assertion-providers` `0.15.2`; since `v0.62.0`, `connectors-core` also turns it
+`0.9.0` and `b10x-assertion-providers` `0.16.0`; since `v0.62.0`, `connectors-core` also turns it
 on through `b10x-loom-connectors`' own normal dependencies.
 `ConnectorsInvoker` fills Commission's `ConnectorInvoker` from the host's `ConnectorEndpoint`
 records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
