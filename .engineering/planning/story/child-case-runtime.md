@@ -40,7 +40,7 @@ scope:
   path: ess/domains/governor.yaml
 - confidence: inferred
   path: website/docs/concepts/governor-and-intake.md
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
 ---
@@ -111,7 +111,8 @@ With fixture protocols `parent/1` (one `case_open` action that may produce `chil
 claim with `children: {in: [passed]}`) and `child/1`, stub programs and no model:
 
 - Performing the opening action creates the child case under `child/1` and one `case_outcome`
-  record in the parent with `child_case` = the child's id and result `open`; the parent's
+  record in the parent with `child_case` = the child's id, `subject` = the subject of the
+  `case_open` action and result `open`, written in the same store write as the opening; the parent's
   `children` claim is `unknown`, and the parent holds a `child_opened` record from the binding's
   `from: effect` entry.
 - After the child's evidence makes `passed` legitimate and `terminate(child, passed, t)` is
@@ -121,6 +122,12 @@ claim with `children: {in: [passed]}`) and `child/1`, stub programs and no model
   whose `subject_revision` is the child's last revision of it. A child that does not declare it
   gives the parent's revision at opening, also after the parent's subject moved while the child
   ran.
+- With three children opened and two of them terminated `passed`, the parent holds three
+  `case_outcome` records, one of them `open`, and its `children: {in: [passed]}` claim is not
+  `true`. Canon counts only the records it is given and adds no check of its own (Canon
+  `story:child-outcome-subject`, relayed by session `sdc` on 2026-11-21), so a child that was
+  opened and has no record would be invisible to the claim; writing the `open` record at the
+  opening is the runner's duty.
 - An `each` argument with three entries opens three children and three records; a repeated
   opening for an existing name gets the next numbered id and leaves the first child's record
   unchanged.

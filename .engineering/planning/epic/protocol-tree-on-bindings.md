@@ -10,7 +10,7 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:38Z", actor: "human:timo", revision: 3, decided_on: {"recorded":{"review_outcome":1}}}
 ---
@@ -107,6 +107,7 @@ engineering vocabulary (`story:tree-run-command`).
 - Report checks that name ESS or git (spec digest match, clean tree): they are SDC data on top of
   the report-field result table.
 - Accepting `loom.bindings/1` in `b10x-loom run --action-bindings`.
+- Decision requests, autonomy levels and a decider at a wait (`epic:decision-requests-in-the-runtime`).
 
 ## Source
 

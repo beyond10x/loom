@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T01:09:49Z",
+  "actor": "human:timo",
+  "artifact": "story:bindings-document",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-bindings --locked at 2fe0743f (implementor's gate, three test files: 23, 20 and 34 passed); at the base ecefe180 the package does not exist",
+    "reference": "wave scratch u2/gate-summary.txt; new behaviour the baseline cannot show; verdict VERIFIED"
+  }
+}

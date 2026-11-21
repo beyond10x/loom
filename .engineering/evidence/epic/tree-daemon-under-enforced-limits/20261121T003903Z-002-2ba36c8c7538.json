@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T00:39:03Z",
+  "actor": "human:timo",
+  "artifact": "epic:tree-daemon-under-enforced-limits",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:tree-daemon-under-enforced-limits-scope-r1",
+    "review": "review-result:tree-daemon-under-enforced-limits-scope-r1",
+    "outcome": "fixed"
+  }
+}

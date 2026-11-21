@@ -2,13 +2,15 @@
 format: aep.planning-md/3
 id: upstream-blocker:engineering-protocols-on-canon-0-9-0
 kind: upstream-blocker
-status: open
+status: cleared
 title: engineering-protocols has no release built on Canon 0.9.0
 tags:
 - sdc
 relations:
 - blocks: story:canon-0-9-0-pin
-revision: 1
+revision: 2
+transitions:
+- {from: "open", to: "cleared", at: "2026-11-21T01:13:01Z", actor: "human:timo", revision: 2}
 ---
 ## What is missing
 

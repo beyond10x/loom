@@ -47,7 +47,7 @@ scope:
   path: website/data/status.json
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":4}}}
 ---
@@ -174,7 +174,8 @@ model and no engineering vocabulary:
 
 A cap on agent calls and agent events in the log (`story:agent-node-run-records`). Mandate
 approvals for tree cases. A replay command. Running two cases of a tree at once. A service or
-daemon that watches a store.
+daemon that watches a store. Turning a wait into a decision request, and `tree approve` through that
+request (`story:tree-waits-open-decision-requests`, `epic:decision-requests-in-the-runtime`).
 
 ## Scope
 

@@ -29,7 +29,7 @@ scope:
   path: docs/design/loom-design.md
 - confidence: cited
   path: ess/domains/run.yaml
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:45Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-11-21T00:12:44Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w1"}
@@ -45,11 +45,19 @@ from the model and never from the candidate list:
 - `ActionFacts`: per action its effect class and its open evidence, the kinds it may produce
   that Canon counted no record of at the subject's current revision. The Canon governor answers
   it from the IR and from the decision of the current evaluation.
-- `StepHistory`: an action that may produce nothing is useful until `performed_at(action, case
-  revision)` is true, and any action is useful again while `due(action)` is true (a host uses it
-  for a retry or a pending copy).
+- `StepHistory`: an action is not useful once `performed_at(action, case revision)` is true,
+  and any action is useful again while `due(action)` is true (a host uses it for a retry or a
+  pending copy).
 
-An action that may produce evidence is useful while its open evidence is not empty. With no
+An action not yet performed at the current case revision is useful if it may produce nothing,
+or while its open evidence is not empty. An action already performed at the current case
+revision is not useful again unless the host reports it due; it becomes useful again when an
+artifact moves, and `max_runs` stays a ceiling in the effect (decided by session `sdc` on
+2026-11-21 after adversary pass 2, `review-result:adv-w20261121w1-u3-pass-2`: under the first
+rule, "useful while a kind it may produce is open", the bundled `software-change@1` selected
+`tests.run` at every step, because a run without a regression command never produces
+`regression_test_result`). A program that fails without writing its evidence therefore needs
+`retry_when` to run again. With no
 useful candidate the selector answers that nothing is admissible to do, and the run ends on its
 ordinary outcome. `story:tree-run-command` is the run that uses it and implements `StepHistory`.
 
@@ -95,9 +103,12 @@ Shared files: `story:child-case-runtime` and `story:canon-0-9-0-pin` also change
   across four steps is the two reads by identifier, then the two writes by identifier.
 - An admissible action whose kinds all have counted records is never selected; with only such
   actions the selector returns `NothingAdmissible`.
-- With a fixture `StepHistory`: an action with no `may_produce` is selected while `performed_at`
-  is false for the current case revision and not selected once it is true; an action with no
-  open evidence is selected while `due` is true.
+- With a fixture `StepHistory`: an action, with or without `may_produce` and whatever evidence
+  is still open, is selected while `performed_at` is false for the current case revision and
+  not selected once it is true; it is selected again at the next case revision; an action with
+  no open evidence, or one already performed at this revision, is selected while `due` is true.
+- On the bundled `software-change@1` with a feature change and no regression command,
+  `tests.run` is taken once per case revision and `implementation.edit` is reached.
 - An `ApprovalRequired` candidate is never selected, and an action the facts name that is not
   among the candidates is never returned (`AGENTS.md` § Rules).
 - The same candidates, facts and history give the same choice on 100 repeated calls, and the

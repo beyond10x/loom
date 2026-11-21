@@ -7,8 +7,8 @@ title: Substrate serves no ingress to a confined run
 tags:
 - sdc
 relations:
-- blocks: story:named-egress-per-action
-revision: 2
+- blocks: story:ingress-routes-per-action
+revision: 3
 ---
 ## What is missing
 
@@ -20,8 +20,8 @@ family (`linux.rs:29`). Substrate's story `inbound-endpoint-for-a-confined-exec`
 
 ## What it blocks
 
-Only the ingress half of `story:named-egress-per-action`: that story refuses a binding with
-`ingress` at load until this clears. Its egress half does not wait.
+`story:ingress-routes-per-action`, which serves the ingress routes an action selects.
+`story:named-egress-per-action` refuses a binding with `ingress` at load and does not wait on this.
 
 ## What clears it
 

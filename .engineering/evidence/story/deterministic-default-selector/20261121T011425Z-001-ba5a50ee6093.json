@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-21T01:14:25Z",
+  "actor": "human:timo",
+  "artifact": "story:deterministic-default-selector",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "cargo test -p b10x-loom-executor -p b10x-loom-governor -p b10x-loom-conformance --locked at ba343770 (implementor's gate: 462 passed, 0 failed; four adversary files 13 passed); at the base ecefe180 the Deterministic strategy and both ports do not exist",
+    "reference": "wave scratch u3/gate-status.txt; new behaviour the baseline cannot show; verdict VERIFIED"
+  }
+}
