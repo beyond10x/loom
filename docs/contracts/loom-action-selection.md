@@ -159,7 +159,8 @@ never from the candidate list:
   subject; a kind no match reads counts any such record. A kind only order forms (`first`,
   `before`, `after`, `since`) read counts any record that applies and that an order form reads by
   kind and subject, whatever its revision, freshness or invalidation, as Canon's order forms read
-  every record the evidence check accepted.
+  every record the evidence check accepted. A `children` form (Canon 0.9.0) reads `case_outcome`
+  the same way, about any artifact.
 - `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
 
 An action is useful while `due` is true (`retry_when`, a pending copy). Otherwise it is not useful
