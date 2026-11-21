@@ -2472,3 +2472,76 @@ fn fnv1a(basis: u64, bytes: &[u8]) -> u64 {
         (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_protocols::{ENGINEERING_FILES, ENGINEERING_LOCK};
+
+    /// `ENGINEERING_FILES` with one byte of `software-change/1.yaml` changed, its lock untouched.
+    fn one_byte_changed() -> Vec<(&'static str, Vec<u8>)> {
+        let mut files: Vec<(&'static str, Vec<u8>)> = ENGINEERING_FILES
+            .iter()
+            .map(|(path, bytes)| (*path, bytes.to_vec()))
+            .collect();
+        let (_, bytes) = files
+            .iter_mut()
+            .find(|(path, _)| *path == "software-change/1.yaml")
+            .expect("software-change/1.yaml is vendored");
+        let at = bytes
+            .windows(b"Deliver a change".len())
+            .position(|window| window == b"Deliver a change")
+            .expect("the description");
+        bytes[at] = b'd';
+        files
+    }
+
+    #[test]
+    fn a_catalog_failing_its_lock_is_invalid_protocol_naming_the_refusal() {
+        let files = one_byte_changed();
+        let borrowed: Vec<(&str, &[u8])> = files
+            .iter()
+            .map(|(path, bytes)| (*path, bytes.as_slice()))
+            .collect();
+        let catalog = ProtocolCatalog::from_vendored(&borrowed, ENGINEERING_LOCK)
+            .map_err(|error| error.to_string());
+        let refusal = catalog.clone().expect_err("the lock refuses the changed file");
+        match builtin_in(catalog, "software-change@1") {
+            Err(OpenError::InvalidProtocol { protocol, problem }) => {
+                assert_eq!(protocol, "software-change@1");
+                assert!(
+                    problem.starts_with(
+                        "engineering protocol lock refused: DigestMismatch software-change/1.yaml"
+                    ),
+                    "{problem}"
+                );
+                assert_eq!(problem, refusal, "the catalog's error text, unchanged");
+            }
+            other => panic!("a lock refusal is InvalidProtocol, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_engineering_catalog_holds_each_builtin_and_nothing_else() {
+        let catalog = || ProtocolCatalog::engineering();
+        let entry = builtin_in(catalog(), "software-change@1").expect("software-change@1");
+        assert_eq!(entry.name(), "software-change@1");
+        assert_eq!(entry.model.protocol.id.as_str(), "software.change/1");
+        for protocol in [
+            "no-such@1",
+            "software-change@2",
+            "software-change",
+            "software-change@01",
+            "software-change@x",
+            "@1",
+        ] {
+            assert_eq!(
+                builtin_in(catalog(), protocol).map(|entry| entry.name().to_owned()),
+                Err(OpenError::UnknownProtocol {
+                    protocol: protocol.to_owned()
+                }),
+                "{protocol}"
+            );
+        }
+    }
+}
