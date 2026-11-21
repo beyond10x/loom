@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tcp-reachability-through-an-aperture
 kind: story
-status: draft
+status: proposed
 title: net.tcp.reachable observes through a named egress aperture whether the destination accepted, once Substrate reports it
 summary: Blocked on Substrate's dial outcome; a refused aperture is a refusal, never false; tested on loopback listeners
 tags:
@@ -12,6 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:gate-run-collects-a-gates-document
 - depends_on: story:named-egress-per-action
+- depends_on: story:observe-git-in-a-linked-worktree
 scope:
 - confidence: cited
   path: crates/loom-bindings/src/decode.rs
@@ -37,7 +38,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: ess/domains/observation.yaml
-revision: 7
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:55:00Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -95,7 +98,13 @@ host would bypass Substrate.
 
 ## Waits on
 
-- `upstream-blocker:substrate-aperture-dial-outcome`.
+- `upstream-blocker:substrate-aperture-dial-outcome`. Session `substrate` drafted
+  `story:aperture-reports-dial-outcome` for it (`.engineering/drafts/e7-substrate-answer-1.md`): the
+  applied network record counts connected, refused and timed-out dials per aperture, after a design
+  document and a successor bundle. That is counts per aperture, not a per-dial answer; this story is
+  rewritten against that shape when the Substrate story lands, not before.
+- `story:observe-git-in-a-linked-worktree` (the edge in the store): both add an `ObserveRefusal`
+  member in `ess/domains/observation.yaml` and regenerate `generated/rust/loom/`.
 - `story:named-egress-per-action` (another epic): the apertures an action may name.
 - `story:gate-run-collects-a-gates-document` (the edge in the store): this story edits its
   `crates/loom-bindings/src/observe/gates.rs`, `crates/loom-bindings/tests/observe_catalog.rs` and

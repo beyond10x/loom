@@ -27,7 +27,7 @@ scope:
   path: crates/loom-governor/tests/explicit_decision_writer.rs
 - confidence: cited
   path: ess/domains/decision.yaml
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:21Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -49,7 +49,7 @@ directly after `Decide` (answer d).
   `i64`, `:193`). The Canon entry carries no request id; `produced_record` holds the link from the
   request to the record (answer g).
 - The decision name of an outcome record has no field of its own in the contract: `Unblocks` names
-  only the outcome (`~/beyond10x/sdc/ess/domains/decision.yaml:78`) and `Consequence` only the
+  only the outcome (`~/beyond10x/sdc/ess/domains/decision.yaml:78` at `00e3557`) and `Consequence` only the
   kind of record (`:86-95`). The writer parses `<decision>` from the request's `record_key`
   (`<outcome>/<decision>@r<N>`, `story:decision-routing-by-holder`); a `record_key` of another
   shape is refused `WriterFailed`, naming it, and nothing is written.
@@ -103,9 +103,9 @@ Item 3 of the request resumes the suspended run in this order: "`Decide` (all gu
 write), the Canon write keyed by the record id, `RecordProduced`, then resume, which requires
 `produced_record` where the decided option produces a record"
 (`~/beyond10x/sdc/docs/decisions.md:310-312`; point 6, and the contract's own order,
-`decisions.md:222-237`, `~/beyond10x/sdc/ess/domains/decision.yaml:548`). A Canon-first order
+`decisions.md:222-237`, `~/beyond10x/sdc/ess/domains/decision.yaml:546`). A Canon-first order
 would write an authority record before eligibility is checked. `RecordProduced` with the record
-already stored changes nothing (`decision.yaml:710-715`), which is what lets a retry record an
+already stored changes nothing (`decision.yaml:708-713`), which is what lets a retry record an
 existing record (`AlreadyRecorded`). Which revision the record binds to is answer e; the refusal
 when the case moved before the write is stated in prose only (`decisions.md:226-228`), so Loom
 enforces it here. `decide` stamps the revision it finds inside its own update

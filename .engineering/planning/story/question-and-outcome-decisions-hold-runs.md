@@ -37,7 +37,7 @@ scope:
   path: crates/loom-intake-slice/tests/decision_hold.rs
 - confidence: cited
   path: ess/intake/domains/routing.yaml
-revision: 18
+revision: 19
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:22Z", actor: "agent:sdc", revision: 18, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -111,7 +111,7 @@ host after it wrote the answer. First it reads the request: when the request alr
 applies `RecordProduced` with `ARTIFACT@REV` directly and calls no writer, so the contract answers
 it: the same record is `already-recorded` and changes nothing, a different one is refused
 `ProducedRecordConflict` and the first record stands
-(`~/beyond10x/sdc/ess/domains/decision.yaml:710-720`). Otherwise it calls `complete_decision`
+(`~/beyond10x/sdc/ess/domains/decision.yaml:708-718` at `00e3557`). Otherwise it calls `complete_decision`
 (`story:decided-record-written-then-recorded`) with one more writer in the set,
 `ArtifactRevisionWriter` given `ARTIFACT@REV`, so it goes through the same path and refusals as
 every other record:

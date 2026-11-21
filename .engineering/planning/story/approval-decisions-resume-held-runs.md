@@ -38,7 +38,7 @@ scope:
   path: crates/loom-intake-slice/tests/decision_authority_rule.rs
 - confidence: cited
   path: ess/intake/domains/routing.yaml
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:23Z", actor: "agent:sdc", revision: 14, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -111,7 +111,7 @@ holder, `rule_final`, or a veto under `rule_and_decider_final`) the run ends:
 - no Suspension is held, so `resume` is refused `NothingSuspended`;
 - the request stays as the route left it: Decided on the denying option after a veto, with its
   denied grant written; otherwise Open. It is left Open rather than superseded: `Supersede` needs a
-  newer request (`~/beyond10x/sdc/ess/domains/decision.yaml:785-789`) and there is none, a listed
+  newer request (`~/beyond10x/sdc/ess/domains/decision.yaml:783-787` at `00e3557`) and there is none, a listed
   person may still decide it (`~/beyond10x/sdc/docs/decisions.md:110`), and the next run of the
   case finds it by its record key and routes it again instead of opening a second one.
 

@@ -10,7 +10,7 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 13
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 11, decided_on: {"recorded":{"review_outcome":12}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -32,7 +32,8 @@ producer that is not independent becomes a decision request for a person or a de
 re-run by the same producer. The request is an entity of Loom's ESS, `loom.decision`, with eight
 commands; its store is durable, and its inbox is a set of CLI and SDK calls, not a service. A
 decision recorded through the inbox over a state directory resumes the run held for it in the
-same invocation.
+same invocation, for an approval hold of a `software-change@1` run. A held question or outcome
+resumes through the SDK function, with the host's executor.
 
 ## Why
 
@@ -63,7 +64,8 @@ holder, not the level (`decisions.md:90-92`), suppression is what the final hold
 Escalate always sets the holder to `person`; so the grant table carries no separate mode
 (`story:autonomy-grant-table`).
 
-The contract is `~/beyond10x/sdc/ess/domains/decision.yaml`, which session `sdc` declared final
+The contract is `~/beyond10x/sdc/ess/domains/decision.yaml` (final at commit `00e3557`; story 1
+copies it whole, and story 23 gives behaviour to what it gained after the first read), which session `sdc` declared final
 on 2026-11-21 (49 declarations, with the scenario `ess/scenarios/merge-a5-veto.yaml`). Session
 `sdc` answered nine questions on it that day; the stories cite them as "session `sdc`,
 2026-11-21, point N":
@@ -160,13 +162,14 @@ no timer: the host resumes the work" (`AGENTS.md:423`).
 ## Stories
 
 In dependency order. Story 0 raises the format of Loom's main ESS system so the contract's copy
-is valid there; story 1 depends on it. Stories 1 to 15 and 21 build against fixtures on the Canon Loom
-pins today. Stories
-16 and 20 wait on `story:tree-run-command`, and through it on `story:canon-0-9-0-pin`, which is
-unblocked (engineering-protocols `0.16.0` pins Canon `0.9.0`) and not yet delivered. Story 22
-waits on story 16 and on `story:tree-daemon` (`epic:tree-daemon-under-enforced-limits`): a
-decision on a served tree goes through the daemon, and story 16 does not wait on the daemon chain.
-Stories 17,
+is valid there; story 1 depends on it. Stories 1 to 15 and 21 build against fixtures on the Canon
+Loom pins today. Stories 16 and 20 wait on `story:tree-run-command`, and through it on
+`story:canon-0-9-0-pin`, which is unblocked (engineering-protocols `0.16.0` pins Canon `0.9.0`) and
+not yet delivered. Story 22 waits on story 16 and on `story:tree-daemon`
+(`epic:tree-daemon-under-enforced-limits`): a decision on a served tree goes through the daemon,
+and story 16 does not wait on the daemon chain. Story 23 waits on stories 20 and 22. Story 24
+waits on story 23 and on the stories of `epic:tree-daemon-under-enforced-limits` and
+`epic:concurrent-and-standing-case-trees` that edit the engine configuration. Stories 17,
 18 and 19 wait on Canon (§ Upstream). Each story's code goes in its own module, so a crate's
 `lib.rs` shared by several stories gains one `mod` line per story; the order is kept, and the wave
 planner keeps two stories that share a file apart. Story 13 depends on story 10 because the type
@@ -176,10 +179,21 @@ resume refusals). Story 15 depends on story 14 because both edit `crates/loom-cl
 `crates/loom-cli/src/lib.rs` and the slice's governor build. Story 20 depends on story 7 because it
 adds the review stop to routing's `ess/domains/decision.yaml` and routing module. Story 21 is
 listed last but comes after story 15 and before story 16: it depends on story 14
-(`resume_decision_hold`) and on story 15 (both edit `crates/loom-cli/src/main.rs` and `lib.rs`),
-and story 16 depends on it (both edit `crates/loom-cli/src/decisions.rs`, `lib.rs` and
-`main.rs`). Story 22 comes after stories 16 and 21 and after `story:tree-daemon`: it depends on
-all three (story 21 for `crates/loom-cli/src/decisions.rs`). A host port
+(`resume_decision_hold`), on story 15 (both edit `crates/loom-cli/src/main.rs` and `lib.rs`) and
+on story 12 (the tick it resumes after), and story 16 depends on it (both edit
+`crates/loom-cli/src/decisions.rs`, `lib.rs` and `main.rs`). Story 22 depends on four stories:
+stories 16 and 21 (story 21 for `crates/loom-cli/src/decisions.rs`), `story:tree-daemon`, and
+`story:concurrent-cases-in-the-tree-daemon` (`epic:concurrent-and-standing-case-trees`), whose
+per-case states `Decide` and `Tick` move a case through. Story 23 comes after stories 1 to 14 and
+holds none of them. It depends on eleven stories:
+- stories 2, 5, 6, 11, 12, 14 and 21, the surfaces it extends;
+- story 22, its eighth edge: its type changes to `Decide` and `Ground.supports` force an edit in
+  the `--tree` and daemon code, so it lands after story 22, and through it after story 16;
+- stories 1 and 4, whose declarations and `check_grounds` it cites;
+- story 20, which changes the same files and has no typed scope.
+
+Story 24 depends on story 23 and on every story that edits `ess/domains/engine.yaml` and is not
+already before it. A host port
 whose answer becomes a command input is declared in `ess/domains/decision.yaml`: `CaseRevisions`
 (the `case_revision` of `Decide` and `TakeRecommendation`, story 11) and `ExpiryInstant` (the
 `expires_at` of `Request`, story 7). A port no command input comes from, such as `DecisionStore`,
@@ -239,11 +253,20 @@ is declared in Rust only.
     `story:selector-stop-names-set-aside-record`.
 21. `story:decisions-resume-the-held-run`: `decisions decide`, `take` and `record` over
     `--state` resume the run held for the request in the same invocation and print its next
-    state; `tick --state DIR --resume` resumes the runs of the requests it took on silence, and
-    no resume command is added.
+    state, for approval holds of `software-change@1` runs. A held question or outcome resumes
+    through `resume_decided_request` with the host's executor, and the command line refuses it
+    `NotRebuildable`. `tick --state DIR --resume` resumes every run held on a request decided by
+    silence, `b10x-loom stop` keeps a stopped run from any resume, and no resume command is added.
 22. `story:daemon-continues-a-decided-request`: on a tree a daemon serves, `decisions decide`,
     `take` and `tick` with `--tree` go through the daemon's `Decide` and `Tick` commands, and the
-    daemon continues the decided case with no further command, after a restart too.
+    decided case leaves `Waiting` and continues with no further command, after a restart too.
+23. `story:goals-grounds-and-free-answers`: a ground citing one goals entry, checked by rule D93
+    through a host port, and a free answer on a question request, as the contract at `00e3557`
+    declares them. The contract's members are story 1's copy; this story adds Loom's declarations
+    and the behaviour.
+24. `story:goals-entries-from-a-resolved-document`: a file-backed `GoalsEntries` provider. It
+    reads the resolved goals document (`sdc.goals/1`, as `sdc-goals resolve` writes it) that the
+    engine configuration names, for `tree run` and the daemon (low priority).
 
 Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enforced-limits`:
 `story:run-log-references-exec-file-changes` (the per-exec file-change reference) and
@@ -285,10 +308,14 @@ Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enfor
 - Changes to Canon, and changes to any artifact of `epic:protocol-tree-on-bindings`.
 - Raising `ess/intake/system.yaml` or `ess/commission/system.yaml`, moving the ESS toolchain, and
   `ordered:` enums (story 0 raises only `ess/system.yaml`, story 1 drops `ordered: true`).
-- SDC's contract extension of 2026-11-21 (`story:decision-contract-goals-grounds` of session
-  `sdc`): a ground kind for goals entries and a free answer on a decided request for the classes
-  scope-changing answer and finding. It is a later story of this epic, drafted once session `sdc`
-  sends the final line ranges; stories 1 to 14 do not wait on it.
+- Resuming a question or outcome hold from the command line, and a general rebuild of a commission
+  from its resume context. Session `sdc` holds no questions in slice runs driven through the
+  binary (`.engineering/drafts/e3-sdc-answers-11.md`, (a)), so that is a further story, not drafted.
+
+SDC's contract extension of 2026-11-21 is no longer out of scope: story 23 carries it. The free
+answer is keyed on the question kind, as the contract keys it (`when_subject: unblocks.kind !=
+question`, `~/beyond10x/sdc/ess/domains/decision.yaml:493`, `:571` at `00e3557`), not on the classes
+scope-changing answer and finding named earlier.
 
 ## Upstream
 
@@ -373,11 +400,19 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
 - An eval run with an override to `decider` is refused `EvalOverride` (story 3).
 - `ess/system.yaml` declares `format: ess/31`, `task drift` exits 0, and `CHANGELOG.md` names the
   raise in one `### Changed` bullet and in no `**Breaking:**` bullet (story 0).
-- At an outcome hold of a slice run, `decisions decide DR-… A --as timo --state DIR` records the
-  decision and prints the resumed run's last line `stopped: Completed` (story 21).
+- At an approval hold of a `software-change@1` run, `decisions decide DR-… A --as timo --state DIR`
+  performs the held request once and prints the resumed run's last line `stopped: …` (story 21).
+- At an outcome hold of a slice run, `resume_decided_request` with a scripted executor brings the
+  run to `stopped: Completed` (story 21).
+- A goals ground read from a fixture resolved goals document named in the engine configuration is
+  verified by `tree run`, and one whose entry digest differs is refused `digest_changed`
+  (story 24).
 - On a tree served by `tree serve` that waits on `DR-…`, `decisions decide DR-… A --as timo
   --tree STORE` exits 0, and the daemon brings the root to its terminal outcome with no further
   command (story 22).
+- A goals ground whose entry digest is unchanged after the goals document moved is verified with
+  the note `revision_moved`, and `decisions decide DR-q --answer "neither"` leaves the question
+  request Decided with that answer (story 23).
 - No test makes a model or network call; `task check` exits 0 on every story's commit.
 
 ## Source

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:observe-compares-generated-trees
 kind: story
-status: draft
+status: proposed
 title: An observe action compares two workspace directories by inventory and content digest
 summary: generated.matches over Substrate's guarded directory pages and digest-bound reads; links and special files refused; 10,000 entries and 4 MiB per tree; .git invisible
 tags:
@@ -34,7 +34,9 @@ scope:
   path: ess/domains/observation.yaml
 - confidence: inferred
   path: website/docs/guides/bindings.md
-revision: 8
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:59Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 

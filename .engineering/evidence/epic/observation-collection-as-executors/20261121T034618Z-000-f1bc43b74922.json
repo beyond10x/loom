@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T03:46:18Z",
+  "actor": "human:timo",
+  "artifact": "epic:observation-collection-as-executors",
+  "kind": "epic",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "approve, no findings",
+    "review": "review-result:observation-collection-as-executors-design-r3",
+    "outcome": "no-op"
+  }
+}

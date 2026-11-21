@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:dns-resolution-through-a-resolver-aperture
 kind: story
-status: draft
+status: proposed
 title: net.host.resolves resolves at a declared resolver through Substrate, once Substrate serves one
 summary: Blocked on a Substrate resolver surface; NXDOMAIN false with TTL 0; timeout unavailable; tested on a loopback responder
 tags:
@@ -32,7 +32,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: ess/domains/observation.yaml
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:55:01Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -92,7 +94,11 @@ configuration, as an aperture is (`AGENTS.md` § Bindings document).
 
 ## Waits on
 
-- `upstream-blocker:substrate-dns-resolver-aperture`.
+- `upstream-blocker:substrate-dns-resolver-aperture`. Session `substrate` drafted
+  `story:resolver-aperture-serves-dns` for it (`.engineering/drafts/e7-substrate-answer-1.md`). It
+  needs an ADR amending Substrate's ADR 0013 (a run has no resolver) before code, and that ADR
+  decides what a run may ask: expect a list of allowed names or a byte ceiling. This story is
+  rewritten against the ADR's choice when it is made, not before.
 - `story:tcp-reachability-through-an-aperture`: shared `ObserveOperation`, `observe.rs`, the network
   module, `crates/loom-bindings/src/observe/gates.rs`, `crates/loom-bindings/tests/observe_catalog.rs`,
   `crates/loom-bindings/tests/gate_run.rs`, the ESS files, `generated/rust/loom/` and

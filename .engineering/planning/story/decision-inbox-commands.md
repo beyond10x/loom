@@ -41,7 +41,7 @@ scope:
   path: website/docs/guides/decisions.md
 - confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:22Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -72,7 +72,7 @@ transitions:
   apply `Escalate` and `Supersede`. Both take no `--as`, and nobody is recorded as escalating or
   superseding: the contract's `Escalate` takes `request_id`, `escalate_to` and `reason`, and
   `Supersede` takes `request_id`, `superseded_by` and `reason`, with no principal
-  (`~/beyond10x/sdc/ess/domains/decision.yaml:748-751`, `:787-790`).
+  (`~/beyond10x/sdc/ess/domains/decision.yaml:746-749` at `00e3557`, `:785-788`).
 - Every command first runs `complete_pending` with the writers the command line has for the
   store (in this story the governor's `ExplicitDecisionWriter`), and `decide` and `take` complete
   the request they decided, so a decision made here is recorded before the command exits. A

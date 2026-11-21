@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:gate-program-identity-bound-to-spawn
 kind: story
-status: draft
+status: proposed
 title: Program admission is one unit, and a bound program runs the bytes it digested
 summary: The admission unit admits (name or absolute path, search path, workspace root), launches the real file read-only under its name, and verifies it after the run; the program port, git and gate commands use all three
 tags:
@@ -31,7 +31,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 12
+revision: 14
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:58Z", actor: "agent:sdc", revision: 14, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -87,7 +89,12 @@ interpreter must be one the sandbox shows (`/usr`, `/bin`, `/lib` and the roots 
 `confinement.rs:1029-1031`). A launch carries at most Substrate's 16 read-only files
 (`MAX_READ_ONLY_FILES`, `confinement.rs:1107-1109`): the program's mount plus those the action's
 confinement names; one that would carry more is refused `ProgramMountsExceeded` when the port is
-built, naming the action and the count.
+built, naming the action and the count. A git launch (`story:observe-git-changed`) and a gate
+command's launch (`story:gate-run-collects-a-gates-document`) cannot pass the limit: each carries
+exactly one read-only file, the admitted program, and nothing else names one (held there by
+`git_runs_the_admitted_file` and `a_gate_command_gets_only_its_program`). Were one to carry 17, the
+runner would refuse it `ScopeInvalid` before it starts (`confinement.rs:2386-2398`), which those
+stories record as `LaunchRefused`.
 
 `loom.bindings.ProgramRun` names the admitted program per action (`program`) and, for an action
 with `arguments_from`, the admitted arguments program (`arguments_program`), so two actions whose

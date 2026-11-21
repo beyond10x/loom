@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:report-formats-checked-before-the-table
 kind: story
-status: draft
+status: proposed
 title: A test, ESS conformance or Codegate report is checked and normalized before a result table reads it
 summary: report_format on a program (tests.run) and tests.report, ess.report, codegate.dependencies on a file; an inconsistent report is refused on ProgramRun or ObserveRun
 tags:
@@ -39,7 +39,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: ess/domains/observation.yaml
-revision: 8
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:59Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 

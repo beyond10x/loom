@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: epic:observation-collection-as-executors
 kind: epic
-status: draft
+status: proposed
 title: Loom collects files, documents, reports, processes and git as executors through Substrate, and a gates document runs with its evaluation in the governor
 summary: An observe executor reads the workspace through Substrate's guarded reads; programs run with their identity bound to the spawn; git runs confined; engineering-gates/1 is planned and evaluated in loom-governor; TCP and DNS wait on Substrate
 tags:
@@ -10,7 +10,9 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 3
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:57Z", actor: "agent:sdc", revision: 5, decided_on: {"recorded":{"review_outcome":8}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -155,9 +157,10 @@ In dependency order:
    domain, the shared record path, the `WorkspaceReader`, and `fs.file.exists`, `fs.dir.exists`,
    `text.contains`.
 2. `story:gate-program-identity-bound-to-spawn` (in the store, taken over from engineering-protocols):
-   one admission unit (a name or an absolute path, and a search path) answers the admitted program
-   or a refusal; the program port, git and the gate run's commands all go through it; the bytes
-   admission digested run, and a digest read is bounded.
+   one admission unit (a name or an absolute path, a search path, and the case's workspace root)
+   admits the program or refuses it, launches the admitted file read-only under its name, and
+   verifies it after the run; the program port, git and the gate run's commands all go through all
+   three; the bytes admission digested run, and a digest read is bounded.
 3. `story:observe-reads-documents`: `json.read`, `yaml.read`, `document.get`, `document.validates`.
 4. `story:observe-compares-generated-trees`: `generated.matches`.
 5. `story:report-formats-checked-before-the-table`: `engineering-tests/1`,
@@ -174,6 +177,10 @@ In dependency order:
    `upstream-blocker:substrate-aperture-dial-outcome`; lifts story 8's refusal of `net.tcp.reachable`.
 10. `story:dns-resolution-through-a-resolver-aperture`: behind
     `upstream-blocker:substrate-dns-resolver-aperture`; lifts story 8's refusal of `net.host.resolves`.
+11. `story:observe-git-in-a-linked-worktree`: `git.changed` in a workspace that is a linked git
+    worktree, its common git directory mounted read-only; waits on stories 6 and 8 and holds no
+    other story. What the mount exposes is a security point for the operator (§ Open 1 of
+    `.engineering/drafts/e7r5-changes.md`, carried from § Open 21 of `e7r3-changes.md`).
 
 The ten stories form one chain of `depends_on` edges, 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10, so no
 two of them share a wave. Each rewrites `generated/rust/loom/` (its `plan.json` and `PLAN.md` carry
@@ -182,7 +189,10 @@ the ESS source digest) and `CHANGELOG.md`; stories 1 to 6 and 8 to 10 also edit
 `crates/loom-bindings/src/program.rs`; 3 and 7 share `Cargo.lock`; 8, 9 and 10 share
 `observe/gates.rs` and the catalog test. Declaring every operation and refusal in story 1 was
 considered and not taken: `CHANGELOG.md` and `generated/rust/loom/` would still order every pair,
-and operations declared before they are served would load and then refuse.
+and operations declared before they are served would load and then refuse. Story 11 stands beside
+the chain: it edits `observe/git.rs` and `observe_git.rs` after 6 and 8, no ESS file, and shares
+only `CHANGELOG.md` with 9 and 10, which wait on Substrate; a wave holding it with either of them
+merges that file's `### Added` lines.
 
 ## SDC's forge-evidence readers
 
@@ -193,7 +203,8 @@ passes (argv, the arguments as one JSON object on standard input, an environment
 of the three formats, and the observation that names the program's admitted path and digest
 (story 2). It must not break them: story 2 is the one change to a reader's launch. A reader named by
 a bare program name resolves on the host's search path instead of Loom's own `PATH`, which is a
-`**Breaking:**` bullet and an item of § Open; a reader named by a workspace path runs as written.
+`**Breaking:**` bullet and § Open 3 of the e7r3 ledger (`.engineering/drafts/e7r3-changes.md`,
+for the operator); a reader named by a workspace path runs as written.
 No story changes the result table, the evidence `from` values a program takes, or the record
 fields; stories 2 and 5 add members to the `ProgramRun` observation only.
 
@@ -234,14 +245,17 @@ fields; stories 2 and 5 add members to the `ProgramRun` observation only.
   with a result table, or with `report_format: engineering-tests/1`, replaces it.
 - An extension catalog or an external provider in a gates project (`project.catalogs`,
   `project.providers`, `canon-engineering-assertions/src/lib.rs:391-410`, `:424-438`): refused by
-  story 8, see § Open.
+  story 8 (§ Open 5 of `.engineering/drafts/e7r3-changes.md`, settled by `sdc`: default kept).
 - Offline replay of a gate run's bundle by a command: the bundle is kept as a blob (story 8), and a
   replay command is a later story.
 - An ESS upgrade: every declaration fits `ess/25` and `ess` 0.86.0 (`ess/system.yaml:1`,
   `ess/ess-inputs.yaml:2`).
-- A per-file read bound above 1 MiB: it needs the shared driver opened with a larger
-  `max_file_bytes` (`crates/loom-intake-slice/src/confinement.rs:224-238`), a change to every
-  confined launch, so it is a later story (§ Open).
+- A per-file read bound above 1 MiB: a follow-up story of Loom's, not Substrate's: an
+  engine-configuration field for the bound, which the runner sets on the public
+  `HostConfig.max_file_bytes` (`crates/substrate-host/src/lib.rs:319`, Substrate `0.21.0`) after
+  `HostConfig::minimum` (`crates/loom-intake-slice/src/confinement.rs:229`). Lock files such as
+  `package-lock.json` exceed 1 MiB; until then they are refused `FileOverBound` with their path and
+  size, never skipped or passed.
 - What `epic:decision-requests-in-the-runtime`, `epic:concurrent-and-standing-case-trees` and
   `epic:tree-daemon-under-enforced-limits` own: decision requests, per-action limits enforced by
   Substrate (`story:action-limits-enforced`), limit events in the run log
@@ -254,7 +268,9 @@ fields; stories 2 and 5 add members to the `ProgramRun` observation only.
 Work order e7 of session `sdc`, 2026-11-21 (`.engineering/drafts/e7-request.md`), the coordinator's
 addition taking over `story:gate-program-identity-bound-to-spawn`, and revision e7r1 after the
 round-1 critics (`.engineering/drafts/e7-round-1-*.md`, `e7r1-changes.md`), and revision e7r2 after
-round 2 and the scope reports (`e7-round-2-*.md`, `scope-report-*.md`, `e7r2-changes.md`). Read:
+round 2 and the scope reports (`e7-round-2-*.md`, `scope-report-*.md`, `e7r2-changes.md`), and
+revision e7r3 after round 3 and the answers of sessions `sdc` and `substrate`
+(`e7-round-3-*.md`, `e7-sdc-answers-2.md`, `e7-substrate-answer-1.md`, `e7r3-changes.md`). Read:
 Loom at
 `61fd500b`; engineering-protocols at `0.16.0`; Canon at `0.9.0` (`8f1f4527`); Substrate at
 `0.21.0`; takt at `25c62df` through a helper agent whose citations were spot-checked;

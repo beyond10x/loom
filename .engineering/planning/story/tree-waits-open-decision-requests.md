@@ -16,7 +16,7 @@ relations:
 - depends_on: story:agent-node-run-records
 - depends_on: story:approvals-supplied-to-canon-evaluation
 - depends_on: story:decisions-resume-the-held-run
-revision: 8
+revision: 10
 ---
 ## Outcome
 
@@ -38,7 +38,7 @@ The request's subject is the subject of the action's evidence entries in the bin
 (`story:bindings-document`); Canon names none (session `canon`, 2026-11-21). An action whose
 evidence entries name more than one subject gives the request the subject `case` at the case
 revision (session `sdc`, 2026-11-21, answer f): a request has one subject
-(`~/beyond10x/sdc/ess/domains/decision.yaml:231-232`), and a binding may list several entries
+(`~/beyond10x/sdc/ess/domains/decision.yaml:231-232` at `00e3557`), and a binding may list several entries
 (`story:bindings-document` § Outcome). The tree hands the router no touched paths, so a
 `paths_touched` condition counts as matching (`story:escalate-when-conditions`). The router sets
 `expires_at` from the classes document through the `ExpiryInstant` port
@@ -97,7 +97,9 @@ they print two lines (`story:decisions-resume-the-held-run`): `unblocked: <case>
 `decisions … --tree` writes the tree's store, so it takes the store's one-writer lock as the
 `tree` commands do (`story:tree-run-command`). On a store a daemon serves, it is therefore refused
 `StoreServed`, naming the daemon's socket, as `story:tree-daemon` refuses any direct command that
-finds the lock held by a daemon (its § Outcome). This holds until
+finds the lock held by a daemon (its § Outcome). It exits 37, a status of `decisions` clear of
+the inbox's and of 30 to 36, and changes nothing. A store held by another direct command is
+refused `StoreInUse` (`story:tree-run-command`), with the same exit 37. This holds until
 `story:daemon-continues-a-decided-request` sends the decision through the daemon.
 
 The tree's `CaseApproval` implements the `AuthorityRecords` port of
@@ -217,6 +219,12 @@ principals, a recorded decider, no rule and no model call:
 - `decisions decide DR-… A --as timo --tree STORE` on a store no daemon serves, with `STORE`
   typed as a relative path, prints the last two lines `unblocked: <case> (DR-…)` and
   `continue: b10x-loom tree run STORE`, with `STORE` exactly as typed.
+- With `b10x-loom tree serve STORE` running on the store (`story:tree-daemon`),
+  `decisions decide DR-… A --as timo --tree STORE` exits 37. Standard error names `StoreServed`
+  and the daemon's socket, and the request and the case's log are byte-identical.
+- With the store's one-writer lock held by the test through the lock `story:tree-run-command`
+  takes, `decisions decide DR-… A --as timo --tree STORE` exits 37. Standard error names
+  `StoreInUse`, and the request and the case's log are byte-identical.
 - `tree verify` exits 0 after the run.
 - `docs/contracts/run-log-v1.json` is regenerated and names the decision events.
 - `task check` exits 0.

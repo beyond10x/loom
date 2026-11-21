@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:observe-git-changed
 kind: story
-status: draft
+status: proposed
 title: The observe port gains a launcher, and git.changed runs git through it with a fixed hardened argv and the host's base and subject
 summary: Merge-base diff of two host-given revisions, glob matched by Loom; missing revision unavailable, never false; repository configuration runs nothing
 tags:
@@ -38,7 +38,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: ess/domains/observation.yaml
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:59Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -71,10 +73,13 @@ What this does to story 1:
   launcher as well as the counting runner and asserts zero launches for every file and document
   operation, so a file operation that started using the launcher would fail it.
 
-When the observe port is built with a launcher, it admits `git` once through `admission::admit`
+When the observe port is built with a launcher for a document that binds `git.changed` or
+`engineering.gates`, it admits `git` once through `admission::admit`
 (`crates/loom-bindings/src/admission.rs`, `story:gate-program-identity-bound-to-spawn`) on the
 host's search path and the case's workspace root; a refusal there is `ObservePortRefused` with
 `refusal` `GitNotAdmitted` and the unit's `ProgramRefusal` in `program_refusal`, and no run exists.
+For a document that binds neither, git is not admitted, so a host without git still serves the file
+and document operations.
 Every git launch is built by the unit's `launch` (the real file mounted read-only, `argv[0]` its
 mount path) and followed by its `verify` (`ProgramChanged`), as for any bound program.
 
@@ -106,8 +111,9 @@ pinned-source helper.
 
 A workspace that is a linked worktree has a `.git` file pointing at a git directory outside the
 workspace, which the sandbox does not show (a child sees only the host paths the host names,
-`confinement.rs:1028-1034`); git then cannot find the repository and the operation is
-`Unavailable` with git's reason (§ Open of the ledger).
+`confinement.rs:1029-1036`); git then cannot find the repository and the operation is
+`Unavailable` with git's reason. `story:observe-git-in-a-linked-worktree` mounts the common git
+directory read-only and serves this case; until it lands, this answer stands.
 
 ## Why
 
@@ -132,7 +138,9 @@ runs outside Substrate.
 
 Waiting on this one: `story:gates-document-evaluated-in-the-governor` (edge added in this revision:
 both edit `generated/rust/loom/` and `CHANGELOG.md`) and `story:gate-run-collects-a-gates-document`
-(the launcher, `observe/git.rs`, `ess/domains/bindings.yaml`, `ess/domains/observation.yaml`).
+(the launcher, `observe/git.rs`, `ess/domains/bindings.yaml`, `ess/domains/observation.yaml`), and
+`story:observe-git-in-a-linked-worktree` (`observe/git.rs`, `observe_git.rs`; it holds no other
+story).
 
 ## ESS first
 
@@ -183,7 +191,8 @@ refused naming it, no evidence record.
 - A workspace with no repository, and a shallow clone missing the base: each `Unavailable`, `reason`
   naming the failed subcommand and its exit code.
 - Histories with no common ancestor: `Unavailable`, `reason` `git merge-base failed with exit 1: `.
-- A linked-worktree workspace: `Unavailable`, `reason` naming `rev-parse` and its exit code.
+- A linked-worktree workspace: `Unavailable`, `reason` naming `rev-parse` and its exit code
+  (`story:observe-git-in-a-linked-worktree` replaces this case).
 - `a_revision_that_looks_like_an_option_is_refused_before_git_runs`: an empty revision, one over 256
   bytes, starting with `-`, holding `..`, or a byte outside `[A-Za-z0-9._/~^@-]`: refused
   `RevisionInvalid`, and the counting launcher counts no launch.
@@ -204,6 +213,9 @@ The launch port and the port build:
   `NoLauncher`, and no `ObserveRun` exists.
 - `git_not_on_the_search_path_refuses_the_port`: `ObservePortRefused.refusal` `GitNotAdmitted`,
   `program_refusal` `ProgramNotFound`.
+- `a_document_without_git_operations_needs_no_git`: a port built with a launcher and a host search
+  path holding no git, for a document binding only `text.contains`, is built, and the action's
+  `ObserveRun.outcome` is `Known`.
 - `a_git_rewritten_after_admission_refuses_the_step`: refused `ProgramChanged`.
 - `git_runs_the_admitted_file`: each `ChildCommand` the recording launcher received has the
   admitted git's mount path as its program and that file as its one read-only file.

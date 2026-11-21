@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:gates-document-evaluated-in-the-governor
 kind: story
-status: draft
+status: proposed
 title: The governor plans and evaluates an engineering-gates/1 document with Canon's expression crate against the vendored catalog
 summary: loom_governor::gates::{plan, evaluate}; catalogs/engineering.yaml held to its sha256; not_applicable never pass; only the governor names canon_expr
 tags:
@@ -39,7 +39,9 @@ scope:
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/system.yaml
-revision: 5
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:55:00Z", actor: "agent:sdc", revision: 6, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:observe-executor-reads-workspace-files
 kind: story
-status: draft
+status: proposed
 title: An observe action reads workspace files through Substrate with no process, and its result table writes the evidence
 summary: Observe executor, loom.observation domain, fs.file.exists, fs.dir.exists, text.contains; 1 MiB per file as Substrate sets it; a link, FIFO or oversize file is a recorded refusal, never false
 tags:
@@ -47,7 +47,9 @@ scope:
   path: ess/system.yaml
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:58Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -113,13 +115,18 @@ The per-file bound is Substrate's: Loom opens its driver with `HostConfig::minim
 (`crates/loom-intake-slice/src/confinement.rs:229`), and Substrate `0.21.0` refuses a file over
 1 MiB with `workspace.file-limit` before reading it (`crates/substrate-guarded/src/fs.rs:516-530`).
 So a file of at most 1 MiB is read whole in one digest-bound read, and a larger one is refused
-`FileOverBound`. This epic does not raise the driver's limit.
+`FileOverBound`, never skipped and never read as a value. Substrate's refusal names no size, so the
+reader takes it from the parent's page (`DirectoryEntry.size`, substrate-wire `lib.rs:1550-1554`),
+and the run carries both in `ObserveRun.over_bound` (`path`, `size`, `bound`). This epic does not
+raise the driver's limit.
 
 Substrate gives one code, `workspace.path-escape`, for a link at any component, a FIFO, socket or
 device, a directory read as a file and a file read as a directory (`fs.rs:227-229`, `:519-521`,
 `:1552`). The reader tells them apart with one more guarded call, a directory page of the parent,
 which lists each entry as `file`, `directory` or `symlink` and omits FIFOs, sockets, devices,
-names that are not UTF-8, and `.git` (`fs.rs:843-870`):
+names that are not UTF-8, and `.git` (`fs.rs:843-870`). A page holds at most 1,000 entries and a
+`next_cursor` (substrate-wire `lib.rs:23`, `:1349`); the reader follows the cursor to the last page
+before it decides that a name is not listed:
 
 - `fs.file.exists` and `fs.dir.exists` read the parent's page and look the name up: `file` is
   `true` for the first and `false` for the second, `directory` the reverse; `symlink` is refused
@@ -132,6 +139,11 @@ names that are not UTF-8, and `.git` (`fs.rs:843-870`):
   `PathRefused`; `file` (the path changed kind between the two calls) is `ChangedDuringRead`.
 - A path with a `.git` component is `resource.not-found` to Substrate (`fs.rs:955-958`), so
   `fs.dir.exists(".git")` is `false` where upstream gives `true`.
+
+An `observe` action's `timeout_seconds` is at most 300, the executor's bound below the 3,600 every
+action may name (`MAX_TIMEOUT_SECONDS`, `crates/loom-bindings/src/lib.rs:34`); `load.rs` refuses a
+larger one `TimeoutOutOfRange`, naming 300, beside its check of 1 to 3,600 (`load.rs:185-191`). The
+default is 10 s.
 
 Refusals are recorded by the rule of the epic (§ Refusals): at load, `check` refuses the document
 with a `BindingsRefusalReason` and no run exists; when the observe port is built, it returns an
@@ -187,7 +199,8 @@ One commit changing only `ess/`:
 - `ess/domains/observation.yaml`, new domain `loom.observation`: `ObserveOutcome` (`Known`,
   `Unavailable`, `Refused`); `ObservedRead` (`path`, `size`, `sha256`); `ObserveRun` (`action`,
   `operation`, `arguments_sha256`, `reads`, `outcome`, `refusal` optional
-  `loom.observation.ObserveRefusal`, `reason` optional, `code` optional, `report_sha256` optional);
+  `loom.observation.ObserveRefusal`, `reason` optional, `code` optional, `report_sha256` optional,
+  `over_bound` optional `OverBound`: `path`, `size` optional, `bound`);
   the step enum `ObserveRefusal` (`PathRefused`, `NotRegular`, `NotUtf8`, `FileOverBound`,
   `ChangedDuringRead`, `ReaderUnserved`, `SubstrateRefused`); the port-build enum
   `ObservePortRefusal` (`NoReader`) and `ObservePortRefused` (`refusal`, `detail`).
@@ -237,6 +250,9 @@ Reads and results (each reads the record written and `ObserveRun.outcome`):
   `false`.
 - `fs.dir.exists(".git")` on a workspace holding a `.git` directory: the row for `false` (the
   narrowing against upstream above).
+- `a_name_past_the_first_page_is_found`: in a directory of 1,001 files, `fs.file.exists` on the
+  name that sorts last (on the second page): the row for `true`, which a reader that stopped after
+  one page would not give.
 - `text.contains` is `true` exactly when the file's bytes, read whole, hold the needle: a file of
   exactly 1 MiB (1,048,576 bytes) whose needle is its last 8 bytes gives the row for `true`, which
   a reader that stopped after any prefix would not.
@@ -250,15 +266,18 @@ Step refusals (each: `ObserveRun.outcome` `Refused`, `ObserveRun.refusal` as nam
 evidence record):
 
 - A link as the last component (listed `symlink` on the parent's page), its target inside the
-  workspace or not: `refusal` `PathRefused`, `code` `workspace.path-escape`, for each of the three
-  operations; the test asserts no record with the `false` row exists.
+  workspace or not: `refusal` `PathRefused` for each of the three operations, with `code`
+  `workspace.path-escape` for `text.contains` (its read gave it) and no `code` for `fs.file.exists`
+  and `fs.dir.exists` (they read only the page); the test asserts no record with the `false` row
+  exists.
 - A link in an earlier component (the parent's page refused): `refusal` `PathRefused`, for each of
   the three operations.
 - A FIFO at the path of `text.contains`: `refusal` `NotRegular`, within the action's deadline, with
   no writer held on it.
 - A directory at the path of `text.contains`: `refusal` `NotRegular`.
-- A file of 1 MiB + 1 byte under `text.contains`: `refusal` `FileOverBound`, `code`
-  `workspace.file-limit`.
+- `a_file_over_the_bound_is_named_with_its_size`: a file of 1 MiB + 1 byte under `text.contains`:
+  `refusal` `FileOverBound`, `code` `workspace.file-limit`, `ObserveRun.over_bound.path` the file's
+  path and `over_bound.size` 1,048,577; no record with the `false` row exists.
 - A file that is not UTF-8 under `text.contains`: `refusal` `NotUtf8`.
 - A fake reader whose read answers `workspace.path-escape` and whose parent page then lists the
   name as `file`: `refusal` `ChangedDuringRead`. (A file of at most 1 MiB is read in one slice, so a
@@ -305,8 +324,8 @@ No process and no host file access:
 
 Limits:
 
-- The wall time: an `observe` action's `timeout_seconds` above 300 is refused at load,
-  `TimeoutOutOfRange`.
+- The wall time: an `observe` action's `timeout_seconds` of 301 is refused at load,
+  `TimeoutOutOfRange`, naming 300; 300 is accepted (the executor's bound above).
 - A read still running at the deadline (default 10 s; the test uses a fake reader that blocks and a
   1 s timeout): `ObserveRun.outcome` `Unavailable`, `reason` `deadline`, and the table's
   `unavailable` row.
@@ -348,7 +367,7 @@ the `WorkspaceReader` trait and its implementation over `WorkspaceDriver`),
 `ExecutorSpec` literal at `:353`, the operation spelling, `UnknownOperation`),
 `crates/loom-bindings/src/load.rs` (the `fit` table at `:230-245` gains `operation` for `Observe`
 and `arguments_from` refused for it; `InvalidObserveArguments`; `PathNotInWorkspace` for observe
-paths), `crates/loom-bindings/src/lib.rs`, `crates/loom-bindings/Cargo.toml` (`serde_json = "1"`
+paths; the 300 s timeout bound for `Observe`), `crates/loom-bindings/src/lib.rs`, `crates/loom-bindings/Cargo.toml` (`serde_json = "1"`
 and `sha2 = "0.10"`; both are already in `Cargo.lock` through `b10x-loom-intake-slice`, so the lock
 changes only in `b10x-loom-bindings`' dependency list), `crates/loom-bindings/tests/observe_files.rs`
 (new), `crates/loom-bindings/tests/bindings_document.rs` (the reason match, the count, the guide
@@ -360,9 +379,10 @@ constructor on `SubstrateRunner`), `website/docs/guides/bindings.md`, `Cargo.loc
 ## Out of scope
 
 Documents, generated trees, report files, git and network (stories 3 to 6, 9, 10 of the epic).
-Following a link inside the workspace. A per-file bound above 1 MiB: it needs the driver opened
-with a larger `max_file_bytes` than `HostConfig::minimum` gives (`confinement.rs:224-238`), a
-change to the runner every confined launch shares, so it is a later story (§ Open of the ledger).
+Following a link inside the workspace. A per-file bound above 1 MiB: a later Loom story, an
+engine-configuration field for the bound that the runner sets on the public
+`HostConfig.max_file_bytes` (`crates/substrate-host/src/lib.rs:319`, Substrate `0.21.0`) after
+`HostConfig::minimum` (`confinement.rs:229`); lock files such as `package-lock.json` exceed 1 MiB.
 Limits Substrate enforces per process (`story:action-limits-enforced`): the file and document
 operations start none.
 

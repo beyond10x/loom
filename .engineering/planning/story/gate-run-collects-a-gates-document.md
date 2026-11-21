@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:gate-run-collects-a-gates-document
 kind: story
-status: draft
+status: proposed
 title: An engineering.gates action reads the gates at the base, collects every request through Loom's collectors and records the result through its table
 summary: Base read, project limits, preflight, admission per command, the process value, 300 s budget, freshness, source unchanged, story context from the host; replaces takt's GateRun
 tags:
@@ -39,7 +39,9 @@ scope:
   path: ess/domains/observation.yaml
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 8
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:55:00Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -80,7 +82,13 @@ observe port's launcher: a port built with a reader and no launcher, for a docum
    `timeout_seconds` cut to what is left of the total budget, 300 s by default; the port's builder
    takes the budget (`collection_budget`) and the clock it is measured on (`clock`), so a test sets
    3 s and a fake clock its fake launcher advances. Each observation carries `observed_at` (when its
-   collection ended) and `valid_until` (`observed_at` plus the project's `freshness_seconds`).
+   collection ended) and `valid_until` (`observed_at` plus the project's `freshness_seconds`). A
+   collector's step refusal inside a request (among them `PathRefused`, `FileOverBound`,
+   `NotRegular`, `NotUtf8`, `ChangedDuringRead`, `DocumentMalformed`) refuses the whole gate run
+   with that member in `ObserveRun.refusal`, `reason` naming the request, and `over_bound` carried
+   for `FileOverBound`; it never becomes an `Unavailable` observation and an `unknown` gate, and no
+   later request is collected. Only a collector's `Unavailable` outcome (an absent path, for
+   example) becomes an `Unavailable` observation.
 5. Every file whose sha256 the collection read, and every relative `executable:`, is read again
    after the last request; one that changed refuses the run (`SourceChanged`). This is narrower
    than upstream, which digests the whole workspace (`source_identity_with_inputs`,
@@ -181,7 +189,8 @@ none of which depends on `b10x-loom-bindings`, so no cycle; and `AGENTS.md` § N
   `story:gate-program-identity-bound-to-spawn`'s admission unit.
 
 Waiting on this one: `story:tcp-reachability-through-an-aperture` (`observe/gates.rs`,
-`observe_catalog.rs`, the ESS files), and through it `story:dns-resolution-through-a-resolver-aperture`.
+`observe_catalog.rs`, the ESS files), and through it `story:dns-resolution-through-a-resolver-aperture`;
+and `story:observe-git-in-a-linked-worktree` (`observe/git.rs`, which this story's `cat-file` shares).
 
 ## ESS first
 
@@ -348,6 +357,16 @@ Clock, budget and freshness (fake):
 - `story.id()` and `story.has_tag(...)` with no story in the context: each bundle observation's
   `outcome` is `Unavailable`, and the gate that uses it is `unknown` in the report.
 
+A collector's refusal inside a request (fake reader; each with no evidence record and no report):
+
+- `a_link_in_a_gate_request_refuses_the_run`: a `text.contains` request on a path the parent's page
+  lists as `symlink`: refused `PathRefused` after commands, `reason` naming the request.
+- `an_over_bound_gate_input_refuses_the_run`: a `text.contains` request on a file of 1 MiB + 1 byte:
+  refused `FileOverBound` after commands, `ObserveRun.over_bound.path` the file and
+  `over_bound.size` 1,048,577; the input is neither skipped nor read as `false`.
+- `an_absolute_path_in_a_gate_request_refuses_the_run`: a `text.contains` request on `/etc/passwd`:
+  refused `PathRefused` after commands, and the fake reader counts no read.
+
 Source:
 
 - A workspace file read by `text.contains` and rewritten by a later `process.run`: refused
@@ -415,7 +434,7 @@ Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the sto
 - **Files (tests):** `crates/loom-bindings/tests/gate_run.rs` (new), `tests/observe_catalog.rs` (new), `tests/fixtures/gates/` (four copied fixtures) — cited, story § Files
 - **Files (docs):** `website/docs/guides/bindings.md` — cited, story § Files and Acceptance
 - **Called, not changed:** `observe/launch.rs`, `crates/loom-bindings/src/admission.rs`, `crates/loom-governor` `gates::{plan, evaluate}` — cited, story § Files / Outcome
-- **Symbols:** `ObserveOperation::EngineeringGates`, `ChangeContext.{story_id, story_tags}`, `ObserveRefusal::{GatesInputUnreadable, RequestNotCollectable, CommandNotDeclared, ProjectInvalid, ExtensionNotServed, SourceChanged, ProgramNotAdmitted, NoExitCode}`, `ObserveRun.{program_refusal, bundle_sha256}`, `ProcessValue`, `GateObservation`, `GateProgram`, `GateBundle` — cited, story § ESS first
+- **Symbols:** `ObserveOperation::EngineeringGates`, `ChangeContext.{story_id, story_tags}`, `ObserveRefusal::{GatesInputUnreadable, GatesRefused, RequestNotCollectable, CommandNotDeclared, ProjectInvalid, ExtensionNotServed, SourceChanged, ProgramNotAdmitted, ExitContradictsReport}`, `ObserveRun.{program_refusal, gates_refusal, bundle_sha256}`, `ProcessValue`, `GateObservation`, `GateProgram`, `GateBundle` — cited, story § ESS first
 - **Symbols (existing):** `SubstrateRunner::run_child` `crates/loom-intake-slice/src/confinement.rs:475`; `ChildExit` and `ChildOutput` re-exported at `confinement.rs:19-22`, built at `:887-894`; `CanonGovernor::try_observations` `crates/loom-governor/src/lib.rs:1131` — cited
 - **Also likely:** `crates/loom-bindings/Cargo.toml` — inferred, only if `serde_json` or similar is needed for `ProcessValue`; the story says it adds no manifest line
 - **Documents:** `website/docs/guides/bindings.md`, `CHANGELOG.md`; no `workflows/`, `protocols/` or `principles/` file — cited

@@ -26,7 +26,7 @@ scope:
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/system.yaml
-revision: 16
+revision: 17
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:19Z", actor: "agent:sdc", revision: 16, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -107,12 +107,12 @@ and rule_final at `A5`. A host presets document may give `budget_overrun` and ma
 `limit_hit`.
 
 `escalation` is a policy row, not a class (point 9): it gives the holder of a request after
-Escalate, and the contract fixes that holder as `person` (`~/beyond10x/sdc/ess/domains/decision.yaml:720-724`,
+Escalate, and the contract fixes that holder as `person` (`~/beyond10x/sdc/ess/domains/decision.yaml:760-764` at `00e3557`,
 third message of session `sdc`). The grant table carries no escalation mode. The document's
 `escalation.mode` (`person` at A2 to A4, `final` at A5, `autonomy-levels.md:385-387`) is
 redundant with the holders: the contract's guards read the request's holder, not the level
 (`~/beyond10x/sdc/docs/decisions.md:90-92`); suppression is what `decider_final`, `rule_final`
-and `rule_and_decider_final` mean (`decision.yaml:184`); and every A5 cell of the presets is one of
+and `rule_and_decider_final` mean (`decision.yaml:186`); and every A5 cell of the presets is one of
 those holders, the rollback cell included, now "R: end" (`autonomy-levels.md:253`). With rule 5,
 no escalation in an eval run reaches a person. Where a run's holder and the document's mode would
 disagree, a lowering at A5 in a run that is not an eval run or a raise at A1, the holder governs

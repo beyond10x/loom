@@ -29,7 +29,7 @@ scope:
   path: crates/loom-sdk/src/decisions.rs
 - confidence: cited
   path: ess/domains/decision.yaml
-revision: 12
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:22Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -47,11 +47,11 @@ compared as instants (both parsed as RFC 3339, not as strings):
   `story:decision-request-entity`), then completes that request with the writers it was given
   (`story:decided-record-written-then-recorded`);
 - without one, it applies `Expire` with `at`; the request is Expired ("the case stays stopped",
-  `~/beyond10x/sdc/ess/domains/decision.yaml:845`).
+  `~/beyond10x/sdc/ess/domains/decision.yaml:843` at `00e3557`).
 
 An Escalated request keeps its `expires_at` and its default on silence, so it is handled as an
 Open one. A request with no `expires_at`, or one after `at`, is not touched: the tick never sends
-it a command the contract would refuse `NotDue` (`decision.yaml:669-674`, `:827-831`). A case
+it a command the contract would refuse `NotDue` (`decision.yaml:667-672`, `:825-829`). A case
 whose revision `revisions` cannot answer stops the tick with an error naming the case; requests it
 already ended stay ended, and the next tick goes on from there. A tick answers a `TickReport`
 (taken on silence, expired, completed, each by request id). The tick completes only the requests
@@ -89,9 +89,9 @@ Item 3 of the request: "expiry with an optional default on silence (fired by a h
 passes the instant)" (`~/beyond10x/sdc/docs/decisions.md:308-309`). Session `sdc` answered on
 2026-11-21 (point 8): a host tick with an explicit instant argument, a CLI command now and a
 daemon later, and no clock read inside the transition; the contract now takes the instant as `at`
-on `Expire` (`decision.yaml:821`) and refuses a tick before `expires_at` (`decisions.md:84-86`).
+on `Expire` (`decision.yaml:819`) and refuses a tick before `expires_at` (`decisions.md:84-86`).
 Commission sets no timer (`AGENTS.md:423`), and the contract names no one who fires `Expire` or
-the silence `TakeRecommendation` at `expires_at` beyond the Driver actor (`decision.yaml:293-303`).
+the silence `TakeRecommendation` at `expires_at` beyond the Driver actor (`decision.yaml:291-301`).
 Loom's `TakeRecommendation` takes the case revision the record is written at (answer e), which
 the SDC command has not, so the tick needs it from the host.
 
@@ -122,7 +122,7 @@ result can come only from `at`:
 - A request without a default ticked at `2099-01-01T10:00:01Z`, past its expiry, is Expired and has
   no record.
 - A request with a non-strong recommendation cannot carry a default on silence (the invariant of
-  `decision.yaml:279`), so no tick decides it; ticked past its expiry it is Expired.
+  `decision.yaml:277`), so no tick decides it; ticked past its expiry it is Expired.
 - A request with no `expires_at` is untouched by a tick at `2099-12-31T23:59:59Z`.
 - A second tick at the same instant answers an empty report and changes no byte of the store.
 - A store holding, beside a request the tick takes, a request Decided without a record before the
@@ -198,4 +198,4 @@ Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the sto
   - `crates/loom-sdk/src/lib.rs` — only if a `pub mod decisions` or re-export line is edited here (inferred, the inbox adds it). Unordered against `story:agent-selects-the-connectors-relay`, `story:child-launches-through-confinement-adapters`, `story:connectors-relay-client` and `story:engineering-registry-calls-replaced`, which also cite it.
   - `story:decision-suspension-reason` has no `depends_on` edge to this story and touches `crates/loom-commission` and `crates/loom-cli/tests/resume_after_grant.rs`; it shares no file with this story.
 - **Safety fact:** nothing outside `crates/loom-decision` reads `TickReport` or the new `tick`, so adding both changes no existing caller — step 2 (`git grep -n 'loom-decision\|FileDecisionStore\|ExplicitDecisionWriter' -- crates` finds nothing in the tree), unproven
-- **Safety fact:** the contract already refuses what a careless tick would send. `Expire` refuses `NotDue` (`~/beyond10x/sdc/ess/domains/decision.yaml:782-786`) and `SilenceHasDefault` (`:787-791`). `TakeRecommendation` refuses `NotDue` (`:625-630`) and `NoDefaultOnSilence` (`:619-624`). The tick's filter is an optimisation, not the guard — step 2, unproven
+- **Safety fact:** the contract already refuses what a careless tick would send. `Expire` refuses `NotDue` (`~/beyond10x/sdc/ess/domains/decision.yaml:825-829`) and `SilenceHasDefault` (`:830-834`). `TakeRecommendation` refuses `NotDue` (`:667-672`) and `NoDefaultOnSilence` (`:661-666`). The tick's filter is an optimisation, not the guard — step 2, unproven

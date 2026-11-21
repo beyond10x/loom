@@ -20,7 +20,7 @@ scope:
   path: crates/loom-decision/tests/routing.rs
 - confidence: cited
   path: ess/domains/decision.yaml
-revision: 17
+revision: 18
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:20Z", actor: "agent:sdc", revision: 17, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -37,7 +37,7 @@ absent), the decision store, a citation resolver, the instant, and an `ExpiryIns
 `expires_after` into an instant. Loom lists no principal itself.
 
 The host gives the expiry instant because the contract takes `expires_at` as an input of `Request`
-(`~/beyond10x/sdc/ess/domains/decision.yaml:415`, `:444`), and `Timestamp` is a string
+(`~/beyond10x/sdc/ess/domains/decision.yaml:413` at `00e3557`, `:442`), and `Timestamp` is a string
 (`generated/rust/loom/src/primitives.rs:25`): `crates/loom-decision` does no time arithmetic and
 its `Cargo.toml` gains no dependency. Each host implements the port with its own clock: the slice
 in `story:approval-decisions-resume-held-runs`, whose implementation
@@ -81,10 +81,10 @@ Opening:
   (`decision.yaml:95`, `:206-210`). The second option of an outcome
   is "leave it untaken" because Canon's `pending_decisions` offers only `[taken]`
   (`story:pending-decisions`, session `canon`, 2026-11-21) and a request needs two options
-  (`decision.yaml:422-425`); session `sdc` accepted it on 2026-11-21 (answer d), and the contract
+  (`decision.yaml:420-423`); session `sdc` accepted it on 2026-11-21 (answer d), and the contract
   now says so (`decision.yaml:67`).
 - The denying option, wherever a rule below names it, is the one whose `consequence.grant` is
-  `denied` (session `sdc`, 2026-11-21, third message; `decision.yaml:595-597`). Only an approval
+  `denied` (session `sdc`, 2026-11-21, third message; `decision.yaml:593-595`). Only an approval
   has one; an outcome and a question have none.
 - `question_key` is `<case>|<action>|<question id or empty>` and `request_id` is
   `DR-<case>-<action or question id>-<n>`, `n` one more than the requests already stored under the
@@ -134,7 +134,7 @@ Opening:
 
 Routing, per holder (`decision.yaml:184-186`, `decisions.md:94-108`); every proposal passes
 `check_grounds` first and is recorded through `Recommend`, verified or withheld. An escalation is
-`Escalate` to the escalation person, which sets the holder to `person` (`decision.yaml:762-766`).
+`Escalate` to the escalation person, which sets the holder to `person` (`decision.yaml:760-764`).
 
 Under `person` the router calls no decider. It scans `list` for a Decided, not superseded request
 with the same `question_key` and subject revision; if there is one, it builds a reply from it, a
@@ -146,8 +146,8 @@ request's `no_recommendation_reason` is `no prior decision` or the check's reaso
 
 Under `rule_and_decider*` the rule's verified proposal is recorded with strength `strong`, whatever
 strength the rule's reply gives: the contract makes the rule's verdict the strong recommendation
-the decider takes (`decision.yaml:634`), and `TakeRecommendation` takes only a strong one
-(`:662`).
+the decider takes (`decision.yaml:632`), and `TakeRecommendation` takes only a strong one
+(`:660`).
 
 An absent decider or rule port is a failed result of that port. The contract is final and has no
 cause for a missing port; it names a "missing, failed or withheld" decider result under the final
@@ -182,7 +182,7 @@ lines). The rule for a withheld rule proposal under `rule_and_decider*` is answe
 
 The holder alone decides whether an escalation goes to a person or is suppressed: the request
 stores its holder and the guards read it, not the level (`decisions.md:90-92`), and an Escalate
-always sets the holder to `person` (`decision.yaml:762-766`). There is no run-wide escalation
+always sets the holder to `person` (`decision.yaml:760-764`). There is no run-wide escalation
 mode (`story:autonomy-grant-table`): the document's `escalation.mode` (`person` at A2 to A4,
 `final` at A5, `autonomy-levels.md:385-387`) is what the presets' holders already say, every A5
 cell being a final holder (`autonomy-levels.md:253`). So in a run that is not an eval run a

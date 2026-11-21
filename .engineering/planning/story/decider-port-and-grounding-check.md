@@ -24,7 +24,7 @@ scope:
   path: crates/loom-decision/tests/grounding_check.rs
 - confidence: cited
   path: ess/domains/decision.yaml
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:19Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -72,7 +72,7 @@ transitions:
   none" and "no ground supports null" (`decision-grounds.sh:89-95`). A failure gives
   `no recommendation: decider failed: <Unavailable or InvalidReply>: <what went wrong>`. Both give
   a refused `Recommend` input with no option, strength `none`, no default on silence and no
-  grounds; the `withheld` outcome clears those anyway (`~/beyond10x/sdc/ess/domains/decision.yaml:470-481`).
+  grounds; the `withheld` outcome clears those anyway (`~/beyond10x/sdc/ess/domains/decision.yaml:496-515` at `00e3557`).
 - A verified report reads `N grounds, all resolve`; a refused one reads `no recommendation: `
   followed by the reasons joined by `; ` (`decision-grounds.sh:100-101`).
 - A `Take` reply proposes nothing of its own: `check_grounds` checks the recorded recommendation's
@@ -102,9 +102,9 @@ Item 1 of the request: "a recommendation is accepted only when every ground reso
 (`crates/loom-executor/src/selection.rs:106`): the decider is given only what it may choose from
 and an answer outside it is refused, never repaired. Placement: a port trait and plain types may
 live outside Commission; the citations that need a Canon case resolve in a Canon-linked crate
-(`AGENTS.md:433-434`), which is why the resolver is a port here. The SDC `Recommend` input requires
-`recommended_option` (`decision.yaml:451`), yet a refused check of an `Escalate` or a failure has
-no option; this story makes it optional in Loom's copy (below).
+(`AGENTS.md:433-434`), which is why the resolver is a port here. The SDC `Recommend` input takes
+`recommended_option` as `Optional<OptionLetter>` (`decision.yaml:465`), and a refused check of an
+`Escalate` or a failure has no option; Loom's copy declares it optional too (below).
 
 ## Waits on
 
@@ -116,8 +116,8 @@ through it.
 
 `ess/domains/decision.yaml` gains `DeciderInput`, `OfferedSource`, `DeciderReply` (`Propose`,
 `Take`, `Escalate`), `DeciderFailure` (`Unavailable`, `InvalidReply`), `CitationVerdict` and
-`GroundingRefusal` (one variant per reason above), and `Recommend`'s `recommended_option` becomes
-`Optional<OptionLetter>`. On that commit `task drift` fails, and
+`GroundingRefusal` (one variant per reason above), and `Recommend`'s `recommended_option` is
+`Optional<OptionLetter>` in Loom's copy, as in the contract. On that commit `task drift` fails, and
 `crates/loom-decision/tests/grounding_check.rs` does not compile.
 
 ## Acceptance

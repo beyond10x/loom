@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:observe-reads-documents
 kind: story
-status: draft
+status: proposed
 title: An observe action reads JSON and YAML documents exactly and validates one against a local schema
 summary: json.read, yaml.read, document.get, document.validates; exact numbers, YAML floats and tags refused, no remote schema reference
 tags:
@@ -28,6 +28,8 @@ scope:
 - confidence: cited
   path: crates/loom-bindings/src/tree.rs
 - confidence: cited
+  path: crates/loom-bindings/tests/fixtures/schema-verdicts
+- confidence: cited
   path: crates/loom-bindings/tests/observe_documents.rs
 - confidence: cited
   path: crates/loom-bindings/tests/observe_files.rs
@@ -37,7 +39,9 @@ scope:
   path: ess/domains/observation.yaml
 - confidence: inferred
   path: website/docs/guides/bindings.md
-revision: 7
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:54:58Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -76,7 +80,12 @@ error is (`src/lib.rs:157-159`). Loom already parses numbers exactly: `arbitrary
 this workspace (`AGENTS.md` § Connectors), and `jsonschema` 0.52.1 is in the lock through
 `b10x-loom-resource` (`Cargo.lock:769`), which takes it with `default-features = false`
 (`crates/loom-resource/Cargo.toml:15`), so no HTTP or file resolver is compiled in. Upstream uses
-`jsonschema` 0.33.0; a verdict that differs between the two versions is § Open of the ledger.
+`jsonschema` 0.33.0. The build holds no second library, so a verdict that differs between the two
+versions is found against recorded fixtures: `crates/loom-bindings/tests/fixtures/schema-verdicts/`
+holds schema and document pairs, each with the verdict engineering-protocols `0.16.0` gave for it
+(recorded once outside the build, the command and the tag written beside the list), and a pair
+whose two verdicts differ names that in its `difference` member, so the difference is reported,
+never silent.
 
 ## Waits on
 
@@ -152,6 +161,10 @@ record. A table refusal (`ResultNotInTable`) is the step's refusal of
   test gives a schema whose only `$ref` is `file:///etc/passwd` and the fake reader counts no read
   of it.
 - A schema `jsonschema` cannot compile: refused `SchemaInvalid`.
+- `schema_verdicts_match_upstream_or_name_the_difference`: for each pair under
+  `tests/fixtures/schema-verdicts/`, `document.validates` gives the recorded upstream verdict, or
+  the pair's `difference` member names the difference; a pair whose verdict differs with no
+  `difference` fails the test, naming the pair and both verdicts.
 - A document of 1 MiB + 1 byte: refused `FileOverBound` (story 1's).
 - `no_file_or_document_operation_starts_a_process` (story 1) covers the four operations: its
   counting runner counts no launch for each.
@@ -170,7 +183,8 @@ argument sets: `path`; `path`, `pointer`, optional `format`; `path`, `schema`; t
 naming the bound passed), `crates/loom-bindings/Cargo.toml` (`jsonschema = { version = "0.52.1",
 default-features = false }`, as `crates/loom-resource/Cargo.toml:15`; `serde_json` is story 1's;
 `Cargo.lock` gains `jsonschema 0.52.1` in `b10x-loom-bindings`' dependency list and no package),
-`crates/loom-bindings/tests/observe_documents.rs` (new), `crates/loom-bindings/tests/observe_files.rs`
+`crates/loom-bindings/tests/observe_documents.rs` (new),
+`crates/loom-bindings/tests/fixtures/schema-verdicts/` (new), `crates/loom-bindings/tests/observe_files.rs`
 (the no-process test's operation list), `Cargo.lock`, `CHANGELOG.md`.
 
 ## Out of scope

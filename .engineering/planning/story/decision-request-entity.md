@@ -34,7 +34,7 @@ scope:
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/ess/loom-decision.domain-graph.json
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -46,7 +46,7 @@ Loom's ESS has a domain `loom.decision` (`ess/domains/decision.yaml`) whose enti
 level, class and holder, the eligible principals and the one it is addressed to, its
 recommendation and grounds, its escalation, its decision with the case revision it was taken at
 (`decided_case_revision`), the Canon record the decision produced, and its supersession. The
-domain is taken from `~/beyond10x/sdc/ess/domains/decision.yaml` as session `sdc` declared it
+domain is taken from `~/beyond10x/sdc/ess/domains/decision.yaml` (at `00e3557`) as session `sdc` declared it
 final on 2026-11-21, with its guards as written, changed only where listed below. It has eight
 commands: `Request`, `Recommend`, `Decide`, `TakeRecommendation`, `RecordProduced`, `Escalate`,
 `Supersede` and `Expire`.
@@ -76,27 +76,27 @@ answers (third message):
 
 - An option's consequence names the kind of Canon record it produces, `produces`, absent when it
   produces none (`decision.yaml:95`); an outcome's "leave it untaken" produces none (`:67`).
-- The denying option is the one whose `consequence.grant` is `denied` (`:553-555`); no other field
+- The denying option is the one whose `consequence.grant` is `denied` (`:595`); no other field
   marks it.
-- `Escalate` always sets the holder to `person` (`:720-724`), so a decider can no longer decide
+- `Escalate` always sets the holder to `person` (`:760-764`), so a decider can no longer decide
   the request.
-- `RecordProduced` with the record already stored changes nothing (`:665-670`); a different
-  record is refused `ProducedRecordConflict` (`:671-675`); on a request whose decided option
-  produces no record it is refused `NoRecordToProduce` (`:676-680`).
-- `Expire` takes the tick's instant `at` (`:776`); `Expire`, and `TakeRecommendation` by
-  `silence`, before `expires_at` or on a request with none are refused `NotDue` (`:625-630`,
-  `:782-786`).
-- `Request` in class `escalation` is refused `NotARequestClass` (`:401-404`).
+- `RecordProduced` with the record already stored changes nothing (`:708-713`); a different
+  record is refused `ProducedRecordConflict` (`:714-718`); on a request whose decided option
+  produces no record it is refused `NoRecordToProduce` (`:719-723`).
+- `Expire` takes the tick's instant `at` (`:819`); `Expire`, and `TakeRecommendation` by
+  `silence`, before `expires_at` or on a request with none are refused `NotDue` (`:667-672`,
+  `:825-829`).
+- `Request` in class `escalation` is refused `NotARequestClass` (`:416-419`).
 
 Changes from the SDC file:
 
 - A decision class is `DecisionClassId`, a newtype over `String`, not the enum of
-  `decision.yaml:174-176`; `budget_overrun` and `limit_hit` are built in (session `sdc`,
-  2026-11-21, point 9; the file says so in prose, `:178`). The guard `decision_class ==
-  escalation` (`:402`) compares with the text `"escalation"`. The domain checks no class beyond
+  `decision.yaml:176-178`; `budget_overrun` and `limit_hit` are built in (session `sdc`,
+  2026-11-21, point 9; the file says so in prose, `:180`). The guard `decision_class ==
+  escalation` (`:417`) compares with the text `"escalation"`. The domain checks no class beyond
   `escalation`; `story:autonomy-grant-table` validates it against the host's classes document.
 - `Decide` and `TakeRecommendation` take `case_revision`, the case revision at the decision, kept
-  as `decided_case_revision` (answer e); the SDC inputs (`:518-524`, `:591-596`) have none. The
+  as `decided_case_revision` (answer e); the SDC inputs (`:547-554`, `:633-638`) have none. The
   record is written at that revision (`story:decided-record-written-then-recorded`).
 - `Request` takes `record_key`, the record id the request's decision would produce at the case
   revision when it is opened (`<capability>@r<N>` for an approval, `<outcome>/<decision>@r<N>`
@@ -105,15 +105,15 @@ Changes from the SDC file:
   `open_for_record`, the Open or Escalated request the runtime found in the store for that key, if
   any. With `open_for_record` given, `Request` is refused `RecordKeyOpen` naming that request, and
   nothing is opened (answer g; the coordinator chose refusal over supersession). The SDC file
-  states this rule in prose only (`:517`; `~/beyond10x/sdc/docs/decisions.md:225-226`), so Loom
+  states this rule in prose only (`:546`; `~/beyond10x/sdc/docs/decisions.md:225-226`), so Loom
   enforces it here.
 - `EscalationSuppressedRecord` is declared: the request id, class, subject at revision, reasons,
   `best` if any, and the cause (`SuppressionCause`: `escalate`, `failure`, `withheld`, `veto`,
   `rule_escalate`), with the instant it was kept. The SDC file names the event
-  `escalation_suppressed` only in prose (`decision.yaml:184`, `:716`); the type is named apart
-  from the error `EscalationSuppressed` (`:351-354`). `story:decision-routing-by-holder` writes
+  `escalation_suppressed` only in prose (`decision.yaml:186`, `:759`); the type is named apart
+  from the error `EscalationSuppressed` (`:366-369`). `story:decision-routing-by-holder` writes
   it through the port; `story:escalate-when-conditions` adds the cause `condition`.
-- The actor `Driver` (`decision.yaml:286-296`) is `loom.decision.Runtime`; `Person` and `Decider`
+- The actor `Driver` (`decision.yaml:291-301`) is `loom.decision.Runtime`; `Person` and `Decider`
   keep their commands.
 
 Format. Loom pins `ess` 0.86.0 (`ess/ess-inputs.yaml:2`, `.github/workflows/check.yml:60`), and
@@ -122,9 +122,9 @@ SDC file declares `format: ess/37` and needs `ess 0.96` (`~/beyond10x/sdc/ess/sy
 `~/beyond10x/sdc/ess/ess-inputs.yaml:2`). At `ess/31` the copy keeps, as the SDC file writes them:
 
 - `[]` stored by `sets:` into the required lists `grounds` and `decision_reasons`
-  (`~/beyond10x/sdc/ess/domains/decision.yaml:448-449`, `:509`), valid from `ess/31` (0.69.0);
+  (`~/beyond10x/sdc/ess/domains/decision.yaml:446-447`, `:507`), valid from `ess/31` (0.69.0);
 - `coalesce(produced_record.record, "") == input.produced.record` in `already-recorded`
-  (`:712`), a call on the left of a comparison, valid from `ess/29` (0.67.0).
+  (`:710`), a call on the left of a comparison, valid from `ess/29` (0.67.0).
 
 It drops one construct: `ordered: true` on `Strength` (`:109`) and `AutonomyLevel` (`:171`),
 which needs `ess/36` (0.91.1). Session `sdc` accepted the drop on 2026-11-21: no guard compares a
@@ -154,8 +154,14 @@ guard need; both stories change `ess/system.yaml`.
 
 `ess/domains/decision.yaml`, declared in `ess/system.yaml` and listed in `ess/ess-inputs.yaml`:
 the types (with `DecisionClassId`, `EscalationSuppressedRecord` and `SuppressionCause`), entity,
-actors, errors (the twelve of the SDC file and `RecordKeyOpen`), commands, events (the nine of the
-SDC file) and views above, under `format: ess/31`. On that commit `task drift` fails, and
+actors, errors (the fourteen of the SDC file at `00e3557`, `OptionOrAnswer` and `AnswerNotAllowed`
+included, and `RecordKeyOpen`), commands, events (the nine of the SDC file) and views above, under
+`format: ess/31`. The copy holds every declaration of the contract, its guards included: the goals
+ground source, the citation's `entry` and `digest`, the optional `Ground.supports`, and the free
+answer (`recommended_answer`, `decided_answer`, `Decide.answer`) with its two guards. The crate
+answers those guards as it answers every outcome. The behaviour behind the goals and answer
+members is `story:goals-grounds-and-free-answers`, whose tests hold the free-answer guards and add
+only Loom's own declarations to this file. On that commit `task drift` fails, and
 `crates/loom-decision/tests/decision_request.rs` and `crates/loom-conformance/src/decision.rs` do
 not compile.
 
@@ -187,7 +193,7 @@ not compile.
 - `Recommend` with `check_verdict: refused` clears any earlier recommendation and sets
   `no_recommendation_reason` to the report; a verified one with no ground or strength `none` is
   refused `UngroundedRecommendation`; a verified non-strong one with `default_on_silence` is
-  refused `NoDefaultOnSilence`; neither invariant of `decision.yaml:270-272` can be broken by any
+  refused `NoDefaultOnSilence`; neither invariant of `decision.yaml:275`, `:277` can be broken by any
   sequence of the eight commands (a test drives random sequences over a fixed request).
 - Under `holder: rule_and_decider_final`, `Decide` by `decider:x` on the option whose
   `consequence.grant` is `denied` is Decided, and on the option whose `grant` is `granted` is
