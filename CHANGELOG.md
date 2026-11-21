@@ -24,6 +24,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom run --confinement local --local-reason <TEXT>`; with `--state` it is refused, exit 2 (story:confinement-opens-from-engine-config)
 - `TestRunner::local_reason`, `confinement::local_label`: every confinement line names `local (<reason>)`; `ResumeHost::check` refuses it (story:confinement-opens-from-engine-config)
 - `loom_connectors::relay::ConnectorsRelay` reads and writes over the Connectors wire at a loopback relay URL, no credential (story:connectors-relay-client)
+- `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
 
 ### Changed
 
@@ -39,6 +40,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `ConfinementRefusal` gains `LocalReasonMissing`, a blank or absent `local` reason (story:confinement-opens-from-engine-config)
 - ESS moves from 0.86.0 to 0.96.0 (`ess-conformance`, `ess-primitives`, the CLI CI installs); generated files drop their `model digest` line (story:ess-096-upgrade)
 - **Breaking:** `HoldSuspensionOutcome` gains `IncompleteRequest` (`SuspensionRequestIncomplete`) for a mixed hold, before `AlreadyHeld`; a non-`Decision` hold with no request is held (story:ess-096-upgrade)
+- **Breaking:** `ConfinementRefusal` gains `NoRunner`, bindings with no runner to start them (story:bound-commands-run-confined)
+- **Breaking:** bound commands start only through `IntentRequest.runner`; an opt-in selects `local` (story:bound-commands-run-confined)
 
 ### Deprecated
 

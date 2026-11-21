@@ -47,6 +47,7 @@
 //! | [`StopReason::StepBudget`] | `Waiting` | a budget ended the run while an effect port's last answer for a request was pending. The slice's own effect ports never answer pending; the stop is the one above, with no detail |
 //! | [`StopReason::NoLocalExecutor`] | `NoPerformableAction` | the pick is not `software-change@1`; the case opens and one frontier is read. [`SliceRun::unperformed`] carries the actions the outcome names, each once, in frontier order |
 //! | [`StopReason::NoLocalExecutor`] | none: no case is opened | the pick is a protocol the request's action bindings bind ([`crate::bindings`]) and one of its actions has no command; the detail names it, and [`SliceRun::unperformed`] carries every action with no command, in the protocol's order |
+//! | [`StopReason::ConfinementUnavailable`] | none: no case is opened | the request binds commands and no runner can start them ([`crate::bindings`]), before any model call: no runner or one that starts no child (`NoRunner`), a host runner on `local` that no opt-in selected (`CommandUnconfined`), or a runner whose preflight refuses; the detail is the refusal |
 //! | [`StopReason::Refused`] | none: no case is opened | the router refuses the pick: outside the registry, or unsure |
 //! | [`StopReason::Refused`] | `EffectRefused` | an effect port refused an admitted request as final; the detail is its reason. The slice's own effect ports never mark a refusal final |
 //!
@@ -575,6 +576,8 @@ pub(crate) enum Execution<'a> {
         /// The evidence kinds each action declares it may produce.
         productions: std::collections::BTreeMap<String, Vec<String>>,
         intent_revision: &'a str,
+        /// The runner every command starts through, and its workspace.
+        commands: &'a crate::bindings::CommandRunner,
     },
 }
 
@@ -664,12 +667,14 @@ pub(crate) fn drive<S: FallibleCaseStore, T: EvaluationTime>(
             bindings,
             productions,
             intent_revision,
+            commands,
         } => Box::new(crate::bindings::CommandEffects::new(
             governor,
             case.clone(),
             intent_revision,
             bindings,
             productions,
+            commands,
             briefing.clone(),
             &console,
         )),

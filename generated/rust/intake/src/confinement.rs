@@ -1,10 +1,10 @@
 // generated from intake v1
-// contract digest 269817d065f2141004a80e19c1657c4d5e71848ad914d839461bb42b30596827
+// contract digest 879d4ef7e79ddcbd66a47af86e760232cd14542f38305f5b2461bf0a03d5b439
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! confinement — `intake.confinement`.
 //!
-//! Requested and observed confinement of local test commands. No automatic fallback. A command bound to a protocol's action runs outside Substrate, so a run that would start one is refused CommandUnconfined unless the operator opts out of confinement for those commands explicitly.
+//! Requested and observed confinement of local test commands and of the commands bound to a protocol's actions. No automatic fallback. A bound command starts only through the runner the host injected: a run that would start one with no runner is refused NoRunner before anything starts, and one whose host names a runner that confines nothing, without the operator's opt-in to the `local` adapter for those commands, is refused CommandUnconfined.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
 
@@ -198,6 +198,8 @@ pub enum ConfinementRefusal {
     CommandUnconfined,
     /// `LocalReasonMissing`.
     LocalReasonMissing,
+    /// `NoRunner`.
+    NoRunner,
 }
 
 /// ConfinementSpec — `intake.confinement.ConfinementSpec`.

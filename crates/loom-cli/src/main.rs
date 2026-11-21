@@ -19,7 +19,7 @@ use b10x_loom_cli::{
     ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
 use b10x_loom_cli::{a2a, agent};
-use b10x_loom_intake_slice::bindings::ActionBindings;
+use b10x_loom_intake_slice::bindings::{ActionBindings, UNCONFINED_FLAG_REASON};
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
@@ -917,6 +917,11 @@ fn run_command(arguments: RunArgs) -> ExitCode {
             "--state cannot be used with --confinement local: a local run is not kept for resume; run again with --confinement local and --local-reason",
         );
     }
+    if arguments.unconfined_bindings && arguments.state.is_some() {
+        usage_refused(
+            "--state cannot be used with --unconfined-bindings: its bound commands run under the local adapter, and a local run is not kept for resume",
+        );
+    }
     if arguments.confinement != Confinement::Local && arguments.local_reason.is_some() {
         usage_refused(
             "--local-reason is the reason for --confinement local and is given only with it",
@@ -1007,9 +1012,11 @@ fn execute(
     ) {
         b10x_loom_intake_slice::bindings::check(bindings, &catalog)
             .map_err(|why| format!("--action-bindings {}: {}", path.display(), printable(&why)))?;
-        // Substrate does not confine a bound command, and the run never falls back to an
-        // unconfined one on its own: only the operator's explicit opt-in starts them, given as
-        // the flag or as the file's own `unconfined_bindings: true`. The flag wins.
+        // A bound command starts through the run's confinement, and the run never falls back to
+        // an unconfined one on its own: only the operator's explicit opt-in, the flag or the
+        // file's own `unconfined_bindings: true`, selects the local adapter. The flag wins.
+        // Without one they run under Substrate's linux adapter; `--confinement none` and
+        // `--confinement local` confine nothing, so they are refused.
         if arguments.unconfined_bindings {
             eprintln!("bound commands: unconfined (--unconfined-bindings)");
         } else if bindings.unconfined_bindings == Some(true) {
@@ -1017,7 +1024,7 @@ fn execute(
                 "bound commands: unconfined (unconfined_bindings in {})",
                 printable(&path.display().to_string())
             );
-        } else {
+        } else if arguments.confinement != Confinement::Substrate {
             return Ok(bindings_refused(&bindings.protocol));
         }
     }
@@ -1130,6 +1137,35 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
 ) -> Result<Ending, String> {
     let program = arguments.test_cmd.split_whitespace().next().unwrap_or("");
     let mut request = intent_request(arguments)?;
+    // The runner the bound commands start through, which the library checks before any model
+    // call: the flag's `local` runner, none for the file's opt-in (the library opens its own),
+    // and otherwise Substrate's linux adapter.
+    if let Some(bindings) = &request.bindings {
+        request.runner = if arguments.unconfined_bindings {
+            let opened = EngineRunner::open(&EngineConfinement {
+                adapter: ConfinementAdapter::Local,
+                local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+                cgroup_root: None,
+            });
+            match opened {
+                Ok(runner) => Some(Arc::new(runner) as Arc<dyn TestRunner>),
+                Err(error) => {
+                    return Ok(confinement_stopped(
+                        &bindings.protocol,
+                        &local_label(UNCONFINED_FLAG_REASON),
+                        &error.to_string(),
+                    ));
+                }
+            }
+        } else if bindings.unconfined_bindings == Some(true) {
+            None
+        } else {
+            Some(
+                Arc::new(SubstrateRunner::new(arguments.cgroup_root.clone()))
+                    as Arc<dyn TestRunner>,
+            )
+        };
+    }
     let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
         let handoff = read_handoff()?;
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;
@@ -1387,10 +1423,15 @@ fn usage_refused(message: &str) -> ! {
 /// The stop of a run whose confinement, named `label` (`substrate`, `local (<reason>)`), was
 /// refused before any test ran.
 fn confinement_refused(prepared: &PreparedIntent, label: &str, reason: &str) -> Ending {
+    confinement_stopped(prepared.protocol(), label, reason)
+}
+
+/// The stop of a run of `protocol` whose confinement, named `label`, was refused.
+fn confinement_stopped(protocol: &str, label: &str, reason: &str) -> Ending {
     eprintln!("confinement: {label}");
     eprintln!("stopped: ConfinementUnavailable ({})", printable(reason));
     Ending::Stopped(SliceRun {
-        protocol: prepared.protocol().to_owned(),
+        protocol: protocol.to_owned(),
         steps: 0,
         stop_reason: StopReason::ConfinementUnavailable,
         approvals: Vec::new(),
@@ -1399,15 +1440,16 @@ fn confinement_refused(prepared: &PreparedIntent, label: &str, reason: &str) -> 
     })
 }
 
-/// The stop of a run given `--action-bindings` without an opt-in (`--unconfined-bindings`, or
-/// `unconfined_bindings: true` in the file), before any model call:
-/// `ConfinementUnavailable (CommandUnconfined: ...)`, exit status 3.
+/// The stop of a run given `--action-bindings` under `--confinement none` or `local` without an
+/// opt-in (`--unconfined-bindings`, or `unconfined_bindings: true` in the file), before any model
+/// call: `ConfinementUnavailable (CommandUnconfined: ...)`, exit status 3.
 fn bindings_refused(protocol: &str) -> Ending {
     let refusal = ConfinementError {
         reason: ConfinementRefusal::CommandUnconfined,
-        detail: "Substrate does not confine the commands --action-bindings binds; pass \
-                 --unconfined-bindings, or set unconfined_bindings: true in the file, to run \
-                 them with the operator's rights"
+        detail: "--confinement none and --confinement local confine none of the commands \
+                 --action-bindings binds; run them under --confinement substrate, or pass \
+                 --unconfined-bindings, or set unconfined_bindings: true in the file, to run them \
+                 under the local adapter with the operator's rights"
             .to_owned(),
     };
     eprintln!("confinement: bound commands");

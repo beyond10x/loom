@@ -99,18 +99,21 @@ action, so a custom protocol needs no embedding host. The file is JSON:
   "protocol": "team-ops@1",
   "timeout_seconds": 30,
   "bindings": [
-    {"action": "note.record", "argv": ["./record-note"]},
-    {"action": "summary.publish", "argv": ["./publish-summary"]}
+    {"action": "note.record", "argv": ["/opt/team-ops/record-note"]},
+    {"action": "summary.publish", "argv": ["/opt/team-ops/publish-summary"]}
   ]
 }
 ```
 
-When the run picks that protocol, each action the governor admits starts its `argv` directly,
-without a shell. The action's arguments arrive as one JSON document on standard input. The
-environment is cleared except for `PATH`, and a program still running after `timeout_seconds`
-(60 when absent, at most 3600) is killed. Exit status 0 means `Performed`: standard output, one
-JSON object of at most 1 MiB, becomes the action's report. Any other exit means `Refused`, citing
-the tail of standard error.
+When the run picks that protocol, each action the governor admits starts its `argv` through the
+run's confinement, without a shell, in `--workspace` or in a private directory made for the run.
+Loom starts no bound program itself: it hands the command to the runner, which starts it. The
+action's arguments arrive as one JSON document on standard input. The environment holds `PATH`
+alone, at the value `b10x-loom` has, and a program still running after `timeout_seconds` (60 when
+absent, at most 3600) is killed with the processes it started. Exit status 0 means `Performed`:
+standard output, one JSON object of at most 1 MiB, becomes the action's report. Any other exit
+means `Refused`, citing the tail of standard error. Each step prints the confinement it ran
+under.
 
 A report may list evidence about the intent as `"evidence": [{"kind": ..., "result": ...}]`.
 Each kind must be one the action declares in `may_produce`; Loom submits it, and the governor
@@ -123,7 +126,6 @@ input. `record-note` here reads its arguments and prints its report:
 ```sh
 #!/bin/sh
 arguments=$(cat)
-echo "$(date -u +%FT%TZ) $arguments" >> notes.log
 printf '%s\n' '{"note":"n-1","evidence":[{"kind":"note_recorded","result":"recorded"}]}'
 ```
 
@@ -142,10 +144,12 @@ picked team-ops@1 (confidence 0.99)
   reason: a team note
 frontier: note.record (admissible), summary.publish (blocked)
 step 1: note.record {"text":"deploy finished"}
+  confinement: local (--unconfined-bindings: the operator runs the bound commands unconfined, as the operator)
   effect: {"note":"n-1","evidence":[{"kind":"note_recorded","result":"recorded"}]}
   evidence: note_recorded recorded
 frontier: note.record (admissible), summary.publish (admissible)
 step 2: summary.publish {"channel":"ops"}
+  confinement: local (--unconfined-bindings: the operator runs the bound commands unconfined, as the operator)
   effect: {"published":true,"evidence":[{"kind":"summary_published","result":"published"}]}
   evidence: summary_published published
 stopped: Completed (done)
@@ -167,15 +171,29 @@ b10x-loom: --action-bindings wrong.json: team-ops@1 declares no action note.eras
 
 A binding confers no authority. The governor still admits each action first, and an action that
 needs a capability still needs its grant. `resume` continues `software-change@1` runs only.
-Bound programs are not confined by Substrate, because `--confinement` applies only to a software
-change's tests. A bound program runs with the permissions of the user who runs `b10x-loom`, so
-`run` starts one only when you pass `--unconfined-bindings`, and then says so on standard error.
-Without the flag the run is refused with exit status 3 before any model call:
+Bound programs run under the run's confinement. Under `--confinement substrate`, the default,
+they run under Substrate's `linux` adapter: the program file is mounted read-only at its own path
+(a program under `/usr`, `/bin`, `/lib` or `/lib64` is already there; one under `/tmp`, or reached
+through a symbolic link, is refused), it writes only under its workspace's `target/`, reads no
+host file outside its workspace, its program and the system view Substrate binds, and reaches no
+network, and each step prints `confinement: substrate`. A host
+whose adapter is not served, a cgroup root that is not delegated included (pass `--cgroup-root`,
+or run inside a delegated scope), stops the run `ConfinementUnavailable`, exit status 3, before
+any model call.
+
+`--unconfined-bindings`, or `"unconfined_bindings": true` in the file, runs them under
+Substrate's `local` adapter instead: unconfined, declared insecure, with the permissions of the
+user who runs `b10x-loom`. Standard error says which one opted in, and each step's confinement
+line names it as the reason (`local (--unconfined-bindings: ...)` or `local (unconfined_bindings:
+true in the run configuration file: ...)`); the flag wins. `--unconfined-bindings` is refused
+beside `--state`. Under `--confinement none` or `--confinement local` without an opt-in, the run
+is refused with exit status 3 before any model call:
 
 ```console
-$ b10x-loom run --action-bindings team-ops.bindings.json "record a note"
+$ b10x-loom run --confinement none --action-bindings team-ops.bindings.json "record a note"
+warning: --confinement none is deprecated; use --confinement local --local-reason <TEXT>, which runs through Substrate's local adapter and records the reason
 confinement: bound commands
-stopped: ConfinementUnavailable (CommandUnconfined: Substrate does not confine the commands --action-bindings binds; pass --unconfined-bindings to run them with the operator's rights)
+stopped: ConfinementUnavailable (CommandUnconfined: --confinement none and --confinement local confine none of the commands --action-bindings binds; run them under --confinement substrate, or pass --unconfined-bindings, or set unconfined_bindings: true in the file, to run them under the local adapter with the operator's rights)
 ```
 
 Embedders can construct `loom_protocols::ProtocolCatalog`, add in-memory YAML with `add_yaml`, and

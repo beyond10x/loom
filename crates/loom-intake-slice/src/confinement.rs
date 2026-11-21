@@ -93,6 +93,34 @@ pub trait TestRunner: Send + Sync {
     fn local_reason(&self) -> Option<&str> {
         None
     }
+    /// Runs `child`, a command the host names, to its end under this runner's confinement, as
+    /// [`SubstrateRunner::run_child`] and [`EngineRunner::run_child`] do. A command bound to a
+    /// protocol's action (`crate::bindings`) starts through this method alone.
+    ///
+    /// The default starts nothing and refuses [`ConfinementRefusal::NoRunner`]: a runner that
+    /// runs only test commands, [`crate::executor::UnconfinedRunner`] among them, starts no bound
+    /// command. A runner that launches through another runner forwards it.
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        let _ = child;
+        Err(no_child_runner())
+    }
+    /// Checks, before any model call and with no child started, that [`TestRunner::run_child`]
+    /// can start a child in the workspace `root`: under `linux` the driver opens as
+    /// [`SubstrateRunner::preflight`] opens it, under `local` the workspace is a directory reached
+    /// through no symbolic link. The default refuses [`ConfinementRefusal::NoRunner`], as
+    /// `run_child`'s does.
+    fn preflight_child(&self, root: &Path) -> Result<(), ConfinementError> {
+        let _ = root;
+        Err(no_child_runner())
+    }
+}
+
+/// The refusal of a runner that starts no child command.
+fn no_child_runner() -> ConfinementError {
+    refuse(
+        ConfinementRefusal::NoRunner,
+        "this runner starts no child command; a bound command starts only through a runner that does (`EngineRunner`, `SubstrateRunner`)",
+    )
 }
 
 /// How a `local` run names its confinement wherever it is printed or recorded:
@@ -1095,6 +1123,14 @@ impl TestRunner for SubstrateRunner {
             execution.output.push_str("\nDependencies are offline. Run `cargo fetch` explicitly on the host before retrying Loom; Loom never fetches dependencies.\n");
         }
         Ok(execution)
+    }
+
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        SubstrateRunner::run_child(self, child)
+    }
+
+    fn preflight_child(&self, root: &Path) -> Result<(), ConfinementError> {
+        self.preflight(root)
     }
 }
 

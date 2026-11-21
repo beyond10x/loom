@@ -12,10 +12,10 @@ catalog. Loom owns `system-query@1`; engineering definitions and installed custo
 remain separate sources. [System queries and custom protocols](https://beyond10x.github.io/loom/docs/guides/system-queries)
 describes the clock tool, pinned installation and offline loading. `run --action-bindings <FILE>`
 drives an installed protocol through commands the operator binds to its actions: each admitted
-action starts its program without a shell, with its arguments as JSON on standard input, and the
-program's JSON report becomes the action's result; a binding confers no authority, and the
-commands run unconfined only with `--unconfined-bindings` or the file's own
-`"unconfined_bindings": true`. Transient model failures get
+action starts its program through the run's confinement, without a shell, with its arguments as
+JSON on standard input, and the program's JSON report becomes the action's result; a binding
+confers no authority, and the commands run unconfined, under Substrate's `local` adapter, only
+with `--unconfined-bindings` or the file's own `"unconfined_bindings": true`. Transient model failures get
 at most three attempts on the same binding; reports count every attempt. Persistent overload
 is reported as unavailable, and tool effects are never retried by this policy.
 
