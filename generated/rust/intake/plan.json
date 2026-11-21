@@ -2,8 +2,8 @@
   "provenance": {
     "system": "intake",
     "specification_version": "v1",
-    "source_digest": "ec41dd24ef5ea19716f1e21bda53b331c389a76ec3b1f1ee86d40b4415617c8e",
-    "contract_digest": "269817d065f2141004a80e19c1657c4d5e71848ad914d839461bb42b30596827"
+    "source_digest": "ac301805b424811b4daf081d660438a8eb6cbc9880c4cb3262fbdf067fa1cb89",
+    "contract_digest": "580c92e6eb1d15ced150fd8c74b88b52f6a70116a600645f3a0299a0c5b3b9c5"
   },
   "scope": {
     "profile": "component-skeletons",

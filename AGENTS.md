@@ -2089,20 +2089,38 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   does not declare, one bound twice and an empty argv. A pick of that protocol with an action left
   unbound stops `NoLocalExecutor` naming it, before a case opens, its `SliceRun::unperformed`
   (the jsonl terminal record's `unperformed_actions`) every unbound action; otherwise
-  `bindings::CommandEffects` performs each admitted action by starting its program directly (no
-  shell) with the arguments as JSON on stdin, only `PATH` in its environment and a timeout past
-  which it and the processes it started are killed and reaped: exit 0 is `Performed` with its
-  stdout (one JSON object) as the report, anything else `Refused`, a status that cannot be read
-  included, naming the error; a timeout this host's clock cannot hold is `Refused`, naming it,
-  before the program starts (`crates/loom-intake-slice/tests/bound_command.rs`,
+  `bindings::CommandEffects` performs each admitted action by handing a `ChildCommand` (its
+  argv, no shell, the arguments as JSON on stdin, `PATH` alone at the host process's value, the
+  timeout) to `TestRunner::run_child`; `src/bindings.rs` starts no process of its own
+  (`bound_command_confined.rs`, `bindings_starts_no_process_of_its_own`). The runner kills the
+  program at the timeout, under `linux` with every process it started (the run's cgroup), under
+  `local` with its process group; under `local` a process that left the group and still holds the
+  output makes the step a runner refusal, after one `Kill`, and a stdin write still pending then
+  is dropped (`engine.rs` tests): exit 0 is `Performed` with its stdout
+  (one JSON object) as the report, anything else `Refused`, a runner's refusal included, naming
+  it, and each step prints its applied `confinement:`; a timeout this host's clock cannot hold is
+  `Refused`, naming it, before the program starts (`crates/loom-intake-slice/tests/bound_command.rs`,
   `a_timed_out_command_leaves_no_process_it_started`,
   `a_timeout_too_large_for_the_clock_is_refused_and_starts_no_command`). Evidence comes only from the report's `evidence` list
   (`intake.bindings.CommandEvidence`), each of a kind the action declares it may produce, about
   `intent`; another kind fails the run. A binding confers no authority: the slice's
   authority provider still answers every capability with approval required, and `resume`
-  continues `software-change@1` runs only. Substrate does not confine a bound command, so
-  without `--unconfined-bindings` `run` stops `ConfinementUnavailable (CommandUnconfined: ...)`,
-  exit 3, before any model call (`bindings_refused`); with it, standard error says so. `crates/loom-cli/tests/custom_protocol_commands.rs`
+  continues `software-change@1` runs only. `bindings::CommandRunner::select` picks the runner in
+  `prepare_intent`, before any model call, and again before the case opens for a restored route:
+  a host runner on `local` with `UNCONFINED_FLAG_REASON` (the flag's, which wins), else the
+  file's `unconfined_bindings: true` opening `local` with `UNCONFINED_FILE_REASON` (a file holds
+  no reason), else the host's runner (`CommandUnconfined` for one on `local` with another
+  reason), else `NoRunner`; then `TestRunner::preflight_child` on the workspace (`run
+  --workspace`, or a private `<tmp>/loom-bound-*/workspace`), whose default refuses `NoRunner`.
+  Each refusal stops the run `ConfinementUnavailable`, exit 3. A runner not on `local` gets an
+  absolute program outside `/usr`, `/bin`, `/lib`, `/lib64` mounted read-only at its own path
+  (`at_host_path`). `run` passes the flag's `local` runner, none for the file's opt-in, and
+  `SubstrateRunner` on `--cgroup-root` otherwise (no delegated re-exec for bound commands);
+  `--confinement none` or `local` without an opt-in stops `ConfinementUnavailable
+  (CommandUnconfined: ...)` before any model call (`bindings_refused`); `--unconfined-bindings`
+  beside `--state` is refused, exit 2; standard error names the opt-in.
+  `crates/loom-intake-slice/tests/bound_command_confined.rs` holds the runner, the reasons and,
+  delegated, the `linux` case; `crates/loom-cli/tests/custom_protocol_commands.rs`
   (`a_custom_protocol_runs_through_declared_commands`) runs the binary against scripts.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`

@@ -190,6 +190,14 @@ impl TestRunner for EngineRunner {
             Route::Local(local) => Some(&local.reason),
         }
     }
+
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        EngineRunner::run_child(self, child)
+    }
+
+    fn preflight_child(&self, root: &Path) -> Result<(), ConfinementError> {
+        self.preflight(root)
+    }
 }
 
 /// The operator's reason, refused [`ConfinementRefusal::LocalReasonMissing`] when absent or
@@ -450,7 +458,7 @@ impl LocalRoute {
     /// Start `command` under `admitted`, write `stdin` to it and close it when given, and wait
     /// for its end, all inside one runtime this call owns. At `timeout` the run is sent
     /// `Signal::Kill`, which `local` sends to its whole process group, and waited for; every path
-    /// that returns once it started has ended it.
+    /// that returns once it started has ended it. A write still pending then is dropped.
     fn launch(
         &self,
         admitted: &AdmittedProfile,
@@ -469,18 +477,33 @@ impl LocalRoute {
                 .start(admitted, command)
                 .await
                 .map_err(contract_error)?;
+            let killed = AtomicBool::new(false);
             let ended = match stdin {
-                None => self.finish(&run, deadline).await,
+                None => self.finish(&run, deadline, &killed).await,
                 Some(bytes) => {
-                    let (written, ended) =
-                        tokio::join!(self.write_all(&run, bytes), self.finish(&run, deadline));
-                    written.and(ended)
+                    let write = self.write_all(&run, bytes);
+                    let finish = self.finish(&run, deadline, &killed);
+                    tokio::pin!(write, finish);
+                    // A write that ended first, failed or not, is answered once the run ended.
+                    // A write still pending when the run ended (or the deadline's `Kill` was
+                    // waited for) is dropped, which closes the run's standard input: a process
+                    // outside the group that holds the pipe and reads nothing never holds the
+                    // run past its deadline.
+                    tokio::select! {
+                        biased;
+                        written = &mut write => written.and(finish.await),
+                        ended = &mut finish => ended,
+                    }
                 }
             };
             let (observed, timed_out) = match ended {
                 Ok(ended) => ended,
                 Err(error) => {
-                    let _ = self.kill(&run).await;
+                    // One `Kill` per run: the deadline's, already sent and waited for, is not
+                    // sent again.
+                    if !killed.load(Ordering::SeqCst) {
+                        let _ = self.kill(&run).await;
+                    }
                     return Err(error);
                 }
             };
@@ -514,15 +537,20 @@ impl LocalRoute {
         self.adapter.close_stdin(run).await.map_err(contract_error)
     }
 
-    /// The run's end, and whether Loom ended it at `deadline`.
+    /// The run's end, and whether Loom ended it at `deadline`. `killed` is set once the deadline's
+    /// `Kill` is sent, whether or not the run then ended.
     async fn finish(
         &self,
         run: &RunId,
         deadline: tokio::time::Instant,
+        killed: &AtomicBool,
     ) -> Result<(RunObservation, bool), ConfinementError> {
         match tokio::time::timeout_at(deadline, self.adapter.wait(run)).await {
             Ok(observed) => Ok((observed.map_err(contract_error)?, false)),
-            Err(_) => Ok((self.kill(run).await?, true)),
+            Err(_) => {
+                killed.store(true, Ordering::SeqCst);
+                Ok((self.kill(run).await?, true))
+            }
         }
     }
 
@@ -918,5 +946,440 @@ impl Drop for LocalChild {
             }
             runtime.shutdown_background();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! `LocalRoute::launch` over a counting adapter: Substrate's own `local` adapter starts the
+    //! run, the fake answers `wait` and counts each `Signal::Kill`.
+
+    use std::future::Future;
+    use std::pin::Pin;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Instant;
+
+    use substrate_host::confinement::{
+        AdapterFacts, Command, ConfinementError as Contract, ConfinementProfile, RenderedCommand,
+    };
+
+    use super::*;
+
+    type Answer<'a, T> = Pin<Box<dyn Future<Output = Result<T, Contract>> + Send + 'a>>;
+
+    /// What the fake's `wait` answers.
+    #[derive(Clone, Copy)]
+    enum Wait {
+        /// Never: a run a process outside its group holds open, before and after `Kill`.
+        Never,
+        /// At once, with a contract error.
+        Refused,
+        /// As `local` answers it.
+        Real,
+        /// As `local` answers it, the run's state and exit status lost.
+        Lost,
+        /// Not before a `Kill` was sent, then as `local` answers it.
+        UntilKill,
+    }
+
+    /// What else the fake does that `local` would not.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Fault {
+        None,
+        /// Every write to standard input stays pending: a process outside the group holds the
+        /// pipe and reads nothing.
+        StdinStalls,
+        /// Sending a `Kill` fails, after it was counted.
+        KillRefused,
+    }
+
+    struct Counting {
+        inner: Arc<dyn Adapter>,
+        wait: Wait,
+        fault: Fault,
+        kills: AtomicUsize,
+    }
+
+    impl Counting {
+        fn refusal(&self, detail: &str) -> Contract {
+            Contract::AdapterUnserved {
+                adapter: self.inner.facts().adapter.clone(),
+                detail: detail.to_owned(),
+            }
+        }
+    }
+
+    impl Adapter for Counting {
+        fn facts(&self) -> &AdapterFacts {
+            self.inner.facts()
+        }
+
+        fn check(&self, profile: &ConfinementProfile) -> Result<(), Contract> {
+            self.inner.check(profile)
+        }
+
+        fn render(
+            &self,
+            admitted: &AdmittedProfile,
+            command: &Command,
+        ) -> Result<RenderedCommand, Contract> {
+            self.inner.render(admitted, command)
+        }
+
+        fn start<'life0, 'life1, 'life2, 'async_trait>(
+            &'life0 self,
+            admitted: &'life1 AdmittedProfile,
+            command: &'life2 Command,
+        ) -> Answer<'async_trait, RunId>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            'life2: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.inner.start(admitted, command)
+        }
+
+        fn observe<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            run: &'life1 RunId,
+        ) -> Answer<'async_trait, RunObservation>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.inner.observe(run)
+        }
+
+        fn output<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            run: &'life1 RunId,
+        ) -> Answer<'async_trait, RunOutput>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.inner.output(run)
+        }
+
+        fn wait<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            run: &'life1 RunId,
+        ) -> Answer<'async_trait, RunObservation>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            match self.wait {
+                Wait::Never => Box::pin(std::future::pending()),
+                Wait::Refused => {
+                    let refusal = self.refusal("the counting fake refuses every wait");
+                    Box::pin(async move { Err(refusal) })
+                }
+                Wait::UntilKill => Box::pin(async move {
+                    while self.kills.load(Ordering::SeqCst) == 0 {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    self.inner.wait(run).await
+                }),
+                Wait::Real => self.inner.wait(run),
+                Wait::Lost => {
+                    let waited = self.inner.wait(run);
+                    Box::pin(async move {
+                        waited.await.map(|observed| RunObservation {
+                            state: RunState::Unknown,
+                            exit: None,
+                            ..observed
+                        })
+                    })
+                }
+            }
+        }
+
+        fn signal<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            run: &'life1 RunId,
+            signal: Signal,
+        ) -> Answer<'async_trait, ()>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            if signal == Signal::Kill {
+                self.kills.fetch_add(1, Ordering::SeqCst);
+                if self.fault == Fault::KillRefused {
+                    let refusal = self.refusal("the counting fake could not send the Kill");
+                    return Box::pin(async move { Err(refusal) });
+                }
+            }
+            self.inner.signal(run, signal)
+        }
+
+        fn write_stdin<'life0, 'life1, 'life2, 'async_trait>(
+            &'life0 self,
+            run: &'life1 RunId,
+            bytes: &'life2 [u8],
+        ) -> Answer<'async_trait, ()>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            'life2: 'async_trait,
+            Self: 'async_trait,
+        {
+            match self.fault {
+                Fault::StdinStalls => Box::pin(std::future::pending()),
+                _ => self.inner.write_stdin(run, bytes),
+            }
+        }
+
+        fn close_stdin<'life0, 'life1, 'async_trait>(
+            &'life0 self,
+            run: &'life1 RunId,
+        ) -> Answer<'async_trait, ()>
+        where
+            'life0: 'async_trait,
+            'life1: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.inner.close_stdin(run)
+        }
+    }
+
+    const REASON: &str = "the engine's own unit test of one kill";
+
+    /// A route over a counting fake of Substrate's `local` adapter, the fake, and a workspace.
+    fn route(wait: Wait) -> (LocalRoute, Arc<Counting>, tempfile::TempDir) {
+        route_with(wait, Fault::None)
+    }
+
+    /// [`route`], the fake also doing `fault`.
+    fn route_with(wait: Wait, fault: Fault) -> (LocalRoute, Arc<Counting>, tempfile::TempDir) {
+        let runner = EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Local,
+            local_reason: Some(REASON.to_owned()),
+            cgroup_root: None,
+        })
+        .expect("Substrate's local adapter opens on this host");
+        let Route::Local(local) = runner.route else {
+            panic!("EngineRunner::open of local takes the local route");
+        };
+        let fake = Arc::new(Counting {
+            inner: Arc::clone(&local.adapter),
+            wait,
+            fault,
+            kills: AtomicUsize::new(0),
+        });
+        let adapter: Arc<dyn Adapter> = fake.clone();
+        let route = LocalRoute::new(adapter, REASON.to_owned()).expect("the fake proves local");
+        let workspace = tempfile::tempdir().expect("a workspace");
+        (route, fake, workspace)
+    }
+
+    /// `launch` of `/usr/bin/true` on `route`, with `stdin` written to it when given (its profile
+    /// admits none), its error and how long it took.
+    fn launch(
+        route: &LocalRoute,
+        workspace: &Path,
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+    ) -> (ConfinementError, Duration) {
+        let (ended, took) = launched(route, workspace, stdin, timeout);
+        match ended {
+            Ok(ended) => panic!("the launch ended: {}", ended.described()),
+            Err(error) => (error, took),
+        }
+    }
+
+    /// `launch` as [`launch`] runs it, its result whatever it is.
+    fn launched(
+        route: &LocalRoute,
+        workspace: &Path,
+        stdin: Option<&[u8]>,
+        timeout: Duration,
+    ) -> (Result<Ended, ConfinementError>, Duration) {
+        let workspace = canonical_workspace(workspace).expect("a canonical workspace");
+        let admitted = route
+            .admit(workspace, None, StdinMode::Null, OutputDelivery::Recorded)
+            .expect("local admits the profile");
+        let command = Command {
+            argv: vec!["/usr/bin/true".to_owned()],
+            env: BTreeMap::new(),
+        };
+        let started = Instant::now();
+        let ended = route.launch(&admitted, &command, stdin, timeout);
+        (ended, started.elapsed())
+    }
+
+    #[test]
+    fn a_run_whose_status_was_lost_is_refused_never_timed_out_and_sent_no_kill() {
+        let (route, fake, workspace) = route(Wait::Lost);
+        let (ended, took) = launched(&route, workspace.path(), None, Duration::from_secs(60));
+        let ended = ended.unwrap_or_else(|error| panic!("the run ended: {error}"));
+        assert!(!ended.timed_out, "a lost status is no timeout");
+        let error = route
+            .execution(ended)
+            .expect_err("a run with no exit status and no timeout is refused");
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::CapabilityUnserved,
+            "{error}"
+        );
+        assert!(
+            error
+                .detail
+                .contains("reports no exit status for the child"),
+            "{error}"
+        );
+        assert!(!error.detail.contains("timed out"), "{error}");
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            0,
+            "an ended run is never killed"
+        );
+        assert!(
+            took < KILL_SETTLE,
+            "nothing waited for the deadline: {took:?}"
+        );
+    }
+
+    #[test]
+    fn a_run_past_its_deadline_is_sent_one_kill_and_waited_for_one_settle() {
+        let (route, fake, workspace) = route(Wait::Never);
+        let (error, took) = launch(&route, workspace.path(), None, Duration::from_millis(10));
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::CapabilityUnserved,
+            "{error}"
+        );
+        assert!(
+            error.detail.contains("had not ended 5s later"),
+            "the refusal names the settle that ran out: {error}"
+        );
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "the deadline sends one Kill, and the launch's error path sends none after it"
+        );
+        assert!(
+            took >= KILL_SETTLE && took < 2 * KILL_SETTLE,
+            "the launch waits one KILL_SETTLE ({KILL_SETTLE:?}) after its Kill, not two: {took:?}"
+        );
+    }
+
+    #[test]
+    fn a_wait_that_fails_before_the_deadline_is_answered_with_one_kill() {
+        let (route, fake, workspace) = route(Wait::Refused);
+        let (error, took) = launch(&route, workspace.path(), None, Duration::from_secs(60));
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::CapabilityUnserved,
+            "{error}"
+        );
+        assert!(
+            error
+                .detail
+                .contains("the counting fake refuses every wait"),
+            "the launch returns the wait's own error: {error}"
+        );
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "a failed wait is no timeout: the launch's error path sends its one Kill"
+        );
+        assert!(
+            took < KILL_SETTLE,
+            "nothing waited for the deadline: {took:?}"
+        );
+    }
+
+    #[test]
+    fn a_write_to_standard_input_that_fails_is_answered_with_one_kill() {
+        let (route, fake, workspace) = route(Wait::Real);
+        let (error, took) = launch(
+            &route,
+            workspace.path(),
+            Some(b"arguments"),
+            Duration::from_secs(60),
+        );
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
+        assert!(
+            error.detail.contains(substrate_wire::SESSION_NOT_PIPE),
+            "the launch returns the write's own error: {error}"
+        );
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "a failed write is no timeout: the launch's error path sends its one Kill"
+        );
+        assert!(
+            took < KILL_SETTLE,
+            "nothing waited for the deadline: {took:?}"
+        );
+    }
+
+    /// A write to standard input that a process outside the group stalls does not hold the run
+    /// past its deadline: once the deadline's `Kill` ended the run, the pending write is dropped.
+    #[test]
+    fn a_stdin_write_still_pending_when_the_deadline_ended_the_run_is_dropped() {
+        let (route, fake, workspace) = route_with(Wait::UntilKill, Fault::StdinStalls);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        // On a thread of its own, so a launch the write holds fails this case instead of hanging
+        // it; the thread is left behind then.
+        std::thread::spawn(move || {
+            let (ended, took) = launched(
+                &route,
+                workspace.path(),
+                Some(b"arguments"),
+                Duration::from_millis(10),
+            );
+            let _ = sender.send((ended.map(|ended| ended.timed_out), took));
+        });
+        let (timed_out, took) = receiver.recv_timeout(KILL_SETTLE).unwrap_or_else(|_| {
+            panic!(
+                "the launch had not returned {KILL_SETTLE:?} after its 10 ms deadline: the \
+                 pending write to standard input held it"
+            )
+        });
+        assert_eq!(timed_out, Ok(true), "the deadline ended the run");
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "the deadline sends one Kill"
+        );
+        assert!(took < KILL_SETTLE, "the launch took {took:?}");
+    }
+
+    /// A `Kill` that could not be sent ends the launch as a refusal of its runner, never as a run
+    /// Loom killed at its deadline (the step reads "was killed" only for that), and is not sent
+    /// a second time.
+    #[test]
+    fn a_kill_that_could_not_be_sent_is_a_refusal_never_a_kill_and_is_not_sent_again() {
+        let (route, fake, workspace) = route_with(Wait::Never, Fault::KillRefused);
+        let (error, took) = launch(&route, workspace.path(), None, Duration::from_millis(10));
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::CapabilityUnserved,
+            "{error}"
+        );
+        assert!(
+            error
+                .detail
+                .contains("the counting fake could not send the Kill"),
+            "the launch returns the send's own error: {error}"
+        );
+        assert!(!error.to_string().contains("killed"), "{error}");
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "the failed Kill is not sent again by the launch's error path"
+        );
+        assert!(
+            took < KILL_SETTLE,
+            "no settle is waited for a Kill never sent: {took:?}"
+        );
     }
 }
