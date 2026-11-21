@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest b8861e6c0dcd516ae6a61f772ec91a14f639811cafa340e3d466e8a1ef368f96
+  contract digest 21380175cf192d59ddb91cecc416f276b3f49e07eca5dca56ea209428d8b5dd3
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-415 capabilities: **399 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+417 capabilities: **401 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -141,6 +141,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.evaluation.EvidenceRecord` |
 | domain type | `loom.evaluation.ExplicitDecision` |
 | domain type | `loom.evaluation.ProtocolName` |
+| domain type | `loom.governor.CaseLink` |
+| domain type | `loom.governor.CaseTermination` |
 | domain type | `loom.governor.CompletionRule` |
 | domain type | `loom.governor.StoredArtifact` |
 | domain type | `loom.governor.StoredCase` |

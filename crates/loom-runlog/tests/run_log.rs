@@ -644,6 +644,9 @@ fn the_log_of_a_case_id_over_100_bytes_sits_beside_its_case_sha256_file() {
             independence: CaseIndependence::none(),
             evidence: Vec::new(),
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("the run log opens over the same directory");
