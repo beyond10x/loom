@@ -1226,11 +1226,13 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `PROGRAM_SOURCE`, `loom/bound-program`, naming the case and the action; `RunsSpent` at
   `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
   `arguments_from` object, `ArgumentsUnreadable` when it does not exit 0 or is not one JSON object
-  within 1 MiB, the bound program not started), the run, the blob `blobs/<sha256>` of the store
+  within 1 MiB, the bound program not started; the `arguments_from` program starts on every step
+  that reaches it, leaves no observation and does not count against `budget.max_runs`), the run, the blob `blobs/<sha256>` of the store
   directory (stdout then stderr, temporary file and rename; a link at the name is replaced, a
   `blobs` link fails the step), one observation (`loom.bindings.ProgramRun`) for every call of
   `run_child`, kept before a runner refusal or a blob failure ends the step (then with no blob, and
-  the refusal text in `runner_refusal`), so every such call counts, then per entry the
+  the refusal text in `runner_refusal`), so every such call counts unless the store refuses that
+  observation (the step then answers the store's error, uncounted), then per entry the
   value (exit code, `timeout` for a killed run, or the pointer into the report, one JSON object
   within 1 MiB naming no member twice) looked up in `results` falling to
   `*`: `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry

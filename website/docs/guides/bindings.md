@@ -223,18 +223,21 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `arguments_from` argv prints, else `{}`. A request has no arguments when they are the empty object
   `{}`; any other value, `null` included, reaches the program as written. An `arguments_from` argv
   that does not exit 0, or prints anything but one JSON object of at most 1 MiB, refuses the step
-  `ArgumentsUnreadable`, and the bound program does not start.
+  `ArgumentsUnreadable`, and the bound program does not start. The `arguments_from` program
+  starts on every step that reaches it, leaves no observation and does not count against
+  `budget.max_runs`.
 - A case held under another protocol than the document's `protocol` refuses the step
   `CaseOfAnotherProtocol`, naming both, before anything starts, and nothing is recorded.
 - A port hands an action's program to its runner at most `budget.max_runs` times in a case,
-  whatever the runner answers: the count is the observations the port kept for that action
+  whatever the runner answers, unless the case store refuses that run's observation (the step
+  then answers the store's error, and the run is not counted): the count is the observations the port kept for that action
   in that case, kept in the case's store, so it survives a reopen. One more is refused
   `RunsSpent`, and nothing starts. The cap holds for one port that drives the case; two hosts that
   drive one case store at the same time can each start the action once more.
 - Each run's standard output followed by its standard error is kept as one file, `blobs/<sha256>`
   in the store directory, written to a temporary file there and renamed; a link at that name is
   replaced, never written through, and a `blobs` that is a link fails the step with no blob
-  written and no evidence recorded. The port keeps one observation (`loom.bindings.ProgramRun`)
+  written and no evidence recorded. The port writes one observation (`loom.bindings.ProgramRun`)
   for every call of the runner, whatever it answered: the case, the action, the exit code, the
   blob's SHA-256 (absent when the blob was not kept), whether the program was killed at its
   timeout and, when the runner refused the child (a program ended by a signal under `local`
