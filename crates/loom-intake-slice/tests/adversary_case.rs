@@ -232,10 +232,10 @@ fn adversary_report_head_when_head_stays_and_when_it_moves_back() {
     ));
 }
 
-/// Every ELS built-in whose case inputs the run defaults supply opens: `intent` and
-/// `implementation` get the hash and `HEAD` where the protocol declares them, every other declared
-/// artifact `r0`, and nothing undeclared. One that declares an input they have no value for
-/// (`self-improvement@1`, `story-delivery@2`) is refused naming it.
+/// Every vendored engineering protocol whose case inputs the run defaults supply opens: `intent`
+/// and `implementation` get the hash and `HEAD` where the protocol declares them, every other
+/// declared artifact `r0`, and nothing undeclared. One that declares an input they have no value
+/// for (`self-improvement@1`, `story-delivery@2`) is refused naming it.
 #[test]
 fn adversary_every_registry_protocol_opens_on_a_git_workspace() {
     let workspace = Repo::new("registry");

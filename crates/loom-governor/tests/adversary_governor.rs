@@ -149,9 +149,10 @@ fn a_refused_revision_update_moves_nothing() {
 // Frontier versus Canon
 // ---------------------------------------------------------------------------------------------
 
-/// Over seeded random sequences of evidence and artifact revisions, on both ELS built-ins, every
-/// frontier is Canon's decision: each action's status, capability and reasons, each claim's value,
-/// each obligation, the case and its revision; and completion is Canon's one legitimate outcome.
+/// Over seeded random sequences of evidence and artifact revisions, on both vendored protocols,
+/// every frontier is Canon's decision: each action's status, capability and reasons, each claim's
+/// value, each obligation, the case and its revision; and completion is Canon's one legitimate
+/// outcome.
 /// A replay on a second governor issues the same frontier ids, and two frontiers that differ never
 /// share an id.
 #[test]
@@ -640,9 +641,9 @@ fn a_held_case_is_never_opened_again() {
     assert_eq!(governor.current_revision(&held).expect("held"), 2);
 }
 
-/// Protocols the ELS registry does not hold under exactly `<name>@<major>`, revision maps with an
-/// artifact too many or an invalid revision, and invalid case ids are refused, and a refused open
-/// holds nothing.
+/// Protocols the vendored catalog does not hold under exactly `<name>@<major>`, revision maps with
+/// an artifact too many or an invalid revision, and invalid case ids are refused, and a refused
+/// open holds nothing.
 #[test]
 fn refused_opens_hold_nothing() {
     let governor = Gov::new(MemoryCaseStore::default());

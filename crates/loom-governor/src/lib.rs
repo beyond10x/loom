@@ -2513,8 +2513,8 @@ mod tests {
         files
     }
 
-    #[test]
-    fn a_catalog_failing_its_lock_is_invalid_protocol_naming_the_refusal() {
+    /// The catalog `from_vendored` refuses over [`one_byte_changed`], and its error text.
+    fn refused_catalog() -> (Result<ProtocolCatalog, String>, String) {
         let files = one_byte_changed();
         let borrowed: Vec<(&str, &[u8])> = files
             .iter()
@@ -2525,9 +2525,19 @@ mod tests {
         let refusal = catalog
             .clone()
             .expect_err("the lock refuses the changed file");
-        match builtin_in(catalog, "software-change@1") {
-            Err(OpenError::InvalidProtocol { protocol, problem }) => {
-                assert_eq!(protocol, "software-change@1");
+        (catalog, refusal)
+    }
+
+    /// Asserts that `protocol` under the refused catalog is `InvalidProtocol` naming it, with the
+    /// lock's refusal text unchanged as `problem`.
+    fn assert_refused(protocol: &str) {
+        let (catalog, refusal) = refused_catalog();
+        match builtin_in(catalog, protocol) {
+            Err(OpenError::InvalidProtocol {
+                protocol: named,
+                problem,
+            }) => {
+                assert_eq!(named, protocol);
                 assert!(
                     problem.starts_with(
                         "engineering protocol lock refused: DigestMismatch software-change/1.yaml"
@@ -2536,7 +2546,35 @@ mod tests {
                 );
                 assert_eq!(problem, refusal, "the catalog's error text, unchanged");
             }
-            other => panic!("a lock refusal is InvalidProtocol, got {other:?}"),
+            other => panic!("{protocol} under a lock refusal is InvalidProtocol, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_catalog_failing_its_lock_is_invalid_protocol_naming_the_refusal() {
+        assert_refused("software-change@1");
+    }
+
+    /// A well-formed name the catalog might hold cannot be told unknown while the catalog is
+    /// refused: it is the refusal, never `UnknownProtocol`.
+    #[test]
+    fn an_unknown_well_formed_name_under_a_refused_catalog_is_invalid_protocol() {
+        assert_refused("no-such@1");
+    }
+
+    /// A name that is not `<name>@<major>` is no catalog entry whatever the catalog holds, so it
+    /// stays `UnknownProtocol` under a refused catalog too.
+    #[test]
+    fn a_malformed_name_under_a_refused_catalog_is_unknown_protocol() {
+        for protocol in ["software-change", "software-change@01", "software-change@x"] {
+            let (catalog, _) = refused_catalog();
+            assert_eq!(
+                builtin_in(catalog, protocol).map(|entry| entry.name().to_owned()),
+                Err(OpenError::UnknownProtocol {
+                    protocol: protocol.to_owned()
+                }),
+                "{protocol}"
+            );
         }
     }
 
@@ -2544,9 +2582,18 @@ mod tests {
     fn the_engineering_catalog_holds_each_builtin_and_nothing_else() {
         let catalog = || ProtocolCatalog::engineering();
         let entry = builtin_in(catalog(), "software-change@1").expect("software-change@1");
-        assert_eq!(entry.name(), "software-change@1");
         assert_eq!(entry.model.protocol.id.as_str(), "software.change");
         assert_eq!(entry.model.protocol.revision, 1);
+        assert_eq!(ENGINEERING_FILES.len(), 10, "the ten vendored files");
+        for (path, bytes) in ENGINEERING_FILES {
+            let (name, file) = path.split_once('/').expect("<name>/<major>.yaml");
+            let major = file.strip_suffix(".yaml").expect("<major>.yaml");
+            let registration = format!("{name}@{major}");
+            let entry = builtin_in(catalog(), &registration)
+                .unwrap_or_else(|error| panic!("{registration}: {error}"));
+            assert_eq!(entry.name(), registration);
+            assert_eq!(entry.definition.yaml.as_bytes(), *bytes, "{registration}");
+        }
         for protocol in [
             "no-such@1",
             "software-change@2",

@@ -42,8 +42,8 @@ fn a_governed_case_issues_the_frontier_canon_decides() {
 }
 
 /// A case opened with a revision for every declared artifact holds them as given; one missing an
-/// artifact is refused, naming it, and so is a protocol the ELS registry does not hold. The first
-/// frontier admits `tests.write`, `implementation.edit` and `tests.run` and blocks
+/// artifact is refused, naming it, and so is a protocol the vendored catalog does not hold. The
+/// first frontier admits `tests.write`, `implementation.edit` and `tests.run` and blocks
 /// `repository.merge` on its precondition claim.
 fn fresh_case(fixture: &Fixture, ir: &Ir) {
     let governor = CanonGovernor::new(MemoryCaseStore::default());
