@@ -12,6 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:approval-decisions-resume-held-runs
 - depends_on: story:grounds-resolve-against-held-cases
+- depends_on: story:question-and-outcome-decisions-hold-runs
 revision: 5
 ---
 ## Outcome

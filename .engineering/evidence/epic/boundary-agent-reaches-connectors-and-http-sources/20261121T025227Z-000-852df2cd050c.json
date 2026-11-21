@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T02:52:27Z",
+  "actor": "human:timo",
+  "artifact": "epic:boundary-agent-reaches-connectors-and-http-sources",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "e6r3-changes.md, applied 2026-11-21",
+    "review": "review-result:boundary-agent-reaches-connectors-and-http-sources-acceptance-r3",
+    "outcome": "fixed"
+  }
+}

@@ -14,7 +14,8 @@ relations:
 - depends_on: story:tree-waits-open-decision-requests
 - depends_on: story:action-limits-enforced
 - depends_on: story:limit-hits-in-run-log
-revision: 2
+- depends_on: story:tree-usage-and-model-budget
+revision: 4
 ---
 ## Outcome
 
@@ -27,17 +28,21 @@ extension within the hard limit or ends.
   `--max-model-cost-micro-usd` (`story:tree-usage-and-model-budget`) is `budget_overrun`; a stop at
   `--max-steps`, `--max-wall-seconds` or the per-run CPU ceiling (`story:action-limits-enforced`
   § Outcome) is `limit_hit`. A process stopped at its own memory, CPU, wall or process limit ends
-  its step, not the run (`story:limit-hits-in-run-log` § Outcome), and raises no request.
+  its step, not the run (`story:limit-hits-in-run-log` § Outcome), and raises no request. A stop
+  `CostUnreported` (`story:tree-usage-and-model-budget`) is no spent budget and raises no request.
 - The request has two options, both producing no Canon record: `A` extend the spent budget member
   once by `extend_by` (a fraction of the member's value), and `B` end the run. The extension is
   kept in the tree's store and written to the root's run log as a `budget extended` line (member,
   from, to, request). When the extension would pass the member's hard limit, option `A` does not
   exist and no request is raised: the run ends at the budget, exit 5, as today. Extended values are
-  rounded down to whole steps, calls, seconds and milliseconds.
+  rounded down to whole steps, calls, seconds, milliseconds and micro-USD. An extended member is
+  the member in force from that line on: the `TreeBudget` that
+  `story:capacity-given-to-an-admission-program` hands a program carries the extended value.
 - The hard limits: the engine's per-run ceilings for wall time and CPU time
-  (`story:action-limits-enforced` § Outcome); for steps and agent calls, `--hard-max-steps` and
-  `--hard-max-agent-calls`, without which those two members are never extended. `extend_by` is
-  `--extend-by` (default none: no extension).
+  (`story:action-limits-enforced` § Outcome); for steps, agent calls and model cost,
+  `--hard-max-steps`, `--hard-max-agent-calls` and `--hard-max-model-cost-micro-usd`, without which
+  those three members are never extended. `extend_by` is `--extend-by` (default none: no
+  extension).
 - Holders come from the grant table (`story:autonomy-grant-table`): `budget_overrun` person at
   `A0` to `A2`, rule at `A3` and `A4`, rule_final at `A5`; `limit_hit` rule at `A0` to `A4`,
   rule_final at `A5` (session `sdc`, 2026-11-21, point 1). The grant table never gives either class
@@ -53,6 +58,9 @@ extension within the hard limit or ends.
   `decisions decide` command; deciding `A` and running `tree run` again goes on under the extended
   budget; deciding `B` makes the next `tree run` exit 5 naming the budget. A rule's `A` goes on in
   the same `tree run`.
+- The stop names the spent member by its `TreeBudget` name, the rule of
+  `story:tree-usage-and-model-budget`: `max_steps`, `max_agent_calls`, `max_model_cost_micro_usd`,
+  `wall_seconds`, `cpu_millis`.
 
 ## Why
 
@@ -62,7 +70,8 @@ Session `sdc`, 2026-11-21: `budget_overrun` and `limit_hit` requests are wanted,
 second overrun goes to a person, `rule_final` ends the run; a limit hit is never extended by an
 LLM. The two classes are built into Loom because Loom raises them (point 9), and
 `story:autonomy-grant-table` holds their rows; today `tree run` ends at every budget with exit 5
-(`story:tree-run-command` § Outcome).
+(`story:tree-run-command` § Outcome). The model cost budget is `story:tree-usage-and-model-budget`'s;
+until this story lands its stop ends the run, exit 5, with no request.
 
 ## Waits on
 
@@ -76,13 +85,17 @@ LLM. The two classes are built into Loom because Loom raises them (point 9), and
   spent member, and the engine's `limits` section.
 - `story:limit-hits-in-run-log`: the last story of this epic to change `ess/domains/runlog.yaml`
   and the limit events before this one.
+- `story:tree-usage-and-model-budget` (`epic:concurrent-and-standing-case-trees`):
+  `--max-model-cost-micro-usd`, `TreeBudget.max_model_cost_micro_usd` and its stop, and the
+  `agents/1` fixture with its stub adapter; it changes `ess/domains/tree.yaml` (`TreeBudget`) and
+  `crates/loom-tree` before this story.
 
 ## ESS first
 
-`ess/domains/tree.yaml`: `TreeBudget` gains `extend_by` and the hard values for steps and agent
-calls, and `BudgetExtension` (member, from, to, request) is added. `ess/domains/runlog.yaml`:
-`RunLogEvent` gains `BudgetExtended`. On that commit `task drift` fails, and
-`crates/loom-tree/tests/budget_requests.rs` does not compile.
+`ess/domains/tree.yaml`: `TreeBudget` gains `extend_by` and the hard values for steps, agent calls
+and model cost, and `BudgetExtension` (member, from, to, request) is added.
+`ess/domains/runlog.yaml`: `RunLogEvent` gains `BudgetExtended`. On that commit `task drift`
+fails, and `crates/loom-tree/tests/budget_requests.rs` does not compile.
 
 ## Acceptance
 
@@ -101,6 +114,15 @@ no model call:
 - At `A1` with `--max-agent-calls 2 --hard-max-agent-calls 4 --extend-by 1`, the third agent step
   raises a `budget_overrun` request addressed to the first person; `decisions decide … A` and
   `tree run` take two more agent steps.
+- Cost, a library test in `crates/loom-tree/tests/budget_requests.rs` with the `agents/1` fixture
+  and the stub adapter of `story:tree-usage-and-model-budget` (three agent writers taken in
+  identifier order, each session stating 1500 micro-USD): at `A1` with
+  `--max-model-cost-micro-usd 3000 --hard-max-model-cost-micro-usd 6000 --extend-by 1`, the run
+  stops before the third session and raises a `budget_overrun` request addressed to the first
+  person, naming `max_model_cost_micro_usd`, exit 3; `decisions decide … A` writes one `budget
+  extended` line from 3000 to 6000, and the next run takes the third session and reaches its
+  terminal outcome, exit 0. Without `--hard-max-model-cost-micro-usd` the same run raises no
+  request and exits 5 naming `max_model_cost_micro_usd`.
 - Without `--hard-max-steps`, a stop at `--max-steps` raises no request and exits 5 as today.
 - A process stopped at its memory limit raises no request (`LimitHit` line only).
 - `--override budget_overrun=decider` is refused `NoOverride` before the first step.
@@ -110,5 +132,9 @@ no model call:
 
 ## Out of scope
 
-Extending a per-process limit. A budget in currency (`max_usd` of `autonomy-levels.md` § 3.1, `limits.max_usd`).
-Counting the extension across a daemon restart (`story:tree-daemon`). Decider call caps.
+Extending a per-process limit. A budget in currency other than the tree's model cost budget
+(`max_usd` of `autonomy-levels.md` § 3.1, `limits.max_usd`). Counting the extension across a daemon
+restart (`story:tree-daemon`). Decider call caps. An extension across a wake of a standing tree: a
+wake of a `Quiescent` tree starts a new run at the tree's budgets and does not carry it over
+(`story:standing-tree-wakes-at-a-host-instant`); a wake of a tree that is not `Quiescent` starts no
+new run and keeps it (`story:concurrent-cases-in-the-tree-daemon`).

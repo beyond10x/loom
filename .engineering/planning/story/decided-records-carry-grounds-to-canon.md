@@ -11,7 +11,7 @@ relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 - depends_on: story:requests-from-canon-pending-decisions
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -34,10 +34,14 @@ Canon, and a decision Canon sets aside because a ground moved supersedes the req
   a Loom-held case an `artifact_revision` ground cannot move alone, because moving the artifact
   raises the case revision (`lib.rs:1042`); the request stays Decided with its record and the stop
   is routed at the new revision under a new record key. A ground alone, at an unchanged case
-  revision: of the grounds Canon receives, only an evidence ground can, when Canon excludes the
-  cited record as `expired` at the evaluation instant
-  (`~/beyond10x/canon/website/docs/reference/protocol.md:57`); that is the `stale_grounds` case
-  above.
+  revision: of the grounds Canon receives, only an evidence ground can. Session `canon` answered on
+  2026-11-21 that expiry of cited evidence makes the ground stop holding with the case revision
+  unchanged, the entry is set aside, and the reason lists
+  `stale_grounds: [{"evidence": "<id>", "reason": "expired"}]`. Expiry needs the evidence kind to
+  declare `max_age` (`~/beyond10x/canon/website/docs/reference/protocol.md:57`), the record to
+  carry `observed_at`, and the evaluation to be given an instant (`--at`). Canon's
+  `story:decision-grounds` is planned, not built; Loom reads the key names of Canon's release, not
+  of that answer.
 
 ## Why
 
@@ -60,13 +64,13 @@ the same for approvals, which Loom starts handing Canon in
 ## ESS first
 
 `ess/domains/governor.yaml`: the stored explicit decision gains `ground_revisions` and
-`ground_evidence`; `StaleDecision` is added (outcome, decision, stale grounds).
-On that commit `task drift` fails, and `crates/loom-governor/tests/decision_grounds.rs` does not
-compile.
+`ground_evidence`; `StaleDecision` is added (outcome, decision, stale grounds, with the members
+Canon's release names for each stale ground). On that commit `task drift` fails, and
+`crates/loom-governor/tests/decision_grounds.rs` does not compile.
 
 ## Acceptance
 
-With a fixture protocol whose evidence kind `check` has `max_age: 1h`:
+With a fixture protocol whose evidence kind `check` declares `max_age: 1h`:
 
 - An outcome request Decided with grounds `spec@t1` and evidence `e7` is recorded; the stored
   explicit decision carries `ground_revisions: {spec: t1}` and `ground_evidence: [e7]`, and the
@@ -74,10 +78,11 @@ With a fixture protocol whose evidence kind `check` has `max_age: 1h`:
 - After `spec` moves to `t2`, which raises the case revision, the outcome is blocked again; the
   request stays Decided with its record, and routing the stop opens a request under the record key
   of the new case revision.
-- An outcome request Decided with ground `check-1`, a `check` record observed at 12:00: an
-  evaluation at 13:30 with the case revision unchanged reports the decision set aside with
-  `stale_grounds` naming `check-1`; the outcome is blocked; the request is Superseded with that
-  reason and a new Open request names it in `supersedes`.
+- An outcome request Decided with ground `check-1`, a `check` record with `observed_at` 12:00: an
+  evaluation given the instant 13:30, with the case revision unchanged, reports the decision set
+  aside with a stale ground naming evidence `check-1` and the reason `expired`; the outcome is
+  blocked; the request is Superseded with that reason and a new Open request names it in
+  `supersedes`. The same evaluation given 12:30 keeps the decision.
 - A request whose grounds are only `path_line` citations is recorded with empty Canon grounds, and
   no evaluation reports it with `stale_grounds`.
 - A case stored before this story (explicit decisions without grounds) is read, and its decisions

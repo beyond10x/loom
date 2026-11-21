@@ -50,7 +50,7 @@ scope:
   path: website/docs/guides/move-to-loom.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"review_outcome":1}}}
@@ -126,9 +126,13 @@ story's own test below, which fails on Canon 0.8.0 because `case_open` is an unk
   through `ProtocolCatalog::add_yaml`, opens a case, and reads a frontier that lists the opening
   action.
 - In the same test a `case_outcome` record with `child_case` and result `open` is received and
-  the `children` claim reads `unknown`. Evaluating a snapshot that holds a `case_outcome` record
-  without `child_case` (`loom_governor::evaluate`) is refused with a reason that names
-  `missing-child-case`; the same record given to `receive` is held and does not apply.
+  the `children` claim reads `unknown`. A `case_outcome` record without `child_case` is refused
+  by Canon's own evidence check with the code `missing-child-case`; `loom_governor::evaluate`
+  over a snapshot that holds it sets the record aside, as it does every readable record Canon
+  refuses (`AGENTS.md` § Governor), so its decision equals the one without the record; the same
+  record given to `receive` is held and does not apply. (Corrected on 2026-11-21 during wave
+  2026-11-21-w2: the bullet said `evaluate` itself is refused, which would change the set-aside
+  rule in a unit that changes no rule.)
 - `evidence_reads` has an arm for `Predicate::Children`, and in the same test
   `CanonGovernor::action_facts` answers for the case before and after the `case_outcome` record
   is received.

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: epic:decision-requests-in-the-runtime
 kind: epic
-status: draft
+status: proposed
 title: A run that stops on a decision opens a decision request, routed by autonomy level, and resumes once it is decided
 summary: loom.decision entity, autonomy grant table, decider port behind the grounding check, escalate_when, inbox, host-tick expiry, resume after the decision, approvals supplied to Canon, a non-independent review as a decision request
 tags:
@@ -10,7 +10,9 @@ tags:
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 7
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-21T03:05:17Z", actor: "agent:sdc", revision: 11, decided_on: {"recorded":{"review_outcome":12}}, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
 ## Outcome
 
@@ -28,7 +30,9 @@ option that produces none resumes or ends the run directly. Loom hands the appro
 to Canon's evaluation, and withholds one whose grounds moved. In a tree, a review recorded by a
 producer that is not independent becomes a decision request for a person or a decider, never a
 re-run by the same producer. The request is an entity of Loom's ESS, `loom.decision`, with eight
-commands; its store is durable, and its inbox is a set of CLI and SDK calls, not a service.
+commands; its store is durable, and its inbox is a set of CLI and SDK calls, not a service. A
+decision recorded through the inbox over a state directory resumes the run held for it in the
+same invocation.
 
 ## Why
 
@@ -55,7 +59,7 @@ invalidated when a revision moves, the decided record) and Loom (the runtime)
 >    moved into Loom's ESS when it is taken.
 
 The escalation mode of item 2 is met by the holders: the contract's guards read a request's
-holder, not the level (`decisions.md:89-91`), suppression is what the final holders mean, and an
+holder, not the level (`decisions.md:90-92`), suppression is what the final holders mean, and an
 Escalate always sets the holder to `person`; so the grant table carries no separate mode
 (`story:autonomy-grant-table`).
 
@@ -76,7 +80,9 @@ on 2026-11-21 (49 declarations, with the scenario `ess/scenarios/merge-a5-veto.y
 6. `Decide` first, with no Canon write; then the runtime writes the Canon record (idempotent);
    then a new command `RecordProduced` sets `produced_record`; then resume, which requires
    `produced_record`.
-7. Record ids: `<capability>@<case_revision>` and `<outcome>/<decision>@<case_revision>`.
+7. Record ids: `<capability>@<case_revision>` and `<outcome>/<decision>@<case_revision>`. Loom
+   writes the case revision `r<N>`, as its governor stamps it, and reads an outcome's decision
+   name from the request's `record_key` (`story:decided-record-written-then-recorded`).
 8. Expiry fires at a host tick with an explicit instant; no clock read inside the transition.
 9. Loom owns the types and the resolver; presets, classes and admitted ceilings are documents the
    host passes in. A class is an identifier checked against the host's classes document;
@@ -133,6 +139,16 @@ review evidence is independent under `independent_on: [different_principal]` whe
 differs from the producer's, on three conditions
 (`story:non-independent-review-becomes-decision-request`).
 
+A fifth message the same day accepted what the stories assume on three points: Loom keeps checking,
+on decided approvals, the ground kinds Canon's entry cannot carry; a question's record is
+`ARTIFACT@REV` of any artifact the case declares, SDC's `questions.yaml` being one instance; and
+the run log counts as "beside the principal" for a decider's model and adapter. On the fourth
+point SDC corrected its table: the A5 rollback cell is now "R: end" (`autonomy-levels.md:253`),
+and an eval run refuses every override that names a non-final holder (`:317`), which Loom's
+`EvalOverride` follows (`story:autonomy-grant-table`). Session `canon` answered the same day that
+expiry of cited evidence makes an evidence ground stop holding at an unchanged case revision
+(stories 18 and 19).
+
 What Loom has, read at `ecefe180`: a run suspends only when the authority provider answers
 `ApprovalRequired` (`crates/loom-commission/src/runtime.rs:384-392`), and `resume_after_grant`
 performs the held request once (`runtime.rs:2374`); `NeedsHumanJudgment` ends the run with no
@@ -143,20 +159,42 @@ no timer: the host resumes the work" (`AGENTS.md:423`).
 
 ## Stories
 
-In dependency order. Stories 1 to 15 build against fixtures on the Canon Loom pins today. Stories
-16 and 20 wait on `story:tree-run-command`, and through it on the Canon 0.9.0 pin of
-`epic:protocol-tree-on-bindings`. Stories 17, 18 and 19 wait on Canon (§ Upstream). Each story's
-code goes in its own module, so a crate's `lib.rs` shared by several stories gains one `mod` line
-per story; the order is kept, and the wave planner keeps two stories that share a file apart.
-Story 13 depends on story 10 because the type change of story 10 forces an edit in
-`crates/loom-intake-slice/src/grant.rs`, which story 13 also edits.
+In dependency order. Story 0 raises the format of Loom's main ESS system so the contract's copy
+is valid there; story 1 depends on it. Stories 1 to 15 and 21 build against fixtures on the Canon Loom
+pins today. Stories
+16 and 20 wait on `story:tree-run-command`, and through it on `story:canon-0-9-0-pin`, which is
+unblocked (engineering-protocols `0.16.0` pins Canon `0.9.0`) and not yet delivered. Story 22
+waits on story 16 and on `story:tree-daemon` (`epic:tree-daemon-under-enforced-limits`): a
+decision on a served tree goes through the daemon, and story 16 does not wait on the daemon chain.
+Stories 17,
+18 and 19 wait on Canon (§ Upstream). Each story's code goes in its own module, so a crate's
+`lib.rs` shared by several stories gains one `mod` line per story; the order is kept, and the wave
+planner keeps two stories that share a file apart. Story 13 depends on story 10 because the type
+change of story 10 forces an edit in `crates/loom-intake-slice/src/grant.rs`, which story 13 also
+edits. Story 11 depends on story 10 because both edit `crates/loom-cli/src/lib.rs` (story 10's
+resume refusals). Story 15 depends on story 14 because both edit `crates/loom-cli/src/main.rs`,
+`crates/loom-cli/src/lib.rs` and the slice's governor build. Story 20 depends on story 7 because it
+adds the review stop to routing's `ess/domains/decision.yaml` and routing module. Story 21 is
+listed last but comes after story 15 and before story 16: it depends on story 14
+(`resume_decision_hold`) and on story 15 (both edit `crates/loom-cli/src/main.rs` and `lib.rs`),
+and story 16 depends on it (both edit `crates/loom-cli/src/decisions.rs`, `lib.rs` and
+`main.rs`). Story 22 comes after stories 16 and 21 and after `story:tree-daemon`: it depends on
+all three (story 21 for `crates/loom-cli/src/decisions.rs`). A host port
+whose answer becomes a command input is declared in `ess/domains/decision.yaml`: `CaseRevisions`
+(the `case_revision` of `Decide` and `TakeRecommendation`, story 11) and `ExpiryInstant` (the
+`expires_at` of `Request`, story 7). A port no command input comes from, such as `DecisionStore`,
+is declared in Rust only.
 
+0. `story:ess-format-31`: `ess/system.yaml` goes from `ess/25` to `ess/31` on the pinned `ess`
+   0.86.0, so the contract's `[]` in `sets:` and its `coalesce` guard are valid; the raise
+   regenerates four files of `generated/rust/loom` and changes no command's outcome or stored row.
 1. `story:decision-request-entity`: the `loom.decision` domain, the crate that applies its eight
    commands, and the `DecisionStore` port with the records kept beside a request.
 2. `story:decision-request-file-store`: requests and their records kept a file each in a store
    directory, with the three views, across a restart.
 3. `story:autonomy-grant-table`: level, presets, classes (with an expiry duration per class),
-   overrides and admitted ceilings resolve into one grant table per run.
+   overrides and admitted ceilings resolve into one grant table per run; an eval run refuses an
+   override to a non-final holder.
 4. `story:decider-port-and-grounding-check`: the `Decider` port, a rule adapter, and the
    grounding check of `decision-grounds.sh` over a citation resolver.
 5. `story:grounds-resolve-against-held-cases`: the citation resolver over a governor-held case,
@@ -164,7 +202,7 @@ Story 13 depends on story 10 because the type change of story 10 forces an edit 
 6. `story:llm-decider`: a decider over an llm `Model`, recorded responses only.
 7. `story:decision-routing-by-holder`: a stop becomes a request with its `expires_at`, routed by
    its holder (an absent decider or rule as a failed result), with escalation and
-   `escalation_suppressed`.
+   `escalation_suppressed`; a Decided request for the record key is reused.
 8. `story:escalate-when-conditions`: the four `escalate_when` conditions, checked by a program
    after the decider replies and before `Decide`.
 9. `story:decided-record-written-then-recorded`: Decide, then the Canon record, then
@@ -180,8 +218,8 @@ Story 13 depends on story 10 because the type change of story 10 forces an edit 
     through requests, ends the run on a final holder's end, and `resume` performs the held request
     only on a recorded grant.
 14. `story:question-and-outcome-decisions-hold-runs`: a slice run is held, not ended, on a
-    question or an outcome decision, and resumed on its decision; `decisions record` records a
-    question's answer revision.
+    question or an outcome decision, and resumed on its decision; `decisions record` completes a
+    question's record through `complete_decision`.
 15. `story:approvals-supplied-to-canon-evaluation`: the governor hands Canon the approvals the
     slice recorded, as `canon-authority/1` records at the current case revision, withholding one
     whose grounds moved.
@@ -197,8 +235,15 @@ Story 13 depends on story 10 because the type change of story 10 forces an edit 
     (blocked).
 20. `story:non-independent-review-becomes-decision-request`: a review recorded by a producer that
     is not independent becomes a `code_review` or `spec_acceptance` request in `tree run`, decided
-    by a person or an independent decider, never re-run; it also waits on
+    by a person or an independent decider, never re-run; it also waits on story 7 and
     `story:selector-stop-names-set-aside-record`.
+21. `story:decisions-resume-the-held-run`: `decisions decide`, `take` and `record` over
+    `--state` resume the run held for the request in the same invocation and print its next
+    state; `tick --state DIR --resume` resumes the runs of the requests it took on silence, and
+    no resume command is added.
+22. `story:daemon-continues-a-decided-request`: on a tree a daemon serves, `decisions decide`,
+    `take` and `tick` with `--tree` go through the daemon's `Decide` and `Tick` commands, and the
+    daemon continues the decided case with no further command, after a restart too.
 
 Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enforced-limits`:
 `story:run-log-references-exec-file-changes` (the per-exec file-change reference) and
@@ -210,7 +255,8 @@ Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enfor
 - A timer or a service. Expiry and the default on silence fire at a host tick with an explicit
   instant (`story:silence-and-expiry-at-a-host-tick`); the tree daemon of
   `epic:tree-daemon-under-enforced-limits` calling that tick is a later story of that epic. No
-  CLI flag sets an expiry: the classes document gives it per class.
+  CLI flag sets an expiry: the classes document gives it per class. No flag fixes the instant of
+  `b10x-loom run`: a request's printed `expires_at` is what a tick is given.
 - Listing or resolving principals. The host hands in the eligible principals per class; Loom
   resolves none through Mandate and authenticates no principal named on the command line.
 - The level presets, the decision classes and the admitted ceilings as data. They are documents
@@ -237,6 +283,12 @@ Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enfor
 - A review independence demand beyond `different_principal`, and model or adapter members on
   Canon's evidence (`story:non-independent-review-becomes-decision-request`).
 - Changes to Canon, and changes to any artifact of `epic:protocol-tree-on-bindings`.
+- Raising `ess/intake/system.yaml` or `ess/commission/system.yaml`, moving the ESS toolchain, and
+  `ordered:` enums (story 0 raises only `ess/system.yaml`, story 1 drops `ordered: true`).
+- SDC's contract extension of 2026-11-21 (`story:decision-contract-goals-grounds` of session
+  `sdc`): a ground kind for goals entries and a free answer on a decided request for the classes
+  scope-changing answer and finding. It is a later story of this epic, drafted once session `sdc`
+  sends the final line ranges; stories 1 to 14 do not wait on it.
 
 ## Upstream
 
@@ -255,14 +307,16 @@ stories, accepted on its local wave branch (commit `c295fae`, not pushed), none 
 - `story:decision-grounds` (canon wave 6): `ground_revisions` and `ground_evidence` on the entries
   of `canon-authority/1` and `canon-decisions/1`; evaluation sets an entry aside when a ground no
   longer holds and lists `stale_grounds` on its reason. Canon judges grounds only on a decided
-  entry; a pending recommendation is checked by Loom with the same two rules.
+  entry; a pending recommendation is checked by Loom with the same two rules. An evidence ground
+  stops holding when its record expires by `max_age` at the evaluation instant, with the case
+  revision unchanged (session `canon`, 2026-11-21); the key names follow Canon's release.
 
 Both later stories depend on `story:authority-revision-binding` and on `story:missing-evidence`
 (canon wave 4). `upstream-blocker:canon-decision-side-unreleased` records this and blocks stories
 17, 18 and 19. Consequences for the stories that do not wait:
 
 - Until Canon ships `pending_decisions`, a request is built from Loom's own stop and
-  `CanonGovernor::decision_document` (`AGENTS.md:480-488`), or from fixtures.
+  `CanonGovernor::decision_document` (`AGENTS.md` § Governor, `:484-492`), or from fixtures.
 - `subject_artifact` never comes from Canon: the host names it, and in a tree the bindings file
   maps the action to its subject.
 - Loom's grounding check applies Canon's two rules to a pending recommendation itself: the cited
@@ -272,9 +326,10 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
   case revision (stories 15 and 16). In a Loom-held case an `artifact_revision` ground cannot move
   without the case revision, so the grounds this catches are `path_line`, `aep_artifact` and
   `sdc_decisions` citations; Canon's entries cannot carry those, so Loom keeps checking them after
-  story 19 too.
+  story 19 too (accepted by session `sdc` on 2026-11-21).
 - Loom pins Canon at `0.8.0` (`crates/loom-governor/Cargo.toml:15`); `story:canon-0-9-0-pin` moves
-  it to `0.9.0` and is itself held by `upstream-blocker:engineering-protocols-on-canon-0-9-0`.
+  it to `0.9.0`. It is unblocked, since engineering-protocols `0.16.0` pins Canon `0.9.0`, and not
+  yet delivered.
 
 ## Acceptance
 
@@ -291,9 +346,9 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
 - A decider reply citing a revision that is no longer current leaves the request with no
   recommendation and `no_recommendation_reason` naming the citation.
 - A slice run whose class the classes document gives `expires_after` opens a request with
-  `expires_at`; a `decisions tick --at` past it decides a request with a strong default by
-  `silence`, after which `resume` performs the held action once, and expires one without, whose
-  run stays held.
+  `expires_at`; a `decisions tick --at` given that printed instant decides a request with a strong
+  default by `silence`, after which `resume` performs the held action once, and expires one
+  without, whose run stays held.
 - A crash injected after `Decide` and before `RecordProduced` leaves a Decided request without a
   record; the next attempt writes the record once and the run resumes once.
 - In a library test with a fixture rule handed in through the SDK, the same approval under
@@ -315,15 +370,27 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
 - A fixture tree whose review is recorded by the implementing producer opens a `code_review`
   request instead of stopping; decided by `decider:stub`, the review record's producer is
   `decider:stub` and the claim holds (story 20).
+- An eval run with an override to `decider` is refused `EvalOverride` (story 3).
+- `ess/system.yaml` declares `format: ess/31`, `task drift` exits 0, and `CHANGELOG.md` names the
+  raise in one `### Changed` bullet and in no `**Breaking:**` bullet (story 0).
+- At an outcome hold of a slice run, `decisions decide DR-… A --as timo --state DIR` records the
+  decision and prints the resumed run's last line `stopped: Completed` (story 21).
+- On a tree served by `tree serve` that waits on `DR-…`, `decisions decide DR-… A --as timo
+  --tree STORE` exits 0, and the daemon brings the root to its terminal outcome with no further
+  command (story 22).
 - No test makes a model or network call; `task check` exits 0 on every story's commit.
 
 ## Source
 
 Session `sdc`, 2026-11-21: the relayed request, nine answers, the second answers a to h with
 `escalate_when` and the budget and limit requests, the third message with the final contract, the
-fourth message on a decider's review independence, and the accepted design calls (an Escalate
-moves the existing request; a Supersede of a Decided request does not revoke the Canon record; the
-host hands in eligible principals; the inbox is a store plus CLI and SDK calls). Session `canon`,
-2026-11-21: the three Canon stories above. Documents read: `~/beyond10x/sdc/docs/decisions.md`,
-`autonomy-levels.md`, `fs-changes.md`, `sdc/tools/decision-grounds.sh`,
-`sdc/ess/domains/decision.yaml`, `sdc/ess/scenarios/merge-a5-veto.yaml`.
+fourth message on a decider's review independence, the fifth message on the four points of the
+e3r3 ledger, the sixth message choosing `ess/31` for Loom's main system
+(`.engineering/drafts/e3-sdc-answers-6.md`, with the probe `e3-ess-format-probe.md`), and the
+accepted design calls (an Escalate moves the existing request; a Supersede of
+a Decided request does not revoke the Canon record; the host hands in eligible principals; the
+inbox is a store plus CLI and SDK calls). Session `canon`, 2026-11-21: the three Canon stories
+above and the answer on expired evidence grounds. Documents read:
+`~/beyond10x/sdc/docs/decisions.md`, `autonomy-levels.md`, `fs-changes.md`,
+`sdc/tools/decision-grounds.sh`, `sdc/ess/domains/decision.yaml`,
+`sdc/ess/scenarios/merge-a5-veto.yaml`.

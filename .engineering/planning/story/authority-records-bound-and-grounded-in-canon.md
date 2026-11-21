@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:approvals-supplied-to-canon-evaluation
 - depends_on: story:decided-records-carry-grounds-to-canon
-revision: 4
+revision: 5
 ---
 ## Outcome
 
@@ -35,19 +35,22 @@ can see moves; Loom stops doing either itself for those grounds.
     request that produced the record stays Decided with its record; the next stop is routed at the
     new revision under a new record key (`story:decision-routing-by-holder`);
   - a ground alone, at an unchanged case revision. Of the grounds Canon receives, only an evidence
-    ground can do this: Canon excludes a record older than its kind's `max_age` at the evaluation
-    instant as `expired` (`~/beyond10x/canon/website/docs/reference/protocol.md:57`) with no
-    revision moving. When an evaluation sets an authority entry aside with `stale_grounds`, the
-    governor answers it beside the stale explicit decisions, and the slice and `tree run`
-    supersede the Decided request that produced the record and route the stop anew.
+    ground can do this. Session `canon` answered on 2026-11-21 that expiry of cited evidence makes
+    the ground stop holding with the case revision unchanged, the entry is set aside, and the
+    reason lists `stale_grounds: [{"evidence": "<id>", "reason": "expired"}]`. Expiry needs the
+    kind to declare `max_age` (`~/beyond10x/canon/website/docs/reference/protocol.md:57`), the
+    record to carry `observed_at`, and the evaluation to be given an instant (`--at`). When an
+    evaluation sets an authority entry aside with `stale_grounds`, the governor answers it beside
+    the stale explicit decisions, and the slice and `tree run` supersede the Decided request that
+    produced the record and route the stop anew. Canon's `story:decision-grounds` is planned, not
+    built; Loom reads the key names of Canon's release, not of that answer.
 - `DecisionAuthority` (`story:approval-decisions-resume-held-runs`), the slice's and the tree's
   `AuthorityRecords` supply (`story:approvals-supplied-to-canon-evaluation`,
   `story:tree-waits-open-decision-requests`) no longer check a Decided approval's
   `artifact_revision` and `canon_evidence` grounds. They keep checking the grounds Canon's entry
   cannot carry (`path_line`, `aep_artifact`, `sdc_decisions`, and `canon_decisions` and
   `canon_authority` record ids), which are also the grounds that go stale while the case stays.
-  Loom's grounding check of pending recommendations is unchanged (session `sdc`, 2026-11-21,
-  answer h).
+  Loom's grounding check of pending recommendations is unchanged.
 
 ## Why
 
@@ -57,8 +60,8 @@ grounds on approvals too, and Loom's own check stays for pending recommendations
 decisions, and `story:decision-grounds` adds `ground_revisions` and `ground_evidence` to its
 entries (session `canon`, 2026-11-21); neither is released. Canon's two ground members hold
 artifact revisions and evidence ids only, so a `path_line` or other record-id ground never reaches
-Canon, and answer h's "pending recommendations only" cannot hold for those grounds: Loom keeps
-checking them on decided approvals.
+Canon; Loom keeps checking those on decided approvals, accepted by session `sdc` on 2026-11-21
+(fifth message, point 1).
 
 ## Waits on
 
@@ -74,14 +77,15 @@ checking them on decided approvals.
 
 `ess/domains/governor.yaml`: `HeldAuthorityRecord` gains `ground_revisions` and
 `ground_evidence`; `StaleDecision` gains the authority variant (capability, case revision, stale
-grounds). `ess/intake/domains/routing.yaml`: the slice's `Grant` gains the two ground members.
-`ess/domains/tree.yaml`: `CaseApproval` gains them. On that commit `task drift` and
-`task intake-drift` fail, and `crates/loom-governor/tests/authority_grounds.rs` does not compile.
+grounds with the members Canon's release names). `ess/intake/domains/routing.yaml`: the slice's
+`Grant` gains the two ground members. `ess/domains/tree.yaml`: `CaseApproval` gains them. On that
+commit `task drift` and `task intake-drift` fail, and
+`crates/loom-governor/tests/authority_grounds.rs` does not compile.
 
 ## Acceptance
 
 With a fixture protocol whose action `merge` requires capability `change.merge`, and whose evidence
-kind `check` has `max_age: 1h`:
+kind `check` declares `max_age: 1h`:
 
 - A granted approval decided at case revision `r3` with ground `spec@t1` is handed to Canon with
   principal, `case_revision: r3` and `ground_revisions: {spec: t1}`; the action is admissible at
@@ -90,9 +94,11 @@ kind `check` has `max_age: 1h`:
   Canon reports `merge` approval-required; Loom chose no records by revision (a test inspects the
   document handed over); the next routing opens a request with record key `change.merge@r4`, and
   the `r3` request stays Decided with its record.
-- A granted approval decided at `r3` with ground `check-1`, a `check` record observed at 12:00: an
-  evaluation at 13:30 with the case still at `r3` sets the entry aside with `stale_grounds` naming
-  `check-1`; the request is Superseded and a new Open request names it.
+- A granted approval decided at `r3` with ground `check-1`, a `check` record with `observed_at`
+  12:00: an evaluation given the instant 13:30, with the case still at `r3`, sets the entry aside
+  with a stale ground naming evidence `check-1` and the reason `expired`; the request is
+  Superseded and a new Open request names it. The same evaluation given 12:30 keeps `merge`
+  admissible.
 - `DecisionAuthority` makes no grounding call for the `artifact_revision` and `canon_evidence`
   grounds of a Decided approval, and one for its `path_line` ground (a counting resolver); a
   pending recommendation is still checked.

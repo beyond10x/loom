@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T02:37:43Z",
+  "actor": "human:timo",
+  "artifact": "epic:concurrent-and-standing-case-trees",
+  "kind": "epic",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "e4r2-changes.md, applied 2026-11-21",
+    "review": "review-result:concurrent-and-standing-case-trees-acceptance-r2",
+    "outcome": "fixed"
+  }
+}

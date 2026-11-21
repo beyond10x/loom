@@ -15,7 +15,8 @@ relations:
 - depends_on: story:hash-chained-run-log
 - depends_on: story:agent-node-run-records
 - depends_on: story:approvals-supplied-to-canon-evaluation
-revision: 6
+- depends_on: story:decisions-resume-the-held-run
+revision: 8
 ---
 ## Outcome
 
@@ -25,7 +26,8 @@ them, with the resolved grant table, beside the root case; `tree run` routes, at
 
 - an action that needs a capability (`AwaitingAuthority`): an approval request whose record is
   the tree's `CaseApproval` (`story:tree-run-command`), written by `CaseApprovalWriter` with
-  record id `<capability>@<case_revision>` at the request's decided case revision;
+  record id `<capability>@r<N>` at the request's decided case revision `r<N>`
+  (`story:decided-record-written-then-recorded`);
 - an outcome blocked on a missing explicit decision: an outcome request, written by
   `ExplicitDecisionWriter`.
 
@@ -36,13 +38,19 @@ The request's subject is the subject of the action's evidence entries in the bin
 (`story:bindings-document`); Canon names none (session `canon`, 2026-11-21). An action whose
 evidence entries name more than one subject gives the request the subject `case` at the case
 revision (session `sdc`, 2026-11-21, answer f): a request has one subject
-(`~/beyond10x/sdc/ess/domains/decision.yaml:229-230`), and a binding may list several entries
+(`~/beyond10x/sdc/ess/domains/decision.yaml:231-232`), and a binding may list several entries
 (`story:bindings-document` § Outcome). The tree hands the router no touched paths, so a
 `paths_touched` condition counts as matching (`story:escalate-when-conditions`). The router sets
-`expires_at` from the classes document (`story:decision-routing-by-holder`). No flag supplies a
-rule (Loom ships no rule): a `rule*` holder in a tree has an absent rule port, which routing treats
-as a failed rule result, so `rule` and `rule_and_decider` escalate to the escalation person and
-`rule_final` and `rule_and_decider_final` end the case's run.
+`expires_at` from the classes document through the `ExpiryInstant` port
+(`story:decision-routing-by-holder`), which `tree run` implements by adding the class's seconds to
+the instant it routes at. No flag supplies a rule (Loom ships no rule): a `rule*` holder in a tree
+has an absent rule port, with the principal `rule:none`, which routing treats as a failed rule
+result, so `rule` and `rule_and_decider` escalate to the escalation person and `rule_final` and
+`rule_and_decider_final` end the case's run.
+
+`tree run` calls `complete_pending` (`story:decided-record-written-then-recorded`) before it routes
+any stop, so a record a crash left written but unrecorded is recorded before routing reads the
+request.
 
 A decider or rule holder decides in the same `tree run`, which goes on once the record is written.
 Where the request waits on a person, `tree run` exits 3 and prints, per request, the case, the
@@ -54,7 +62,8 @@ completes it, so `story:tree-run-command`'s use of it is kept.
 The next `tree run` continues past a wait only when its request carries a `produced_record`
 whose grounds still resolve; a ground that no longer resolves supersedes the request and opens a
 new one, as `story:approval-decisions-resume-held-runs` does for the slice. `tree run` builds its
-`HeldCaseGrounds` with the tree's store directory as the root of `path_line` citations. In a
+`HeldCaseGrounds` with the tree's store directory as the case directory of `GroundRoots`, the root
+of `path_line` citations (`story:grounds-resolve-against-held-cases`). In a
 Loom-held case an `artifact_revision` ground cannot move alone: moving the artifact raises the case
 revision (`crates/loom-governor/src/lib.rs:1042`), the record of the earlier case revision no
 longer applies, and the stop is routed at the new revision under a new record key, while the old
@@ -78,7 +87,18 @@ key). `tree status` shows the case stopped with that reason.
 and `decisions tick` act on the tree's decision store, with `CaseApprovalWriter` and
 `ExplicitDecisionWriter` as their writers, and append the decision events below to the run log of
 the request's case. So `decisions tick --at INSTANT --tree STORE` writes the `expired` and the
-silence `decided` lines.
+silence `decided` lines. For `--tree` the tree implements the tick's `CaseRevisions` port
+(`story:silence-and-expiry-at-a-host-tick`) from the governor of the request's case.
+
+Under `--tree`, `decisions decide` and `take` resume nothing by themselves. After their output
+they print two lines (`story:decisions-resume-the-held-run`): `unblocked: <case> (DR-…)` and
+`continue: b10x-loom tree run <STORE>`, with `<STORE>` the path exactly as given to `--tree`.
+
+`decisions … --tree` writes the tree's store, so it takes the store's one-writer lock as the
+`tree` commands do (`story:tree-run-command`). On a store a daemon serves, it is therefore refused
+`StoreServed`, naming the daemon's socket, as `story:tree-daemon` refuses any direct command that
+finds the lock held by a daemon (its § Outcome). This holds until
+`story:daemon-continues-a-decided-request` sends the decision through the daemon.
 
 The tree's `CaseApproval` implements the `AuthorityRecords` port of
 `story:approvals-supplied-to-canon-evaluation`, and `tree run` builds its governor and its
@@ -119,6 +139,8 @@ decider or rule holder must not produce it, so it is no decision request.
 - `story:decision-routing-by-holder`, `story:escalate-when-conditions`,
   `story:decided-record-written-then-recorded`, `story:decision-inbox-commands` and
   `story:silence-and-expiry-at-a-host-tick` through them.
+- `story:decisions-resume-the-held-run`: it says what `decide` and `take` print under `--tree`,
+  and both change `crates/loom-cli/src/decisions.rs`, `lib.rs` and `main.rs`.
 
 It does not depend on `story:bound-agent-node`: the decider is not an agent node and works on no
 workspace.
@@ -172,9 +194,10 @@ principals, a recorded decider, no rule and no model call:
   unchanged, the case's `canon-decision/1` shows the capability approval-required with no
   authority entry handed over, and the next `tree run` writes one `superseded` line, opens a new
   request naming the old one in `supersedes`, and exits 3.
-- A granted approval whose case then moves (`spec` revised, the case revision raised): the next
-  `tree run` opens a request with record key `<capability>@<new revision>`, writes no
-  `superseded` line, exits 3, and the old request stays Decided with its record.
+- A granted approval at case revision `r<N>` whose case then moves (`spec` revised, the case
+  revision raised to `r<N+1>`): the next `tree run` opens a request with record key
+  `<capability>@r<N+1>`, writes no `superseded` line, exits 3, and the old request stays Decided
+  with its record.
 - A recorded decider reply citing a moved revision at `A1` writes one `withheld` line with the
   reason, and the request waits on the person with no recommendation.
 - With the classes document giving `roadmap` `expires_after: 3600` and `--at 12:00`, the request
@@ -191,6 +214,9 @@ principals, a recorded decider, no rule and no model call:
   capability granted.
 - A child's wait names the child's case and the request is in the child's log.
 - `tree status` lists the open request of the waiting case and none after it is decided.
+- `decisions decide DR-… A --as timo --tree STORE` on a store no daemon serves, with `STORE`
+  typed as a relative path, prints the last two lines `unblocked: <case> (DR-…)` and
+  `continue: b10x-loom tree run STORE`, with `STORE` exactly as typed.
 - `tree verify` exits 0 after the run.
 - `docs/contracts/run-log-v1.json` is regenerated and names the decision events.
 - `task check` exits 0.
@@ -203,4 +229,7 @@ binding gives no options. An action bound to a `person` executor: it stays the w
 requests at a budget or limit stop (`story:budget-and-limit-stops-raise-decision-requests`).
 Recording the decider's model call in the run log. A daemon that ticks expiry. Computing touched
 paths. A stop for a review recorded by a producer that is not independent
-(`story:non-independent-review-becomes-decision-request`). A flag that supplies a rule.
+(`story:non-independent-review-becomes-decision-request`). A flag that supplies a rule. A served
+tree: a decision through the daemon, and the daemon continuing the decided case
+(`story:daemon-continues-a-decided-request`). Until that story lands, `decisions … --tree` on a
+served store is refused `StoreServed`.

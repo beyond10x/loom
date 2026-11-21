@@ -13,7 +13,7 @@ relations:
 - depends_on: story:tree-waits-open-decision-requests
 - depends_on: story:canon-0-9-0-pin
 - depends_on: story:approvals-supplied-to-canon-evaluation
-revision: 4
+revision: 5
 ---
 ## Outcome
 
@@ -23,18 +23,18 @@ engineering-protocols tag built on that release, and builds every decision stop 
 
 - `CanonGovernor::pending_decisions(case, frontier)` returns the section of the document behind a
   frontier id the governor issued, as `decision_document` returns the whole document
-  (`AGENTS.md:480-488`).
+  (`AGENTS.md` § Governor, `:484-492`).
 - `stop_from_pending` in `b10x-loom-governor` turns an `authority` entry `{action, capability,
   scope?, current, case_revision?, options: [granted, denied]}` into an approval stop with options
   `A` granted and `B` denied, both producing a record, and a `decisions` entry `{outcome,
-  decision, case_revision?, options: [taken]}` into an outcome stop with `A` take, which produces
-  the explicit decision record, and `B` leave it untaken, which produces none (session `sdc`,
-  2026-11-21, answer d). The subject is given by the caller: Canon names no subject artifact of an
-  action, and the caller maps the action to its subject through the bindings file (session
-  `canon`, 2026-11-21).
+  decision, case_revision?, options: [taken]}` into an outcome stop whose action is the outcome
+  (`story:decision-routing-by-holder`), with `A` take, which produces the explicit decision
+  record, and `B` leave it untaken, which produces none (session `sdc`, 2026-11-21, answer d). The
+  subject is given by the caller: Canon names no subject artifact of an action, and the caller maps
+  the action to its subject through the bindings file (session `canon`, 2026-11-21).
 - Canon gives one `authority` entry per requirement that makes an action approval-required. Each
-  entry is one stop; the router keys requests by `record_key` (`<capability>@<case_revision>`),
-  and `question_key` stays `<case>|<action>|<question id or empty>`
+  entry is one stop; the router keys requests by `record_key` (`<capability>@r<N>`, `r<N>` the
+  case revision), and `question_key` stays `<case>|<action>|<question id or empty>`
   (`story:decision-routing-by-holder`). So two entries of one action with two capabilities give
   two requests under one `question_key`, and two entries with one capability at one revision give
   one request: the second routing finds the open request for that record key and reuses it.
@@ -78,11 +78,11 @@ Loom and Canon cannot disagree about what is pending. Loom pins Canon at `0.8.0`
   approval stop with options `granted`, `denied`, both producing a record, and an outcome stop
   with options take, producing a record, and leave untaken, producing none.
 - A fixture action `merge` that requires two capabilities, `change.merge` and `release.approve`,
-  gives two `authority` entries and two requests with the record keys `change.merge@<rev>` and
-  `release.approve@<rev>`, both under the `question_key` `<case>|merge|`.
-- A fixture action `merge` with two requirements naming one capability `change.merge` gives two
-  `authority` entries and one request: the second routing finds the open request for
-  `change.merge@<rev>` and reuses it, and the store holds one request.
+  at case revision `r3`, gives two `authority` entries and two requests with the record keys
+  `change.merge@r3` and `release.approve@r3`, both under the `question_key` `<case>|merge|`.
+- A fixture action `merge` with two requirements naming one capability `change.merge`, at case
+  revision `r3`, gives two `authority` entries and one request: the second routing finds the open
+  request for `change.merge@r3` and reuses it, and the store holds one request.
 - The slice and tree fixture runs of stories 13, 14 and 16 give the same requests, by id, question,
   options and subject, as before this story.
 - A grep finds no reading of `"present": false` outside `crates/loom-governor`.
