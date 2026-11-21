@@ -259,8 +259,8 @@ pub(crate) fn registration(path: &str) -> Option<String> {
 
 /// Hold `files`, as (path below the vendored directory, bytes), to `lock`: a file the lock does
 /// not name is `Unlocked`, a file whose sha256 is not its entry's is `DigestMismatch`, and an
-/// entry no file has is `Missing`. Every file is checked; the first refusal, in the order of
-/// `files` and then of the lock's entries, is returned.
+/// entry no file has is `Missing`. The first refusal, in the order of `files` and then of the
+/// lock's entries, is returned; later files are not looked at.
 pub fn check(lock: &ProtocolLock, files: &[(&str, &[u8])]) -> Result<(), LockError> {
     let locked: BTreeMap<&str, &str> = lock
         .files
