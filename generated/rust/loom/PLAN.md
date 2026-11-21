@@ -1,14 +1,14 @@
 <!--
   generated from loom v1
-  model digest fbeaebade33f9bae0fee878b4ac2ed2d464d4ad92289ab370b697eb4163ce3d5
-  contract digest f4ad0d5c16c875e74b035f1a0641820afec1c749de0636dc8a78651dab8edd95
+  model digest dab0e9b0b131719fb6d54b29aa318e3ed2ca817df946678486108672bd614274
+  contract digest 077f4e4e6548832cdab0185ef7b7f4e65f130d090c84f28346747b75d9e33239
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-312 capabilities: **307 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+327 capabilities: **322 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -189,6 +189,21 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.run.SelectionRecordId` |
 | domain type | `loom.run.SelectionStrategy` |
 | domain type | `loom.run.TurnId` |
+| domain type | `loom.runlog.ActionFinished` |
+| domain type | `loom.runlog.ActionStarted` |
+| domain type | `loom.runlog.AuthorityRecorded` |
+| domain type | `loom.runlog.CaseOpened` |
+| domain type | `loom.runlog.ChildClosed` |
+| domain type | `loom.runlog.ChildOpened` |
+| domain type | `loom.runlog.Discarded` |
+| domain type | `loom.runlog.Evaluated` |
+| domain type | `loom.runlog.RevisionMove` |
+| domain type | `loom.runlog.RunLogEvent` |
+| domain type | `loom.runlog.RunLogLine` |
+| domain type | `loom.runlog.RunLogRefusal` |
+| domain type | `loom.runlog.RunLogRefused` |
+| domain type | `loom.runlog.Stopped` |
+| domain type | `loom.runlog.Terminated` |
 | domain type | `loom.session.AgentSession.State` |
 | domain type | `loom.session.CallDecision` |
 | domain type | `loom.session.ChangedFile` |
