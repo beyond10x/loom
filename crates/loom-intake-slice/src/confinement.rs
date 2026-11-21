@@ -86,6 +86,10 @@ pub trait TestRunner: Send + Sync {
     }
     /// The operator's reason when this runner launches through Substrate's `local` adapter, and
     /// `None` for any other runner: a run that answers `Some` is not kept for resume.
+    ///
+    /// A runner that launches through another runner answers what the inner runner answers. A
+    /// runner that answers `None` for a `local` launch has its run kept for resume, and a resume
+    /// reopens it under another adapter with no reason.
     fn local_reason(&self) -> Option<&str> {
         None
     }
@@ -97,27 +101,63 @@ pub fn local_label(reason: &str) -> String {
     format!("local ({})", escape_reason(reason))
 }
 
-/// `reason` with every character that can break or hide a line escaped as `\u{…}`: control
-/// characters (C0, DEL and C1, `U+0085` among them, and the tab), the line and paragraph
-/// separators (`U+2028`, `U+2029`, the categories Zl and Zp) and the bidirectional controls
-/// (`U+061C`, `U+200E`, `U+200F`, `U+202A` to `U+202E`, `U+2066` to `U+2069`). Escaping is
-/// idempotent: what it writes is ASCII it leaves unchanged.
+/// How a run names a `local` record's reason, already passed through [`escape_reason`] when
+/// [`EngineRunner`] recorded it: every character that breaks or hides a line is escaped once more
+/// (a no-op on such a record), the backslash left as it is so the record reads as recorded.
+pub(crate) fn recorded_label(recorded: &str) -> String {
+    format!("local ({})", escape(recorded, false))
+}
+
+/// The format characters, Unicode category Cf, as inclusive ranges, and the whole tag block
+/// (`U+E0000` to `U+E007F`): each renders as nothing or reorders the text around it.
+const FORMAT_CHARACTERS: [(char, char); 22] = [
+    ('\u{00AD}', '\u{00AD}'),
+    ('\u{0600}', '\u{0605}'),
+    ('\u{061C}', '\u{061C}'),
+    ('\u{06DD}', '\u{06DD}'),
+    ('\u{070F}', '\u{070F}'),
+    ('\u{0890}', '\u{0891}'),
+    ('\u{08E2}', '\u{08E2}'),
+    ('\u{180E}', '\u{180E}'),
+    ('\u{200B}', '\u{200F}'),
+    ('\u{202A}', '\u{202E}'),
+    ('\u{2060}', '\u{2064}'),
+    ('\u{2066}', '\u{206F}'),
+    ('\u{FEFF}', '\u{FEFF}'),
+    ('\u{FFF9}', '\u{FFFB}'),
+    ('\u{110BD}', '\u{110BD}'),
+    ('\u{110CD}', '\u{110CD}'),
+    ('\u{13430}', '\u{1343F}'),
+    ('\u{1BCA0}', '\u{1BCA3}'),
+    ('\u{1D173}', '\u{1D17A}'),
+    ('\u{E0000}', '\u{E0000}'),
+    ('\u{E0001}', '\u{E0001}'),
+    ('\u{E0020}', '\u{E007F}'),
+];
+
+/// `reason` with every character that can break, hide or reorder a line escaped as `\u{…}`:
+/// control characters (C0, DEL and C1, `U+0085` among them, and the tab), the line and paragraph
+/// separators (`U+2028`, `U+2029`, the categories Zl and Zp), and every format character
+/// (`FORMAT_CHARACTERS`: category Cf, the bidirectional controls and the tag block among them).
+/// The backslash itself is written `\\`, so two different reasons never escape to the same text.
+/// A letter, a digit, a space and punctuation of any script pass unchanged.
 pub fn escape_reason(reason: &str) -> String {
-    let mut shown = String::with_capacity(reason.len());
-    for character in reason.chars() {
-        let breaks = character.is_control()
-            || matches!(
-                character,
-                '\u{2028}'
-                    | '\u{2029}'
-                    | '\u{061C}'
-                    | '\u{200E}'
-                    | '\u{200F}'
-                    | '\u{202A}'..='\u{202E}'
-                    | '\u{2066}'..='\u{2069}'
-            );
-        if breaks {
+    escape(reason, true)
+}
+
+/// [`escape_reason`], the backslash escaped when `backslash` is set.
+fn escape(text: &str, backslash: bool) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        let hides = character.is_control()
+            || matches!(character, '\u{2028}' | '\u{2029}')
+            || FORMAT_CHARACTERS
+                .iter()
+                .any(|&(first, last)| (first..=last).contains(&character));
+        if hides {
             shown.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+        } else if backslash && character == '\\' {
+            shown.push_str("\\\\");
         } else {
             shown.push(character);
         }

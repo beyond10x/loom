@@ -25,7 +25,7 @@ use b10x_loom_intake_slice::clock::Clock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, BaselineEnvironment, ChildCommand, ChildError, ChildOutput,
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EgressAperture, EngineConfinement,
-    EngineRunner, ExecEnvironment, TestRunner, discover_cgroup_root,
+    EngineRunner, ExecEnvironment, TestRunner, discover_cgroup_root, escape_reason,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner, applied_label};
@@ -1092,6 +1092,42 @@ fn a_reason_breaks_no_line_in_its_label_or_record() {
             .as_deref()
             .map(|recorded| format!("local ({recorded})")),
         Some(label)
+    );
+}
+
+/// Letters, digits, spaces and punctuation of other scripts are no format characters: they pass.
+#[test]
+fn a_reason_in_another_script_passes_unchanged() {
+    let reason = "Prüfung läuft — 測試を実行する、τεστ; проверка «да» ١٢٣ अभी? 시험!";
+    assert_eq!(escape_reason(reason), reason);
+    let runner = EngineRunner::open(&local_confinement(Some(reason))).expect("local opens");
+    assert_eq!(runner.label(), format!("local ({reason})"));
+}
+
+/// A typed `\u{a}` and a real newline are two reasons, and the label and the record tell them
+/// apart: the backslash is escaped too.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn two_reasons_never_escape_to_the_same_text() {
+    let fixture = Fixture::new();
+    let test = TestCommand::new("true", Vec::<String>::new());
+    let mut seen = Vec::new();
+    for reason in ["a\\u{a}b", "a\nb"] {
+        let runner = EngineRunner::open(&local_confinement(Some(reason))).expect("local opens");
+        let recorded = runner
+            .run(&test, &fixture.workspace)
+            .expect("true runs")
+            .applied
+            .local_reason
+            .expect("the reason is recorded");
+        seen.push((runner.label(), recorded));
+    }
+    assert_eq!(
+        seen,
+        [
+            ("local (a\\\\u{a}b)".to_owned(), "a\\\\u{a}b".to_owned()),
+            ("local (a\\u{a}b)".to_owned(), "a\\u{a}b".to_owned()),
+        ]
     );
 }
 

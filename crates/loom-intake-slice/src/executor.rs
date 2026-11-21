@@ -1199,13 +1199,14 @@ impl TestRunner for UnconfinedRunner {
     }
 }
 
-/// How a run's `confinement:` line names the confinement `applied` records: `local (<reason>)`
-/// ([`local_label`]) when Substrate's `local` adapter ran it, the backend's name otherwise.
+/// How a run's `confinement:` line names the confinement `applied` records: `local (<reason>)`,
+/// the reason as recorded (already passed through [`escape_reason`]), when Substrate's `local`
+/// adapter ran it, the backend's name otherwise.
 ///
-/// [`local_label`]: crate::confinement::local_label
+/// [`escape_reason`]: crate::confinement::escape_reason
 pub fn applied_label(applied: &AppliedConfinement) -> String {
     if applied.adapter.as_deref() == Some("local") {
-        crate::confinement::local_label(applied.local_reason.as_deref().unwrap_or_default())
+        crate::confinement::recorded_label(applied.local_reason.as_deref().unwrap_or_default())
     } else {
         backend_name(applied.backend).to_owned()
     }
