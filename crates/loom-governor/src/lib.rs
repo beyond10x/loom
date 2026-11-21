@@ -47,8 +47,9 @@
 //!
 //! # Evaluation
 //!
-//! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the built-in
-//! registry or registered by [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
+//! Every `frontier` and `completion` call evaluates afresh: the protocol is taken from the vendored
+//! engineering catalog ([`ProtocolCatalog::engineering`]) or registered by
+//! [`CanonGovernor::with_protocol`], compiled with Canon and evaluated with
 //! `b10x_canon::eval::evaluate_with` over the case's `canon-case/1` snapshot and the evidence that
 //! applies. A trusted host may supply [`EvaluationTime`] for freshness; the governor reads no clock
 //! itself and supplies no authority decision. It never invents authority, so an action
@@ -126,17 +127,17 @@
 //!
 //! # Dependencies
 //!
-//! Canon is the library `b10x-canon-engineering` uses, tag `0.9.0`, pinned by `Cargo.lock` to
-//! commit `8f1f452`, so the protocol model the ELS registry returns is the one this crate
-//! compiles. Commission is the path dependency `b10x-loom-commission`, built from this
-//! repository's own tree, and `b10x-canon-engineering` is pinned to tag `0.16.0` of
-//! beyond10x/engineering-protocols.
+//! Canon is `b10x-canon` at the reference this crate's `Cargo.toml` names, pinned by
+//! `Cargo.lock`, and compiles the catalog's engineering protocols. Commission is the path
+//! dependency `b10x-loom-commission`, built from this repository's own tree. The engineering
+//! protocols are the files `b10x-loom-protocols` vendors under `protocols/engineering/`, held to
+//! their lock.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
-use loom_protocols::ProtocolCatalog;
+use loom_protocols::{ProtocolCatalog, ProtocolEntry};
 
 /// The generated `loom` model: [`evaluate`] reads and returns its `loom.evaluation` types.
 pub use loom as model;
@@ -1619,8 +1620,8 @@ fn checked_independence(ir: &Ir, independence: &CaseIndependence) -> Result<(), 
     Ok(())
 }
 
-/// Checks `inputs` against the case inputs the ELS built-in `protocol` declares, when it names
-/// one; a protocol that is not built in is the registering governor's to check.
+/// Checks `inputs` against the case inputs the vendored engineering `protocol` declares, when it
+/// names one; a protocol that is not vendored is the registering governor's to check.
 pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Result<(), OpenError> {
     match protocol_ir(protocol) {
         Ok(ir) => checked_inputs(&ir, inputs),
@@ -1629,8 +1630,8 @@ pub(crate) fn checked_builtin_inputs(protocol: &str, inputs: &CaseInputs) -> Res
     }
 }
 
-/// Checks `independence` against the dimensions the ELS built-in `protocol` declares, when it
-/// names one; a protocol that is not built in is the registering governor's to check.
+/// Checks `independence` against the dimensions the vendored engineering `protocol` declares,
+/// when it names one; a protocol that is not vendored is the registering governor's to check.
 pub(crate) fn checked_builtin_independence(
     protocol: &str,
     independence: &CaseIndependence,
@@ -1701,7 +1702,7 @@ fn opened(
     }
 }
 
-/// The ELS built-in `protocol`, `<name>@<major>`, compiled by Canon.
+/// The vendored engineering `protocol`, `<name>@<major>`, compiled by Canon.
 fn protocol_ir(protocol: &str) -> Result<Ir, OpenError> {
     let builtin = builtin(protocol)?;
     compile(&builtin.model).map_err(|problems| OpenError::InvalidProtocol {
@@ -1725,25 +1726,41 @@ fn declared_outcomes(model: &b10x_canon::model::Protocol) -> Vec<String> {
         .collect()
 }
 
-/// The ELS built-in `protocol`, `<name>@<major>`, as the registry declares it.
-fn builtin(protocol: &str) -> Result<canon_engineering::registry::Builtin, OpenError> {
+/// The vendored engineering `protocol`, `<name>@<major>`, as [`ProtocolCatalog::engineering`]
+/// holds it. The catalog is built once per process: its files are compiled in, so every build
+/// gives the same catalog or the same refusal.
+fn builtin(protocol: &str) -> Result<ProtocolEntry, OpenError> {
+    static ENGINEERING: OnceLock<Result<ProtocolCatalog, String>> = OnceLock::new();
+    builtin_in(
+        ENGINEERING
+            .get_or_init(ProtocolCatalog::engineering)
+            .clone(),
+        protocol,
+    )
+}
+
+/// The entry `catalog` holds for `protocol`: a registration that is not `<name>@<major>`, or one
+/// the catalog does not hold, is [`OpenError::UnknownProtocol`]; a catalog that could not be
+/// built, a lock refusal included, is [`OpenError::InvalidProtocol`] with its error text
+/// unchanged as `problem`.
+fn builtin_in(
+    catalog: Result<ProtocolCatalog, String>,
+    protocol: &str,
+) -> Result<ProtocolEntry, OpenError> {
     let unknown = || OpenError::UnknownProtocol {
         protocol: protocol.to_owned(),
     };
-    let (name, major) = protocol.split_once('@').ok_or_else(unknown)?;
-    let major: u32 = major
-        .parse()
+    let (_, major) = protocol.split_once('@').ok_or_else(unknown)?;
+    major
+        .parse::<u32>()
         .ok()
-        .filter(|parsed: &u32| parsed.to_string() == major)
+        .filter(|parsed| parsed.to_string() == major)
         .ok_or_else(unknown)?;
-    canon_engineering::registry::get(name, major).map_err(|error| match error {
-        canon_engineering::registry::Error::UnknownName { .. }
-        | canon_engineering::registry::Error::UnknownMajor { .. } => unknown(),
-        other => OpenError::InvalidProtocol {
-            protocol: protocol.to_owned(),
-            problem: other.to_string(),
-        },
-    })
+    let catalog = catalog.map_err(|problem| OpenError::InvalidProtocol {
+        protocol: protocol.to_owned(),
+        problem,
+    })?;
+    catalog.get(protocol).cloned().ok_or_else(unknown)
 }
 
 /// The case's `canon-case/1` snapshot.
@@ -2505,7 +2522,9 @@ mod tests {
             .collect();
         let catalog = ProtocolCatalog::from_vendored(&borrowed, ENGINEERING_LOCK)
             .map_err(|error| error.to_string());
-        let refusal = catalog.clone().expect_err("the lock refuses the changed file");
+        let refusal = catalog
+            .clone()
+            .expect_err("the lock refuses the changed file");
         match builtin_in(catalog, "software-change@1") {
             Err(OpenError::InvalidProtocol { protocol, problem }) => {
                 assert_eq!(protocol, "software-change@1");
@@ -2526,7 +2545,8 @@ mod tests {
         let catalog = || ProtocolCatalog::engineering();
         let entry = builtin_in(catalog(), "software-change@1").expect("software-change@1");
         assert_eq!(entry.name(), "software-change@1");
-        assert_eq!(entry.model.protocol.id.as_str(), "software.change/1");
+        assert_eq!(entry.model.protocol.id.as_str(), "software.change");
+        assert_eq!(entry.model.protocol.revision, 1);
         for protocol in [
             "no-such@1",
             "software-change@2",

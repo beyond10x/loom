@@ -459,7 +459,10 @@ that evaluates protocols with Canon, and it adds no clock, network or model call
 It depends on Commission by path, never the reverse.
 
 Host-reviewed protocols enter through `CanonGovernor::with_protocol`; compile and frontier
-representability checks remain in the governor. `EvaluationTime` is a trusted host callback,
+representability checks remain in the governor. A governor built without a catalog takes any other
+protocol from the vendored engineering catalog (`ProtocolCatalog::engineering`), and a catalog that
+cannot be built, a lock refusal included, is `OpenError::InvalidProtocol` with its error text,
+never an unknown protocol. `EvaluationTime` is a trusted host callback,
 never a model argument. Durable stores implement `FallibleCaseStore` atomically and report
 failures explicitly; the legacy `CaseStore` bridge is only for infallible adapters.
 `FileCaseStore` is one: a file per case, written as `loom.governor`'s `StoredCase` to a temporary

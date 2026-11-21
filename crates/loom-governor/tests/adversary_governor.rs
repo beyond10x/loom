@@ -18,6 +18,7 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::evidence::{EvidenceError, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
 use loom_governor::{CanonGovernor, MemoryCaseStore, OpenError, UpdateError};
+use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
 type Gov = CanonGovernor<MemoryCaseStore>;
@@ -1041,8 +1042,11 @@ fn truth(value: &Truth) -> &'static str {
 }
 
 fn ir_of(name: &str, major: u32) -> Ir {
-    let builtin = canon_engineering::registry::get(name, major).expect("ELS holds it");
-    compile(&b10x_canon::model::parse(builtin.yaml).expect("parses")).expect("compiles")
+    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
+    let entry = catalog
+        .get(&format!("{name}@{major}"))
+        .expect("the catalog holds it");
+    compile(&b10x_canon::model::parse(&entry.definition.yaml).expect("parses")).expect("compiles")
 }
 
 fn revs(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
