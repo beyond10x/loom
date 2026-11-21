@@ -6,8 +6,9 @@
 # take case_revision, kept as decided_case_revision; Request takes record_key, which it stores,
 # and open_for_record, which refuses it RecordKeyOpen; EscalationSuppressedRecord and
 # SuppressionCause are declared; the actor Driver is Runtime. The view DecisionRequests lists
-# record_key and decided_case_revision beside the source's fields. b10x-loom-decision applies the
-# commands over its DecisionStore port. Summaries citing docs/ name the SDC's documents.
+# record_key and decided_case_revision beside the source's fields. Decide and TakeRecommendation
+# refuse kind-not-principal when principal_kind is not the kind of the principal's name (session
+# sdc, 2026-11-21). b10x-loom-decision applies the commands over its DecisionStore port. Summaries citing docs/ name the SDC's documents.
 domain: loom.decision
 summary: "Decision requests: every approval or decision the SDC asks of a person or a decider, with its options, a recommendation and the grounds it rests on. A decision request is opened where a case stops on a decision (driver verdicts awaiting_authority and awaiting_person, docs/driver.md:119-127), is decided by a principal allowed at its autonomy level, and once decided names the Canon record it produced (canon-authority/1, canon-decisions/1 or canon-evidence/1). docs/decisions.md explains it in plain terms."
 
@@ -62,7 +63,7 @@ types:
     kind: newtype
     of: String
     naming:
-      summary: "Who decides: a person's name (operator), decider:<kind> (decider:haiku, decider:approve, decider:reject), or silence for a default taken because nobody answered. Recorded as given, as Canon records a principal (canon-decisions/1)."
+      summary: "Who decides: a person's name (operator), decider:<kind> (decider:model, decider:haiku as an older alias, decider:approve, decider:reject), rule:<name>, or silence for a default taken because nobody answered. Recorded as given, as Canon records a principal (canon-decisions/1)."
 
   - name: loom.decision.OptionLetter
     kind: newtype
@@ -599,6 +600,17 @@ commands:
       - {name: case_revision, type: loom.decision.Revision, summary: "The case revision at the decision, kept as decided_case_revision."}
       - {name: reasons, type: "List<String>"}
     outcomes:
+      - name: kind-not-principal
+        when:
+          any:
+            - all: [principal_kind == decider, {not: {principal: {starts_with: "decider:"}}}]
+            - all: [principal_kind == rule, {not: {principal: {starts_with: "rule:"}}}]
+            - all: [principal_kind == silence, principal != "silence"]
+            - all:
+                - principal_kind == person
+                - any: [{principal: {starts_with: "decider:"}}, {principal: {starts_with: "rule:"}}, principal == "silence"]
+        error: loom.decision.NotEligible
+        summary: "principal_kind must be the kind the principal's name has: decider:<kind> is decider, rule:<name> is rule, silence is silence, any other name is person. A command whose kind is not its principal's is refused whatever the holder, before every other kind guard."
       - name: silence-takes-recommendation
         when: principal_kind == silence
         error: loom.decision.NotEligible
@@ -685,6 +697,17 @@ commands:
       - {name: case_revision, type: loom.decision.Revision, summary: "The case revision at the decision, kept as decided_case_revision."}
       - {name: reasons, type: "List<String>"}
     outcomes:
+      - name: kind-not-principal
+        when:
+          any:
+            - all: [principal_kind == decider, {not: {principal: {starts_with: "decider:"}}}]
+            - all: [principal_kind == rule, {not: {principal: {starts_with: "rule:"}}}]
+            - all: [principal_kind == silence, principal != "silence"]
+            - all:
+                - principal_kind == person
+                - any: [{principal: {starts_with: "decider:"}}, {principal: {starts_with: "rule:"}}, principal == "silence"]
+        error: loom.decision.NotEligible
+        summary: "principal_kind must be the kind the principal's name has: decider:<kind> is decider, rule:<name> is rule, silence is silence, any other name is person. A command whose kind is not its principal's is refused whatever the holder, before every other kind guard."
       - name: no-request
         unknown_instance: true
         error: loom.decision.NoSuchRequest

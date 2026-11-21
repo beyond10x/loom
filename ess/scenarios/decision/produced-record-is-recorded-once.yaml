@@ -1,17 +1,23 @@
 # story decision-request-entity: a person decides an approval at a case revision, and the Canon
 # record it produced is recorded once: the same record again changes nothing, another is refused.
-# ESS-SYNTH-001 x2: ess 0.96.0 withdraws the synthesized scenario for RecordProduced/recorded and
-# its transition because it creates a second row under a value a row it created still holds, on
-# DecisionRequestId (ess repeated_identity.rs:28-31). The SDC's unmodified domain has the same two
-# refusals. No change of the specification that keeps the behaviour removes them, so this authored
-# scenario covers them.
+# ESS-SYNTH-003 x6: no candidate ess 0.96.0 synthesizes arranges a Decided request whose
+# decided_option, options and produced_record select RecordProduced's branches (recorded and its
+# transition, already-recorded, produced-conflict, the invariant after recorded and after
+# already-recorded). Before kind-not-principal (security review F1) the two recorded ids were
+# ESS-SYNTH-001, a second row under a held DecisionRequestId (ess repeated_identity.rs:28-31), as
+# in the SDC's unmodified domain, and the other four were synthesized. No change of the
+# specification that keeps the behaviour removes them, so this authored scenario covers them.
 type: ess-scenario/7
 covers:
   - loom.decision.RecordProduced/outcome/recorded
   - loom.decision.DecisionRequest/transition/record_produced/by/loom.decision.RecordProduced/recorded
+  - loom.decision.RecordProduced/outcome/already-recorded
+  - loom.decision.RecordProduced/outcome/produced-conflict
+  - loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/recorded
+  - loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/already-recorded
 domain: loom.decision
 scenario: produced-record-is-recorded-once
-summary: "A decided approval records its entry once and refuses another; authored: synthesis withdraws its witness (ESS-SYNTH-001, a second row under a held DecisionRequestId)."
+summary: "A decided approval records its entry once and refuses another; authored: synthesis arranges no Decided request that reaches RecordProduced (ESS-SYNTH-003)."
 
 timeline:
   - at: 2026-11-21T12:00:00Z
