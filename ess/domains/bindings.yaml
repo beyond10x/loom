@@ -4,8 +4,9 @@
 # Acceptance, and the SDC bindings examples (`~/beyond10x/sdc/driver/examples/sdc/*.bindings.json`)
 # in the old JSON format. The document is YAML, JSON is read as YAML. This domain declares the
 # decoded document and the refusals that decoding and the load-time check against a compiled
-# protocol give; nothing here is executed. An adapter, an aperture and a remote endpoint are
-# engine configuration and never binding data.
+# protocol give, and (story bound-program-result-table) the run of a `program` binding, the
+# evidence its result table records and the refusals of that step. An adapter, an aperture and a
+# remote endpoint are engine configuration and never binding data.
 domain: loom.bindings
 
 summary: >-
@@ -241,6 +242,82 @@ types:
       - name: action
         type: Optional<String>
       - name: member
+        type: String
+      - name: detail
+        type: String
+
+  # One run of a `program` binding's argv by the program effect port (story
+  # bound-program-result-table), the payload of the observation the port keeps for it: the case and
+  # the action it ran for, the exit code (absent when the program was killed at its timeout or its
+  # status could not be read), the SHA-256 of the blob that holds its standard output followed by
+  # its standard error (the file `blobs/<sha256>` in the store directory), and whether it was killed
+  # at its timeout. The observations of one action in one case from the port are its run count.
+  - name: loom.bindings.ProgramRun
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: blob_sha256
+        type: String
+      - name: timed_out
+        type: Boolean
+
+  # An artifact and the revision the case holds for it when the program started.
+  - name: loom.bindings.ArtifactRevision
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: revision
+        type: String
+
+  # One evidence record the program effect port submits for an `evidence` entry: the entry's kind,
+  # subject and producer, the result the entry's table gives for the value read (absent when the
+  # row names none), the subject's revision in the case, the observation's instant, and the revision
+  # of each artifact the entry lists in `upstream`. The program names none of these.
+  - name: loom.bindings.RecordedEvidence
+    kind: struct
+    fields:
+      - name: kind
+        type: String
+      - name: subject
+        type: String
+      - name: producer
+        type: String
+      - name: result
+        type: Optional<String>
+      - name: subject_revision
+        type: String
+      - name: observed_at
+        type: Timestamp
+      - name: upstream_revisions
+        type: List<loom.bindings.ArtifactRevision>
+
+  # Why the program effect port refuses a step: the value read is a key neither the table nor its
+  # `*` lists (`ResultNotInTable`, a timeout reads the key `timeout`); the report is not one JSON
+  # object within 1 MiB or lacks the pointer (`ReportUnreadable`); the `arguments_from` argv did
+  # not exit 0 or printed anything but one JSON object within 1 MiB (`ArgumentsUnreadable`, the
+  # bound program is not started); the action has run its `budget.max_runs` times in the case
+  # (`RunsSpent`, nothing is started). A refused step records no evidence.
+  - name: loom.bindings.ProgramRefusalReason
+    kind: enum
+    variants:
+      - ResultNotInTable
+      - ReportUnreadable
+      - ArgumentsUnreadable
+      - RunsSpent
+
+  # A refused step: the reason, the action and what is wrong.
+  - name: loom.bindings.ProgramRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.ProgramRefusalReason
+      - name: action
         type: String
       - name: detail
         type: String
