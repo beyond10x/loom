@@ -215,6 +215,27 @@ fn plain_segment(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
+/// Whether `link.name` is one plain segment and the child id the opening built from it:
+/// `<parent>.<name>`, or `<parent>.<name>.<n>` with `n` from 2, written without a leading zero.
+pub(crate) fn link_name_fits(link: &CaseLink) -> bool {
+    if !plain_segment(&link.name) {
+        return false;
+    }
+    let base = format!("{}.{}", link.parent.0, link.name);
+    if link.child.0 == base {
+        return true;
+    }
+    link.child
+        .0
+        .strip_prefix(&format!("{base}."))
+        .and_then(|n| {
+            n.parse::<u64>()
+                .ok()
+                .filter(|parsed| parsed.to_string() == n)
+        })
+        .is_some_and(|n| n >= 2)
+}
+
 /// A UUID (version 8) derived from `input`, as [`frontier_uuid`] derives one.
 fn derived_uuid(input: &str) -> String {
     let high = fnv1a(0xcbf2_9ce4_8422_2325, input.as_bytes());
@@ -512,6 +533,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
                 let link = CaseLink {
                     parent: StoredCaseId(parent.0.clone()),
                     child: StoredCaseId(id.clone()),
+                    name: child.name.clone(),
                     action: action.to_owned(),
                     outcome_evidence: LoomUuid(derived_uuid(&format!(
                         "case_outcome\n{}\n{id}",

@@ -1340,3 +1340,90 @@ fn no_protocol_or_case_file_member_turns_host_case_outcomes_on() {
     assert!(read.is_err(), "{read:?}");
     assert!(governor.frontier(&case).is_err());
 }
+
+// ---- the name a link holds ----------------------------------------------------------------------
+
+/// The name of the link `case` holds to its parent.
+fn link_name<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &CaseId) -> String {
+    governor
+        .case_state(case)
+        .unwrap()
+        .parent
+        .expect("a child holds its parent link")
+        .name
+}
+
+#[test]
+fn a_first_and_a_repeated_child_hold_the_opening_name_and_keep_it_over_a_reopen() {
+    let dir = dir();
+    let (first, repeated, parent) = {
+        let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+        let parent = root(&governor, "parent@1");
+        let first = open_children(&governor, &parent, &["review"]).remove(0);
+        let repeated = open_children(&governor, &parent, &["review"]).remove(0);
+        assert_eq!(
+            (first.0.as_str(), repeated.0.as_str()),
+            ("case-1.review", "case-1.review.2")
+        );
+        assert_eq!(link_name(&governor, &first), "review");
+        assert_eq!(link_name(&governor, &repeated), "review");
+        (first, repeated, parent)
+    };
+    let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+    assert_eq!(link_name(&governor, &first), "review");
+    assert_eq!(link_name(&governor, &repeated), "review");
+    let names: Vec<(String, String)> = governor
+        .case_state(&parent)
+        .unwrap()
+        .children
+        .into_iter()
+        .map(|link| (link.child.0, link.name))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("case-1.review".to_owned(), "review".to_owned()),
+            ("case-1.review.2".to_owned(), "review".to_owned()),
+        ]
+    );
+    // A termination and its record replacement leave the name as the opening wrote it.
+    verdict(&governor, &repeated, "passed");
+    governor.terminate(&repeated, "passed", T2).unwrap();
+    assert_eq!(link_name(&governor, &repeated), "review");
+}
+
+#[test]
+fn a_case_file_whose_link_name_is_missing_not_one_segment_or_not_its_id_is_refused_on_read() {
+    for (label, holder_is_child, name) in [
+        ("missing", true, None),
+        ("not one segment", true, Some("re.view")),
+        ("empty", true, Some("")),
+        ("not the id's", true, Some("other")),
+        ("not the id's, in children", false, Some("other")),
+    ] {
+        let dir = dir();
+        let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+        let parent = root(&governor, "parent@1");
+        let _ = open_children(&governor, &parent, &["review"]);
+        let repeated = open_children(&governor, &parent, &["review"]).remove(0);
+        let holder = if holder_is_child { &repeated } else { &parent };
+        let path = dir.join(format!("{}.json", loom_governor::case_file_stem(&holder.0)));
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let link = if holder_is_child {
+            &mut document["parent"]
+        } else {
+            &mut document["children"][1]
+        };
+        match name {
+            None => {
+                link.as_object_mut().unwrap().remove("name");
+            }
+            Some(name) => link["name"] = serde_json::Value::from(name),
+        }
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let read = FileCaseStore::open(&dir).unwrap().get(holder);
+        assert!(read.is_err(), "{label}: {read:?}");
+        assert!(governor.case_state(holder).is_err(), "{label}");
+    }
+}

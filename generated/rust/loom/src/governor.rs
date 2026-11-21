@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 21380175cf192d59ddb91cecc416f276b3f49e07eca5dca56ea209428d8b5dd3
+// contract digest 01d5df5383358208a9b5a2a9c54f415efd85e2a66caf0c4f6eb535dbea0e94c0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
@@ -15,6 +15,8 @@ pub struct CaseLink {
     pub parent: StoredCaseId,
     /// `child` — `loom.governor.StoredCaseId`.
     pub child: StoredCaseId,
+    /// `name` — `String`.
+    pub name: String,
     /// `action` — `String`.
     pub action: String,
     /// `outcome_evidence` — `Uuid`.

@@ -593,7 +593,8 @@ expected_revision, children, records, at)` performs a `case_open` action: the pa
 the one `case_open` names, with no input, its own independence and the parent's revision of each
 artifact it declares (`UNREVISED`, `r0`, for one the parent lacks). A child is `<parent>.<name>`
 (a name of ASCII letters, digits, `-`, `_`), then `.2`, `.3` past an id a case or a parent record
-holds. Each child is written first with its `parent` link (`loom.governor.CaseLink`); then the
+holds. Each child is written first with its `parent` link (`loom.governor.CaseLink`, whose `name`
+is the opening's, the same for `.2`, read through `case_state(case)?.parent`); then the
 parent once, with the links in `children`, one `case_outcome` record per child (producer
 `CHILD_OUTCOME_PRODUCER`, result `open`, the subject's revision at opening) and the action's own
 records. A child whose parent does not list it (a restart between the writes) is taken over by

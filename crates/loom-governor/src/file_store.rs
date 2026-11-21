@@ -30,7 +30,9 @@
 //! `children` member, and a terminated case's outcome and instant its `termination` member, each
 //! left out when the case has none, so a case stored before child cases reads as one with no
 //! link and no termination. A link that does not name the case holding it (`parent` whose
-//! `child` is another case, a `children` entry whose `parent` is another case) is refused on read.
+//! `child` is another case, a `children` entry whose `parent` is another case) is refused on read,
+//! and so is a link without its `name`, with a name that is not one plain segment, or with one
+//! the child id was not built from (`<parent>.<name>`, `<parent>.<name>.<n>`).
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
@@ -382,7 +384,8 @@ fn stored_case(state: &CaseState) -> StoredCase {
 }
 
 /// Refuses a stored case whose links are not its own: a `parent` link naming another child, or a
-/// `children` link naming another parent.
+/// `children` link naming another parent; and one whose link holds a name that is not one plain
+/// segment or not the one its child id was built from.
 fn own_links(stored: &StoredCase) -> Result<(), String> {
     if let Some(link) = &stored.parent
         && link.child != stored.id
@@ -397,6 +400,14 @@ fn own_links(stored: &StoredCase) -> Result<(), String> {
             return Err(format!(
                 "case `{}` holds the child link of `{}`",
                 stored.id.0, link.parent.0
+            ));
+        }
+    }
+    for link in stored.parent.iter().chain(stored.children.iter().flatten()) {
+        if !crate::children::link_name_fits(link) {
+            return Err(format!(
+                "case `{}` holds a link to `{}` whose name `{}` did not build that id",
+                stored.id.0, link.child.0, link.name
             ));
         }
     }
@@ -675,6 +686,8 @@ fn encode_link(out: &mut String, link: &CaseLink) {
     push_text(out, &link.parent.0);
     member(out, "child");
     push_text(out, &link.child.0);
+    member(out, "name");
+    push_text(out, &link.name);
     member(out, "action");
     push_text(out, &link.action);
     member(out, "outcome_evidence");
@@ -686,9 +699,10 @@ fn encode_link(out: &mut String, link: &CaseLink) {
     out.push('}');
 }
 
-const LINK_MEMBERS: [&str; 6] = [
+const LINK_MEMBERS: [&str; 7] = [
     "parent",
     "child",
+    "name",
     "action",
     "outcome_evidence",
     "subject",
@@ -700,6 +714,7 @@ fn decode_link(value: &Value, at: &str) -> Result<CaseLink, DecodeError> {
     Ok(CaseLink {
         parent: StoredCaseId(text_member(value, at, "parent")?),
         child: StoredCaseId(text_member(value, at, "child")?),
+        name: text_member(value, at, "name")?,
         action: text_member(value, at, "action")?,
         outcome_evidence: Uuid(text_member(value, at, "outcome_evidence")?),
         subject: text_member(value, at, "subject")?,
