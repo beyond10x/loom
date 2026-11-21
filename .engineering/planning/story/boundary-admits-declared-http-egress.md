@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:boundary-admits-declared-http-egress
 kind: story
-status: proposed
+status: active
 title: A credential-free LoomAgent may reach an in-cluster http source it declares, through a namespace egress peer the operator allows
 summary: Namespace entry admitted beside spec.boundary only outside every allowed upstream's namespace, with a selector, tied by namespace to an http binding with no bearer and listed in allowedBoundaryHttpEgress; the operator's list is the gate; chart and operator page change
 tags:
@@ -56,9 +56,10 @@ scope:
   path: ess/scenarios/resource-admission/resources/boundary-egress-unbound.yaml
 - confidence: cited
   path: ess/scenarios/resource-admission/resources/boundary-http-egress-allowed.yaml
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:54:03Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "sdc-accepts-boundary-epic-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T10:53:57Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w6"}
 ---
 ## Outcome
 

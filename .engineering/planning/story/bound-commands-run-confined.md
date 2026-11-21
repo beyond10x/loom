@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bound-commands-run-confined
 kind: story
-status: proposed
+status: active
 title: A bound command starts only through the injected runner, and the library refuses one without it
 summary: CommandEffects calls run_child; --unconfined-bindings selects the local adapter with a reason
 tags:
@@ -45,9 +45,10 @@ scope:
   path: website/docs/guides/embed-the-runtime.md
 - confidence: inferred
   path: website/docs/guides/system-queries.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:44Z", actor: "human:timo", revision: 6, decided_on: {"recorded":{"review_outcome":1}}}
+- {from: "proposed", to: "active", at: "2026-11-21T10:53:57Z", actor: "agent:sdc", revision: 7, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w6"}
 ---
 ## Outcome
 
