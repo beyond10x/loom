@@ -55,7 +55,8 @@ use b10x_loom_commission::model::responsibility::{
     TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::ports::suspension::{
-    SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release, decide_take,
+    SuspensionPort, SuspensionStoreError, SuspensionWrite, decide_hold, decide_release,
+    decide_take, incomplete_request,
 };
 
 use crate::FileStoreError;
@@ -211,6 +212,10 @@ impl FileSuspensionStore {
 impl SuspensionPort for FileSuspensionStore {
     fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome {
         let refused = |error| HoldSuspensionOutcome::StorageFailed { error };
+        // `incomplete-request` comes before every other outcome, the identity check included.
+        if let Some(incomplete) = incomplete_request(&input) {
+            return incomplete;
+        }
         if input.suspension.commission_id != input.commission_id {
             return refused(
                 SuspensionStoreError::new(

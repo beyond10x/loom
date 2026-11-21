@@ -146,6 +146,27 @@ pub enum SuspensionWrite {
     Delete(SuspensionKey),
 }
 
+/// The refusal `incomplete-request` of a hold giving some but not all of its four request members
+/// (`action_request_id`, `expected_case_revision`, `action`, `arguments`), naming its Suspension;
+/// `None` when it gives all four or none. The specification decides it before every other outcome
+/// (`story:ess-096-upgrade`), so [`decide_hold`] and every store that checks a hold before deciding
+/// it, as `FileSuspensionStore` checks its identity, ask this first. Nothing is stored for it.
+pub fn incomplete_request(input: &HoldSuspension) -> Option<HoldSuspensionOutcome> {
+    let members = [
+        input.action_request_id.is_some(),
+        input.expected_case_revision.is_some(),
+        input.action.is_some(),
+        input.arguments.is_some(),
+    ];
+    (members.contains(&true) && members.contains(&false)).then(|| {
+        HoldSuspensionOutcome::IncompleteRequest {
+            error: SuspensionRequestIncomplete {
+                suspension: input.suspension.clone(),
+            },
+        }
+    })
+}
+
 /// `HoldSuspension` over `held`, the Suspension stored under the input's identity:
 /// `incomplete-request` when the input gives some but not all of its four request members, whether
 /// or not one is held; `already-held` when there is one; `storage-failed` for a `Decision` hold
@@ -157,23 +178,10 @@ pub fn decide_hold(
     held: Option<&SuspensionSnapshot>,
     input: HoldSuspension,
 ) -> (HoldSuspensionOutcome, Option<SuspensionWrite>) {
-    let members = [
-        input.action_request_id.is_some(),
-        input.expected_case_revision.is_some(),
-        input.action.is_some(),
-        input.arguments.is_some(),
-    ];
     // The specification decides this before `held` and `already-held` (`story:ess-096-upgrade`):
     // the four are present together or absent together on every Suspension.
-    if members.contains(&true) && members.contains(&false) {
-        return (
-            HoldSuspensionOutcome::IncompleteRequest {
-                error: SuspensionRequestIncomplete {
-                    suspension: input.suspension,
-                },
-            },
-            None,
-        );
+    if let Some(refused) = incomplete_request(&input) {
+        return (refused, None);
     }
     if held.is_some() {
         return (
@@ -189,7 +197,7 @@ pub fn decide_hold(
     // (`story:decision-suspension-reason`): ess/22 cannot tie the members to the reason, so the
     // port refuses that combination before any store keeps it. The members agree with each other
     // here, so the first stands for all four.
-    if matches!(input.reason, SuspensionReason::Decision(_)) && members[0] {
+    if matches!(input.reason, SuspensionReason::Decision(_)) && input.action_request_id.is_some() {
         return (
             HoldSuspensionOutcome::StorageFailed {
                 error: SuspensionStorageFailed {
@@ -265,7 +273,10 @@ fn other_decision(
 /// requests when it is held for another request than the input's, `wrong-state` naming the
 /// request when it is already `Resuming`, `other-decision` naming both decision requests when it
 /// is held for another decision request than the input's, otherwise `taken`, with the `Resuming`
-/// Suspension to store.
+/// Suspension to store. A take naming neither request matches any Suspension held with no
+/// request, so it cannot tell two successive such holds of one commission apart. The runtime and
+/// the slice always name one; only the conformance target, forwarding what a scenario sends, may
+/// take naming neither.
 pub fn decide_take(
     held: Option<SuspensionSnapshot>,
     input: TakeSuspension,
@@ -322,7 +333,10 @@ pub fn decide_take(
 /// `ReleaseSuspension` over `held`: `not-found` when nothing is stored, `other-request` naming
 /// both requests when it is held for another request than the input's, `not-taken` naming the
 /// request when it is `Pending`, `other-decision` naming both decision requests when it is held
-/// for another decision request than the input's, otherwise `released`, removing it.
+/// for another decision request than the input's, otherwise `released`, removing it. A release
+/// naming neither request matches any Suspension held with no request, so it cannot tell two
+/// successive such holds of one commission apart. The runtime and the slice always name one;
+/// only the conformance target, forwarding what a scenario sends, may release naming neither.
 pub fn decide_release(
     held: Option<SuspensionSnapshot>,
     input: ReleaseSuspension,

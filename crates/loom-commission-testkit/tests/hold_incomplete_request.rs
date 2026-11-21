@@ -418,3 +418,122 @@ fn the_resumes_of_a_suspension_without_a_request_perform_nothing_on_the_memory_s
 fn the_resumes_of_a_suspension_without_a_request_perform_nothing_on_the_file_store() {
     resumes_without_a_request(&*file("resumes"));
 }
+
+/// `hold(reason, mask)` whose Suspension identity names another commission than its
+/// `commission_id`.
+fn hold_misnamed(reason: SuspensionReason, mask: u8) -> HoldSuspension {
+    HoldSuspension {
+        suspension: SuspensionKey {
+            commission_id: CommissionId(uuid(0x93)),
+        },
+        ..hold(reason, mask)
+    }
+}
+
+/// What a store holds under either commission the misnamed hold names.
+fn held_under_both(port: &dyn SuspensionPort) -> [Option<String>; 2] {
+    [commission(), CommissionId(uuid(0x93))].map(|named| {
+        port.get(&named)
+            .map(|held| held.map(|held| format!("{held:?}")))
+            .unwrap_or_else(|error| Some(format!("unreadable: {error}")))
+    })
+}
+
+fn suspension_files(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("suspension-")
+        })
+        .count()
+}
+
+/// The specification decides `incomplete-request` before every other outcome, so a mixed hold
+/// whose Suspension identity names another commission than its `commission_id` is refused
+/// `incomplete-request` by both stores, for each reason and each of the 14 mixed member sets,
+/// and neither store holds anything after it nor writes a file.
+#[test]
+fn a_mixed_hold_naming_another_commission_is_incomplete_on_both_stores() {
+    let mut wrong = Vec::new();
+    let mut reasons = other_reasons();
+    reasons.push(decision());
+    for (index, reason) in reasons.into_iter().enumerate() {
+        for mask in 1u8..15 {
+            let input = hold_misnamed(reason.clone(), mask);
+            let expected = HoldSuspensionOutcome::IncompleteRequest {
+                error: SuspensionRequestIncomplete {
+                    suspension: input.suspension.clone(),
+                },
+            };
+            let name = format!("misnamed-{index}-{mask}");
+            let dir = store_dir(&name);
+            let on_file = FileSuspensionStore::open(&dir).expect("the store opens");
+            let in_memory = SuspensionStore::new();
+            for (store, port) in [
+                ("memory", &in_memory as &dyn SuspensionPort),
+                ("file", &on_file),
+            ] {
+                let outcome = port.hold(input.clone());
+                if outcome != expected {
+                    wrong.push(format!(
+                        "{mask:04b} {reason:?}: {store} answered {outcome:?}"
+                    ));
+                }
+                let held = held_under_both(port);
+                if held != [None, None] {
+                    wrong.push(format!("{mask:04b} {reason:?}: {store} holds {held:?}"));
+                }
+            }
+            if suspension_files(&dir) != 0 {
+                wrong.push(format!(
+                    "{mask:04b} {reason:?}: the file store wrote a file"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// A misnamed hold that is not mixed, as each store answers it: the in-memory store decides it by
+/// the identity alone and holds it under the identity's commission; the file store refuses it
+/// `StorageFailed` before deciding and writes nothing. The two stores differ here, as they did at
+/// base `29e5d199` for every hold `decide_hold` held; this case states the difference and does
+/// not settle it.
+#[test]
+fn a_misnamed_hold_with_all_four_or_none_is_held_in_memory_and_refused_by_the_file_store() {
+    for (reason, mask) in [
+        (SuspensionReason::Authority(Value::Null), 15),
+        (SuspensionReason::Authority(Value::Null), 0),
+        (decision(), 0),
+    ] {
+        let label = format!("{mask:04b} {reason:?}");
+        let in_memory = SuspensionStore::new();
+        let outcome = in_memory.hold(hold_misnamed(reason.clone(), mask));
+        assert!(
+            matches!(outcome, HoldSuspensionOutcome::Held { .. }),
+            "{label}: memory answered {outcome:?}"
+        );
+        let held = held_under_both(&in_memory);
+        assert!(
+            held[0].is_none() && held[1].is_some(),
+            "{label}: memory holds {held:?}"
+        );
+
+        let dir = store_dir(&format!("misnamed-whole-{mask}-{}", label.len()));
+        let on_file = FileSuspensionStore::open(&dir).expect("the store opens");
+        let outcome = on_file.hold(hold_misnamed(reason, mask));
+        assert!(
+            matches!(outcome, HoldSuspensionOutcome::StorageFailed { .. }),
+            "{label}: file answered {outcome:?}"
+        );
+        assert_eq!(
+            suspension_files(&dir),
+            0,
+            "{label}: the file store wrote a file"
+        );
+    }
+}

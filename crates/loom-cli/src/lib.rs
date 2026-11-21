@@ -127,7 +127,8 @@ Exit status:
   17  NotPerformed: nothing performs the request's action
   18  RunNotSuspended: the run store does not hold the run suspended
   19  HeldForDecision: the commission's Suspension holds the run for a decision request; nothing is performed
-  20  the suspension store could not be read; nothing was resumed
+  20  the suspension store could not be read, or it holds a Suspension that holds no action
+      request and whose reason is no decision; nothing was resumed
   21  the governor could not answer before the run resumed; nothing was resumed
   22  the run could not be resumed, the Suspension could not be taken or released, or the resumed
       loop stopped without a run outcome
