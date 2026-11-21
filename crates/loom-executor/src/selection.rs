@@ -99,6 +99,10 @@ pub struct Resolution {
 }
 
 /// Picks the action Loom proposes next, from the projected catalogue only.
+///
+/// A selector that wraps another must forward [`ActionSelector::resolve_for_case`] to it, so the
+/// wrapped selector sees the case of the run; one that forwards only [`ActionSelector::select`]
+/// answers for the wrapped selector's own case.
 pub trait ActionSelector {
     /// One of `candidates`, chosen in `context`.
     fn select(
@@ -138,6 +142,10 @@ pub trait ActionSelector {
     /// naming the case of the frontier it was handed. By default the case is not read; a selector
     /// whose answer depends on the case ([`DeterministicSelector`]) refuses a case it does not
     /// answer for, and [`HybridSelector`] hands the case on to both its selectors.
+    ///
+    /// A selector that wraps another must forward this method to it. One that forwards only
+    /// [`ActionSelector::select`] answers for the wrapped selector's own case whatever `case` is,
+    /// as the default reads no case.
     fn resolve_for_case(
         &self,
         case: &CaseId,
@@ -214,12 +222,13 @@ impl<P: ActionFactsPort + ?Sized> ActionFactsPort for &P {
 /// The host port that answers what the run already did, for the [`DeterministicSelector`]: the
 /// history half of usefulness, which is the runtime's and not Canon's.
 pub trait StepHistory {
-    /// Whether `action` was performed at the case revision `case_revision`. An action that may
-    /// produce no evidence is useful until this is true for the revision the facts were read at.
+    /// Whether `action` was performed at the case revision `case_revision`. While this is true for
+    /// the revision the facts were read at, an action that is not due is not useful, whatever it
+    /// may produce and whatever is still open; it is useful again once an artifact moves.
     fn performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String>;
 
-    /// Whether `action` is due again whatever its evidence and its history, as for a retry or a
-    /// pending copy: while it is, an admissible `action` is useful.
+    /// Whether `action` is due again whatever its evidence and its history, as for a retry
+    /// (`retry_when`) or a pending copy: while it is, an admissible `action` is useful.
     fn due(&self, action: &str) -> Result<bool, String>;
 }
 
@@ -242,9 +251,9 @@ const WRITE: &str = "write";
 /// From the candidates it keeps only the `Admissible` ones whose action is useful, orders them
 /// with every action whose effect class is not `write` (an undeclared one included) before every
 /// `write` action and then by action id, and takes the first. An action is useful while
-/// [`StepHistory::due`] is true; otherwise, when it may produce evidence, while its open evidence
-/// is not empty, and when it may produce none, until [`StepHistory::performed_at`] is true for
-/// the case revision the facts were read at. A candidate the facts do not name is not useful, and
+/// [`StepHistory::due`] is true; otherwise it is not useful once [`StepHistory::performed_at`] is
+/// true for the case revision the facts were read at, and before that it is useful when it may
+/// produce no evidence or when its open evidence is not empty. A candidate the facts do not name is not useful, and
 /// an action the facts name that is not a candidate is never returned. With no useful candidate it
 /// answers [`SelectorError::NothingAdmissible`]; a port that cannot answer makes it
 /// [`SelectorError::Unavailable`] with the port's reason. Its pick has no confidence and reports no
@@ -286,14 +295,14 @@ impl<F: ActionFactsPort, H: StepHistory> DeterministicSelector<F, H> {
         {
             return Ok(true);
         }
-        if facts.may_produce.is_empty() {
-            return self
-                .history
-                .performed_at(action, case_revision)
-                .map(|performed| !performed)
-                .map_err(SelectorError::Unavailable);
+        if self
+            .history
+            .performed_at(action, case_revision)
+            .map_err(SelectorError::Unavailable)?
+        {
+            return Ok(false);
         }
-        Ok(!facts.open_evidence.is_empty())
+        Ok(facts.may_produce.is_empty() || !facts.open_evidence.is_empty())
     }
 }
 

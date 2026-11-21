@@ -1882,8 +1882,10 @@ impl JsonTree for loom::json::Value {
 /// that applies, is about its subject's current revision (Canon's revision binding), is not
 /// expired at `at` (Canon's freshness rule), is listed under no claim of `decision` as
 /// invalidated, and is read by an evidence match of `ir` by kind and subject (Canon's rule for a
-/// match) or is of a kind no evidence match reads. A record Canon sets aside only as not
-/// independent still counts.
+/// match) or is of a kind no evidence match reads. A record of a kind only order forms read counts
+/// when an order form reads it by kind and subject, whatever its binding, freshness or
+/// invalidation: Canon's order forms read every record the evidence check accepted
+/// (`eval/order.rs`, `of`). A record Canon sets aside only as not independent still counts.
 fn counted_kinds(
     ir: &Ir,
     state: &CaseState,
@@ -1897,17 +1899,27 @@ fn counted_kinds(
         .filter(|exclusion| exclusion.reason == ExclusionReason::Invalidated)
         .map(|exclusion| exclusion.evidence.as_str())
         .collect();
-    let matches = evidence_matches(ir);
+    let (matches, orders) = evidence_reads(ir);
     let at = at.and_then(|at| CanonInstant::new(at).seconds());
     state
         .evidence
         .iter()
         .filter(|held| held.applies)
         .filter_map(|held| canon_record(&held.data))
-        .filter(|record| bound_to_current_revision(state, record))
-        .filter(|record| !expired(ir, record, at))
-        .filter(|record| !invalidated.contains(record.id.as_str()))
-        .filter(|record| read_by_a_match(&matches, record))
+        .filter(|record| {
+            let left = || {
+                bound_to_current_revision(state, record)
+                    && !expired(ir, record, at)
+                    && !invalidated.contains(record.id.as_str())
+            };
+            if names_kind(&matches, record) {
+                left() && read_by(&matches, record)
+            } else if names_kind(&orders, record) {
+                read_by(&orders, record)
+            } else {
+                left()
+            }
+        })
         .map(|record| record.kind.as_str().to_owned())
         .collect()
 }
@@ -1941,15 +1953,16 @@ fn expired(ir: &Ir, record: &EvidenceRecord, at: Option<i64>) -> bool {
     }
 }
 
-/// Every evidence match of `ir`, as (kind, subject): in each claim's `true_when`, each
-/// obligation's `discharged_when` and `applicable_when`, each action's precondition and each
-/// outcome's requirement, through every `all`, `any` and `not`. Order forms are not evidence
-/// matches: they read the whole history, excluded records included.
-fn evidence_matches(ir: &Ir) -> Vec<(&EvidenceKindId, Option<&ArtifactId>)> {
-    fn walk<'p>(
-        predicate: &'p Predicate,
-        found: &mut Vec<(&'p EvidenceKindId, Option<&'p ArtifactId>)>,
-    ) {
+/// What reads a record: a kind, and the subject it must be about when one is named.
+type Reader<'p> = (&'p EvidenceKindId, Option<&'p ArtifactId>);
+
+/// Every evidence match of `ir`, and every kind an order form reads, as (kind, subject): in each
+/// claim's `true_when`, each obligation's `discharged_when` and `applicable_when`, each action's
+/// precondition and each outcome's requirement, through every `all`, `any` and `not`. Order
+/// forms are kept apart: they read the whole history, excluded records included.
+fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
+    fn walk<'p>(predicate: &'p Predicate, found: &mut (Vec<Reader<'p>>, Vec<Reader<'p>>)) {
+        let (matches, orders) = found;
         match predicate {
             Predicate::All(members) | Predicate::Any(members) => {
                 for member in members {
@@ -1958,12 +1971,25 @@ fn evidence_matches(ir: &Ir) -> Vec<(&EvidenceKindId, Option<&ArtifactId>)> {
             }
             Predicate::Not(member) => walk(member, found),
             Predicate::Evidence(matching) => {
-                found.push((&matching.kind, matching.subject.as_ref()));
+                matches.push((&matching.kind, matching.subject.as_ref()));
             }
-            _ => {}
+            Predicate::First(form) => orders.push((&form.kind, form.subject.as_ref())),
+            Predicate::Before(form) => {
+                orders.push((&form.first, form.subject.as_ref()));
+                orders.push((&form.then, form.subject.as_ref()));
+            }
+            Predicate::After(form) => {
+                orders.push((&form.first, form.subject.as_ref()));
+                orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Since(form) => {
+                orders.push((&form.last, form.subject.as_ref()));
+                orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Input(_) | Predicate::Claim(_) => {}
         }
     }
-    let mut found = Vec::new();
+    let mut found = (Vec::new(), Vec::new());
     for claim in ir.claims.values() {
         walk(&claim.true_when, &mut found);
     }
@@ -1984,19 +2010,17 @@ fn evidence_matches(ir: &Ir) -> Vec<(&EvidenceKindId, Option<&ArtifactId>)> {
     found
 }
 
-/// Whether an evidence match of `matches` reads `record`, or none reads its kind at all. A match
-/// reads a record of its kind and, when it names a subject, about that artifact: Canon's rule for
-/// every match (`eval/claims.rs`, `reads`).
-fn read_by_a_match(
-    matches: &[(&EvidenceKindId, Option<&ArtifactId>)],
-    record: &EvidenceRecord,
-) -> bool {
-    let mut of_kind = matches
-        .iter()
-        .filter(|(kind, _)| **kind == record.kind)
-        .peekable();
-    of_kind.peek().is_none()
-        || of_kind.any(|(_, subject)| subject.is_none_or(|subject| *subject == record.subject))
+/// Whether one of `readers` reads records of `record`'s kind.
+fn names_kind(readers: &[Reader<'_>], record: &EvidenceRecord) -> bool {
+    readers.iter().any(|(kind, _)| **kind == record.kind)
+}
+
+/// Whether one of `readers` reads `record`: a record of its kind and, when it names a subject,
+/// about that artifact, Canon's rule for every match and order form (`eval/claims.rs`, `reads`).
+fn read_by(readers: &[Reader<'_>], record: &EvidenceRecord) -> bool {
+    readers.iter().any(|(kind, subject)| {
+        **kind == record.kind && subject.is_none_or(|subject| *subject == record.subject)
+    })
 }
 
 /// Whether `data` applies to the case: its facts carry a record of its kind, and Canon evaluates

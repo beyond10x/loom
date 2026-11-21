@@ -156,16 +156,23 @@ never from the candidate list:
   moves, the earlier record still held. A record counts when it applies, is about its subject's
   current revision, is not expired at the trusted time, is not invalidated, and an evidence match
   of the protocol (in a claim, an obligation, a precondition or an outcome) reads it by kind and
-  subject; a kind no match reads counts any such record.
+  subject; a kind no match reads counts any such record. A kind only order forms (`first`,
+  `before`, `after`, `since`) read counts any record that applies and that an order form reads by
+  kind and subject, whatever its revision, freshness or invalidation, as Canon's order forms read
+  every record the evidence check accepted.
 - `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
 
-An action is useful while `due` is true; otherwise, when it may produce evidence, while its open
-evidence is not empty, and when it may produce none, until `performed_at` is true for the case
-revision the facts were read at. A candidate the facts do not name is not useful, and an action
+An action is useful while `due` is true (`retry_when`, a pending copy). Otherwise it is not useful
+once `performed_at` is true for the case revision the facts were read at, whatever it may produce
+and whatever is still open; it is useful again once an artifact moves. Before that it is useful
+when it may produce no evidence or when its open evidence is not empty. `max_runs` stays a ceiling
+in the effect. A candidate the facts do not name is not useful, and an action
 the facts name that is not a candidate is never returned: the choice passes Loom's membership rule
 like every other. A selector is built for one case: a run of a commission for another case is
 `SelectorError::Unavailable` naming both, and no port is asked (`ActionSelector::resolve_for_case`,
-which Loom calls with the case of the frontier it was handed).
+which Loom calls with the case of the frontier it was handed). A selector that wraps another must
+forward `resolve_for_case`; one that forwards only `select` answers for the wrapped selector's own
+case.
 
 A record Canon sets aside only as not independent (its producer is not declared independent on a
 dimension the match demands) still counts. A kind whose only records are set aside so is treated
