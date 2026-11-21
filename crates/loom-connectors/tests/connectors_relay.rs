@@ -311,13 +311,16 @@ fn request_id(request: &Received) -> String {
         .to_owned()
 }
 
-/// A URL of a loopback port nothing listens on: a port the kernel gave a listener that is then
-/// closed, never bound again by this test.
-fn unreachable_url() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind a loopback port");
-    let port = listener.local_addr().expect("the bound address").port();
-    drop(listener);
-    format!("http://127.0.0.1:{port}")
+/// A URL of a loopback port nothing listens on, and the socket that holds it: bound to
+/// `127.0.0.1:0` and never listened on, so a connect to it is refused, and no other process can
+/// take the port while the case holds the socket.
+fn unreachable_url() -> (String, tokio::net::TcpSocket) {
+    let socket = tokio::net::TcpSocket::new_v4().expect("a socket");
+    socket
+        .bind("127.0.0.1:0".parse().expect("an address"))
+        .expect("bind a loopback port");
+    let port = socket.local_addr().expect("the bound address").port();
+    (format!("http://127.0.0.1:{port}"), socket)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1114,13 +1117,15 @@ fn a_call_naming_another_instance_sends_nothing() {
 /// is its first request.
 #[test]
 fn a_relay_that_cannot_be_reached_is_unavailable() {
-    let url = unreachable_url();
+    let (url, held) = unreachable_url();
     let relay = ConnectorsRelay::new(&url, adapter(), connection(), vec![]).unwrap();
     starts(&failed(read(&relay)), "relay-unavailable:");
     starts(
         &write_failed(write(&relay, &admitted())),
         "relay-unavailable:",
     );
+    // The port stays taken, and not listening, until both assertions ran.
+    drop(held);
 }
 
 /// The fake closes its listener before it writes the describe's answer (`connection: close`),
