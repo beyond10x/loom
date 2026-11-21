@@ -3727,6 +3727,7 @@ dependencies = [
 name = "loom-xtask"
 version = "0.57.2"
 dependencies = [
+ "b10x-loom-protocols",
  "b10x-loom-resource",
  "clap",
  "proc-macro2",
