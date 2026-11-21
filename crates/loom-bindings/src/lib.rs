@@ -13,16 +13,23 @@
 //! `b10x_loom_intake_slice::bindings` admits the runner and builds the child, keeps its output as
 //! one content-addressed blob, and records evidence by the binding's result table alone. Decoding
 //! and the load-time check start no process; the crate opens no network connection.
+//!
+//! [`check_case_open`] holds an `open` executor to the protocol's `case_open` at load, and
+//! [`OpenEffects`] performs an action bound to `open`: it opens the child cases through
+//! `CanonGovernor::open_children`, under the protocol `case_open` names, with the independence of
+//! the child's bindings file, read beside the parent's (story:child-case-runtime).
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 mod decode;
 mod load;
+mod open;
 mod program;
 mod tree;
 
 pub use decode::decode;
 pub use load::{check, unbound};
+pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
 
 use loom::bindings::BindingsRefusal;

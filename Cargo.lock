@@ -426,6 +426,7 @@ dependencies = [
  "b10x-loom-commission-testkit",
  "b10x-loom-governor",
  "b10x-loom-intake-slice",
+ "b10x-loom-protocols",
  "loom",
  "serde",
  "serde_json",
