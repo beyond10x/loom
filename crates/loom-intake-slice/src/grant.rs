@@ -716,11 +716,13 @@ mod tests {
         suspensions.take(TakeSuspension {
             suspension: key.clone(),
             action_request_id: Some(request.clone()),
+            decision_request_id: None,
         });
         assert!(!allows(Some(granted.clone()), "repository.merge"), "taken");
         suspensions.release(ReleaseSuspension {
             suspension: key,
             action_request_id: Some(request),
+            decision_request_id: None,
         });
         assert!(!allows(Some(granted), "repository.merge"), "released");
     }

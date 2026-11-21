@@ -55,8 +55,9 @@ use b10x_loom_commission::model::responsibility::{
     JudgePerformableActions, JudgePerformableActionsOutcome, ProposedActionArguments,
     ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun, ResumeRunOutcome,
     RevalidateActionRequestOutcome, RunId, RunStateConflict, RunStorageFailed, StartRun,
-    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionRequestMismatch, SuspensionSettled,
-    SuspensionStateConflict, SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
+    StartRunOutcome, SuspendRun, SuspendRunOutcome, SuspensionDecisionMismatch,
+    SuspensionRequestMismatch, SuspensionSettled, SuspensionStateConflict, SuspensionStorageFailed,
+    TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::outcome::{
     RunStore, judge_budget_stop, judge_idle, judge_performable, judge_refusal,
@@ -112,9 +113,11 @@ const SUSPENSION_ALREADY_HELD: &str = "commission.responsibility.SuspensionAlrea
 const SUSPENSION_NOT_FOUND: &str = "commission.responsibility.SuspensionNotFound";
 const SUSPENSION_STATE_CONFLICT: &str = "commission.responsibility.SuspensionStateConflict";
 const SUSPENSION_REQUEST_MISMATCH: &str = "commission.responsibility.SuspensionRequestMismatch";
+const SUSPENSION_DECISION_MISMATCH: &str = "commission.responsibility.SuspensionDecisionMismatch";
 const SUSPENSION_STORAGE_FAILED: &str = "commission.responsibility.SuspensionStorageFailed";
 const SUSPENSION_SETTLED: &str = "commission.responsibility.SuspensionSettled";
 const SETTLED: &str = "settled";
+const OTHER_DECISION: &str = "other-decision";
 const SUSPENSION_STATES: &str = "commission.responsibility.SuspensionStates";
 
 /// One scenario's state.
@@ -309,6 +312,14 @@ impl ConformanceTarget for CommissionTarget {
                 .suspensions
                 .ports
                 .fail_next(SuspensionUnwritable::Release),
+            (TAKE_SUSPENSION, OTHER_DECISION) => live
+                .suspensions
+                .ports
+                .misname_next(SuspensionUnwritable::Take),
+            (RELEASE_SUSPENSION, OTHER_DECISION) => live
+                .suspensions
+                .ports
+                .misname_next(SuspensionUnwritable::Release),
             _ => return Err(undeclared()),
         }
         Ok(())
@@ -519,6 +530,26 @@ fn suspension_other_request(
     ))
 }
 
+/// A take's or a release's `other-decision` refusal, naming the Suspension, the decision request
+/// it is held for and the one the command named, each left out when it names none
+/// (`story:decision-suspension-reason`).
+fn suspension_other_decision(
+    command: &str,
+    mismatch: SuspensionDecisionMismatch,
+) -> SemanticCommandResult {
+    let mut named = error(SUSPENSION_DECISION_MISMATCH).with(
+        "suspension",
+        codec::from_suspension_key(&mismatch.suspension),
+    );
+    if let Some(held) = mismatch.held_decision_request_id {
+        named = named.with("held_decision_request_id", Node::Text(held));
+    }
+    if let Some(decision) = mismatch.decision_request_id {
+        named = named.with("decision_request_id", Node::Text(decision));
+    }
+    took(command, "other-decision").with_error(named)
+}
+
 fn hold_suspension(
     live: &mut Live,
     input: &Input,
@@ -575,6 +606,7 @@ fn take_suspension(
         suspension: codec::suspension_key(input.get("suspension")?)?,
         action_request_id: codec::optional(input, "action_request_id", codec::uuid)?
             .map(ActionRequestId),
+        decision_request_id: codec::optional(input, "decision_request_id", codec::text)?,
     };
     Some(match live.suspensions.take_suspension(command).ok()? {
         TakeSuspensionOutcome::OtherRequest { error } => {
@@ -602,6 +634,9 @@ fn take_suspension(
         TakeSuspensionOutcome::WrongState { error } => {
             suspension_conflict(TAKE_SUSPENSION, "wrong-state", error)
         }
+        TakeSuspensionOutcome::OtherDecision { error } => {
+            suspension_other_decision(TAKE_SUSPENSION, error)
+        }
         TakeSuspensionOutcome::StorageFailed { error } => {
             suspension_storage_failed(TAKE_SUSPENSION, error)
         }
@@ -617,6 +652,7 @@ fn release_suspension(
         suspension: codec::suspension_key(input.get("suspension")?)?,
         action_request_id: codec::optional(input, "action_request_id", codec::uuid)?
             .map(ActionRequestId),
+        decision_request_id: codec::optional(input, "decision_request_id", codec::text)?,
     };
     Some(match live.suspensions.release_suspension(command).ok()? {
         ReleaseSuspensionOutcome::OtherRequest { error } => {
@@ -642,6 +678,9 @@ fn release_suspension(
                 "suspension",
                 codec::from_suspension_key(&missing.suspension),
             ))
+        }
+        ReleaseSuspensionOutcome::OtherDecision { error } => {
+            suspension_other_decision(RELEASE_SUSPENSION, error)
         }
         ReleaseSuspensionOutcome::StorageFailed { error } => {
             suspension_storage_failed(RELEASE_SUSPENSION, error)

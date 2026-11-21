@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 80727144504c944a2e6474f4ea2942968e297890e697d78f658c49ec5417f09c
-// contract digest 517ae7472a433ac632470e459ef5eaed9c1bd6fc880f470e3c89fa2284eeafe6
+// model digest 6bb42a5810efc385adb384b6bdb1a8e8f7ea869e6a7b5118c38b9bf6c06741d9
+// contract digest f4007876e52f5a84b65c3374f0ec1653ebdbe1365fd1cc7b6b4484aac89aa9c6
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Semantic types synthesised from the `commission` specification, v1.

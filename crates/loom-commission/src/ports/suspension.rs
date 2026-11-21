@@ -25,6 +25,12 @@
 //! A Suspension held for a decision request (`SuspensionReason::Decision`,
 //! `story:decision-suspension-reason`) holds the Run and no action request: its request, expected
 //! case revision, action and arguments are absent, and a take and a release of it name no request.
+//! They name its decision request instead: [`decide_take`] and [`decide_release`] refuse one that
+//! names another, or none, and one that names a decision request on a Suspension held for an action
+//! request (`other-decision`, [`SuspensionDecisionMismatch`] naming both), and keep it, so a resume
+//! that read the hold for one decision never takes or releases a later hold for another.
+//! [`decide_hold`] refuses a hold whose reason and those four members disagree (`Decision` with any
+//! of them, any other reason without all of them) as `storage-failed`, and stores nothing.
 //!
 //! A take and a release name the action request the resume read and revalidated. A Suspension
 //! held for another request is refused (`other-request`, [`SuspensionRequestMismatch`] naming
@@ -56,9 +62,10 @@ use crate::model::responsibility::obligations::{
 use crate::model::responsibility::{
     ActionRequestId, AnySuspension, CommissionId, HoldSuspension, HoldSuspensionOutcome,
     ReleaseSuspension, ReleaseSuspensionOutcome, Suspension, SuspensionAlreadyHeld, SuspensionData,
-    SuspensionHeld, SuspensionKey, SuspensionNotFound, SuspensionReleased,
-    SuspensionRequestMismatch, SuspensionSnapshot, SuspensionStateConflict,
-    SuspensionStorageFailed, SuspensionTaken, TakeSuspension, TakeSuspensionOutcome,
+    SuspensionDecisionMismatch, SuspensionHeld, SuspensionKey, SuspensionNotFound,
+    SuspensionReason, SuspensionReleased, SuspensionRequestMismatch, SuspensionSnapshot,
+    SuspensionStateConflict, SuspensionStorageFailed, SuspensionTaken, TakeSuspension,
+    TakeSuspensionOutcome,
 };
 
 /// Keeps the Suspension of each commission, answering the commands the specification declares on
@@ -131,7 +138,8 @@ pub enum SuspensionWrite {
 }
 
 /// `HoldSuspension` over `held`, the Suspension stored under the input's identity: `already-held`
-/// when there is one, otherwise `held`, with the `Pending` Suspension to store.
+/// when there is one, `storage-failed` when the input's reason and its four request members
+/// disagree, otherwise `held`, with the `Pending` Suspension to store.
 pub fn decide_hold(
     held: Option<&SuspensionSnapshot>,
     input: HoldSuspension,
@@ -141,6 +149,31 @@ pub fn decide_hold(
             HoldSuspensionOutcome::AlreadyHeld {
                 error: SuspensionAlreadyHeld {
                     suspension: input.suspension,
+                },
+            },
+            None,
+        );
+    }
+    // A Suspension held for a decision holds no action request, and every other holds one whole
+    // (`story:decision-suspension-reason`): ess/22 cannot tie the members to the reason, so the
+    // port refuses the combination it forbids before any store keeps it.
+    let decision = matches!(input.reason, SuspensionReason::Decision(_));
+    let members = [
+        input.action_request_id.is_some(),
+        input.expected_case_revision.is_some(),
+        input.action.is_some(),
+        input.arguments.is_some(),
+    ];
+    if members.contains(&decision) {
+        return (
+            HoldSuspensionOutcome::StorageFailed {
+                error: SuspensionStorageFailed {
+                    reason: if decision {
+                        "a Suspension held for a decision holds no action request".to_owned()
+                    } else {
+                        "a Suspension not held for a decision holds its whole action request"
+                            .to_owned()
+                    },
                 },
             },
             None,
@@ -189,10 +222,30 @@ fn other_request(
     })
 }
 
+/// The refusal `other-decision` of a take or a release naming the decision request `named` when
+/// `held` is held for another decision request, or for none (an action request); `None` when
+/// both name the same one or neither names one (`story:decision-suspension-reason`).
+fn other_decision(
+    held: &SuspensionSnapshot,
+    suspension: &SuspensionKey,
+    named: &Option<String>,
+) -> Option<SuspensionDecisionMismatch> {
+    let held_decision = match &held.data.reason {
+        SuspensionReason::Decision(hold) => Some(&hold.request_id),
+        _ => None,
+    };
+    (held_decision != named.as_ref()).then(|| SuspensionDecisionMismatch {
+        suspension: suspension.clone(),
+        held_decision_request_id: held_decision.cloned(),
+        decision_request_id: named.clone(),
+    })
+}
+
 /// `TakeSuspension` over `held`: `not-found` when nothing is stored, `other-request` naming both
 /// requests when it is held for another request than the input's, `wrong-state` naming the
-/// request when it is already `Resuming`, otherwise `taken`, with the `Resuming` Suspension to
-/// store.
+/// request when it is already `Resuming`, `other-decision` naming both decision requests when it
+/// is held for another decision request than the input's, otherwise `taken`, with the `Resuming`
+/// Suspension to store.
 pub fn decide_take(
     held: Option<SuspensionSnapshot>,
     input: TakeSuspension,
@@ -210,8 +263,12 @@ pub fn decide_take(
     if let Some(error) = other_request(&held, &input.suspension, &input.action_request_id) {
         return (TakeSuspensionOutcome::OtherRequest { error }, None);
     }
-    match held.refine() {
-        AnySuspension::Pending(pending) => {
+    let decision = other_decision(&held, &input.suspension, &input.decision_request_id);
+    match (held.refine(), decision) {
+        (AnySuspension::Pending(_), Some(error)) => {
+            (TakeSuspensionOutcome::OtherDecision { error }, None)
+        }
+        (AnySuspension::Pending(pending), None) => {
             let taken = pending.take();
             let event = SuspensionTaken {
                 suspension: input.suspension,
@@ -226,7 +283,7 @@ pub fn decide_take(
                 ))),
             )
         }
-        resuming @ AnySuspension::Resuming(_) => {
+        (resuming @ AnySuspension::Resuming(_), _) => {
             let state = resuming.state();
             let held = resuming.snapshot();
             (
@@ -244,7 +301,8 @@ pub fn decide_take(
 
 /// `ReleaseSuspension` over `held`: `not-found` when nothing is stored, `other-request` naming
 /// both requests when it is held for another request than the input's, `not-taken` naming the
-/// request when it is `Pending`, otherwise `released`, removing it.
+/// request when it is `Pending`, `other-decision` naming both decision requests when it is held
+/// for another decision request than the input's, otherwise `released`, removing it.
 pub fn decide_release(
     held: Option<SuspensionSnapshot>,
     input: ReleaseSuspension,
@@ -262,8 +320,9 @@ pub fn decide_release(
     if let Some(error) = other_request(&held, &input.suspension, &input.action_request_id) {
         return (ReleaseSuspensionOutcome::OtherRequest { error }, None);
     }
-    match held.refine() {
-        pending @ AnySuspension::Pending(_) => {
+    let decision = other_decision(&held, &input.suspension, &input.decision_request_id);
+    match (held.refine(), decision) {
+        (pending @ AnySuspension::Pending(_), _) => {
             let state = pending.state();
             let held = pending.snapshot();
             (
@@ -276,7 +335,10 @@ pub fn decide_release(
                 None,
             )
         }
-        AnySuspension::Resuming(_) => (
+        (AnySuspension::Resuming(_), Some(error)) => {
+            (ReleaseSuspensionOutcome::OtherDecision { error }, None)
+        }
+        (AnySuspension::Resuming(_), None) => (
             ReleaseSuspensionOutcome::Released {
                 suspension_released: SuspensionReleased {
                     suspension: input.suspension.clone(),
@@ -288,7 +350,8 @@ pub fn decide_release(
 }
 
 /// The suspension port over memory: one Suspension per commission id, every command answered by
-/// the decisions above under one lock. It never answers `storage-failed`.
+/// the decisions above under one lock. It answers `storage-failed` only for a hold
+/// [`decide_hold`] refuses.
 #[derive(Debug, Default)]
 pub struct SuspensionStore {
     held: Mutex<BTreeMap<Uuid, SuspensionSnapshot>>,

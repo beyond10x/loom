@@ -510,8 +510,9 @@ use crate::model::responsibility::{
     RunOutcomeCompleted, RunOutcomeEffectRefused, RunOutcomeIdleBound, RunOutcomeNeedsAuthority,
     RunOutcomeNoPerformableAction, RunOutcomeSuspended, RunOutcomeWaiting, RunStarted, RunState,
     RunStorageFailed, StartRun, StartRunOutcome, StopPolicy, SuspendRun, SuspendRunOutcome,
-    SuspensionKey, SuspensionReason, SuspensionState, SuspensionStateConflict, TakeSuspension,
-    TakeSuspensionOutcome, Truth, Unit, commission_state, frontier_state, observation_state,
+    SuspensionDecisionMismatch, SuspensionKey, SuspensionReason, SuspensionState,
+    SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Truth, Unit, commission_state,
+    frontier_state, observation_state,
 };
 use crate::model::responsibility::{
     RevalidationAnswer, RuntimeEvent, RuntimeEventActionSelected, RuntimeEventAuthorityDecided,
@@ -2311,20 +2312,22 @@ fn release_taken<R: ?Sized>(
     let Some(Suspensions { port, .. }) = suspensions else {
         return Ok(());
     };
-    release(port, taken, Some(request.action_request_id.clone()))
+    release(port, taken, Some(request.action_request_id.clone()), None)
 }
 
 /// Releases `taken` for `request` (`ReleaseSuspension`), `None` for a Suspension held for a
-/// decision, which holds no request. A release the port does not answer `released` is
-/// [`LoopFailure::SuspensionNotReleased`].
+/// decision, which holds no request and is named by its `decision` request instead. A release the
+/// port does not answer `released` is [`LoopFailure::SuspensionNotReleased`].
 fn release(
     port: &dyn SuspensionPort,
     taken: SuspensionKey,
     request: Option<ActionRequestId>,
+    decision: Option<String>,
 ) -> Result<(), LoopFailure> {
     match port.release(ReleaseSuspension {
         suspension: taken,
         action_request_id: request.clone(),
+        decision_request_id: decision,
     }) {
         ReleaseSuspensionOutcome::Released { .. } => Ok(()),
         outcome => Err(LoopFailure::SuspensionNotReleased(Box::new(
@@ -2639,6 +2642,7 @@ where
     let failure = match suspensions.take(TakeSuspension {
         suspension: key.clone(),
         action_request_id: Some(request.action_request_id.clone()),
+        decision_request_id: None,
     }) {
         TakeSuspensionOutcome::Taken { .. } => None,
         // A Suspension held since that holds no request is held for a decision.
@@ -2651,6 +2655,8 @@ where
                 None => ResumeRefusal::HeldForDecision,
             }))
         }
+        // A take that names no decision request is refused this only by a decision hold.
+        TakeSuspensionOutcome::OtherDecision { .. } => Some(Err(ResumeRefusal::HeldForDecision)),
         TakeSuspensionOutcome::NotFound { .. } => Some(Err(ResumeRefusal::NothingSuspended)),
         TakeSuspensionOutcome::WrongState { error } => Some(Err(ResumeRefusal::InDoubt {
             action_request_id: error
@@ -2821,12 +2827,24 @@ where
         })
     };
     let key = stored.suspension.clone();
+    // The take and the release name the decision request, and the port refuses them unless the
+    // Suspension still holds the Run for it: one held since for another decision, or for an action
+    // request, is not this decision's to resume.
+    let decision = Some(decided.request_id.clone());
+    let other_decision = |error: SuspensionDecisionMismatch| match error.held_decision_request_id {
+        Some(held_request_id) => ResumeRefusal::OtherDecision {
+            request_id: decided.request_id.clone(),
+            held_request_id,
+        },
+        None => ResumeRefusal::HeldForAuthority,
+    };
     // A `Pending` Suspension is taken; one already `Resuming`, read so or found so by the take
     // (another resume took it since), is not taken again.
     let taken = state == SuspensionState::Pending
         && match suspensions.take(TakeSuspension {
             suspension: key.clone(),
             action_request_id: None,
+            decision_request_id: decision.clone(),
         }) {
             TakeSuspensionOutcome::Taken { .. } => true,
             TakeSuspensionOutcome::WrongState { .. } => false,
@@ -2837,6 +2855,9 @@ where
             TakeSuspensionOutcome::OtherRequest { .. } => {
                 return refused(ResumeRefusal::HeldForAuthority);
             }
+            TakeSuspensionOutcome::OtherDecision { error } => {
+                return refused(other_decision(error));
+            }
             TakeSuspensionOutcome::StorageFailed { error } => {
                 return Err(failed(LoopFailure::RunStorage(RunStorageFailed {
                     reason: error.reason,
@@ -2845,7 +2866,7 @@ where
         };
     if taken {
         unsuspend(runs, &run_id).map_err(failed)?;
-        if let Err(failure) = release(suspensions, key, None) {
+        if let Err(failure) = release(suspensions, key, None, decision) {
             let error = failed(failure);
             stopped(context, &run_id, Err(&error));
             return Err(error);
@@ -2853,16 +2874,17 @@ where
     } else {
         // The release comes first: of two resumes of one `Resuming` Suspension, only the one
         // whose release removes it goes on.
-        match release(suspensions, key, None) {
+        match release(suspensions, key, None, decision) {
             Ok(()) => {}
-            Err(LoopFailure::SuspensionNotReleased(unreleased))
-                if matches!(
-                    unreleased.outcome,
-                    ReleaseSuspensionOutcome::NotFound { .. }
-                ) =>
-            {
-                return refused(ResumeRefusal::NothingSuspended);
-            }
+            Err(LoopFailure::SuspensionNotReleased(unreleased)) => match &unreleased.outcome {
+                ReleaseSuspensionOutcome::NotFound { .. } => {
+                    return refused(ResumeRefusal::NothingSuspended);
+                }
+                ReleaseSuspensionOutcome::OtherDecision { error } => {
+                    return refused(other_decision(error.clone()));
+                }
+                _ => return Err(failed(LoopFailure::SuspensionNotReleased(unreleased))),
+            },
             Err(failure) => return Err(failed(failure)),
         }
         if RunStorage::get(runs, &run_id).map(|run| run.state) == Some(RunState::Suspended)

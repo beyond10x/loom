@@ -1,6 +1,6 @@
 // generated from commission v1
-// model digest 80727144504c944a2e6474f4ea2942968e297890e697d78f658c49ec5417f09c
-// contract digest 517ae7472a433ac632470e459ef5eaed9c1bd6fc880f470e3c89fa2284eeafe6
+// model digest 6bb42a5810efc385adb384b6bdb1a8e8f7ea869e6a7b5118c38b9bf6c06741d9
+// contract digest f4007876e52f5a84b65c3374f0ec1653ebdbe1365fd1cc7b6b4484aac89aa9c6
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Responsibility — `commission.responsibility`.
@@ -3003,6 +3003,8 @@ pub struct ReleaseSuspension {
     pub suspension: SuspensionKey,
     /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
     pub action_request_id: Option<ActionRequestId>,
+    /// `decision_request_id` — `Optional<String>`.
+    pub decision_request_id: Option<String>,
 }
 
 /// Everything `commission.responsibility.ReleaseSuspension` can result in — one variant per declared outcome.
@@ -3031,6 +3033,11 @@ pub enum ReleaseSuspensionOutcome {
     NotFound {
         /// Why it was refused: `commission.responsibility.SuspensionNotFound`.
         error: SuspensionNotFound,
+    },
+    /// `other-decision` — externally decided (the held Suspension's decision request is not the one the input names).
+    OtherDecision {
+        /// Why it was refused: `commission.responsibility.SuspensionDecisionMismatch`.
+        error: SuspensionDecisionMismatch,
     },
     /// `storage-failed` — externally decided (the suspension port cannot remove the Suspension).
     StorageFailed {
@@ -3201,6 +3208,8 @@ pub struct TakeSuspension {
     pub suspension: SuspensionKey,
     /// `action_request_id` — `Optional<commission.responsibility.ActionRequestId>`.
     pub action_request_id: Option<ActionRequestId>,
+    /// `decision_request_id` — `Optional<String>`.
+    pub decision_request_id: Option<String>,
 }
 
 /// Everything `commission.responsibility.TakeSuspension` can result in — one variant per declared outcome.
@@ -3229,6 +3238,11 @@ pub enum TakeSuspensionOutcome {
     WrongState {
         /// Why it was refused: `commission.responsibility.SuspensionStateConflict`.
         error: SuspensionStateConflict,
+    },
+    /// `other-decision` — externally decided (the held Suspension's decision request is not the one the input names).
+    OtherDecision {
+        /// Why it was refused: `commission.responsibility.SuspensionDecisionMismatch`.
+        error: SuspensionDecisionMismatch,
     },
     /// `storage-failed` — externally decided (the suspension port cannot record the take).
     StorageFailed {
@@ -3371,6 +3385,17 @@ pub struct RunStorageFailed {
 pub struct SuspensionAlreadyHeld {
     /// `suspension` — `commission.responsibility.SuspensionKey`.
     pub suspension: SuspensionKey,
+}
+
+/// The declared error `commission.responsibility.SuspensionDecisionMismatch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspensionDecisionMismatch {
+    /// `suspension` — `commission.responsibility.SuspensionKey`.
+    pub suspension: SuspensionKey,
+    /// `held_decision_request_id` — `Optional<String>`.
+    pub held_decision_request_id: Option<String>,
+    /// `decision_request_id` — `Optional<String>`.
+    pub decision_request_id: Option<String>,
 }
 
 /// The declared error `commission.responsibility.SuspensionNotFound`.
@@ -3525,9 +3550,9 @@ pub mod obligations {
 
     /// The behaviour `commission.responsibility.ReleaseSuspension` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`.
+    /// Why it is not generated: kept an obligation by the field `held_decision_request_id` of error `commission.responsibility.SuspensionDecisionMismatch`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `other-decision`.
     ///
-    /// Contract: given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
+    /// Contract: given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `other-decision` externally decided (the held Suspension's decision request is not the one the input names), error `commission.responsibility.SuspensionDecisionMismatch`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed`.
     pub trait ReleaseSuspensionBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.ReleaseSuspension`.
         ///
@@ -3590,9 +3615,9 @@ pub mod obligations {
 
     /// The behaviour `commission.responsibility.TakeSuspension` — an implementation obligation.
     ///
-    /// Why it is not generated: kept an obligation by the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`.
+    /// Why it is not generated: kept an obligation by the field `held_decision_request_id` of error `commission.responsibility.SuspensionDecisionMismatch`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `other-decision`.
     ///
-    /// Contract: given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed`.
+    /// Contract: given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `other-decision` externally decided (the held Suspension's decision request is not the one the input names), error `commission.responsibility.SuspensionDecisionMismatch`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed`.
     pub trait TakeSuspensionBehavior {
         /// Decides and enacts exactly one declared outcome of `commission.responsibility.TakeSuspension`.
         ///

@@ -340,7 +340,8 @@ restart. A run an executor suspends for `SuspensionReason::Decision` (`DecisionH
 request's id and what it unblocks) holds a Suspension too, with no action request, expected case
 revision, action or arguments (`null` in the store's file); only `resume_after_decision`, given the
 decided hold (`DecidedHold`, `Recorded` with the produced record or `NoRecord`), takes and releases
-it and goes on from the case's current revision, performing nothing held; `resume_after_grant`
+it, naming its decision request (`decision_request_id`; the port refuses another, or none, as
+`other-decision`), and goes on from the case's current revision, performing nothing held; `resume_after_grant`
 refuses it `HeldForDecision` and `approve` `OtherCapability`
 (`crates/loom-commission-testkit/tests/decision_suspend_resume.rs`). An effect port's `Refused` changed nothing, and an ordinary refusal is an idle iteration
 toward the idle bound. One the port marks final (`EffectOutcomeRefused.ends_run`) ends the run at

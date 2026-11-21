@@ -13,6 +13,12 @@
 //! `HoldSuspension` also declares `settled` as `external:`: the host already settled the request
 //! the Suspension would hold. A scenario forces it the same way, and the next hold is answered
 //! `settled`, storing nothing, as a host that settled the request answers it.
+//!
+//! `TakeSuspension` and `ReleaseSuspension` declare `other-decision` as `external:` too: the
+//! Suspension holds another decision request than the one the command names, which ess/22 cannot
+//! state as a guard (`story:decision-suspension-reason`). A scenario forces it the same way, and
+//! the next take or release of that command names a decision request other than the one the
+//! Suspension holds, so [`SuspensionStore`]'s own decision answers it.
 
 use b10x_loom_commission::model::behaviour::{RunStorage, SuspensionStorage};
 use b10x_loom_commission::model::obligation::UnmetObligation;
@@ -23,7 +29,7 @@ use b10x_loom_commission::model::responsibility::obligations::{
 use b10x_loom_commission::model::responsibility::{
     HoldSuspension, HoldSuspensionOutcome, ReleaseSuspension, ReleaseSuspensionOutcome, ResumeRun,
     ResumeRunOutcome, RunId, RunSnapshot, RunStorageFailed, StartRun, StartRunOutcome, SuspendRun,
-    SuspendRunOutcome, SuspensionKey, SuspensionSettled, SuspensionSnapshot,
+    SuspendRunOutcome, SuspensionKey, SuspensionReason, SuspensionSettled, SuspensionSnapshot,
     SuspensionStorageFailed, TakeSuspension, TakeSuspensionOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
@@ -146,6 +152,9 @@ pub enum SuspensionUnwritable {
     Release,
 }
 
+/// The decision request a forced `other-decision` names on a Suspension held for none.
+pub const OTHER_DECISION: &str = "the conformance scenario's other decision request";
+
 /// The reason the suspension store gives for a hold a scenario made the host settle.
 pub const HOST_SETTLED: &str = "the conformance host already settled the request";
 
@@ -156,6 +165,7 @@ pub struct ScenarioSuspensions {
     held: SuspensionStore,
     unwritable: Option<SuspensionUnwritable>,
     settles: bool,
+    misnamed: Option<SuspensionUnwritable>,
 }
 
 impl ScenarioSuspensions {
@@ -173,6 +183,36 @@ impl ScenarioSuspensions {
     /// after that invocation.
     pub fn settle_next(&mut self) {
         self.settles = true;
+    }
+
+    /// Makes the next take or release, as `command` names, name a decision request other than the
+    /// one the Suspension holds. The condition lapses after that invocation.
+    pub fn misname_next(&mut self, command: SuspensionUnwritable) {
+        self.misnamed = Some(command);
+    }
+
+    /// The decision request the next `command` names: `named`, or, when a scenario forced
+    /// `other-decision`, one the Suspension under `key` does not hold. A condition that fires
+    /// lapses.
+    fn naming(
+        &mut self,
+        command: SuspensionUnwritable,
+        key: &SuspensionKey,
+        named: Option<String>,
+    ) -> Option<String> {
+        if self.misnamed != Some(command) {
+            return named;
+        }
+        self.misnamed = None;
+        let held =
+            SuspensionStorage::get(&self.held, key).and_then(|held| match held.data.reason {
+                SuspensionReason::Decision(hold) => Some(hold.request_id),
+                _ => None,
+            });
+        Some(match held {
+            Some(held) => format!("{held} (another)"),
+            None => OTHER_DECISION.to_owned(),
+        })
     }
 
     /// Whether `command`'s write fails now; a condition that fires lapses.
@@ -243,7 +283,15 @@ impl TakeSuspensionBehavior for ScenarioSuspensions {
                 error: suspensions_unwritable(),
             });
         }
-        self.held.take_suspension(input)
+        let decision_request_id = self.naming(
+            SuspensionUnwritable::Take,
+            &input.suspension,
+            input.decision_request_id,
+        );
+        self.held.take_suspension(TakeSuspension {
+            decision_request_id,
+            ..input
+        })
     }
 }
 
@@ -257,6 +305,14 @@ impl ReleaseSuspensionBehavior for ScenarioSuspensions {
                 error: suspensions_unwritable(),
             });
         }
-        self.held.release_suspension(input)
+        let decision_request_id = self.naming(
+            SuspensionUnwritable::Release,
+            &input.suspension,
+            input.decision_request_id,
+        );
+        self.held.release_suspension(ReleaseSuspension {
+            decision_request_id,
+            ..input
+        })
     }
 }

@@ -452,6 +452,7 @@ fn concurrent_takes_over_one_directory_take_once() {
                         store.take(TakeSuspension {
                             suspension: key,
                             action_request_id: Some(request),
+                            decision_request_id: None,
                         }),
                         TakeSuspensionOutcome::Taken { .. }
                     )
@@ -501,7 +502,8 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.release(ReleaseSuspension {
             suspension: key.clone(),
-            action_request_id: Some(request.clone())
+            action_request_id: Some(request.clone()),
+            decision_request_id: None,
         }),
         ReleaseSuspensionOutcome::NotTaken { .. }
     ));
@@ -512,7 +514,8 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.take(TakeSuspension {
             suspension: key.clone(),
-            action_request_id: Some(request.clone())
+            action_request_id: Some(request.clone()),
+            decision_request_id: None,
         }),
         TakeSuspensionOutcome::Taken { .. }
     ));
@@ -523,7 +526,8 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.take(TakeSuspension {
             suspension: key.clone(),
-            action_request_id: Some(request.clone())
+            action_request_id: Some(request.clone()),
+            decision_request_id: None,
         }),
         TakeSuspensionOutcome::WrongState { .. }
     ));
@@ -534,14 +538,16 @@ fn the_file_store_answers_hold_take_and_release_from_each_state() {
     assert!(matches!(
         store.release(ReleaseSuspension {
             suspension: key.clone(),
-            action_request_id: Some(request.clone())
+            action_request_id: Some(request.clone()),
+            decision_request_id: None,
         }),
         ReleaseSuspensionOutcome::Released { .. }
     ));
     assert!(matches!(
         store.release(ReleaseSuspension {
             suspension: key,
-            action_request_id: Some(request)
+            action_request_id: Some(request),
+            decision_request_id: None,
         }),
         ReleaseSuspensionOutcome::NotFound { .. }
     ));

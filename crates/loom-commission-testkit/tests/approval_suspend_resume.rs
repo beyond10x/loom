@@ -509,6 +509,7 @@ fn a_take_or_a_release_for_another_request_is_refused_naming_both_and_changes_no
     let taken = suspensions.take(TakeSuspension {
         suspension: key.clone(),
         action_request_id: held.data.action_request_id.clone(),
+        decision_request_id: None,
     });
     assert!(
         matches!(taken, TakeSuspensionOutcome::Taken { .. }),
@@ -518,6 +519,7 @@ fn a_take_or_a_release_for_another_request_is_refused_naming_both_and_changes_no
         suspensions.release(ReleaseSuspension {
             suspension: key.clone(),
             action_request_id: Some(read.clone()),
+            decision_request_id: None,
         }),
         ReleaseSuspensionOutcome::OtherRequest {
             error: SuspensionRequestMismatch {

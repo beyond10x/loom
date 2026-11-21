@@ -21,9 +21,11 @@ use b10x_loom_commission::model::responsibility::{
     ActionRequestId, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
     CommissionId, DecidedHold, DecidedRecord, DecisionHold, DecisionUnblocks, EffectOutcome,
     EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeSuspended, HoldSuspension,
-    HoldSuspensionOutcome, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
-    RunOutcomeSuspended, RunState, SuspensionData, SuspensionKey, SuspensionReason,
-    SuspensionSnapshot, SuspensionState, SuspensionStateConflict, Unit, commission_state,
+    HoldSuspensionOutcome, ObservationId, PrincipalId, ProposedActionArguments, ReleaseSuspension,
+    ReleaseSuspensionOutcome, RunId, RunOutcome, RunOutcomeSuspended, RunState, SuspensionData,
+    SuspensionDecisionMismatch, SuspensionKey, SuspensionReason, SuspensionSnapshot,
+    SuspensionState, SuspensionStateConflict, TakeSuspension, TakeSuspensionOutcome, Unit,
+    commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -712,4 +714,194 @@ fn line<'t>(record: &'t str, key: &str) -> &'t str {
         .lines()
         .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
         .unwrap_or_else(|| panic!("no `{key}` in {record}"))
+}
+
+// ---------------------------------------------------------------------------------------------
+// Correction 1: a decision hold is taken and released only by naming its decision request, the
+// comparison the port's own decision (`other-decision`), over memory and over the file store.
+// ---------------------------------------------------------------------------------------------
+
+/// The approval request an `Authority` hold holds.
+const APPROVAL_REQUEST: u64 = 0x301;
+
+/// A fresh, empty file store directory for `name`.
+fn file_store(name: &str) -> FileSuspensionStore {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join("decision-suspend-resume")
+        .join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    FileSuspensionStore::open(&dir).expect("the store opens")
+}
+
+/// The commission the port cases hold for.
+fn port_commission() -> Commission<commission_state::Assigned> {
+    commission(&case("port"))
+}
+
+fn hold_of(data: &SuspensionData) -> HoldSuspension {
+    HoldSuspension {
+        suspension: data.suspension.clone(),
+        commission_id: data.commission_id.clone(),
+        run_id: data.run_id.clone(),
+        run_case_revision: data.run_case_revision,
+        action_request_id: data.action_request_id.clone(),
+        case_id: data.case_id.clone(),
+        expected_case_revision: data.expected_case_revision,
+        action: data.action.clone(),
+        arguments: data.arguments.clone(),
+        reason: data.reason.clone(),
+    }
+}
+
+/// Holds `data` in `port`, which must answer `held`.
+fn hold_in(port: &dyn SuspensionPort, data: &SuspensionData) {
+    let held = port.hold(hold_of(data));
+    assert!(
+        matches!(held, HoldSuspensionOutcome::Held { .. }),
+        "held: {held:?}"
+    );
+}
+
+fn key_of(commission: &Commission<commission_state::Assigned>) -> SuspensionKey {
+    SuspensionKey {
+        commission_id: commission.data().commission_id.clone(),
+    }
+}
+
+fn mismatch(
+    commission: &Commission<commission_state::Assigned>,
+    held: Option<&str>,
+    named: Option<&str>,
+) -> SuspensionDecisionMismatch {
+    SuspensionDecisionMismatch {
+        suspension: key_of(commission),
+        held_decision_request_id: held.map(str::to_owned),
+        decision_request_id: named.map(str::to_owned),
+    }
+}
+
+/// A release naming another decision request than the one the taken hold holds is refused
+/// `other-decision`, naming both, and the hold stays `Resuming`.
+fn a_release_naming_another_decision_is_refused(port: &dyn SuspensionPort) {
+    let commission = port_commission();
+    hold_in(
+        port,
+        &decision_data(&commission, decision(HELD, DecisionUnblocks::Question)),
+    );
+    let taken = port.take(TakeSuspension {
+        suspension: key_of(&commission),
+        action_request_id: None,
+        decision_request_id: Some(HELD.to_owned()),
+    });
+    assert!(
+        matches!(taken, TakeSuspensionOutcome::Taken { .. }),
+        "taken: {taken:?}"
+    );
+    let before = stored(port, &commission);
+
+    let released = port.release(ReleaseSuspension {
+        suspension: key_of(&commission),
+        action_request_id: None,
+        decision_request_id: Some("DR-2".to_owned()),
+    });
+
+    assert_eq!(
+        released,
+        ReleaseSuspensionOutcome::OtherDecision {
+            error: mismatch(&commission, Some(HELD), Some("DR-2")),
+        }
+    );
+    let after = stored(port, &commission);
+    assert_eq!(after, before, "the hold stays");
+    assert_eq!(
+        after.map(|held| held.state),
+        Some(SuspensionState::Resuming)
+    );
+}
+
+/// A take naming no decision request on a Decision hold is refused `other-decision`, and the hold
+/// stays `Pending`.
+fn a_take_naming_no_decision_on_a_decision_hold_is_refused(port: &dyn SuspensionPort) {
+    let commission = port_commission();
+    hold_in(
+        port,
+        &decision_data(&commission, decision(HELD, DecisionUnblocks::Approval)),
+    );
+    let before = stored(port, &commission);
+
+    let taken = port.take(TakeSuspension {
+        suspension: key_of(&commission),
+        action_request_id: None,
+        decision_request_id: None,
+    });
+
+    assert_eq!(
+        taken,
+        TakeSuspensionOutcome::OtherDecision {
+            error: mismatch(&commission, Some(HELD), None),
+        }
+    );
+    let after = stored(port, &commission);
+    assert_eq!(after, before, "the hold stays");
+    assert_eq!(after.map(|held| held.state), Some(SuspensionState::Pending));
+}
+
+/// A take naming a decision request on a hold for an approval, naming that hold's action request,
+/// is refused `other-decision`, and the hold stays `Pending`.
+fn a_take_naming_a_decision_on_an_approval_hold_is_refused(port: &dyn SuspensionPort) {
+    let commission = port_commission();
+    let request = ActionRequestId(uuid(APPROVAL_REQUEST));
+    let mut approval = decision_data(&commission, SuspensionReason::Authority(Value::Null));
+    approval.action_request_id = Some(request.clone());
+    approval.expected_case_revision = Some(1);
+    approval.action = Some("repository.merge".to_owned());
+    approval.arguments = Some(ProposedActionArguments(Value::Null));
+    hold_in(port, &approval);
+    let before = stored(port, &commission);
+
+    let taken = port.take(TakeSuspension {
+        suspension: key_of(&commission),
+        action_request_id: Some(request),
+        decision_request_id: Some(HELD.to_owned()),
+    });
+
+    assert_eq!(
+        taken,
+        TakeSuspensionOutcome::OtherDecision {
+            error: mismatch(&commission, None, Some(HELD)),
+        }
+    );
+    let after = stored(port, &commission);
+    assert_eq!(after, before, "the hold stays");
+    assert_eq!(after.map(|held| held.state), Some(SuspensionState::Pending));
+}
+
+#[test]
+fn a_release_naming_another_decision_request_is_refused_and_the_hold_stays() {
+    a_release_naming_another_decision_is_refused(&SuspensionStore::new());
+}
+
+#[test]
+fn a_take_naming_no_decision_request_on_a_decision_hold_is_refused() {
+    a_take_naming_no_decision_on_a_decision_hold_is_refused(&SuspensionStore::new());
+}
+
+#[test]
+fn a_take_naming_a_decision_request_on_an_approval_hold_is_refused() {
+    a_take_naming_a_decision_on_an_approval_hold_is_refused(&SuspensionStore::new());
+}
+
+#[test]
+fn over_the_file_store_a_release_naming_another_decision_request_is_refused_and_the_hold_stays() {
+    a_release_naming_another_decision_is_refused(&file_store("release-other-decision"));
+}
+
+#[test]
+fn over_the_file_store_a_take_naming_no_decision_request_on_a_decision_hold_is_refused() {
+    a_take_naming_no_decision_on_a_decision_hold_is_refused(&file_store("take-no-decision"));
+}
+
+#[test]
+fn over_the_file_store_a_take_naming_a_decision_request_on_an_approval_hold_is_refused() {
+    a_take_naming_a_decision_on_an_approval_hold_is_refused(&file_store("take-on-approval"));
 }

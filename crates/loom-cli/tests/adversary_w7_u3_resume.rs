@@ -189,6 +189,7 @@ fn a_resume_after_a_crash_between_take_and_hand_off_is_in_doubt() {
                 commission_id: CommissionId(Uuid(held.commission.clone())),
             },
             action_request_id: Some(ActionRequestId(Uuid(held.action_request_id.clone()))),
+            decision_request_id: None,
         });
     assert!(
         matches!(taken, TakeSuspensionOutcome::Taken { .. }),

@@ -2,8 +2,8 @@
   "provenance": {
     "system": "commission",
     "specification_version": "v1",
-    "source_digest": "80727144504c944a2e6474f4ea2942968e297890e697d78f658c49ec5417f09c",
-    "contract_digest": "517ae7472a433ac632470e459ef5eaed9c1bd6fc880f470e3c89fa2284eeafe6"
+    "source_digest": "6bb42a5810efc385adb384b6bdb1a8e8f7ea869e6a7b5118c38b9bf6c06741d9",
+    "contract_digest": "f4007876e52f5a84b65c3374f0ec1653ebdbe1365fd1cc7b6b4484aac89aa9c6"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -897,9 +897,9 @@
         "disposition": "obligation",
         "reason": {
           "class": "undetermined",
-          "construct": "the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`"
+          "construct": "the field `held_decision_request_id` of error `commission.responsibility.SuspensionDecisionMismatch`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `other-decision`"
         },
-        "contract": "given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
+        "contract": "given `commission.responsibility.ReleaseSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `not-taken` when the existing subject's stored fields satisfy `state == Pending`, error `commission.responsibility.SuspensionStateConflict`; `released` otherwise, deletes `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionReleased`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `other-decision` externally decided (the held Suspension's decision request is not the one the input names), error `commission.responsibility.SuspensionDecisionMismatch`; `storage-failed` externally decided (the suspension port cannot remove the Suspension), error `commission.responsibility.SuspensionStorageFailed`"
       }
     },
     {
@@ -992,9 +992,9 @@
         "disposition": "obligation",
         "reason": {
           "class": "undetermined",
-          "construct": "the field `reason` of error `commission.responsibility.SuspensionStorageFailed`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `storage-failed`"
+          "construct": "the field `held_decision_request_id` of error `commission.responsibility.SuspensionDecisionMismatch`, which neither the specification nor the held `commission.responsibility.Suspension` determines, in `other-decision`"
         },
-        "contract": "given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed`"
+        "contract": "given `commission.responsibility.TakeSuspension` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `other-request` when the existing subject's stored fields satisfy `action_request_id != input.action_request_id`, error `commission.responsibility.SuspensionRequestMismatch`; `taken` otherwise, takes `take` of `commission.responsibility.Suspension`, emits `commission.responsibility.SuspensionTaken`; `not-found` for an identity no record carries, error `commission.responsibility.SuspensionNotFound`; `wrong-state` from a state no declared move starts in, error `commission.responsibility.SuspensionStateConflict`; `other-decision` externally decided (the held Suspension's decision request is not the one the input names), error `commission.responsibility.SuspensionDecisionMismatch`; `storage-failed` externally decided (the suspension port cannot record the take), error `commission.responsibility.SuspensionStorageFailed`"
       }
     },
     {
@@ -1105,6 +1105,13 @@
     {
       "kind": "error_type",
       "source": "commission.responsibility.SuspensionAlreadyHeld",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "commission.responsibility.SuspensionDecisionMismatch",
       "disposition": {
         "disposition": "generated"
       }

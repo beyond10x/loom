@@ -903,6 +903,7 @@ impl Held {
             store.take(TakeSuspension {
                 suspension: key.clone(),
                 action_request_id: named.clone(),
+                decision_request_id: None,
             }),
             TakeSuspensionOutcome::Taken { .. }
         ));
@@ -910,6 +911,7 @@ impl Held {
             store.release(ReleaseSuspension {
                 suspension: key.clone(),
                 action_request_id: named,
+                decision_request_id: None,
             }),
             ReleaseSuspensionOutcome::Released { .. }
         ));
