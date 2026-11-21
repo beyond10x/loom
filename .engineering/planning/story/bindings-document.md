@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bindings-document
 kind: story
-status: active
+status: implemented
 title: loom.bindings/1 declares per protocol action its executor, result table, tools, budget and timeout, checked at load
 summary: The one binding format, grown from intake.bindings; document, decode and load-time checks, nothing executed
 tags:
@@ -11,6 +11,14 @@ relations:
 - decomposes: epic:protocol-tree-on-bindings
 - serves: vision:O1
 scope:
+- confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: Cargo.lock
+- confidence: cited
+  path: README.md
 - confidence: cited
   path: crates/loom-bindings
 - confidence: inferred
@@ -21,14 +29,23 @@ scope:
   path: ess/ess-inputs.yaml
 - confidence: cited
   path: ess/system.yaml
+- confidence: cited
+  path: generated/rust/loom/
+- confidence: cited
+  path: website/data/ess/
 - confidence: inferred
   path: website/data/status.json
 - confidence: inferred
   path: website/docs/guides/bindings.md
-revision: 9
+- confidence: cited
+  path: website/docs/reference/crates.md
+- confidence: cited
+  path: website/docs/reference/ess/
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:44Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":5}}}
 - {from: "proposed", to: "active", at: "2026-11-21T00:12:43Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":5}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w1"}
+- {from: "active", to: "implemented", at: "2026-11-21T01:32:44Z", actor: "human:timo", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":7,"verification":1}}}
 ---
 ## Outcome
 
@@ -127,23 +144,34 @@ read-only roots) per binding. Accepting the format in `b10x-loom run --action-bi
 
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w1 from the unit's commits (`git diff --name-status ecefe180 2fe0743f`). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-bindings` (new crate `b10x-loom-bindings`) — cited, Outcome and Acceptance name it
-- **Files:** `crates/loom-bindings/` (`Cargo.toml`, `src/`, `tests/bindings_document.rs`) — cited, the Cargo.toml and test file are named in Acceptance and ESS first; the `src/` layout is inferred
-- **Files:** `ess/domains/bindings.yaml` — cited, § ESS first
-- **Files:** `ess/system.yaml` (add `loom.bindings` to `domains:`) — cited, § ESS first says "declared in `ess/system.yaml`"; the edit shape is read from `adcbf763` and `7021cd30`
-- **Files:** `ess/ess-inputs.yaml` (add `domains/bindings.yaml` to `specification:`) — inferred, `adcbf763` and `7021cd30` each added one line there; the story does not name the file
-- **Files:** `crates/loom-executor/tests/crate_names.rs` (`EXPECTED`, 28 to 29, add `b10x-loom-bindings` / `loom-bindings`) — inferred, `25b06ad5` and `f0acace9` each edited this guard when they added a crate; it reads `cargo metadata` and requires the exact package set (`crate_names.rs:1-12`, `:18`)
-- **Files:** `crates/loom-bindings/Cargo.toml` names `b10x-canon` as `crates/loom-governor/Cargo.toml:15` does — cited, Acceptance bullet 4
-- **Symbols:** `loom.bindings.{BindingsDocument, BoundAction, Executor, EvidenceEntry, ResultSource, ActionBudget, ToolAllowList, RetryCondition, BindingsRefusal}` — cited, § ESS first
-- **Symbols:** `b10x_canon::ir::Ir::independence_dimensions`; `Action::may_produce` via `ProtocolEntry::model` (`crates/loom-protocols/src/lib.rs:17-23`) — inferred, read-only dependencies for the load-time checks (see `crates/loom-governor/src/lib.rs:1496-1503` and `crates/loom-intake-slice/src/bindings.rs:208-222`)
-- **Also likely:** `crates/loom-protocols/` as a dependency of the new crate, read only — inferred, `ProtocolEntry` is where a compiled protocol's actions, artifacts and `may_produce` are reachable
-- **Also likely:** `loom = { path = "../../generated/rust/loom" }` as a dependency of the new crate, as `crates/loom-resource/Cargo.toml` does — inferred, so the crate takes `loom.bindings` types from the generated model
-- **Also likely:** `website/data/status.json` — inferred, hand-written status record; `25b06ad5` added an item for a new crate, the ESS-only commit `adcbf763` did not, and the story's acceptance does not mention it
-- **Documents:** one guide page under `website/docs/guides/` with a complete `loom.bindings/1` file in a code block, decoded by `crates/loom-bindings/tests/bindings_document.rs` — cited that it exists; the file name `website/docs/guides/bindings.md` is inferred. The sidebar autogenerates `guides/` (`website/sidebars.ts`), so no sidebar edit.
-- **Documents:** house-rule files, not listed — `CHANGELOG.md`, `AGENTS.md`, `README.md`, `Cargo.lock`, `generated/rust/loom/**`, `website/docs/reference/crates.md`, `website/docs/reference/ess/**`, `website/data/ess/loom-bindings.domain-graph.json` — cited as needing regeneration or hand edit by `f0acace9`
-- **Confidence:** high for the crate, the ESS domain file and `ess/system.yaml` (the story names them and the wiring is read from two commits). Medium for the guide page name and the `status.json` edit.
-- **Would collide with:** `crates/loom-bindings/**` (the four later stories extend it); `ess/domains/bindings.yaml`; the `domains:` list of `ess/system.yaml` and the `specification:` list of `ess/ess-inputs.yaml` (any unit adding an ESS domain); the `EXPECTED` array of `crates/loom-executor/tests/crate_names.rs` (any unit adding a crate); every manifest that names `b10x-canon` (`story:canon-0-9-0-pin` moves them with this one); `website/data/status.json`.
-- **Safety fact:** adding the crate edits no root file. `Cargo.toml` has `members = ["crates/*"]`, so the crate joins the workspace by directory alone — `Cargo.toml:3`, cited and unproven. The one guard that fails without an edit is `crate_names.rs`, because it requires the exact package set (`crate_names.rs:18`, `:185`), so step 2, unproven. No other guard enumerates crates. `the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags` scans `crates/*/Cargo.toml` (`adversary_w8_pin.rs:19-48`, `:103`), so the new manifest passes it by naming the same tag, step 2, unproven.
+- **Primary surface:** `crates/loom-bindings` (new crate `b10x-loom-bindings`, lib `b10x_loom_bindings`) — cited, 8 new files, 3,357 lines
+- **Files:** `crates/loom-bindings/Cargo.toml` — new, cited, depends on `b10x-canon` (git tag `0.8.0`), `loom` (`../../generated/rust/loom`), `serde` and `serde_yaml_ng`; `publish = false`
+- **Files:** `crates/loom-bindings/src/lib.rs` — new, cited, crate documentation, the re-exports and the limit constants
+- **Files:** `crates/loom-bindings/src/decode.rs` — new, cited, the YAML or JSON decoder into the generated `loom.bindings` types
+- **Files:** `crates/loom-bindings/src/load.rs` — new, cited, the load-time check against the compiled protocol and the list of unbound actions
+- **Files:** `crates/loom-bindings/src/tree.rs` — new, cited, the bounded reader of the text (nesting, node count, document bytes, open brackets)
+- **Files:** `crates/loom-bindings/tests/bindings_document.rs` — new, cited, the acceptance tests (991 lines)
+- **Files:** `crates/loom-bindings/tests/adversary_w20261121w1_u2.rs` and `crates/loom-bindings/tests/adversary_w20261121w1_u2_pass2.rs` — new, cited, the adversary's two rounds
+- **Files:** `ess/domains/bindings.yaml` — new, cited, the `loom.bindings` domain: 14 types from `Executor` to `BindingsRefusal`
+- **Files:** `ess/system.yaml` — cited, `loom.bindings` added to `domains:`
+- **Files:** `ess/ess-inputs.yaml` — cited, `domains/bindings.yaml` added to `specification:`
+- **Files:** `crates/loom-executor/tests/crate_names.rs` — cited, `EXPECTED` goes from 28 to 29 entries, adding `b10x-loom-bindings` / `loom-bindings` / `b10x_loom_bindings`
+- **Files:** `website/data/status.json` — cited, one item added, "Bindings document", status `shipped`
+- **Files:** `website/docs/guides/bindings.md` — new, cited, the guide page (201 lines) holding a `loom.bindings/1` file
+- **Files:** `website/docs/reference/crates.md` — cited, generated page: package count 28 to 29 and one row for `b10x-loom-bindings`
+- **Files:** `generated/rust/loom/` — cited, regenerated: `src/bindings.rs` is new, `src/lib.rs` gains `pub mod bindings;`, and `Cargo.toml`, `PLAN.md` (297 to 311 capabilities), `plan.json` and the other 17 `src/*.rs` files take the new model and contract digests
+- **Files:** `website/docs/reference/ess/` — cited, regenerated: `loom-bindings.md` is new, `index.mdx` gains the bindings domain graph import and the other 13 domain pages take the new digests
+- **Files:** `website/data/ess/` — cited, regenerated: `loom-bindings.domain-graph.json` is new
+- **Files:** `AGENTS.md` — cited, a new `## Bindings document` section (43 lines) on the crate, `decode`, `check`, `unbound`, the bounds and the refusals
+- **Files:** `CHANGELOG.md` — cited, one `### Added` line for `b10x-loom-bindings`
+- **Files:** `README.md` — cited, one crate row for `b10x-loom-bindings`
+- **Files:** `Cargo.lock` — cited, 10 lines added for the new package
+- **Symbols:** `b10x_loom_bindings::decode` — new, cited, `decode(text: &str) -> Decoded<BindingsDocument>`
+- **Symbols:** `b10x_loom_bindings::check` — new, cited, `check(document, registration: &str, protocol) -> Result<(), Refusal>`
+- **Symbols:** `b10x_loom_bindings::unbound` — new, cited, `unbound(document, protocol) -> Vec<String>`
+- **Symbols:** `b10x_loom_bindings::Refusal` — new, cited, `pub struct Refusal(pub BindingsRefusal)`, with `Display`
+- **Symbols:** `b10x_loom_bindings::{FORMAT, DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, MAX_NESTING, MAX_OPEN_BRACKETS, MAX_NODES, MAX_DOCUMENT_BYTES}` — new, cited, public constants in `src/lib.rs`
+- **Symbols:** `loom::bindings::{BindingsDocument, BoundAction, Executor, ExecutorSpec, EvidenceEntry, ResultSource, ResultRule, ActionBudget, ToolAllowList, RetryCondition, ArtifactPath, ProducerIndependence, BindingsRefusalReason, BindingsRefusal}` — new, cited, generated from `loom.bindings` (`ess/domains/bindings.yaml`)
+- **Predicted and not touched:** none

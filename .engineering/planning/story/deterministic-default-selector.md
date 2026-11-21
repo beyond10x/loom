@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:deterministic-default-selector
 kind: story
-status: active
+status: implemented
 title: A deterministic selector takes useful admissible actions, reads before writes, then identifier order
 summary: Calls no model; the frontier and catalogue gain effect class and open evidence kinds, the history half comes from a host port
 tags:
@@ -12,27 +12,46 @@ relations:
 - serves: vision:O1
 scope:
 - confidence: cited
+  path: AGENTS.md
+- confidence: cited
+  path: CHANGELOG.md
+- confidence: cited
+  path: README.md
+- confidence: cited
   path: crates/loom-conformance/src/codec.rs
 - confidence: cited
   path: crates/loom-executor/src/lib.rs
 - confidence: cited
   path: crates/loom-executor/src/selection.rs
 - confidence: cited
+  path: crates/loom-executor/tests/adversary_w20261121w1_u3.rs
+- confidence: cited
+  path: crates/loom-executor/tests/adversary_w20261121w1_u3_pass2.rs
+- confidence: cited
   path: crates/loom-executor/tests/deterministic_selector.rs
 - confidence: cited
   path: crates/loom-governor/src/lib.rs
 - confidence: inferred
   path: crates/loom-governor/tests/action_facts.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w1_u3.rs
+- confidence: cited
+  path: crates/loom-governor/tests/adversary_w20261121w1_u3_pass2.rs
 - confidence: inferred
   path: docs/contracts/loom-action-selection.md
 - confidence: inferred
   path: docs/design/loom-design.md
 - confidence: cited
   path: ess/domains/run.yaml
-revision: 10
+- confidence: cited
+  path: generated/rust/loom/
+- confidence: cited
+  path: website/docs/reference/ess/
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:45Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
 - {from: "proposed", to: "active", at: "2026-11-21T00:12:44Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w1"}
+- {from: "active", to: "implemented", at: "2026-11-21T01:32:44Z", actor: "human:timo", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":1}}}
 ---
 ## Outcome
 
@@ -127,34 +146,30 @@ selector of `b10x-loom run <intent>`. `max_runs` (enforced by the effect,
 
 ## Scope
 
-Derived 2026-11-21. The `story-scoper` report was made against the earlier design (new members
-on `FrontierAction` and `CatalogueEntry`); its count of 205 struct literals in 166 files is why
-the story now uses a port. This section is the coordinator's reading for the port design; every
-line is **cited** (read from the scoper's report or the story) or **inferred**.
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w1 from the unit's commits (`git diff --name-status ecefe180 ba343770`). Every line is cited from that diff.
 
-- **Primary surface:** `crates/loom-executor/src/selection.rs` (the selector, the `ActionFacts`
-  and `StepHistory` ports, beside `FirstAdmissibleSelector` at line 140) — cited
-- **Files:** `ess/domains/run.yaml` (`ActionFacts`; `SelectionStrategy` at line 46 gains
-  `Deterministic`) — cited
-- **Files:** `crates/loom-governor/src/lib.rs` (a method that answers a case's action facts;
-  `project` at line 1874 already walks `ir.actions`) — cited
-- **Files:** `crates/loom-conformance/src/codec.rs:89,137` (exhaustive matches over
-  `SelectionStrategy`) — cited
-- **Files:** `crates/loom-executor/src/lib.rs:64` (the `pub use selection::{…}` re-export) — cited
-- **Files:** `crates/loom-executor/tests/deterministic_selector.rs` (new) — cited
-- **Also likely:** a governor test for the action facts, `crates/loom-governor/tests/action_facts.rs`
-  (name guessed) — inferred
-- **Documents:** `docs/contracts/loom-action-selection.md`, `docs/design/loom-design.md:74` (the
-  selection-strategies list) — inferred
-- **Not touched:** `ess/commission/domains/responsibility.yaml`, `crates/loom-executor/src/projection.rs`
-  and the 166 files that build `FrontierAction` or `CatalogueEntry` — cited, the story's last
-  acceptance line holds it
-- **Confidence:** medium — the files are named by the story and the scoper's reading; that the
-  current decision exposes which records Canon counted per kind is read from the story's Why and
-  not from the code
-- **Would collide with:** any unit touching `crates/loom-governor/src/lib.rs`,
-  `crates/loom-executor/src/selection.rs`, `SelectionStrategy` in `ess/domains/run.yaml`, or
-  `crates/loom-conformance/src/codec.rs`
-- **Safety fact:** the selector returns only an id from the candidate list it was given
-  (`select`/`resolve` at `selection.rs:309,347` refuse any other), so a facts port that names an
-  unknown action cannot widen the choice — unproven
+- **Primary surface:** `crates/loom-executor/src/selection.rs` — cited, 274 lines: the `ActionFactsPort` and `StepHistory` ports, `CaseFacts`, `DeterministicSelector` beside `FirstAdmissibleSelector`, and `resolve_for_case` on `ActionSelector`, `HybridSelector` and as a free function
+- **Files:** `ess/domains/run.yaml` — cited, `SelectionStrategy` gains the variant `Deterministic`; new struct `loom.run.ActionFacts` (`action`, `effect`, `may_produce`, `open_evidence`)
+- **Files:** `crates/loom-governor/src/lib.rs` — cited, 257 lines: `CanonGovernor::action_facts` and its `ActionFactsPort` impl, the private `counted_kinds` rule for which records count, and `decided_at` split out of `decided`
+- **Files:** `crates/loom-executor/src/lib.rs` — cited, the `pub use selection::{…}` list gains `ActionFactsPort`, `CaseFacts`, `DeterministicSelector` and `StepHistory`; the run's selection goes through `selection::resolve_for_case` with the frontier's case id
+- **Files:** `crates/loom-conformance/src/codec.rs` — cited, the two matches over `SelectionStrategy` gain a `Deterministic` arm (2 lines)
+- **Files:** `crates/loom-executor/tests/deterministic_selector.rs` — new, cited, the acceptance tests (449 lines)
+- **Files:** `crates/loom-governor/tests/action_facts.rs` — new, cited, the governor's action-facts tests (290 lines)
+- **Files:** `crates/loom-executor/tests/adversary_w20261121w1_u3.rs` and `crates/loom-executor/tests/adversary_w20261121w1_u3_pass2.rs` — new, cited, the adversary's two rounds against the selector
+- **Files:** `crates/loom-governor/tests/adversary_w20261121w1_u3.rs` and `crates/loom-governor/tests/adversary_w20261121w1_u3_pass2.rs` — new, cited, the adversary's two rounds against the action facts
+- **Files:** `docs/contracts/loom-action-selection.md` — cited, a new `## Deterministic selection` section (48 lines)
+- **Files:** `docs/design/loom-design.md` — cited, 7 lines: the selection-strategies list names `DeterministicSelector` and links the contract section
+- **Files:** `generated/rust/loom/` — cited, regenerated: `src/run.rs` gains `ActionFacts` and the `Deterministic` variant; `PLAN.md` goes from 297 to 298 capabilities; `Cargo.toml`, `plan.json` and the other 17 `src/*.rs` files take the new model and contract digests
+- **Files:** `website/docs/reference/ess/` — cited, regenerated: `loom-run.md` and the other 12 domain pages
+- **Files:** `AGENTS.md` — cited, 14 lines: the selector's table row and a paragraph on `CanonGovernor::action_facts` and which records count
+- **Files:** `CHANGELOG.md` — cited, one `### Added` line, marked **Breaking**: `SelectionStrategy` gains `Deterministic`
+- **Files:** `README.md` — cited, a sentence on `DeterministicSelector` beside the `b10x-loom-selector-laya` crate
+- **Symbols:** `b10x_loom_executor::selection::DeterministicSelector<F, H>` — new, cited, `DeterministicSelector::new(case: CaseId, facts: F, history: H)`, implements `ActionSelector` with strategy `Deterministic`
+- **Symbols:** `b10x_loom_executor::selection::ActionFactsPort` — new, cited, `action_facts(&self, case: &CaseId) -> Result<CaseFacts, String>`, with a blanket impl for `&P`
+- **Symbols:** `b10x_loom_executor::selection::StepHistory` — new, cited, `performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String>` and `due(&self, action: &str) -> Result<bool, String>`, with a blanket impl for `&H`
+- **Symbols:** `b10x_loom_executor::selection::CaseFacts` — new, cited, `pub case_revision: i64` and `pub actions: Vec<ActionFacts>`
+- **Symbols:** `b10x_loom_executor::selection::resolve_for_case` — new, cited, the free function; `ActionSelector::resolve_for_case` — new, cited, a provided trait method that ignores the case by default; `HybridSelector` overrides it
+- **Symbols:** `loom_governor::CanonGovernor::action_facts` — new, cited, `action_facts(&self, case: &CaseId) -> Result<CaseFacts, GovernorError>`
+- **Symbols:** `loom::run::SelectionStrategy::Deterministic` and `loom::run::ActionFacts` — new, cited, generated from `ess/domains/run.yaml`
+- **Not touched:** `ess/commission/domains/responsibility.yaml`, `crates/loom-executor/src/projection.rs` and the files that build `FrontierAction` or `CatalogueEntry` — cited, none is in the diff, as the story's last acceptance line required
+- **Predicted and not touched:** none
