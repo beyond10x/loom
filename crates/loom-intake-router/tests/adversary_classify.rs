@@ -11,6 +11,7 @@ use llm_core::{
     Provenance, StopReason, StreamSink, ToolCall, ToolName, TurnObservation, TurnOutcome,
     TurnRequest,
 };
+use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 use std::sync::Mutex;
 
@@ -112,11 +113,22 @@ impl Model for Fake {
     }
 }
 
+/// Every vendored engineering entry as `name@major`, in registry order: by name, then by major as
+/// a number.
 fn registry() -> Vec<String> {
-    canon_engineering::registry::list()
-        .into_iter()
-        .map(|(name, major)| format!("{name}@{major}"))
-        .collect()
+    let mut entries: Vec<String> = ProtocolCatalog::engineering()
+        .expect("the engineering catalog")
+        .iter()
+        .map(|entry| entry.name().to_owned())
+        .collect();
+    entries.sort_by_key(|entry| {
+        let (name, major) = entry.split_once('@').expect("name@major");
+        (
+            name.to_owned(),
+            major.parse::<u32>().expect("a numeric major"),
+        )
+    });
+    entries
 }
 
 fn pick(protocol: &str, confidence: Value) -> Value {
@@ -473,20 +485,21 @@ async fn the_request_is_deterministic_and_keeps_the_intent_out_of_the_instructio
     );
 
     let mut last = 0;
-    for (name, major) in canon_engineering::registry::list() {
-        let builtin = canon_engineering::registry::get(name, major).expect("a valid built-in");
+    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
+    for name in registry() {
+        let builtin = catalog.get(&name).expect("a vendored entry");
         let description = builtin
             .model
             .protocol
             .description
             .as_deref()
             .expect("every built-in describes itself");
-        let line = format!("- {name}@{major}: {description}");
+        let line = format!("- {name}: {description}");
         let at = request
             .instructions
             .find(&line)
             .unwrap_or_else(|| panic!("{line:?} not in {}", request.instructions));
-        assert!(at >= last, "{name}@{major} is out of registry order");
+        assert!(at >= last, "{name} is out of registry order");
         last = at;
     }
 }

@@ -557,30 +557,6 @@ fn locked_file_is_the_sha256_of_the_bytes() {
 }
 
 #[test]
-fn the_vendored_files_equal_the_pinned_registry() {
-    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
-    let registry: BTreeSet<String> = canon_engineering::registry::list()
-        .into_iter()
-        .map(|(name, major)| format!("{name}@{major}"))
-        .collect();
-    let registrations: BTreeSet<String> = catalog
-        .iter()
-        .map(|entry| entry.name().to_owned())
-        .collect();
-    assert_eq!(registry, registrations);
-    assert_eq!(ENGINEERING_FILES.len(), registry.len());
-    for (path, bytes) in ENGINEERING_FILES {
-        let (name, file) = path.split_once('/').expect("<name>/<major>.yaml");
-        let major: u32 = file
-            .strip_suffix(".yaml")
-            .and_then(|major| major.parse().ok())
-            .expect("<major>.yaml");
-        let builtin = canon_engineering::registry::get(name, major).expect("in the registry");
-        assert_eq!(builtin.yaml.as_bytes(), *bytes, "{path}");
-    }
-}
-
-#[test]
 fn every_engineering_entry_matches_its_lock_entry() {
     let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
     let locked = committed_lock();

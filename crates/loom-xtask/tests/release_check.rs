@@ -383,11 +383,30 @@ fn release_pair(
     second: &str,
     tag_second: bool,
 ) -> PathBuf {
+    release_pair_with_page(
+        name,
+        STABILITY_PAGE,
+        first,
+        second_version,
+        second,
+        tag_second,
+    )
+}
+
+/// [`release_pair`] with `page` as the SDK stability page of both commits.
+fn release_pair_with_page(
+    name: &str,
+    page: &str,
+    first: &str,
+    second_version: &str,
+    second: &str,
+    tag_second: bool,
+) -> PathBuf {
     let root = fixture(name, "0.1.0", &changelog_with(&[("0.1.0", first)]));
-    let page = root.join("website/docs/reference/sdk-stability.md");
-    fs::create_dir_all(page.parent().unwrap_or(&root))
-        .unwrap_or_else(|e| panic!("create {}: {e}", page.display()));
-    write(&page, STABILITY_PAGE);
+    let stability = root.join("website/docs/reference/sdk-stability.md");
+    fs::create_dir_all(stability.parent().unwrap_or(&root))
+        .unwrap_or_else(|e| panic!("create {}: {e}", stability.display()));
+    write(&stability, page);
     git(&root, &["init", "-q"]);
     git(&root, &["add", "-A"]);
     git(&root, &["commit", "-q", "-m", "first"]);
@@ -551,6 +570,75 @@ fn a_breaking_entry_on_a_patch_tag_is_refused() {
     assert!(
         out.status.success(),
         "release-check refused a `**Breaking:**` entry on the minor tag 0.2.0: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// The variant `story:engineering-registry-calls-replaced` removes.
+const ROUTER_REGISTRY: &str = "`loom_sdk::intake::router::RouterError::Registry`";
+
+/// The bullets under `### Removed` in the `## [Unreleased]` section of `changelog`.
+fn unreleased_removed(changelog: &str) -> Vec<String> {
+    let unreleased = changelog
+        .split_once("## [Unreleased]")
+        .map(|(_, rest)| rest.split("\n## [").next().unwrap_or(rest))
+        .unwrap_or_else(|| panic!("CHANGELOG.md has no `## [Unreleased]` section"));
+    let mut bullets = Vec::new();
+    let mut in_removed = false;
+    for line in unreleased.lines() {
+        if let Some(heading) = line.strip_prefix("### ") {
+            in_removed = heading.trim() == "Removed";
+        } else if in_removed && line.starts_with("- ") {
+            bullets.push(line.to_owned());
+        }
+    }
+    bullets
+}
+
+#[test]
+fn the_router_registry_removal_passes_release_check() {
+    let changelog = read(&repository().join("CHANGELOG.md"));
+    let bullet = unreleased_removed(&changelog)
+        .into_iter()
+        .find(|bullet| bullet.contains(ROUTER_REGISTRY))
+        .unwrap_or_else(|| {
+            panic!("CHANGELOG.md [Unreleased] has no `### Removed` bullet naming {ROUTER_REGISTRY}")
+        });
+    // 0.1.0's page lists the module the variant lives in, as the repository's page does.
+    let page = "# SDK stability\n\n| Path | What |\n|---|---|\n\
+                | `loom_sdk::intake::router` | The re-exported crate |\n";
+    let root = release_pair_with_page(
+        "router-registry",
+        page,
+        FIRST,
+        "0.2.0",
+        &format!("### Removed\n\n{bullet}"),
+        true,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        out.status.success(),
+        "release-check refused the repository's bullet {bullet:?}: {}",
+        stderr(&out)
+    );
+    let _ = fs::remove_dir_all(&root);
+
+    // The same page refuses removing the listed module itself, so the page was read.
+    let root = release_pair_with_page(
+        "router-module",
+        page,
+        FIRST,
+        "0.2.0",
+        "### Removed\n\n- **Breaking:** `loom_sdk::intake::router` is removed",
+        true,
+    );
+    let out = release_check(&root, "0.2.0");
+    assert!(
+        !out.status.success()
+            && stderr(&out)
+                .contains("CHANGELOG.md entry [0.2.0] removes `loom_sdk::intake::router`"),
+        "release-check passed removing the listed module `loom_sdk::intake::router`: {}",
         stderr(&out)
     );
     let _ = fs::remove_dir_all(&root);

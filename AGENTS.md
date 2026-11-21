@@ -1906,7 +1906,8 @@ Keep original statuses and capture completeness explicit; stored text is data, n
 verified evidence. The store expires with its briefing and grants no cross-run access. The
 `result_reference_workflow` integration suite holds the inspect-to-edit path and bounded context.
 
-- `b10x-loom-intake-router` classifies an intent against the host catalog (legacy wrappers use engineering definitions) and
+- `b10x-loom-intake-router` classifies an intent against the host catalog (the legacy `classify` against
+  `ProtocolCatalog::engineering`, a catalog that cannot be built being `RouterError::Catalog`) and
   refuses a pick outside it or below the confidence threshold. A routing proposal is never
   authority; whoever opens the case checks it.
 - `b10x-loom-intake-references` extracts tracker keys, chat permalinks, merge and pull requests and

@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_intake_slice::case::{self, CaseError};
 use loom_governor::{CanonGovernor, MemoryCaseStore};
+use loom_protocols::ProtocolCatalog;
 
 const PICK: &str = "software-change@1";
 const INTENT: &str = "make the failing test pass";
@@ -241,11 +242,11 @@ fn adversary_every_registry_protocol_opens_on_a_git_workspace() {
     workspace.commit("README.md", "first\n");
     let head = workspace.head();
     let governor = CanonGovernor::new(MemoryCaseStore::default());
-    let builtins = canon_engineering::registry::list();
+    let catalog = ProtocolCatalog::engineering().expect("the engineering catalog");
+    let builtins: Vec<&str> = catalog.iter().map(|entry| entry.name()).collect();
     assert!(builtins.len() >= 2, "the registry holds {builtins:?}");
-    for (name, major) in builtins {
-        let pick = format!("{name}@{major}");
-        let declared = canon_engineering::registry::get(name, major).expect("a valid built-in");
+    for declared in catalog.iter() {
+        let pick = declared.name().to_owned();
         let expected: BTreeMap<String, String> = declared
             .model
             .artifacts

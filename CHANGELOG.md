@@ -30,6 +30,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** a Suspension's `action_request_id`, `expected_case_revision`, `action` and `arguments` are `Option`, so is each `ActionRequestId` of its commands and events; `TakeSuspension` and `ReleaseSuspension` gain `decision_request_id` and the refusal `OtherDecision`, so a Decision hold is taken and released only by naming it; `ResumeRefusal` gains three variants (story:decision-suspension-reason)
 - `CanonGovernor` without a catalog opens engineering protocols from `ProtocolCatalog::engineering`; a lock refusal is `InvalidProtocol` (story:engineering-registry-calls-replaced)
 
+### Removed
+
+- **Breaking:** `loom_sdk::intake::router::RouterError::Registry` is removed; a catalog that cannot be built stays `RouterError::Catalog` (story:engineering-registry-calls-replaced)
+
 ## [0.57.2] - 2026-11-05
 
 No breaking changes.
