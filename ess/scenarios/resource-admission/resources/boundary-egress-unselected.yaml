@@ -1,0 +1,23 @@
+# story boundary-admits-declared-http-egress: a Command resource with an allowed model boundary
+# whose spec.agent names an egress namespace outside every allowed upstream's with an empty pod
+# selector, read by its credential-free metrics binding.
+apiVersion: loom.beyond10x.dev/v1alpha1
+kind: LoomAgent
+metadata: {name: nightly, namespace: agents}
+spec:
+  agent:
+    format: loom.agent/1
+    agent: {id: nightly, name: Nightly, brief: Runs the nightly check.}
+    model: {routes: routes.yaml, roles: [{role: agent, model: small}]}
+    bindings:
+      - {name: metrics, kind: http, base_url: 'http://metrics.monitoring.svc:9090', allow_paths: [/api/v1/query], method: GET, max_bytes: 262144}
+    deploy:
+      kubernetes:
+        namespace: agents
+        service_account: nightly
+        resources: {cpu: 500m, memory: 512Mi}
+        egress: [{name: metrics, namespace: monitoring, selector: [], port: 9090}]
+  routes: {}
+  command: {args: [--once]}
+  boundary:
+    model: {upstream: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}

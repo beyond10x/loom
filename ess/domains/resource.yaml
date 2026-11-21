@@ -410,9 +410,11 @@ types:
   # upstream that is no plain `http://` URL of a cluster service (`BoundaryUpstreamInvalid`), an
   # upstream or audience no `allowedBoundaryUpstreams` entry gives (`BoundaryUpstreamNotAllowed`),
   # an egress entry naming a host beside it (`BoundaryEgressHost`); beside it, in this order, an
-  # egress entry naming the namespace of any `allowedBoundaryUpstreams` upstream or giving no pod
-  # selector (`BoundaryEgressNamespace`), one no `GET` `http` binding without a `bearer_env` reads
-  # from, by a `base_url` that is a cluster service in its namespace (`BoundaryEgressUnbound`),
+  # egress entry naming the namespace of any `allowedBoundaryUpstreams` upstream or of the
+  # configuration's `modelRoute`, then one naming no namespace (no DNS-1123 label), then one
+  # giving no pod selector (`BoundaryEgressNamespace`), one no `GET` `http` binding without a
+  # `bearer_env` reads from, by a `base_url` that is a cluster service in its namespace
+  # (`BoundaryEgressUnbound`),
   # and one no single `allowedBoundaryHttpEgress` entry equals in namespace, selector (a set of
   # label pairs) and port (`BoundaryEgressNotAllowed`; story boundary-admits-declared-http-egress);
   # a Secret outside `allowedSecretNames` (`SecretNotAllowed`); a
@@ -1148,7 +1150,7 @@ commands:
         payload:
           loom.resource.AdmissionRefused: {reason: BoundaryEgressHost}
       - name: boundary-egress-namespace
-        external: beside spec.boundary, an egress entry of spec.agent names the namespace of an allowedBoundaryUpstreams upstream, or gives no pod selector
+        external: beside spec.boundary, an egress entry of spec.agent names the namespace of an allowedBoundaryUpstreams upstream or of the modelRoute, names no namespace, or gives no pod selector
         error: loom.resource.AdmissionRefused
         payload:
           loom.resource.AdmissionRefused: {reason: BoundaryEgressNamespace}

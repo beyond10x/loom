@@ -1,0 +1,19 @@
+# story boundary-admits-declared-http-egress: beside a boundary an egress entry with an empty pod
+# selector would open every pod of its namespace; it is refused at its selector, though a binding
+# reads there.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-egress-namespace-without-a-selector-is-refused
+summary: A model boundary beside an egress namespace with an empty selector is refused BoundaryEgressNamespace at the selector.
+
+timeline:
+  - at: 2026-11-21T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-egress-unselected.yaml}
+    outcome: boundary-egress-namespace
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryEgressNamespace
+        member: spec.agent.deploy.kubernetes.egress[0].selector
+        detail: "it is empty, so its rule would open every pod of the namespace; beside spec.boundary an entry names the pods it reaches"
