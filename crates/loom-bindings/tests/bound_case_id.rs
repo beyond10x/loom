@@ -546,9 +546,16 @@ fn a_loom_case_in_the_hosts_environment_does_not_reach_the_program() {
         println!("{CHILD_CHECKED}");
         return;
     }
+    // The test's name as the harness lists it: its module path below the crate root, so the
+    // filter still selects it once this file is a module of the crate's one test binary.
+    let function = "a_loom_case_in_the_hosts_environment_does_not_reach_the_program";
+    let name = match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{function}"),
+        None => function.to_owned(),
+    };
     let output = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
-            "a_loom_case_in_the_hosts_environment_does_not_reach_the_program",
+            name.as_str(),
             "--exact",
             "--nocapture",
             "--test-threads",
@@ -563,6 +570,7 @@ fn a_loom_case_in_the_hosts_environment_does_not_reach_the_program() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "{stdout}\n{stderr}");
     assert!(stdout.contains(CHILD_CHECKED), "{stdout}\n{stderr}");
+    assert!(stdout.contains("1 passed"), "{stdout}\n{stderr}");
 }
 
 #[test]
