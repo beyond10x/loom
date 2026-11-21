@@ -1325,11 +1325,8 @@ entities:
         target: commission.responsibility.ActionRequest
         cardinality: one
         via: action_request_id
-      - name: case
-        kind: references
-        target: commission.responsibility.Case
-        cardinality: one
-        via: case_id
+    # story:ess-096-upgrade: `case_id` names the commission's case and declares no relation: no
+    # command creates a `Case`, so synthesis cannot arrange the row a relation would name.
     lifecycle:
       initial: Pending
       states: [Pending, Resuming]
@@ -1522,6 +1519,13 @@ errors:
       - name: suspension
         type: commission.responsibility.SuspensionKey
 
+  # story:ess-096-upgrade: the hold gives some but not all of `action_request_id`,
+  # `expected_case_revision`, `action` and `arguments`; nothing was stored.
+  - name: commission.responsibility.SuspensionRequestIncomplete
+    fields:
+      - name: suspension
+        type: commission.responsibility.SuspensionKey
+
   # story:approval-suspend-resume-slice: the commission holds no Suspension.
   - name: commission.responsibility.SuspensionNotFound
     fields:
@@ -1693,6 +1697,10 @@ commands:
   #
   # story:decision-suspension-reason: a hold for a decision request (reason Decision) gives no
   # action request, expected case revision, action or arguments; every other hold gives all four.
+  #
+  # story:ess-096-upgrade: a hold giving some but not all four is refused (`incomplete-request`,
+  # naming the Suspension), whatever its reason and whether or not the commission already holds
+  # one, and nothing is stored. Which reason gives none is held by the suspension port.
   - name: commission.responsibility.HoldSuspension
     input:
       - name: suspension
@@ -1723,6 +1731,16 @@ commands:
           commission.responsibility.SuspensionSettled:
             suspension: input.suspension
             action_request_id: input.action_request_id
+      - name: incomplete-request
+        when:
+          not:
+            any:
+              - all: [defined(action_request_id), defined(expected_case_revision), defined(action), defined(arguments)]
+              - all: ["not defined(action_request_id)", "not defined(expected_case_revision)", "not defined(action)", "not defined(arguments)"]
+        error: commission.responsibility.SuspensionRequestIncomplete
+        payload:
+          commission.responsibility.SuspensionRequestIncomplete:
+            suspension: input.suspension
       - name: held
         creates: commission.responsibility.Suspension
         instance: suspension
