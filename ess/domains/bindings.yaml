@@ -7,8 +7,9 @@
 # protocol give, and (story bound-program-result-table) the run of a `program` binding, the
 # evidence its result table records and the refusals of that step, and (story
 # bound-artifact-revisions) the revision Loom computes for each placed artifact, the revision moves
-# a step writes and a step's discard. An adapter, an aperture and a remote endpoint are engine
-# configuration and never binding data.
+# a step writes and a step's discard, and (story bound-program-case-id) the environment of every
+# program that port starts, `PATH` and `LOOM_CASE` and nothing else. An adapter, an aperture and a
+# remote endpoint are engine configuration and never binding data.
 domain: loom.bindings
 
 summary: >-
@@ -272,6 +273,23 @@ types:
         type: Boolean
       - name: runner_refusal
         type: Optional<String>
+
+  # The environment of a program the program effect port starts (story bound-program-case-id),
+  # the bound program and its `arguments_from` program alike: `path`, the variable `PATH` at the
+  # host process's value (absent when the host has none), and `loom_case`, the variable
+  # `LOOM_CASE`, the id of the case the port was built for as the governor holds it (a child as
+  # `<parent id>.<name>`), at most 4096 bytes, else the step is refused and nothing starts. No
+  # other variable reaches such a program, and no host variable is inherited: no request's
+  # arguments, `arguments_from` output, program report, bindings document or host variable sets
+  # or changes either value. The intake slice's `run --action-bindings` commands are not started
+  # by this port and keep `PATH` alone.
+  - name: loom.bindings.ProgramEnvironment
+    kind: struct
+    fields:
+      - name: path
+        type: Optional<String>
+      - name: loom_case
+        type: String
 
   # An artifact and the revision the case holds for it when the program started.
   - name: loom.bindings.ArtifactRevision

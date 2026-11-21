@@ -7,10 +7,11 @@
 //! [`b10x_loom_intake_slice::bindings::admit_bound_program_runner`] and checked with
 //! [`TestRunner::preflight_child`] on the workspace root before anything starts; a refusal of
 //! either is the constructor's. Every program, the `arguments_from` argv included, starts through
-//! that runner's [`TestRunner::run_child`] alone, as the child
-//! [`b10x_loom_intake_slice::bindings::bound_program_child`] builds: the argv, the arguments as
-//! JSON on standard input and never in an argv, `PATH` alone, the binding's timeout, the workspace
-//! root as its start directory.
+//! that runner's [`TestRunner::run_child`] alone, as the child [`crate::bound_case_child`] builds:
+//! the argv, the arguments as JSON on standard input and never in an argv, an environment of
+//! `PATH` and `LOOM_CASE` (the id of the case the port was built for) alone, the binding's
+//! timeout, the workspace root as its start directory. A case id longer than
+//! [`crate::MAX_CASE_VARIABLE_BYTES`] refuses the step and nothing starts.
 //!
 //! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
 //! and nothing starts; the action's run count (the observations this port kept for the action in
@@ -69,7 +70,7 @@ use b10x_loom_commission::ports::evidence::{
 };
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_slice::bindings::{
-    DEFAULT_TIMEOUT_SECONDS, MAX_REPORT_BYTES, admit_bound_program_runner, bound_program_child,
+    DEFAULT_TIMEOUT_SECONDS, MAX_REPORT_BYTES, admit_bound_program_runner,
 };
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{ConfinementError, TestExecution, TestRunner};
@@ -84,6 +85,8 @@ use loom_governor::{
 
 use crate::revision::{describe, placements, revisions_of};
 use sha2::{Digest as _, Sha256};
+
+use crate::bound_case_child;
 
 /// The `source` of every observation the port keeps: one per run of a bound program. The run count
 /// of an action in a case is the number of these naming it and the case.
@@ -234,12 +237,13 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             Ok(arguments) => arguments,
             Err(outcome) => return Ok(outcome),
         };
-        let child = match bound_program_child(
+        let child = match bound_case_child(
             argv,
             &arguments,
             timeout,
             &self.workspace,
             self.runner.local_reason(),
+            &self.case,
         ) {
             Ok(child) => child,
             Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
@@ -478,12 +482,13 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 detail,
             ))
         };
-        let child = match bound_program_child(
+        let child = match bound_case_child(
             argv,
             &commission_text(requested),
             timeout,
             &self.workspace,
             self.runner.local_reason(),
+            &self.case,
         ) {
             Ok(child) => child,
             Err(why) => return Err(refused(format!("{program} was not started: {why}"))),

@@ -19,12 +19,14 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod child;
 mod decode;
 mod load;
 mod program;
 mod revision;
 mod tree;
 
+pub use child::{CASE_VARIABLE, MAX_CASE_VARIABLE_BYTES, bound_case_child};
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};

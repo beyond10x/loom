@@ -38,6 +38,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `ProgramRefusalReason` gains `ArtifactUnreadable`, a placed path that is not digested (story:bound-artifact-revisions)
 - **Breaking:** after a `program` step each placed artifact moves to its content digest, and its records name that revision (story:bound-artifact-revisions)
 - A `program` step of an action that does not write whose program changed a placed artifact records nothing, `Discarded` (story:bound-artifact-revisions)
+- `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
 
 ### Removed
 

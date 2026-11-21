@@ -214,11 +214,20 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `CommandUnconfined` for any other. The runner then checks it can start a child in the workspace
   root, and its refusal is passed on: a runner that runs test commands only is refused `NoRunner`.
 - Every program starts through that runner alone, the `arguments_from` argv included, with its
-  `argv` (no shell), the arguments as one JSON object on standard input, `PATH` alone in its
-  environment, the binding's `timeout_seconds` (60 when absent), and the workspace root as its start
-  directory. Under a runner that is not `local`, a program at an absolute path outside `/usr`,
-  `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH` that is not UTF-8
-  refuses the step, `<program> was not started: the host's PATH is not UTF-8`, and starts nothing.
+  `argv` (no shell), the arguments as one JSON object on standard input, `PATH` and `LOOM_CASE`
+  alone in its environment, the binding's `timeout_seconds` (60 when absent), and the workspace
+  root as its start directory. Under a runner that is not `local`, a program at an absolute path
+  outside `/usr`, `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH`
+  that is not UTF-8 refuses the step, `<program> was not started: the host's PATH is not UTF-8`,
+  and starts nothing.
+- `PATH` has the host process's value. `LOOM_CASE` is the id of the case the port was built for,
+  as the governor holds it (a child case as `<parent id>.<name>`), so a program reads the case it
+  runs for from it. The port alone sets it: no member of the request's arguments, of the
+  `arguments_from` output, of a program's report or of the bindings document, and no variable of
+  the host process, changes it; a document cannot name an environment. A case id longer than 4096
+  bytes refuses the step, `<program> was not started: the case id is longer than 4096 bytes`, and
+  nothing starts or is recorded. The commands of `b10x-loom run --action-bindings` keep `PATH`
+  alone.
 - The arguments are the request's, else the binding's `arguments`, else the object the
   `arguments_from` argv prints, else `{}`. A request has no arguments when they are the empty object
   `{}`; any other value, `null` included, reaches the program as written. An `arguments_from` argv

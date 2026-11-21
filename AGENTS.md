@@ -1243,8 +1243,15 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   naming no flag and no file member; `local` only with `UNCONFINED_FLAG_REASON`, else
   `CommandUnconfined`), then `preflight_child` on the workspace root, its refusal passed on. Every
   program, the `arguments_from` argv included, starts through that runner's `run_child`, as
-  `bound_program_child` builds the child (the one definition the intake slice's `CommandRunner`
-  also uses). A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
+  `bound_case_child` (`src/child.rs`, `story:bound-program-case-id`) builds the child: it calls
+  `bound_program_child` (the one definition the intake slice's `CommandRunner` also uses) and
+  replaces the environment with the one `loom.bindings.ProgramEnvironment` describes, `PATH` at
+  the host's value and `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
+  and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
+  anything starts. It is the only caller of `bound_program_child` in `crates/loom-bindings/src`
+  (`every_child_of_the_crate_is_built_by_bound_case_child`), so a port of the crate that starts a
+  program gives the case id; the intake slice's commands keep `PATH` alone. Held by
+  `crates/loom-bindings/tests/bound_case_id.rs`. A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
   naming both, nothing started or recorded), the run count (observations of source
   `PROGRAM_SOURCE`, `loom/bound-program`, naming the case and the action; `RunsSpent` at
   `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
