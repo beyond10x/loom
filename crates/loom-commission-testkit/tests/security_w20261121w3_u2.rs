@@ -25,8 +25,8 @@ use b10x_loom_commission::model::responsibility::{
     EffectOutcomePerformed, ExecutorOutcome, ExecutorOutcomeSuspended, HoldSuspension,
     HoldSuspensionOutcome, ObservationId, PrincipalId, ProposedActionArguments, ReleaseSuspension,
     ReleaseSuspensionOutcome, Run, RunData, RunId, SuspensionData, SuspensionKey, SuspensionReason,
-    SuspensionSnapshot, SuspensionState, TakeSuspension, TakeSuspensionOutcome, Unit,
-    commission_state,
+    SuspensionRequestIncomplete, SuspensionSnapshot, SuspensionState, TakeSuspension,
+    TakeSuspensionOutcome, Unit, commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -703,7 +703,9 @@ fn security_a_suspension_file_whose_reason_and_members_disagree_is_refused_and_k
     }
 }
 
-/// A hold whose reason and members disagree is refused by the file store and nothing is written.
+/// A hold whose reason and members disagree is refused by the file store and nothing is written:
+/// one giving some but not all four members `IncompleteRequest`, naming its Suspension
+/// (`story:ess-096-upgrade`), the other two `StorageFailed`.
 #[test]
 fn security_the_file_store_writes_no_hold_whose_reason_and_members_disagree() {
     let commission = commission_of(&CaseId("case-sec-file".to_owned()));
@@ -718,22 +720,38 @@ fn security_the_file_store_writes_no_hold_whose_reason_and_members_disagree() {
         decision_data(&commission, SuspensionReason::Authority(Value::Null));
     smuggled(&mut authority_without_arguments, true);
     authority_without_arguments.arguments = None;
-    for (name, data) in [
-        ("hold-decision-with-request", decision_with_request),
-        ("hold-decision-with-action", decision_with_action),
-        ("hold-authority-without-members", authority_without_members),
+    for (name, data, mixed) in [
+        ("hold-decision-with-request", decision_with_request, false),
+        ("hold-decision-with-action", decision_with_action, true),
+        (
+            "hold-authority-without-members",
+            authority_without_members,
+            false,
+        ),
         (
             "hold-authority-without-arguments",
             authority_without_arguments,
+            true,
         ),
     ] {
         let dir = store_dir(name);
         let store = FileSuspensionStore::open(&dir).expect("the store opens");
+        let key = data.suspension.clone();
         let held = store.hold(hold_input(&data));
-        assert!(
-            matches!(held, HoldSuspensionOutcome::StorageFailed { .. }),
-            "{name}: hold answered {held:?}"
-        );
+        if mixed {
+            assert_eq!(
+                held,
+                HoldSuspensionOutcome::IncompleteRequest {
+                    error: SuspensionRequestIncomplete { suspension: key },
+                },
+                "{name}: hold answered {held:?}"
+            );
+        } else {
+            assert!(
+                matches!(held, HoldSuspensionOutcome::StorageFailed { .. }),
+                "{name}: hold answered {held:?}"
+            );
+        }
         assert!(!file_of(&dir).exists(), "{name}: a file was written");
     }
 }

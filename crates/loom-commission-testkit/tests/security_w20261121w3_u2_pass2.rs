@@ -21,8 +21,9 @@ use b10x_loom_commission::model::responsibility::{
     CommissionId, DecidedHold, DecidedRecord, DecisionHold, DecisionUnblocks, EffectOutcome,
     EffectOutcomePerformed, ExecutorOutcome, HoldSuspension, HoldSuspensionOutcome, ObservationId,
     PrincipalId, ProposedActionArguments, ReleaseSuspension, ReleaseSuspensionOutcome, RunId,
-    SuspensionData, SuspensionKey, SuspensionReason, SuspensionSnapshot, SuspensionState,
-    TakeSuspension, TakeSuspensionOutcome, Unit, commission_state,
+    SuspensionData, SuspensionKey, SuspensionReason, SuspensionRequestIncomplete,
+    SuspensionSnapshot, SuspensionState, TakeSuspension, TakeSuspensionOutcome, Unit,
+    commission_state,
 };
 use b10x_loom_commission::outcome::RunStore;
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
@@ -464,8 +465,9 @@ fn security_pass2_an_approval_hold_is_taken_as_before_and_never_by_a_decision() 
 }
 
 /// The in-memory store (the one the conformance target holds through) refuses every hold whose
-/// reason and four request members disagree, and stores nothing; the two agreeing holds are
-/// held.
+/// reason and four request members disagree, and stores nothing: one giving some but not all four
+/// `IncompleteRequest`, naming its Suspension (`story:ess-096-upgrade`), a `Decision` hold with all
+/// four and another hold with none `StorageFailed`; the two agreeing holds are held.
 #[test]
 fn security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_disagree() {
     let full = approval();
@@ -487,17 +489,24 @@ fn security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_
             }
             let decision_hold = matches!(reason, SuspensionReason::Decision(_));
             let agrees = (decision_hold && mask == 0) || (!decision_hold && mask == 15);
+            let mixed = mask != 0 && mask != 15;
             let store = SuspensionStore::new();
             let outcome = store.hold(hold_of(&held));
             let stored = SuspensionPort::get(&store, &CommissionId(uuid(0x81))).unwrap();
+            let refused = if mixed {
+                outcome
+                    == HoldSuspensionOutcome::IncompleteRequest {
+                        error: SuspensionRequestIncomplete { suspension: key() },
+                    }
+            } else {
+                matches!(outcome, HoldSuspensionOutcome::StorageFailed { .. })
+            };
             if agrees {
                 assert!(
                     matches!(outcome, HoldSuspensionOutcome::Held { .. }),
                     "{mask:04b} {reason:?}: {outcome:?}"
                 );
-            } else if !matches!(outcome, HoldSuspensionOutcome::StorageFailed { .. })
-                || stored.is_some()
-            {
+            } else if !refused || stored.is_some() {
                 forbidden.push(format!(
                     "{mask:04b} {reason:?}: {outcome:?}, stored {stored:?}"
                 ));
@@ -509,7 +518,10 @@ fn security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_
     null_arguments.arguments = Some(ProposedActionArguments(Value::Null));
     let store = SuspensionStore::new();
     let outcome = store.hold(hold_of(&null_arguments));
-    if !matches!(outcome, HoldSuspensionOutcome::StorageFailed { .. })
+    if outcome
+        != (HoldSuspensionOutcome::IncompleteRequest {
+            error: SuspensionRequestIncomplete { suspension: key() },
+        })
         || !SuspensionStorage::list(&store).is_empty()
     {
         forbidden.push(format!("null arguments on a Decision hold: {outcome:?}"));

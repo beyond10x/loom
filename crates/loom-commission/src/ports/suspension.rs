@@ -12,7 +12,10 @@
 //! and enacted as one atomic step over what the store holds:
 //!
 //! * `HoldSuspension` stores it `Pending`; a commission already holding one is refused
-//!   (`already-held`) and keeps it. A host that already settled the request the Suspension would
+//!   (`already-held`) and keeps it. A hold giving some but not all of its four request members is
+//!   refused first (`incomplete-request`,
+//!   [`SuspensionRequestIncomplete`](crate::model::responsibility::SuspensionRequestIncomplete)),
+//!   whether or not the commission holds one, and stores nothing. A host that already settled the request the Suspension would
 //!   hold answers `settled`, with its reason
 //!   ([`SuspensionSettled`](crate::model::responsibility::SuspensionSettled)), and stores
 //!   nothing; the runtime then ends the run with nothing held. [`decide_hold`] never answers it:
@@ -29,8 +32,10 @@
 //! names another, or none, and one that names a decision request on a Suspension held for an action
 //! request (`other-decision`, [`SuspensionDecisionMismatch`] naming both), and keep it, so a resume
 //! that read the hold for one decision never takes or releases a later hold for another.
-//! [`decide_hold`] refuses a hold whose reason and those four members disagree (`Decision` with any
-//! of them, any other reason without all of them) as `storage-failed`, and stores nothing.
+//! [`decide_hold`] refuses a hold whose reason and those four members disagree, and stores
+//! nothing: one giving some but not all of them as `incomplete-request`, whatever its reason
+//! (`story:ess-096-upgrade`), and a `Decision` hold with all four or another hold with none as
+//! `storage-failed`, since the specification cannot read the reason's variant.
 //!
 //! A take and a release name the action request the resume read and revalidated. A Suspension
 //! held for another request is refused (`other-request`, [`SuspensionRequestMismatch`] naming
@@ -63,16 +68,17 @@ use crate::model::responsibility::{
     ActionRequestId, AnySuspension, CommissionId, HoldSuspension, HoldSuspensionOutcome,
     ReleaseSuspension, ReleaseSuspensionOutcome, Suspension, SuspensionAlreadyHeld, SuspensionData,
     SuspensionDecisionMismatch, SuspensionHeld, SuspensionKey, SuspensionNotFound,
-    SuspensionReason, SuspensionReleased, SuspensionRequestMismatch, SuspensionSnapshot,
-    SuspensionStateConflict, SuspensionStorageFailed, SuspensionTaken, TakeSuspension,
-    TakeSuspensionOutcome,
+    SuspensionReason, SuspensionReleased, SuspensionRequestIncomplete, SuspensionRequestMismatch,
+    SuspensionSnapshot, SuspensionStateConflict, SuspensionStorageFailed, SuspensionTaken,
+    TakeSuspension, TakeSuspensionOutcome,
 };
 
 /// Keeps the Suspension of each commission, answering the commands the specification declares on
 /// it, each atomically.
 pub trait SuspensionPort {
-    /// `HoldSuspension`: stores the Suspension `Pending`, or refuses when its commission already
-    /// holds one, keeping that one. A host that already settled the request answers `settled` and
+    /// `HoldSuspension`: stores the Suspension `Pending`, or refuses when the input gives some but
+    /// not all of its four request members, or when its commission already holds one, keeping that
+    /// one. A host that already settled the request answers `settled` and
     /// stores nothing.
     fn hold(&self, input: HoldSuspension) -> HoldSuspensionOutcome;
 
@@ -137,13 +143,33 @@ pub enum SuspensionWrite {
     Delete(SuspensionKey),
 }
 
-/// `HoldSuspension` over `held`, the Suspension stored under the input's identity: `already-held`
-/// when there is one, `storage-failed` when the input's reason and its four request members
-/// disagree, otherwise `held`, with the `Pending` Suspension to store.
+/// `HoldSuspension` over `held`, the Suspension stored under the input's identity:
+/// `incomplete-request` when the input gives some but not all of its four request members, whether
+/// or not one is held; `already-held` when there is one; `storage-failed` when the input's reason
+/// and its four members disagree (a `Decision` hold with all four, another hold with none);
+/// otherwise `held`, with the `Pending` Suspension to store.
 pub fn decide_hold(
     held: Option<&SuspensionSnapshot>,
     input: HoldSuspension,
 ) -> (HoldSuspensionOutcome, Option<SuspensionWrite>) {
+    let members = [
+        input.action_request_id.is_some(),
+        input.expected_case_revision.is_some(),
+        input.action.is_some(),
+        input.arguments.is_some(),
+    ];
+    // The specification decides this before `held` and `already-held` (`story:ess-096-upgrade`):
+    // the four are present together or absent together on every Suspension.
+    if members.contains(&true) && members.contains(&false) {
+        return (
+            HoldSuspensionOutcome::IncompleteRequest {
+                error: SuspensionRequestIncomplete {
+                    suspension: input.suspension,
+                },
+            },
+            None,
+        );
+    }
     if held.is_some() {
         return (
             HoldSuspensionOutcome::AlreadyHeld {
@@ -158,12 +184,6 @@ pub fn decide_hold(
     // (`story:decision-suspension-reason`): ess/22 cannot tie the members to the reason, so the
     // port refuses the combination it forbids before any store keeps it.
     let decision = matches!(input.reason, SuspensionReason::Decision(_));
-    let members = [
-        input.action_request_id.is_some(),
-        input.expected_case_revision.is_some(),
-        input.action.is_some(),
-        input.arguments.is_some(),
-    ];
     if members.contains(&decision) {
         return (
             HoldSuspensionOutcome::StorageFailed {
@@ -351,7 +371,8 @@ pub fn decide_release(
 
 /// The suspension port over memory: one Suspension per commission id, every command answered by
 /// the decisions above under one lock. It answers `storage-failed` only for a hold
-/// [`decide_hold`] refuses.
+/// [`decide_hold`] refuses so, a `Decision` hold with all four request members or another hold
+/// with none.
 #[derive(Debug, Default)]
 pub struct SuspensionStore {
     held: Mutex<BTreeMap<Uuid, SuspensionSnapshot>>,
