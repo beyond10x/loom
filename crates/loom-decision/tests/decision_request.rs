@@ -300,7 +300,12 @@ fn a_second_write_from_the_same_read_is_refused_and_the_first_is_kept() {
             request_id,
             read: held_read,
             found,
+            record_key_held_by,
         }) => {
+            assert_eq!(
+                record_key_held_by, None,
+                "a stale read names no record-key holder"
+            );
             assert_eq!(request_id, id(DR1));
             assert_eq!(held_read.as_deref(), Some(&read));
             assert_eq!(found.as_deref(), Some(&first));
@@ -315,6 +320,53 @@ fn a_second_write_from_the_same_read_is_refused_and_the_first_is_kept() {
         matches!(&refused, WriteError::Conflict(conflict) if conflict.read.is_none() && conflict.found.is_some()),
         "{refused:?}"
     );
+}
+
+/// The port's own rule, with no command: a write that would leave two Open or Escalated requests
+/// with one `record_key` is a conflict, and nothing is written.
+#[test]
+fn the_store_refuses_a_second_open_request_for_a_record_key() {
+    let mut scratch = InMemoryDecisionStore::new();
+    opened(&mut scratch, person_approval(DR1));
+    let first = stored(&scratch, DR1);
+    assert_eq!(first.state, DecisionRequestState::Open);
+    let mut second = first.clone();
+    second.data.request_id = id(DR2);
+
+    let mut store = InMemoryDecisionStore::new();
+    store.write(None, first.clone()).expect("the first is kept");
+    let refused = store.write(None, second.clone());
+    assert!(
+        matches!(&refused, Err(WriteError::Conflict(conflict)) if conflict.request_id == id(DR2)),
+        "a second open request for {KEY} was written: {refused:?}"
+    );
+    assert_eq!(
+        store.list().expect("reads"),
+        vec![first.clone()],
+        "nothing is written"
+    );
+
+    let mut escalated = second.clone();
+    escalated.state = DecisionRequestState::Escalated;
+    assert!(
+        matches!(store.write(None, escalated), Err(WriteError::Conflict(_))),
+        "an Escalated request for the key counts as open too"
+    );
+
+    // Another key, or the first request no longer open, leaves the write free.
+    let mut other_key = second.clone();
+    other_key.data.record_key = "change.merge@r10".to_owned();
+    store.write(None, other_key).expect("another key is kept");
+    let mut expired = first.clone();
+    expired.state = DecisionRequestState::Expired;
+    store
+        .write(Some(&first), expired)
+        .expect("the first expires");
+    let mut third = first.clone();
+    third.data.request_id = id("DR-IDEA-1.billing-change.merge-3");
+    store
+        .write(None, third)
+        .expect("a new open request for the key once the first is closed");
 }
 
 #[test]
@@ -819,6 +871,144 @@ fn a_principal_the_stored_request_does_not_list_cannot_decide() {
     );
     assert_eq!(store, before, "a refused Decide writes nothing");
     assert_eq!(stored(&store, DR1).state, DecisionRequestState::Open);
+}
+
+fn take_by(request_id: &str, who: &str, kind: PrincipalKind) -> TakeRecommendation {
+    TakeRecommendation {
+        request_id: id(request_id),
+        principal: principal(who),
+        principal_kind: kind,
+        decided_at: at("2026-11-21T11:30:00Z"),
+        case_revision: Revision("r9".to_owned()),
+        reasons: vec!["Because.".to_owned()],
+    }
+}
+
+/// A store with `DR1` Open under `holder`, listing a person, `decider:model`, `rule:merge` and
+/// silence, with a strong recommendation of A that is the default on silence.
+fn kind_store(holder: Holder) -> InMemoryDecisionStore {
+    let mut store = InMemoryDecisionStore::new();
+    let mut input = approval(
+        DR1,
+        holder,
+        &["operator", "decider:model", "rule:merge", "silence"],
+        "operator",
+    );
+    input.expires_at = Some(at("2026-11-21T11:00:00Z"));
+    opened(&mut store, input);
+    let answer = recommend(
+        &mut store,
+        recommend_input(
+            DR1,
+            Strength::Strong,
+            true,
+            vec![ground()],
+            CheckVerdict::Verified,
+        ),
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, RecommendOutcome::Recommended { .. }),
+        "{answer:?}"
+    );
+    store
+}
+
+/// The kind a command claims must be the kind its principal's name has (decision.yaml
+/// `kind-not-principal`, security review F1): each disagreement is refused on both commands,
+/// whatever the holder, and nothing is written.
+#[test]
+fn a_principal_kind_its_name_does_not_have_is_refused_on_both_commands() {
+    let disagreements = [
+        ("operator", PrincipalKind::Decider),
+        ("operator", PrincipalKind::Rule),
+        ("silence", PrincipalKind::Person),
+        ("decider:model", PrincipalKind::Person),
+        ("rule:merge", PrincipalKind::Decider),
+        ("operator", PrincipalKind::Silence),
+        ("decider:model", PrincipalKind::Rule),
+    ];
+    for holder in [Holder::Person, Holder::Decider, Holder::RuleAndDecider] {
+        for (who, kind) in disagreements {
+            let mut store = kind_store(holder);
+            let before = store.clone();
+            let answer = decide(&mut store, decide_input(DR1, "A", who, kind)).expect("applied");
+            assert!(
+                matches!(answer, DecideOutcome::KindNotPrincipal { .. }),
+                "Decide by {who} as {kind:?} under {holder:?}: {answer:?}"
+            );
+            let answer = take_recommendation(&mut store, take_by(DR1, who, kind)).expect("applied");
+            assert!(
+                matches!(answer, TakeRecommendationOutcome::KindNotPrincipal { .. }),
+                "TakeRecommendation by {who} as {kind:?} under {holder:?}: {answer:?}"
+            );
+            assert_eq!(store, before, "nothing is written");
+        }
+    }
+    // The guard reads the command alone: it refuses before the request is looked up.
+    let mut empty = InMemoryDecisionStore::new();
+    let answer = take_recommendation(&mut empty, take_by(DR1, "operator", PrincipalKind::Decider))
+        .expect("applied");
+    assert!(
+        matches!(answer, TakeRecommendationOutcome::KindNotPrincipal { .. }),
+        "{answer:?}"
+    );
+}
+
+/// A truthful `decider:model` with kind `decider` is decided or refused as before the guard.
+#[test]
+fn a_truthful_decider_model_is_decided_or_refused_as_before() {
+    let mut store = kind_store(Holder::Decider);
+    let answer = decide(
+        &mut store,
+        decide_input(DR1, "A", "decider:model", PrincipalKind::Decider),
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, DecideOutcome::Decided { .. }),
+        "{answer:?}"
+    );
+    assert_eq!(
+        stored(&store, DR1).data.decided_by_kind,
+        Some(PrincipalKind::Decider)
+    );
+
+    let mut store = kind_store(Holder::RuleAndDecider);
+    let answer = decide(
+        &mut store,
+        decide_input(DR1, "A", "decider:model", PrincipalKind::Decider),
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, DecideOutcome::DeciderUnderRule { .. }),
+        "{answer:?}"
+    );
+    let answer = take_recommendation(
+        &mut store,
+        take_by(DR1, "decider:model", PrincipalKind::Decider),
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, TakeRecommendationOutcome::Taken { .. }),
+        "{answer:?}"
+    );
+
+    let mut store = kind_store(Holder::Person);
+    let answer = decide(
+        &mut store,
+        decide_input(DR1, "A", "decider:model", PrincipalKind::Decider),
+    )
+    .expect("applied");
+    assert!(
+        matches!(answer, DecideOutcome::PersonOnly { .. }),
+        "{answer:?}"
+    );
+    let answer = take_recommendation(&mut store, take_by(DR1, "silence", PrincipalKind::Silence))
+        .expect("applied");
+    assert!(
+        matches!(answer, TakeRecommendationOutcome::Taken { .. }),
+        "{answer:?}"
+    );
 }
 
 #[test]

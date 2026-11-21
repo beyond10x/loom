@@ -207,16 +207,19 @@ conditions fails `task check`:
    summary line is covered by an authored `covers:` scenario (`ess-scenario/7`), so 0 refusals
    remain uncovered; an uncovered refusal fails the gate. `task conform` adds that a covering
    scenario counts only when the conformance run executes it
-   (`crates/loom-conformance/tests/conform.rs`): one reported skipped or unsupported fails it;
+   (`crates/loom-conformance/tests/conform.rs`): one reported skipped or unsupported fails it,
+   and the suite's map of refusal occurrences to covers must equal the pinned `COVER_TABLE` in
+   that file in both directions, so a new cover is a change of that file, which a reviewer reads;
 4. no file under `ess/` contains `UNMAPPED:`, so the specification carries no open question.
 
 A refusal is removed by a change of the specification that keeps its behaviour, where one exists.
 It is covered by an authored scenario only where none exists, and that scenario's `summary` (the
 suite's `purpose`) says why: the refusal code and the cause, with the reasoning in the comment
-above it. The three `ess/scenarios/decision/` covers are the example: ess 0.96.0 reaches no
+above it. The four `ess/scenarios/decision/` covers are the example: ess 0.96.0 reaches no
 Expired or Escalated decision request once `DecisionClassId` is a text newtype and `Request` has
-`record-key-open` (ESS-SYNTH-004), and withdraws its `RecordProduced/recorded` witness for a second
-row under a held `DecisionRequestId` (ESS-SYNTH-001).
+`record-key-open` (ESS-SYNTH-004), and, once `kind-not-principal` reads the principal's name,
+arranges no Decided request for `RecordProduced` and no prefixed principal for Decide's kind
+guards (ESS-SYNTH-003).
 
 No story is implemented while the gate is red, whether or not it edits `ess/`. The `UNMAPPED:`
 scan stands in for ESS until ESS refuses open entries itself: the `UNMAPPED:` scan is removed when
@@ -1274,23 +1277,33 @@ executor, Canon, model provider or Mandate (`decision_request.rs` reads the mani
   `src/apply.rs` writes them against the generated types in ESS's `ess/37` precedence: the
   command alone, then whether the request exists, then what it holds, then `wrong-state`, then
   acceptance. Guards read three-valued; an unknown guard, an instant that is no RFC 3339, or an
-  outcome that would break an invariant is `DecisionError::Undecided`. Who may decide is read
-  from the stored request, never from the command.
+  outcome that would break an invariant is `DecisionError::Undecided`. The holder and the
+  eligible principals are read from the stored request; `principal` and `principal_kind` are
+  the command's. `principal` is held against the stored `eligible` list; `principal_kind`
+  must be the kind of the principal's name (`decider:<kind>`, `rule:<name>`, `silence`, any
+  other name a person), else `Decide` and `TakeRecommendation` refuse `kind-not-principal`
+  before every other kind guard, and only then decides which kind guards apply. No guard reads
+  `addressed_to`.
 - Every command reads the request from the `DecisionStore` port and writes it back from that
   read only on an outcome that creates or moves it; a refusal and `already-recorded` write
   nothing. A write whose read is stale is `StoreConflict` (request id, state read, state found);
   a store that cannot read or write is `StoreFailure`. Neither is an ESS error. `Request`
   refuses `RecordKeyOpen` for the Open or Escalated request the store finds for its record key,
-  or the one the command names when the store finds none. A `Request` for an id the store
+  or the one the command names when the store finds none. Every `DecisionStore` refuses, in
+  the step that writes, a write that would leave two Open or Escalated requests with one
+  `record_key` (`StoreConflict::record_key_held_by`); `Request` answers that `RecordKeyOpen`
+  naming the holder, and nothing is written. A `Request` for an id the store
   already holds writes from no read and is `StoreConflict`: the domain declares no outcome for it.
 - `InMemoryDecisionStore` is the only store; durable storage is
   `story:decision-request-file-store`. The `EscalationSuppressedRecord`s kept beside a request
   are read back in append order; appending beside an unknown request is `NoSuchRequest`.
 - The views are the generated queries over what the store lists. `task conform` runs the
   domain's synthesized scenarios and `ess/scenarios/decision/` against the crate
-  (`crates/loom-conformance/src/decision.rs`). Three of those scenarios cover, with `covers:`,
-  the obligations ESS 0.96.0 synthesis refuses for this domain (no route to Expired, none to
-  Escalated for `supersede`, no witness for `RecordProduced/recorded`).
+  (`crates/loom-conformance/src/decision.rs`). Four of those scenarios cover, with `covers:`,
+  the 17 obligations ESS 0.96.0 synthesis refuses for this domain (no route to Expired, none to
+  Escalated for `supersede`, no Decided witness for `RecordProduced`, no prefixed principal
+  for Decide's kind guards); `COVER_TABLE` in `crates/loom-conformance/tests/conform.rs` pins
+  each occurrence to its cover.
 - `crates/loom-decision/tests/decision_request.rs` holds each refusal with the store unchanged,
   random sequences of all eight commands against the invariants, and the declared order of
   `Strength` and `AutonomyLevel` (both `ordered: true`) against the SDC's variant lists.

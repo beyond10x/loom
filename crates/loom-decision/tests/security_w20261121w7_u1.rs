@@ -431,7 +431,7 @@ fn security_every_guard_refusal_of_every_command_attempts_no_write() {
     refused(
         &mut open,
         "Decide silence-takes-recommendation",
-        |s| decide(s, decide_by(DR1, "A", "operator", PrincipalKind::Silence)),
+        |s| decide(s, decide_by(DR1, "A", "silence", PrincipalKind::Silence)),
         |a| matches!(a, D::SilenceTakesRecommendation { .. }),
     );
     refused(
@@ -474,7 +474,7 @@ fn security_every_guard_refusal_of_every_command_attempts_no_write() {
     refused(
         &mut open,
         "Decide person-only (person)",
-        |s| decide(s, decide_by(DR1, "A", "operator", PrincipalKind::Decider)),
+        |s| decide(s, decide_by(DR1, "A", "decider:x", PrincipalKind::Decider)),
         |a| matches!(a, D::PersonOnly { .. }),
     );
     refused(
@@ -538,11 +538,14 @@ fn security_every_guard_refusal_of_every_command_attempts_no_write() {
         },
         |a| matches!(a, T::NoRequest { .. }),
     );
-    for kind in [PrincipalKind::Decider, PrincipalKind::Rule] {
+    for (who, kind) in [
+        ("decider:x", PrincipalKind::Decider),
+        ("rule:merge", PrincipalKind::Rule),
+    ] {
         refused(
             &mut advised,
             &format!("TakeRecommendation person-only ({kind:?})"),
-            |s| take_recommendation(s, take_by(DR1, "decider:x", kind, "2026-11-21T11:30:00Z")),
+            |s| take_recommendation(s, take_by(DR1, who, kind, "2026-11-21T11:30:00Z")),
             |a| matches!(a, T::PersonOnly { .. }),
         );
     }

@@ -57,13 +57,84 @@ const UNNAMED_SKIP: &str = "loom.run.Unnamed/outcome/not-in-skipped-md";
 /// The scenario expectation 4 adds to a copy of the report as unsupported.
 const UNNAMED_UNSUPPORTED: &str = "loom.run.Unnamed/outcome/unsupported-not-in-skipped-md";
 
-/// The authored scenarios of `ess/scenarios/decision/` that cover the ten `loom.decision`
-/// refusals (AGENTS.md § ESS item 3).
-const COVERS: [&str; 3] = [
-    "loom.decision/authored/expired-request-refuses-every-command",
-    "loom.decision/authored/escalated-request-is-superseded",
-    "loom.decision/authored/produced-record-is-recorded-once",
+const EXPIRED: &str = "loom.decision/authored/expired-request-refuses-every-command";
+const ESCALATED: &str = "loom.decision/authored/escalated-request-is-superseded";
+const PRODUCED: &str = "loom.decision/authored/produced-record-is-recorded-once";
+const KIND_GUARDS: &str = "loom.decision/authored/decide-kind-guards-under-a-rule";
+
+/// The pinned cover table (AGENTS.md § ESS item 3): every refusal occurrence of the suite
+/// synthesized from `ess/`, by the id its coverage inventory prints, with the authored scenario
+/// that covers it. `task conform` fails when the suite's occurrence-to-cover map differs from it in
+/// either direction, so a new cover is a change of this file, which a reviewer reads.
+const COVER_TABLE: [(&str, &str); 17] = [
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Decide",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Escalate",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Expire",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Recommend",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.RecordProduced",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Supersede",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.TakeRecommendation",
+        EXPIRED,
+    ),
+    (
+        "loom.decision.DecisionRequest/transition/supersede/by/loom.decision.Supersede/superseded",
+        ESCALATED,
+    ),
+    ("loom.decision.RecordProduced/outcome/recorded", PRODUCED),
+    (
+        "loom.decision.DecisionRequest/transition/record_produced/by/loom.decision.RecordProduced/recorded",
+        PRODUCED,
+    ),
+    (
+        "loom.decision.RecordProduced/outcome/already-recorded",
+        PRODUCED,
+    ),
+    (
+        "loom.decision.RecordProduced/outcome/produced-conflict",
+        PRODUCED,
+    ),
+    (
+        "loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/recorded",
+        PRODUCED,
+    ),
+    (
+        "loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/already-recorded",
+        PRODUCED,
+    ),
+    (
+        "loom.decision.Decide/outcome/decider-under-rule",
+        KIND_GUARDS,
+    ),
+    ("loom.decision.Decide/outcome/rule-not-holder", KIND_GUARDS),
+    (
+        "loom.decision.Decide/outcome/silence-takes-recommendation",
+        KIND_GUARDS,
+    ),
 ];
+
+/// The authored scenarios the pinned table names, each once.
+fn table_covers() -> BTreeSet<&'static str> {
+    COVER_TABLE.iter().map(|(_, cover)| *cover).collect()
+}
 
 /// The two statuses a report carries, each checked against what its counts and coverage come to.
 const STATUSES: [&str; 2] = ["execution_status", "conformance_status"];
@@ -270,6 +341,81 @@ fn covering_scenarios(suite: &Value) -> BTreeSet<String> {
         .filter_map(|refusal| refusal["covered_by"].as_str())
         .map(str::to_owned)
         .collect()
+}
+
+/// What no `covered_by` reads as in [`cover_table_violations`].
+const UNCOVERED: &str = "(no cover)";
+
+/// Every way the suite's refusal occurrences and their covers differ from [`COVER_TABLE`], each
+/// named: an occurrence (or its cover) the table lacks, and a table row the suite lacks. Two
+/// scenarios for one occurrence differ in both directions. Empty means the map is the table.
+fn cover_table_violations(suite: &Value) -> Vec<String> {
+    let mut counts: std::collections::BTreeMap<(String, String), i64> =
+        std::collections::BTreeMap::new();
+    for refusal in suite["coverage"]["refused"]
+        .as_array()
+        .unwrap_or_else(|| panic!("the suite carries no `coverage.refused` array"))
+    {
+        let occurrence = refusal["scenario"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a refusal names no scenario: {refusal}"))
+            .to_owned();
+        let cover = refusal["covered_by"]
+            .as_str()
+            .unwrap_or(UNCOVERED)
+            .to_owned();
+        *counts.entry((occurrence, cover)).or_default() += 1;
+    }
+    for (occurrence, cover) in COVER_TABLE {
+        *counts
+            .entry((occurrence.to_owned(), cover.to_owned()))
+            .or_default() -= 1;
+    }
+    let mut found = Vec::new();
+    for ((occurrence, cover), count) in counts {
+        if count > 0 {
+            found.push(format!(
+                "covers: the suite's refusal `{occurrence}` covered by `{cover}` is not in the \
+                 pinned table (conform.rs COVER_TABLE)"
+            ));
+        }
+        if count < 0 {
+            found.push(format!(
+                "covers: the pinned table row `{occurrence}` covered by `{cover}` is not in the \
+                 suite"
+            ));
+        }
+    }
+    found
+}
+
+/// A copy of `suite` with one more refusal occurrence, `occurrence`, covered by `cover`: the
+/// form of a scenario that claims a refusal it does not test (security review F4, `sec1/e3`).
+fn with_refusal(suite: &Value, occurrence: &str, cover: &str) -> Value {
+    let mut copy = suite.clone();
+    copy["coverage"]["refused"]
+        .as_array_mut()
+        .unwrap_or_else(|| panic!("the suite carries a `coverage.refused` array"))
+        .push(serde_json::json!({
+            "code": "ESS-SYNTH-003",
+            "scenario": occurrence,
+            "covered_by": cover,
+            "scope": "in_scope",
+        }));
+    copy
+}
+
+/// A copy of `suite` in which the refusal `occurrence` is covered by `cover` instead.
+fn with_cover(suite: &Value, occurrence: &str, cover: &str) -> Value {
+    let mut copy = suite.clone();
+    let refusal = copy["coverage"]["refused"]
+        .as_array_mut()
+        .unwrap_or_else(|| panic!("the suite carries a `coverage.refused` array"))
+        .iter_mut()
+        .find(|refusal| refusal["scenario"] == occurrence)
+        .unwrap_or_else(|| panic!("the suite refuses `{occurrence}`"));
+    refusal["covered_by"] = Value::from(cover);
+    copy
 }
 
 /// Every covering scenario the report does not record as executed (passed or failed), each named
@@ -561,11 +707,33 @@ fn ess_conformance_report() {
          naming conformance_status; it added {added:?}"
     );
 
-    // Covers: every authored scenario that covers a refusal is executed. The three covers of
-    // `ess/scenarios/decision/` are among them, and a copy of the report in which one of them is
-    // skipped, unsupported or not reported fails the check naming it.
+    // The pinned cover table: the suite's occurrence-to-cover map is COVER_TABLE. A copy of the
+    // suite in which a fourth scenario claims a refusal, a new one or one the table gives
+    // another, fails the check naming it, and a copy that drops a row names the row.
+    const FOURTH: &str = "loom.decision/authored/vacuous-cover";
+    const PROBE: &str = "loom.run.Probe/outcome/never";
+    let claimed = cover_table_violations(&with_refusal(&suite, PROBE, FOURTH));
+    assert!(
+        claimed.len() == 1 && claimed[0].contains(PROBE) && claimed[0].contains(FOURTH),
+        "covers: a copy of the suite in which `{FOURTH}` covers `{PROBE}` must fail the table \
+         check naming it; it found {claimed:?}"
+    );
+    let (taken, _) = COVER_TABLE[0];
+    let moved = cover_table_violations(&with_cover(&suite, taken, FOURTH));
+    assert!(
+        moved.len() == 2
+            && moved.iter().any(|found| found.contains(FOURTH))
+            && moved.iter().all(|found| found.contains(taken)),
+        "covers: a copy of the suite in which `{FOURTH}` covers `{taken}` must fail the table \
+         check naming both; it found {moved:?}"
+    );
+    found.extend(cover_table_violations(&suite));
+
+    // Covers: every authored scenario that covers a refusal is executed. The covers the pinned
+    // table names are among them, and a copy of the report in which one of them is skipped,
+    // unsupported or not reported fails the check naming it.
     let covers = covering_scenarios(&suite);
-    for cover in COVERS {
+    for cover in table_covers() {
         assert!(
             covers.contains(cover),
             "the suite marks no refusal covered by `{cover}`: {covers:?}"

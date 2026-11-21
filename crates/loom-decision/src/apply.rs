@@ -18,10 +18,10 @@ use loom::decision::{
     DecisionRequested, DecisionStateConflict, DecisionSuperseded, DecisionTaken, Escalate,
     EscalateOutcome, EscalationSuppressed, Expire, ExpireOutcome, Grant, Holder,
     NoDefaultOnSilence, NoRecordToProduce, NoSuchRequest, NotARequestClass, NotDue, NotEligible,
-    OptionOrAnswer, PrincipalKind, ProducedRecordConflict, ProducedRecordRecorded, Recommend,
-    RecommendOutcome, RecommendationRecorded, RecommendationTaken, RecommendationWithheld,
-    RecordKeyOpen, RecordProduced, RecordProducedOutcome, Request, RequestOutcome,
-    SilenceHasDefault, Strength, Supersede, SupersedeOutcome, TakeRecommendation,
+    OptionOrAnswer, Principal, PrincipalKind, ProducedRecordConflict, ProducedRecordRecorded,
+    Recommend, RecommendOutcome, RecommendationRecorded, RecommendationTaken,
+    RecommendationWithheld, RecordKeyOpen, RecordProduced, RecordProducedOutcome, Request,
+    RequestOutcome, SilenceHasDefault, Strength, Supersede, SupersedeOutcome, TakeRecommendation,
     TakeRecommendationOutcome, TooFewOptions, UnblockKind, UngroundedRecommendation,
 };
 use loom::primitives::Timestamp;
@@ -168,6 +168,22 @@ fn missing(request_id: &DecisionRequestId) -> NoSuchRequest {
     }
 }
 
+/// The kind a principal's name has, the `kind-not-principal` guard of `Decide` and
+/// `TakeRecommendation` (decision.yaml): `decider:<kind>` is a decider, `rule:<name>` a rule,
+/// `silence` silence, and any other name a person.
+fn kind_of(principal: &Principal) -> PrincipalKind {
+    let name = principal.0.as_str();
+    if name.starts_with("decider:") {
+        PrincipalKind::Decider
+    } else if name.starts_with("rule:") {
+        PrincipalKind::Rule
+    } else if name == "silence" {
+        PrincipalKind::Silence
+    } else {
+        PrincipalKind::Person
+    }
+}
+
 fn active(state: DecisionRequestState) -> bool {
     matches!(
         state,
@@ -178,7 +194,10 @@ fn active(state: DecisionRequestState) -> bool {
 /// `loom.decision.Request`: opens a request, Open with no recommendation.
 ///
 /// `RecordKeyOpen` names the Open or Escalated request the store finds for `record_key`, or,
-/// when it finds none, the one `open_for_record` names.
+/// when it finds none, the one `open_for_record` names. A request for the key that another
+/// writer opens after that check is refused by the store in the step that writes
+/// ([`DecisionStore::write`]); `Request` then answers `RecordKeyOpen` naming it, and nothing is
+/// written.
 ///
 /// # Errors
 ///
@@ -256,16 +275,30 @@ pub fn request<S: DecisionStore + ?Sized>(
         superseded_by: None,
         superseded_reason: None,
     };
-    write(
+    let request_id = data.request_id.clone();
+    match write(
         store,
         "loom.decision.Request",
         None,
         DecisionRequestState::Open,
         data,
-    )?;
-    Ok(RequestOutcome::Requested {
-        decision_requested: requested,
-    })
+    ) {
+        Ok(()) => Ok(RequestOutcome::Requested {
+            decision_requested: requested,
+        }),
+        // Another writer opened a request for the record key after the check: the store refused
+        // the write in the step that writes and names that request.
+        Err(DecisionError::Conflict(StoreConflict {
+            record_key_held_by: Some(open_for_record),
+            ..
+        })) => Ok(RequestOutcome::RecordKeyOpen {
+            error: RecordKeyOpen {
+                request_id,
+                open_for_record,
+            },
+        }),
+        Err(other) => Err(other),
+    }
 }
 
 /// `loom.decision.Recommend`: records a verified recommendation on an Open request, or, when
@@ -375,6 +408,11 @@ pub fn decide<S: DecisionStore + ?Sized>(
         principal: input.principal.clone(),
     };
     let kind = input.principal_kind;
+    if kind != kind_of(&input.principal) {
+        return Ok(DecideOutcome::KindNotPrincipal {
+            error: not_eligible(),
+        });
+    }
     if kind == PrincipalKind::Silence {
         return Ok(DecideOutcome::SilenceTakesRecommendation {
             error: not_eligible(),
@@ -486,6 +524,11 @@ pub fn take_recommendation<S: DecisionStore + ?Sized>(
         request_id: request_id.clone(),
         principal: input.principal.clone(),
     };
+    if input.principal_kind != kind_of(&input.principal) {
+        return Ok(TakeRecommendationOutcome::KindNotPrincipal {
+            error: not_eligible(),
+        });
+    }
     let Some(held) = store.read(&request_id)? else {
         return Ok(TakeRecommendationOutcome::NoRequest {
             error: missing(&request_id),
@@ -776,5 +819,140 @@ mod tests {
         assert_eq!(any([Some(true), None]), Some(true));
         assert_eq!(any([Some(false), Some(false)]), Some(false));
         assert_eq!(any([]), Some(false));
+    }
+
+    /// A store that counts every write it is asked for, and refuses none.
+    #[derive(Default)]
+    struct Counting {
+        inner: crate::store::InMemoryDecisionStore,
+        writes: usize,
+    }
+
+    impl DecisionStore for Counting {
+        fn read(
+            &self,
+            request_id: &DecisionRequestId,
+        ) -> Result<Option<DecisionRequestSnapshot>, StoreFailure> {
+            self.inner.read(request_id)
+        }
+
+        fn write(
+            &mut self,
+            read: Option<&DecisionRequestSnapshot>,
+            next: DecisionRequestSnapshot,
+        ) -> Result<(), WriteError> {
+            self.writes += 1;
+            self.inner.write(read, next)
+        }
+
+        fn list(&self) -> Result<Vec<DecisionRequestSnapshot>, StoreFailure> {
+            self.inner.list()
+        }
+
+        fn append_record(
+            &mut self,
+            record: loom::decision::EscalationSuppressedRecord,
+        ) -> Result<(), crate::store::AppendError> {
+            self.inner.append_record(record)
+        }
+
+        fn records(
+            &self,
+            request_id: &DecisionRequestId,
+        ) -> Result<Vec<loom::decision::EscalationSuppressedRecord>, StoreFailure> {
+            self.inner.records(request_id)
+        }
+    }
+
+    fn opened() -> DecisionRequestSnapshot {
+        use loom::decision::{
+            ActionId, ArtifactId, AutonomyLevel, CaseId, Consequence, DecisionClassId,
+            DecisionOption, OptionLetter, Revision, Unblocks,
+        };
+        let option = |letter: &str, grant| DecisionOption {
+            letter: OptionLetter(letter.to_owned()),
+            does: format!("Option {letter}."),
+            cost: "None.".to_owned(),
+            consequence: Consequence {
+                admits: Vec::new(),
+                blocks: Vec::new(),
+                grant: Some(grant),
+                answer: None,
+                produces: None,
+            },
+        };
+        let mut store = crate::store::InMemoryDecisionStore::new();
+        let answer = request(
+            &mut store,
+            Request {
+                request_id: DecisionRequestId("DR-1".to_owned()),
+                case_id: CaseId("IDEA-1.billing".to_owned()),
+                question_key: "IDEA-1.billing|change.merge|".to_owned(),
+                record_key: "change.merge@r9".to_owned(),
+                open_for_record: None,
+                unblocks: Unblocks {
+                    kind: UnblockKind::Approval,
+                    action: ActionId("change.merge".to_owned()),
+                    capability: None,
+                    question_id: None,
+                    outcome: None,
+                },
+                subject_artifact: ArtifactId("change".to_owned()),
+                subject_revision: Revision("t0r1".to_owned()),
+                subject_path: None,
+                question: "Merge?".to_owned(),
+                options: vec![option("A", Grant::Granted), option("B", Grant::Denied)],
+                autonomy_level: AutonomyLevel::A3,
+                decision_class: DecisionClassId("merge".to_owned()),
+                holder: Holder::Person,
+                eligible: vec![Principal("operator".to_owned())],
+                addressed_to: Principal("operator".to_owned()),
+                opened_at: Timestamp("2026-11-21T11:00:00Z".to_owned()),
+                expires_at: None,
+                supersedes: None,
+            },
+        )
+        .expect("applied");
+        assert!(
+            matches!(answer, RequestOutcome::Requested { .. }),
+            "{answer:?}"
+        );
+        store
+            .read(&DecisionRequestId("DR-1".to_owned()))
+            .expect("reads")
+            .expect("stored")
+    }
+
+    /// `write` refuses data that breaks an invariant of the entity before it asks the store:
+    /// a default on silence with a weak recommendation (`default_on_silence == false or
+    /// recommendation_strength == strong`) is `Undecided`, and the store is asked for no write.
+    #[test]
+    fn write_refuses_data_that_breaks_an_invariant_and_asks_the_store_nothing() {
+        let held = opened();
+        let mut store = Counting::default();
+        store.inner = crate::store::InMemoryDecisionStore::with_requests(vec![held.clone()]);
+        let mut data = held.data.clone();
+        data.default_on_silence = true;
+        data.recommendation_strength = Strength::Weak;
+        assert!(data.broken_invariant().is_some(), "the data breaks one");
+
+        let refused = write(
+            &mut store,
+            "loom.decision.Recommend",
+            Some(&held),
+            DecisionRequestState::Open,
+            data,
+        )
+        .expect_err("refused");
+        assert!(
+            matches!(&refused, DecisionError::Undecided(undecided) if undecided.reason.contains("invariant")),
+            "{refused:?}"
+        );
+        assert_eq!(store.writes, 0, "the store was asked for no write");
+        assert_eq!(
+            store.inner.list().expect("reads"),
+            vec![held],
+            "nothing is written"
+        );
     }
 }

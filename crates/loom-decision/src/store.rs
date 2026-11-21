@@ -24,9 +24,10 @@ impl fmt::Display for StoreFailure {
 
 impl std::error::Error for StoreFailure {}
 
-/// A write refused because the request is no longer in the state it was read in: the request
-/// id, the state read (absent for a new request) and the state found (absent when none is
-/// stored).
+/// A write refused because the request is no longer in the state it was read in, or because it
+/// would leave two Open or Escalated requests with one `record_key`: the request id, the state
+/// read (absent for a new request), the state found (absent when none is stored) and the other
+/// open request holding the record key, where that is the cause.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreConflict {
     /// The request written.
@@ -35,6 +36,16 @@ pub struct StoreConflict {
     pub read: Option<Box<DecisionRequestSnapshot>>,
     /// The request the store holds, or `None` when it holds none.
     pub found: Option<Box<DecisionRequestSnapshot>>,
+    /// The other Open or Escalated request with the same `record_key`, when the write was refused
+    /// for it; `None` for a stale read.
+    pub record_key_held_by: Option<DecisionRequestId>,
+}
+
+fn is_open(state: DecisionRequestState) -> bool {
+    matches!(
+        state,
+        DecisionRequestState::Open | DecisionRequestState::Escalated
+    )
 }
 
 fn state(snapshot: Option<&DecisionRequestSnapshot>) -> String {
@@ -43,13 +54,20 @@ fn state(snapshot: Option<&DecisionRequestSnapshot>) -> String {
 
 impl fmt::Display for StoreConflict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "decision request {} changed since it was read: read {}, found {}",
-            self.request_id.0,
-            state(self.read.as_deref()),
-            state(self.found.as_deref())
-        )
+        match &self.record_key_held_by {
+            Some(holder) => write!(
+                f,
+                "decision request {} is refused: request {} is open for its record key",
+                self.request_id.0, holder.0
+            ),
+            None => write!(
+                f,
+                "decision request {} changed since it was read: read {}, found {}",
+                self.request_id.0,
+                state(self.read.as_deref()),
+                state(self.found.as_deref())
+            ),
+        }
     }
 }
 
@@ -112,11 +130,17 @@ pub trait DecisionStore {
     /// Stores `next` under its request id when the store still holds `read` there (`None`: no
     /// request), replacing it.
     ///
+    /// An obligation of every store, checked in the same step that writes: when `next` is Open or
+    /// Escalated and the store holds another Open or Escalated request with the same
+    /// `record_key`, the write is a conflict naming that request
+    /// ([`StoreConflict::record_key_held_by`]) and nothing is written. One open request per
+    /// record key therefore holds across any check a command made before writing.
+    ///
     /// # Errors
     ///
     /// [`WriteError::Conflict`] when the store holds anything else, a new request whose id was
-    /// stored since the read included, and nothing is written; [`WriteError::Failure`] when the
-    /// store cannot write.
+    /// stored since the read included, or another open request for the record key, and nothing
+    /// is written; [`WriteError::Failure`] when the store cannot write.
     fn write(
         &mut self,
         read: Option<&DecisionRequestSnapshot>,
@@ -139,12 +163,7 @@ pub trait DecisionStore {
         Ok(self
             .list()?
             .into_iter()
-            .find(|held| {
-                matches!(
-                    held.state,
-                    DecisionRequestState::Open | DecisionRequestState::Escalated
-                ) && held.data.record_key == record_key
-            })
+            .find(|held| is_open(held.state) && held.data.record_key == record_key)
             .map(|held| held.data.request_id))
     }
 
@@ -213,12 +232,25 @@ impl DecisionStore for InMemoryDecisionStore {
         next: DecisionRequestSnapshot,
     ) -> Result<(), WriteError> {
         let found = self.held(&next.data.request_id);
-        if found != read {
-            return Err(WriteError::Conflict(StoreConflict {
+        let conflict = |record_key_held_by| {
+            WriteError::Conflict(StoreConflict {
                 request_id: next.data.request_id.clone(),
                 read: read.cloned().map(Box::new),
                 found: found.cloned().map(Box::new),
-            }));
+                record_key_held_by,
+            })
+        };
+        if found != read {
+            return Err(conflict(None));
+        }
+        if is_open(next.state)
+            && let Some(holder) = self.requests.iter().find(|held| {
+                held.data.request_id != next.data.request_id
+                    && is_open(held.state)
+                    && held.data.record_key == next.data.record_key
+            })
+        {
+            return Err(conflict(Some(holder.data.request_id.clone())));
         }
         match self
             .requests

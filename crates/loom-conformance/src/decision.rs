@@ -710,6 +710,12 @@ pub(crate) fn decide(
     };
     Some(
         match b10x_loom_decision::decide(store(live), command).ok()? {
+            DecideOutcome::KindNotPrincipal { error } => not_eligible(
+                DECIDE,
+                "kind-not-principal",
+                &error.request_id,
+                &error.principal,
+            ),
             DecideOutcome::SilenceTakesRecommendation { error } => not_eligible(
                 DECIDE,
                 "silence-takes-recommendation",
@@ -786,6 +792,12 @@ pub(crate) fn take_recommendation(
     let command_name = TAKE_RECOMMENDATION;
     Some(
         match b10x_loom_decision::take_recommendation(store(live), command).ok()? {
+            TakeRecommendationOutcome::KindNotPrincipal { error } => not_eligible(
+                command_name,
+                "kind-not-principal",
+                &error.request_id,
+                &error.principal,
+            ),
             TakeRecommendationOutcome::NoRequest { error } => refused(
                 command_name,
                 "no-request",
