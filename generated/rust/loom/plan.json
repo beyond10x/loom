@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "2d3fdabc05ca80c549f8a76dcfa32938a9e8b98e2bf1f272a95549fea2adaa22",
-    "contract_digest": "03a4fc948ecc8c56f554376674e3477aca9cfb4b05fd51d3cae6948310aa1cc1"
+    "source_digest": "4b212087017b48da95b55e39917bce0f036c4a1b099cbaf5c1b25dea4e2617d2",
+    "contract_digest": "6da6157abf2cb1c60ccb98fd5e82be5c50013ae5d48c3e0bb00e0b6c02b065ce"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -362,6 +362,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ArtifactRevision",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.BindingsDocument",
       "disposition": {
         "disposition": "generated"
@@ -412,6 +419,34 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.ProducerIndependence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RecordedEvidence",
       "disposition": {
         "disposition": "generated"
       }

@@ -1176,10 +1176,12 @@ only crate that does.
 `b10x-loom-bindings` (`crates/loom-bindings`, `story:bindings-document`, epic
 `protocol-tree-on-bindings`) decodes the `loom.bindings/1` document and checks it against a compiled
 protocol. Its types are `loom.bindings` (`ess/domains/bindings.yaml`); the generated model is the
-document, and the crate holds the decoder (`decode.rs`, YAML or JSON into the generated types) and the
-load-time check (`load.rs`, `check` and `unbound`). It executes nothing, starts no process and opens no
-network connection, and it depends on `b10x-canon` by the reference `crates/loom-governor/Cargo.toml`
-names, so a Canon pin moves both manifests.
+document, and the crate holds the decoder (`decode.rs`, YAML or JSON into the generated types), the
+load-time check (`load.rs`, `check` and `unbound`) and the program effect port (`program.rs`,
+`ProgramEffects`, `story:bound-program-result-table`). Decoding and the check start no process; the
+crate opens no network connection. It depends on `b10x-canon` by the reference
+`crates/loom-governor/Cargo.toml` names, so a Canon pin moves both manifests, and on
+`b10x-loom-intake-slice` for the runner rules below.
 
 - A document names one protocol (`name@major`) and holds one `actions` list item per bound action.
   Each action has an `executor` (`program`, `agent`, `person`, `open`, `copy`), `evidence` entries
@@ -1211,6 +1213,36 @@ names, so a Canon pin moves both manifests.
   matches the enum exhaustively, so a reason added to the specification fails the file's compilation until a
   case reaches it. The guide page `website/docs/guides/bindings.md` holds one complete file, and the
   same test file decodes it and checks it against the protocol on the page.
+- `ProgramEffects` performs an action bound to `program`, for any registered protocol, built per
+  case from the `CanonGovernor` holding it, the checked document, the workspace root, the store
+  directory and the host's runner (`Option<Arc<dyn TestRunner>>`). The runner is admitted at
+  construction by `b10x_loom_intake_slice::bindings::admit_bound_program_runner` (none `NoRunner`,
+  naming no flag and no file member; `local` only with `UNCONFINED_FLAG_REASON`, else
+  `CommandUnconfined`), then `preflight_child` on the workspace root, its refusal passed on. Every
+  program, the `arguments_from` argv included, starts through that runner's `run_child`, as
+  `bound_program_child` builds the child (the one definition the intake slice's `CommandRunner`
+  also uses). A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
+  naming both, nothing started or recorded), the run count (observations of source
+  `PROGRAM_SOURCE`, `loom/bound-program`, naming the case and the action; `RunsSpent` at
+  `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
+  `arguments_from` object, `ArgumentsUnreadable` when it does not exit 0 or is not one JSON object
+  within 1 MiB, the bound program not started; the `arguments_from` program starts on every step
+  that reaches it, leaves no observation and does not count against `budget.max_runs`), the run, the blob `blobs/<sha256>` of the store
+  directory (stdout then stderr, temporary file and rename; a link at the name is replaced, a
+  `blobs` link fails the step), one observation (`loom.bindings.ProgramRun`) for every call of
+  `run_child`, kept before a runner refusal or a blob failure ends the step (then with no blob, and
+  the refusal text in `runner_refusal`), so every such call counts unless the store refuses that
+  observation (the step then answers the store's error, uncounted), then per entry the
+  value (exit code, `timeout` for a killed run, or the pointer into the report, one JSON object
+  within 1 MiB naming no member twice) looked up in `results` falling to
+  `*`: `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry
+  (`loom.bindings.RecordedEvidence`) with the entry's producer, the observation's instant and, in
+  `facts`, the revisions the case held for the subject and as `upstream_revisions`. Nothing the
+  program prints names a result, revision, producer or instant. The cap holds for one port that
+  drives the case; two hosts that drive one case store at the same time can each start the action
+  once more (`story:bound-program-run-cap-holds-across-ports`). Held by
+  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
+  `crates/loom-governor` is not changed by it.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 
@@ -2117,7 +2149,11 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   --workspace`, or a private `<tmp>/loom-bound-*/workspace`), whose default refuses `NoRunner`.
   Each refusal stops the run `ConfinementUnavailable`, exit 3. A runner not on `local` gets an
   absolute program outside `/usr`, `/bin`, `/lib`, `/lib64` mounted read-only at its own path
-  (`at_host_path`). `run` passes the flag's `local` runner, none for the file's opt-in, and
+  (`at_host_path`). The host-runner step of `select_runner` and the child are the public
+  `bindings::admit_bound_program_runner` (its `NoRunner` names no flag and no file member;
+  `select_runner` keeps its own) and `bindings::bound_program_child`, which the program effect port
+  of `b10x-loom-bindings` (§ Bindings document) also uses, so each rule has one definition.
+  `run` passes the flag's `local` runner, none for the file's opt-in, and
   `SubstrateRunner` on `--cgroup-root` otherwise (no delegated re-exec for bound commands);
   `--confinement none` or `local` without an opt-in stops `ConfinementUnavailable
   (CommandUnconfined: ...)` before any model call (`bindings_refused`); `--unconfined-bindings`

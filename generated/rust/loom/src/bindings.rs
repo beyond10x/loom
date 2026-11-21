@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 03a4fc948ecc8c56f554376674e3477aca9cfb4b05fd51d3cae6948310aa1cc1
+// contract digest 6da6157abf2cb1c60ccb98fd5e82be5c50013ae5d48c3e0bb00e0b6c02b065ce
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -28,6 +28,15 @@ pub struct ArtifactPath {
     pub artifact: String,
     /// `path` — `String`.
     pub path: String,
+}
+
+/// ArtifactRevision — `loom.bindings.ArtifactRevision`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactRevision {
+    /// `artifact` — `String`.
+    pub artifact: String,
+    /// `revision` — `String`.
+    pub revision: String,
 }
 
 /// BindingsDocument — `loom.bindings.BindingsDocument`.
@@ -198,6 +207,68 @@ pub struct ProducerIndependence {
     pub producer: String,
     /// `dimensions` — `List<String>`.
     pub dimensions: Vec<String>,
+}
+
+/// ProgramRefusal — `loom.bindings.ProgramRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramRefusal {
+    /// `reason` — `loom.bindings.ProgramRefusalReason`.
+    pub reason: ProgramRefusalReason,
+    /// `action` — `String`.
+    pub action: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// ProgramRefusalReason — `loom.bindings.ProgramRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramRefusalReason {
+    /// `ResultNotInTable`.
+    ResultNotInTable,
+    /// `ReportUnreadable`.
+    ReportUnreadable,
+    /// `ArgumentsUnreadable`.
+    ArgumentsUnreadable,
+    /// `RunsSpent`.
+    RunsSpent,
+    /// `CaseOfAnotherProtocol`.
+    CaseOfAnotherProtocol,
+}
+
+/// ProgramRun — `loom.bindings.ProgramRun`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramRun {
+    /// `case` — `String`.
+    pub case: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `exit` — `Optional<Integer>`.
+    pub exit: Option<i64>,
+    /// `blob_sha256` — `Optional<String>`.
+    pub blob_sha256: Option<String>,
+    /// `timed_out` — `Boolean`.
+    pub timed_out: bool,
+    /// `runner_refusal` — `Optional<String>`.
+    pub runner_refusal: Option<String>,
+}
+
+/// RecordedEvidence — `loom.bindings.RecordedEvidence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedEvidence {
+    /// `kind` — `String`.
+    pub kind: String,
+    /// `subject` — `String`.
+    pub subject: String,
+    /// `producer` — `String`.
+    pub producer: String,
+    /// `result` — `Optional<String>`.
+    pub result: Option<String>,
+    /// `subject_revision` — `String`.
+    pub subject_revision: String,
+    /// `observed_at` — `Timestamp`.
+    pub observed_at: crate::primitives::Timestamp,
+    /// `upstream_revisions` — `List<loom.bindings.ArtifactRevision>`.
+    pub upstream_revisions: Vec<ArtifactRevision>,
 }
 
 /// ResultRule — `loom.bindings.ResultRule`.

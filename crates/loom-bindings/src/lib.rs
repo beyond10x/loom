@@ -8,16 +8,22 @@
 //! first defect found, naming the action and the member. [`unbound`] lists the actions the
 //! document binds nothing to; that is not an error.
 //!
-//! The crate executes nothing, starts no process and opens no network connection.
+//! [`ProgramEffects`] is the effect port that performs an action bound to a `program` executor,
+//! for any registered protocol: it starts each program through the host's runner alone, as
+//! `b10x_loom_intake_slice::bindings` admits the runner and builds the child, keeps its output as
+//! one content-addressed blob, and records evidence by the binding's result table alone. Decoding
+//! and the load-time check start no process; the crate opens no network connection.
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 mod decode;
 mod load;
+mod program;
 mod tree;
 
 pub use decode::decode;
 pub use load::{check, unbound};
+pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
 
 use loom::bindings::BindingsRefusal;
 use std::fmt;
