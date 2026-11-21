@@ -40,6 +40,11 @@
 //! Service targets, which the pod's NetworkPolicy opens in place of the URL's port, since a
 //! NetworkPolicy matches the pod port after the Service has translated it.
 //!
+//! An `allowedBoundaryUpstreams` URL and the `modelRoute` URL must name their namespace: a host
+//! other than `<service>.<namespace>.svc`, optionally `.cluster.local` (a short service name, an
+//! IP literal), refuses the configuration, naming the member and the URL, since admission keeps
+//! a boundary's egress entries out of each of those namespaces.
+//!
 //! Each `allowedBoundaryHttpEgress` entry admits one namespace egress entry beside a boundary
 //! (story boundary-admits-declared-http-egress): its `namespace`, its `selector` (label pairs,
 //! not empty, each name once, compared as a set) and its TCP `port` (1 to 65535), all three in
@@ -285,6 +290,15 @@ impl Config {
         if let Some(size) = &config.default_command_resources {
             sized("defaultCommandResources", size)?;
         }
+        if let Some(route) = &config.model_route {
+            names_namespace("modelRoute.url", &route.url)?;
+        }
+        for (index, entry) in config.allowed_boundary_upstreams.iter().enumerate() {
+            names_namespace(
+                &format!("allowedBoundaryUpstreams[{index}].url"),
+                &entry.url,
+            )?;
+        }
         for (index, entry) in config.allowed_boundary_http_egress.iter().enumerate() {
             let at = format!("allowedBoundaryHttpEgress[{index}].selector");
             if entry.selector.is_empty() {
@@ -408,6 +422,37 @@ fn sized(member: &str, size: &Resources) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// Refuses `url`, the configuration's `member`, when its host names no namespace: read with any
+/// scheme, user information and port dropped, a trailing dot dropped, in lower case, it is not
+/// `<service>.<namespace>.svc` or `<service>.<namespace>.svc.cluster.local` (a short service
+/// name, an IP literal). Admission closes the namespace of every allowed upstream and of the
+/// model route beside a boundary, so it must be able to read each (correction 1 of story
+/// boundary-admits-declared-http-egress).
+fn names_namespace(member: &str, url: &str) -> Result<(), ConfigError> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host.rsplit_once(':').map_or(host, |(host, _)| host);
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let readable = match host.split('.').collect::<Vec<_>>().as_slice() {
+        [service, namespace, "svc"] | [service, namespace, "svc", "cluster", "local"] => {
+            !service.is_empty() && !namespace.is_empty()
+        }
+        _ => false,
+    };
+    if readable {
+        Ok(())
+    } else {
+        Err(ConfigError(format!(
+            "{member}: {url:?} names no namespace: its host is not <service>.<namespace>.svc or \
+             <service>.<namespace>.svc.cluster.local, so no boundary's egress could be kept out of \
+             it"
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -634,6 +679,83 @@ mod tests {
                 error.0.contains("allowedBoundaryHttpEgress") && error.0.contains(named),
                 "story:boundary-admits-declared-http-egress: {entry}: {error}"
             );
+        }
+    }
+
+    /// Hosts that name no namespace: a short service name, a bare name, IP literals, another
+    /// domain after `svc`, a namespace missing, an empty authority.
+    const UNREADABLE: [&str; 9] = [
+        "http://gw.store:8080",
+        "http://gw:8080",
+        "http://10.0.0.1:8080",
+        "http://[fd00::1]:8080/v1",
+        "http://gw.store.svc.example:8080",
+        "http://gw.store.svc.cluster:8080",
+        "http://gw.svc:8080",
+        "http://",
+        "",
+    ];
+
+    /// Spellings of the cluster service `gw` of the namespace `store`.
+    const READABLE: [&str; 6] = [
+        "http://gw.store.svc",
+        "http://gw.store.svc:8080/path",
+        "http://gw.store.svc.cluster.local.:8080",
+        "http://GW.STORE.SVC:8080",
+        "https://gw.store.svc",
+        "http://user@gw.store.svc:8080",
+    ];
+
+    /// Correction 1 of `story:boundary-admits-declared-http-egress` (security pass 1, F2): an
+    /// `allowedBoundaryUpstreams` URL whose host is no `<service>.<namespace>.svc`, with an
+    /// optional `.cluster.local`, names no namespace admission could close beside a boundary, so
+    /// the configuration read refuses it, naming the entry's `url` and the URL. Every spelling of
+    /// a cluster service is still read.
+    #[test]
+    fn an_upstream_url_whose_namespace_cannot_be_read_is_refused() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\nallowedBoundaryUpstreams:\n- {kind: model, url: \
+                    'http://llm-gateway.llm.svc:8080', audience: llm-gateway}\n";
+        for url in UNREADABLE {
+            let error = Config::parse(&format!(
+                "{base}- {{kind: connectors, url: '{url}', audience: gw}}\n"
+            ))
+            .expect_err(url);
+            assert!(
+                error.0.starts_with("allowedBoundaryUpstreams[1].url: ")
+                    && error.0.contains(&format!("{url:?}")),
+                "{url}: {error}"
+            );
+        }
+        for url in READABLE {
+            Config::parse(&format!(
+                "{base}- {{kind: connectors, url: '{url}', audience: gw}}\n"
+            ))
+            .unwrap_or_else(|error| panic!("{url}: {error}"));
+        }
+    }
+
+    /// Correction 1 (F2): the same for the `modelRoute` URL, whose namespace a boundary's egress
+    /// entries may not open either.
+    #[test]
+    fn a_model_route_url_whose_namespace_cannot_be_read_is_refused() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        for url in UNREADABLE {
+            let error = Config::parse(&format!(
+                "{base}modelRoute: {{url: '{url}', protocol: messages, model: m}}\n"
+            ))
+            .expect_err(url);
+            assert!(
+                error.0.starts_with("modelRoute.url: ") && error.0.contains(&format!("{url:?}")),
+                "{url}: {error}"
+            );
+        }
+        for url in READABLE {
+            Config::parse(&format!(
+                "{base}modelRoute: {{url: '{url}', protocol: messages, model: m}}\n"
+            ))
+            .unwrap_or_else(|error| panic!("{url}: {error}"));
         }
     }
 }

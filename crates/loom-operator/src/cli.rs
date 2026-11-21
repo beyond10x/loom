@@ -14,7 +14,10 @@ entries (allowedBoundaryHttpEgress: namespace, selector, port) it may declare be
 Every allowedBoundaryHttpEgress entry must name read-path pods and a port that serves only reads,
 and never a pod that forwards requests with a credential of its own: the pod reaches them by
 network position alone, with any method on that port, and so does every credential-free resource
-of the namespace that declares a matching entry and binding.
+of the namespace that declares a matching entry and binding. No entry opens the namespace of an
+allowedBoundaryUpstreams URL or of the modelRoute URL, then none that is no namespace name, so
+each of those URLs must have a host <service>.<namespace>.svc, optionally .cluster.local: a short
+service name or an IP address refuses the configuration.
 The cluster is the in-cluster service account's, else the current kubeconfig context's.
 Each resource is checked in-process before any child exists; a refused one has no children and its
 status names the refusal. The record of the resources lives in memory: after a restart every

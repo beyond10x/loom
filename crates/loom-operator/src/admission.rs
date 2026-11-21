@@ -67,9 +67,9 @@
 //!    credential-free-network-policy and boundary-admits-declared-http-egress), so a
 //!    `deploy.kubernetes.egress` entry of `spec.agent`, in order, naming a host is
 //!    `BoundaryEgressHost` at its `host`, and one naming a namespace is admitted only when, in
-//!    this order: its namespace is a DNS-1123 label and that of no `allowedBoundaryUpstreams`
-//!    URL, of any kind, declared or not, whatever its spelling (`BoundaryEgressNamespace` at its
-//!    `namespace`); its selector is not empty (`BoundaryEgressNamespace` at its `selector`); a
+//!    this order: its namespace is that of no `allowedBoundaryUpstreams` URL, of any kind,
+//!    declared or not, nor that of the `modelRoute` URL, whatever its spelling, and then a
+//!    DNS-1123 label (`BoundaryEgressNamespace` at its `namespace`); its selector is not empty (`BoundaryEgressNamespace` at its `selector`); a
 //!    `GET` `http` binding without a `bearer_env` has a `base_url` [`cluster_service`] reads as
 //!    a service in that namespace (`BoundaryEgressUnbound` at the entry); and one
 //!    `allowedBoundaryHttpEgress` entry equals it in namespace, selector (a set of label pairs)
@@ -1489,9 +1489,10 @@ fn boundary(
     Ok(())
 }
 
-/// The namespace the host of `url`, an `allowedBoundaryUpstreams` URL, names, read so that no
-/// spelling hides it: any scheme, user information and port dropped, a trailing dot dropped, in
-/// lower case; the label before `svc`. `None` when the host names no cluster service.
+/// The namespace the host of `url`, an `allowedBoundaryUpstreams` or `modelRoute` URL, names,
+/// read so that no spelling hides it: any scheme, user information and port dropped, a trailing
+/// dot dropped, in lower case; the label before `svc`. `None` when the host names no cluster
+/// service, which the configuration read already refuses.
 fn upstream_namespace(url: &str) -> Option<String> {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
@@ -1511,9 +1512,11 @@ fn upstream_namespace(url: &str) -> Option<String> {
 /// this order, the first that fails refusing it:
 ///
 /// 1. `namespace`, in lower case without a trailing dot, is the namespace of no
-///    `allowedBoundaryUpstreams` URL, of any kind, declared here or not ([`upstream_namespace`]),
-///    so no entry reopens an upstream's namespace on another port, and it is a DNS-1123 label:
-///    `BoundaryEgressNamespace` at its `namespace`, each with its own detail;
+///    `allowedBoundaryUpstreams` URL, of any kind, declared here or not, and not that of the
+///    `modelRoute` URL, a proxy holding a credential ([`upstream_namespace`]; the configuration
+///    read refuses either URL when its host names no namespace), so no entry reopens such a
+///    namespace on another port; then it is a DNS-1123 label: `BoundaryEgressNamespace` at its
+///    `namespace`, each with its own detail;
 /// 2. its selector is not empty, since an empty one opens every pod of the namespace:
 ///    `BoundaryEgressNamespace` at its `selector`;
 /// 3. an `http` binding whose method is exactly `GET`, with no `bearer_env`, has a `base_url`
@@ -1533,7 +1536,9 @@ fn boundary_http_egress(
     if config
         .allowed_boundary_upstreams
         .iter()
-        .any(|allowed| upstream_namespace(&allowed.url).is_some_and(|upstream| upstream == spelt))
+        .map(|allowed| allowed.url.as_str())
+        .chain(config.model_route.as_ref().map(|route| route.url.as_str()))
+        .any(|url| upstream_namespace(url).is_some_and(|upstream| upstream == spelt))
     {
         return Err(Refusal::new(
             Reason::BoundaryEgressNamespace,

@@ -528,14 +528,18 @@ which the NetworkPolicy then opens in place of the URL's port. The controller re
 boundary beside `spec.secretRef` or `spec.secretFiles` (`BoundaryWithSecret`), an upstream that
 is no cluster service or is `https` (`BoundaryUpstreamInvalid`), one no entry of its kind lists
 or whose audience the entry does not give (`BoundaryUpstreamNotAllowed`), a host egress entry
-(`BoundaryEgressHost`), a namespace egress entry in an allowed upstream's namespace or without a
-selector (`BoundaryEgressNamespace`), one no `GET` `http` binding without a `bearer_env` reads by
+(`BoundaryEgressHost`), a namespace egress entry in an allowed upstream's or the model route's
+namespace, one whose namespace is no namespace name, or one without a selector
+(`BoundaryEgressNamespace`), one no `GET` `http` binding without a `bearer_env` reads by
 a cluster-service `base_url` in that namespace (`BoundaryEgressUnbound`), one no single
 `allowedBoundaryHttpEgress` entry (`{namespace, selector, port}`, empty by default) equals
 (`BoundaryEgressNotAllowed`), empty routes on an `AgentServe`
 resource without `boundary.model` (`NoModelRoute`; a `Command` resource gets an empty
 `routes.yaml`), and an audience, operation id (at most 256 bytes) or repository out of form
-(`Malformed`). Native sidecars need Kubernetes 1.29 or newer.
+(`Malformed`). The controller does not start on an `allowedBoundaryUpstreams` or `modelRoute`
+URL whose host is not `<service>.<namespace>.svc`, optionally `.cluster.local` (a short service
+name or an IP address), since no egress entry may open that namespace and it could not be read.
+Native sidecars need Kubernetes 1.29 or newer.
 
 ```yaml
 spec:

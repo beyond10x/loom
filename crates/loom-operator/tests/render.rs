@@ -1740,6 +1740,11 @@ fn quoted(text: &str) -> String {
 
 /// The test configuration, allowing `upstreams` (each its kind, URL and audience) as the
 /// boundary upstreams.
+///
+/// The entries are set on the parsed configuration, not read with it, since the configuration
+/// read refuses an upstream URL whose namespace it cannot read (correction 1 of
+/// `story:boundary-admits-declared-http-egress`), and admission must refuse such an upstream
+/// even when a configuration holds it.
 fn allowing(upstreams: &[(&str, &str, &str)]) -> Config {
     let entries: Vec<serde_json::Value> = upstreams
         .iter()
@@ -1747,11 +1752,11 @@ fn allowing(upstreams: &[(&str, &str, &str)]) -> Config {
             serde_json::json!({"kind": kind, "url": url, "audience": audience})
         })
         .collect();
-    Config::parse(&format!(
-        "{CONFIG}allowedBoundaryUpstreams: {}\n",
-        serde_json::Value::Array(entries)
-    ))
-    .expect("the test configuration with boundary upstreams")
+    Config {
+        allowed_boundary_upstreams: serde_json::from_value(serde_json::Value::Array(entries))
+            .expect("the test configuration's boundary upstreams"),
+        ..config()
+    }
 }
 
 /// The three upstreams the credential-free resources declare, each for its relay and audience.
@@ -3971,6 +3976,63 @@ fn an_egress_in_an_allowed_upstream_namespace_is_refused() {
             "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: "
         ) && message != expected,
         "a namespace that is no DNS-1123 label names no namespace: {message}"
+    );
+}
+
+/// The first condition, correction 1 after security pass 1 (F1): the configuration's model route
+/// is an in-cluster proxy holding a credential, so an entry naming its namespace, in any
+/// spelling of either, is refused at its namespace as an allowed upstream's is, though it has a
+/// selector, a binding at the model route and an allow list entry. The same entry is admitted
+/// under a model route in another namespace.
+#[test]
+fn an_egress_in_the_model_route_namespace_is_refused() {
+    let detail = "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
+                  NetworkPolicy opens no namespace";
+    let expected = format!(
+        "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: \
+         {detail}"
+    );
+    let route = [("app", "model-route")];
+    let under = |url: &str, config: Config| Config {
+        model_route: config
+            .model_route
+            .map(|model_route| b10x_loom_operator::config::ModelRoute {
+                url: url.to_owned(),
+                ..model_route
+            }),
+        ..config
+    };
+    for (namespace, model_route) in [
+        ("agents", "http://model-route.agents.svc:8080/v1"),
+        ("Agents", "http://model-route.agents.svc:8080/v1"),
+        ("agents.", "http://model-route.agents.svc:8080/v1"),
+        (
+            "agents",
+            "http://Model-Route.AGENTS.svc.cluster.local.:8080/v1",
+        ),
+    ] {
+        let agent = with_egress(&namespace_entry("route", namespace, &route, 8080))
+            .replace(LOGS_BINDING_URL, "http://model-route.agents.svc:8080");
+        let config = under(
+            model_route,
+            http_egress_config(&[allowed_egress(namespace, &route, 8080)]),
+        );
+        let message = refusal(&behind_model_boundary(&agent), &config);
+        assert_eq!(message, expected, "{namespace} under {model_route}");
+        assert!(!message.contains(" agents"), "{message}");
+    }
+
+    let agent = with_egress(&namespace_entry("route", "agents", &route, 8080))
+        .replace(LOGS_BINDING_URL, "http://model-route.agents.svc:8080");
+    let elsewhere = under(
+        "http://model-route.models.svc:8080/v1",
+        http_egress_config(&[allowed_egress("agents", &route, 8080)]),
+    );
+    let rendered = render_document(&behind_model_boundary(&agent), &elsewhere)
+        .expect("the entry is admitted under a model route in another namespace");
+    assert!(
+        egress_rules(&rendered).contains(&peer_rule("agents", &route, 8080)),
+        "the entry is rendered"
     );
 }
 
