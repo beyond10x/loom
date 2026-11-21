@@ -1321,7 +1321,9 @@ without a trailing dot, the namespace of no `allowedBoundaryUpstreams` URL of an
 or not, and not that of the `modelRoute` URL, a proxy holding a credential, then it is a
 DNS-1123 label (`BoundaryEgressNamespace` at its `namespace`, each with its own detail; the
 configuration read refuses an upstream or model route URL whose host is no
-`<service>.<namespace>.svc[.cluster.local]`, so each names its namespace), its selector is not
+`<service>.<namespace>.svc[.cluster.local]`, so each names its namespace, and condition 1 fails
+closed: under a `Config` built without the read, one such URL whose namespace cannot be read
+refuses every namespace entry, its detail naming the URL), its selector is not
 empty (`BoundaryEgressNamespace` at its `selector`), a `GET` `http` binding of `spec.agent`
 without a `bearer_env` has a `base_url` `admission::cluster_service` reads as a service in that
 namespace (`BoundaryEgressUnbound` at the entry; it ties by namespace only, and the operator's

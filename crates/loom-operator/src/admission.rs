@@ -1492,7 +1492,7 @@ fn boundary(
 /// The namespace the host of `url`, an `allowedBoundaryUpstreams` or `modelRoute` URL, names,
 /// read so that no spelling hides it: any scheme, user information and port dropped, a trailing
 /// dot dropped, in lower case; the label before `svc`. `None` when the host names no cluster
-/// service, which the configuration read already refuses.
+/// service, which the configuration read already refuses and condition 1 refuses again.
 fn upstream_namespace(url: &str) -> Option<String> {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
@@ -1513,10 +1513,11 @@ fn upstream_namespace(url: &str) -> Option<String> {
 ///
 /// 1. `namespace`, in lower case without a trailing dot, is the namespace of no
 ///    `allowedBoundaryUpstreams` URL, of any kind, declared here or not, and not that of the
-///    `modelRoute` URL, a proxy holding a credential ([`upstream_namespace`]; the configuration
-///    read refuses either URL when its host names no namespace), so no entry reopens such a
-///    namespace on another port; then it is a DNS-1123 label: `BoundaryEgressNamespace` at its
-///    `namespace`, each with its own detail;
+///    `modelRoute` URL, a proxy holding a credential ([`upstream_namespace`]), so no entry
+///    reopens such a namespace on another port. It fails closed: the configuration read refuses
+///    either URL when its host names no namespace, and when a `Config` built without the read
+///    holds one, every entry is refused, the detail naming that URL. Then it is a DNS-1123
+///    label: `BoundaryEgressNamespace` at its `namespace`, each with its own detail;
 /// 2. its selector is not empty, since an empty one opens every pod of the namespace:
 ///    `BoundaryEgressNamespace` at its `selector`;
 /// 3. an `http` binding whose method is exactly `GET`, with no `bearer_env`, has a `base_url`
@@ -1533,19 +1534,39 @@ fn boundary_http_egress(
     config: &Config,
 ) -> Result<(), Refusal> {
     let spelt = namespace.trim_end_matches('.').to_ascii_lowercase();
-    if config
+    let closed = config
         .allowed_boundary_upstreams
         .iter()
-        .map(|allowed| allowed.url.as_str())
-        .chain(config.model_route.as_ref().map(|route| route.url.as_str()))
-        .any(|url| upstream_namespace(url).is_some_and(|upstream| upstream == spelt))
-    {
-        return Err(Refusal::new(
-            Reason::BoundaryEgressNamespace,
-            format!("{at}.namespace"),
-            "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
-             NetworkPolicy opens no namespace",
-        ));
+        .map(|allowed| ("allowedBoundaryUpstreams", allowed.url.as_str()))
+        .chain(
+            config
+                .model_route
+                .as_ref()
+                .map(|route| ("modelRoute", route.url.as_str())),
+        );
+    for (member, url) in closed {
+        match upstream_namespace(url) {
+            None => {
+                return Err(Refusal::new(
+                    Reason::BoundaryEgressNamespace,
+                    format!("{at}.namespace"),
+                    format!(
+                        "the namespace of the controller's {member} URL {url:?} cannot be read, \
+                         so no namespace a resource with spec.boundary opens can be told apart \
+                         from it"
+                    ),
+                ));
+            }
+            Some(upstream) if upstream == spelt => {
+                return Err(Refusal::new(
+                    Reason::BoundaryEgressNamespace,
+                    format!("{at}.namespace"),
+                    "a resource with spec.boundary reaches only DNS and its boundary's upstreams, \
+                     so its NetworkPolicy opens no namespace",
+                ));
+            }
+            Some(_) => {}
+        }
     }
     if !dns_label(namespace) {
         return Err(Refusal::new(

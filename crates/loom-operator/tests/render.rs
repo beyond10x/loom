@@ -4036,6 +4036,44 @@ fn an_egress_in_the_model_route_namespace_is_refused() {
     );
 }
 
+/// The first condition fails closed, correction 2 after security pass 2 (F2-b): under a
+/// configuration built without the read, whose model route URL names no namespace that can be
+/// read (a short service name, a bare name, an IP literal), no namespace entry is admitted
+/// beside a boundary, though the same entry is admitted under a readable model route. The
+/// refusal names the URL.
+#[test]
+fn an_egress_beside_a_model_route_with_no_readable_namespace_is_refused() {
+    let logs = [("app", "logs")];
+    let agent = with_egress(&namespace_entry("logs", "monitoring", &logs, 3100));
+    let config = http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]);
+    render_document(&behind_model_boundary(&agent), &config)
+        .expect("the entry is admitted under a readable model route");
+    for url in [
+        "http://model-route.monitoring:8080/v1",
+        "http://model-route:8080/v1",
+        "http://10.0.0.1:8080/v1",
+        "http://[fd00::1]:8080/v1",
+    ] {
+        let unread = Config {
+            model_route: config.model_route.clone().map(|model_route| {
+                b10x_loom_operator::config::ModelRoute {
+                    url: url.to_owned(),
+                    ..model_route
+                }
+            }),
+            ..config.clone()
+        };
+        let message = refusal(&behind_model_boundary(&agent), &unread);
+        assert!(
+            message.starts_with(
+                "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: "
+            ) && message.contains(&format!("{url:?}")),
+            "{url}: {message}"
+        );
+        assert!(!message.contains(" monitoring"), "{message}");
+    }
+}
+
 /// The second condition: an entry with an empty or absent selector, which opens every pod of the
 /// namespace, is refused at its selector.
 #[test]
