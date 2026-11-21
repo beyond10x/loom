@@ -17,6 +17,7 @@ specification:
   - domains/resource.yaml
   - domains/bindings.yaml
   - domains/runlog.yaml
+  - domains/decision.yaml
 scenarios:
   - scenarios/agent-check/a-valid-spec-checks.yaml
   - scenarios/agent-check/a-malformed-document-is-refused.yaml
@@ -121,3 +122,4 @@ scenarios:
   - scenarios/resource-stage-files/a-stale-directory-is-refused.yaml
   - scenarios/resource-stage-files/an-absent-destination-is-staged-private.yaml
   - scenarios/resource-stage-files/an-existing-directory-is-staged-private.yaml
+  - scenarios/decision/merge-a5-veto.yaml

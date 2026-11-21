@@ -1,0 +1,1034 @@
+# Decision requests (story decision-request-entity). A copy of the SDC's contract,
+# ~/beyond10x/sdc/ess/domains/decision.yaml at 00e3557, which session sdc declared final on
+# 2026-11-21, with its guards as written and `ordered: true` kept on Strength and AutonomyLevel.
+# Changed from the source, each on an answer of session sdc: a decision class is the newtype
+# DecisionClassId, not an enum (`escalation` is compared as text); Decide and TakeRecommendation
+# take case_revision, kept as decided_case_revision; Request takes record_key, which it stores,
+# and open_for_record, which refuses it RecordKeyOpen; EscalationSuppressedRecord and
+# SuppressionCause are declared; the actor Driver is Runtime. The view DecisionRequests lists
+# record_key and decided_case_revision beside the source's fields. b10x-loom-decision applies the
+# commands over its DecisionStore port. Summaries citing docs/ name the SDC's documents.
+domain: loom.decision
+summary: "Decision requests: every approval or decision the SDC asks of a person or a decider, with its options, a recommendation and the grounds it rests on. A decision request is opened where a case stops on a decision (driver verdicts awaiting_authority and awaiting_person, docs/driver.md:119-127), is decided by a principal allowed at its autonomy level, and once decided names the Canon record it produced (canon-authority/1, canon-decisions/1 or canon-evidence/1). docs/decisions.md explains it in plain terms."
+
+naming:
+  wire: decision
+  display: Decisions
+
+types:
+  - name: loom.decision.DecisionRequestId
+    kind: newtype
+    of: String
+    naming:
+      summary: "Id of a decision request, chosen by the driver: DR-<case>-<action or question id>-<n>."
+
+  - name: loom.decision.CaseId
+    kind: newtype
+    of: String
+    naming:
+      summary: "A Canon case id (canon-case/1 id), such as IDEA-1.direction."
+
+  - name: loom.decision.ActionId
+    kind: newtype
+    of: String
+    naming:
+      summary: "A protocol action id, such as roadmap.approve."
+
+  - name: loom.decision.CapabilityId
+    kind: newtype
+    of: String
+    naming:
+      summary: "A Canon capability an action requires, such as owner.approve."
+
+  - name: loom.decision.OutcomeId
+    kind: newtype
+    of: String
+    naming:
+      summary: "A Canon outcome id."
+
+  - name: loom.decision.ArtifactId
+    kind: newtype
+    of: String
+    naming:
+      summary: "A case artifact id (canon-case/1 artifacts key), such as roadmap."
+
+  - name: loom.decision.Revision
+    kind: newtype
+    of: String
+    naming:
+      summary: "An artifact or case revision as the case snapshot writes it."
+
+  - name: loom.decision.Principal
+    kind: newtype
+    of: String
+    naming:
+      summary: "Who decides: a person's name (operator), decider:<kind> (decider:haiku, decider:approve, decider:reject), or silence for a default taken because nobody answered. Recorded as given, as Canon records a principal (canon-decisions/1)."
+
+  - name: loom.decision.OptionLetter
+    kind: newtype
+    of: String
+    naming:
+      summary: "The letter of an option: A, B, C, in the order presented."
+
+  - name: loom.decision.UnblockKind
+    kind: enum
+    variants: [approval, question, outcome]
+    naming:
+      summary: "What the decision unblocks. approval: an action that is approval-required, decided by an authority grant. question: an interview question a writer hands off (questions.answer handoff, docs/driver.md:112-114). outcome: a case outcome that requires an explicit decision (canon-decisions/1); its request has two options, the decision (produces canon_decisions) and 'leave it untaken' (produces none)."
+
+  - name: loom.decision.Unblocks
+    kind: struct
+    naming:
+      summary: "The case and the protocol action, question or outcome the decision unblocks."
+    fields:
+      - {name: kind, type: loom.decision.UnblockKind}
+      - {name: action, type: loom.decision.ActionId}
+      - {name: capability, type: Optional<loom.decision.CapabilityId>, summary: "The capability whose grant decides an approval."}
+      - {name: question_id, type: Optional<String>, summary: "The question id in questions.yaml, for kind question."}
+      - {name: outcome, type: Optional<loom.decision.OutcomeId>, summary: "The outcome, for kind outcome."}
+
+  - name: loom.decision.Grant
+    kind: enum
+    variants: [granted, denied]
+    naming:
+      summary: "A canon-authority/1 decision (documents.md:123-132)."
+
+  - name: loom.decision.Consequence
+    kind: struct
+    naming:
+      summary: "What choosing the option does to the protocol."
+    fields:
+      - {name: admits, type: "List<loom.decision.ActionId>", summary: "Actions that become admissible."}
+      - {name: blocks, type: "List<loom.decision.ActionId>", summary: "Actions that become blocked."}
+      - {name: grant, type: Optional<loom.decision.Grant>, summary: "The authority entry the option writes, for an approval."}
+      - {name: answer, type: Optional<String>, summary: "The answer written to questions.yaml, for a question."}
+      - {name: produces, type: Optional<loom.decision.ProducedDocument>, summary: "The kind of Canon record the option produces when decided; absent when it produces none, such as 'leave it untaken' on an outcome request. Only a decided option that produces a record goes through RecordProduced before the run resumes."}
+
+  - name: loom.decision.DecisionOption
+    kind: struct
+    naming:
+      summary: "One option of a decision request."
+    fields:
+      - {name: letter, type: loom.decision.OptionLetter}
+      - {name: does, type: String, summary: "What the option does, one sentence."}
+      - {name: cost, type: String, summary: "What it costs: work, time, scope or risk."}
+      - {name: consequence, type: loom.decision.Consequence}
+
+  - name: loom.decision.Strength
+    kind: enum
+    ordered: true
+    variants: [none, weak, moderate, strong]
+    naming:
+      summary: "How strongly the grounds support the recommended option. none: the request carries no recommendation (stored before Recommend and after a withheld one; a Recommend sending none is refused). strong: a vision, requirement, PRD, story or spec states it, or a prior decision on the same question and subject stands with its grounds unchanged. moderate: a policy, an autonomy rule or an evidence record supports it by inference. weak: the grounds make it plausible only."
+
+  - name: loom.decision.GroundSource
+    kind: enum
+    variants: [idea, vision, requirement, prior_decision, prd, story, spec, policy, evidence_record, autonomy_rule, goals]
+    naming:
+      summary: "The kind of source a ground cites. idea: the person's own input and its dissection items (work/idea.yaml, work/dissection.yaml), which the decider cites (d1 to d4 in runs/trial-todo-1/decisions.jsonl). goals: one entry of the requester's goals document (sdc.goals/1, docs/requester.md § 2), cited as artifact_revision of artifact goals with its entry id and the entry's digest, displayed goals@<revision>#<entry id>."
+
+  - name: loom.decision.RecordStore
+    kind: enum
+    variants: [sdc_decisions, canon_evidence, canon_authority, canon_decisions, aep_artifact]
+    naming:
+      summary: "Where a cited record id is looked up: the decision request log, a case's evidence/ (canon-evidence/1 id), authority.json, decisions.json, or an AEP planning store (kind:name)."
+
+  - name: loom.decision.PathLineCitation
+    kind: struct
+    fields:
+      - {name: path, type: String, summary: "A file path relative to the repository root."}
+      - {name: line, type: Integer}
+      - {name: line_end, type: Optional<Integer>}
+      - {name: digest, type: Optional<String>, summary: "sha256:<hex> of the cited lines when the ground was checked; a different digest later means the ground changed."}
+
+  - name: loom.decision.RecordCitation
+    kind: struct
+    fields:
+      - {name: store, type: loom.decision.RecordStore}
+      - {name: record_id, type: String}
+
+  - name: loom.decision.ArtifactRevisionCitation
+    kind: struct
+    fields:
+      - {name: artifact, type: loom.decision.ArtifactId}
+      - {name: revision, type: loom.decision.Revision}
+      - {name: case, type: Optional<loom.decision.CaseId>, summary: "The case whose snapshot holds the artifact; absent means the request's case."}
+      - {name: entry, type: Optional<String>, summary: "One entry of the artifact, for artifact goals: the entry id (product/p1). The ground rests on that entry: it must exist in the current goals layers, apply at the check's instant (inside its validity window, not overridden by a lower layer) and still have the digest. A revision that moved since is noted (revision_moved), not refused (docs/requester.md decision 3)."}
+      - {name: digest, type: Optional<String>, summary: "sha256:<hex> of the cited entry as sdc-goals digest prints it; written by the grounding check when absent, so a later check sees a change."}
+
+  - name: loom.decision.Citation
+    kind: union
+    tag: form
+    variants:
+      path_line: loom.decision.PathLineCitation
+      record_id: loom.decision.RecordCitation
+      artifact_revision: loom.decision.ArtifactRevisionCitation
+    naming:
+      summary: "Where a ground is: path:line, a record id, artifact@revision, or one entry of an artifact (goals@<revision>#<entry id>). A program checks that each resolves (tools/decision-grounds.sh; a goals entry through sdc-goals ground)."
+
+  - name: loom.decision.Ground
+    kind: struct
+    naming:
+      summary: "One ground of a recommendation: its source kind, a citation that resolves, the option it supports (or the free answer) and how."
+    fields:
+      - {name: source, type: loom.decision.GroundSource}
+      - {name: citation, type: loom.decision.Citation}
+      - {name: supports, type: Optional<loom.decision.OptionLetter>, summary: "The option the ground supports; absent: it supports the recommended free answer."}
+      - {name: how, type: String, summary: "How the cited text supports the option, one sentence."}
+
+  - name: loom.decision.AutonomyLevel
+    kind: enum
+    ordered: true
+    variants: [A0, A1, A2, A3, A4, A5]
+    naming:
+      summary: "The run's autonomy level, docs/autonomy-levels.md:36-42 and :205-213: A0 Manual, A1 Advised, A2 Internal, A3 To merge, A4 To release, A5 Unattended (eval runs, :41-42). The level does not decide eligibility by itself: with the request's decision class it gives the holder (:241-256, overrides :297-320), and the guards read the holder."
+
+  - name: loom.decision.DecisionClassId
+    kind: newtype
+    of: String
+    naming:
+      summary: "A decision class, an identifier validated against the host's classes document (the keys of sdc.decision-classes/1, docs/autonomy-levels.md:244-257 and :398-413, such as merge or code_review); budget_overrun and limit_hit are Loom built-ins. The domain checks no class beyond escalation, which names the row that gives a request's holder after Escalate; Request refuses it as a class of a new request."
+
+  - name: loom.decision.Holder
+    kind: enum
+    variants: [person, advised, decider, decider_final, rule, rule_final, rule_and_decider, rule_and_decider_final]
+    naming:
+      summary: "Who decides this request, the cell of docs/autonomy-levels.md:242-257 for its class at the run's level (holders :233-239). person: P, a person decides. advised: P+, a person decides with the decider's proposal shown as the recommendation (propose only). decider: D→P, the decider takes any option and an escalate goes to a person. decider_final: D*, an escalate is suppressed and the decider's best is final. rule: R and the cells 'R, then P', a rule decides and an escalate goes to a person. rule_final: the cells 'R: end', a rule decides, an escalate is refused and the run ends. rule_and_decider: R∧D→P, the rule's verdict is recorded as a strong recommendation; the decider takes it (TakeRecommendation) or vetoes, and a veto is an Escalate; it never grants against the rule. rule_and_decider_final: R∧D*, the same, except that a veto is a Decide on the denying option, after which the run ends as refused with no explicitly_abandoned record. Under decider_final and rule_and_decider_final a decider result that is missing, failed or withheld by the grounding check decides the denying option, or ends the run where no option denies, and escalation_suppressed records the cause; a rule verdict withheld under rule_and_decider counts as no recommendation and goes to a person, under rule_and_decider_final the run ends. Override order (docs/autonomy-levels.md § 2.3): person < advised < rule_and_decider < rule, decider (not comparable); each non-final holder < its final variant; rule_and_decider_final < rule_final, decider_final. A move down is a lowering; every other move is a raise and needs the class's admitted ceiling."
+
+  - name: loom.decision.PrincipalKind
+    kind: enum
+    variants: [person, decider, rule, silence]
+    naming:
+      summary: "person: a named person. decider: decider:<kind>. rule: rule:<name>, a program deciding from evidence (docs/autonomy-levels.md:202-203). silence: the recommended default taken because nobody answered before expires_at (not in autonomy-levels.md; a person-facing addition, A0 to A4 only in practice)."
+
+  - name: loom.decision.ProposerKind
+    kind: enum
+    variants: [rule, llm, person, prior_decision]
+    naming:
+      summary: "Who proposed the recommendation: a deterministic rule, an LLM (accepted only when its citations pass the grounding check), a person, or the reuse of a prior decision."
+
+  - name: loom.decision.CheckVerdict
+    kind: enum
+    variants: [verified, refused]
+    naming:
+      summary: "The grounding check's verdict on a proposed recommendation: verified when it cites at least one ground, every citation resolves and a ground supports the recommended option or free answer; refused otherwise."
+
+  - name: loom.decision.ProducedDocument
+    kind: enum
+    variants: [canon_authority, canon_decisions, canon_evidence, artifact_revision]
+    naming:
+      summary: "The Canon record a decided request produced. canon_authority: an AuthorityDecision entry bound to the case revision (approval). canon_decisions: an ExplicitDecision entry (outcome). canon_evidence: the approval evidence a manual action produced (context_approval, vision_approval, roadmap_approval). artifact_revision: the new revision of questions.yaml holding the answer (question)."
+
+  - name: loom.decision.ProducedRecord
+    kind: struct
+    fields:
+      - {name: document, type: loom.decision.ProducedDocument}
+      - {name: record, type: String, summary: "The record id: the evidence id (canon_evidence), <capability>@<case_revision> (canon_authority), <outcome>/<decision>@<case_revision> (canon_decisions), or artifact@revision (artifact_revision)."}
+      - {name: case_revision, type: loom.decision.Revision}
+      - {name: aep_record, type: Optional<String>, summary: "The AEP approval-record id, where one was written."}
+
+  - name: loom.decision.SuppressionCause
+    kind: enum
+    variants: [escalate, failure, withheld, veto, rule_escalate]
+    naming:
+      summary: "Why an escalation was suppressed under a final holder (decider_final, rule_final, rule_and_decider_final). escalate: the decider asked to escalate. failure: the decider's result was missing or failed. withheld: the grounding check withheld the decider's recommendation. veto: the decider vetoed under rule_and_decider_final. rule_escalate: the rule asked to escalate."
+
+  - name: loom.decision.EscalationSuppressedRecord
+    kind: struct
+    naming:
+      summary: "The record kept beside a request when an escalation was suppressed (the escalation_suppressed event the SDC names in prose, decision.yaml:186 and :759 at 00e3557): which request, its class and subject at revision, the reasons, the decider's best option if any, the cause, and when it was kept. Named apart from the error EscalationSuppressed."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: decision_class, type: loom.decision.DecisionClassId}
+      - {name: subject_artifact, type: loom.decision.ArtifactId}
+      - {name: subject_revision, type: loom.decision.Revision}
+      - {name: reasons, type: "List<String>"}
+      - {name: best, type: Optional<loom.decision.OptionLetter>, summary: "The decider's best option, where it named one."}
+      - {name: cause, type: loom.decision.SuppressionCause}
+      - {name: kept_at, type: Timestamp}
+
+entities:
+  - name: loom.decision.DecisionRequest
+    naming:
+      summary: "One decision the system asks of a person or a decider: the question, its options, the recommendation and its grounds, who may decide, and the decision once taken."
+    identity:
+      name: request_id
+      type: loom.decision.DecisionRequestId
+    fields:
+      - {name: case_id, type: loom.decision.CaseId}
+      - {name: question_key, type: String, summary: "<case>|<action>|<question id or empty>: the same question asked again has the same key; a prior decision is looked up by it."}
+      - {name: record_key, type: String, summary: "The record id the request's decision would produce at the case revision when it was opened: <capability>@r<N> (an approval with no scope), <capability>[<key>=<value>,…]@r<N> (with a scope), <outcome>/<decision>@r<N> (an outcome), question:<question id>@<subject revision> (a question). At most one Open or Escalated request has a record key."}
+      - {name: unblocks, type: loom.decision.Unblocks}
+      - {name: subject_artifact, type: loom.decision.ArtifactId, summary: "The artifact under decision."}
+      - {name: subject_revision, type: loom.decision.Revision, summary: "Its revision under decision; the decision applies to this revision only."}
+      - {name: subject_path, type: Optional<String>, summary: "The file to read, relative to the case's work/."}
+      - {name: question, type: String}
+      - {name: options, type: "List<loom.decision.DecisionOption>"}
+      - {name: autonomy_level, type: loom.decision.AutonomyLevel, summary: "The run's level when the request was opened."}
+      - {name: decision_class, type: loom.decision.DecisionClassId}
+      - {name: holder, type: loom.decision.Holder, summary: "Who decides: the class's cell at the run's level, after per-run overrides (docs/autonomy-levels.md:297-320). The guards read it."}
+      - {name: eligible, type: "List<loom.decision.Principal>", summary: "The principals who may decide, handed in by the host; a listed person may decide whatever the holder (lowering is always allowed, docs/autonomy-levels.md:311)."}
+      - {name: addressed_to, type: loom.decision.Principal, summary: "The principal whose inbox holds the request: the eligible person first asked, or the one it was escalated to."}
+      - {name: opened_at, type: Timestamp}
+      - {name: expires_at, type: Optional<Timestamp>, summary: "When silence ends the request: it is decided with the recommended default, or expires."}
+      - {name: supersedes, type: Optional<loom.decision.DecisionRequestId>}
+      - {name: recommended_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: recommended_answer, type: Optional<String>, summary: "A free answer recommended in place of an option, for a question request only."}
+      - {name: recommendation_strength, type: loom.decision.Strength}
+      - {name: default_on_silence, type: Boolean, summary: "Whether silence until expires_at takes the recommended option or answer."}
+      - {name: grounds, type: "List<loom.decision.Ground>"}
+      - {name: recommended_by, type: Optional<loom.decision.ProposerKind>}
+      - {name: grounding_report, type: Optional<String>, summary: "The grounding check's one-line report on the recommendation it verified."}
+      - {name: no_recommendation_reason, type: Optional<String>, summary: "Why the request carries no recommendation: the grounding check's refusals."}
+      - {name: escalated_to, type: Optional<loom.decision.Principal>}
+      - {name: escalation_reason, type: Optional<String>}
+      - {name: decided_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: decided_answer, type: Optional<String>, summary: "The free answer decided in place of an option, for a question request only; it is written to questions.yaml as the answer, as an option's consequence.answer is."}
+      - {name: decided_by, type: Optional<loom.decision.Principal>}
+      - {name: decided_by_kind, type: Optional<loom.decision.PrincipalKind>}
+      - {name: decided_at, type: Optional<Timestamp>}
+      - {name: decided_case_revision, type: Optional<loom.decision.Revision>, summary: "The case revision at the decision, as Decide or TakeRecommendation gave it; the produced record is written at it."}
+      - {name: decision_reasons, type: "List<String>"}
+      - {name: produced_record, type: Optional<loom.decision.ProducedRecord>, summary: "The Canon record the decision produced, set by RecordProduced after the runtime wrote it; absent on a Decided request means the Canon write has not been recorded yet and the run does not resume."}
+      - {name: superseded_by, type: Optional<loom.decision.DecisionRequestId>}
+      - {name: superseded_reason, type: Optional<String>}
+    relations:
+      - name: superseded_request
+        kind: references
+        target: loom.decision.DecisionRequest
+        cardinality: one
+        via: supersedes
+      - name: superseding_request
+        kind: references
+        target: loom.decision.DecisionRequest
+        cardinality: one
+        via: superseded_by
+    invariants:
+      - {any: [not defined(recommended_option), not defined(no_recommendation_reason)]}
+      - {any: [not defined(recommended_answer), not defined(no_recommendation_reason)]}
+      - {any: [default_on_silence == false, recommendation_strength == strong]}
+    lifecycle:
+      initial: Open
+      states: [Open, Escalated, Decided, Superseded, Expired]
+      terminal: [Superseded, Expired]
+      transitions:
+        - {name: recommend, from: [Open], to: Open}
+        - {name: escalate, from: [Open, Escalated], to: Escalated}
+        - {name: decide, from: [Open, Escalated], to: Decided}
+        - {name: record_produced, from: [Decided], to: Decided}
+        - {name: supersede, from: [Open, Escalated, Decided], to: Superseded}
+        - {name: expire, from: [Open, Escalated], to: Expired}
+
+actors:
+  - name: loom.decision.Runtime
+    naming:
+      display: Runtime
+      summary: "Loom's runtime (the SDC's Driver): opens requests where a case stops, records recommendations that passed the grounding check, takes a default on silence and expires on a host tick, records the Canon record it wrote after a decision, and supersedes."
+    may:
+      - loom.decision.Request
+      - loom.decision.Recommend
+      - loom.decision.TakeRecommendation
+      - loom.decision.RecordProduced
+      - loom.decision.Supersede
+      - loom.decision.Expire
+  - name: loom.decision.Person
+    naming:
+      display: Person
+      summary: "A person who answers in the inbox: decides, takes the recommendation, or escalates."
+    may:
+      - loom.decision.Decide
+      - loom.decision.TakeRecommendation
+      - loom.decision.Escalate
+  - name: loom.decision.Decider
+    naming:
+      display: Decider
+      summary: "decider:<kind> (approve, reject, haiku): decides within its autonomy level or escalates. Its recommendation reaches the request only through the driver's Recommend after the grounding check."
+    may:
+      - loom.decision.Decide
+      - loom.decision.TakeRecommendation
+      - loom.decision.Escalate
+
+errors:
+  - name: loom.decision.TooFewOptions
+    summary: "A decision request needs at least two options."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.NotARequestClass
+    summary: "A request cannot be opened in class escalation; Escalate moves an existing request instead."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.UngroundedRecommendation
+    summary: "A recommendation the grounding check verified cites no ground; nothing was recorded."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.OptionOrAnswer
+    summary: "A decision or a verified recommendation names exactly one of an option and a free answer; nothing was recorded."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.AnswerNotAllowed
+    summary: "Only a question request takes a free answer; an approval or an outcome is decided by one of its options. Nothing was recorded."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.NotEligible
+    summary: "The principal may not decide this request at its autonomy level; nothing was decided."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: principal, type: loom.decision.Principal}
+
+  - name: loom.decision.NoDefaultOnSilence
+    summary: "Silence takes only the recommended option of a request whose recommendation is the default on silence."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.SilenceHasDefault
+    summary: "The request has a default on silence: it is decided with principal silence, not expired."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.NotDue
+    summary: "The host tick's instant is before the request's expires_at, or the request has none: silence takes nothing and nothing expires."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.EscalationSuppressed
+    summary: "The holder is final (D* or R∧D*): an escalation is suppressed, not recorded as Escalated."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.ProducedRecordConflict
+    summary: "The request already names a different produced Canon record; the first one recorded stands and nothing changed."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.NoRecordToProduce
+    summary: "The decided option's consequence produces no Canon record; nothing was recorded."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.DecisionStateConflict
+    summary: "The request is not in a state this command acts from; nothing changed."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.NoSuchRequest
+    summary: "No decision request has this id."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+  - name: loom.decision.RecordKeyOpen
+    summary: "An Open or Escalated request already exists for the record key: two open requests for one record id must not exist (the SDC's Decide summary; docs/decisions.md:263-264). Nothing was opened."
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: open_for_record, type: loom.decision.DecisionRequestId, summary: "The open request for the record key."}
+
+commands:
+  - name: loom.decision.Request
+    naming:
+      wire: request
+      display: Request a decision
+      summary: "Open a decision request where a case stops on a decision: an approval-required action, a handed-off question, or an outcome that needs an explicit decision."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: case_id, type: loom.decision.CaseId}
+      - {name: question_key, type: String}
+      - {name: record_key, type: String, summary: "The record id the request's decision would produce at the case revision when it is opened."}
+      - {name: open_for_record, type: Optional<loom.decision.DecisionRequestId>, summary: "The Open or Escalated request the runtime found in the store for record_key, if any."}
+      - {name: unblocks, type: loom.decision.Unblocks}
+      - {name: subject_artifact, type: loom.decision.ArtifactId}
+      - {name: subject_revision, type: loom.decision.Revision}
+      - {name: subject_path, type: Optional<String>}
+      - {name: question, type: String}
+      - {name: options, type: "List<loom.decision.DecisionOption>"}
+      - {name: autonomy_level, type: loom.decision.AutonomyLevel}
+      - {name: decision_class, type: loom.decision.DecisionClassId}
+      - {name: holder, type: loom.decision.Holder}
+      - {name: eligible, type: "List<loom.decision.Principal>"}
+      - {name: addressed_to, type: loom.decision.Principal}
+      - {name: opened_at, type: Timestamp}
+      - {name: expires_at, type: Optional<Timestamp>}
+      - {name: supersedes, type: Optional<loom.decision.DecisionRequestId>}
+    outcomes:
+      - name: escalation-is-not-a-class
+        when: decision_class == "escalation"
+        error: loom.decision.NotARequestClass
+        summary: "The escalation row of docs/autonomy-levels.md:257 is not a request class: Escalate moves an existing request, and the row gives its holder after Escalate. Nothing was opened."
+      - name: too-few-options
+        when: options.count < 2
+        error: loom.decision.TooFewOptions
+        summary: "Fewer than two options: nothing was opened."
+      - name: record-key-open
+        when: defined(open_for_record)
+        error: loom.decision.RecordKeyOpen
+        summary: "An Open or Escalated request exists for the record key, the one named: nothing was opened (refusal, not supersession)."
+      - name: requested
+        creates: loom.decision.DecisionRequest
+        instance: request_id
+        sets:
+          case_id: input.case_id
+          question_key: input.question_key
+          record_key: input.record_key
+          unblocks: input.unblocks
+          subject_artifact: input.subject_artifact
+          subject_revision: input.subject_revision
+          subject_path: input.subject_path
+          question: input.question
+          options: input.options
+          autonomy_level: input.autonomy_level
+          decision_class: input.decision_class
+          holder: input.holder
+          eligible: input.eligible
+          addressed_to: input.addressed_to
+          opened_at: input.opened_at
+          expires_at: input.expires_at
+          supersedes: input.supersedes
+          recommendation_strength: none
+          default_on_silence: false
+          grounds: []
+          decision_reasons: []
+        emits:
+          - loom.decision.DecisionRequested
+        payload:
+          loom.decision.DecisionRequested:
+            request_id: input.request_id
+            case_id: input.case_id
+            subject_artifact: input.subject_artifact
+            subject_revision: input.subject_revision
+        summary: "The request is Open, with no recommendation yet."
+
+  - name: loom.decision.Recommend
+    naming:
+      wire: recommend
+      display: Record a recommendation
+      summary: "Record a recommendation on an open request, after the grounding check (tools/decision-grounds.sh) ran on it. A refused check records no recommendation and the reason. A question request may be recommended a free answer in place of an option (docs/requester.md § 3)."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: recommended_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: recommended_answer, type: Optional<String>, summary: "A free answer in place of an option, for a question request only."}
+      - {name: strength, type: loom.decision.Strength}
+      - {name: default_on_silence, type: Boolean}
+      - {name: grounds, type: "List<loom.decision.Ground>"}
+      - {name: proposed_by, type: loom.decision.ProposerKind}
+      - {name: check_verdict, type: loom.decision.CheckVerdict}
+      - {name: check_report, type: String}
+    outcomes:
+      - name: ungrounded
+        when: {all: [check_verdict == verified, {any: [grounds.count < 1, strength == none]}]}
+        error: loom.decision.UngroundedRecommendation
+        summary: "A verified recommendation without a ground, or with strength none, is a contradiction: nothing was recorded."
+      - name: silence-needs-strong
+        when: {all: [check_verdict == verified, default_on_silence == true, strength != strong]}
+        error: loom.decision.NoDefaultOnSilence
+        summary: "Only a strong recommendation may be the default on silence."
+      - name: option-or-answer
+        when: {all: [check_verdict == verified, {any: [{all: [defined(recommended_option), defined(recommended_answer)]}, {all: [not defined(recommended_option), not defined(recommended_answer)]}]}]}
+        error: loom.decision.OptionOrAnswer
+        summary: "A verified recommendation names exactly one of an option and a free answer."
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: answer-not-allowed
+        when: {all: [check_verdict == verified, defined(recommended_answer)]}
+        when_subject:
+          predicate: unblocks.kind != question
+        error: loom.decision.AnswerNotAllowed
+        summary: "Only a question request is recommended a free answer."
+      - name: withheld
+        when: check_verdict == refused
+        moves: loom.decision.DecisionRequest.recommend
+        instance: request_id
+        sets:
+          recommended_option: {cleared: true}
+          recommended_answer: {cleared: true}
+          recommendation_strength: none
+          recommended_by: {cleared: true}
+          grounding_report: {cleared: true}
+          default_on_silence: false
+          grounds: []
+          no_recommendation_reason: input.check_report
+        emits:
+          - loom.decision.RecommendationWithheld
+        payload:
+          loom.decision.RecommendationWithheld:
+            request_id: input.request_id
+            reason: input.check_report
+        summary: "The check refused the citations: the request carries no recommendation and says why."
+      - name: recommended
+        moves: loom.decision.DecisionRequest.recommend
+        instance: request_id
+        sets:
+          recommended_option: input.recommended_option
+          recommended_answer: input.recommended_answer
+          recommendation_strength: input.strength
+          default_on_silence: input.default_on_silence
+          grounds: input.grounds
+          recommended_by: input.proposed_by
+          grounding_report: input.check_report
+          no_recommendation_reason: {cleared: true}
+        emits:
+          - loom.decision.RecommendationRecorded
+        payload:
+          loom.decision.RecommendationRecorded:
+            request_id: input.request_id
+            recommended_option: input.recommended_option
+            recommended_answer: input.recommended_answer
+            strength: input.strength
+        summary: "The request carries the recommendation and its verified grounds."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is not Open."
+
+  - name: loom.decision.Decide
+    naming:
+      wire: decide
+      display: Decide
+      summary: "Take one option of an Open or Escalated request. Decide checks every guard and writes no Canon record. Where the option's consequence names a produces kind, the runtime then writes that Canon record, keyed by its record id (the Canon entry carries no request id; two open requests for the same record id must not exist); RecordProduced stores it as produced_record; the run resumes only once produced_record is set. If the case revision moved between Decide and the Canon write, the write is refused and the request is superseded. A crash after Decide leaves a Decided request without produced_record, and the retry writes the Canon record and records it. An option that produces no record resumes or ends the run directly after Decide. A question request may be decided with a free answer in place of an option (both of the operator's trial-2 answers were 'neither option as asked', docs/requester.md § 1); the answer is written to questions.yaml and produces its new revision (artifact_revision)."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: option, type: Optional<loom.decision.OptionLetter>}
+      - {name: answer, type: Optional<String>, summary: "A free answer in place of an option, for a question request only."}
+      - {name: principal, type: loom.decision.Principal}
+      - {name: principal_kind, type: loom.decision.PrincipalKind}
+      - {name: decided_at, type: Timestamp}
+      - {name: case_revision, type: loom.decision.Revision, summary: "The case revision at the decision, kept as decided_case_revision."}
+      - {name: reasons, type: "List<String>"}
+    outcomes:
+      - name: silence-takes-recommendation
+        when: principal_kind == silence
+        error: loom.decision.NotEligible
+        summary: "Silence never chooses an option: a default on silence is taken through TakeRecommendation."
+      - name: option-or-answer
+        when: {any: [{all: [defined(option), defined(answer)]}, {all: [not defined(option), not defined(answer)]}]}
+        error: loom.decision.OptionOrAnswer
+        summary: "A decision names exactly one of an option and a free answer."
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: answer-not-allowed
+        when: defined(answer)
+        when_subject:
+          predicate: unblocks.kind != question
+        error: loom.decision.AnswerNotAllowed
+        summary: "An approval or an outcome is decided by one of its options; only a question request takes a free answer."
+      - name: person-only
+        when: principal_kind != person
+        when_subject:
+          predicate: {any: [holder == person, holder == advised]}
+        error: loom.decision.NotEligible
+        summary: "Holder P or P+ (docs/autonomy-levels.md:233-234): only a person decides; at P+ the decider's proposal is the recommendation (propose only)."
+      - name: not-listed
+        when_subject:
+          predicate: {not: {exists: {in: eligible, as: p, that: p == input.principal}}}
+        error: loom.decision.NotEligible
+        summary: "The principal is not in the request's eligible list."
+      - name: decider-under-rule
+        when: principal_kind == decider
+        when_subject:
+          predicate:
+            any:
+              - holder == rule
+              - holder == rule_final
+              - holder == rule_and_decider
+              - all:
+                  - holder == rule_and_decider_final
+                  - {not: {exists: {in: options, as: o, that: {all: [o.letter == input.option, o.consequence.grant == denied]}}}}
+        error: loom.decision.NotEligible
+        summary: "Holder R, R: end or R∧D (docs/autonomy-levels.md:237-239): the decider does not choose an option and never grants against the rule. Under R∧D→P (rule_and_decider) it takes the rule's recommendation through TakeRecommendation or vetoes through Escalate. Under R∧D* (rule_and_decider_final) its veto is a Decide on the denying option (consequence.grant denied) and nothing else; the run then ends as refused, with no explicitly_abandoned record (:275-276)."
+      - name: rule-not-holder
+        when: principal_kind == rule
+        when_subject:
+          predicate: {not: {any: [holder == rule, holder == rule_final]}}
+        error: loom.decision.NotEligible
+        summary: "A rule decides alone only where the holder is R or R: end (docs/autonomy-levels.md:237-238)."
+      - name: decided
+        moves: loom.decision.DecisionRequest.decide
+        instance: request_id
+        sets:
+          decided_option: input.option
+          decided_answer: input.answer
+          decided_by: input.principal
+          decided_by_kind: input.principal_kind
+          decided_at: input.decided_at
+          decided_case_revision: input.case_revision
+          decision_reasons: input.reasons
+        emits:
+          - loom.decision.DecisionTaken
+        payload:
+          loom.decision.DecisionTaken:
+            request_id: input.request_id
+            option: input.option
+            answer: input.answer
+            principal: input.principal
+        summary: "The request is Decided and has no produced_record yet; RecordProduced adds it after the runtime wrote the Canon record."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is not Open or Escalated."
+
+  - name: loom.decision.TakeRecommendation
+    naming:
+      wire: take-recommendation
+      display: Take the recommendation
+      summary: "Decide a request with its recommended option or free answer, which must be strong: a person accepting it, a decider under R∧D (the rule's verdict is the strong recommendation; docs/autonomy-levels.md:239, the merge rule :261-267) or under D→P and D*, or silence when the recommendation is the default on silence. Silence is fired by a host tick that passes the instant as decided_at, at or after expires_at; the command reads no clock. The option or answer is read from the request, never sent. As with Decide, no Canon record is written here: the runtime writes it afterwards and records it through RecordProduced."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: principal, type: loom.decision.Principal}
+      - {name: principal_kind, type: loom.decision.PrincipalKind}
+      - {name: decided_at, type: Timestamp}
+      - {name: case_revision, type: loom.decision.Revision, summary: "The case revision at the decision, kept as decided_case_revision."}
+      - {name: reasons, type: "List<String>"}
+    outcomes:
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: person-only
+        when: {any: [principal_kind == decider, principal_kind == rule]}
+        when_subject:
+          predicate: {any: [holder == person, holder == advised]}
+        error: loom.decision.NotEligible
+        summary: "Holder P or P+: only a person decides, a recommendation included."
+      - name: not-listed
+        when: principal_kind != silence
+        when_subject:
+          predicate: {not: {exists: {in: eligible, as: p, that: p == input.principal}}}
+        error: loom.decision.NotEligible
+        summary: "A person or decider not in the request's eligible list."
+      - name: not-strong
+        when_subject:
+          predicate: recommendation_strength != strong
+        error: loom.decision.NotEligible
+        summary: "Only a strong recommendation is taken through TakeRecommendation, by every principal kind. A person who wants a weak or moderate recommendation chooses its option through Decide. An absent recommendation has strength none."
+      - name: silence-without-default
+        when: principal_kind == silence
+        when_subject:
+          predicate: default_on_silence == false
+        error: loom.decision.NoDefaultOnSilence
+        summary: "Silence takes the recommendation only when it is the default on silence."
+      - name: silence-not-due
+        when: principal_kind == silence
+        when_subject:
+          predicate: {any: [not defined(expires_at), expires_at > input.decided_at]}
+        error: loom.decision.NotDue
+        summary: "Silence is fired by a host tick at or after expires_at; the tick's instant is decided_at."
+      - name: taken
+        moves: loom.decision.DecisionRequest.decide
+        instance: request_id
+        sets:
+          decided_option: {subject: recommended_option}
+          decided_answer: {subject: recommended_answer}
+          decided_by: input.principal
+          decided_by_kind: input.principal_kind
+          decided_at: input.decided_at
+          decided_case_revision: input.case_revision
+          decision_reasons: input.reasons
+        emits:
+          - loom.decision.RecommendationTaken
+        payload:
+          loom.decision.RecommendationTaken:
+            request_id: input.request_id
+            principal: input.principal
+        summary: "The request is Decided with its recommended option or answer and no produced_record yet."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is not Open or Escalated."
+
+  - name: loom.decision.RecordProduced
+    naming:
+      wire: record-produced
+      display: Record the produced Canon record
+      summary: "Store the Canon record the runtime wrote for a Decided request whose decided option produces one (canon-authority/1, canon-decisions/1, canon-evidence/1, or the questions.yaml revision). It runs after Decide or TakeRecommendation and after the Canon write, which is keyed by the record id; the run resumes only once produced_record is set. Sending the record already stored changes nothing; a different record is refused; so is a request whose decided option produces no record."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: produced, type: loom.decision.ProducedRecord}
+    outcomes:
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: already-recorded
+        when_subject:
+          predicate: "coalesce(produced_record.record, \"\") == input.produced.record"
+        preserves: loom.decision.DecisionRequest
+        instance: request_id
+        summary: "A record with the same record id is already stored: record ids key idempotence, so a retry after the record was written changes nothing."
+      - name: produced-conflict
+        when_subject:
+          predicate: defined(produced_record)
+        error: loom.decision.ProducedRecordConflict
+        summary: "A different record is already stored: the first one stands."
+      - name: option-produces-none
+        when_subject:
+          predicate: {all: [defined(decided_option), {not: {exists: {in: options, as: o, that: {all: [o.letter == decided_option, defined(o.consequence.produces)]}}}}]}
+        error: loom.decision.NoRecordToProduce
+        summary: "The decided option produces no Canon record: the run resumes or ends without RecordProduced."
+      - name: recorded
+        moves: loom.decision.DecisionRequest.record_produced
+        instance: request_id
+        sets:
+          produced_record: input.produced
+        emits:
+          - loom.decision.ProducedRecordRecorded
+        payload:
+          loom.decision.ProducedRecordRecorded:
+            request_id: input.request_id
+            produced: input.produced
+        summary: "The Decided request names the Canon record it produced; the run may resume."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is not Decided."
+
+  - name: loom.decision.Escalate
+    naming:
+      wire: escalate
+      display: Escalate
+      summary: "Move an Open or Escalated request to a person. A decider or a rule escalates when it will not decide under D→P, R, or R∧D→P, where an Escalate is also the decider's veto (docs/autonomy-levels.md:235-239, escalation.mode person :385). Under P and P+ an Escalate is a person passing the request on to someone else, also from Escalated. Escalate never opens a request: the escalation row of the class table (:257) is not a request class, it gives the holder of the request after Escalate (P at A2 to A4 in SDC's table)."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: escalate_to, type: loom.decision.Principal}
+      - {name: reason, type: String}
+    outcomes:
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: suppressed
+        when_subject:
+          predicate: {any: [holder == decider_final, holder == rule_final, holder == rule_and_decider_final]}
+        error: loom.decision.EscalationSuppressed
+        summary: "Holder D*, R: end or R∧D* (A5, docs/autonomy-levels.md:236, :255-256, :385, :454-459): no person is asked. Under D* the decider's best is taken through Decide or TakeRecommendation and the driver records escalation_suppressed; under R: end and on an R∧D* veto the run ends."
+      - name: escalated
+        moves: loom.decision.DecisionRequest.escalate
+        instance: request_id
+        sets:
+          holder: person
+          escalated_to: input.escalate_to
+          addressed_to: input.escalate_to
+          escalation_reason: input.reason
+        emits:
+          - loom.decision.DecisionEscalated
+        payload:
+          loom.decision.DecisionEscalated:
+            request_id: input.request_id
+            escalate_to: input.escalate_to
+        summary: "The request waits on the named person and its holder becomes P, the escalation row's cell, so a decider can no longer decide it. A P+ request passed on by a person also becomes P: P and P+ have the same guards, and the recommendation stays."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is not Open or Escalated."
+
+  - name: loom.decision.Supersede
+    naming:
+      wire: supersede
+      display: Supersede
+      summary: "Replace a request by a newer one: the subject moved to a new revision, a ground changed, or a person reopened a decision. The newer request names this one in supersedes."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: superseded_by, type: loom.decision.DecisionRequestId}
+      - {name: reason, type: String}
+    outcomes:
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: superseded
+        moves: loom.decision.DecisionRequest.supersede
+        instance: request_id
+        sets:
+          superseded_by: input.superseded_by
+          superseded_reason: input.reason
+        emits:
+          - loom.decision.DecisionSuperseded
+        payload:
+          loom.decision.DecisionSuperseded:
+            request_id: input.request_id
+            superseded_by: input.superseded_by
+        summary: "The request is Superseded; a decision it held no longer applies. Superseding a Decided request does not revoke the Canon record it produced: Canon's own binding to the subject or case revision decides whether that record still applies."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is already Superseded or Expired."
+
+  - name: loom.decision.Expire
+    naming:
+      wire: expire
+      display: Expire
+      summary: "End a request nobody answered before expires_at, when it has no default on silence. Fired by a host tick that passes the instant as input (at); the command reads no clock."
+    input:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: at, type: Timestamp, summary: "The instant of the host tick that fired the command."}
+    outcomes:
+      - name: no-request
+        unknown_instance: true
+        error: loom.decision.NoSuchRequest
+        summary: "No request has this id."
+      - name: not-due
+        when_subject:
+          predicate: {any: [not defined(expires_at), expires_at > input.at]}
+        error: loom.decision.NotDue
+        summary: "The request has no expires_at, or the tick's instant is before it."
+      - name: has-default
+        when_subject:
+          predicate: default_on_silence == true
+        error: loom.decision.SilenceHasDefault
+        summary: "Decide it with principal silence instead."
+      - name: expired
+        moves: loom.decision.DecisionRequest.expire
+        instance: request_id
+        emits:
+          - loom.decision.DecisionExpired
+        payload:
+          loom.decision.DecisionExpired:
+            request_id: input.request_id
+        summary: "The request is Expired; the case stays stopped."
+      - name: wrong-state
+        wrong_state: true
+        error: loom.decision.DecisionStateConflict
+        summary: "The request is not Open or Escalated."
+
+events:
+  - name: loom.decision.DecisionRequested
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: case_id, type: loom.decision.CaseId}
+      - {name: subject_artifact, type: loom.decision.ArtifactId}
+      - {name: subject_revision, type: loom.decision.Revision}
+  - name: loom.decision.RecommendationRecorded
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: recommended_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: recommended_answer, type: Optional<String>}
+      - {name: strength, type: loom.decision.Strength}
+  - name: loom.decision.RecommendationWithheld
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: reason, type: String}
+  - name: loom.decision.DecisionTaken
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: option, type: Optional<loom.decision.OptionLetter>}
+      - {name: answer, type: Optional<String>}
+      - {name: principal, type: loom.decision.Principal}
+  - name: loom.decision.RecommendationTaken
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: principal, type: loom.decision.Principal}
+  - name: loom.decision.ProducedRecordRecorded
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: produced, type: loom.decision.ProducedRecord}
+  - name: loom.decision.DecisionEscalated
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: escalate_to, type: loom.decision.Principal}
+  - name: loom.decision.DecisionSuperseded
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: superseded_by, type: loom.decision.DecisionRequestId}
+  - name: loom.decision.DecisionExpired
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+
+views:
+  - name: loom.decision.OpenDecisionsForPrincipal
+    naming:
+      wire: open-for-principal
+      display: Open decisions for a principal
+    source: loom.decision.DecisionRequest
+    consistency: read_your_writes
+    params:
+      - {name: principal, type: loom.decision.Principal}
+    filter:
+      all:
+        - {any: [state == Open, state == Escalated]}
+        - addressed_to == param.principal
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: case_id, type: loom.decision.CaseId}
+      - {name: question, type: String}
+      - {name: subject_artifact, type: loom.decision.ArtifactId}
+      - {name: subject_revision, type: loom.decision.Revision}
+      - {name: recommended_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: recommended_answer, type: Optional<String>}
+      - {name: recommendation_strength, type: loom.decision.Strength}
+      - {name: no_recommendation_reason, type: Optional<String>}
+      - {name: opened_at, type: Timestamp}
+      - {name: expires_at, type: Optional<Timestamp>}
+
+  - name: loom.decision.ArtifactDecisionHistory
+    naming:
+      wire: artifact-history
+      display: Decision history of an artifact
+    source: loom.decision.DecisionRequest
+    consistency: read_your_writes
+    params:
+      - {name: artifact, type: loom.decision.ArtifactId}
+    filter: subject_artifact == param.artifact
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: subject_revision, type: loom.decision.Revision}
+      - {name: question, type: String}
+      - {name: state, type: loom.decision.DecisionRequest.State}
+      - {name: decided_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: decided_answer, type: Optional<String>}
+      - {name: decided_by, type: Optional<loom.decision.Principal>}
+      - {name: decided_at, type: Optional<Timestamp>}
+      - {name: produced_record, type: Optional<loom.decision.ProducedRecord>}
+      - {name: supersedes, type: Optional<loom.decision.DecisionRequestId>}
+      - {name: superseded_by, type: Optional<loom.decision.DecisionRequestId>}
+
+  - name: loom.decision.DecisionRequests
+    naming:
+      wire: requests
+      display: Decision requests
+    source: loom.decision.DecisionRequest
+    consistency: read_your_writes
+    fields:
+      - {name: request_id, type: loom.decision.DecisionRequestId}
+      - {name: state, type: loom.decision.DecisionRequest.State}
+      - {name: case_id, type: loom.decision.CaseId}
+      - {name: question_key, type: String}
+      - {name: record_key, type: String}
+      - {name: unblocks, type: loom.decision.Unblocks}
+      - {name: subject_artifact, type: loom.decision.ArtifactId}
+      - {name: subject_revision, type: loom.decision.Revision}
+      - {name: subject_path, type: Optional<String>}
+      - {name: question, type: String}
+      - {name: options, type: "List<loom.decision.DecisionOption>"}
+      - {name: autonomy_level, type: loom.decision.AutonomyLevel}
+      - {name: decision_class, type: loom.decision.DecisionClassId}
+      - {name: holder, type: loom.decision.Holder}
+      - {name: eligible, type: "List<loom.decision.Principal>"}
+      - {name: addressed_to, type: loom.decision.Principal}
+      - {name: opened_at, type: Timestamp}
+      - {name: expires_at, type: Optional<Timestamp>}
+      - {name: supersedes, type: Optional<loom.decision.DecisionRequestId>}
+      - {name: recommended_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: recommended_answer, type: Optional<String>}
+      - {name: recommendation_strength, type: loom.decision.Strength}
+      - {name: default_on_silence, type: Boolean}
+      - {name: grounds, type: "List<loom.decision.Ground>"}
+      - {name: recommended_by, type: Optional<loom.decision.ProposerKind>}
+      - {name: grounding_report, type: Optional<String>}
+      - {name: no_recommendation_reason, type: Optional<String>}
+      - {name: escalated_to, type: Optional<loom.decision.Principal>}
+      - {name: escalation_reason, type: Optional<String>}
+      - {name: decided_option, type: Optional<loom.decision.OptionLetter>}
+      - {name: decided_answer, type: Optional<String>}
+      - {name: decided_by, type: Optional<loom.decision.Principal>}
+      - {name: decided_by_kind, type: Optional<loom.decision.PrincipalKind>}
+      - {name: decided_at, type: Optional<Timestamp>}
+      - {name: decided_case_revision, type: Optional<loom.decision.Revision>}
+      - {name: decision_reasons, type: "List<String>"}
+      - {name: produced_record, type: Optional<loom.decision.ProducedRecord>}
+      - {name: superseded_by, type: Optional<loom.decision.DecisionRequestId>}
+      - {name: superseded_reason, type: Optional<String>}
