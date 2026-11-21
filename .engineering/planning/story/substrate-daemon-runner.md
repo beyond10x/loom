@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:confinement-opens-from-engine-config
 - depends_on: story:engine-configuration-document
-revision: 5
+revision: 6
 ---
 ## Outcome
 
@@ -28,6 +28,16 @@ not starting with `-`; `is_root_name`, `crates/substrate-wire/src/lib.rs:2514-25
 adopts it by that name (`Client::adopt_workspace`, `crates/b10x-substrate-sdk/src/lib.rs:226`) and
 forgets the adopted record, leaving the directory, once the child ended. A directory elsewhere is
 refused `ScopeInvalid` before anything starts, naming the directory and the root.
+
+Where the tree puts a case's workspace when the runner is the daemon: directly under the daemon's
+workspace root. Every case of a tree works in the tree's one workspace, the directory `tree open`
+records (`story:tree-run-command`, `story:child-case-runtime`). Under `adapter: daemon` that
+directory must be `<workspace_root>/<name>`, with `<name>` a root name. For a daemon started by
+`ManagedDaemon` the root is `<data_dir>/workspaces` (`crates/b10x-substrate-sdk/src/managed.rs:164`).
+`tree open --engine` and `tree run --engine` refuse a workspace elsewhere, or one whose name is
+not a root name, as `WorkspaceOutsideDaemonRoot`, naming the workspace and the root. The refusal
+comes before a case file is written or an exec starts. The runner's `ScopeInvalid` stays for a
+direct caller of `run_child` or `spawn_child`.
 
 `run_child`, `spawn_child` and the test runner's `run` behave as under the in-process `linux`
 adapter for every `ChildCommand` option the daemon can honour, and refuse before start, with
@@ -89,7 +99,10 @@ log by `Client::events` (`:341`). A workspace reaches a daemon only by adoption 
 already under its workspace root (SDK `lib.rs:218-248`) or by creating one and writing it file by
 file; the second cannot carry a case workspace (`upstream-blocker:substrate-remote-workspace-content`),
 so this story serves a daemon on the same host and `story:substrate-daemon-on-another-host` the
-rest. `ManagedDaemon` starts a private daemon on a Unix socket, either an external binary or, with
+rest. Adoption takes a root name, not a path, so a workspace one level deeper or beside the root
+cannot be adopted at all; the tree therefore checks the placement when it opens or runs a tree,
+where the operator can still move the workspace, instead of failing at the first step.
+`ManagedDaemon` starts a private daemon on a Unix socket, either an external binary or, with
 the SDK feature `linked-daemon`, the test binary itself re-executed, which needs
 `run_daemon_child_if_requested()` at the start of `main`
 (`crates/b10x-substrate-sdk/src/managed.rs:83-92`, `:405-409`).
@@ -104,6 +117,7 @@ the SDK feature `linked-daemon`, the test binary itself re-executed, which needs
   `story:child-launches-through-confinement-adapters` and `story:bound-commands-run-confined`,
   which edit `ess/intake/domains/confinement.yaml` and `SubstrateRunner::run_child`
   (`crates/loom-intake-slice/src/confinement.rs:475`) before it.
+- Through the chain: `story:tree-run-command`, which records the tree's workspace at `tree open`.
 
 ## ESS first
 
@@ -112,8 +126,9 @@ workspace root, lease seconds); `AppliedConfinement` gains `exec_id` and `ended_
 code), both optional; a new `ExecResourceUsage` (`cpu_millis`, `memory_peak_bytes`,
 `processes_peak`, `process_limit_hits`). `ess/domains/engine.yaml`: `ConfinementSection`'s adapter
 gains `Daemon` with the same members, `StepConfinement` gains `exec_id` and `ended_by`, and
-`EngineRefusal` gains `EndpointInvalid` (the value). On that commit `task intake-drift` and
-`task drift` fail and `crates/loom-intake-slice/tests/daemon_runner.rs` does not compile.
+`EngineRefusal` gains `EndpointInvalid` (the value) and `WorkspaceOutsideDaemonRoot` (workspace,
+root). On that commit `task intake-drift` and `task drift` fail and
+`crates/loom-intake-slice/tests/daemon_runner.rs` does not compile.
 
 ## Acceptance
 
@@ -146,6 +161,11 @@ daemon's Unix socket. Every bullet runs under `Daemon`.
   start for them).
 - A child whose workspace directory is not directly under `workspace_root` is refused
   `ScopeInvalid` naming the directory and the root, before any exec starts.
+- `tree open --engine` with `adapter: daemon` and a workspace in another directory, one two levels
+  under `workspace_root`, and one directly under it named `-x`, each exits non-zero naming
+  `WorkspaceOutsideDaemonRoot`, the workspace and the root, and writes no case file. `tree run
+  --engine` with `adapter: daemon` on a store whose recorded workspace is not directly under the
+  root exits non-zero with the same refusal, and `Client::events` lists no exec start.
 - With a socket path nothing listens on, the constructor is refused before any child starts,
   naming the endpoint; an `endpoint` that is not an absolute path (`https://127.0.0.1:1`) is
   refused by the loader `EndpointInvalid`.
@@ -157,7 +177,8 @@ daemon's Unix socket. Every bullet runs under `Daemon`.
   `ChildResult` (`usage`, `usage_unavailable`), as `website/docs/reference/sdk-stability.md:21`
   requires for the exhaustive structs it lists at `:133-136`.
 - `tree run --engine` with `adapter: daemon` runs the three-level fixture tree of
-  `story:tree-run-command`, and every `action finished` line of a program step names an exec id.
+  `story:tree-run-command`, opened with its workspace directly under `workspace_root`, and every
+  `action finished` line of a program step names an exec id.
 - In the same run, a fixture action whose binding has `arguments_from` runs both its
   `arguments_from` program and its bound program as execs that `Client::get_exec` finds, and
   neither process is a descendant of the `tree run` process.
@@ -169,4 +190,4 @@ Limits per action (`story:action-limits-enforced`). Choosing among several endpo
 another host and an HTTPS endpoint (`story:substrate-daemon-on-another-host`, held by
 `upstream-blocker:substrate-remote-workspace-content`). The kubernetes driver of the daemon. `oci`
 and `pod` through a daemon (`story:confinement-level-on-oci-and-pod`). Usage in process: the adapter
-route reports none.
+route reports none. Moving or copying a workspace into the daemon's root: the operator places it.

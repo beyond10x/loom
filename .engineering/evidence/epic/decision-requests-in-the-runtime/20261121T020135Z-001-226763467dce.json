@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T02:01:35Z",
+  "actor": "human:timo",
+  "artifact": "epic:decision-requests-in-the-runtime",
+  "kind": "epic",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:decision-requests-in-the-runtime-parallel-safety-r2",
+    "review": "review-result:decision-requests-in-the-runtime-parallel-safety-r2",
+    "outcome": "fixed"
+  }
+}

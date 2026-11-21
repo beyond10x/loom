@@ -6,12 +6,12 @@ status: draft
 title: The engine can name a Substrate daemon on another host over HTTPS and run every child there
 summary: Workspace and read-only content to the daemon and back; held by upstream-blocker:substrate-remote-workspace-content
 tags:
-- e2r4
+- sdc
 relations:
 - decomposes: epic:tree-daemon-under-enforced-limits
 - serves: vision:O1
 - depends_on: story:tree-daemon
-revision: 1
+revision: 2
 ---
 ## Outcome
 

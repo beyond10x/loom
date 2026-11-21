@@ -11,7 +11,7 @@ relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
 - depends_on: epic:protocol-tree-on-bindings
-revision: 7
+revision: 8
 ---
 ## Outcome
 
@@ -179,6 +179,8 @@ and one Loom daemon, `tree serve --engine engine-daemon.yaml`, with three run sl
 
 ## Not in scope
 
+- Running the cases of one tree at once, standing trees, a program's view of capacity and
+  flow limits: `epic:concurrent-and-standing-case-trees`.
 - Changes in Substrate. What Loom needs and Substrate lacks is filed as upstream blockers on the
   stories that need it.
 - A limit on output size: the fixed 1 MiB cap stays, with no ceiling and no event kind.

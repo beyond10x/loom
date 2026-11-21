@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:agent-node-run-records
 - depends_on: story:named-egress-per-action
-revision: 5
+revision: 7
 ---
 ## Outcome
 
@@ -22,6 +22,11 @@ time. It listens on a Unix socket of the local user, `$XDG_RUNTIME_DIR/b10x-loom
 flag and variable to find it. `tree open`, `run`, `approve`, `close`, `status`, `verify` and the new
 `tree stop` reach a tree through the daemon when it is running and work on the store directly, as
 before, when it is not (`tree stop` then exits non-zero naming `DaemonUnreachable`).
+
+`tree serve` requires the `Daemon` runner (`story:substrate-daemon-runner`). An engine
+configuration whose confinement is opened in process (`adapter: linux` or `adapter: local`) is
+refused at start as `DaemonRunnerRequired`, naming the adapter. The refusal comes before the
+daemon binds its socket or takes any store's lock, and it exits non-zero.
 
 Through the daemon, `tree run <store>` submits the tree (`Submit`) and blocks until it stops, then
 exits as a direct `tree run` would for that stop: 0 at a terminal outcome, 3 when it waits on a
@@ -69,6 +74,17 @@ Substrate 0.21.0 a lapsed lease kills the exec and records it `Expired`
 and a lease is at least 1000 ms (`lib.rs:409`). This story is the last unheld one of the epic and
 owns the epic's acceptance test, `crates/loom-cli/tests/tree_daemon_limits.rs`.
 
+Why only the `Daemon` runner: in process, a `SubstrateRunner` and its clones share one Substrate
+driver per directory holding their workspaces, set of egress apertures and certificate bundle.
+Opening a driver ends every confined run under its cgroup root, so while a launch of the process
+runs, a launch that needs a driver for another directory, aperture set or bundle is refused
+`CapabilityUnserved` (`crates/loom-intake-slice/src/confinement.rs:113-124`, the rule at
+`:117-124`). Two served trees whose steps select different apertures, or whose workspaces sit in
+different directories, would refuse each other's steps whenever both run. The restart rule needs
+the daemon runner too: only a Substrate daemon kills an interrupted step's exec once its lease
+lapses, and `lease_seconds` exists only on `adapter: daemon`. The epic's gate runs `tree serve`
+under `Daemon` already.
+
 ## Waits on
 
 - `story:named-egress-per-action`: the story before this one in the chain, the last unheld story
@@ -77,21 +93,22 @@ owns the epic's acceptance test, `crates/loom-cli/tests/tree_daemon_limits.rs`.
   tree, which the daemon counts the same way; it edits `ess/domains/tree.yaml` and
   `crates/loom-cli/src/lib.rs` before this story.
 - Through the chain: `story:engine-configuration-document` (`--engine`),
-  `story:substrate-daemon-runner` (the exec lease, `lease_seconds`), `story:action-limits-enforced`
-  (the per-run ceilings and the used times), `story:limit-hits-in-run-log` (`TreeStatus`'s
-  limit-hit count, edited in `ess/domains/tree.yaml` before this story).
+  `story:substrate-daemon-runner` (the exec lease, `lease_seconds`, and the `Daemon` runner this
+  story requires), `story:action-limits-enforced` (the per-run ceilings and the used times),
+  `story:limit-hits-in-run-log` (`TreeStatus`'s limit-hit count, edited in
+  `ess/domains/tree.yaml` before this story).
 
 ## ESS first
 
 `ess/domains/tree.yaml`: `TreeDaemon` (socket, run slots), `ServedTree` with the lifecycle
 `Queued`, `Running`, `Waiting`, `Stopped`, `Terminal`, the commands `Open`, `Submit`, `Approve`,
-`Close` and `Stop`, the refusals `StoreServed` (socket), `DaemonUnreachable` and
-`AgentStepUnconfined` (action), `TreeStop` gains `Stopped`, and `TreeStatus` gains `served`
-(optional, the tree's `ServedTree` state). `ess/domains/engine.yaml`: `ServeSection` (`run_slots`)
-and `EngineConfiguration` gains optional `serve`. The tree domain then has commands, so its
-conformance scenarios are synthesized (`ess/scenarios/`, `crates/loom-conformance`, as
-`story:tree-run-command`'s scope names for that case); on that commit `task drift` fails and the
-new scenarios are red.
+`Close` and `Stop`, the refusals `StoreServed` (socket), `DaemonUnreachable`,
+`AgentStepUnconfined` (action) and `DaemonRunnerRequired` (adapter), `TreeStop` gains `Stopped`,
+and `TreeStatus` gains `served` (optional, the tree's `ServedTree` state).
+`ess/domains/engine.yaml`: `ServeSection` (`run_slots`) and `EngineConfiguration` gains optional
+`serve`. The tree domain then has commands, so its conformance scenarios are synthesized
+(`ess/scenarios/`, `crates/loom-conformance`, as `story:tree-run-command`'s scope names for that
+case); on that commit `task drift` fails and the new scenarios are red.
 
 ## Acceptance
 
@@ -115,6 +132,10 @@ socket under the test's directory named by `--socket`:
 - `tree run` directly on a served store (with `--socket` naming a path nothing listens on) exits
   non-zero naming `StoreServed` and the daemon's socket, not `StoreInUse`; with no daemon running
   the same command works on the store as in `story:tree-run-command`.
+- `tree serve --engine` with a file whose confinement is `adapter: linux`, and with one whose
+  confinement is `adapter: local` with a reason, each exits non-zero naming `DaemonRunnerRequired`
+  and the adapter. No socket exists at the `--socket` path afterwards, and a direct `tree run` on a
+  store of the test then takes its lock.
 - Under an engine configuration with `lease_seconds: 2`, the daemon killed with SIGKILL during a
   step and started again continues each tree: the interrupted action is performed again, the
   Substrate daemon's event log (`Client::events`) shows the interrupted step's exec `Expired` before
@@ -141,7 +162,8 @@ socket under the test's directory named by `--socket`:
 
 ## Out of scope
 
-Running two cases of one tree at once. Interrupting a running step (`tree stop --now`). A network
+Running two cases of one tree at once (`story:concurrent-cases-in-the-tree-daemon`). Interrupting a running step (`tree stop --now`). A network
 listener, authentication beyond the local user, a hosted service. Placing trees on several hosts.
 Reloading a changed engine configuration in a running daemon. Agent steps under the daemon
-(`story:agent-session-through-substrate`).
+(`story:agent-session-through-substrate`). `tree serve` on an in-process runner, and one driver
+per union of aperture sets that would allow it.

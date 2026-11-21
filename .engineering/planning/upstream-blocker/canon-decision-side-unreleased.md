@@ -11,7 +11,7 @@ relations:
 - blocks: story:requests-from-canon-pending-decisions
 - blocks: story:decided-records-carry-grounds-to-canon
 - blocks: story:authority-records-bound-and-grounded-in-canon
-revision: 2
+revision: 3
 ---
 ## What is missing
 
@@ -60,5 +60,6 @@ dependencies), and an engineering-protocols tag built on it: Loom moves Canon to
 ## Who
 
 Session `canon` owns the three stories and reported them to this planning on 2026-11-21 through
-the coordinator. Session `sdc` sent the original requests (`~/beyond10x/sdc/docs/decisions.md:219-231`).
-No release date is known.
+the coordinator. Session `sdc` sent the original requests, "To the Canon session" and "To the Loom
+session" (`~/beyond10x/sdc/docs/decisions.md:279-315`); Canon's answer to the first two is at
+`decisions.md:295-297`. No release date is known.

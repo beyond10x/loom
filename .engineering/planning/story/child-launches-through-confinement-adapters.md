@@ -4,13 +4,17 @@ id: story:child-launches-through-confinement-adapters
 kind: story
 status: draft
 title: run_child and spawn_child launch through Substrate's confinement adapters, not HostDriver directly
-summary: 'ADR 0109 decision 6, second half for loom: launches go through the contract; waits on the linux adapter''s scoped write'
+summary: '''ADR 0109 decision 6, second half for loom: launches go through the contract; b10x-substrate-host regains its kubernetes feature so pod opens, which brings aws-lc-rs back into the operator''''s graph'''
 tags:
 - adr-0109
 relations:
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:substrate-0-21-pin
 scope:
+- confidence: inferred
+  path: Cargo.lock
+- confidence: inferred
+  path: crates/loom-intake-slice/Cargo.toml
 - confidence: cited
   path: crates/loom-intake-slice/src/confinement.rs
 - confidence: cited
@@ -26,8 +30,12 @@ scope:
 - confidence: cited
   path: crates/loom-intake-slice/tests/confinement.rs
 - confidence: inferred
+  path: crates/loom-operator/src/main.rs
+- confidence: inferred
+  path: crates/loom-operator/tests/startup.rs
+- confidence: inferred
   path: website/docs/reference/sdk-stability.md
-revision: 9
+revision: 12
 ---
 ## Outcome
 
@@ -36,14 +44,40 @@ revision: 9
 `HostDriver` requests themselves. Writes stay scoped to the paths the host names, and each launch
 records the adapter and facts it ran under, as `tests.run` does.
 
+Loom builds `b10x-substrate-host` with the `kubernetes` feature again, so that the contract can
+open `pod` as it opens `oci`, `linux` and `local`. Since wave 2026-11-21-w1 the manifest reads
+`default-features = false, features = ["git"]` (`crates/loom-intake-slice/Cargo.toml:31`), and in
+that build Substrate 0.21.0 compiles `pod` without a cluster client: every open is refused
+`confinement.adapter-unserved` naming `pod` and the feature
+(`crates/substrate-host/src/confinement/pod.rs:2012-2014`, `pod_unserved.rs`). This story makes
+the line `features = ["git", "kubernetes"]`, still with `default-features = false`.
+
+That brings `aws-lc-rs` back into the operator's graph. The feature adds
+`b10x-substrate-kubernetes-client` (`crates/substrate-host/Cargo.toml:22`, `:41`), whose `rustls`
+and `tokio-rustls` are Substrate's workspace pins with `aws_lc_rs` (Substrate `Cargo.toml:54`,
+`:68`). `b10x-loom-operator` reaches `b10x-substrate-host` through `b10x-loom-sdk`
+(`crates/loom-operator/Cargo.toml:23`), so its graph again enables both rustls providers: `ring`
+through kube's `rustls-tls` and its own `rustls` pin (`crates/loom-operator/Cargo.toml:29-30`),
+`aws-lc-rs` through Substrate. The binary stays correct because `run` installs `ring` as the
+process default before it builds a client (`crates/loom-operator/src/main.rs:58`), which is what
+`run_builds_its_tls_client_and_connects_to_the_cluster` checks: the process connects and its
+standard error holds no `CryptoProvider` (`crates/loom-operator/tests/startup.rs:89`). Only the
+comments that say `aws-lc-rs` left with Substrate 0.21.0 become wrong (`main.rs:52-56`,
+`startup.rs:2-6`), and this story rewrites them.
+
 ## Why
 
 ADR 0109 decision 6: "loom-sdk and takt consume Substrate only and delete their own confinement
 code". story:substrate-0-12-pin moved admission onto the `linux` adapter's facts
 (`linux::proof`), but launches still open `HostDriver` directly (`crates/loom-intake-slice/src/confinement.rs`,
 `HostDriver::open`) with a `Scoped` workspace, because the `linux` adapter in Substrate 0.13.0
-serves the workspace read-write only. The adapter route waits on Substrate's story
-"linux adapter serves a scoped workspace write" (requested 2026-10-27).
+served the workspace read-write only. The adapter route waited on Substrate's story
+"linux adapter serves a scoped workspace write" (requested 2026-10-27), delivered in 0.14.0.
+
+The `kubernetes` feature was turned off in `story:substrate-0-21-pin` (security review pass 1 of
+wave 2026-11-21-w1), which took `aws-lc-rs` out of the graph and left the operator with `ring`
+only. Pass 2 recorded the cost for this story: with `["git"]` the `pod` adapter is not openable;
+`oci`, `linux` and `local` are (`approval-record:loom-wave-2026-11-21-w1`).
 
 ## Acceptance
 
@@ -51,15 +85,26 @@ serves the workspace read-write only. The adapter route waits on Substrate's sto
    `HostDriver::open` remains outside it.
 2. The delegated cases in `tests/confinement.rs` and `tests/confined_child.rs` still hold,
    including the scoped `target` write and a refused write outside it.
-3. `task check` passes.
+3. `crates/loom-intake-slice/Cargo.toml` builds `b10x-substrate-host` with
+   `default-features = false, features = ["git", "kubernetes"]`, and a `pod` open through the
+   contract on a host with no cluster is refused for a reason other than
+   `confinement.adapter-unserved` naming the feature.
+4. With that feature on, `cargo tree -p b10x-loom-operator -i aws-lc-rs --locked` lists a path
+   through `b10x-substrate-host`; `run_builds_its_tls_client_and_connects_to_the_cluster`
+   (`crates/loom-operator/tests/startup.rs`) passes with its assertions unchanged; the comments
+   at `crates/loom-operator/src/main.rs:52-56` and `crates/loom-operator/tests/startup.rs:2-6`
+   say both providers are in the graph and `run` installs `ring`; and `CHANGELOG.md` names
+   `aws-lc-rs` back in the graph.
+5. `task check` passes.
 
 ## Waits on
 
-Read 2026-11-21 against Substrate 0.21.0 (tag commit `adfde402`); Loom pins 0.14.0
-(`crates/loom-intake-slice/Cargo.toml:31-32`). This section replaces the reading of 2026-10-28.
+Read 2026-11-21 against Substrate 0.21.0 (tag commit `adfde402`), which Loom pins since wave
+2026-11-21-w1 (`crates/loom-intake-slice/Cargo.toml:31-32`, `version = "=0.21.0"`). This section
+replaces the reading of 2026-10-28.
 
-- Delivered in Substrate 0.14.0, already in Loom's pin: the `linux` adapter serves
-  `workspace_access: Scoped` on a host whose probe proved `exec.workspace-scoped-write`.
+- Delivered in Substrate 0.14.0: the `linux` adapter serves `workspace_access: Scoped` on a host
+  whose probe proved `exec.workspace-scoped-write`.
 - Delivered in Substrate 0.15.0: standard input through a confinement adapter
   (`StdinMode::Piped`, fact `stdin_pipe`, `write_stdin`, `close_stdin`), proved by `local`,
   `linux`, `macos` and `systemd` (Substrate `CHANGELOG.md`, entry 0.15.0). Substrate's
@@ -72,8 +117,8 @@ Read 2026-11-21 against Substrate 0.21.0 (tag commit `adfde402`); Loom pins 0.14
   `host:port` of `ChildCommand::with_egress` to that aperture's name. That mapping is part of
   this story when it is scoped.
 
-The story no longer waits on a Substrate release. It waits on `story:substrate-0-21-pin`, which
-moves Loom's pin onto a release that has both facts.
+The story waits on nothing: `story:substrate-0-21-pin`, which moved the pin onto a release with
+both facts, is `implemented`.
 
 ## Scope
 

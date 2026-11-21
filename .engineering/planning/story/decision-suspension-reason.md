@@ -4,13 +4,13 @@ id: story:decision-suspension-reason
 kind: story
 status: draft
 title: Commission holds a run for a decision request and resumes it only once it is decided and any record it produces is recorded
-summary: SuspensionReason::Decision, a hold with no action request, resume_after_decision with Recorded or NoRecord
+summary: SuspensionReason::Decision, a hold with no action request, resume_after_decision with Recorded or NoRecord; the optional Suspension members reach the slice's grant module, so the approval story waits on it
 tags:
 - sdc
 relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
-revision: 4
+revision: 6
 ---
 ## Outcome
 
@@ -39,33 +39,61 @@ Suspension's reason is `Authority`, and `resume_after_grant` performs the held r
 the provider allows it (`runtime.rs:384-392`, `:2374`). A `Decision` hold refuses
 `resume_after_grant` (`HeldForDecision`) and an `Authority` hold refuses `resume_after_decision`.
 
+Making the Suspension's `action_request_id`, `action`, `arguments` and `expected_case_revision`
+optional reaches past Commission. `git grep` of the generated `SuspensionData` members and of the
+`SuspensionReason` matches gives every file this story's commit must edit:
+
+- production code: `crates/loom-commission/src/ports/suspension.rs` (`:150`, `:179-181`, `:230`,
+  `:267`), `crates/loom-commission/src/runtime.rs` (`:1207`, `:2408-2433`, `:2521`, `:2572`),
+  `crates/loom-governor/src/file_suspension.rs` (the reason encoder `:281-301`, the decoder
+  `:452-497`), `crates/loom-commission-conformance/src/codec.rs` (the reason codec `:198-216` and
+  its inverse) and `src/lib.rs` (the hold input, `:512-523`), and
+  `crates/loom-intake-slice/src/grant.rs` (`:293`, `:300`, `:315`, `:332`, `:402-403`);
+- tests: `crates/loom-intake-slice/src/handoff.rs:706` (its test module),
+  `crates/loom-agent/tests/serve.rs:628`, `crates/loom-cli/tests/adversary_w10_u3.rs:331-335`,
+  `adversary_w7_u2_state.rs:196`, `adversary_w7_u3_resume.rs:398`, `resume_after_grant.rs:933-937`,
+  `run_state.rs:134`, `:155`, `crates/loom-mandate/tests/mandate_authority.rs:586`, and in
+  `crates/loom-commission-testkit/tests` `adversary_w6_suspend_resume.rs:251`,
+  `adversary_w6_suspend_resume_pass2.rs`, `approval_suspend_resume.rs`, `pending_effect.rs:1227-1228`
+  and `stop_policy.rs:488`.
+
+Each test edit unwraps a member that is now optional and changes no assertion.
+
 ## Why
 
 A run suspends today only on a capability `ApprovalRequired` (`runtime.rs:384-392`);
 `NeedsHumanJudgment` ends it with no Suspension (`crates/loom-commission/src/outcome.rs:118-124`),
 and an executor's `Suspended` suspends the Run but holds no Suspension, so nothing can resume a run
-held for a question or an outcome decision. Resume "once the decision is written to Canon"
-(`decisions.md:241-243`) requires `produced_record` for an option that produces one (session
-`sdc`, 2026-11-21, point 6 and answer d); the `DecidedHold` type carries it, so Commission sees the
-record and never reads Canon or the decision store (`AGENTS.md:96-97`).
+held for a question or an outcome decision. The contract's order ends "The run resumes. Resume
+requires `produced_record`." (`~/beyond10x/sdc/docs/decisions.md:232`; request item 3,
+`decisions.md:309-312`) for an option that produces a record (session `sdc`, 2026-11-21, point 6
+and answer d); the `DecidedHold` type carries it, so Commission sees the record and never reads
+Canon or the decision store (`AGENTS.md:96-97`).
 
 ## Waits on
 
-Nothing in this epic. `story:child-case-runtime` and `story:deterministic-default-selector`
-(`epic:protocol-tree-on-bindings`) also change `ess/commission/domains/responsibility.yaml`; no
-edge orders them, because `story:child-case-runtime` waits on an upstream blocker. Whichever is
-taken second rebases on the other.
+Nothing in this epic. `story:approval-decisions-resume-held-runs` depends on this story: both edit
+`crates/loom-intake-slice/src/grant.rs`, this one because the type change forces it (above), that
+one for `approve`'s refusal of a decision-held commission. `story:question-and-outcome-decisions-hold-runs`
+(which also depends on this story directly) and `story:approvals-supplied-to-canon-evaluation`,
+which edits the same grant module, come after it through that story.
+
+`story:child-case-runtime` and `story:deterministic-default-selector` (`epic:protocol-tree-on-bindings`)
+also change `ess/commission/domains/responsibility.yaml`; no edge orders them, because
+`story:child-case-runtime` waits on an upstream blocker. Whichever is taken second rebases on the
+other. Which of the test files above another story outside this set also edits is for the
+story-scoper.
 
 ## ESS first
 
 `ess/commission/domains/responsibility.yaml`: `SuspensionReason` gains
 `Decision: commission.responsibility.DecisionHold`; `DecisionHold` and `DecidedHold` (with the
 union `DecidedRecord`: `Recorded` carrying the record as JSON, `NoRecord`) are added;
-`Suspension.action_request_id`, `action`, `arguments` and `expected_case_revision` become optional
-with an invariant that they are present unless the reason is `Decision`; the refusals
-`HeldForDecision`, `HeldForAuthority` and `OtherDecision` are added. On that commit the commission
-drift check fails, and `crates/loom-commission-testkit/tests/decision_suspend_resume.rs` does not
-compile.
+`Suspension.action_request_id`, `action`, `arguments` and `expected_case_revision`, and the same
+members of the `HoldSuspension` input, become optional with an invariant that they are present
+unless the reason is `Decision`; the refusals `HeldForDecision`, `HeldForAuthority` and
+`OtherDecision` are added. On that commit the commission drift check fails, and
+`crates/loom-commission-testkit/tests/decision_suspend_resume.rs` does not compile.
 
 ## Acceptance
 
@@ -83,8 +111,12 @@ compile.
   on an `Authority` hold is refused `HeldForAuthority`; neither changes the Suspension.
 - A `FileSuspensionStore` holds a `Decision` Suspension across a real process restart, and a
   Suspension file written before this story (with an action request) still decodes
-  (`crates/loom-commission-testkit/tests/approval_suspend_resume.rs` passes unchanged).
+  (`crates/loom-commission-testkit/tests/approval_suspend_resume.rs` passes; its diff only unwraps
+  the optional members and changes no assertion).
 - A commission holding a `Decision` Suspension starts no Run (`LoopFailure::CommissionSuspended`).
+- `crates/loom-intake-slice` builds and its tests pass with `grant.rs` reading the optional
+  members; `b10x-loom approve` on an `Authority` hold behaves as before
+  (`crates/loom-cli/tests/resume_after_grant.rs` passes).
 - `crates/loom-commission/Cargo.toml` still depends only on the generated `commission` crate.
 - `task check` exits 0.
 
@@ -92,4 +124,5 @@ compile.
 
 Who returns the `Decision` suspension, opening the request, and reading whether its option
 produces a record (`story:question-and-outcome-decisions-hold-runs`). Any timer. Changing the
-approval path.
+approval path. Refusing `approve` on a decision-held commission
+(`story:approval-decisions-resume-held-runs`).

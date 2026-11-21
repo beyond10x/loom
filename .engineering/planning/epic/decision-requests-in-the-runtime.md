@@ -4,13 +4,13 @@ id: epic:decision-requests-in-the-runtime
 kind: epic
 status: draft
 title: A run that stops on a decision opens a decision request, routed by autonomy level, and resumes once it is decided
-summary: loom.decision entity, autonomy grant table, decider port behind the grounding check, escalate_when, inbox, host-tick expiry, resume after the decision, approvals supplied to Canon
+summary: loom.decision entity, autonomy grant table, decider port behind the grounding check, escalate_when, inbox, host-tick expiry, resume after the decision, approvals supplied to Canon, a non-independent review as a decision request
 tags:
 - sdc
 relations:
 - serves: vision:O1
 - serves: vision:governed-autonomy
-revision: 5
+revision: 7
 ---
 ## Outcome
 
@@ -25,7 +25,9 @@ state and exit status. A request whose class the host gives an expiry duration e
 tick, or is decided with its default on silence. Once it is decided on an option that produces a
 Canon record, Loom writes that record, records it on the request, and resumes the held run; an
 option that produces none resumes or ends the run directly. Loom hands the approvals it recorded
-to Canon's evaluation. The request is an entity of Loom's ESS, `loom.decision`, with eight
+to Canon's evaluation, and withholds one whose grounds moved. In a tree, a review recorded by a
+producer that is not independent becomes a decision request for a person or a decider, never a
+re-run by the same producer. The request is an entity of Loom's ESS, `loom.decision`, with eight
 commands; its store is durable, and its inbox is a set of CLI and SDK calls, not a service.
 
 ## Why
@@ -51,6 +53,11 @@ invalidated when a revision moves, the decided record) and Loom (the runtime)
 > 4. The entity itself (`sdc/ess/domains/decision.yaml`, commands `Request`, `Recommend`, `Decide`,
 >    `TakeRecommendation`, `RecordProduced`, `Escalate`, `Supersede`, `Expire`) as the contract,
 >    moved into Loom's ESS when it is taken.
+
+The escalation mode of item 2 is met by the holders: the contract's guards read a request's
+holder, not the level (`decisions.md:89-91`), suppression is what the final holders mean, and an
+Escalate always sets the holder to `person`; so the grant table carries no separate mode
+(`story:autonomy-grant-table`).
 
 The contract is `~/beyond10x/sdc/ess/domains/decision.yaml`, which session `sdc` declared final
 on 2026-11-21 (49 declarations, with the scenario `ess/scenarios/merge-a5-veto.yaml`). Session
@@ -88,6 +95,7 @@ Session `sdc` answered a second set the same day; the stories cite these as "ses
   included, is a raise. `limit_hit` has no override (`autonomy-levels.md:299-316`).
 - b. Under `decider_final` a missing, failed or withheld decider result decides the denying
   option, or ends the run where no option denies; `escalation_suppressed` is recorded with the
+  cause. Loom treats an absent decider or rule port as a failed result of that port, with no new
   cause.
 - c. A rule verdict withheld by the grounding check under `rule_and_decider*` is no
   recommendation: to a person when non-final, the run ends when final.
@@ -120,7 +128,10 @@ refused `NoRecordToProduce`. Two rules stay prose only, and Loom enforces them: 
 case revision moved before the Canon write, and no two open requests for one record id
 (`decisions.md:225-228`). The same message records SDC's selector rule: a review recorded by a
 producer that is not independent becomes a pending decision of class `code_review` or
-`spec_acceptance`, never a re-run by the same producer.
+`spec_acceptance`, never a re-run by the same producer. A fourth message answered that a decider's
+review evidence is independent under `independent_on: [different_principal]` when its principal
+differs from the producer's, on three conditions
+(`story:non-independent-review-becomes-decision-request`).
 
 What Loom has, read at `ecefe180`: a run suspends only when the authority provider answers
 `ApprovalRequired` (`crates/loom-commission/src/runtime.rs:384-392`), and `resume_after_grant`
@@ -128,15 +139,17 @@ performs the held request once (`runtime.rs:2374`); `NeedsHumanJudgment` ends th
 Suspension (`crates/loom-commission/src/outcome.rs:118-124`), and the intake slice treats it as
 unexpected (`crates/loom-intake-slice/src/run.rs:928`). Nothing in Loom resembles a decision
 request, an inbox, a holder, an autonomy level, a grounding check or a decider. "Commission sets
-no timer: the host resumes the work" (`AGENTS.md:419`).
+no timer: the host resumes the work" (`AGENTS.md:423`).
 
 ## Stories
 
-In dependency order. Stories 1 to 15 build against fixtures on the Canon Loom pins today. Story 16
-waits on `story:tree-run-command`, and through it on the Canon 0.9.0 pin of
+In dependency order. Stories 1 to 15 build against fixtures on the Canon Loom pins today. Stories
+16 and 20 wait on `story:tree-run-command`, and through it on the Canon 0.9.0 pin of
 `epic:protocol-tree-on-bindings`. Stories 17, 18 and 19 wait on Canon (§ Upstream). Each story's
 code goes in its own module, so a crate's `lib.rs` shared by several stories gains one `mod` line
 per story; the order is kept, and the wave planner keeps two stories that share a file apart.
+Story 13 depends on story 10 because the type change of story 10 forces an edit in
+`crates/loom-intake-slice/src/grant.rs`, which story 13 also edits.
 
 1. `story:decision-request-entity`: the `loom.decision` domain, the crate that applies its eight
    commands, and the `DecisionStore` port with the records kept beside a request.
@@ -150,11 +163,13 @@ per story; the order is kept, and the wave planner keeps two stories that share 
    its records, the decision store and file roots.
 6. `story:llm-decider`: a decider over an llm `Model`, recorded responses only.
 7. `story:decision-routing-by-holder`: a stop becomes a request with its `expires_at`, routed by
-   its holder, with escalation and `escalation_suppressed`.
+   its holder (an absent decider or rule as a failed result), with escalation and
+   `escalation_suppressed`.
 8. `story:escalate-when-conditions`: the four `escalate_when` conditions, checked by a program
    after the decider replies and before `Decide`.
 9. `story:decided-record-written-then-recorded`: Decide, then the Canon record, then
-   `RecordProduced` for an option that produces one; a retry completes a half-finished decision.
+   `RecordProduced` for an option that produces one; a retry completes a half-finished decision;
+   a request whose record kind has no writer waits for one.
 10. `story:decision-suspension-reason`: Commission holds a run for a decision request and resumes
     it only on a decided request, with its record where the option produces one.
 11. `story:decision-inbox-commands`: `b10x-loom decisions` list, show, history, decide, take,
@@ -165,9 +180,11 @@ per story; the order is kept, and the wave planner keeps two stories that share 
     through requests, ends the run on a final holder's end, and `resume` performs the held request
     only on a recorded grant.
 14. `story:question-and-outcome-decisions-hold-runs`: a slice run is held, not ended, on a
-    question or an outcome decision, and resumed on its decision.
+    question or an outcome decision, and resumed on its decision; `decisions record` records a
+    question's answer revision.
 15. `story:approvals-supplied-to-canon-evaluation`: the governor hands Canon the approvals the
-    slice recorded, as `canon-authority/1` records at the current case revision.
+    slice recorded, as `canon-authority/1` records at the current case revision, withholding one
+    whose grounds moved.
 16. `story:tree-waits-open-decision-requests`: each decision wait of `tree run` is a decision
     request, `decisions --tree` acts on the tree's store, the tree's approvals reach Canon, and
     the run log records the decision events.
@@ -176,7 +193,12 @@ per story; the order is kept, and the wave planner keeps two stories that share 
 18. `story:decided-records-carry-grounds-to-canon`: an explicit decision carries its grounds to
     Canon, and one Canon sets aside supersedes the request (blocked).
 19. `story:authority-records-bound-and-grounded-in-canon`: those records carry principal, case
-    revision and grounds, and Canon, not Loom, checks a decided approval's grounds (blocked).
+    revision and grounds, and Canon, not Loom, checks the grounds it can see on a decided approval
+    (blocked).
+20. `story:non-independent-review-becomes-decision-request`: a review recorded by a producer that
+    is not independent becomes a `code_review` or `spec_acceptance` request in `tree run`, decided
+    by a person or an independent decider, never re-run; it also waits on
+    `story:selector-stop-names-set-aside-record`.
 
 Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enforced-limits`:
 `story:run-log-references-exec-file-changes` (the per-exec file-change reference) and
@@ -193,12 +215,12 @@ Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enfor
   resolves none through Mandate and authenticates no principal named on the command line.
 - The level presets, the decision classes and the admitted ceilings as data. They are documents
   the host passes in; SDC ships its own (session `sdc`, 2026-11-21, point 9).
+- A rule. Loom ships none, and no command-line flag supplies one; a host hands a rule in through
+  the SDK, and on the command line a rule holder has none.
+- A run-wide escalation mode beside the holders.
 - A change of autonomy level within a run, and any record of one: no story changes a run's level.
 - An action bound to a `person` executor in a tree. It is work, not a decision, and stays the wait
   of `story:tree-run-command` (`tree approve --action`).
-- A stop for a review recorded by a producer that is not independent (classes `code_review`,
-  `spec_acceptance`). No story of this epic builds it; `story:selector-stop-names-set-aside-record`
-  of `epic:protocol-tree-on-bindings` only names the set-aside record in the selector's stop.
 - Computing the paths an action touched. The host hands them in for `paths_touched`; the slice
   and the tree hand none, so the condition counts as matching there
   (`story:escalate-when-conditions`).
@@ -210,8 +232,10 @@ Two stories session `sdc` also asked for are under `epic:tree-daemon-under-enfor
 - Learning from decided requests (`beyond10x/decider`), and mirroring requests into AEP as
   `approval-record` or `decision-blocker`.
 - The KPIs R18 to R25 of `autonomy-levels.md` § 5.
-- Writing a question's answer into an application file. A question-kind request's record is
-  written by a host writer (`story:decided-record-written-then-recorded`).
+- Writing a question's answer into an application file. The host writes it and records its
+  revision with `decisions record` (`story:question-and-outcome-decisions-hold-runs`).
+- A review independence demand beyond `different_principal`, and model or adapter members on
+  Canon's evidence (`story:non-independent-review-becomes-decision-request`).
 - Changes to Canon, and changes to any artifact of `epic:protocol-tree-on-bindings`.
 
 ## Upstream
@@ -243,8 +267,12 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
   maps the action to its subject.
 - Loom's grounding check applies Canon's two rules to a pending recommendation itself: the cited
   revision is still current, and the cited evidence record is still present. Until story 19, Loom
-  also re-checks a decided approval's grounds before it allows, and hands Canon its approvals in
-  today's `{capability, decision}` shape at the current case revision (stories 15 and 16).
+  also re-checks a decided approval's grounds before it allows and before it hands the approval to
+  Canon, and hands Canon its approvals in today's `{capability, decision}` shape at the current
+  case revision (stories 15 and 16). In a Loom-held case an `artifact_revision` ground cannot move
+  without the case revision, so the grounds this catches are `path_line`, `aep_artifact` and
+  `sdc_decisions` citations; Canon's entries cannot carry those, so Loom keeps checking them after
+  story 19 too.
 - Loom pins Canon at `0.8.0` (`crates/loom-governor/Cargo.toml:15`); `story:canon-0-9-0-pin` moves
   it to `0.9.0` and is itself held by `upstream-blocker:engineering-protocols-on-canon-0-9-0`.
 
@@ -264,13 +292,18 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
   recommendation and `no_recommendation_reason` naming the citation.
 - A slice run whose class the classes document gives `expires_after` opens a request with
   `expires_at`; a `decisions tick --at` past it decides a request with a strong default by
-  `silence` and expires one without, whose run stays held.
+  `silence`, after which `resume` performs the held action once, and expires one without, whose
+  run stays held.
 - A crash injected after `Decide` and before `RecordProduced` leaves a Decided request without a
   record; the next attempt writes the record once and the run resumes once.
-- The same approval under `rule_and_decider` with `escalate_when: [{decider: escalate}]` and a
-  recorded decider reply that escalates goes to a person; under `rule_and_decider_final` the slice
-  run ends `stopped: Refused` with exit 3, one `escalation_suppressed` of cause `condition`, and
-  the request left Open.
+- In a library test with a fixture rule handed in through the SDK, the same approval under
+  `rule_and_decider` with `escalate_when: [{decider: escalate}]` and a recorded decider reply that
+  escalates goes to a person; under `rule_and_decider_final` the slice run ends
+  `stopped: Refused` with one `escalation_suppressed` of cause `condition` and the request left
+  Open. On the command line, with no rule, the same approval at A5 ends `stopped: Refused` with
+  exit 3 and cause `failure`.
+- A granted approval whose `path_line` ground changed while the case revision stayed is not handed
+  to Canon, and `resume` supersedes its request instead of performing the action.
 - A fixture outcome stop decided "leave it untaken" writes no Canon record; `resume` releases the
   hold and the run ends `NoAdmissibleAction` with nothing performed.
 - A fixture tree whose root waits on an approval exits 3 naming a request id; deciding it with
@@ -279,15 +312,18 @@ Both later stories depend on `story:authority-revision-binding` and on `story:mi
   exits 0.
 - After a recorded approval, Canon's own `canon-decision/1` for the case lists the action
   admissible (stories 15 and 16).
+- A fixture tree whose review is recorded by the implementing producer opens a `code_review`
+  request instead of stopping; decided by `decider:stub`, the review record's producer is
+  `decider:stub` and the claim holds (story 20).
 - No test makes a model or network call; `task check` exits 0 on every story's commit.
 
 ## Source
 
 Session `sdc`, 2026-11-21: the relayed request, nine answers, the second answers a to h with
-`escalate_when` and the budget and limit requests, the third message with the final contract, and
-the accepted design calls (an Escalate moves the existing request; a Supersede of a Decided request
-does not revoke the Canon record; the host hands in eligible principals; the inbox is a store
-plus CLI and SDK calls). Session `canon`, 2026-11-21: the three Canon stories above. Documents
-read: `~/beyond10x/sdc/docs/decisions.md`, `autonomy-levels.md`, `fs-changes.md`,
-`sdc/tools/decision-grounds.sh`, `sdc/ess/domains/decision.yaml`,
-`sdc/ess/scenarios/merge-a5-veto.yaml`.
+`escalate_when` and the budget and limit requests, the third message with the final contract, the
+fourth message on a decider's review independence, and the accepted design calls (an Escalate
+moves the existing request; a Supersede of a Decided request does not revoke the Canon record; the
+host hands in eligible principals; the inbox is a store plus CLI and SDK calls). Session `canon`,
+2026-11-21: the three Canon stories above. Documents read: `~/beyond10x/sdc/docs/decisions.md`,
+`autonomy-levels.md`, `fs-changes.md`, `sdc/tools/decision-grounds.sh`,
+`sdc/ess/domains/decision.yaml`, `sdc/ess/scenarios/merge-a5-veto.yaml`.

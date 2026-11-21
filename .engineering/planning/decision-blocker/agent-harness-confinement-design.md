@@ -6,10 +6,10 @@ status: open
 title: Nobody has decided how a Claude Code session gets its files, credential and model endpoint inside a Substrate confinement
 summary: Six questions for the metaharness and Substrate owners, through session sdc; holds story:agent-session-through-substrate
 tags:
-- e2r4
+- sdc
 relations:
 - blocks: story:agent-session-through-substrate
-revision: 1
+revision: 2
 ---
 ## Question
 

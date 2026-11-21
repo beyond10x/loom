@@ -4,14 +4,14 @@ id: story:decision-routing-by-holder
 kind: story
 status: draft
 title: A run's stop on a decision opens a request and routes it by its holder, escalating or suppressing
-summary: Class from the host's classes, principals from the host, expires_at from the class, eight holder rules, suppressed escalations appended through the store port, an open request reused per record id
+summary: Class from the host's classes, principals from the host, expires_at from the class, eight holder rules with an absent decider or rule as a failed result, suppressed escalations appended through the store port, an open request reused per record id
 tags:
 - sdc
 relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 - depends_on: story:decider-port-and-grounding-check
-revision: 5
+revision: 7
 ---
 ## Outcome
 
@@ -38,7 +38,7 @@ Opening:
   now says so (`decision.yaml:67`).
 - The denying option, wherever a rule below names it, is the one whose `consequence.grant` is
   `denied` (session `sdc`, 2026-11-21, third message; `decision.yaml:553-555`). Only an approval
-  has one.
+  has one; an outcome and a question have none.
 - `question_key` is `<case>|<action>|<question id or empty>` and `request_id` is
   `DR-<case>-<action or question id>-<n>`, `n` one more than the requests already stored under the
   key (`decision.yaml:13`, `:227`).
@@ -66,23 +66,43 @@ Opening:
 
 Routing, per holder (`decision.yaml:182-184`, `decisions.md:94-108`); every proposal passes
 `check_grounds` first and is recorded through `Recommend`, verified or withheld. An escalation is
-`Escalate` to the escalation person, which sets the holder to `person` (`decision.yaml:720-724`):
+`Escalate` to the escalation person, which sets the holder to `person` (`decision.yaml:720-724`).
+
+An absent decider or rule port is a failed result of that port. The contract is final and has no
+cause for a missing port; it names a "missing, failed or withheld" decider result under the final
+holders (`decision.yaml:184`, `~/beyond10x/sdc/docs/autonomy-levels.md:277-279`), so every row
+below treats an absent port as that port's failure: where a row escalates, the Escalate's reason is
+`no decider configured` or `no rule configured`; where it records an `EscalationSuppressedRecord`,
+the cause is `failure` and the reasons carry the same words; where it waits on a person, the
+request's `no_recommendation_reason` carries them. A decider failure (`Unavailable`,
+`InvalidReply`, or no decider) counts as an `Escalate` with no `best`
+(`story:decider-port-and-grounding-check`), and under `rule_and_decider*` that is a veto.
 
 | holder | what the router does |
 |---|---|
 | `person` | no decider call; a reusable prior decision is recorded as the recommendation; the request waits on the person |
-| `advised` | the decider proposes; the request waits on the person with the recommendation or the reason for none |
+| `advised` | the decider proposes; the request waits on the person with the recommendation or the reason for none (a failure included) |
 | `decider` | a verified proposal is decided by the decider (`Decide`); an `Escalate`, a failure or a withheld proposal is escalated |
-| `decider_final` | a verified proposal is decided by the decider; `Escalate` is refused `EscalationSuppressed`; an `Escalate` with `best` decides `best`; an `Escalate` with no `best`, a failure or a withheld proposal decides the denying option, and where no option denies, the request stays Open and the route answers `RunEnds` |
-| `rule` | a verified rule proposal is decided by the rule; anything else is escalated |
+| `decider_final` | a verified proposal is decided by the decider; `Escalate` is refused `EscalationSuppressed`; an `Escalate` with `best` decides `best`; an `Escalate` with no `best`, a failure or a withheld proposal decides the denying option and the route answers `Decided`; where no option denies (an outcome, a question), the request stays Open and the route answers `RunEnds` |
+| `rule` | a verified rule proposal is decided by the rule; anything else (an `Escalate`, a failure, a withheld proposal) is escalated |
 | `rule_final` | as `rule`, except that the escalation is suppressed: the request stays Open and the route answers `RunEnds` |
-| `rule_and_decider` | the rule's verified proposal is recorded as a strong recommendation proposed by `rule`; the decider takes it (`TakeRecommendation`) or vetoes, and a veto is escalated; a rule proposal the check withholds is no recommendation, and the request is escalated |
-| `rule_and_decider_final` | as `rule_and_decider`, except that a veto is a `Decide` by the decider on the denying option and the route answers `RunEnds` as refused; a withheld rule proposal leaves the request Open and the route answers `RunEnds` |
+| `rule_and_decider` | the rule's verified proposal is recorded as a strong recommendation proposed by `rule`; the decider takes it (`TakeRecommendation`) or vetoes (a failure included), and a veto is escalated with the recommendation kept; a rule proposal the check withholds, or a rule failure, is no recommendation, and the request is escalated with no decider call |
+| `rule_and_decider_final` | as `rule_and_decider`, except: a veto is a `Decide` by the decider on the denying option and the route answers `RunEnds` as refused; a decider failure decides the denying option and the route answers `Decided`; where no option denies, a veto or a decider failure leaves the request Open and the route answers `RunEnds`; a withheld rule proposal or a rule failure leaves the request Open and the route answers `RunEnds` |
 
 The `decider_final` rule is session `sdc`'s answer b of 2026-11-21, now in the contract
-(`decision.yaml:184`; `decisions.md:104-106`; `~/beyond10x/sdc/docs/autonomy-levels.md:277-279`).
-The rule for a withheld rule proposal under `rule_and_decider*` is answer c (`decisions.md:106-108`,
-`autonomy-levels.md:280-282`).
+(`decision.yaml:184`; `decisions.md:104-106`; `autonomy-levels.md:277-279`), and the rule that a
+stop with no denying option ends the run applies to `rule_and_decider_final` too (the same
+lines). The rule for a withheld rule proposal under `rule_and_decider*` is answer c
+(`decisions.md:106-108`, `autonomy-levels.md:280-282`).
+
+The holder alone decides whether an escalation goes to a person or is suppressed: the request
+stores its holder and the guards read it, not the level (`decisions.md:89-91`), and an Escalate
+always sets the holder to `person` (`decision.yaml:720-724`). There is no run-wide escalation
+mode (`story:autonomy-grant-table`): the document's `escalation.mode` (`person` at A2 to A4,
+`final` at A5, `autonomy-levels.md:385-387`) is what the presets' holders already say. So a
+lowering at A5 to `decider` escalates to the person, and a raise at A1 to `decider` (within an
+admitted ceiling) escalates to the escalation person though A0 and A1 have no decider escalation
+in the document.
 
 A decider `Propose` of another option than the rule's counts as a veto. The route answers
 `AwaitsPrincipal` (request, principal), `Decided` (request), or `RunEnds` (request, cause, and
@@ -101,9 +121,11 @@ Its code goes in its own module of `crates/loom-decision`; `lib.rs` gains one `m
 
 Item 3 of the request (routing to eligible principals, escalation to a named person) and the
 recording of `escalation_suppressed` of item 2 (`decisions.md:304-312`). The decision rules per
-holder are those of `decisions.md:94-102`. Session `sdc` accepted on 2026-11-21 that an Escalate
+holder are those of `decisions.md:94-108`. Session `sdc` accepted on 2026-11-21 that an Escalate
 moves the existing request and that the host hands in the eligible principals. The expiry source
-is the coordinator's decision: the classes document's per-class duration, no CLI flag.
+is the coordinator's decision: the classes document's per-class duration, no CLI flag. An absent
+port as a failed result is the coordinator's decision too: the contract is final, so no cause is
+added.
 
 ## Waits on
 
@@ -139,8 +161,13 @@ in-memory store:
   `expires_at` is `2026-11-22T12:00:00Z`; a `vision` request has no `expires_at`.
 - At `A1` the decider is called once and the request waits on the person with the verified
   recommendation; with a reply citing a moved revision it waits with `no_recommendation_reason`.
+- At `A1` with no decider, the request waits on the person with no recommendation and
+  `no_recommendation_reason` `no decider configured`.
 - At `A3` a verified decider reply on `roadmap` is Decided by `decider:stub`; an `Escalate` reply
   leaves the request Escalated, addressed to the escalation person, with holder `person`.
+- At `A3` with no decider on `roadmap` (`decider`), and with no rule on `rollback` (`rule`), each
+  request is Escalated to the escalation person with holder `person` and the reason
+  `no decider configured` or `no rule configured`; no `EscalationSuppressedRecord` is appended.
 - At `A3` on `rollback` (`rule`), a verified rule proposal is Decided by `rule:stub`; a rule
   `Escalate` leaves the request Escalated to the escalation person with holder `person`, and makes
   no decider call.
@@ -148,15 +175,33 @@ in-memory store:
   subject, revision, reasons, `A` and cause `escalate`, and the request is Decided `A`; with no
   `best` it is Decided `B` (the denying option); a decider failure is Decided `B` with cause
   `failure`; a reply citing a moved revision is Decided `B` with cause `withheld`.
+- At `A5` on `roadmap` (`decider_final`) with no decider, and on `merge` (`rule_and_decider_final`)
+  with a rule verdict that grants and no decider, each request is Decided `B` with one record of
+  cause `failure` whose reasons name `no decider configured`, and the route answers `Decided`.
 - At `A5` on a question whose options have no denying option, a decider failure appends a record
-  with cause `failure`, leaves the request Open, and answers `RunEnds`.
+  with cause `failure`, leaves the request Open, and answers `RunEnds`; an outcome stop `close`
+  under `decider_final` with no decider does the same.
+- At `A5` on an outcome stop classed `rule_and_decider_final`, a decider veto, and a decider
+  failure, each leave the request Open with one record of cause `veto` or `failure` and answer
+  `RunEnds`.
 - At `A4` on `merge`, the rule's verdict is recorded strong and proposed by `rule`; a decider
   `Take` is Decided by the decider through `TakeRecommendation`; a veto leaves it Escalated; a rule
   verdict citing a moved revision leaves no recommendation and the request Escalated. At `A5` a
   veto is Decided `B` with cause `veto` and the route answers `RunEnds` as refused; a withheld rule
   verdict leaves the request Open with cause `withheld` and answers `RunEnds`.
+- At `A4` on `merge` with no decider, the rule's strong recommendation is recorded and the request
+  is Escalated to the escalation person keeping it, with the reason `no decider configured`.
+- At `A4` on `merge` with no rule, the request carries no recommendation and is Escalated to the
+  escalation person with the reason `no rule configured`, and the decider is not called.
 - At `A5` on `budget_overrun` (`rule_final`), a rule `Escalate` appends a record with cause
-  `rule_escalate`, leaves the request Open, and answers `RunEnds`.
+  `rule_escalate`, leaves the request Open, and answers `RunEnds`; with no rule, and on `merge`
+  (`rule_and_decider_final`) with no rule, the request stays Open with one record of cause
+  `failure` whose reasons name `no rule configured`, and the route answers `RunEnds`.
+- At `A5` with the override `roadmap: decider` (a lowering), a decider `Escalate` leaves the request
+  Escalated to the escalation person with holder `person` and appends no
+  `EscalationSuppressedRecord`.
+- At `A1` with the override `roadmap: decider` and an admitted entry `roadmap: decider` (a raise),
+  a decider `Escalate` leaves the request Escalated to the escalation person with holder `person`.
 - The same stop routed twice opens one request: the second routing finds the open request for the
   record key and reuses it. A stop at a new subject revision supersedes the open request, and the
   new request names it in `supersedes`.
@@ -175,5 +220,6 @@ Writing the Canon record and resuming (`story:decided-record-written-then-record
 stories). A person's Escalate, Decide or Take (`story:decision-inbox-commands`). Firing expiry
 (`story:silence-and-expiry-at-a-host-tick`). `escalate_when` (`story:escalate-when-conditions`).
 Building a stop from Canon's `pending_decisions` (`story:requests-from-canon-pending-decisions`).
-A stop for a review recorded by a producer that is not independent (classes `code_review`,
-`spec_acceptance`): no story of this epic builds it yet.
+A stop for a review recorded by a producer that is not independent
+(`story:non-independent-review-becomes-decision-request` routes it through this router). A new
+cause for a missing port.

@@ -4,28 +4,26 @@ id: story:autonomy-grant-table
 kind: story
 status: draft
 title: A run's level, overrides and the host's presets, classes and ceilings resolve into one grant table
-summary: Holders partially ordered; a lowering always, any other move a raise up to the admitted ceiling; limit_hit takes no override; an expiry duration per class; autonomy_resolved
+summary: Holders partially ordered; a lowering always, any other move a raise up to the admitted ceiling; limit_hit takes no override; an expiry duration per class; no escalation mode beside the holders; autonomy_resolved
 tags:
 - sdc
 relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 - depends_on: story:decision-request-entity
-revision: 5
+revision: 7
 ---
 ## Outcome
 
 `b10x-loom-decision` resolves a run's autonomy into one grant table: for every decision class,
-the holder, and for the run, the escalation mode (`none`, `person` or `final`). The inputs are
-the run's level (`A0` to `A5`), and three documents the host passes in: the level presets
-(`loom.autonomy-presets/1`: per level, a holder per class and the escalation mode), the decision
+the holder. The inputs are the run's level (`A0` to `A5`), and three documents the host passes in:
+the level presets (`loom.autonomy-presets/1`: per level, a holder per class), the decision
 classes (`loom.decision-classes/1`: per class id its kind, `approval`, `question`, `outcome`,
 `review` or `control`, the actions and capability it covers, and optionally `expires_after`, a
 whole number of seconds after which an unanswered request of the class may expire), and the
-admitted ceilings
-(`loom.autonomy-admitted/1`: per class the highest admitted holder), plus the run's overrides
-(class to holder) and whether the run is an eval run. Loom ships no presets for host classes and
-no default level: a host that names no level is refused.
+admitted ceilings (`loom.autonomy-admitted/1`: per class the highest admitted holder), plus the
+run's overrides (class to holder) and whether the run is an eval run. Loom ships no presets for
+host classes and no default level: a host that names no level is refused.
 
 Holders are ordered partially, as session `sdc` answered on 2026-11-21 (answer a):
 `person < advised < rule_and_decider < rule` and `rule_and_decider < decider`, with `rule` and
@@ -54,9 +52,19 @@ with no classes document, and Loom holds their rows, read from `autonomy-levels.
 "R, then P" as `rule` and "R: end" as `rule_final` (session `sdc`, 2026-11-21, point 1):
 `budget_overrun` person, person, person, rule, rule, rule_final; `limit_hit` rule at `A0` to `A4`
 and rule_final at `A5`. A host presets document may give `budget_overrun` and may not give
-`limit_hit`. `escalation` is a policy row, not a class: the escalation mode is `none` at `A0` and
-`A1`, `person` at `A2` to `A4`, and `final` at `A5` (`autonomy-levels.md` § 2.2, row "escalation", and § 3.1, `escalation.mode`), read
-from the presets document.
+`limit_hit`.
+
+`escalation` is a policy row, not a class (point 9): it gives the holder of a request after
+Escalate, and the contract fixes that holder as `person` (`~/beyond10x/sdc/ess/domains/decision.yaml:720-724`,
+third message of session `sdc`). The grant table carries no escalation mode. The document's
+`escalation.mode` (`person` at A2 to A4, `final` at A5, `autonomy-levels.md:385-387`) is
+redundant with the holders: the contract's guards read the request's holder, not the level
+(`~/beyond10x/sdc/docs/decisions.md:89-91`); suppression is what `decider_final`, `rule_final`
+and `rule_and_decider_final` mean (`decision.yaml:184`); and the A5 presets are those holders for
+every class but `rollback`, whose A5 cell is `R` (`autonomy-levels.md:244-257`), so under the
+contract a rollback rule's escalate at A5 goes to a person; that cell is SDC's data. Where a run's holder and the document's mode would disagree, a
+lowering at A5 or a raise at A1, the holder governs (`story:decision-routing-by-holder`). A presets
+document that names `escalation` is refused, naming it.
 
 A resolution gives an `AutonomyResolved` record (level, eval flag, the digest of each input
 document, the overrides, and the table). The grant table answers `holder(class)` and
@@ -80,7 +88,8 @@ no crate, and `StopPolicy` (`responsibility.yaml:432-446`) is a per-run stop con
 The order is answer a, now also written in `autonomy-levels.md:299-309`. Expiry is "fired by a
 host tick that passes the instant" (`decisions.md:84-86`), and a request's `expires_at` needs a
 source a host run can give: the coordinator chose a per-class duration in the classes document
-over a CLI flag.
+over a CLI flag. The request's item 2 names "escalation mode person or final"
+(`decisions.md:305-306`); it is met by the final holders, as above, and no story read a mode.
 
 ## Waits on
 
@@ -90,7 +99,7 @@ over a CLI flag.
 ## ESS first
 
 A new domain `loom.autonomy` in `ess/domains/autonomy.yaml`, declared in `ess/system.yaml`:
-`AutonomyLevel`, `EscalationMode`, `AutonomyPresets`, `DecisionClasses`, `DecisionClassKind`,
+`AutonomyLevel`, `AutonomyPresets`, `DecisionClasses`, `DecisionClassKind`,
 `AdmittedCeilings`, `AutonomyOverrides`, `GrantTable`, `AutonomyResolved`, and the refusals
 `AboveCeiling`, `NoOverride`, `EvalOverride`, `UnknownClass`, `NoLevel`, `BadExpiry`. The domain
 declares types only, no command, so no conformance scenario is added. On that commit
@@ -102,16 +111,16 @@ With fixture documents that copy the table of `autonomy-levels.md` § 2.2, with 
 `~/beyond10x/sdc/ess/domains/decision.yaml:176`:
 
 - At `A3`, `holder(roadmap)` is `decider` and `holder(merge)` is `person`; at `A4`,
-  `holder(merge)` is `rule_and_decider`; at `A5`, `rule_and_decider_final`; the escalation mode is
-  `person` at `A3` and `final` at `A5`.
+  `holder(merge)` is `rule_and_decider`; at `A5`, `rule_and_decider_final`.
 - At `A4`, `vision: person` is taken; `merge: decider` at `A3` is refused `AboveCeiling` with no
   admitted entry and taken with an admitted entry `merge: decider`.
 - A move between incomparable holders is a raise: at `A3`, `roadmap: rule` (preset `decider`) is
   refused `AboveCeiling` with no admitted entry, refused with an admitted entry `roadmap: decider`,
   and taken with an admitted entry `roadmap: rule`; at `A5`, `roadmap: rule` (preset
   `decider_final`) is refused `AboveCeiling` with no admitted entry.
-- At `A5`, `roadmap: rule_and_decider_final` (preset `decider_final`) and `roadmap: advised` in a
-  run that is not an eval run are lowerings and are taken with no admitted entry.
+- At `A5`, `roadmap: rule_and_decider_final` (preset `decider_final`), `roadmap: decider` and
+  `roadmap: advised` in a run that is not an eval run are lowerings and are taken with no admitted
+  entry.
 - A test checks every ordered pair of the eight holders against the pairs of answer a: a pair is a
   lowering exactly when the closure of those pairs puts the override below the preset.
 - `limit_hit: person` and `limit_hit: rule_final` are refused `NoOverride` at every level.
@@ -126,11 +135,11 @@ With fixture documents that copy the table of `autonomy-levels.md` § 2.2, with 
   86400 seconds and `expires_after(vision)` (no member) and `expires_after(limit_hit)` are absent;
   `expires_after: 0` is refused `BadExpiry` naming the class.
 - `budget_overrun` and `limit_hit` resolve with an empty classes document; a presets document that
-  names `limit_hit` is refused, naming it.
+  names `limit_hit` or `escalation` is refused, naming it.
 - A classes document with a member the format does not declare (`escalate_when` included) is
   refused, naming the member.
-- `AutonomyResolved` carries the SHA-256 of each document's bytes; the same inputs give the same
-  record bytes.
+- `AutonomyResolved` carries the SHA-256 of each document's bytes and no escalation mode; the same
+  inputs give the same record bytes.
 - `task check` exits 0.
 
 ## Out of scope
@@ -138,4 +147,5 @@ With fixture documents that copy the table of `autonomy-levels.md` § 2.2, with 
 The run's `escalate_when` conditions (`story:escalate-when-conditions`); they are not a member of
 the classes document. A change of level within a run, and any record of one: no story changes a
 run's level. Setting `expires_at` on a request (`story:decision-routing-by-holder`). Mapping an action to its
-class at a stop (`story:decision-routing-by-holder`). SDC's own preset and class files.
+class at a stop (`story:decision-routing-by-holder`). SDC's own preset and class files. A
+run-wide escalation mode.

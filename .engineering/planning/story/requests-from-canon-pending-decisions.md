@@ -13,7 +13,7 @@ relations:
 - depends_on: story:tree-waits-open-decision-requests
 - depends_on: story:canon-0-9-0-pin
 - depends_on: story:approvals-supplied-to-canon-evaluation
-revision: 3
+revision: 4
 ---
 ## Outcome
 
@@ -32,6 +32,12 @@ engineering-protocols tag built on that release, and builds every decision stop 
   2026-11-21, answer d). The subject is given by the caller: Canon names no subject artifact of an
   action, and the caller maps the action to its subject through the bindings file (session
   `canon`, 2026-11-21).
+- Canon gives one `authority` entry per requirement that makes an action approval-required. Each
+  entry is one stop; the router keys requests by `record_key` (`<capability>@<case_revision>`),
+  and `question_key` stays `<case>|<action>|<question id or empty>`
+  (`story:decision-routing-by-holder`). So two entries of one action with two capabilities give
+  two requests under one `question_key`, and two entries with one capability at one revision give
+  one request: the second routing finds the open request for that record key and reuses it.
 - `DecisionHoldingExecutor` (`story:question-and-outcome-decisions-hold-runs`), `DecisionAuthority`
   (`story:approval-decisions-resume-held-runs`) and `tree run`
   (`story:tree-waits-open-decision-requests`) build their stops with it, and the interim reading
@@ -71,8 +77,12 @@ Loom and Canon cannot disagree about what is pending. Loom pins Canon at `0.8.0`
   decision, `pending_decisions` has one entry in each list, and `stop_from_pending` gives an
   approval stop with options `granted`, `denied`, both producing a record, and an outcome stop
   with options take, producing a record, and leave untaken, producing none.
-- An action approval-required by two requirements gives two entries and two requests with
-  distinct `question_key`s and `record_key`s.
+- A fixture action `merge` that requires two capabilities, `change.merge` and `release.approve`,
+  gives two `authority` entries and two requests with the record keys `change.merge@<rev>` and
+  `release.approve@<rev>`, both under the `question_key` `<case>|merge|`.
+- A fixture action `merge` with two requirements naming one capability `change.merge` gives two
+  `authority` entries and one request: the second routing finds the open request for
+  `change.merge@<rev>` and reuses it, and the store holds one request.
 - The slice and tree fixture runs of stories 13, 14 and 16 give the same requests, by id, question,
   options and subject, as before this story.
 - A grep finds no reading of `"present": false` outside `crates/loom-governor`.

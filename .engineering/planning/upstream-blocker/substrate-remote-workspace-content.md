@@ -6,10 +6,10 @@ status: open
 title: No Substrate route carries a case workspace to a daemon on another host and back
 summary: 'At 0.21.0: adoption on the daemon''s host, or per-file writes of at most 1 MiB with no mode; read-only roots are daemon-host paths'
 tags:
-- e2r4
+- sdc
 relations:
 - blocks: story:substrate-daemon-on-another-host
-revision: 1
+revision: 2
 ---
 ## What is missing
 

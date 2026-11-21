@@ -47,7 +47,7 @@ scope:
   path: website/data/status.json
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 9
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":4}}}
 ---
@@ -74,6 +74,11 @@ logic is a new crate, `b10x-loom-tree` (`crates/loom-tree`); `crates/loom-cli` h
 - `tree verify` checks the run log of every case of the tree and names the first line that fails;
 - `tree status` prints the tree as JSON for a live view: per case its id, protocol, revision,
   outcome or stop, open obligations, and the path of its case file and run log.
+
+A case's workspace is the tree's one workspace, the existing directory `tree open` is given as
+`--workspace <dir>` and records in the store beside the root case file: every case of the tree
+works in it, every path of the bindings is relative to it, and under a Substrate daemon it must
+lie directly under the daemon's workspace root (`story:substrate-daemon-runner`).
 
 `tree run` ends with exit 0 at a terminal outcome, 3 when it waits on a person or on authority,
 4 when a case is stuck (nothing useful, no legitimate outcome, nothing awaiting approval), and 5
@@ -173,7 +178,8 @@ model and no engineering vocabulary:
 ## Out of scope
 
 A cap on agent calls and agent events in the log (`story:agent-node-run-records`). Mandate
-approvals for tree cases. A replay command. Running two cases of a tree at once. A service or
+approvals for tree cases. A replay command. Running two cases of a tree at once (the daemon's,
+`story:concurrent-cases-in-the-tree-daemon`; a direct `tree run` stays sequential). A service or
 daemon that watches a store. Turning a wait into a decision request, and `tree approve` through that
 request (`story:tree-waits-open-decision-requests`, `epic:decision-requests-in-the-runtime`).
 

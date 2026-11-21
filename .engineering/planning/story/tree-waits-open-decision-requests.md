@@ -15,7 +15,7 @@ relations:
 - depends_on: story:hash-chained-run-log
 - depends_on: story:agent-node-run-records
 - depends_on: story:approvals-supplied-to-canon-evaluation
-revision: 5
+revision: 6
 ---
 ## Outcome
 
@@ -39,7 +39,10 @@ revision (session `sdc`, 2026-11-21, answer f): a request has one subject
 (`~/beyond10x/sdc/ess/domains/decision.yaml:229-230`), and a binding may list several entries
 (`story:bindings-document` § Outcome). The tree hands the router no touched paths, so a
 `paths_touched` condition counts as matching (`story:escalate-when-conditions`). The router sets
-`expires_at` from the classes document (`story:decision-routing-by-holder`).
+`expires_at` from the classes document (`story:decision-routing-by-holder`). No flag supplies a
+rule (Loom ships no rule): a `rule*` holder in a tree has an absent rule port, which routing treats
+as a failed rule result, so `rule` and `rule_and_decider` escalate to the escalation person and
+`rule_final` and `rule_and_decider_final` end the case's run.
 
 A decider or rule holder decides in the same `tree run`, which goes on once the record is written.
 Where the request waits on a person, `tree run` exits 3 and prints, per request, the case, the
@@ -50,11 +53,17 @@ completes it, so `story:tree-run-command`'s use of it is kept.
 
 The next `tree run` continues past a wait only when its request carries a `produced_record`
 whose grounds still resolve; a ground that no longer resolves supersedes the request and opens a
-new one, as `story:approval-decisions-resume-held-runs` does for the slice. An outcome request
-decided "leave it untaken" produces no record (answer d): the next `tree run` opens no new request
-for that stop at that case revision and goes on directly, and a case left with nothing useful and
-no legitimate outcome ends stuck (exit 4) as `story:tree-run-command` says. `tree status` lists,
-per case, the ids of its Open and Escalated requests.
+new one, as `story:approval-decisions-resume-held-runs` does for the slice. `tree run` builds its
+`HeldCaseGrounds` with the tree's store directory as the root of `path_line` citations. In a
+Loom-held case an `artifact_revision` ground cannot move alone: moving the artifact raises the case
+revision (`crates/loom-governor/src/lib.rs:1042`), the record of the earlier case revision no
+longer applies, and the stop is routed at the new revision under a new record key, while the old
+request stays Decided with its record. The grounds that go stale while the case stays are
+`path_line`, `aep_artifact` and `sdc_decisions` citations, and this check is what catches them.
+An outcome request decided "leave it untaken" produces no record (answer d): the next `tree run`
+opens no new request for that stop at that case revision and goes on directly, and a case left
+with nothing useful and no legitimate outcome ends stuck (exit 4) as `story:tree-run-command` says.
+`tree status` lists, per case, the ids of its Open and Escalated requests.
 
 On `RunEnds` (`story:decision-routing-by-holder`) the case's run ends: `tree run` stops that case
 as `Stuck` with the reason `decision <id> ended the run: <cause>`, takes no further step in the
@@ -73,7 +82,11 @@ silence `decided` lines.
 
 The tree's `CaseApproval` implements the `AuthorityRecords` port of
 `story:approvals-supplied-to-canon-evaluation`, and `tree run` builds its governor and its
-`HeldCaseGrounds` with it, so Canon's evaluation of a case sees the tree's approvals.
+`HeldCaseGrounds` with it, so Canon's evaluation of a case sees the tree's approvals. As in the
+slice, the port reports a `CaseApproval` only while the grounds of the Decided request that
+produced it still resolve (with `canon_authority` citations resolved against the unfiltered
+approvals); a record with a moved ground is withheld, Canon reports the action approval-required
+again, and `tree run` supersedes the request and opens a new one.
 
 Every decision event is a line in the case's run log: `decision requested`, `recommendation
 recorded` or `withheld`, `escalated`, `escalation suppressed` (class, subject at revision, reasons,
@@ -100,8 +113,8 @@ decider or rule holder must not produce it, so it is no decision request.
 - `story:hash-chained-run-log`: the run log this story writes decision events into.
 - `story:agent-node-run-records`: it adds `RunLogEvent` variants to `ess/domains/runlog.yaml` and
   a member to `ess/domains/tree.yaml`, which this story also changes.
-- `story:approvals-supplied-to-canon-evaluation`: the `AuthorityRecords` port and the governor's
-  supply, and both change `crates/loom-cli/src/lib.rs`.
+- `story:approvals-supplied-to-canon-evaluation`: the `AuthorityRecords` port, the governor's
+  supply and its grounds filter, and both change `crates/loom-cli/src/lib.rs`.
 - `story:question-and-outcome-decisions-hold-runs`: both change `crates/loom-cli/src/lib.rs`.
 - `story:decision-routing-by-holder`, `story:escalate-when-conditions`,
   `story:decided-record-written-then-recorded`, `story:decision-inbox-commands` and
@@ -109,6 +122,17 @@ decider or rule holder must not produce it, so it is no decision request.
 
 It does not depend on `story:bound-agent-node`: the decider is not an agent node and works on no
 workspace.
+
+Shared with `epic:tree-daemon-under-enforced-limits`, with no edge either way:
+`story:limit-hits-in-run-log` and `story:engine-configuration-document` also change
+`ess/domains/runlog.yaml`, `ess/domains/tree.yaml` and `crates/loom-tree`;
+`story:action-limits-enforced` and `story:tree-daemon` change `ess/domains/tree.yaml` and
+`crates/loom-tree`; `story:confinement-level-required`, `story:executable-allow-list`,
+`story:named-egress-per-action`, `story:confinement-level-on-oci-and-pod` and
+`story:ingress-routes-per-action` change `crates/loom-tree`. Of this story and any of those, the
+second to land rebases onto the first in each shared file, as `story:limit-hits-in-run-log` says
+from its side. `story:budget-and-limit-stops-raise-decision-requests` and
+`story:run-log-references-exec-file-changes` come after this story through their edges.
 
 ## ESS first
 
@@ -120,7 +144,7 @@ commit `task drift` fails, and `crates/loom-tree/tests/tree_decisions.rs` does n
 ## Acceptance
 
 With the three-level fixture tree of `story:tree-run-command`, fixture autonomy documents and
-principals, a stub rule and a recorded decider, no model call:
+principals, a recorded decider, no rule and no model call:
 
 - At `A0`, `tree run` exits 3 naming `DR-…` and printing its `decisions decide … --tree STORE`
   command; running it and `tree run` again continues; after the last decision the root ends
@@ -130,6 +154,9 @@ principals, a stub rule and a recorded decider, no model call:
   in that case's log.
 - At `A3`, the recorded decider decides the `roadmap`-class approval with grounds that resolve,
   and `tree run` does not stop there.
+- At `A3` with a classes document that puts a child's approval in `rollback` (holder `rule`),
+  `tree run` writes one `escalated` line whose reason is `no rule configured`, exits 3 naming the
+  request, and the request is Escalated to the escalation person.
 - At `A5`, a recorded `Escalate` with `best` writes one `escalation suppressed` line with cause
   `escalate` and the tree goes on with `best`.
 - At `A5` on a root outcome with a decider failure, `tree run` exits 4 naming the root and the
@@ -140,9 +167,14 @@ principals, a stub rule and a recorded decider, no model call:
   printed `decisions decide` command.
 - A request Decided without a record (crash injected) holds the tree at the next `tree run`, which
   first completes it, writes one `record produced` line, and continues.
-- A granted approval whose ground cites `spec@<rev>`: after `spec` moves, the next `tree run`
-  supersedes the request, writes one `superseded` line, opens a new request naming it in
-  `supersedes`, and exits 3.
+- At `A1` an approval taken on a strong recommendation whose `path_line` ground cites lines 1-3 of
+  `notes.md` in the store directory: after those lines are rewritten, with the case revision
+  unchanged, the case's `canon-decision/1` shows the capability approval-required with no
+  authority entry handed over, and the next `tree run` writes one `superseded` line, opens a new
+  request naming the old one in `supersedes`, and exits 3.
+- A granted approval whose case then moves (`spec` revised, the case revision raised): the next
+  `tree run` opens a request with record key `<capability>@<new revision>`, writes no
+  `superseded` line, exits 3, and the old request stays Decided with its record.
 - A recorded decider reply citing a moved revision at `A1` writes one `withheld` line with the
   reason, and the request waits on the person with no recommendation.
 - With the classes document giving `roadmap` `expires_after: 3600` and `--at 12:00`, the request
@@ -170,4 +202,5 @@ binding gives no options. An action bound to a `person` executor: it stays the w
 `story:tree-run-command` (`tree approve --action`). Opening `budget_overrun` and `limit_hit`
 requests at a budget or limit stop (`story:budget-and-limit-stops-raise-decision-requests`).
 Recording the decider's model call in the run log. A daemon that ticks expiry. Computing touched
-paths. A stop for a review recorded by a producer that is not independent.
+paths. A stop for a review recorded by a producer that is not independent
+(`story:non-independent-review-becomes-decision-request`). A flag that supplies a rule.

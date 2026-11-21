@@ -14,7 +14,7 @@ relations:
 - depends_on: story:tree-waits-open-decision-requests
 - depends_on: story:action-limits-enforced
 - depends_on: story:limit-hits-in-run-log
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -23,7 +23,8 @@ class instead of ending at once, and the request's holder decides whether the ru
 extension within the hard limit or ends.
 
 - Which stop raises which class, from the rows of `~/beyond10x/sdc/docs/autonomy-levels.md` § 2.2, rows "budget overrun" and "limit hit":
-  a stop at `--max-agent-calls` (`story:agent-node-run-records`) is `budget_overrun`; a stop at
+  a stop at `--max-agent-calls` (`story:agent-node-run-records`) or at
+  `--max-model-cost-micro-usd` (`story:tree-usage-and-model-budget`) is `budget_overrun`; a stop at
   `--max-steps`, `--max-wall-seconds` or the per-run CPU ceiling (`story:action-limits-enforced`
   § Outcome) is `limit_hit`. A process stopped at its own memory, CPU, wall or process limit ends
   its step, not the run (`story:limit-hits-in-run-log` § Outcome), and raises no request.

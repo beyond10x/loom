@@ -21,7 +21,7 @@ scope:
   path: crates/loom-bindings/tests/bound_program.rs
 - confidence: cited
   path: ess/domains/bindings.yaml
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:45Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":2}}}
 ---
@@ -90,13 +90,16 @@ Each with a fixture protocol of two artifacts and stub programs, no model:
   with the same output leave one file. `crates/loom-governor` is not changed by this story.
 - An action that has already run its `budget.max_runs` times in this case is not performed and is
   reported `RunsSpent`. The count is the number of observations the case's store holds for that
-  action from this effect port; it survives a reopen of the store.
+  action from this effect port; it survives a reopen of the store. An observation (an action
+  whose effect class is not `write`) is never refused `RunsSpent`
+  (`story:run-caps-per-arrival`).
 - The effect port reports `performs` only for actions bound to `program`.
 - `task check` exits 0.
 
 ## Out of scope
 
-Moving artifact revisions after the program ran (`story:bound-artifact-revisions`). Agent,
+Moving artifact revisions after the program ran (`story:bound-artifact-revisions`).
+Counting runs per arrival (`story:run-caps-per-arrival`). Agent,
 person, open and copy executors. Report checks that name a tool (a spec digest, a clean tree).
 
 ## Scope

@@ -4,7 +4,7 @@ id: story:approvals-supplied-to-canon-evaluation
 kind: story
 status: draft
 title: The governor hands Canon the approvals Loom recorded, so Canon's own evaluation sees them
-summary: AuthorityRecords port; canon-authority/1 in today's shape at the current case revision; the slice supplies its own, the tree in tree-waits-open-decision-requests; waits on no Canon pin
+summary: AuthorityRecords port; canon-authority/1 in today's shape at the current case revision; a record whose request's grounds moved is withheld; the slice supplies its own, the tree in tree-waits-open-decision-requests; waits on no Canon pin
 tags:
 - sdc
 relations:
@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:approval-decisions-resume-held-runs
 - depends_on: story:grounds-resolve-against-held-cases
-revision: 3
+revision: 5
 ---
 ## Outcome
 
@@ -22,7 +22,7 @@ in Canon's own decision and in a replay of it.
 
 - `CanonGovernor::with_authority_records` takes the host's `AuthorityRecords` port
   (`story:grounds-resolve-against-held-cases`: case, capability, decision, principal, case
-  revision). The private `decide_case` (`crates/loom-governor/src/lib.rs:1798-1815`), through
+  revision). The private `decide_case` (`crates/loom-governor/src/lib.rs:2042-2065`), through
   which every evaluation of the governor goes, passes Canon the records of the case whose case
   revision is the held case's current revision, one entry per capability. Canon's
   `canon-authority/1` of the pinned release has no `case_revision` member
@@ -40,14 +40,30 @@ in Canon's own decision and in a replay of it.
   `story:tree-waits-open-decision-requests`, which depends on this story. Without the port the
   governor supplies no authority decision, as today, and `HeldCaseGrounds` refuses a
   `canon_authority` citation (`story:grounds-resolve-against-held-cases`).
+- The slice's `AuthorityRecords` reports a record only while the grounds of the Decided request
+  that produced it (the request whose `produced_record` names it) still resolve through
+  `HeldCaseGrounds`, with the run's workspace as the `path_line` root and `canon_authority`
+  citations resolved against the unfiltered records, so no record's check waits on another's
+  filter. A record with a moved ground is withheld from Canon: Canon reports the action
+  approval-required again, Commission asks `DecisionAuthority`, and `DecisionAuthority`
+  supersedes the request and routes the stop anew, as it does today.
+
+Once the approvals reach Canon, Commission's revalidation reads an approved action as `Admitted`
+and asks the authority provider only about actions Canon still reports approval-required
+(`crates/loom-commission/src/runtime.rs:2435-2449`), so the grounds check of
+`DecisionAuthority` alone would no longer run for an approved action. Withholding the record at
+the supply keeps it running. That is the smaller of the two mechanisms: the other, asking the
+provider about an action Canon admits, changes Commission's revalidation for every host. The check
+matters only for grounds that move while the case stays (`path_line`, `aep_artifact`,
+`sdc_decisions`): a moved `artifact_revision` ground raises the case revision
+(`crates/loom-governor/src/lib.rs:1042`), and a record of an earlier case revision is not handed
+over at all. It stays until Canon judges grounds on authority entries
+(`story:authority-records-bound-and-grounded-in-canon`), and for the grounds Canon cannot see,
+after that.
 
 The port and the governor's supply go in their own module of `crates/loom-governor`, the slice's
-implementation in the grant module of `crates/loom-intake-slice`.
-
-Commission's revalidation then reads an approved action as `Admitted`, and the authority provider
-is asked only about actions Canon still reports approval-required. Loom's own check of an
-approval's grounds before it allows stays until Canon judges grounds on authority entries
-(`story:authority-records-bound-and-grounded-in-canon`).
+implementation in the grant module of `crates/loom-intake-slice`
+(`crates/loom-intake-slice/src/grant.rs`).
 
 ## Why
 
@@ -62,10 +78,13 @@ needs no Canon release: the entry shape exists in Canon `0.8.0`. The `principal`
 
 ## Waits on
 
-- `story:approval-decisions-resume-held-runs`: the slice's grant store and the decision flags.
+- `story:approval-decisions-resume-held-runs`: the slice's grant store, the decision flags, and
+  `DecisionAuthority`, whose supersede the withheld record leads to.
 - `story:grounds-resolve-against-held-cases`: the `AuthorityRecords` port and `HeldCaseGrounds`,
   and both change `crates/loom-governor/src/lib.rs`.
 
+`story:decision-suspension-reason` also changes `crates/loom-intake-slice/src/grant.rs`; this story
+is ordered after it through `story:approval-decisions-resume-held-runs`.
 `story:question-and-outcome-decisions-hold-runs` also changes `crates/loom-intake-slice` and
 `crates/loom-cli`, with no edge between the two: each story's code is in its own module, and the
 wave planner keeps two stories that share a scope path out of one wave.
@@ -97,6 +116,12 @@ With a fixture protocol whose action `merge` requires capability `change.merge`:
   frontier for the same snapshot, evidence and records.
 - The slice run of `story:approval-decisions-resume-held-runs`: after `decisions decide … A`, the
   next evaluation shows `repository.merge` admissible, and `resume` performs it once.
+- The slice run at `A1` whose request was taken on a strong recommendation with a `path_line`
+  ground on lines 1-3 of `notes.md` in the workspace: after those lines are rewritten and not
+  committed (the case revision unchanged), the next evaluation shows `repository.merge`
+  approval-required with no authority entry handed over, `resume` is refused naming the
+  capability as not granted, the request is Superseded naming a new Open request, and nothing is
+  performed.
 - A slice approval whose decider ground cites `repository.merge@<rev>` in `canon_authority`
   resolves through the slice's port once the grant is recorded.
 - Without `with_authority_records`, every existing governor test passes unchanged.
@@ -107,4 +132,4 @@ With a fixture protocol whose action `merge` requires capability `change.merge`:
 `principal`, `case_revision` and grounds on the entry
 (`story:authority-records-bound-and-grounded-in-canon`). The tree's approvals
 (`story:tree-waits-open-decision-requests`). Mandate approvals. An authority store of
-the governor's own.
+the governor's own. Asking the authority provider about an action Canon admits.

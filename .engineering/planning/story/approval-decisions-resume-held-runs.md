@@ -4,7 +4,7 @@ id: story:approval-decisions-resume-held-runs
 kind: story
 status: draft
 title: b10x-loom run routes its approvals through decision requests and resumes only on a recorded grant
-summary: DecisionAuthority, grant record writer at the decided case revision, --escalate-when, grounds checked again before an allow; a final holder's end stops the run with exit 3
+summary: DecisionAuthority, grant record writer at the decided case revision, --escalate-when, grounds checked again before an allow; no rule on the command line; a final holder's end stops the run with exit 3
 tags:
 - sdc
 relations:
@@ -12,7 +12,8 @@ relations:
 - serves: vision:O1
 - depends_on: story:silence-and-expiry-at-a-host-tick
 - depends_on: story:llm-decider
-revision: 5
+- depends_on: story:decision-suspension-reason
+revision: 7
 ---
 ## Outcome
 
@@ -29,13 +30,24 @@ flags (`--autonomy-level`, `--autonomy-presets FILE`, `--decision-classes FILE`,
   the route decided the request at once (a decider or rule holder) and its record is written, it
   answers from the record instead;
 - before it answers from a record, it checks the Decided request's grounds again through
-  `HeldCaseGrounds` (`story:grounds-resolve-against-held-cases`): a ground that no longer resolves
-  makes it supersede the request, route the stop anew, and answer `ApprovalRequired`. Canon will
-  set aside a decided authority entry whose ground moved (`story:decision-grounds`, session
-  `canon`, 2026-11-21), and Loom will hand Canon its approvals
-  (`story:approvals-supplied-to-canon-evaluation`); until Canon judges grounds on those entries
-  (`story:authority-records-bound-and-grounded-in-canon`), Loom applies the rule to its approvals
-  itself;
+  `HeldCaseGrounds` (`story:grounds-resolve-against-held-cases`), built with the run's
+  `--workspace` as the root of `path_line` citations: a ground that no longer resolves makes it
+  supersede the request, route the stop anew, and answer `ApprovalRequired`. In a Loom-held case
+  an `artifact_revision` ground cannot move alone: moving the artifact raises the case revision
+  (`crates/loom-governor/src/lib.rs:1042`), and `resume_after_grant` refuses `CaseMoved` before it
+  asks the provider (`crates/loom-commission/src/runtime.rs:2410`). The grounds that can go stale
+  while the case stays are `path_line`, `aep_artifact` and `sdc_decisions` citations, and this
+  check is what catches them. Canon will set aside a decided authority entry whose ground moved
+  (`story:decision-grounds`, session `canon`, 2026-11-21); until Canon judges grounds on those
+  entries (`story:authority-records-bound-and-grounded-in-canon`), Loom applies the rule itself,
+  here and, once the approvals reach Canon, where they are supplied
+  (`story:approvals-supplied-to-canon-evaluation`);
+- no flag supplies a rule: Loom ships no rule (`story:decider-port-and-grounding-check`). On the
+  command line a `rule`, `rule_final`, `rule_and_decider` or `rule_and_decider_final` holder has
+  an absent rule port, which routing treats as a failed rule result
+  (`story:decision-routing-by-holder`): `rule` and `rule_and_decider` escalate to the escalation
+  person, `rule_final` and `rule_and_decider_final` end the run. A host with a rule hands it to
+  `DecisionAuthority` as a `RuleDecider` through `loom_sdk::intake::slice`;
 - the slice hands no touched paths to the router, so a run whose `--escalate-when` lists
   `paths_touched` escalates every decider-held approval (`story:escalate-when-conditions`: an
   unknown counts as matching);
@@ -43,7 +55,7 @@ flags (`--autonomy-level`, `--autonomy-presets FILE`, `--decision-classes FILE`,
   refuses (`crates/loom-commission/src/ports/authority.rs:39`);
 - the router sets the request's `expires_at` from the classes document's `expires_after` and the
   run's instant (`story:decision-routing-by-holder`), so `decisions tick --at` over the state
-  directory can expire a request a real run opened.
+  directory can expire a request a real run opened, or decide it by `silence` with its default.
 
 On `RunEnds` (a final holder with no usable result, an `escalate_when` condition under a final
 holder, `rule_final`, or a veto under `rule_and_decider_final`) the run ends:
@@ -69,11 +81,15 @@ an authority provider end a run outright.
 (`intake.routing.Grant`, `crates/loom-intake-slice/src/grant.rs:116`) with record id
 `<capability>@<case_revision>` at the request's decided case revision and the request's principal,
 idempotent by that id (session `sdc`, 2026-11-21, answers e and g). `b10x-loom decisions` given
-`--state DIR` uses it. `b10x-loom resume` then continues the held run through `resume_after_grant`
+`--state DIR`, `decisions tick` included, uses it as the writer of `canon_authority` records;
+`story:question-and-outcome-decisions-hold-runs` adds the writers for outcome and question records.
+`b10x-loom resume` then continues the held run through `resume_after_grant`
 (`crates/loom-commission/src/runtime.rs:2374`), which asks `DecisionAuthority` again and performs
 the held request once only when the record is there. `b10x-loom approve` on a commission whose
 Suspension names a decision request is refused, naming the request and the `decisions decide`
-command. Without the decision flags, `run`, `approve` and `resume` behave as today.
+command; that refusal is in `approve`'s function in `crates/loom-intake-slice/src/grant.rs`
+(`:285-316`), which reads the held Suspension. Without the decision flags, `run`, `approve` and
+`resume` behave as today.
 
 `DecisionAuthority` and `GrantRecordWriter` go in their own module of
 `crates/loom-intake-slice`, and `--state` on `decisions` in the inbox's module of `crates/loom-cli`.
@@ -83,17 +99,22 @@ command. Without the decision flags, `run`, `approve` and `resume` behave as tod
 Item 3 of the request: resume of the suspended run (`resume_after_grant`) after `Decide`, the
 Canon write and `RecordProduced` (`~/beyond10x/sdc/docs/decisions.md:307-312`). Today a grant
 comes only from `b10x-loom approve` (`crates/loom-cli/src/lib.rs:235-242`) and `GrantAuthority`
-allows only the
-pending held request (`grant.rs:358-448`). Resume requires `produced_record` (session `sdc`,
-2026-11-21, point 6): the provider allows only on a recorded decision. Both approval options
-produce a record (answer d).
+allows only the pending held request (`grant.rs:358-448`). Resume requires `produced_record`
+(session `sdc`, 2026-11-21, point 6): the provider allows only on a recorded decision. Both
+approval options produce a record (answer d).
 
 ## Waits on
 
-`story:silence-and-expiry-at-a-host-tick`: both change `crates/loom-cli`, and a silence
-decision is one this resume continues after. `story:llm-decider`: `--decider ROUTE` builds it.
-`story:decision-inbox-commands`, `story:decided-record-written-then-recorded` and
-`story:escalate-when-conditions` through the first.
+- `story:decision-suspension-reason`: it makes the Suspension's `action_request_id`, `action`,
+  `arguments` and `expected_case_revision` optional, which forces an edit in
+  `crates/loom-intake-slice/src/grant.rs` (`:293`, `:300`, `:315`, `:332`, `:402-403`), the file
+  whose `approve` this story changes. `story:question-and-outcome-decisions-hold-runs` and
+  `story:approvals-supplied-to-canon-evaluation` are ordered after it through this story.
+- `story:silence-and-expiry-at-a-host-tick`: both change `crates/loom-cli`, and a silence
+  decision is one this resume continues after.
+- `story:llm-decider`: `--decider ROUTE` builds it.
+- `story:decision-inbox-commands`, `story:decided-record-written-then-recorded` and
+  `story:escalate-when-conditions` through `story:silence-and-expiry-at-a-host-tick`.
 
 ## ESS first
 
@@ -103,8 +124,9 @@ resume context keeps them) and the refusal `HeldForDecisionRequest`. On that com
 
 ## Acceptance
 
-With the intake slice's fixture protocol, stub programs, a recorded selector, fixture autonomy
-documents and principals, and no model call:
+On the command line (`crates/loom-cli/tests/approval_decisions.rs`), with the intake slice's
+fixture protocol, stub programs, a recorded selector, fixture autonomy documents and principals, a
+recorded decider route, and no model call:
 
 - At `A0` a run that reaches `repository.merge` ends `NeedsAuthority`, holds an `Authority`
   Suspension whose request names `DR-…`, and `decisions list --principal timo --state DIR` shows
@@ -113,32 +135,58 @@ documents and principals, and no model call:
 - `resume` before the decision is refused naming the capability as not granted, and performs
   nothing.
 - Deciding `B` (deny) writes a denied grant; `resume` is refused and performs nothing.
-- At `A4` with a stub rule whose verdict holds and a recorded decider reply `Take`, the run does
-  not stop: the request is Decided by the decider, the grant written, and the merge performed in
-  the same run.
-- At `A4` with `--escalate-when` listing `paths_touched: ["**"]`, the same run stops with the
-  request Escalated to the escalation person.
-- At `A5` (an eval run) with a stub rule whose verdict grants and a recorded decider veto, the run
-  ends with `stopped: Refused (decision DR-… ended the run: veto)` and exit 3, the merge is not
-  performed, no Suspension is held, `resume` is refused `NothingSuspended`, and the request is
-  Decided `B` with a denied grant `repository.merge@<rev>`.
-- At `A5` with `--escalate-when` listing `decider: escalate` and a recorded decider `Escalate`,
-  the run ends with exit 3 naming the request and cause `condition`, nothing is performed, the
-  request is Open with one `EscalationSuppressedRecord`, and `decisions list --principal
-  decider:stub --state DIR` lists it; a second `run` of the same intent routes that request again and opens no
-  other.
+- At `A2` with a classes document that puts `repository.merge` in class `context` (holder
+  `decider`) and a recorded decider reply `A` whose grounds resolve, the run does not stop: the
+  request is Decided by `decider:stub`, the grant written, and the merge performed in the same run.
+- The same `A2` run with `--escalate-when` listing `paths_touched: ["**"]` stops
+  `NeedsAuthority` with the request Escalated to the escalation person and holder `person`.
+- At `A4` (merge `rule_and_decider`) with no rule, the run stops `NeedsAuthority` and the request
+  is Escalated to the escalation person with no recommendation and the reason
+  `no rule configured`.
+- At `A5` (merge `rule_and_decider_final`) with no rule, the run ends with
+  `stopped: Refused (decision DR-… ended the run: failure)` and exit 3, nothing is performed, and
+  the request is Open with one `EscalationSuppressedRecord` of cause `failure` whose reasons name
+  `no rule configured`.
+- At `A5` with `repository.merge` in class `context` (`decider_final`), `--escalate-when` listing
+  `decider: escalate` and a recorded decider `Escalate` with `best: A`, the run ends with exit 3
+  naming the request and cause `condition`, nothing is performed, the request is Open with one
+  `EscalationSuppressedRecord`, and `decisions list --principal decider:stub --state DIR` lists
+  it; a second `run` of the same intent routes that request again and opens no other.
 - At `A0` with the classes document giving the merge class `expires_after: 3600` and the run's
   instant fixed at 12:00, the request's `expires_at` is 13:00; `decisions tick --at 12:59 --state
   DIR` leaves it Open, `decisions tick --at 13:00 --state DIR` expires it, and `resume` then
   performs nothing and the Suspension stays.
-- With the case moved after the decision, `resume` is refused `CaseMoved` and performs nothing.
-- A granted request whose ground cites `spec@<rev>`: after `spec` moves and before `resume`, the
-  resume is refused, the request is Superseded naming a new Open request, and nothing is
-  performed.
+- At `A1` with the same expiry and a recorded decider reply `A`, strong, with a default on silence,
+  `decisions tick --at 13:00 --state DIR` decides the request by `silence`, writes the granted
+  grant `repository.merge@<rev>` and records it; `resume` then performs the merge once.
+- With the case moved after the decision (the test raises an artifact through `update_revision`),
+  `resume` is refused `CaseMoved` naming both case revisions, `DecisionAuthority` is not asked (a
+  counting store records no read), nothing is performed, and the request stays Decided.
+- At `A1` a request whose recorded decider recommendation `A`, strong, has a `path_line` ground on lines 1-3
+  of `notes.md` in the workspace, taken with `decisions take DR-… --as timo --state DIR`: after
+  those lines are rewritten and not committed, the case revision is unchanged, `resume` is refused
+  naming `repository.merge` as not granted (not `CaseMoved`), the request is Superseded naming a
+  new Open request, and nothing is performed.
 - `approve` on a commission held for `DR-…` exits non-zero naming the request and the command.
 - A store failure injected into `DecisionAuthority` ends the run with nothing performed.
 - `run --mandate … --autonomy-level A0` exits 2 naming both flags and opens nothing.
-- Without the decision flags, `crates/loom-cli/tests/resume_after_grant.rs` passes unchanged.
+- Without the decision flags, `crates/loom-cli/tests/resume_after_grant.rs` passes, unchanged by
+  this story.
+
+As a library test (`crates/loom-intake-slice/tests/decision_authority_rule.rs`) that drives the
+slice through `loom_sdk::intake::slice` with `DecisionAuthority` given a `RuleDecider` over a
+fixture function, a recorded decider and no model call:
+
+- At `A4` with a rule verdict that grants and a recorded decider reply `Take`, the run does not
+  stop: the request is Decided by the decider through `TakeRecommendation`, the grant written, and
+  the merge performed in the same run.
+- At `A5` with a rule verdict that grants and a recorded decider veto, the slice reports
+  `stopped: Refused (decision DR-… ended the run: veto)`, the merge is not performed, no
+  Suspension is held, and the request is Decided `B` with a denied grant `repository.merge@<rev>`.
+- At `A4` with `escalate_when: [{decider: escalate}]` and a recorded decider `Escalate`, the request
+  is Escalated to the escalation person; at `A5` the same run reports
+  `stopped: Refused (decision DR-… ended the run: condition)`, and the request is Open with one
+  `EscalationSuppressedRecord` of cause `condition`.
 - `task check` exits 0.
 
 ## Out of scope
@@ -146,4 +194,4 @@ documents and principals, and no model call:
 Question and outcome decisions (`story:question-and-outcome-decisions-hold-runs`). Mandate
 approvals with decision requests: `--mandate` and the decision flags are refused together.
 Supplying the grants to Canon's evaluation (`story:approvals-supplied-to-canon-evaluation`).
-Computing touched paths from the change's diff.
+Computing touched paths from the change's diff. A command-line flag that supplies a rule.

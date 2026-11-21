@@ -11,7 +11,7 @@ relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 - depends_on: story:decider-port-and-grounding-check
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -30,9 +30,10 @@ comes from the host's routes as any other Loom model (`epic:model-routes`).
 
 ## Why
 
-Item 1 of the request names a rule or an LLM decider (`decisions.md:235-237`). SDC's decider is
-`tools/decider.sh` with Haiku (`~/beyond10x/sdc/docs/autonomy-levels.md:203`). An LLM decider
-lives where `llm-core` is already a dependency: `b10x-loom-executor`
+Item 1 of the request: "A decider executor port: given a pending decision and its inputs, return
+an option, reasons and grounds (rule or LLM)" (`~/beyond10x/sdc/docs/decisions.md:301-303`).
+SDC's decider is `tools/decider.sh` with Haiku (`~/beyond10x/sdc/docs/autonomy-levels.md:203`).
+An LLM decider lives where `llm-core` is already a dependency: `b10x-loom-executor`
 (`crates/loom-executor/Cargo.toml:11`), never Commission (`AGENTS.md:96-97`). Every answer goes
 through the grounding check; the model is not trusted context (`AGENTS.md` § Rules).
 
@@ -67,5 +68,5 @@ Every test uses a recorded `Model` that replays fixed turns; none calls a model 
 
 ## Out of scope
 
-Decider prompts per class (SDC data, `autonomy-levels.md:457`). Confining the decider. Retrying
+Decider prompts per class (SDC data, `autonomy-levels.md:481`). Confining the decider. Retrying
 a failed call (the host retries, as for the selector). Recording the call in a run log.

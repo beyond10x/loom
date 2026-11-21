@@ -4,7 +4,7 @@ id: story:decided-record-written-then-recorded
 kind: story
 status: draft
 title: A decision is taken first, then its Canon record is written, then recorded on the request
-summary: Written at the decided case revision, RecordProduced after an idempotent write; an option that produces no record completes at Decide; a retry completes a half-finished decision
+summary: Written at the decided case revision, RecordProduced after an idempotent write; an option that produces no record completes at Decide; a record kind with no writer waits for one; a retry completes a half-finished decision
 tags:
 - sdc
 relations:
@@ -12,7 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:grounds-resolve-against-held-cases
 - depends_on: story:escalate-when-conditions
-revision: 4
+revision: 6
 ---
 ## Outcome
 
@@ -30,14 +30,19 @@ directly after `Decide` (answer d).
   confirmed in answer g): a writer that finds that record already written by the same principal
   answers it and writes nothing. The Canon entry carries no request id; `produced_record` holds the
   link from the request to the record (answer g).
-- `complete_decision(store, writer, request_id)` reads the request: Decided with a record, it
+- A host gives the completion a set of writers, at most one per `produces` kind
+  (`canon_authority`, `canon_decisions`, `canon_evidence`, `artifact_revision`).
+- `complete_decision(store, writers, request_id)` reads the request: Decided with a record, it
   answers the record; Decided on an option that produces a record and without one, it writes and
-  records it; Decided on an option that produces none, it answers `NoRecord` and calls no writer;
-  in any other state it is refused `NotDecided`. `complete_pending(store, writer)` does this for
-  every Decided request whose option produces a record and that has none, so the next attempt after
-  a crash completes what the last one left.
+  records it with the writer for that kind; Decided on an option that produces none, it answers
+  `NoRecord` and calls no writer; Decided on an option whose kind has no writer in the set, it
+  answers `AwaitsWriter` naming the kind, writes nothing, and leaves the request as it was; in any
+  other state it is refused `NotDecided`. `complete_pending(store, writers)` does this for every
+  Decided request whose option produces a record and that has none, so the next attempt after a
+  crash completes what the last one left; it answers the requests it left awaiting a writer, and a
+  later call given that writer completes them.
 - `ExplicitDecisionWriter` in `b10x-loom-governor` writes an outcome request's record through
-  `CanonGovernor::decide` (`crates/loom-governor/src/lib.rs:1052`) at the request's decided case
+  `CanonGovernor::decide` (`crates/loom-governor/src/lib.rs:1055`) at the request's decided case
   revision, with the request's `decided_by` as principal.
 - If the held case is no longer at the decided case revision and the record was not written at it,
   the writer writes nothing and the completion is refused `CaseMovedSinceDecision`, naming both
@@ -46,7 +51,8 @@ directly after `Decide` (answer d).
 
 Approval records are written by the writers of `story:approval-decisions-resume-held-runs` (the
 slice's grant store) and `story:tree-waits-open-decision-requests` (the tree's case approvals); a
-question's record by a host writer.
+question's record by a host writer (`story:question-and-outcome-decisions-hold-runs` gives the
+slice's).
 
 ## Why
 
@@ -60,7 +66,9 @@ already stored changes nothing (`decision.yaml:665-670`), which is what lets a r
 existing record (`AlreadyRecorded`). Which revision the record binds to is answer e; the refusal
 when the case moved before the write is stated in prose only (`decisions.md:226-228`), so Loom
 enforces it here. That only an option producing a record has one to write is answer d
-(`decision.yaml:95`). "The decision applies to this revision only" (`decision.yaml:230`).
+(`decision.yaml:95`). "The decision applies to this revision only" (`decision.yaml:230`). A
+command line has the writers of its store option only (`story:decision-inbox-commands`), so a
+request whose kind it cannot write must wait for one that can, not fail every command.
 
 ## Waits on
 
@@ -72,9 +80,9 @@ so `lib.rs` gains one `mod` line); through it
 
 ## ESS first
 
-`ess/domains/decision.yaml` gains `CompletionOutcome` (`Recorded`, `AlreadyRecorded`, `NoRecord`)
-and `CompletionRefusal` (`NotDecided`, `CaseMovedSinceDecision`, `WriterFailed`). On that commit
-`task drift` fails, and `crates/loom-decision/tests/record_completion.rs` and
+`ess/domains/decision.yaml` gains `CompletionOutcome` (`Recorded`, `AlreadyRecorded`, `NoRecord`,
+`AwaitsWriter`) and `CompletionRefusal` (`NotDecided`, `CaseMovedSinceDecision`, `WriterFailed`).
+On that commit `task drift` fails, and `crates/loom-decision/tests/record_completion.rs` and
 `crates/loom-governor/tests/explicit_decision_writer.rs` do not compile.
 
 ## Acceptance
@@ -94,10 +102,15 @@ and `CompletionRefusal` (`NotDecided`, `CaseMovedSinceDecision`, `WriterFailed`)
   the stop again supersedes the request.
 - An outcome request decided "leave it untaken" answers `NoRecord`, the writer is not called, and
   `complete_pending` skips it.
+- A question request Decided `A` (`produces: artifact_revision`) with only an
+  `ExplicitDecisionWriter` in the set answers `AwaitsWriter` naming `artifact_revision`, the store
+  is unchanged, and `complete_pending` lists it and completes the outcome requests beside it; given
+  a fixture `artifact_revision` writer afterwards, `complete_pending` records it.
 - `task check` exits 0.
 
 ## Out of scope
 
 Resuming the run (`story:decision-suspension-reason`,
 `story:approval-decisions-resume-held-runs`). Grounds on the Canon record
-(`story:decided-records-carry-grounds-to-canon`). An AEP `approval-record`.
+(`story:decided-records-carry-grounds-to-canon`). An AEP `approval-record`. Any writer of an
+approval or question record.

@@ -40,7 +40,7 @@ scope:
   path: ess/domains/governor.yaml
 - confidence: inferred
   path: website/docs/concepts/governor-and-intake.md
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
 ---
@@ -56,6 +56,15 @@ into the parent as the one `case_outcome` evidence record Canon reads for that c
   one child) and the child's bindings file. A bindings file is refused at load when an `open`
   executor sits on an action with no `case_open`, or a `case_open` action is bound to anything
   else.
+- The child's bindings file, `executor.bindings`, is read relative to the directory of the
+  bindings file that names it: relative only, with no `..` segment, as `b10x-loom-bindings`
+  enforces at load (`check`, `crates/loom-bindings/src/load.rs:202-212`, through
+  `workspace_path`, `crates/loom-bindings/src/lib.rs:79-99`, refused `PathNotInWorkspace`; test
+  `the_child_bindings_path_of_an_open_executor_names_a_file_beside_the_bindings_file`,
+  `crates/loom-bindings/tests/bindings_document.rs:878-902`). The requester accepted this rule
+  in wave 2026-11-21-w1 (`approval-record:loom-wave-2026-11-21-w1`, U2 correction round 2). This
+  story resolves the path against that directory when it opens the child, never against the
+  process's working directory or the workspace.
 - The child's id is `<parent id>.<name>`; opening for the same name again gives `<id>.2`, `<id>.3`.
   A child whose subject was revised is never reopened or rewritten: the parent opens a new one.
 - The child is opened with the `independence` map of its own bindings file.
@@ -133,6 +142,10 @@ claim with `children: {in: [passed]}`) and `child/1`, stub programs and no model
   unchanged.
 - A child whose bindings file lists `independence` for a producer accepts that producer's record
   on a match that demands the dimension, and drops another producer's.
+- A parent bindings file at `<dir>/parent.yaml` whose `open` executor names `bindings:
+  sub/child.yaml` opens the child with the `independence` map of `<dir>/sub/child.yaml`, with the
+  process's working directory elsewhere and a file of the same name in the workspace holding
+  another map.
 - A file a child's program writes at a placed path moves the parent's revision of the artifact
   placed at the same path at the parent's next evaluation.
 - A terminated case refuses a further action without a new error variant: its frontier lists no
@@ -155,9 +168,10 @@ claim with `children: {in: [passed]}`) and `child/1`, stub programs and no model
 ## Out of scope
 
 Deciding when a case terminates and driving the children (`story:tree-run-command`). Copying a
-record from parent to child (`story:record-copy-between-cases`). A workspace per child.
+record from parent to child (`story:record-copy-between-cases`). A workspace per child (`story:child-case-own-workspace`).
 Invalidating a child's outcome when the parent's subject moves: that is Canon's `revision:
-current`.
+current`. A child bindings path outside the parent bindings file's directory: the load check
+refuses it.
 
 ## Scope
 

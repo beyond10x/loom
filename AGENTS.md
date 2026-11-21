@@ -273,7 +273,10 @@ other tree's binary fresh, and the gate exits 0 on code it did not build
 check with `cargo test --workspace --locked -- --list` in the gated tree that the tests the run
 printed exist there. Check `df -h /` before a full gate and run one full gate at a time. End a
 managed worktree with `worktree finish --discard-cache --archive <tree>`, which removes its build
-cache; never delete a `target/` by hand.
+cache; never delete a `target/` by hand. `worktree discard-cache` and `finish --discard-cache`
+delete every git-ignored entry of the tree, `.engineering/drafts/` included (2026-11-21: 146 draft
+files of a tree still in use were deleted with its `target/`): run `--dry-run` first, and in a tree
+whose drafts are still needed copy `.engineering/drafts/` to the session scratch directory before.
 
 Where a test puts its scratch depends on what it needs from the directories above it:
 
