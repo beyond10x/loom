@@ -736,3 +736,163 @@ fn two_ports_over_one_case_store_start_a_capped_action_at_most_max_runs_times() 
         scratch.starts()
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Pass 2
+
+#[test]
+fn a_member_named_twice_through_a_unicode_escape_is_refused_and_records_nothing() {
+    // Built at run time so no tool or formatter can fold the escape: the second name is
+    // `st`, a backslash, `u0061tus`, which a JSON reader decodes to `status`.
+    let backslash = char::from(92u8);
+    let report = format!(r#"{{"status": "bad", "st{backslash}u0061tus": "ok"}}"#);
+    assert!(report.contains(backslash), "{report}");
+    let (governor, end) = report_case("/status", report.as_bytes());
+    let reason = refused_reason(&end);
+    assert!(reason.starts_with("ReportUnreadable"), "{reason}");
+    assert!(records(&governor, CASE).is_empty());
+}
+
+/// A runner that records each child and refuses it with `detail`, as a runner does for a child it
+/// started and lost.
+struct Refusing {
+    detail: String,
+    children: Mutex<Vec<ChildCommand>>,
+}
+
+impl TestRunner for Refusing {
+    fn run(&self, _: &TestCommand, _: &Path) -> Result<TestExecution, ConfinementError> {
+        Err(ConfinementError {
+            reason: ConfinementRefusal::CapabilityUnserved,
+            detail: "runs no test command".to_owned(),
+        })
+    }
+
+    fn backend(&self) -> Backend {
+        Backend::Substrate
+    }
+
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        self.children.lock().unwrap().push(child.clone());
+        Err(ConfinementError {
+            reason: ConfinementRefusal::CapabilityUnserved,
+            detail: self.detail.clone(),
+        })
+    }
+
+    fn preflight_child(&self, _: &Path) -> Result<(), ConfinementError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_runner_refusal_text_is_data_and_names_no_blob_no_record_and_no_file() {
+    let scratch = Scratch::new();
+    let document = document(&["/opt/stub/program"], CAPPED, "/status", TABLE);
+    let governor = governor();
+    let detail = format!(
+        r#"{{"status": "ok", "kind": "review"}} ../../outside {}"#,
+        "x".repeat(64 * 1024)
+    );
+    let runner = Arc::new(Refusing {
+        detail: detail.clone(),
+        children: Mutex::default(),
+    });
+    let ends: Vec<String> = {
+        let effects = ProgramEffects::new(
+            &governor,
+            CaseId(CASE.to_owned()),
+            &document,
+            &scratch.workspace,
+            &scratch.store,
+            Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        )
+        .unwrap();
+        (0..2)
+            .map(|_| refused_reason(&try_drive(&governor, &effects, CASE, "{}").unwrap()))
+            .collect()
+    };
+    assert!(ends[1].starts_with("RunsSpent"), "{}", &ends[1][..80]);
+    assert_eq!(runner.children.lock().unwrap().len(), 1);
+    assert!(records(&governor, CASE).is_empty());
+    let runs: Vec<serde_json::Value> = governor
+        .try_observations()
+        .unwrap()
+        .iter()
+        .filter(|observation| observation.source == b10x_loom_bindings::PROGRAM_SOURCE)
+        .map(|observation| plain(&observation.payload))
+        .collect();
+    assert_eq!(runs.len(), 1);
+    assert!(runs[0]["blob_sha256"].is_null() && runs[0]["exit"].is_null());
+    assert!(
+        runs[0]["runner_refusal"]
+            .as_str()
+            .is_some_and(|text| text.ends_with(&detail))
+    );
+    let blobs = scratch.store.join("blobs");
+    assert!(
+        !blobs.exists() || std::fs::read_dir(&blobs).unwrap().count() == 0,
+        "a blob was kept for a refused run"
+    );
+    assert!(!scratch.root.join("outside").exists());
+}
+
+#[test]
+fn a_case_of_the_same_protocol_name_and_another_major_is_refused_and_starts_nothing() {
+    let scratch = Scratch::new();
+    let document = document(&["/opt/stub/program"], "", "/status", TABLE);
+    let governor = governor_over(MemoryCaseStore::default())
+        .with_protocol_yaml("fixture@2", &PROTOCOL.replace("revision: 1", "revision: 2"))
+        .expect("fixture@2 registers");
+    open(&governor, CASE, "fixture@2");
+    let runner = Answering::new(&[(br#"{"status": "ok"}"#, false)]);
+    let end = {
+        let effects = ProgramEffects::new(
+            &governor,
+            CaseId(CASE.to_owned()),
+            &document,
+            &scratch.workspace,
+            &scratch.store,
+            Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        )
+        .unwrap();
+        try_drive(&governor, &effects, CASE, "{}").unwrap()
+    };
+    let reason = refused_reason(&end);
+    assert!(reason.starts_with("CaseOfAnotherProtocol"), "{reason}");
+    assert!(runner.children().is_empty());
+    assert!(records(&governor, CASE).is_empty());
+}
+
+#[test]
+fn a_case_the_governor_does_not_hold_starts_nothing_and_records_nothing() {
+    let scratch = Scratch::new();
+    let document = document(
+        &["/opt/stub/program"],
+        "    arguments_from: [/opt/stub/args]\n",
+        "/status",
+        TABLE,
+    );
+    let governor = governor();
+    let runner = Answering::new(&[(br#"{"status": "ok"}"#, false)]);
+    let answer = {
+        let effects = ProgramEffects::new(
+            &governor,
+            CaseId("case-unknown".to_owned()),
+            &document,
+            &scratch.workspace,
+            &scratch.store,
+            Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        )
+        .unwrap();
+        format!("{:?}", try_drive(&governor, &effects, "case-unknown", "{}"))
+    };
+    assert!(runner.children().is_empty(), "a program started: {answer}");
+    let kept = governor
+        .try_observations()
+        .unwrap()
+        .iter()
+        .filter(|observation| observation.source == b10x_loom_bindings::PROGRAM_SOURCE)
+        .count();
+    assert_eq!(kept, 0, "{answer}");
+}
