@@ -164,7 +164,6 @@ fn status(frontier: &Frontier<frontier_state::Issued>, action: &str) -> ActionSt
         .find(|entry| entry.action == action)
         .unwrap_or_else(|| panic!("the frontier lists {action}: {:?}", frontier.data()))
         .status
-        .clone()
 }
 
 fn resolved(frontier: &Frontier<frontier_state::Issued>) -> Truth {
@@ -180,7 +179,6 @@ fn resolved(frontier: &Frontier<frontier_state::Issued>) -> Truth {
             )
         })
         .value
-        .clone()
 }
 
 /// The open evidence `action_facts` gives `open_change`.
@@ -212,7 +210,7 @@ fn a_protocol_with_case_open_and_children_registers_and_its_frontier_lists_the_o
                 )
             });
         assert_eq!(
-            (opening.status.clone(), opening.capability.as_deref()),
+            (opening.status, opening.capability.as_deref()),
             (ActionStatus::ApprovalRequired, Some("case.open")),
             "{admission}: the opening action needs its capability, like any other action"
         );
