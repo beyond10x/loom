@@ -982,7 +982,8 @@ pub enum ResumeRefusal {
 pub enum ResumeError {
     /// Nothing was resumed; why.
     Refused(ResumeRefusal),
-    /// The suspension port could not be read. Nothing was resumed.
+    /// The suspension port could not be read, or it holds a Suspension that holds no action
+    /// request and whose reason is no decision. Nothing was resumed.
     Store(SuspensionStoreError),
     /// The governor could not answer before the Run resumed. Nothing was resumed.
     Governor(GovernorError),
