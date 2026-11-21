@@ -33,6 +33,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
 - **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
 - A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
+- `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
 
 ### Removed
 
