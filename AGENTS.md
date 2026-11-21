@@ -218,8 +218,11 @@ suite's `purpose`) says why: the refusal code and the cause, with the reasoning 
 above it. The four `ess/scenarios/decision/` covers are the example: ess 0.96.0 reaches no
 Expired or Escalated decision request once `DecisionClassId` is a text newtype and `Request` has
 `record-key-open` (ESS-SYNTH-004), and, once `kind-not-principal` reads the principal's name,
-arranges no Decided request for `RecordProduced` and no prefixed principal for Decide's kind
-guards (ESS-SYNTH-003).
+arranges no prefixed principal for Decide's kind guards and no Decided request whose produced
+record selects `RecordProduced`'s `recorded`, `already-recorded` or `produced-conflict`
+(ESS-SYNTH-003: "no candidate of the 11 tried satisfies `loom.decision.DecisionRequest` stored
+decided_option,options,produced_record selecting this branch"); it still synthesizes
+`option-produces-none` from a Decided request.
 
 No story is implemented while the gate is red, whether or not it edits `ess/`. The `UNMAPPED:`
 scan stands in for ESS until ESS refuses open entries itself: the `UNMAPPED:` scan is removed when
@@ -1301,9 +1304,10 @@ executor, Canon, model provider or Mandate (`decision_request.rs` reads the mani
   domain's synthesized scenarios and `ess/scenarios/decision/` against the crate
   (`crates/loom-conformance/src/decision.rs`). Four of those scenarios cover, with `covers:`,
   the 17 obligations ESS 0.96.0 synthesis refuses for this domain (no route to Expired, none to
-  Escalated for `supersede`, no Decided witness for `RecordProduced`, no prefixed principal
-  for Decide's kind guards); `COVER_TABLE` in `crates/loom-conformance/tests/conform.rs` pins
-  each occurrence to its cover.
+  Escalated for `supersede`, no Decided request whose produced record selects
+  `RecordProduced`'s `recorded`, `already-recorded` or `produced-conflict`, no prefixed
+  principal for Decide's kind guards); `COVER_TABLE` in
+  `crates/loom-conformance/tests/conform.rs` pins each occurrence to its cover.
 - `crates/loom-decision/tests/decision_request.rs` holds each refusal with the store unchanged,
   random sequences of all eight commands against the invariants, and the declared order of
   `Strength` and `AutonomyLevel` (both `ordered: true`) against the SDC's variant lists.
