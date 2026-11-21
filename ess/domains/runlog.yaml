@@ -1,0 +1,183 @@
+# The run log of one case (story hash-chained-run-log): one JSON line per event in
+# `runlog-<stem>.jsonl`, beside the case file `<stem>.json` the governor's FileCaseStore writes
+# (crates/loom-governor/src/file_store.rs). Each line names the SHA-256 of the line before it, so
+# a reader can refuse a log that was cut, shortened, reordered or changed. The log is the
+# runtime's, not Canon's (Canon is not an event store). The crate b10x-loom-runlog declares the
+# events and writes what it is given; emitting them is another story's. A line has no lifecycle:
+# it is appended once and never rewritten, so the domain declares types only.
+domain: loom.runlog
+
+summary: >-
+  The run log of one case: one line per event, each carrying its sequence number, the SHA-256 of
+  the line before it, the instant and the event; and the refusals a reader gives a log that was
+  cut, has a line missing or out of order, or has a changed byte.
+
+naming:
+  wire: runlog
+  display: Run log
+
+types:
+  # One line of the log. `seq` counts the lines from 0 with no gap. `prev` is the SHA-256 of the
+  # previous line's bytes, without its line feed, as 64 lower-case hex digits; it is absent on
+  # line 0 and present on every other line. `at` is the instant the host gave the append.
+  - name: loom.runlog.RunLogLine
+    kind: struct
+    fields:
+      - name: seq
+        type: Integer
+      - name: prev
+        type: Optional<String>
+      - name: at
+        type: Timestamp
+      - name: event
+        type: loom.runlog.RunLogEvent
+
+  # The events. On the wire the tag is `kind` and the event's members sit beside it.
+  - name: loom.runlog.RunLogEvent
+    kind: union
+    tag: kind
+    variants:
+      CaseOpened: loom.runlog.CaseOpened
+      Evaluated: loom.runlog.Evaluated
+      ActionStarted: loom.runlog.ActionStarted
+      ActionFinished: loom.runlog.ActionFinished
+      Discarded: loom.runlog.Discarded
+      ChildOpened: loom.runlog.ChildOpened
+      ChildClosed: loom.runlog.ChildClosed
+      AuthorityRecorded: loom.runlog.AuthorityRecorded
+      Stopped: loom.runlog.Stopped
+      Terminated: loom.runlog.Terminated
+
+  # The case was opened: its id and the registered protocol that governs it, `name@major`.
+  - name: loom.runlog.CaseOpened
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: protocol
+        type: String
+
+  # The case was evaluated: the case revision evaluated, the frontier id the governor issued and
+  # the SHA-256 of the decision document behind it.
+  - name: loom.runlog.Evaluated
+    kind: struct
+    fields:
+      - name: case_revision
+        type: Integer
+      - name: frontier
+        type: String
+      - name: decision_digest
+        type: String
+
+  # An action of the frontier was started.
+  - name: loom.runlog.ActionStarted
+    kind: struct
+    fields:
+      - name: action
+        type: String
+
+  # One artifact's revision as an action moved it: from the revision held before (absent when
+  # none was) to the one held after.
+  - name: loom.runlog.RevisionMove
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: from
+        type: Optional<String>
+      - name: to
+        type: String
+
+  # An action finished: its exit status or why it was refused (one of the two), the digest of the
+  # blob holding its output, the ids of the evidence records it gave and the revisions it moved.
+  - name: loom.runlog.ActionFinished
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: refusal
+        type: Optional<String>
+      - name: blob_digest
+        type: Optional<String>
+      - name: evidence
+        type: List<String>
+      - name: revisions
+        type: List<loom.runlog.RevisionMove>
+
+  # What an action produced was discarded, and why.
+  - name: loom.runlog.Discarded
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: reason
+        type: String
+
+  # A child case was opened: its id and the registered protocol that governs it.
+  - name: loom.runlog.ChildOpened
+    kind: struct
+    fields:
+      - name: child
+        type: String
+      - name: protocol
+        type: String
+
+  # A child case was closed, with the outcome it completed with (absent when it completed with
+  # none).
+  - name: loom.runlog.ChildClosed
+    kind: struct
+    fields:
+      - name: child
+        type: String
+      - name: outcome
+        type: Optional<String>
+
+  # An authority decision was recorded: the capability asked for, the decision and the principal
+  # who took it.
+  - name: loom.runlog.AuthorityRecorded
+    kind: struct
+    fields:
+      - name: capability
+        type: String
+      - name: decision
+        type: String
+      - name: principal
+        type: String
+
+  # The run stopped: the stop, and the decisions that would let it go on.
+  - name: loom.runlog.Stopped
+    kind: struct
+    fields:
+      - name: stop
+        type: String
+      - name: next
+        type: List<String>
+
+  # The run ended for good, and why.
+  - name: loom.runlog.Terminated
+    kind: struct
+    fields:
+      - name: reason
+        type: String
+
+  # Why a reader refuses a log. `CutLine`: the last line does not end with a line feed, or does
+  # not read as a line. `BrokenChain`: a line's `prev` is not the SHA-256 of the line before it
+  # (absent where it must be present, or present on line 0), or a line before the last does not
+  # read as a line. `SequenceGap`: a line's `seq` is not its position, counted from 0.
+  - name: loom.runlog.RunLogRefusal
+    kind: enum
+    variants: [CutLine, BrokenChain, SequenceGap]
+
+  # A refused log: the refusal, the first line that fails it, counted from 0 as `seq` is, and
+  # what is wrong with that line.
+  - name: loom.runlog.RunLogRefused
+    kind: struct
+    fields:
+      - name: refusal
+        type: loom.runlog.RunLogRefusal
+      - name: line
+        type: Integer
+      - name: detail
+        type: String
