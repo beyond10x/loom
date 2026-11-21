@@ -556,6 +556,10 @@ mod connectors {
     use loom_sdk::connectors::cli::idempotency_key;
     use loom_sdk::connectors::evidence::WriteEvidenceAdapter;
     use loom_sdk::connectors::evidence::WriteEvidenceError;
+    use loom_sdk::connectors::relay::ConnectorsRelay;
+    use loom_sdk::connectors::relay::RelayUrl;
+    use loom_sdk::connectors::relay::RelayUrlRefused;
+    use loom_sdk::connectors::relay::loopback_url;
     // connectors paths: end
 
     /// The governed write's signature, as a host calls it: compilation is the witness.

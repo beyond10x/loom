@@ -112,6 +112,8 @@ enum Reply {
     Vanish(u16, String),
     /// The request is read and recorded, and the connection closes with no answer.
     Lost,
+    /// A redirect: the status, an empty body and `location` naming the URL given.
+    Redirect(u16, String),
 }
 
 type Invoking = Box<dyn Fn(&Received) -> Reply + Send + Sync>;
@@ -167,6 +169,9 @@ impl Fake {
                             return;
                         }
                         Reply::Lost => drop(stream),
+                        Reply::Redirect(status, location) => {
+                            write_redirect(stream, status, &location);
+                        }
                     }
                 }
             })
@@ -285,6 +290,15 @@ fn write_answer(mut stream: TcpStream, status: u16, body: &str) {
         "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
          connection: close\r\n\r\n{body}",
         body.len()
+    );
+    let _ = stream.flush();
+}
+
+fn write_redirect(mut stream: TcpStream, status: u16, location: &str) {
+    let _ = write!(
+        stream,
+        "HTTP/1.1 {status} X\r\nlocation: {location}\r\ncontent-length: 0\r\n\
+         connection: close\r\n\r\n"
     );
     let _ = stream.flush();
 }
@@ -415,7 +429,9 @@ fn read_answer(status: u16, response: &InvokeResponse) -> Reply {
 
 /// A write's answer, written as a host with standing grants writes it.
 fn write_answer_keyed(status: u16, response: &InvokeResponse) -> Reply {
-    let bytes = response.encode_keyed().expect("the keyed binding writes it");
+    let bytes = response
+        .encode_keyed()
+        .expect("the keyed binding writes it");
     Reply::Answer(status, String::from_utf8(bytes).expect("UTF-8"))
 }
 
@@ -690,7 +706,8 @@ fn a_relay_write_applied_carries_its_classification_audit_and_body() {
             classification: MutationClassification::Applied,
             idempotency_key: idempotency_key(&request),
             request_id: Some(request_id(&invocations[0])),
-            body: Some(json::parse(r#"{"routed":true,"queue":"billing"}"#).unwrap()),
+            // `serde_json` keeps an object's members by name, so the body arrives in that order.
+            body: Some(json::parse(r#"{"queue":"billing","routed":true}"#).unwrap()),
             source_audit: None,
             audit_ref: Some("aud-1".to_owned()),
             code: None,
@@ -759,7 +776,10 @@ fn an_answer_carrying_a_source_audit_is_an_upstream_protocol_answer() {
     };
     let probe = with_source_audit(success("probe", json!({}), None));
     assert!(probe.encode().is_err(), "the unkeyed encoder refuses it");
-    assert!(probe.encode_keyed().is_err(), "the keyed encoder refuses it");
+    assert!(
+        probe.encode_keyed().is_err(),
+        "the keyed encoder refuses it"
+    );
 
     let fake = Fake::start(descriptor(), move |request| {
         let id = request_id(request);
@@ -879,13 +899,7 @@ fn a_relay_read_of_a_mutation_operation_sends_no_invoke() {
 #[test]
 fn a_read_answer_with_a_mutation_or_an_incomplete_audit_is_failed() {
     let answers: Vec<fn(&str) -> InvokeResponse> = vec![
-        |id| {
-            success(
-                id,
-                json!({}),
-                Some(observed(EffectKnowledge::Applied, id)),
-            )
-        },
+        |id| success(id, json!({}), Some(observed(EffectKnowledge::Applied, id))),
         |id| InvokeResponse {
             audit_status: AuditStatus::Incomplete,
             ..success(id, json!({}), None)
@@ -915,7 +929,10 @@ fn a_relay_source_lists_what_the_describe_reports_for_each_kind() {
     assert_eq!(kinds, [ReadKind::List, ReadKind::Get]);
     for (_, entity) in entities {
         assert_eq!(entity.revision, REVISION);
-        assert_eq!(entity.input_schema, json::parse(r#"{"type":"object"}"#).unwrap());
+        assert_eq!(
+            entity.input_schema,
+            json::parse(r#"{"type":"object"}"#).unwrap()
+        );
         assert!(!entity.schema.is_empty());
     }
     assert!(fake.invocations().is_empty(), "listing invokes nothing");
@@ -1002,7 +1019,10 @@ fn a_relay_write_sends_no_approval_member() {
         ]
     );
     assert_eq!(body["operation"], ROUTE);
-    assert_eq!(body["input"], json!({"ticket": "48213", "queue": "billing"}));
+    assert_eq!(
+        body["input"],
+        json!({"ticket": "48213", "queue": "billing"})
+    );
     let raw = String::from_utf8_lossy(&invocations[0].raw).into_owned();
     assert!(!raw.contains("approval"), "{raw}");
     assert!(!raw.contains(&proof()), "{raw}");
@@ -1097,7 +1117,10 @@ fn a_relay_that_cannot_be_reached_is_unavailable() {
     let url = unreachable_url();
     let relay = ConnectorsRelay::new(&url, adapter(), connection(), vec![]).unwrap();
     starts(&failed(read(&relay)), "relay-unavailable:");
-    starts(&write_failed(write(&relay, &admitted())), "relay-unavailable:");
+    starts(
+        &write_failed(write(&relay, &admitted())),
+        "relay-unavailable:",
+    );
 }
 
 /// The fake closes its listener before it writes the describe's answer (`connection: close`),
@@ -1147,13 +1170,21 @@ fn a_boundary_refusal_at_the_invoke_is_relay_refused_and_nothing_is_resent() {
         let (refusal, message) = refused(read(&fake.relay(vec![])));
         assert_eq!(refusal, "relay-refused", "{code}");
         assert!(message.contains(code), "{message}");
-        assert_eq!((fake.describes(), fake.invocations().len()), (1, 1), "{code}");
+        assert_eq!(
+            (fake.describes(), fake.invocations().len()),
+            (1, 1),
+            "{code}"
+        );
 
         let fake = Fake::start(descriptor(), move |_| boundary(status, code));
         let (refusal, message) = write_refused(write(&fake.relay(vec![]), &request));
         assert_eq!(refusal, "relay-refused", "{code}");
         assert!(message.contains(code), "{message}");
-        assert_eq!((fake.describes(), fake.invocations().len()), (1, 1), "{code}");
+        assert_eq!(
+            (fake.describes(), fake.invocations().len()),
+            (1, 1),
+            "{code}"
+        );
     }
 }
 
@@ -1233,8 +1264,7 @@ fn a_connectors_error_at_the_describe_is_refused_with_its_code() {
 
 /// At the invoke, a valid v1alpha2 401 `unauthorized` envelope, request id null, no `mutation`.
 #[test]
-fn a_connectors_unauthorized_answer_at_the_invoke_is_refused_for_a_read_and_unknown_for_a_write()
-{
+fn a_connectors_unauthorized_answer_at_the_invoke_is_refused_for_a_read_and_unknown_for_a_write() {
     let fake = Fake::start(descriptor(), |_| {
         read_answer(401, &before_anchor(None, ErrorCode::Unauthorized))
     });
@@ -1403,7 +1433,10 @@ fn a_keyed_write_refused_unsupported_names_the_standing_grant_and_is_not_resent_
     let request = admitted();
     let message = write_failed(write(&fake.relay(vec![]), &request));
     assert!(message.contains("standing_grants"), "{message}");
-    assert!(message.contains("connectors.standing-grants/1"), "{message}");
+    assert!(
+        message.contains("connectors.standing-grants/1"),
+        "{message}"
+    );
     let invocations = fake.invocations();
     assert_eq!(invocations.len(), 1, "never resent");
     assert_eq!(
@@ -1435,7 +1468,12 @@ fn a_replayed_write_is_applied_naming_the_original_attempt() {
 // No credential, loopback only, no process.
 
 /// The headers a client could carry a credential in.
-const CREDENTIAL_HEADERS: [&str; 4] = ["authorization", "proxy-authorization", "x-api-key", "cookie"];
+const CREDENTIAL_HEADERS: [&str; 4] = [
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "cookie",
+];
 
 /// A read and a write, each answered; no recorded request carries a credential header or the
 /// fixture token.
@@ -1464,7 +1502,12 @@ fn exercise_without_credential() {
             );
         }
         let raw = String::from_utf8_lossy(&request.raw);
-        assert!(!raw.contains(TOKEN), "{} {} carries the token", request.method, request.path);
+        assert!(
+            !raw.contains(TOKEN),
+            "{} {} carries the token",
+            request.method,
+            request.path
+        );
     }
 }
 
@@ -1485,7 +1528,11 @@ fn the_relay_client_sends_no_credential() {
     let proxy = Fake::start(descriptor(), |_| Reply::Lost);
     let proxied = format!("http://relay:{TOKEN}@127.0.0.1:{}", proxy.port());
     let output = std::process::Command::new(std::env::current_exe().unwrap())
-        .args(["the_relay_client_sends_no_credential", "--exact", "--test-threads=1"])
+        .args([
+            "the_relay_client_sends_no_credential",
+            "--exact",
+            "--test-threads=1",
+        ])
         .env(CHILD, "1")
         .env("CONNECTORS_TOKEN", TOKEN)
         .env("CONNECTORS_SERVICE_CREDENTIAL", TOKEN)
@@ -1508,7 +1555,10 @@ fn the_relay_client_sends_no_credential() {
         "the child failed: {stdout}{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(stdout.contains("1 passed"), "the child ran the test: {stdout}");
+    assert!(
+        stdout.contains("1 passed"),
+        "the child ran the test: {stdout}"
+    );
     assert_eq!(proxy.connections(), 0, "nothing went through the proxy");
 }
 
@@ -1527,12 +1577,15 @@ fn a_relay_url_that_is_not_loopback_is_refused_before_any_request() {
     };
     for value in shapes(8402).into_iter().chain(shapes(fake.port())) {
         let by_rule = loopback_url(&value).expect_err(&value);
-        let by_client =
-            ConnectorsRelay::new(&value, adapter(), connection(), vec![source()]).expect_err(&value);
+        let by_client = ConnectorsRelay::new(&value, adapter(), connection(), vec![source()])
+            .expect_err(&value);
         assert_eq!(by_rule, by_client, "{value}");
         let said = by_rule.to_string();
         assert!(!said.contains(&value), "`{said}` repeats the value");
-        assert!(!said.contains("10.0.0.1") && !said.contains("u:p"), "{said}");
+        assert!(
+            !said.contains("10.0.0.1") && !said.contains("u:p"),
+            "{said}"
+        );
     }
     let accepted = loopback_url("http://127.0.0.1:8402").expect("a loopback URL");
     assert_eq!(accepted.to_string(), "http://127.0.0.1:8402");
@@ -1541,6 +1594,48 @@ fn a_relay_url_that_is_not_loopback_is_refused_before_any_request() {
         .expect("a loopback URL");
     assert!(fake.received().is_empty());
     assert_eq!(fake.connections(), 0);
+}
+
+/// A redirect is an answer like any other that is no Connectors answer: never followed, so the
+/// URL it names, another loopback listener answering correctly, sees no connection.
+#[test]
+fn a_redirect_is_never_followed() {
+    let elsewhere = Fake::start(descriptor(), |request| {
+        if request.json().get("idempotency_key").is_some() {
+            write_applied(request)
+        } else {
+            read_success(request)
+        }
+    });
+    let request = admitted();
+    for status in [301, 302, 307, 308] {
+        let describe_there = format!("{}/v1/describe", elsewhere.url());
+        let fake = Fake::start(
+            Reply::Redirect(status, describe_there.clone()),
+            read_success,
+        );
+        starts(&failed(read(&fake.relay(vec![]))), "upstream-protocol:");
+        let fake = Fake::start(Reply::Redirect(status, describe_there), write_applied);
+        starts(
+            &write_failed(write(&fake.relay(vec![]), &request)),
+            "upstream-protocol:",
+        );
+
+        let invoke_there = format!("{}/v1alpha2/invoke", elsewhere.url());
+        let redirect = move |_: &Received| Reply::Redirect(status, invoke_there.clone());
+        let fake = Fake::start(descriptor(), redirect.clone());
+        starts(&failed(read(&fake.relay(vec![]))), "upstream-protocol:");
+        assert_eq!(fake.invocations().len(), 1);
+        let fake = Fake::start(descriptor(), redirect);
+        let result = written(write(&fake.relay(vec![]), &request));
+        assert_eq!(
+            result.classification,
+            MutationClassification::Unknown,
+            "{status}"
+        );
+        assert_eq!(fake.invocations().len(), 1);
+    }
+    assert_eq!(elsewhere.connections(), 0, "no redirect was followed");
 }
 
 /// A source scan, as `no_invoke_ever_carries_an_approval_file` scans `src/cli.rs`: `src/relay.rs`
