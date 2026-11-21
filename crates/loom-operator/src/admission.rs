@@ -63,10 +63,17 @@
 //!    exactly that of an entry of its kind and URL, else `BoundaryUpstreamNotAllowed` at
 //!    `audience` (an audience the API server accepts would make the token a Kubernetes API
 //!    credential). A credential-free pod's NetworkPolicy
-//!    opens DNS and the upstreams only (story credential-free-network-policy), so a
+//!    opens DNS, the upstreams and only the namespace entries the operator allows (stories
+//!    credential-free-network-policy and boundary-admits-declared-http-egress), so a
 //!    `deploy.kubernetes.egress` entry of `spec.agent`, in order, naming a host is
-//!    `BoundaryEgressHost` at its `host`, and one naming a namespace `BoundaryEgressNamespace` at
-//!    its `namespace`.
+//!    `BoundaryEgressHost` at its `host`, and one naming a namespace is admitted only when, in
+//!    this order: its namespace is that of no `allowedBoundaryUpstreams` URL, of any kind,
+//!    declared or not, nor that of the `modelRoute` URL, whatever its spelling, and then a
+//!    DNS-1123 label (`BoundaryEgressNamespace` at its `namespace`); its selector is not empty (`BoundaryEgressNamespace` at its `selector`); a
+//!    `GET` `http` binding without a `bearer_env` has a `base_url` [`cluster_service`] reads as
+//!    a service in that namespace (`BoundaryEgressUnbound` at the entry); and one
+//!    `allowedBoundaryHttpEgress` entry equals it in namespace, selector (a set of label pairs)
+//!    and port (`BoundaryEgressNotAllowed` at the entry).
 //! 6. A `spec.secretRef` or `spec.secretFiles` outside the configuration's `allowedSecretNames`
 //!    (`SecretNotAllowed`).
 //! 7. A `deploy.kubernetes.namespace` other than the resource's (`NamespaceMismatch`).
@@ -179,7 +186,7 @@ use b10x_loom_agent::{
 };
 use b10x_loom_boundary::{Relay as BoundaryRelay, Upstream as BoundaryUrl};
 use llm_models::routes::Routes;
-use loom_sdk::agent::{AgentSpec, parse};
+use loom_sdk::agent::{AgentSpec, Binding, KubernetesEgress, parse};
 use serde_yaml_ng::{Mapping, Value};
 
 use b10x_loom_resource::model::{AdmissionRefusalReason as Reason, AgentVariant};
@@ -261,6 +268,8 @@ pub fn reason_spelling(reason: Reason) -> &'static str {
         Reason::BoundaryUpstreamNotAllowed => "BoundaryUpstreamNotAllowed",
         Reason::BoundaryEgressHost => "BoundaryEgressHost",
         Reason::BoundaryEgressNamespace => "BoundaryEgressNamespace",
+        Reason::BoundaryEgressUnbound => "BoundaryEgressUnbound",
+        Reason::BoundaryEgressNotAllowed => "BoundaryEgressNotAllowed",
         Reason::SecretNotAllowed => "SecretNotAllowed",
         Reason::NamespaceMismatch => "NamespaceMismatch",
         Reason::EgressHostNotAllowed => "EgressHostNotAllowed",
@@ -1357,7 +1366,7 @@ fn boundary_credential(boundary: &Boundary, declared: &[Upstream<'_>]) -> Result
 /// builds from it accepted ([`relay`]); its strings hold no credential (`SecretLiteral`); each
 /// audience is exactly that of an entry of its kind and URL (`BoundaryUpstreamNotAllowed` at
 /// `audience`); and no `deploy.kubernetes.egress` entry of `spec.agent` names a host
-/// (`BoundaryEgressHost`) or a namespace (`BoundaryEgressNamespace`).
+/// (`BoundaryEgressHost`), and each naming a namespace passes [`boundary_http_egress`].
 fn boundary(
     spec: &LoomAgentSpec,
     decoded: Option<&AgentSpec>,
@@ -1460,6 +1469,9 @@ fn boundary(
         .and_then(|deploy| deploy.kubernetes.as_ref())
         .map(|kubernetes| kubernetes.egress.as_slice())
         .unwrap_or_default();
+    let bindings = decoded
+        .map(|decoded| decoded.bindings.as_slice())
+        .unwrap_or_default();
     for (index, entry) in egress.iter().enumerate() {
         let at = format!("spec.agent.deploy.kubernetes.egress[{index}]");
         if entry.host.is_some() {
@@ -1470,14 +1482,139 @@ fn boundary(
                  upstreams, so its NetworkPolicy opens no host",
             ));
         }
-        if entry.namespace.is_some() {
-            return Err(Refusal::new(
-                Reason::BoundaryEgressNamespace,
-                format!("{at}.namespace"),
-                "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so \
-                 its NetworkPolicy opens no namespace",
-            ));
+        if let Some(namespace) = &entry.namespace {
+            boundary_http_egress(entry, namespace, &at, bindings, config)?;
         }
+    }
+    Ok(())
+}
+
+/// The namespace the host of `url`, an `allowedBoundaryUpstreams` or `modelRoute` URL, names,
+/// read so that no spelling hides it: any scheme, user information and port dropped, a trailing
+/// dot dropped, in lower case; the label before `svc`. `None` when the host names no cluster
+/// service, which the configuration read already refuses and condition 1 refuses again.
+fn upstream_namespace(url: &str) -> Option<String> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host.rsplit_once(':').map_or(host, |(host, _)| host);
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    match host.split('.').collect::<Vec<_>>().as_slice() {
+        [_, namespace, "svc", ..] => Some((*namespace).to_owned()),
+        _ => None,
+    }
+}
+
+/// Step 5 for `entry`, the egress entry at `at` naming `namespace` beside a boundary, under the
+/// `bindings` of `spec.agent` (story boundary-admits-declared-http-egress). Each condition in
+/// this order, the first that fails refusing it:
+///
+/// 1. `namespace`, in lower case without a trailing dot, is the namespace of no
+///    `allowedBoundaryUpstreams` URL, of any kind, declared here or not, and not that of the
+///    `modelRoute` URL, a proxy holding a credential ([`upstream_namespace`]), so no entry
+///    reopens such a namespace on another port. It fails closed: the configuration read refuses
+///    either URL when its host names no namespace, and when a `Config` built without the read
+///    holds one, every entry is refused, the detail naming that URL. Then it is a DNS-1123
+///    label: `BoundaryEgressNamespace` at its `namespace`, each with its own detail;
+/// 2. its selector is not empty, since an empty one opens every pod of the namespace:
+///    `BoundaryEgressNamespace` at its `selector`;
+/// 3. an `http` binding whose method is exactly `GET`, with no `bearer_env`, has a `base_url`
+///    [`cluster_service`] reads as a service in `namespace`: `BoundaryEgressUnbound` at the
+///    entry. This ties the entry to a binding by namespace only, since a Service's pods and
+///    ports are the cluster's; the operator's list is the gate;
+/// 4. one `allowedBoundaryHttpEgress` entry equals it in namespace, selector (as a set of pairs)
+///    and port ([`Config::allowed_http_egress`]): `BoundaryEgressNotAllowed` at the entry.
+fn boundary_http_egress(
+    entry: &KubernetesEgress,
+    namespace: &str,
+    at: &str,
+    bindings: &[Binding],
+    config: &Config,
+) -> Result<(), Refusal> {
+    let spelt = namespace.trim_end_matches('.').to_ascii_lowercase();
+    let closed = config
+        .allowed_boundary_upstreams
+        .iter()
+        .map(|allowed| ("allowedBoundaryUpstreams", allowed.url.as_str()))
+        .chain(
+            config
+                .model_route
+                .as_ref()
+                .map(|route| ("modelRoute", route.url.as_str())),
+        );
+    for (member, url) in closed {
+        match upstream_namespace(url) {
+            None => {
+                return Err(Refusal::new(
+                    Reason::BoundaryEgressNamespace,
+                    format!("{at}.namespace"),
+                    format!(
+                        "the namespace of the controller's {member} URL {url:?} cannot be read, \
+                         so no namespace a resource with spec.boundary opens can be told apart \
+                         from it"
+                    ),
+                ));
+            }
+            Some(upstream) if upstream == spelt => {
+                return Err(Refusal::new(
+                    Reason::BoundaryEgressNamespace,
+                    format!("{at}.namespace"),
+                    "a resource with spec.boundary reaches only DNS and its boundary's upstreams, \
+                     so its NetworkPolicy opens no namespace",
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    if !dns_label(namespace) {
+        return Err(Refusal::new(
+            Reason::BoundaryEgressNamespace,
+            format!("{at}.namespace"),
+            "it is no namespace name, a DNS-1123 label, so it is no namespace a boundary may \
+             open",
+        ));
+    }
+    if entry.selector.is_empty() {
+        return Err(Refusal::new(
+            Reason::BoundaryEgressNamespace,
+            format!("{at}.selector"),
+            "it is empty, so its rule would open every pod of the namespace; beside spec.boundary \
+             an entry names the pods it reaches",
+        ));
+    }
+    let bound = bindings.iter().any(|binding| match binding {
+        Binding::Http(http) => {
+            http.method == "GET"
+                && http.bearer_env.is_none()
+                && cluster_service(&http.base_url)
+                    .is_ok_and(|service| service.namespace == namespace)
+        }
+        Binding::Connectors(_) => false,
+    });
+    if !bound {
+        return Err(Refusal::new(
+            Reason::BoundaryEgressUnbound,
+            at,
+            "no GET http binding of spec.agent without a bearer_env has a base_url that is a \
+             cluster service in its namespace, so the agent reads nothing there",
+        ));
+    }
+    let selector = entry
+        .selector
+        .iter()
+        .map(|label| (label.name.as_str(), label.value.as_str()));
+    if config
+        .allowed_http_egress(namespace, selector, entry.port)
+        .is_none()
+    {
+        return Err(Refusal::new(
+            Reason::BoundaryEgressNotAllowed,
+            at,
+            "the controller's allowedBoundaryHttpEgress holds no entry equal to it in namespace, \
+             selector and port",
+        ));
     }
     Ok(())
 }

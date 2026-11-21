@@ -1,0 +1,13 @@
+# story boundary-admits-declared-http-egress: a namespace egress entry beside a boundary outside
+# every allowed upstream's namespace, with a selector, tied to a credential-free http binding and
+# equal to an allowedBoundaryHttpEgress entry is admitted.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-allowed-http-egress-is-admitted
+summary: A model boundary beside an egress namespace the configuration allows for a credential-free http binding is admitted.
+
+timeline:
+  - at: 2026-11-21T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-http-egress-allowed.yaml}
+    outcome: admitted

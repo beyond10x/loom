@@ -18,6 +18,8 @@
 //! allowedBoundaryUpstreams:
 //!   - {kind: model, url: 'http://llm-gateway.llm.svc:8080', audience: llm-gateway}
 //!   - {kind: git, url: 'http://connectors.connectors.svc/git', audience: connectors-git, port: 8080}
+//! allowedBoundaryHttpEgress:
+//!   - {namespace: monitoring, selector: [{name: app, value: logs-read}], port: 3100}
 //! ```
 //!
 //! `defaultResources` sizes an `AgentServe` pod whose spec declares no
@@ -37,7 +39,20 @@
 //! must give exactly, and optionally the `port` (1 to 65535) of the upstream's pods that its
 //! Service targets, which the pod's NetworkPolicy opens in place of the URL's port, since a
 //! NetworkPolicy matches the pod port after the Service has translated it.
+//!
+//! An `allowedBoundaryUpstreams` URL and the `modelRoute` URL must name their namespace: a host
+//! other than `<service>.<namespace>.svc`, optionally `.cluster.local` (a short service name, an
+//! IP literal), refuses the configuration, naming the member and the URL, since admission keeps
+//! a boundary's egress entries out of each of those namespaces.
+//!
+//! Each `allowedBoundaryHttpEgress` entry admits one namespace egress entry beside a boundary
+//! (story boundary-admits-declared-http-egress): its `namespace`, its `selector` (label pairs,
+//! not empty, each name once, compared as a set) and its TCP `port` (1 to 65535), all three in
+//! the one entry. The pod reaches the pods it selects by network position alone, so an entry
+//! names read-path pods and a port that serves only reads, never a pod that forwards requests
+//! with a credential of its own.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::fs;
 use std::num::NonZeroU16;
@@ -89,6 +104,36 @@ pub struct Config {
     /// matched exactly; empty admits none.
     #[serde(default)]
     pub allowed_boundary_upstreams: Vec<AllowedUpstream>,
+    /// The namespace egress entries a resource with `spec.boundary` may declare, each matched in
+    /// namespace, selector and port at once; empty admits none.
+    #[serde(default)]
+    pub allowed_boundary_http_egress: Vec<AllowedHttpEgress>,
+}
+
+/// One `allowedBoundaryHttpEgress` entry: beside `spec.boundary`, a `deploy.kubernetes.egress`
+/// entry of `spec.agent` with exactly this namespace, this selector (as a set of label pairs)
+/// and this port is admitted, once admission's other conditions hold. The pods it selects are
+/// reached by network position alone, so it should name read-path pods and a port that serves
+/// only reads, never a pod that forwards with a credential of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllowedHttpEgress {
+    /// The namespace the entry names.
+    pub namespace: String,
+    /// The pod selector the entry gives, never empty, each label name once.
+    pub selector: Vec<SelectorLabel>,
+    /// The TCP port the entry opens.
+    pub port: NonZeroU16,
+}
+
+/// One label of an [`AllowedHttpEgress`] selector: a pod carrying `name` with `value`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SelectorLabel {
+    /// The label's name.
+    pub name: String,
+    /// The label's value.
+    pub value: String,
 }
 
 /// The relay a boundary upstream is declared for, as `spec.boundary` names its members.
@@ -207,8 +252,8 @@ impl Config {
     /// The configuration `render` uses without `--config`: namespace `default`, the agent image
     /// `registry.example/loom-agent` at this crate's version, 250m CPU and 256Mi memory for an
     /// `AgentServe` resource, no default size for a `Command` resource (one that declares none
-    /// is refused `ResourcesRequired`), no model route, and no Secret name, egress host or
-    /// boundary upstream admitted.
+    /// is refused `ResourcesRequired`), no model route, and no Secret name, egress host,
+    /// boundary upstream or boundary http egress admitted.
     #[must_use]
     pub fn builtin() -> Self {
         Self {
@@ -230,6 +275,7 @@ impl Config {
             allowed_seccomp_localhost_profiles: Vec::new(),
             allowed_app_armor_localhost_profiles: Vec::new(),
             allowed_boundary_upstreams: Vec::new(),
+            allowed_boundary_http_egress: Vec::new(),
         }
     }
 
@@ -244,7 +290,59 @@ impl Config {
         if let Some(size) = &config.default_command_resources {
             sized("defaultCommandResources", size)?;
         }
+        if let Some(route) = &config.model_route {
+            names_namespace("modelRoute.url", &route.url)?;
+        }
+        for (index, entry) in config.allowed_boundary_upstreams.iter().enumerate() {
+            names_namespace(
+                &format!("allowedBoundaryUpstreams[{index}].url"),
+                &entry.url,
+            )?;
+        }
+        for (index, entry) in config.allowed_boundary_http_egress.iter().enumerate() {
+            let at = format!("allowedBoundaryHttpEgress[{index}].selector");
+            if entry.selector.is_empty() {
+                return Err(ConfigError(format!(
+                    "{at}: it is empty, which would select every pod of the namespace"
+                )));
+            }
+            for (later, label) in entry.selector.iter().enumerate() {
+                if entry.selector[..later]
+                    .iter()
+                    .any(|earlier| earlier.name == label.name)
+                {
+                    return Err(ConfigError(format!(
+                        "{at}[{later}]: it names a label an earlier pair names, and a pod \
+                         selector holds one value per label"
+                    )));
+                }
+            }
+        }
         Ok(config)
+    }
+
+    /// The `allowedBoundaryHttpEgress` entry equal to an egress entry in `namespace`, whose
+    /// selector is `selector` (label name and value pairs) on `port`, if one is: the namespace
+    /// and port exactly, the selector as a set of pairs, order ignored, so neither a pair the
+    /// entry lacks nor one the allowed entry lacks matches.
+    #[must_use]
+    pub fn allowed_http_egress<'a>(
+        &self,
+        namespace: &str,
+        selector: impl IntoIterator<Item = (&'a str, &'a str)>,
+        port: i64,
+    ) -> Option<&AllowedHttpEgress> {
+        let selector: BTreeSet<(&str, &str)> = selector.into_iter().collect();
+        self.allowed_boundary_http_egress.iter().find(|allowed| {
+            allowed.namespace == namespace
+                && i64::from(allowed.port.get()) == port
+                && allowed
+                    .selector
+                    .iter()
+                    .map(|label| (label.name.as_str(), label.value.as_str()))
+                    .collect::<BTreeSet<_>>()
+                    == selector
+        })
     }
 
     /// Whether an `allowedBoundaryUpstreams` entry names the relay `kind` (`model`, `connectors`
@@ -324,6 +422,37 @@ fn sized(member: &str, size: &Resources) -> Result<(), ConfigError> {
         }
     }
     Ok(())
+}
+
+/// Refuses `url`, the configuration's `member`, when its host names no namespace: read with any
+/// scheme, user information and port dropped, a trailing dot dropped, in lower case, it is not
+/// `<service>.<namespace>.svc` or `<service>.<namespace>.svc.cluster.local` (a short service
+/// name, an IP literal). Admission closes the namespace of every allowed upstream and of the
+/// model route beside a boundary, so it must be able to read each (correction 1 of story
+/// boundary-admits-declared-http-egress).
+fn names_namespace(member: &str, url: &str) -> Result<(), ConfigError> {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host.rsplit_once(':').map_or(host, |(host, _)| host);
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let readable = match host.split('.').collect::<Vec<_>>().as_slice() {
+        [service, namespace, "svc"] | [service, namespace, "svc", "cluster", "local"] => {
+            !service.is_empty() && !namespace.is_empty()
+        }
+        _ => false,
+    };
+    if readable {
+        Ok(())
+    } else {
+        Err(ConfigError(format!(
+            "{member}: {url:?} names no namespace: its host is not <service>.<namespace>.svc or \
+             <service>.<namespace>.svc.cluster.local, so no boundary's egress could be kept out of \
+             it"
+        )))
+    }
 }
 
 #[cfg(test)]
@@ -456,6 +585,177 @@ mod tests {
                 error.0.contains("allowedBoundaryUpstreams") && error.0.contains(named),
                 "story:boundary-container-projected-token: {entry}: {error}"
             );
+        }
+    }
+
+    /// `story:boundary-admits-declared-http-egress`: absent, `allowedBoundaryHttpEgress` admits
+    /// none; an entry is matched in namespace, port and selector at once, the selector as a set.
+    #[test]
+    fn the_boundary_http_egress_entries_are_listed_and_absent_admit_none() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        let absent = Config::parse(base).expect("a configuration");
+        assert!(absent.allowed_boundary_http_egress.is_empty());
+        assert!(Config::builtin().allowed_boundary_http_egress.is_empty());
+        assert!(
+            absent
+                .allowed_http_egress("monitoring", [("app", "logs")], 3100)
+                .is_none()
+        );
+        let listed = Config::parse(&format!(
+            "{base}allowedBoundaryHttpEgress:\n- {{namespace: monitoring, selector: [{{name: app, \
+             value: logs}}, {{name: tier, value: read}}], port: 3100}}\n"
+        ))
+        .expect("a configuration");
+        let allowed = |namespace, selector: &[(&'static str, &'static str)], port| {
+            listed
+                .allowed_http_egress(namespace, selector.iter().copied(), port)
+                .is_some()
+        };
+        assert!(allowed(
+            "monitoring",
+            &[("tier", "read"), ("app", "logs")],
+            3100
+        ));
+        assert!(!allowed("monitoring", &[("app", "logs")], 3100), "subset");
+        assert!(
+            !allowed(
+                "monitoring",
+                &[("app", "logs"), ("tier", "read"), ("x", "y")],
+                3100
+            ),
+            "superset"
+        );
+        assert!(!allowed(
+            "Monitoring",
+            &[("app", "logs"), ("tier", "read")],
+            3100
+        ));
+        assert!(!allowed(
+            "monitoring",
+            &[("app", "logs"), ("tier", "read")],
+            3101
+        ));
+    }
+
+    /// An `allowedBoundaryHttpEgress` entry is a namespace, a selector of `{name, value}` pairs
+    /// and a port; an unknown member, a missing one, port 0, an empty selector and a label named
+    /// twice are refused when the configuration is read.
+    #[test]
+    fn a_boundary_http_egress_entry_out_of_shape_is_refused() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        for (entry, named) in [
+            (
+                "{namespace: m, selector: [{name: app, value: logs}], port: 3100, host: h}",
+                "host",
+            ),
+            (
+                "{namespace: m, selector: [{name: app, value: logs, op: In}], port: 3100}",
+                "op",
+            ),
+            (
+                "{namespace: m, selector: [{name: app, value: logs}]}",
+                "port",
+            ),
+            (
+                "{selector: [{name: app, value: logs}], port: 3100}",
+                "namespace",
+            ),
+            (
+                "{namespace: m, selector: [{name: app, value: logs}], port: 0}",
+                "nonzero",
+            ),
+            ("{namespace: m, selector: [], port: 3100}", "empty"),
+            ("{namespace: m, port: 3100}", "selector"),
+            (
+                "{namespace: m, selector: [{name: app, value: a}, {name: app, value: b}], port: 3100}",
+                "selector[1]",
+            ),
+        ] {
+            let error = Config::parse(&format!("{base}allowedBoundaryHttpEgress: [{entry}]\n"))
+                .expect_err(entry);
+            assert!(
+                error.0.contains("allowedBoundaryHttpEgress") && error.0.contains(named),
+                "story:boundary-admits-declared-http-egress: {entry}: {error}"
+            );
+        }
+    }
+
+    /// Hosts that name no namespace: a short service name, a bare name, IP literals, another
+    /// domain after `svc`, a namespace missing, an empty authority.
+    const UNREADABLE: [&str; 9] = [
+        "http://gw.store:8080",
+        "http://gw:8080",
+        "http://10.0.0.1:8080",
+        "http://[fd00::1]:8080/v1",
+        "http://gw.store.svc.example:8080",
+        "http://gw.store.svc.cluster:8080",
+        "http://gw.svc:8080",
+        "http://",
+        "",
+    ];
+
+    /// Spellings of the cluster service `gw` of the namespace `store`.
+    const READABLE: [&str; 6] = [
+        "http://gw.store.svc",
+        "http://gw.store.svc:8080/path",
+        "http://gw.store.svc.cluster.local.:8080",
+        "http://GW.STORE.SVC:8080",
+        "https://gw.store.svc",
+        "http://user@gw.store.svc:8080",
+    ];
+
+    /// Correction 1 of `story:boundary-admits-declared-http-egress` (security pass 1, F2): an
+    /// `allowedBoundaryUpstreams` URL whose host is no `<service>.<namespace>.svc`, with an
+    /// optional `.cluster.local`, names no namespace admission could close beside a boundary, so
+    /// the configuration read refuses it, naming the entry's `url` and the URL. Every spelling of
+    /// a cluster service is still read.
+    #[test]
+    fn an_upstream_url_whose_namespace_cannot_be_read_is_refused() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\nallowedBoundaryUpstreams:\n- {kind: model, url: \
+                    'http://llm-gateway.llm.svc:8080', audience: llm-gateway}\n";
+        for url in UNREADABLE {
+            let error = Config::parse(&format!(
+                "{base}- {{kind: connectors, url: '{url}', audience: gw}}\n"
+            ))
+            .expect_err(url);
+            assert!(
+                error.0.starts_with("allowedBoundaryUpstreams[1].url: ")
+                    && error.0.contains(&format!("{url:?}")),
+                "{url}: {error}"
+            );
+        }
+        for url in READABLE {
+            Config::parse(&format!(
+                "{base}- {{kind: connectors, url: '{url}', audience: gw}}\n"
+            ))
+            .unwrap_or_else(|error| panic!("{url}: {error}"));
+        }
+    }
+
+    /// Correction 1 (F2): the same for the `modelRoute` URL, whose namespace a boundary's egress
+    /// entries may not open either.
+    #[test]
+    fn a_model_route_url_whose_namespace_cannot_be_read_is_refused() {
+        let base = "namespace: a\ndefaultImage: {repository: r, tag: t}\ndefaultResources: {cpu: \
+                    '1', memory: 1Mi}\n";
+        for url in UNREADABLE {
+            let error = Config::parse(&format!(
+                "{base}modelRoute: {{url: '{url}', protocol: messages, model: m}}\n"
+            ))
+            .expect_err(url);
+            assert!(
+                error.0.starts_with("modelRoute.url: ") && error.0.contains(&format!("{url:?}")),
+                "{url}: {error}"
+            );
+        }
+        for url in READABLE {
+            Config::parse(&format!(
+                "{base}modelRoute: {{url: '{url}', protocol: messages, model: m}}\n"
+            ))
+            .unwrap_or_else(|error| panic!("{url}: {error}"));
         }
     }
 }

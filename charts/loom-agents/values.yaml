@@ -15,6 +15,7 @@ allowUnconfinedProfiles: false
 allowedSeccompLocalhostProfiles: []
 allowedAppArmorLocalhostProfiles: []
 allowedBoundaryUpstreams: []
+allowedBoundaryHttpEgress: []
 resources:
   requests:
     cpu: 50m

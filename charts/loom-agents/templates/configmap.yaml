@@ -34,3 +34,4 @@ data:
     allowedEgressHosts: {{ .Values.allowedEgressHosts | toJson }}
     allowedClaimNames: {{ .Values.allowedClaimNames | toJson }}
     allowedBoundaryUpstreams: {{ .Values.allowedBoundaryUpstreams | toJson }}
+    allowedBoundaryHttpEgress: {{ .Values.allowedBoundaryHttpEgress | toJson }}

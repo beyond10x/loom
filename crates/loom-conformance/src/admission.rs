@@ -5,7 +5,10 @@
 //! `AdmitLoomAgent`'s one input is the resource's `path`, and every refusal is `external:`: the
 //! resource, the controller configuration and the catalog are outside the input. This target
 //! plays the file system and the controller, as it plays the governor for `not-in-frontier`: the
-//! configuration is always `ess/scenarios/resource-admission/config.yaml`; a `path` naming a
+//! configuration is `ess/scenarios/resource-admission/config.yaml`, or the `config.yaml` beside
+//! the resource read when its directory under `resource-admission/` holds one (the model route's
+//! scenario reads `resources/with-model-route/config.yaml`, since the others rely on no model
+//! route; story boundary-admits-declared-http-egress); a `path` naming a
 //! regular file under the repository root is read as it is (the authored scenarios name the
 //! fixtures under `ess/scenarios/resource-admission/resources/`); a synthesized path names none,
 //! and the target reads the fixture of the branch the scenario forced with
@@ -113,7 +116,13 @@ pub(crate) fn admit_loom_agent(
         let branch = forced.as_deref().unwrap_or(ADMITTED);
         fixtures.join("resources").join(format!("{branch}.yaml"))
     };
-    let config = Config::parse(&read(&fixtures.join("config.yaml"))?).map_err(|why| {
+    let beside = resource.with_file_name("config.yaml");
+    let config_path = if beside.starts_with(&fixtures) && beside.is_file() {
+        beside
+    } else {
+        fixtures.join("config.yaml")
+    };
+    let config = Config::parse(&read(&config_path)?).map_err(|why| {
         TargetError::unavailable("reading the scenarios' controller configuration", why.0)
     })?;
     let agent = parse_resource(&read(&resource)?).map_err(|why| {

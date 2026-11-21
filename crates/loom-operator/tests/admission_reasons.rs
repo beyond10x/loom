@@ -21,14 +21,22 @@ fn fixtures() -> PathBuf {
     root().join("ess/scenarios/resource-admission")
 }
 
-/// The answer `admit` gives the fixture `name` under the scenarios' configuration.
+/// The answer `admit` gives the fixture `name` under the scenarios' configuration: the
+/// `config.yaml` beside the fixture when its directory holds one (`with-model-route/`), as the
+/// conformance target reads it, else the one of `resource-admission/`.
 fn answer(name: &str) -> Result<(), Refusal> {
-    let config = Config::parse(
-        &fs::read_to_string(fixtures().join("config.yaml")).expect("the scenarios' configuration"),
-    )
-    .expect("the scenarios' configuration parses");
-    let text = fs::read_to_string(fixtures().join(format!("resources/{name}.yaml")))
-        .unwrap_or_else(|error| panic!("the fixture {name}: {error}"));
+    let path = fixtures().join(format!("resources/{name}.yaml"));
+    let beside = path.with_file_name("config.yaml");
+    let config_path = if beside.is_file() {
+        beside
+    } else {
+        fixtures().join("config.yaml")
+    };
+    let config =
+        Config::parse(&fs::read_to_string(config_path).expect("the scenarios' configuration"))
+            .expect("the scenarios' configuration parses");
+    let text =
+        fs::read_to_string(path).unwrap_or_else(|error| panic!("the fixture {name}: {error}"));
     let agent = parse_resource(&text).unwrap_or_else(|error| panic!("{name}: {error}"));
     let namespace = agent
         .metadata
@@ -50,7 +58,7 @@ fn refusal(name: &str) -> Refusal {
 }
 
 /// Each fixture, the reason it is refused with and the member it is refused at.
-const REFUSED: [(&str, &str, &str); 35] = [
+const REFUSED: [(&str, &str, &str); 40] = [
     ("malformed", "Malformed", "spec.agent"),
     (
         "secret-literal",
@@ -148,6 +156,31 @@ const REFUSED: [(&str, &str, &str); 35] = [
         "spec.agent.deploy.kubernetes.egress[0].namespace",
     ),
     (
+        "with-model-route/boundary-egress-model-route",
+        "BoundaryEgressNamespace",
+        "spec.agent.deploy.kubernetes.egress[0].namespace",
+    ),
+    (
+        "boundary-egress-namespace-name",
+        "BoundaryEgressNamespace",
+        "spec.agent.deploy.kubernetes.egress[0].namespace",
+    ),
+    (
+        "boundary-egress-unselected",
+        "BoundaryEgressNamespace",
+        "spec.agent.deploy.kubernetes.egress[0].selector",
+    ),
+    (
+        "boundary-egress-unbound",
+        "BoundaryEgressUnbound",
+        "spec.agent.deploy.kubernetes.egress[0]",
+    ),
+    (
+        "boundary-egress-not-allowed",
+        "BoundaryEgressNotAllowed",
+        "spec.agent.deploy.kubernetes.egress[0]",
+    ),
+    (
         "secret-not-allowed",
         "SecretNotAllowed",
         "spec.secretRef.name",
@@ -218,7 +251,11 @@ fn each_fixture_is_refused_with_its_reason_at_its_member() {
 
 #[test]
 fn the_admitted_fixtures_are_admitted() {
-    for name in ["admitted", "admitted-command"] {
+    for name in [
+        "admitted",
+        "admitted-command",
+        "boundary-http-egress-allowed",
+    ] {
         if let Err(refusal) = answer(name) {
             panic!("{name}: {}", refusal.message());
         }

@@ -1,0 +1,20 @@
+# story boundary-admits-declared-http-egress: the configuration's model route is an in-cluster
+# endpoint whose proxy holds a credential, so beside a boundary no egress entry opens its
+# namespace, though a binding reads there and the configuration allows the entry. The fixture's
+# directory holds the configuration with a model route it is admitted under.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-egress-in-the-model-route-namespace-is-refused
+summary: A model boundary beside an egress entry in the model route's namespace is refused BoundaryEgressNamespace.
+
+timeline:
+  - at: 2026-11-21T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/with-model-route/boundary-egress-model-route.yaml}
+    outcome: boundary-egress-namespace
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryEgressNamespace
+        member: spec.agent.deploy.kubernetes.egress[0].namespace
+        detail: "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its NetworkPolicy opens no namespace"

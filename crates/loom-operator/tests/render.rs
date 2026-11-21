@@ -1740,6 +1740,11 @@ fn quoted(text: &str) -> String {
 
 /// The test configuration, allowing `upstreams` (each its kind, URL and audience) as the
 /// boundary upstreams.
+///
+/// The entries are set on the parsed configuration, not read with it, since the configuration
+/// read refuses an upstream URL whose namespace it cannot read (correction 1 of
+/// `story:boundary-admits-declared-http-egress`), and admission must refuse such an upstream
+/// even when a configuration holds it.
 fn allowing(upstreams: &[(&str, &str, &str)]) -> Config {
     let entries: Vec<serde_json::Value> = upstreams
         .iter()
@@ -1747,11 +1752,11 @@ fn allowing(upstreams: &[(&str, &str, &str)]) -> Config {
             serde_json::json!({"kind": kind, "url": url, "audience": audience})
         })
         .collect();
-    Config::parse(&format!(
-        "{CONFIG}allowedBoundaryUpstreams: {}\n",
-        serde_json::Value::Array(entries)
-    ))
-    .expect("the test configuration with boundary upstreams")
+    Config {
+        allowed_boundary_upstreams: serde_json::from_value(serde_json::Value::Array(entries))
+            .expect("the test configuration's boundary upstreams"),
+        ..config()
+    }
 }
 
 /// The three upstreams the credential-free resources declare, each for its relay and audience.
@@ -2578,10 +2583,12 @@ fn a_host_egress_entry_beside_a_boundary_is_refused() {
         .expect("the same host is admitted without a boundary");
 }
 
-/// Design D243 § 2: beside a boundary the pod's egress is DNS and the upstreams only. A
-/// namespace egress entry, which would open that namespace (an upstream's included, on another
-/// port) past the boundary, is refused at its namespace, whatever its selector or port, and the
-/// refusal never repeats it; without a boundary the same entries are admitted.
+/// Design D243 § 2: beside a boundary the pod's egress is DNS and the upstreams only, unless the
+/// operator allows a namespace entry (`story:boundary-admits-declared-http-egress`). A namespace
+/// egress entry the configuration does not allow is refused at the entry; one naming an allowed
+/// upstream's namespace (on another port) at its namespace, one without a selector at its
+/// selector, whatever its port, and the refusal never repeats it; without a boundary the same
+/// entries are admitted.
 #[test]
 fn a_namespace_egress_entry_beside_a_boundary_is_refused() {
     let message = refusal(
@@ -2597,10 +2604,10 @@ fn a_namespace_egress_entry_beside_a_boundary_is_refused() {
     );
     assert_eq!(
         message,
-        "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: a \
-         resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
-         NetworkPolicy opens no namespace",
-        "story:credential-free-network-policy"
+        "refused: BoundaryEgressNotAllowed at spec.agent.deploy.kubernetes.egress[0]: the \
+         controller's allowedBoundaryHttpEgress holds no entry equal to it in namespace, selector \
+         and port",
+        "story:boundary-admits-declared-http-egress"
     );
     for (entries, member) in [
         (
@@ -2614,7 +2621,7 @@ fn a_namespace_egress_entry_beside_a_boundary_is_refused() {
         (
             "      - {name: logs, namespace: monitoring, port: 3100}\n      - {name: chat-api, \
              host: chat.example, port: 443}\n",
-            "egress[0].namespace",
+            "egress[0].selector",
         ),
         (
             "      - {name: chat-api, host: chat.example, port: 443}\n      - {name: logs, \
@@ -3738,4 +3745,617 @@ fn the_inputs_file_and_mount_are_the_controllers() {
         message.starts_with("refused: MountPathInvalid at spec.workspace.mountPath: "),
         "{message}"
     );
+}
+
+/// `story:boundary-admits-declared-http-egress`: a selector as YAML, each pair `{name, value}`.
+fn selector(pairs: &[(&str, &str)]) -> String {
+    let pairs: Vec<String> = pairs
+        .iter()
+        .map(|(name, value)| format!("{{name: {name}, value: {value}}}"))
+        .collect();
+    format!("[{}]", pairs.join(", "))
+}
+
+/// An `allowedBoundaryHttpEgress` entry as YAML.
+fn allowed_egress(namespace: &str, pairs: &[(&str, &str)], port: u16) -> String {
+    format!(
+        "{{namespace: {namespace}, selector: {}, port: {port}}}",
+        selector(pairs)
+    )
+}
+
+/// The test configuration with the three upstreams the credential-free resources declare and
+/// `entries` (each an [`allowed_egress`]) as `allowedBoundaryHttpEgress`.
+fn http_egress_config(entries: &[String]) -> Config {
+    http_egress_config_with(&ALLOWED, entries)
+}
+
+/// The test configuration with `upstreams` and `entries` as `allowedBoundaryHttpEgress`.
+fn http_egress_config_with(upstreams: &[(&str, &str, &str)], entries: &[String]) -> Config {
+    let upstreams: Vec<serde_json::Value> = upstreams
+        .iter()
+        .map(|(kind, url, audience)| {
+            serde_json::json!({"kind": kind, "url": url, "audience": audience})
+        })
+        .collect();
+    Config::parse(&format!(
+        "{CONFIG}allowedBoundaryUpstreams: {}\nallowedBoundaryHttpEgress: [{}]\n",
+        serde_json::Value::Array(upstreams),
+        entries.join(", ")
+    ))
+    .expect("story:boundary-admits-declared-http-egress: the configuration lists allowedBoundaryHttpEgress")
+}
+
+/// An egress entry `name` in `namespace` with `pairs` as its selector on `port`, as a line of
+/// the egress list.
+fn namespace_entry(name: &str, namespace: &str, pairs: &[(&str, &str)], port: u16) -> String {
+    format!(
+        "      - {{name: {name}, namespace: {namespace}, selector: {}, port: {port}}}\n",
+        selector(pairs)
+    )
+}
+
+/// The example's credential-free agent with `entries` (lines of the list) as its egress.
+fn with_egress(entries: &str) -> String {
+    let agent =
+        credential_free_agent().replace("    egress: []\n", &format!("    egress:\n{entries}"));
+    assert!(
+        agent.contains(entries),
+        "the entries sit in the egress list"
+    );
+    agent
+}
+
+/// An `AgentServe` resource running `agent` with the default routes and a model-only boundary.
+fn behind_model_boundary(agent: &str) -> String {
+    wrapped(
+        agent,
+        &format!("  routes: {{}}\n{}", boundary(true, false, false)),
+    )
+}
+
+/// The example's `logs` binding, `http://logs.monitoring.svc:3100` with no `bearer_env`.
+const LOGS_BINDING_URL: &str = "http://logs.monitoring.svc:3100";
+
+/// The example's `metrics` binding, `http://metrics.monitoring.svc:9090` with no `bearer_env`.
+const METRICS_BINDING_URL: &str = "http://metrics.monitoring.svc:9090";
+
+/// Each egress rule of the rendered NetworkPolicy, as rendered.
+fn egress_rules(rendered: &str) -> Vec<Value> {
+    let docs = documents(rendered);
+    let policy = docs
+        .iter()
+        .find(|doc| text(doc, &["kind"]) == "NetworkPolicy")
+        .expect("a NetworkPolicy");
+    at(policy, &["spec", "egress"])
+        .as_sequence()
+        .expect("egress rules")
+        .clone()
+}
+
+/// The rule an admitted entry renders: exactly its namespace, its pod selector and its TCP port.
+fn peer_rule(namespace: &str, pairs: &[(&str, &str)], port: u16) -> Value {
+    let labels: Vec<String> = pairs
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect();
+    serde_yaml_ng::from_str(&format!(
+        "to:\n- namespaceSelector: {{matchLabels: {{kubernetes.io/metadata.name: {namespace}}}}}\n  \
+         podSelector: {{matchLabels: {{{}}}}}\nports:\n- {{port: {port}, protocol: TCP}}\n",
+        labels.join(", ")
+    ))
+    .expect("a rule")
+}
+
+/// `story:boundary-admits-declared-http-egress`: an entry beside a boundary outside every allowed
+/// upstream's namespace, with a selector, tied to a credential-free `http` binding and allowed by
+/// the operator, is admitted, and the NetworkPolicy holds DNS, the upstream rule of today and
+/// exactly one more rule: the entry's namespace and pod selector on its port, nothing wider.
+#[test]
+fn a_declared_http_egress_beside_a_boundary_is_admitted_and_rendered() {
+    let logs = [("app", "logs")];
+    let config = http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]);
+    let without = render_document(&behind_model_boundary(&credential_free_agent()), &config)
+        .expect("rendered without the entry");
+    assert_eq!(egress_of(&without), [dns(), rule("llm", "TCP", 8080)]);
+    let rendered = render_document(
+        &behind_model_boundary(&with_egress(&namespace_entry(
+            "logs",
+            "monitoring",
+            &logs,
+            3100,
+        ))),
+        &config,
+    )
+    .expect("story:boundary-admits-declared-http-egress: rendered");
+    assert_eq!(
+        egress_of(&rendered),
+        [
+            dns(),
+            rule("monitoring", "TCP", 3100),
+            rule("llm", "TCP", 8080)
+        ],
+        "DNS, the entry and the upstream of today"
+    );
+    let rules = egress_rules(&rendered);
+    assert_eq!(rules[1], peer_rule("monitoring", &logs, 3100), "{rules:?}");
+    assert_eq!(rules[0], egress_rules(&without)[0]);
+    assert_eq!(rules[2], egress_rules(&without)[1]);
+}
+
+#[test]
+fn a_credential_free_agent_with_an_http_egress_renders_as_its_golden_file() {
+    let logs = [("app", "logs")];
+    let rendered = render_document(
+        &behind_model_boundary(&with_egress(&namespace_entry(
+            "logs",
+            "monitoring",
+            &logs,
+            3100,
+        ))),
+        &http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]),
+    )
+    .expect("rendered");
+    let golden = root().join("crates/loom-operator/tests/golden/credential-free-http-egress.yaml");
+    if std::env::var_os("LOOM_OPERATOR_BLESS").is_some() {
+        fs::write(&golden, &rendered).expect("the golden file is written");
+    }
+    let expected = fs::read_to_string(&golden).expect("the golden file");
+    assert_eq!(
+        rendered,
+        expected,
+        "render differs from {}",
+        golden.display()
+    );
+}
+
+/// The first condition (`story:boundary-admits-declared-http-egress`): an entry naming the
+/// namespace of any `allowedBoundaryUpstreams` entry, declared by this resource or not, in any
+/// spelling, is refused at its namespace, though it has a selector, a binding there and an allow
+/// list entry, so no later condition is reached.
+#[test]
+fn an_egress_in_an_allowed_upstream_namespace_is_refused() {
+    let detail = "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
+                  NetworkPolicy opens no namespace";
+    let expected = format!(
+        "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: \
+         {detail}"
+    );
+    let store = [("app", "store")];
+    for (namespace, binding) in [
+        ("connectors", "http://store.connectors.svc:5432"),
+        ("llm", "http://store.llm.svc:5432"),
+        ("Connectors", "http://store.connectors.svc:5432"),
+        ("LLM", "http://store.llm.svc:5432"),
+        ("llm.", "http://store.llm.svc:5432"),
+    ] {
+        let agent = with_egress(&namespace_entry("store", namespace, &store, 5432))
+            .replace(LOGS_BINDING_URL, binding);
+        let config = http_egress_config(&[allowed_egress(namespace, &store, 5432)]);
+        let message = refusal(&behind_model_boundary(&agent), &config);
+        assert_eq!(message, expected, "{namespace}");
+        for value in ["connectors", "llm", "store", "Connectors", "LLM"] {
+            assert!(
+                !message.contains(&format!(" {value}")),
+                "{value}: {message}"
+            );
+        }
+    }
+
+    let spelt = [
+        ("model", MODEL_UPSTREAM, "llm-gateway"),
+        (
+            "git",
+            "http://gw.Store.svc.cluster.local.:80/git",
+            "store-git",
+        ),
+    ];
+    let agent = with_egress(&namespace_entry("store", "store", &store, 5432))
+        .replace(LOGS_BINDING_URL, "http://db.store.svc:5432");
+    let message = refusal(
+        &behind_model_boundary(&agent),
+        &http_egress_config_with(&spelt, &[allowed_egress("store", &store, 5432)]),
+    );
+    assert_eq!(
+        message, expected,
+        "an allowed upstream's namespace spelt in upper case with a trailing dot is still its"
+    );
+
+    let agent = with_egress(&namespace_entry(
+        "logs",
+        "Monitoring",
+        &[("app", "logs")],
+        3100,
+    ));
+    let message = refusal(
+        &behind_model_boundary(&agent),
+        &http_egress_config(&[allowed_egress("Monitoring", &[("app", "logs")], 3100)]),
+    );
+    assert!(
+        message.starts_with(
+            "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: "
+        ) && message != expected,
+        "a namespace that is no DNS-1123 label names no namespace: {message}"
+    );
+}
+
+/// The first condition, correction 1 after security pass 1 (F1): the configuration's model route
+/// is an in-cluster proxy holding a credential, so an entry naming its namespace, in any
+/// spelling of either, is refused at its namespace as an allowed upstream's is, though it has a
+/// selector, a binding at the model route and an allow list entry. The same entry is admitted
+/// under a model route in another namespace.
+#[test]
+fn an_egress_in_the_model_route_namespace_is_refused() {
+    let detail = "a resource with spec.boundary reaches only DNS and its boundary's upstreams, so its \
+                  NetworkPolicy opens no namespace";
+    let expected = format!(
+        "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: \
+         {detail}"
+    );
+    let route = [("app", "model-route")];
+    let under = |url: &str, config: Config| Config {
+        model_route: config
+            .model_route
+            .map(|model_route| b10x_loom_operator::config::ModelRoute {
+                url: url.to_owned(),
+                ..model_route
+            }),
+        ..config
+    };
+    for (namespace, model_route) in [
+        ("agents", "http://model-route.agents.svc:8080/v1"),
+        ("Agents", "http://model-route.agents.svc:8080/v1"),
+        ("agents.", "http://model-route.agents.svc:8080/v1"),
+        (
+            "agents",
+            "http://Model-Route.AGENTS.svc.cluster.local.:8080/v1",
+        ),
+    ] {
+        let agent = with_egress(&namespace_entry("route", namespace, &route, 8080))
+            .replace(LOGS_BINDING_URL, "http://model-route.agents.svc:8080");
+        let config = under(
+            model_route,
+            http_egress_config(&[allowed_egress(namespace, &route, 8080)]),
+        );
+        let message = refusal(&behind_model_boundary(&agent), &config);
+        assert_eq!(message, expected, "{namespace} under {model_route}");
+        assert!(!message.contains(" agents"), "{message}");
+    }
+
+    let agent = with_egress(&namespace_entry("route", "agents", &route, 8080))
+        .replace(LOGS_BINDING_URL, "http://model-route.agents.svc:8080");
+    let elsewhere = under(
+        "http://model-route.models.svc:8080/v1",
+        http_egress_config(&[allowed_egress("agents", &route, 8080)]),
+    );
+    let rendered = render_document(&behind_model_boundary(&agent), &elsewhere)
+        .expect("the entry is admitted under a model route in another namespace");
+    assert!(
+        egress_rules(&rendered).contains(&peer_rule("agents", &route, 8080)),
+        "the entry is rendered"
+    );
+}
+
+/// The first condition fails closed, correction 2 after security pass 2 (F2-b): under a
+/// configuration built without the read, whose model route URL names no namespace that can be
+/// read (a short service name, a bare name, an IP literal), no namespace entry is admitted
+/// beside a boundary, though the same entry is admitted under a readable model route. The
+/// refusal names the URL.
+#[test]
+fn an_egress_beside_a_model_route_with_no_readable_namespace_is_refused() {
+    let logs = [("app", "logs")];
+    let agent = with_egress(&namespace_entry("logs", "monitoring", &logs, 3100));
+    let config = http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]);
+    render_document(&behind_model_boundary(&agent), &config)
+        .expect("the entry is admitted under a readable model route");
+    for url in [
+        "http://model-route.monitoring:8080/v1",
+        "http://model-route:8080/v1",
+        "http://10.0.0.1:8080/v1",
+        "http://[fd00::1]:8080/v1",
+    ] {
+        let unread = Config {
+            model_route: config.model_route.clone().map(|model_route| {
+                b10x_loom_operator::config::ModelRoute {
+                    url: url.to_owned(),
+                    ..model_route
+                }
+            }),
+            ..config.clone()
+        };
+        let message = refusal(&behind_model_boundary(&agent), &unread);
+        assert!(
+            message.starts_with(
+                "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].namespace: "
+            ) && message.contains(&format!("{url:?}")),
+            "{url}: {message}"
+        );
+        assert!(!message.contains(" monitoring"), "{message}");
+    }
+}
+
+/// The second condition: an entry with an empty or absent selector, which opens every pod of the
+/// namespace, is refused at its selector.
+#[test]
+fn an_egress_with_an_empty_selector_beside_a_boundary_is_refused() {
+    let config = http_egress_config(&[allowed_egress("monitoring", &[("app", "logs")], 3100)]);
+    for entry in [
+        "      - {name: logs, namespace: monitoring, port: 3100}\n",
+        "      - {name: logs, namespace: monitoring, selector: [], port: 3100}\n",
+    ] {
+        let message = refusal(&behind_model_boundary(&with_egress(entry)), &config);
+        assert!(
+            message.starts_with(
+                "refused: BoundaryEgressNamespace at spec.agent.deploy.kubernetes.egress[0].selector: "
+            ),
+            "{entry}: {message}"
+        );
+        assert!(!message.contains(" monitoring"), "{message}");
+    }
+}
+
+/// The third condition: an entry no `http` binding without a `bearer_env` reads from, by a
+/// `base_url` whose host is a cluster service in its namespace, is refused at the entry. A host
+/// that only looks like one (another domain after `svc`, a trailing dot, an IP literal, user
+/// information, upper case, `https`) ties nothing.
+#[test]
+fn an_egress_no_credential_free_binding_names_is_refused() {
+    let unbound = |message: &str| {
+        assert!(
+            message.starts_with(
+                "refused: BoundaryEgressUnbound at spec.agent.deploy.kubernetes.egress[0]: "
+            ),
+            "{message}"
+        );
+        assert!(!message.contains(" monitoring"), "{message}");
+    };
+    let logs = [("app", "logs")];
+
+    let elsewhere = with_egress(&namespace_entry("logs", "observability", &logs, 3100));
+    unbound(&refusal(
+        &behind_model_boundary(&elsewhere),
+        &http_egress_config(&[allowed_egress("observability", &logs, 3100)]),
+    ));
+
+    let config = http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]);
+    let entry = namespace_entry("logs", "monitoring", &logs, 3100);
+    let bearer = with_egress(&entry).replace(
+        "method: GET, max_bytes: 262144}",
+        "method: GET, bearer_env: SOURCE_TOKEN, max_bytes: 262144}",
+    );
+    assert_eq!(bearer.matches("bearer_env: SOURCE_TOKEN").count(), 2);
+    unbound(&refusal(&behind_model_boundary(&bearer), &config));
+
+    for lookalike in [
+        "http://logs.monitoring.svc.evil.example:3100",
+        "http://logs.monitoring.svc.:3100",
+        "http://logs.monitoring.svc.cluster.local.:3100",
+        "http://logs.monitoring.svc.cluster.evil:3100",
+        "http://10.0.0.1:3100",
+        "http://logs.MONITORING.svc:3100",
+        "http://LOGS.monitoring.svc:3100",
+        "https://logs.monitoring.svc:3100",
+        "http://logs.monitoring:3100",
+    ] {
+        let agent = with_egress(&entry)
+            .replace(LOGS_BINDING_URL, lookalike)
+            .replace(METRICS_BINDING_URL, "http://metrics.observability.svc:9090");
+        unbound(&refusal(&behind_model_boundary(&agent), &config));
+    }
+
+    let user = with_egress(&entry)
+        .replace(LOGS_BINDING_URL, "http://reader@logs.monitoring.svc:3100")
+        .replace(METRICS_BINDING_URL, "http://metrics.observability.svc:9090");
+    let message = refusal(&behind_model_boundary(&user), &config);
+    assert!(
+        message.starts_with("refused: SecretLiteral at spec.agent.bindings[1].base_url: "),
+        "user information never ties a binding: the document check refuses it first: {message}"
+    );
+
+    let posting = with_egress(&entry).replace(
+        "method: GET, max_bytes: 262144}",
+        "method: POST, max_bytes: 262144}",
+    );
+    let command = wrapped(
+        &posting,
+        &format!(
+            "  routes: {{}}\n  command: {{args: [--once]}}\n{}",
+            boundary(true, false, false)
+        ),
+    );
+    unbound(&refusal(&command, &config));
+}
+
+/// The document check refuses a binding whose method is not `GET` before step 5 reads the egress.
+#[test]
+fn a_post_binding_beside_an_http_egress_is_refused_by_the_document_check() {
+    let logs = [("app", "logs")];
+    let agent = with_egress(&namespace_entry("logs", "monitoring", &logs, 3100)).replacen(
+        "method: GET, max_bytes: 262144}",
+        "method: POST, max_bytes: 262144}",
+        1,
+    );
+    let message = refusal(
+        &behind_model_boundary(&agent),
+        &http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]),
+    );
+    assert!(
+        message.starts_with("refused: HttpMethod at spec.agent.bindings[1].method"),
+        "{message}"
+    );
+}
+
+/// The fourth condition's cases: the entry `logs` in `monitoring` on 3100 with `pairs`, the
+/// example's `logs` binding and a model-only boundary, so only `allowed` decides.
+fn not_allowed(pairs: &[(&str, &str)], port: u16, allowed: &[String]) {
+    let message = refusal(
+        &behind_model_boundary(&with_egress(&namespace_entry(
+            "logs",
+            "monitoring",
+            pairs,
+            port,
+        ))),
+        &http_egress_config(allowed),
+    );
+    assert_eq!(
+        message,
+        "refused: BoundaryEgressNotAllowed at spec.agent.deploy.kubernetes.egress[0]: the \
+         controller's allowedBoundaryHttpEgress holds no entry equal to it in namespace, selector \
+         and port",
+        "story:boundary-admits-declared-http-egress"
+    );
+}
+
+#[test]
+fn an_egress_whose_namespace_is_not_the_allowed_one_is_refused() {
+    not_allowed(
+        &[("app", "logs")],
+        3100,
+        &[allowed_egress("observability", &[("app", "logs")], 3100)],
+    );
+}
+
+#[test]
+fn an_egress_whose_selector_is_a_strict_subset_of_the_allowed_one_is_refused() {
+    not_allowed(
+        &[("app", "logs")],
+        3100,
+        &[allowed_egress(
+            "monitoring",
+            &[("app", "logs"), ("tier", "read")],
+            3100,
+        )],
+    );
+}
+
+#[test]
+fn an_egress_whose_selector_is_a_strict_superset_of_the_allowed_one_is_refused() {
+    not_allowed(
+        &[("app", "logs"), ("tier", "read")],
+        3100,
+        &[allowed_egress("monitoring", &[("app", "logs")], 3100)],
+    );
+}
+
+#[test]
+fn an_egress_whose_selector_has_another_value_is_refused() {
+    not_allowed(
+        &[("app", "logs")],
+        3100,
+        &[allowed_egress("monitoring", &[("app", "metrics")], 3100)],
+    );
+}
+
+#[test]
+fn an_egress_on_another_port_than_the_allowed_one_is_refused() {
+    not_allowed(
+        &[("app", "logs")],
+        3100,
+        &[allowed_egress("monitoring", &[("app", "logs")], 9090)],
+    );
+}
+
+#[test]
+fn an_egress_beside_an_empty_allow_list_is_refused() {
+    not_allowed(&[("app", "logs")], 3100, &[]);
+}
+
+#[test]
+fn an_egress_whose_values_are_spread_over_two_allowed_entries_is_refused() {
+    not_allowed(
+        &[("app", "logs")],
+        3100,
+        &[
+            allowed_egress("monitoring", &[("app", "metrics")], 9090),
+            allowed_egress("observability", &[("app", "logs")], 3100),
+        ],
+    );
+}
+
+#[test]
+fn an_egress_matching_an_allowed_entry_exactly_is_admitted() {
+    let pairs = [("app", "logs"), ("tier", "read")];
+    let rendered = render_document(
+        &behind_model_boundary(&with_egress(&namespace_entry(
+            "logs",
+            "monitoring",
+            &pairs,
+            3100,
+        ))),
+        &http_egress_config(&[
+            allowed_egress("monitoring", &[("tier", "read"), ("app", "logs")], 3100),
+            allowed_egress("observability", &[("app", "logs")], 3100),
+        ]),
+    )
+    .expect("story:boundary-admits-declared-http-egress: the same set in another order");
+    let rules = egress_rules(&rendered);
+    assert_eq!(rules.len(), 3, "{rules:?}");
+    assert_eq!(rules[1], peer_rule("monitoring", &pairs, 3100), "{rules:?}");
+}
+
+/// An entry naming a host stays refused beside a boundary, an entry naming a host and a namespace
+/// the configuration allows included.
+#[test]
+fn a_host_egress_beside_a_boundary_is_still_refused() {
+    let logs = [("app", "logs")];
+    let config = http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]);
+    for entry in [
+        "      - {name: chat-api, host: chat.example, port: 443}\n",
+        "      - {name: logs, host: chat.example, namespace: monitoring, selector: [{name: app, \
+         value: logs}], port: 3100}\n",
+    ] {
+        let message = refusal(&behind_model_boundary(&with_egress(entry)), &config);
+        assert!(
+            message.starts_with(
+                "refused: BoundaryEgressHost at spec.agent.deploy.kubernetes.egress[0].host: "
+            ),
+            "{entry}: {message}"
+        );
+        assert!(!message.contains("chat.example"), "{message}");
+    }
+}
+
+/// Nothing reaches a container with the entry: the pod's volumes and the agent's and the
+/// boundary's environment and mounts are those of the same resource without it, so no Secret
+/// reference or projected token is added.
+#[test]
+fn an_http_egress_adds_no_credential_variable_or_volume() {
+    let logs = [("app", "logs")];
+    let config = http_egress_config(&[allowed_egress("monitoring", &logs, 3100)]);
+    let with = pod_of(
+        &render_document(
+            &behind_model_boundary(&with_egress(&namespace_entry(
+                "logs",
+                "monitoring",
+                &logs,
+                3100,
+            ))),
+            &config,
+        )
+        .expect("rendered with the entry"),
+    );
+    let without = pod_of(
+        &render_document(&behind_model_boundary(&credential_free_agent()), &config)
+            .expect("rendered without it"),
+    );
+    assert_eq!(with["volumes"], without["volumes"], "the pod's volumes");
+    let agent = |pod: &Value| pod["containers"][0].clone();
+    let sidecar = |pod: &Value| {
+        init_container(pod, "boundary")
+            .expect("the boundary")
+            .clone()
+    };
+    for member in ["env", "envFrom", "volumeMounts"] {
+        assert_eq!(
+            agent(&with)[member],
+            agent(&without)[member],
+            "agent {member}"
+        );
+        assert_eq!(
+            sidecar(&with)[member],
+            sidecar(&without)[member],
+            "boundary {member}"
+        );
+    }
+    assert_eq!(with, without, "the pod is the same");
 }

@@ -17,14 +17,15 @@ use std::process::Command;
 use std::num::NonZeroU16;
 
 use b10x_loom_operator::config::{
-    AllowedUpstream, Config, Image, ModelRoute, Resources, UpstreamKind,
+    AllowedHttpEgress, AllowedUpstream, Config, Image, ModelRoute, Resources, SelectorLabel,
+    UpstreamKind,
 };
 use b10x_loom_operator::render::render_document;
 use serde::Deserialize;
 use serde_yaml_ng::Value;
 
 /// The overrides `task chart-check` renders the chart with, as `--set` arguments.
-const OVERRIDES: [&str; 18] = [
+const OVERRIDES: [&str; 24] = [
     "image.tag=0.0.1-test",
     "agentImage.repository=registry.example/other-agent",
     "modelRoute.url=http://model-route.agents.svc:8080/v1",
@@ -43,6 +44,12 @@ const OVERRIDES: [&str; 18] = [
     "allowedBoundaryUpstreams[1].kind=git",
     "allowedBoundaryUpstreams[1].url=http://connectors.connectors.svc/git",
     "allowedBoundaryUpstreams[1].audience=connectors-git",
+    "allowedBoundaryHttpEgress[0].namespace=monitoring",
+    "allowedBoundaryHttpEgress[0].selector[0].name=app",
+    "allowedBoundaryHttpEgress[0].selector[0].value=logs",
+    "allowedBoundaryHttpEgress[0].selector[1].name=tier",
+    "allowedBoundaryHttpEgress[0].selector[1].value=read",
+    "allowedBoundaryHttpEgress[0].port=3100",
 ];
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -288,7 +295,17 @@ fn the_controller_runs_the_configured_image_with_the_values_as_its_config() {
             allowed_seccomp_localhost_profiles: Vec::new(),
             allowed_app_armor_localhost_profiles: Vec::new(),
             allowed_boundary_upstreams: Vec::new(),
+            allowed_boundary_http_egress: Vec::new(),
         }
+    );
+    let map = kind(&documents, "ConfigMap");
+    assert!(
+        map["data"]["config.yaml"]
+            .as_str()
+            .expect("config.yaml")
+            .lines()
+            .any(|line| line == "allowedBoundaryHttpEgress: []"),
+        "story:boundary-admits-declared-http-egress: the chart renders an empty list by default"
     );
 }
 
@@ -341,8 +358,43 @@ fn overrides_reach_the_controller_image_and_config() {
                     port: None,
                 },
             ],
+            allowed_boundary_http_egress: vec![AllowedHttpEgress {
+                namespace: "monitoring".to_owned(),
+                selector: vec![
+                    SelectorLabel {
+                        name: "app".to_owned(),
+                        value: "logs".to_owned(),
+                    },
+                    SelectorLabel {
+                        name: "tier".to_owned(),
+                        value: "read".to_owned(),
+                    },
+                ],
+                port: NonZeroU16::new(3100).expect("a port"),
+            }],
         }
     );
+}
+
+/// `story:boundary-admits-declared-http-egress`: the values carry no comments, so the operator
+/// page, where the controller's configuration is documented, says what an
+/// `allowedBoundaryHttpEgress` entry may name: a NetworkPolicy is layer 4 and the pod reaches the
+/// entry by network position alone.
+#[test]
+fn the_values_reference_says_what_an_http_egress_entry_may_name() {
+    let page = fs::read_to_string(root().join("website/docs/reference/operator-cli.md"))
+        .expect("the operator page");
+    let page = page.split_whitespace().collect::<Vec<_>>().join(" ");
+    for sentence in [
+        "Every allowedBoundaryHttpEgress entry must name read-path pods and a port that serves \
+         only reads, and never a pod that forwards requests with a credential of its own",
+        "allowedBoundaryHttpEgress",
+    ] {
+        assert!(
+            page.contains(sentence),
+            "website/docs/reference/operator-cli.md says: {sentence}"
+        );
+    }
 }
 
 /// `story:command-resources-declared`: the chart sizes a `Command` resource that declares no

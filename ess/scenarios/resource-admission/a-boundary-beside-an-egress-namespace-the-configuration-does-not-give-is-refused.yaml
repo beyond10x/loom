@@ -1,0 +1,19 @@
+# story boundary-admits-declared-http-egress: beside a boundary a namespace egress entry tied to a
+# credential-free http binding opens its namespace only when one allowedBoundaryHttpEgress entry
+# equals it in namespace, selector and port; this one's selector is not the allowed one.
+type: ess-scenario/4
+domain: loom.resource
+scenario: a-boundary-beside-an-egress-namespace-the-configuration-does-not-give-is-refused
+summary: A model boundary beside a bound egress namespace no allowedBoundaryHttpEgress entry gives is refused BoundaryEgressNotAllowed.
+
+timeline:
+  - at: 2026-11-21T00:00:00Z
+    command: loom.resource.AdmitLoomAgent
+    input: {path: ess/scenarios/resource-admission/resources/boundary-egress-not-allowed.yaml}
+    outcome: boundary-egress-not-allowed
+    error:
+      name: loom.resource.AdmissionRefused
+      fields:
+        reason: BoundaryEgressNotAllowed
+        member: spec.agent.deploy.kubernetes.egress[0]
+        detail: "the controller's allowedBoundaryHttpEgress holds no entry equal to it in namespace, selector and port"
