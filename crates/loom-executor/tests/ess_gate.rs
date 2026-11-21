@@ -1,6 +1,7 @@
 //! The ESS hard gate (Atlas ADR 0076): the specification under `ess/` validates with
-//! `--strict-requires`, compiles, synthesizes its conformance suite with 0 refusals, and carries no
-//! open question (no `UNMAPPED:` string in any file under `ess/`).
+//! `--strict-requires`, compiles, synthesizes its conformance suite (`--suite-format 5`) with 0
+//! refusals not covered by an authored scenario (`covers:`), and carries no open question (no
+//! `UNMAPPED:` string in any file under `ess/`).
 //!
 //! The gate is a function over a directory, so it runs on `ess/` and on temporary copies of it.
 //! Everything it writes lands under `CARGO_TARGET_TMPDIR`. It uses only the standard library and
@@ -28,7 +29,9 @@ impl fmt::Display for Step {
         f.write_str(match self {
             Step::Validate => "validate (ess specify validate --strict-requires)",
             Step::Compile => "compile (ess specify compile --format json)",
-            Step::Synthesize => "synthesize (ess verify conform synthesize, 0 refusals)",
+            Step::Synthesize => {
+                "synthesize (ess verify conform synthesize --suite-format 5, 0 refusals not covered)"
+            }
             Step::MarkerScan => "marker scan (no UNMAPPED: under ess/)",
         })
     }
@@ -91,27 +94,17 @@ fn run_gate(dir: &Path, suite_out: &Path) -> Result<Json, GateFailure> {
         path_arg(dir),
         "--scenarios",
         path_arg(dir),
+        "--suite-format",
+        "5",
         "--out",
         path_arg(suite_out),
     ]);
-    if !synthesize.status.success() {
-        return Err(fail(Step::Synthesize, describe(&synthesize)));
-    }
-    match refusals(&String::from_utf8_lossy(&synthesize.stdout)) {
-        Some(0) => {}
-        Some(n) => {
-            return Err(fail(
-                Step::Synthesize,
-                format!("{n} refusal(s): {}", describe(&synthesize)),
-            ));
-        }
-        None => {
-            return Err(fail(
-                Step::Synthesize,
-                format!("no refusal count in the output: {}", describe(&synthesize)),
-            ));
-        }
-    }
+    synthesize_holds(
+        synthesize.status.success(),
+        &String::from_utf8_lossy(&synthesize.stdout),
+        &describe(&synthesize),
+    )
+    .map_err(|detail| fail(Step::Synthesize, detail))?;
 
     let markers = scan_markers(dir);
     if !markers.is_empty() {
@@ -190,14 +183,57 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The count from the synthesize summary line, `… N refusal(s), written to …`. The summary is the
-/// last line carrying a count; `refused:` lines before it are not read for one.
-fn refusals(stdout: &str) -> Option<u64> {
-    stdout.lines().rev().find_map(|line| {
-        let before = &line[..line.find(" refusal(s)")?];
+/// The two counts of a `--suite-format 5` summary line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Refusals {
+    occurrences: u64,
+    covered: u64,
+}
+
+/// The counts from the synthesize summary line, `… N refusal occurrence(s), M covered by
+/// authored`. ess 0.96.0 leaves `, M covered by authored` out when M is 0
+/// (`crates/edge/ess-cli/src/coverage.rs:130-134`), so a line without it reads as 0 covered. The
+/// summary is the last line carrying an occurrence count; `refused:` lines before it are not read.
+fn refusals(stdout: &str) -> Option<Refusals> {
+    let count_before = |text: &str, marker: &str| -> Option<u64> {
+        let before = &text[..text.find(marker)?];
         let digits = before.rsplit(|c: char| !c.is_ascii_digit()).next()?;
         digits.parse().ok()
+    };
+    stdout.lines().rev().find_map(|line| {
+        let occurrences = count_before(line, " refusal occurrence(s)")?;
+        let covered = match line.find(" covered by authored") {
+            Some(_) => count_before(line, " covered by authored")?,
+            None => 0,
+        };
+        Some(Refusals {
+            occurrences,
+            covered,
+        })
     })
+}
+
+/// Gate step 3 over what synthesize returned: it exited 0, its summary line carries the counts,
+/// and every refusal occurrence is covered by an authored scenario. `described` is the run as a
+/// failure prints it.
+fn synthesize_holds(success: bool, stdout: &str, described: &str) -> Result<(), String> {
+    if !success {
+        return Err(described.to_owned());
+    }
+    match refusals(stdout) {
+        Some(Refusals {
+            occurrences,
+            covered,
+        }) if covered >= occurrences => Ok(()),
+        Some(Refusals {
+            occurrences,
+            covered,
+        }) => Err(format!(
+            "{} refusal(s) not covered by an authored scenario: {described}",
+            occurrences - covered
+        )),
+        None => Err(format!("no refusal count in the output: {described}")),
+    }
 }
 
 fn ess(args: &[&str]) -> Output {
@@ -312,9 +348,10 @@ fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
     );
 }
 
-/// A command whose `never` outcome no input satisfies. ess 0.69.0 validates and compiles it, and
-/// `ess verify conform synthesize` refuses the outcome (`ESS-SYNTH-003`) and still exits 0 with
-/// `1 refusal(s)` on its summary line: the refusal count is the only signal that step 3 fails.
+/// A command whose `never` outcome no input satisfies. ess validates and compiles it, and
+/// `ess verify conform synthesize --suite-format 5` refuses the outcome (`ESS-SYNTH-003`), covers
+/// it with no authored scenario and exits 1 (ess 0.96.0); the summary-line counts are the second
+/// signal, for a synthesize that exits 0 while refusing.
 /// It is a file of its own in domain `loom.run`, so it does not depend on which sections
 /// `run.yaml` already declares.
 const UNSATISFIABLE_COMMAND: &str = "domain: loom.run
@@ -365,10 +402,11 @@ fn copy_with_edit(name: &str, file: &str, edit: impl FnOnce(String) -> String) -
     copy
 }
 
-// Item 3, the refusal count: synthesize exits 0 and refuses one outcome; the gate fails at step 3.
+// Item 3, the refusal count: synthesize refuses one outcome no authored scenario covers; the gate
+// fails at step 3.
 #[test]
-fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
-    let copy = copy_with_edit("gate_refused_exit_0", "ess-inputs.yaml", |text| {
+fn gate_over_a_copy_with_an_uncovered_refusal_fails_at_synthesize() {
+    let copy = copy_with_edit("gate_refused_uncovered", "ess-inputs.yaml", |text| {
         text.replacen(
             "  - domains/run.yaml\n",
             "  - domains/run.yaml\n  - domains/probe.yaml\n",
@@ -379,12 +417,37 @@ fn gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize() {
     let suite = copy.parent().expect("scratch").join("loom-suite.json");
     let Err(failure) = run_gate(&copy, &suite) else {
         panic!(
-            "the gate passed a specification synthesize refuses with exit 0 and 1 refusal(s) \
+            "the gate passed a specification with a refusal no authored scenario covers \
              (ESS-SYNTH-003)"
         );
     };
     assert_eq!(failure.step, Step::Synthesize, "{failure}");
-    assert!(failure.detail.contains("1 refusal(s)"), "{failure}");
+    assert!(
+        failure.detail.contains("loom.run.Probe/outcome/never"),
+        "the failure names the uncovered refusal: {failure}"
+    );
+}
+
+// Item 3, covered refusals: the tree's own `covers:` scenarios cover every refusal of `ess/`, and
+// removing one cover makes the gate fail at step 3.
+#[test]
+fn gate_over_a_copy_missing_one_cover_fails_at_synthesize() {
+    let copy = copy_with_edit("gate_cover_removed", "ess-inputs.yaml", |text| {
+        text.replacen(
+            "  - scenarios/decision/escalated-request-is-superseded.yaml\n",
+            "",
+            1,
+        )
+    });
+    let suite = copy.parent().expect("scratch").join("loom-suite.json");
+    let Err(failure) = run_gate(&copy, &suite) else {
+        panic!("the gate passed a specification whose supersede transition no scenario covers");
+    };
+    assert_eq!(failure.step, Step::Synthesize, "{failure}");
+    assert!(
+        failure.detail.contains("transition/supersede"),
+        "the failure names the uncovered refusal: {failure}"
+    );
 }
 
 // Item 1, `--strict-requires`: a specification requiring an older ess fails validation.
@@ -578,24 +641,97 @@ fn taskfile_check_runs_the_ess_gate() {
 
 #[test]
 fn refusal_count_is_read_from_the_summary_line() {
+    let counts = |occurrences, covered| {
+        Some(Refusals {
+            occurrences,
+            covered,
+        })
+    };
+    // What ess 0.96.0 prints for main at c1a1f443: no refusal, so no `covered by authored`.
     assert_eq!(
-        refusals("0 scenario(s) (0 authored), 0 refusal(s), written to x"),
-        Some(0)
+        refusals("286 selected scenario(s), 103 authored source(s), 0 refusal occurrence(s)"),
+        counts(0, 0)
     );
+    // One refusal, none covered: the cover count is left out and reads as 0.
     assert_eq!(
-        refusals("3 scenario(s) (1 authored), 12 refusal(s), written to x"),
-        Some(12)
+        refusals("287 selected scenario(s), 103 authored source(s), 1 refusal occurrence(s)"),
+        counts(1, 0)
     );
-    // ess 0.69.0 can exit 0 while refusing: `refused:` lines, then the summary. The count is read
-    // from the summary, the last line that carries one.
     assert_eq!(
         refusals(
-            "refused: some construct\nrefused: says 0 refusal(s) in its text\n\
-             3 scenario(s) (0 authored), 2 refusal(s), written to /x/suite.json\n"
+            "362 selected scenario(s), 107 authored source(s), 10 refusal occurrence(s), \
+             10 covered by authored"
         ),
-        Some(2)
+        counts(10, 10)
+    );
+    // `refused:` lines, then the summary. The counts are read from the summary, the last line
+    // that carries both.
+    assert_eq!(
+        refusals(
+            "refused: some construct\nrefused: says 0 refusal occurrence(s), 0 covered by \
+             authored in its text\n77 selected scenario(s), 4 authored source(s), \
+             11 refusal occurrence(s), 10 covered by authored\n"
+        ),
+        counts(11, 10)
+    );
+    // The default-format summary carries no cover count: it is not read as one.
+    assert_eq!(
+        refusals("3 scenario(s) (1 authored), 12 refusal(s), written to x"),
+        None
     );
     assert_eq!(refusals("written to x"), None);
+}
+
+// Item 3, the count arm: ess 0.96.0 exits 1 on an uncovered refusal under `--suite-format 5`, so
+// no specification makes synthesize exit 0 with one. Step 3's own check is fed that run: exit 0
+// and a summary line with more occurrences than covered fails it, and so does a summary without
+// counts.
+#[test]
+fn synthesize_exiting_0_with_an_uncovered_occurrence_fails_step_3() {
+    let uncovered = synthesize_holds(
+        true,
+        "refused[ESS-SYNTH-003]: …\n\
+         363 selected scenario(s), 107 authored source(s), 11 refusal occurrence(s), \
+         10 covered by authored\n",
+        "exit status: 0",
+    );
+    let Err(detail) = uncovered else {
+        panic!("step 3 passed exit 0 with 11 refusal occurrence(s), 10 covered by authored");
+    };
+    assert!(
+        detail.contains("1 refusal(s) not covered by an authored scenario"),
+        "{detail}"
+    );
+
+    let uncounted = synthesize_holds(true, "written to x", "exit status: 0");
+    assert!(
+        uncounted
+            .as_ref()
+            .is_err_and(|detail| detail.contains("no refusal count")),
+        "step 3 passed exit 0 with no summary line: {uncounted:?}"
+    );
+
+    assert_eq!(
+        synthesize_holds(
+            true,
+            "362 selected scenario(s), 107 authored source(s), 10 refusal occurrence(s), \
+             10 covered by authored",
+            "exit status: 0"
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        synthesize_holds(
+            true,
+            "286 selected scenario(s), 103 authored source(s), 0 refusal occurrence(s)",
+            "exit status: 0"
+        ),
+        Ok(())
+    );
+    assert_eq!(
+        synthesize_holds(false, "", "exit status: 1"),
+        Err("exit status: 1".to_owned())
+    );
 }
 
 /// Just enough JSON to read `ess specify compile --format json`.

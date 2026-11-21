@@ -125,6 +125,8 @@ fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_st
             "synthesize",
             "--path",
             "ess",
+            "--scenarios",
+            "ess",
             "--suite-format",
             "5",
             "--out",

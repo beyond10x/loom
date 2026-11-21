@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 6da6157abf2cb1c60ccb98fd5e82be5c50013ae5d48c3e0bb00e0b6c02b065ce
+// contract digest b8861e6c0dcd516ae6a61f772ec91a14f639811cafa340e3d466e8a1ef368f96
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -18,6 +18,24 @@
 //! or — as `entity invariant` — the declared outcome would leave an entity breaking an invariant.
 
 use crate::obligation::UnmetObligation;
+
+/// Where `loom.decision.DecisionRequest` is stored — a port the implementor provides.
+///
+/// Keyed by the identity `request_id`. Generated network entries supply an ephemeral implementation; durable storage remains a port.
+pub trait DecisionRequestStorage {
+    /// The instance with this identity, or `None` where none is stored.
+    fn get(&self, identity: &crate::decision::DecisionRequestId) -> Option<crate::decision::DecisionRequestSnapshot>;
+
+    /// Stores this instance under its identity, replacing what was held.
+    fn put(&mut self, snapshot: crate::decision::DecisionRequestSnapshot);
+
+    /// Removes the instance with this identity.
+    fn delete(&mut self, identity: &crate::decision::DecisionRequestId);
+
+    /// Every stored instance, in the order the store keeps them: the order a generated query
+    /// answers an unordered view in.
+    fn list(&self) -> Vec<crate::decision::DecisionRequestSnapshot>;
+}
 
 /// Where `loom.resource.LoomAgent` is stored — a port the implementor provides.
 ///
@@ -388,6 +406,54 @@ impl<P> crate::agent::obligations::RunOnceBehavior for Generated<P>
         }
         // `answered`: the default.
         return Ok(crate::agent::RunOnceOutcome::Answered);
+    }
+}
+
+impl<P: crate::decision::obligations::DecideBehavior> crate::decision::obligations::DecideBehavior for Generated<P> {
+    fn decide(&mut self, input: crate::decision::Decide) -> Result<crate::decision::DecideOutcome, UnmetObligation> {
+        crate::decision::obligations::DecideBehavior::decide(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::EscalateBehavior> crate::decision::obligations::EscalateBehavior for Generated<P> {
+    fn escalate(&mut self, input: crate::decision::Escalate) -> Result<crate::decision::EscalateOutcome, UnmetObligation> {
+        crate::decision::obligations::EscalateBehavior::escalate(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::ExpireBehavior> crate::decision::obligations::ExpireBehavior for Generated<P> {
+    fn expire(&mut self, input: crate::decision::Expire) -> Result<crate::decision::ExpireOutcome, UnmetObligation> {
+        crate::decision::obligations::ExpireBehavior::expire(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::RecommendBehavior> crate::decision::obligations::RecommendBehavior for Generated<P> {
+    fn recommend(&mut self, input: crate::decision::Recommend) -> Result<crate::decision::RecommendOutcome, UnmetObligation> {
+        crate::decision::obligations::RecommendBehavior::recommend(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::RecordProducedBehavior> crate::decision::obligations::RecordProducedBehavior for Generated<P> {
+    fn record_produced(&mut self, input: crate::decision::RecordProduced) -> Result<crate::decision::RecordProducedOutcome, UnmetObligation> {
+        crate::decision::obligations::RecordProducedBehavior::record_produced(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::RequestBehavior> crate::decision::obligations::RequestBehavior for Generated<P> {
+    fn request(&mut self, input: crate::decision::Request) -> Result<crate::decision::RequestOutcome, UnmetObligation> {
+        crate::decision::obligations::RequestBehavior::request(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::SupersedeBehavior> crate::decision::obligations::SupersedeBehavior for Generated<P> {
+    fn supersede(&mut self, input: crate::decision::Supersede) -> Result<crate::decision::SupersedeOutcome, UnmetObligation> {
+        crate::decision::obligations::SupersedeBehavior::supersede(&mut self.ports, input)
+    }
+}
+
+impl<P: crate::decision::obligations::TakeRecommendationBehavior> crate::decision::obligations::TakeRecommendationBehavior for Generated<P> {
+    fn take_recommendation(&mut self, input: crate::decision::TakeRecommendation) -> Result<crate::decision::TakeRecommendationOutcome, UnmetObligation> {
+        crate::decision::obligations::TakeRecommendationBehavior::take_recommendation(&mut self.ports, input)
     }
 }
 
@@ -1031,6 +1097,116 @@ where
 impl<P: crate::session::obligations::RecordFailedSessionBehavior> crate::session::obligations::RecordFailedSessionBehavior for Generated<P> {
     fn record_failed_session(&mut self, input: crate::session::RecordFailedSession) -> Result<crate::session::RecordFailedSessionOutcome, UnmetObligation> {
         crate::session::obligations::RecordFailedSessionBehavior::record_failed_session(&mut self.ports, input)
+    }
+}
+
+/// `loom.decision.ArtifactDecisionHistory`, generated: every row is one the specification fully determines from the stored `loom.decision.DecisionRequest`s.
+impl<P> crate::decision::obligations::ArtifactDecisionHistoryQuery for Generated<P>
+where
+    P: DecisionRequestStorage,
+{
+    fn artifact_decision_history(&self, param_0: crate::decision::ArtifactId) -> Result<Vec<crate::decision::ArtifactDecisionHistory>, UnmetObligation> {
+        let mut admitted = DecisionRequestStorage::list(&self.ports);
+        // `filter:` shows a row where it holds; false or unknown hides it.
+        admitted.retain(|held| equal(Some(&held.data.subject_artifact).map(|value| &value.0).map(|value| value.clone()), Some(&param_0).map(|value| &value.0).map(|value| value.clone())) == Some(true));
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::decision::ArtifactDecisionHistory {
+                request_id: held.data.request_id,
+                subject_revision: held.data.subject_revision,
+                question: held.data.question,
+                state: held.state,
+                decided_option: held.data.decided_option,
+                decided_answer: held.data.decided_answer,
+                decided_by: held.data.decided_by,
+                decided_at: held.data.decided_at,
+                produced_record: held.data.produced_record,
+                supersedes: held.data.supersedes,
+                superseded_by: held.data.superseded_by,
+            })
+            .collect())
+    }
+}
+
+/// `loom.decision.DecisionRequests`, generated: every row is one the specification fully determines from the stored `loom.decision.DecisionRequest`s.
+impl<P> crate::decision::obligations::DecisionRequestsQuery for Generated<P>
+where
+    P: DecisionRequestStorage,
+{
+    fn decision_requests(&self) -> Result<Vec<crate::decision::DecisionRequests>, UnmetObligation> {
+        let admitted = DecisionRequestStorage::list(&self.ports);
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::decision::DecisionRequests {
+                request_id: held.data.request_id,
+                state: held.state,
+                case_id: held.data.case_id,
+                question_key: held.data.question_key,
+                record_key: held.data.record_key,
+                unblocks: held.data.unblocks,
+                subject_artifact: held.data.subject_artifact,
+                subject_revision: held.data.subject_revision,
+                subject_path: held.data.subject_path,
+                question: held.data.question,
+                options: held.data.options,
+                autonomy_level: held.data.autonomy_level,
+                decision_class: held.data.decision_class,
+                holder: held.data.holder,
+                eligible: held.data.eligible,
+                addressed_to: held.data.addressed_to,
+                opened_at: held.data.opened_at,
+                expires_at: held.data.expires_at,
+                supersedes: held.data.supersedes,
+                recommended_option: held.data.recommended_option,
+                recommended_answer: held.data.recommended_answer,
+                recommendation_strength: held.data.recommendation_strength,
+                default_on_silence: held.data.default_on_silence,
+                grounds: held.data.grounds,
+                recommended_by: held.data.recommended_by,
+                grounding_report: held.data.grounding_report,
+                no_recommendation_reason: held.data.no_recommendation_reason,
+                escalated_to: held.data.escalated_to,
+                escalation_reason: held.data.escalation_reason,
+                decided_option: held.data.decided_option,
+                decided_answer: held.data.decided_answer,
+                decided_by: held.data.decided_by,
+                decided_by_kind: held.data.decided_by_kind,
+                decided_at: held.data.decided_at,
+                decided_case_revision: held.data.decided_case_revision,
+                decision_reasons: held.data.decision_reasons,
+                produced_record: held.data.produced_record,
+                superseded_by: held.data.superseded_by,
+                superseded_reason: held.data.superseded_reason,
+            })
+            .collect())
+    }
+}
+
+/// `loom.decision.OpenDecisionsForPrincipal`, generated: every row is one the specification fully determines from the stored `loom.decision.DecisionRequest`s.
+impl<P> crate::decision::obligations::OpenDecisionsForPrincipalQuery for Generated<P>
+where
+    P: DecisionRequestStorage,
+{
+    fn open_decisions_for_principal(&self, param_0: crate::decision::Principal) -> Result<Vec<crate::decision::OpenDecisionsForPrincipal>, UnmetObligation> {
+        let mut admitted = DecisionRequestStorage::list(&self.ports);
+        // `filter:` shows a row where it holds; false or unknown hides it.
+        admitted.retain(|held| all(&[any(&[equal(Some(&held.state).map(|value| match value { crate::decision::DecisionRequestState::Decided => "Decided", crate::decision::DecisionRequestState::Escalated => "Escalated", crate::decision::DecisionRequestState::Expired => "Expired", crate::decision::DecisionRequestState::Open => "Open", crate::decision::DecisionRequestState::Superseded => "Superseded" }.to_owned()), Some("Open".to_owned())), equal(Some(&held.state).map(|value| match value { crate::decision::DecisionRequestState::Decided => "Decided", crate::decision::DecisionRequestState::Escalated => "Escalated", crate::decision::DecisionRequestState::Expired => "Expired", crate::decision::DecisionRequestState::Open => "Open", crate::decision::DecisionRequestState::Superseded => "Superseded" }.to_owned()), Some("Escalated".to_owned()))]), equal(Some(&held.data.addressed_to).map(|value| &value.0).map(|value| value.clone()), Some(&param_0).map(|value| &value.0).map(|value| value.clone()))]) == Some(true));
+        Ok(admitted
+            .into_iter()
+            .map(|held| crate::decision::OpenDecisionsForPrincipal {
+                request_id: held.data.request_id,
+                case_id: held.data.case_id,
+                question: held.data.question,
+                subject_artifact: held.data.subject_artifact,
+                subject_revision: held.data.subject_revision,
+                recommended_option: held.data.recommended_option,
+                recommended_answer: held.data.recommended_answer,
+                recommendation_strength: held.data.recommendation_strength,
+                no_recommendation_reason: held.data.no_recommendation_reason,
+                opened_at: held.data.opened_at,
+                expires_at: held.data.expires_at,
+            })
+            .collect())
     }
 }
 

@@ -1,0 +1,82 @@
+# story decision-request-entity: a request a decider escalated to a person is superseded by a newer
+# one. ESS-SYNTH-004: ess 0.96.0 finds no input that reaches Escalate/escalated, so it arranges no
+# request resting in Escalated for this transition. The cause is DecisionClassId as a text newtype
+# compared with "escalation" (story:96-99), alone enough for this refusal; the record-key-open
+# outcome on open_for_record (story:109-111) is the other change the story asks for. No change of
+# the specification that keeps the behaviour removes it, so this authored scenario covers it.
+type: ess-scenario/7
+covers:
+  - loom.decision.DecisionRequest/transition/supersede/by/loom.decision.Supersede/superseded
+domain: loom.decision
+scenario: escalated-request-is-superseded
+summary: "An escalated request is superseded by a newer one; authored: synthesis reaches no Escalated one (ESS-SYNTH-004, text DecisionClassId and record-key-open)."
+
+timeline:
+  - at: 2026-11-21T12:00:00Z
+    command: loom.decision.Request
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing-change.review-1"
+      case_id: "IDEA-1.billing"
+      question_key: "IDEA-1.billing|change.review|"
+      record_key: "change.review@r3"
+      unblocks: {kind: approval, action: "change.review", capability: "change.review"}
+      subject_artifact: "change"
+      subject_revision: "t0r1"
+      question: "Approve the review of the change at revision t0r1?"
+      options:
+        - letter: "A"
+          does: "Approve the review."
+          cost: "None."
+          consequence: {admits: ["change.review"], blocks: [], grant: granted, produces: canon_authority}
+        - letter: "B"
+          does: "Reject the review."
+          cost: "The change is reworked."
+          consequence: {admits: [], blocks: ["change.review"], grant: denied, produces: canon_authority}
+      autonomy_level: A3
+      decision_class: code_review
+      holder: decider
+      eligible: ["decider:haiku", "timo"]
+      addressed_to: "decider:haiku"
+      opened_at: 2026-11-21T12:00:00Z
+    outcome: requested
+    events:
+      - event: loom.decision.DecisionRequested
+        payload:
+          request_id: "DR-IDEA-1.billing-change.review-1"
+          case_id: "IDEA-1.billing"
+          subject_artifact: "change"
+          subject_revision: "t0r1"
+
+  - at: 2026-11-21T12:01:00Z
+    command: loom.decision.Escalate
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing-change.review-1"
+      escalate_to: "timo"
+      reason: "The review touches the refund path."
+    outcome: escalated
+    events:
+      - event: loom.decision.DecisionEscalated
+        payload:
+          request_id: "DR-IDEA-1.billing-change.review-1"
+          escalate_to: "timo"
+
+  - at: 2026-11-21T12:02:00Z
+    command: loom.decision.Supersede
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing-change.review-1"
+      superseded_by: "DR-IDEA-1.billing-change.review-2"
+      reason: "The change moved to revision t0r2."
+    outcome: superseded
+    events:
+      - event: loom.decision.DecisionSuperseded
+        payload:
+          request_id: "DR-IDEA-1.billing-change.review-1"
+          superseded_by: "DR-IDEA-1.billing-change.review-2"
+
+assert:
+  - view: loom.decision.ArtifactDecisionHistory
+    params: {artifact: "change"}
+    contains: {request_id: "DR-IDEA-1.billing-change.review-1", state: Superseded, superseded_by: "DR-IDEA-1.billing-change.review-2"}

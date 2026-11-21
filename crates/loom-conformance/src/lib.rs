@@ -31,6 +31,10 @@
 //! configuration, and `StageFiles` by `b10x_loom_resource::stage::stage_files`, the decision
 //! `b10x-loom agent stage-files` makes (the `admission` module).
 //!
+//! The `loom.decision` domain's eight commands are applied by `b10x-loom-decision` to the
+//! scenario's in-memory decision store, and its three views are that crate's view functions over
+//! it (the `decision` module).
+//!
 //! This crate translates values and records what was published. It decides no outcome: each
 //! answer is the outcome the executor returned, and each event is the one it returned.
 //! The `loom.agent` domain's `CheckAgentSpec` is answered by `b10x_loom_agent::check_text` over
@@ -65,6 +69,7 @@ mod a2a;
 mod admission;
 mod agent;
 pub mod codec;
+mod decision;
 mod resource;
 mod run;
 mod session;
@@ -160,6 +165,8 @@ struct Live {
     sessions: Vec<AgentSessions>,
     /// `LoomAgent` resources, behind the generated behaviour of `loom.resource`.
     resources: LoomAgentRecord,
+    /// Decision requests, behind `b10x-loom-decision`'s commands.
+    decisions: b10x_loom_decision::InMemoryDecisionStore,
 }
 
 impl Live {
@@ -253,6 +260,16 @@ impl ConformanceTarget for LoomTarget {
             a2a::RECORD_A2A_TURN => a2a::record_a2a_turn_command(input),
             a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
             run::RUN_ONCE => run::run_once_command(input),
+            decision::REQUEST => decision::request(&mut live, input, correlation),
+            decision::RECOMMEND => decision::recommend(&mut live, input, correlation),
+            decision::DECIDE => decision::decide(&mut live, input, correlation),
+            decision::TAKE_RECOMMENDATION => {
+                decision::take_recommendation(&mut live, input, correlation)
+            }
+            decision::RECORD_PRODUCED => decision::record_produced(&mut live, input, correlation),
+            decision::ESCALATE => decision::escalate(&mut live, input, correlation),
+            decision::SUPERSEDE => decision::supersede(&mut live, input, correlation),
+            decision::EXPIRE => decision::expire(&mut live, input, correlation),
             other => {
                 return Err(TargetError::unavailable(
                     format!("invoking `{other}`"),
@@ -378,6 +395,15 @@ impl ConformanceTarget for LoomTarget {
                     "the generated query refused a row its declared type cannot hold",
                 )
             })?,
+            decision::OPEN_DECISIONS_FOR_PRINCIPAL
+            | decision::ARTIFACT_DECISION_HISTORY
+            | decision::DECISION_REQUESTS => decision::rows(&live, &view, &request.params)
+                .ok_or_else(|| {
+                    TargetError::unavailable(
+                        format!("reading `{view}`"),
+                        "a parameter does not decode or the decision store refused",
+                    )
+                })?,
             _ => {
                 return Err(TargetError::unavailable(
                     format!("reading `{view}`"),

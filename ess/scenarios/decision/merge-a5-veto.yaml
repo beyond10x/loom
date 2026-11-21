@@ -1,0 +1,133 @@
+type: ess-scenario/1
+domain: loom.decision
+scenario: merge-a5-veto
+summary: "At A5 merge (R∧D*) the decider vetoes only by deciding the denying option; granting and escalating are refused."
+
+timeline:
+  - at: 2026-11-21T12:00:00Z
+    command: loom.decision.Request
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      case_id: "IDEA-1.billing.refunds"
+      question_key: "IDEA-1.billing.refunds|change.merge|"
+      record_key: "change.merge@r9"
+      unblocks: {kind: approval, action: "change.merge", capability: "change.merge"}
+      subject_artifact: "change"
+      subject_revision: "t0r1"
+      subject_path: "impl/"
+      question: "Merge the change at revision t0r1 into mainline?"
+      options:
+        - letter: "A"
+          does: "Grant change.merge at this case revision."
+          cost: "None beyond the merge."
+          consequence: {admits: ["change.merge"], blocks: [], grant: granted, produces: canon_authority}
+        - letter: "B"
+          does: "Deny change.merge."
+          cost: "The run ends as refused."
+          consequence: {admits: [], blocks: ["change.merge"], grant: denied, produces: canon_authority}
+      autonomy_level: A5
+      decision_class: merge
+      holder: rule_and_decider_final
+      eligible: ["decider:haiku"]
+      addressed_to: "decider:haiku"
+      opened_at: 2026-11-21T12:00:00Z
+    outcome: requested
+    events:
+      - event: loom.decision.DecisionRequested
+        payload:
+          request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+          case_id: "IDEA-1.billing.refunds"
+          subject_artifact: "change"
+          subject_revision: "t0r1"
+
+  - at: 2026-11-21T12:01:00Z
+    command: loom.decision.Recommend
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      recommended_option: "A"
+      strength: strong
+      default_on_silence: false
+      grounds:
+        - source: evidence_record
+          citation: {form: record_id, value: {store: canon_evidence, record_id: "e0130-change.review"}}
+          supports: "A"
+          how: "The merge rule holds: code_review approved by an independent principal; the rule's verdict is this recommendation."
+      proposed_by: rule
+      check_verdict: verified
+      check_report: "1 ground, 1 resolves"
+    outcome: recommended
+    events:
+      - event: loom.decision.RecommendationRecorded
+        payload:
+          request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+          recommended_option: "A"
+          strength: strong
+
+  - at: 2026-11-21T12:02:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      option: "A"
+      principal: "decider:haiku"
+      principal_kind: decider
+      decided_at: 2026-11-21T12:02:00Z
+      case_revision: "r9"
+      reasons: ["Granting directly."]
+    outcome: decider-under-rule
+
+  - at: 2026-11-21T12:03:00Z
+    command: loom.decision.Escalate
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      escalate_to: "operator"
+      reason: "The refund path changed."
+    outcome: suppressed
+
+  - at: 2026-11-21T12:04:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      option: "B"
+      principal: "decider:haiku"
+      principal_kind: decider
+      decided_at: 2026-11-21T12:04:00Z
+      case_revision: "r9"
+      reasons: ["Veto: the refund path changed and no test covers a partial refund."]
+    outcome: decided
+    events:
+      - event: loom.decision.DecisionTaken
+        payload:
+          request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+          option: "B"
+          principal: "decider:haiku"
+
+  - at: 2026-11-21T12:05:00Z
+    command: loom.decision.RecordProduced
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      produced: {document: canon_authority, record: "change.merge@r9", case_revision: "r9"}
+    outcome: recorded
+    events:
+      - event: loom.decision.ProducedRecordRecorded
+        payload:
+          request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+          produced: {document: canon_authority, record: "change.merge@r9", case_revision: "r9"}
+
+  - at: 2026-11-21T12:06:00Z
+    command: loom.decision.RecordProduced
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing.refunds-change.merge-1"
+      produced: {document: canon_authority, record: "change.merge@r9", case_revision: "r9"}
+    outcome: already-recorded
+
+assert:
+  - view: loom.decision.ArtifactDecisionHistory
+    params: {artifact: "change"}
+    contains: {request_id: "DR-IDEA-1.billing.refunds-change.merge-1", state: Decided, decided_option: "B", decided_by: "decider:haiku", produced_record: {document: canon_authority, record: "change.merge@r9", case_revision: "r9"}}
