@@ -2074,7 +2074,10 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   argv, no shell, the arguments as JSON on stdin, `PATH` alone at the host process's value, the
   timeout) to `TestRunner::run_child`; `src/bindings.rs` starts no process of its own
   (`bound_command_confined.rs`, `bindings_starts_no_process_of_its_own`). The runner kills the
-  program and the processes it started at the timeout: exit 0 is `Performed` with its stdout
+  program at the timeout, under `linux` with every process it started (the run's cgroup), under
+  `local` with its process group; under `local` a process that left the group and still holds the
+  output makes the step a runner refusal, after one `Kill`, and a stdin write still pending then
+  is dropped (`engine.rs` tests): exit 0 is `Performed` with its stdout
   (one JSON object) as the report, anything else `Refused`, a runner's refusal included, naming
   it, and each step prints its applied `confinement:`; a timeout this host's clock cannot hold is
   `Refused`, naming it, before the program starts (`crates/loom-intake-slice/tests/bound_command.rs`,

@@ -458,7 +458,7 @@ impl LocalRoute {
     /// Start `command` under `admitted`, write `stdin` to it and close it when given, and wait
     /// for its end, all inside one runtime this call owns. At `timeout` the run is sent
     /// `Signal::Kill`, which `local` sends to its whole process group, and waited for; every path
-    /// that returns once it started has ended it.
+    /// that returns once it started has ended it. A write still pending then is dropped.
     fn launch(
         &self,
         admitted: &AdmittedProfile,
@@ -481,11 +481,19 @@ impl LocalRoute {
             let ended = match stdin {
                 None => self.finish(&run, deadline, &killed).await,
                 Some(bytes) => {
-                    let (written, ended) = tokio::join!(
-                        self.write_all(&run, bytes),
-                        self.finish(&run, deadline, &killed)
-                    );
-                    written.and(ended)
+                    let write = self.write_all(&run, bytes);
+                    let finish = self.finish(&run, deadline, &killed);
+                    tokio::pin!(write, finish);
+                    // A write that ended first, failed or not, is answered once the run ended.
+                    // A write still pending when the run ended (or the deadline's `Kill` was
+                    // waited for) is dropped, which closes the run's standard input: a process
+                    // outside the group that holds the pipe and reads nothing never holds the
+                    // run past its deadline.
+                    tokio::select! {
+                        biased;
+                        written = &mut write => written.and(finish.await),
+                        ended = &mut finish => ended,
+                    }
                 }
             };
             let (observed, timed_out) = match ended {
@@ -970,12 +978,35 @@ mod tests {
         Real,
         /// As `local` answers it, the run's state and exit status lost.
         Lost,
+        /// Not before a `Kill` was sent, then as `local` answers it.
+        UntilKill,
+    }
+
+    /// What else the fake does that `local` would not.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Fault {
+        None,
+        /// Every write to standard input stays pending: a process outside the group holds the
+        /// pipe and reads nothing.
+        StdinStalls,
+        /// Sending a `Kill` fails, after it was counted.
+        KillRefused,
     }
 
     struct Counting {
         inner: Arc<dyn Adapter>,
         wait: Wait,
+        fault: Fault,
         kills: AtomicUsize,
+    }
+
+    impl Counting {
+        fn refusal(&self, detail: &str) -> Contract {
+            Contract::AdapterUnserved {
+                adapter: self.inner.facts().adapter.clone(),
+                detail: detail.to_owned(),
+            }
+        }
     }
 
     impl Adapter for Counting {
@@ -1045,14 +1076,15 @@ mod tests {
             match self.wait {
                 Wait::Never => Box::pin(std::future::pending()),
                 Wait::Refused => {
-                    let adapter = self.inner.facts().adapter.clone();
-                    Box::pin(async move {
-                        Err(Contract::AdapterUnserved {
-                            adapter,
-                            detail: "the counting fake refuses every wait".to_owned(),
-                        })
-                    })
+                    let refusal = self.refusal("the counting fake refuses every wait");
+                    Box::pin(async move { Err(refusal) })
                 }
+                Wait::UntilKill => Box::pin(async move {
+                    while self.kills.load(Ordering::SeqCst) == 0 {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    self.inner.wait(run).await
+                }),
                 Wait::Real => self.inner.wait(run),
                 Wait::Lost => {
                     let waited = self.inner.wait(run);
@@ -1079,6 +1111,10 @@ mod tests {
         {
             if signal == Signal::Kill {
                 self.kills.fetch_add(1, Ordering::SeqCst);
+                if self.fault == Fault::KillRefused {
+                    let refusal = self.refusal("the counting fake could not send the Kill");
+                    return Box::pin(async move { Err(refusal) });
+                }
             }
             self.inner.signal(run, signal)
         }
@@ -1094,7 +1130,10 @@ mod tests {
             'life2: 'async_trait,
             Self: 'async_trait,
         {
-            self.inner.write_stdin(run, bytes)
+            match self.fault {
+                Fault::StdinStalls => Box::pin(std::future::pending()),
+                _ => self.inner.write_stdin(run, bytes),
+            }
         }
 
         fn close_stdin<'life0, 'life1, 'async_trait>(
@@ -1114,6 +1153,11 @@ mod tests {
 
     /// A route over a counting fake of Substrate's `local` adapter, the fake, and a workspace.
     fn route(wait: Wait) -> (LocalRoute, Arc<Counting>, tempfile::TempDir) {
+        route_with(wait, Fault::None)
+    }
+
+    /// [`route`], the fake also doing `fault`.
+    fn route_with(wait: Wait, fault: Fault) -> (LocalRoute, Arc<Counting>, tempfile::TempDir) {
         let runner = EngineRunner::open(&EngineConfinement {
             adapter: ConfinementAdapter::Local,
             local_reason: Some(REASON.to_owned()),
@@ -1126,6 +1170,7 @@ mod tests {
         let fake = Arc::new(Counting {
             inner: Arc::clone(&local.adapter),
             wait,
+            fault,
             kills: AtomicUsize::new(0),
         });
         let adapter: Arc<dyn Adapter> = fake.clone();
@@ -1273,6 +1318,68 @@ mod tests {
         assert!(
             took < KILL_SETTLE,
             "nothing waited for the deadline: {took:?}"
+        );
+    }
+
+    /// A write to standard input that a process outside the group stalls does not hold the run
+    /// past its deadline: once the deadline's `Kill` ended the run, the pending write is dropped.
+    #[test]
+    fn a_stdin_write_still_pending_when_the_deadline_ended_the_run_is_dropped() {
+        let (route, fake, workspace) = route_with(Wait::UntilKill, Fault::StdinStalls);
+        let (sender, receiver) = std::sync::mpsc::channel();
+        // On a thread of its own, so a launch the write holds fails this case instead of hanging
+        // it; the thread is left behind then.
+        std::thread::spawn(move || {
+            let (ended, took) = launched(
+                &route,
+                workspace.path(),
+                Some(b"arguments"),
+                Duration::from_millis(10),
+            );
+            let _ = sender.send((ended.map(|ended| ended.timed_out), took));
+        });
+        let (timed_out, took) = receiver.recv_timeout(KILL_SETTLE).unwrap_or_else(|_| {
+            panic!(
+                "the launch had not returned {KILL_SETTLE:?} after its 10 ms deadline: the \
+                 pending write to standard input held it"
+            )
+        });
+        assert_eq!(timed_out, Ok(true), "the deadline ended the run");
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "the deadline sends one Kill"
+        );
+        assert!(took < KILL_SETTLE, "the launch took {took:?}");
+    }
+
+    /// A `Kill` that could not be sent ends the launch as a refusal of its runner, never as a run
+    /// Loom killed at its deadline (the step reads "was killed" only for that), and is not sent
+    /// a second time.
+    #[test]
+    fn a_kill_that_could_not_be_sent_is_a_refusal_never_a_kill_and_is_not_sent_again() {
+        let (route, fake, workspace) = route_with(Wait::Never, Fault::KillRefused);
+        let (error, took) = launch(&route, workspace.path(), None, Duration::from_millis(10));
+        assert_eq!(
+            error.reason,
+            ConfinementRefusal::CapabilityUnserved,
+            "{error}"
+        );
+        assert!(
+            error
+                .detail
+                .contains("the counting fake could not send the Kill"),
+            "the launch returns the send's own error: {error}"
+        );
+        assert!(!error.to_string().contains("killed"), "{error}");
+        assert_eq!(
+            fake.kills.load(Ordering::SeqCst),
+            1,
+            "the failed Kill is not sent again by the launch's error path"
+        );
+        assert!(
+            took < KILL_SETTLE,
+            "no settle is waited for a Kill never sent: {took:?}"
         );
     }
 }

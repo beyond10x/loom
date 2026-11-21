@@ -42,6 +42,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `HoldSuspensionOutcome` gains `IncompleteRequest` (`SuspensionRequestIncomplete`) for a mixed hold, before `AlreadyHeld`; a non-`Decision` hold with no request is held (story:ess-096-upgrade)
 - **Breaking:** `ConfinementRefusal` gains `NoRunner`, bindings with no runner to start them (story:bound-commands-run-confined)
 - **Breaking:** bound commands start only through `IntentRequest.runner`; an opt-in selects `local` (story:bound-commands-run-confined)
+- **Breaking:** `b10x-loom run --action-bindings` with no opt-in runs its commands under Substrate's `linux` adapter instead of stopping `ConfinementUnavailable (CommandUnconfined)`, exit 3; with `--confinement none` or `local` it still stops so (story:bound-commands-run-confined)
+- **Breaking:** `b10x-loom run --unconfined-bindings` with `--state` is refused, exit 2 (story:bound-commands-run-confined)
+- A bound program ended by a signal reads `<program> was refused by its runner: CapabilityUnserved: …`, no longer `<program> ended signal: …`; under `local`, one whose output a process that left its group holds past the timeout reads the same refusal, no longer `was killed after N s` (story:bound-commands-run-confined)
+- Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
 
 ### Deprecated
 

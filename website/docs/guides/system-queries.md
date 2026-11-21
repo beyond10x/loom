@@ -110,7 +110,9 @@ run's confinement, without a shell, in `--workspace` or in a private directory m
 Loom starts no bound program itself: it hands the command to the runner, which starts it. The
 action's arguments arrive as one JSON document on standard input. The environment holds `PATH`
 alone, at the value `b10x-loom` has, and a program still running after `timeout_seconds` (60 when
-absent, at most 3600) is killed with the processes it started. Exit status 0 means `Performed`:
+absent, at most 3600) is killed: under `linux` with every process it started, under `local` with
+its process group. Under `local` a process that left the group and still holds the program's
+output is not killed, and the step is refused by its runner. Exit status 0 means `Performed`:
 standard output, one JSON object of at most 1 MiB, becomes the action's report. Any other exit
 means `Refused`, citing the tail of standard error. Each step prints the confinement it ran
 under.

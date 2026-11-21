@@ -97,12 +97,7 @@ fn under_local_the_timeout_holds_when_the_arguments_exceed_one_pipe_buffer() {
     // `json_text` writes each backspace as `\u0008`, six bytes: past one 64 KiB pipe buffer.
     let large = "\u{8}".repeat(30_000);
     let started = Instant::now();
-    let (result, output) = case.run(
-        &script,
-        &[],
-        pick(),
-        select_with(json!({ "text": large })),
-    );
+    let (result, output) = case.run(&script, &[], pick(), select_with(json!({ "text": large })));
     let took = started.elapsed();
     let run = result.unwrap_or_else(|error| panic!("{error}\n{}", tail(&output)));
     assert_eq!(run.steps, 1, "{}", tail(&output));

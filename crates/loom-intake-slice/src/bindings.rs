@@ -9,7 +9,9 @@
 //! process of its own. The command is a [`ChildCommand`]: its program, never a shell, with the
 //! action's arguments as JSON on standard input, an environment of `PATH` alone (the host's
 //! `PATH`, [`INHERITED`]), and the configuration's timeout ([`DEFAULT_TIMEOUT_SECONDS`] when
-//! absent), past which the runner kills the program and the processes it started; a timeout this
+//! absent), past which the runner kills the program (under `linux` with every process it started,
+//! under `local` with its process group; a process that left the group and still holds the
+//! program's output makes the step a refusal of the runner); a timeout this
 //! host's clock cannot hold is refused, naming it, before the program starts.
 //!
 //! Which runner, decided before any model call ([`CommandRunner::select`]): the operator's opt-in
