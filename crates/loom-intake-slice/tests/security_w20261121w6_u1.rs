@@ -110,6 +110,40 @@ fn under_local_the_timeout_holds_when_the_arguments_exceed_one_pipe_buffer() {
     );
 }
 
+/// Under `local`, a program that ends by itself without reading arguments larger than one pipe
+/// buffer ends as itself: the pending write is dropped once the run ended, and the step is the
+/// program's own outcome (its report, and its exit status when it is not 0), never a refusal of
+/// its runner.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn under_local_a_program_that_reads_none_of_its_large_arguments_ends_as_itself() {
+    let large = "\u{8}".repeat(30_000);
+    let case = Case::new("unread_large_arguments");
+    let script = case.script("record-note", "printf '{\"note\":\"n-1\"}\\n'\nexit 0\n");
+    let (result, output) = case.run(&script, &[], pick(), select_with(json!({ "text": large })));
+    let run = result.unwrap_or_else(|error| panic!("{error}\n{}", tail(&output)));
+    assert_eq!(run.steps, 1, "{}", tail(&output));
+    assert_eq!(effect(&output), json!({"note": "n-1"}), "{}", tail(&output));
+    let case = Case::new("unread_large_arguments_failing");
+    let script = case.script("record-note", "echo failed-on-purpose >&2\nexit 3\n");
+    let (result, output) = case.run(&script, &[], pick(), select_with(json!({ "text": large })));
+    let run = result.unwrap_or_else(|error| panic!("{error}\n{}", tail(&output)));
+    assert_eq!(run.steps, 1, "{}", tail(&output));
+    assert!(
+        output.contains(&format!(
+            "{} ended exit status: 3: failed-on-purpose",
+            script.display()
+        )),
+        "{}",
+        tail(&output)
+    );
+    assert!(
+        !output.contains("refused by its runner"),
+        "{}",
+        tail(&output)
+    );
+}
+
 /// The model chooses the arguments; only the binding's own argv reaches the program's argv.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
