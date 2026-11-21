@@ -23,9 +23,14 @@
 //! request: its `action_request_id`, `expected_case_revision`, `action` and `arguments` are written
 //! as JSON `null`, so the file keeps all ten members. The reason decides how they read: for
 //! `Decision` all four must be `null` and read as absent; for any other reason all four are read
-//! as present, so `arguments` that are themselves `null` stay arguments. A file written before has
-//! all four and reads as it did. A `Decision` file with any of the four not `null`, or another
-//! reason's file with a `null` request, is refused on read, so it is never written either.
+//! as present, so `arguments` that are themselves `null` stay arguments, unless
+//! `action_request_id`, `expected_case_revision` and `action` are all `null`: then the Suspension
+//! holds no request and `arguments` must be `null` too (`story:ess-096-upgrade`, a hold of another
+//! reason with none of the four is held). A file written before has all four and reads as it did;
+//! no earlier build wrote another reason's file with none, and one written by hand, refused before,
+//! now reads as such a Suspension. A `Decision` file with any of the four not `null`, or another
+//! reason's file with some but not all of them `null`, is refused on read, so it is never written
+//! either.
 //!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, the lock
 //! [`FileCaseStore`](crate::FileCaseStore) takes, through the same code. A suspension store and a
@@ -530,10 +535,28 @@ fn decode(value: &Value) -> Result<SuspensionSnapshot, DecodeError> {
     let commission_id = CommissionId(uuid(value, "commission_id")?);
     let reason = decode_reason(member_at(value, "", "reason")?)?;
     // The reason decides how the four request members read (`story:decision-suspension-reason`):
-    // a Suspension held for a decision has all four `null`, any other has all four present, and a
-    // `null` there is a value (`arguments` may be `null`), or a refusal (the other three).
+    // a Suspension held for a decision has all four `null`. Any other has all four present, where
+    // a `null` is a value (`arguments` may be `null`) or a refusal (the other three), or, when
+    // `action_request_id`, `expected_case_revision` and `action` are all `null`, holds no request
+    // (`story:ess-096-upgrade`): then `arguments` reads absent when `null`, and present otherwise,
+    // which the invariant check below refuses.
+    let no_request = ["action_request_id", "expected_case_revision", "action"]
+        .iter()
+        .map(|name| member_at(value, "", name))
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .all(|found| matches!(found, Value::Null));
     let (action_request_id, expected_case_revision, action, arguments) =
-        if matches!(reason, SuspensionReason::Decision(_)) {
+        if !matches!(reason, SuspensionReason::Decision(_)) && no_request {
+            let arguments = member_at(value, "", "arguments")?;
+            (
+                None,
+                None,
+                None,
+                (!matches!(arguments, Value::Null))
+                    .then(|| ProposedActionArguments(arguments.clone())),
+            )
+        } else if matches!(reason, SuspensionReason::Decision(_)) {
             for name in REQUEST_MEMBERS {
                 let found = member_at(value, "", name)?;
                 if !matches!(found, Value::Null) {

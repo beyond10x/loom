@@ -15,8 +15,8 @@
 //!   (`already-held`) and keeps it. A hold giving some but not all of its four request members is
 //!   refused first (`incomplete-request`,
 //!   [`SuspensionRequestIncomplete`](crate::model::responsibility::SuspensionRequestIncomplete)),
-//!   whether or not the commission holds one, and stores nothing. A host that already settled the request the Suspension would
-//!   hold answers `settled`, with its reason
+//!   whether or not the commission holds one, and stores nothing. A host that already settled the
+//!   request the Suspension would hold answers `settled`, with its reason
 //!   ([`SuspensionSettled`](crate::model::responsibility::SuspensionSettled)), and stores
 //!   nothing; the runtime then ends the run with nothing held. [`decide_hold`] never answers it:
 //!   only the host knows what it settled, so a host wraps its store to answer it first.
@@ -32,10 +32,13 @@
 //! names another, or none, and one that names a decision request on a Suspension held for an action
 //! request (`other-decision`, [`SuspensionDecisionMismatch`] naming both), and keep it, so a resume
 //! that read the hold for one decision never takes or releases a later hold for another.
-//! [`decide_hold`] refuses a hold whose reason and those four members disagree, and stores
-//! nothing: one giving some but not all of them as `incomplete-request`, whatever its reason
-//! (`story:ess-096-upgrade`), and a `Decision` hold with all four or another hold with none as
-//! `storage-failed`, since the specification cannot read the reason's variant.
+//! [`decide_hold`] refuses a hold giving some but not all of those four members as
+//! `incomplete-request`, whatever its reason (`story:ess-096-upgrade`), and a `Decision` hold with
+//! all four as `storage-failed`, and stores nothing. A hold of any other reason with none of the
+//! four is held, as the specification declares it: no guard can read which variant the reason
+//! is, so the specification admits that hold, and the runtime follows it. Such a Suspension holds
+//! no request to perform: `resume_after_grant` answers `ResumeError::Store` before taking it, and
+//! `resume_after_decision` refuses it as `HeldForAuthority`.
 //!
 //! A take and a release name the action request the resume read and revalidated. A Suspension
 //! held for another request is refused (`other-request`, [`SuspensionRequestMismatch`] naming
@@ -145,9 +148,11 @@ pub enum SuspensionWrite {
 
 /// `HoldSuspension` over `held`, the Suspension stored under the input's identity:
 /// `incomplete-request` when the input gives some but not all of its four request members, whether
-/// or not one is held; `already-held` when there is one; `storage-failed` when the input's reason
-/// and its four members disagree (a `Decision` hold with all four, another hold with none);
-/// otherwise `held`, with the `Pending` Suspension to store.
+/// or not one is held; `already-held` when there is one; `storage-failed` for a `Decision` hold
+/// with all four; otherwise `held`, with the `Pending` Suspension to store. A hold of a reason
+/// other than `Decision` with none of the four is held: refusing it cannot be declared until a
+/// guard can read which variant a union value is, so the specification admits that hold and the
+/// runtime follows it (`story:ess-096-upgrade`).
 pub fn decide_hold(
     held: Option<&SuspensionSnapshot>,
     input: HoldSuspension,
@@ -180,20 +185,15 @@ pub fn decide_hold(
             None,
         );
     }
-    // A Suspension held for a decision holds no action request, and every other holds one whole
+    // A Suspension held for a decision holds no action request
     // (`story:decision-suspension-reason`): ess/22 cannot tie the members to the reason, so the
-    // port refuses the combination it forbids before any store keeps it.
-    let decision = matches!(input.reason, SuspensionReason::Decision(_));
-    if members.contains(&decision) {
+    // port refuses that combination before any store keeps it. The members agree with each other
+    // here, so the first stands for all four.
+    if matches!(input.reason, SuspensionReason::Decision(_)) && members[0] {
         return (
             HoldSuspensionOutcome::StorageFailed {
                 error: SuspensionStorageFailed {
-                    reason: if decision {
-                        "a Suspension held for a decision holds no action request".to_owned()
-                    } else {
-                        "a Suspension not held for a decision holds its whole action request"
-                            .to_owned()
-                    },
+                    reason: "a Suspension held for a decision holds no action request".to_owned(),
                 },
             },
             None,
@@ -371,8 +371,7 @@ pub fn decide_release(
 
 /// The suspension port over memory: one Suspension per commission id, every command answered by
 /// the decisions above under one lock. It answers `storage-failed` only for a hold
-/// [`decide_hold`] refuses so, a `Decision` hold with all four request members or another hold
-/// with none.
+/// [`decide_hold`] refuses so, a `Decision` hold with all four request members.
 #[derive(Debug, Default)]
 pub struct SuspensionStore {
     held: Mutex<BTreeMap<Uuid, SuspensionSnapshot>>,

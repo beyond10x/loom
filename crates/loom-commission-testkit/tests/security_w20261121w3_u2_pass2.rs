@@ -467,7 +467,8 @@ fn security_pass2_an_approval_hold_is_taken_as_before_and_never_by_a_decision() 
 /// The in-memory store (the one the conformance target holds through) refuses every hold whose
 /// reason and four request members disagree, and stores nothing: one giving some but not all four
 /// `IncompleteRequest`, naming its Suspension (`story:ess-096-upgrade`), a `Decision` hold with all
-/// four and another hold with none `StorageFailed`; the two agreeing holds are held.
+/// four `StorageFailed`; the two agreeing holds are held, and so is a hold of another reason with
+/// none of the four, stored with that reason and no request member.
 #[test]
 fn security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_disagree() {
     let full = approval();
@@ -488,7 +489,7 @@ fn security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_
                 held.arguments = full.arguments.clone();
             }
             let decision_hold = matches!(reason, SuspensionReason::Decision(_));
-            let agrees = (decision_hold && mask == 0) || (!decision_hold && mask == 15);
+            let agrees = mask == 0 || (!decision_hold && mask == 15);
             let mixed = mask != 0 && mask != 15;
             let store = SuspensionStore::new();
             let outcome = store.hold(hold_of(&held));
@@ -506,6 +507,20 @@ fn security_pass2_the_memory_store_holds_no_suspension_whose_reason_and_members_
                     matches!(outcome, HoldSuspensionOutcome::Held { .. }),
                     "{mask:04b} {reason:?}: {outcome:?}"
                 );
+                if !decision_hold && mask == 0 {
+                    let stored = stored.expect("the hold is stored");
+                    assert_eq!(stored.data.reason, reason, "{mask:04b}");
+                    assert_eq!(
+                        (
+                            stored.data.action_request_id,
+                            stored.data.expected_case_revision,
+                            stored.data.action,
+                            stored.data.arguments
+                        ),
+                        (None, None, None, None),
+                        "{mask:04b} {reason:?}"
+                    );
+                }
             } else if !refused || stored.is_some() {
                 forbidden.push(format!(
                     "{mask:04b} {reason:?}: {outcome:?}, stored {stored:?}"

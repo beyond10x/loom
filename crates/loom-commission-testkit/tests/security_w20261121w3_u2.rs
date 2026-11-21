@@ -633,10 +633,6 @@ fn security_a_suspension_file_whose_reason_and_members_disagree_is_refused_and_k
             file_text(&request, "3", "null", "{}", AUTHORITY),
         ),
         (
-            "authority-with-no-members",
-            file_text("null", "null", "null", "null", AUTHORITY),
-        ),
-        (
             "decision-unblocking-nothing-known",
             file_text(
                 "null",
@@ -701,11 +697,37 @@ fn security_a_suspension_file_whose_reason_and_members_disagree_is_refused_and_k
             .count();
         assert_eq!(suspensions, 1, "{name}: another Suspension file appeared");
     }
+
+    // story:ess-096-upgrade: a hold of a reason other than Decision with none of the four is held,
+    // so its file, all four `null`, reads back as that Suspension with no request member.
+    let dir = store_dir("authority-with-no-members");
+    let store = FileSuspensionStore::open(&dir).expect("the store opens");
+    std::fs::write(
+        file_of(&dir),
+        file_text("null", "null", "null", "null", AUTHORITY),
+    )
+    .unwrap();
+    let read = store
+        .get(&commission)
+        .expect("authority-with-no-members: get reads it")
+        .expect("authority-with-no-members: a Suspension is stored");
+    assert!(matches!(read.data.reason, SuspensionReason::Authority(_)));
+    assert_eq!(
+        (
+            read.data.action_request_id,
+            read.data.expected_case_revision,
+            read.data.action,
+            read.data.arguments
+        ),
+        (None, None, None, None),
+        "authority-with-no-members"
+    );
 }
 
 /// A hold whose reason and members disagree is refused by the file store and nothing is written:
 /// one giving some but not all four members `IncompleteRequest`, naming its Suspension
-/// (`story:ess-096-upgrade`), the other two `StorageFailed`.
+/// (`story:ess-096-upgrade`), a `Decision` hold with all four `StorageFailed`. A hold of another
+/// reason with none of the four is held and written, and reads back with no request member.
 #[test]
 fn security_the_file_store_writes_no_hold_whose_reason_and_members_disagree() {
     let commission = commission_of(&CaseId("case-sec-file".to_owned()));
@@ -723,11 +745,6 @@ fn security_the_file_store_writes_no_hold_whose_reason_and_members_disagree() {
     for (name, data, mixed) in [
         ("hold-decision-with-request", decision_with_request, false),
         ("hold-decision-with-action", decision_with_action, true),
-        (
-            "hold-authority-without-members",
-            authority_without_members,
-            false,
-        ),
         (
             "hold-authority-without-arguments",
             authority_without_arguments,
@@ -754,4 +771,30 @@ fn security_the_file_store_writes_no_hold_whose_reason_and_members_disagree() {
         }
         assert!(!file_of(&dir).exists(), "{name}: a file was written");
     }
+
+    let name = "hold-authority-without-members";
+    let dir = store_dir(name);
+    let store = FileSuspensionStore::open(&dir).expect("the store opens");
+    let held = store.hold(hold_input(&authority_without_members));
+    assert!(
+        matches!(held, HoldSuspensionOutcome::Held { .. }),
+        "{name}: hold answered {held:?}"
+    );
+    let stored = store
+        .get(&authority_without_members.commission_id)
+        .expect("the store reads")
+        .expect("the hold is stored");
+    assert_eq!(stored.state, SuspensionState::Pending, "{name}");
+    assert_eq!(stored.data, authority_without_members, "{name}");
+    assert!(matches!(stored.data.reason, SuspensionReason::Authority(_)));
+    assert_eq!(
+        (
+            stored.data.action_request_id,
+            stored.data.expected_case_revision,
+            stored.data.action,
+            stored.data.arguments
+        ),
+        (None, None, None, None),
+        "{name}"
+    );
 }
