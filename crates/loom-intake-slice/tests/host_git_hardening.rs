@@ -478,7 +478,8 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
     }
     const SOURCE_HELPER: &str = "crates/loom-protocols/src/git.rs";
     const RELEASE_HELPER: &str = "crates/loom-xtask/src/release.rs";
-    let helpers = [HELPER, SOURCE_HELPER, RELEASE_HELPER];
+    const VENDOR_HELPER: &str = "crates/loom-xtask/src/protocols_vendor.rs";
+    let helpers = [HELPER, SOURCE_HELPER, RELEASE_HELPER, VENDOR_HELPER];
     let bypassing: Vec<&(String, String)> = starts
         .iter()
         .filter(|(file, _)| !helpers.contains(&file.as_str()))
@@ -513,6 +514,32 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         assert!(
             source.contains(setting),
             "source fetch helper omitted {setting}"
+        );
+    }
+    // The vendor helper reads a maintainer's checkout, whose own configuration may name an
+    // `ext::` promisor remote and allow `ext`: a `-c` for the same key outranks the repository,
+    // and no lazy fetch is made. Each setting is matched as a string literal, so a comment that
+    // names it does not count.
+    let vendor = std::fs::read_to_string(root.join(VENDOR_HELPER)).unwrap();
+    for setting in [
+        "\"protocol.ext.allow=never\"",
+        "\"protocol.allow=never\"",
+        "\"--no-replace-objects\"",
+    ] {
+        assert!(
+            vendor.contains(setting),
+            "protocols vendor helper omitted {setting}"
+        );
+    }
+    // Where the value matters, the variable is matched with its value, whitespace aside.
+    let squeezed_vendor: String = vendor.chars().filter(|c| !c.is_whitespace()).collect();
+    for setting in [
+        ".env(\"GIT_NO_LAZY_FETCH\",\"1\")",
+        ".env(\"GIT_CONFIG_GLOBAL\",\"/dev/null\")",
+    ] {
+        assert!(
+            squeezed_vendor.contains(setting),
+            "protocols vendor helper omitted {setting}"
         );
     }
 

@@ -52,8 +52,14 @@ only by `loom_protocols::lock`) names the repository, tag and commit and each fi
 `ProtocolCatalog::engineering` is `from_vendored` over them: a changed digest, a file the lock does
 not name, a locked file that is absent and a malformed lock each refuse the whole catalog before any
 definition is admitted, and each entry's revision is the lock's tag
-(`crates/loom-protocols/tests/engineering_lock.rs`). Copy the files from the tag's commit
-(`git show <commit>:protocols/<path>`), never from a working tree, and never edit them here.
+(`crates/loom-protocols/tests/engineering_lock.rs`). Never edit them here. The vendored catalog
+moves to a new tag in three steps: fetch the tag into a local engineering-protocols checkout; run
+`cargo run -q --locked -p loom-xtask -- protocols-vendor --checkout <dir> --tag <tag>`, which
+reads that tag's commit from Git objects only, never fetches, writes every
+`protocols/<name>/<major>.yaml` byte for byte, removes a file the tag no longer holds and writes
+`lock.json` through `loom_protocols::lock` with its constant repository, validating everything
+before its first write (`crates/loom-xtask/tests/protocols_vendor.rs`); then run `task check`.
+The command needs Git 2.44.0 or newer and refuses an older one before it reads anything.
 Intake routing, artifact declarations and
 host admission must use the same immutable catalog; a remote package never installs executable
 code or authority. Protocol installation is explicit and runs read verified snapshots offline.
