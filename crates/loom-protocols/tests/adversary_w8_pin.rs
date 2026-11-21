@@ -1,10 +1,10 @@
 //! Adversary pass 1 for the engineering-protocols 0.3.0 pin.
 //!
-//! The pin is written in three places that nothing compares: the manifests (`tag = "…"`), the
-//! lockfile, and the `revision` that `ProtocolCatalog::engineering` stamps on every entry, which
-//! is the `tag` of `protocols/engineering/lock.json`. These cases tie them together, so the next
-//! pin cannot move one and leave the others, and hold the catalog to what the CHANGELOG says
-//! callers now see.
+//! Canon's pin is written in two places: the manifests (`tag = "…"`) and the lockfile; the
+//! engineering definitions' tag is the `tag` of `protocols/engineering/lock.json`, which is the
+//! `revision` `ProtocolCatalog::engineering` stamps on every entry. These cases tie them
+//! together, so the next pin cannot move one and leave the others, and hold the catalog to what
+//! the CHANGELOG says callers now see.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -76,11 +76,10 @@ fn one_tag(dependency: &str) -> String {
     distinct.into_iter().next().expect("one").to_owned()
 }
 
-/// Each entry's revision is also the tag of the vendored files' lock (story:engineering-protocol-lock),
-/// so the manifests, the lockfile and `protocols/engineering/lock.json` name one release.
+/// Each entry's revision is the tag of the vendored files' lock (story:engineering-protocol-lock);
+/// no manifest names an engineering-protocols crate, so that lock is the one place the tag is named.
 #[test]
-fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
-    let tag = one_tag("b10x-canon-engineering");
+fn every_engineering_entry_carries_the_tag_the_vendored_lock_names() {
     let locked = lock::decode(ENGINEERING_LOCK)
         .expect("the committed lock decodes")
         .tag;
@@ -95,13 +94,6 @@ fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
         );
         assert_eq!(
             entry.definition.source.revision,
-            tag,
-            "{} says it comes from engineering-protocols {} while the manifests pin {tag}",
-            entry.name(),
-            entry.definition.source.revision
-        );
-        assert_eq!(
-            entry.definition.source.revision,
             locked,
             "{} says it comes from engineering-protocols {} while the vendored lock names {locked}",
             entry.name(),
@@ -112,22 +104,48 @@ fn every_engineering_entry_carries_the_tag_the_manifest_pins() {
     assert!(seen > 0, "the engineering catalog is empty");
 }
 
+/// The `name` and `source` of every `[[package]]` in `Cargo.lock` that has a `source`.
+fn locked_packages() -> Vec<(String, String)> {
+    let lock = std::fs::read_to_string(workspace().join("Cargo.lock")).expect("Cargo.lock");
+    let field = |block: &str, key: &str| {
+        block.lines().find_map(|line| {
+            line.trim()
+                .strip_prefix(key)
+                .and_then(|rest| rest.trim_start().strip_prefix('='))
+                .map(|value| value.trim().trim_matches('"').to_owned())
+        })
+    };
+    lock.split("[[package]]")
+        .skip(1)
+        .filter_map(|block| Some((field(block, "name")?, field(block, "source")?)))
+        .collect()
+}
+
+/// One Canon from the tag every manifest names, and no package of engineering-protocols: the
+/// engineering definitions are vendored files, so Canon moves without an engineering-protocols
+/// release.
 #[test]
-fn the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags() {
-    for (package, repository) in [
-        ("b10x-canon-engineering", "beyond10x/engineering-protocols"),
-        ("b10x-canon", "beyond10x/canon"),
-    ] {
-        let tag = one_tag(package);
-        let sources = locked_sources(package);
-        assert_eq!(sources.len(), 1, "{package}: one copy, found {sources:?}");
-        let prefix = format!("git+https://github.com/{repository}?tag={tag}#");
-        assert!(
-            sources[0].starts_with(&prefix),
-            "{package}: locked from {} and not from tag {tag}",
-            sources[0]
-        );
-    }
+fn the_lockfile_holds_one_canon_and_no_engineering_package() {
+    let tag = one_tag("b10x-canon");
+    let sources = locked_sources("b10x-canon");
+    assert_eq!(sources.len(), 1, "b10x-canon: one copy, found {sources:?}");
+    let prefix = format!("git+https://github.com/beyond10x/canon?tag={tag}#");
+    assert!(
+        sources[0].starts_with(&prefix),
+        "b10x-canon: locked from {} and not from tag {tag}",
+        sources[0]
+    );
+
+    let engineering: Vec<String> = locked_packages()
+        .into_iter()
+        .filter(|(_, source)| source.contains("github.com/beyond10x/engineering-protocols"))
+        .map(|(name, source)| format!("{name} from {source}"))
+        .collect();
+    assert!(
+        engineering.is_empty(),
+        "Cargo.lock holds engineering-protocols packages, which no manifest names:\n{}",
+        engineering.join("\n")
+    );
 }
 
 /// The CHANGELOG: the engineering registry, and so `ProtocolCatalog::engineering` and `::bundled`,

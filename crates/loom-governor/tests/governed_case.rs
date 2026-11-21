@@ -6,8 +6,8 @@
 //!
 //! `tests/fixtures/chg-1842.fixture.yaml` is a byte-for-byte copy of
 //! `fixtures/software-change/chg-1842.fixture.yaml` in beyond10x/engineering-protocols at tag
-//! `0.16.0`, the release this crate depends on; `b10x-canon-engineering` does not expose its
-//! fixtures.
+//! `0.16.0`, the release `protocols/engineering/lock.json` names; Loom depends on no
+//! engineering-protocols crate, and none exposes its fixtures.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

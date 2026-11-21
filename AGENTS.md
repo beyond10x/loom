@@ -31,8 +31,8 @@ model-facing approval suspension. Each decision is a structured request to an ll
 runs no model loop of its own. Since ADR 0090 it also holds Commission's contracts and runtime, the
 governor and intake (sections below).
 
-It does not own protocol semantics (Canon), engineering protocol definitions
-(`b10x-canon-engineering`, beyond10x/engineering-protocols), case truth, organizational authority,
+It does not own protocol semantics (Canon), engineering protocol definitions (engineering-protocols',
+vendored under `protocols/engineering/`), case truth, organizational authority,
 connector credentials, final completion, provider wires or credentials (llm), or the engineering
 record of a case (AEP).
 
@@ -553,10 +553,11 @@ refuses such a case of a built-in protocol naming the case and the input
 `a_stored_case_with_unusable_inputs_is_never_decided`). An obligation is `open` only when Canon
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
-Canon is named by the reference `b10x-canon-engineering` uses (`tag = "0.9.0"`), pinned by
-`Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon with
-`cargo update -p b10x-canon -p b10x-canon-engineering` together with the `b10x-canon-engineering`
-tag (now `0.16.0`); any other crate that adds Canon uses the same reference. Canon 0.9.0 lets a
+Canon is named by the `b10x-canon` line of each of `crates/loom-governor/Cargo.toml`,
+`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.9.0"`), pinned
+by `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
+with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
+adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
 register and are decided like any other construct, and Loom opens no child case itself.
 
@@ -564,9 +565,8 @@ register and are decided like any other construct, and Loom opens no child case 
 
 `b10x-loom-connectors` (`crates/loom-connectors`, `loom_sdk::connectors`) is the one crate that
 links Connectors: `connectors-client` and `connectors-core` at tag `v0.62.0`. Move both together.
-`serde_json`'s `arbitrary_precision` was already on for `b10x-loom-sdk` through `b10x-canon-expr`
-`0.9.0` and `b10x-assertion-providers` `0.16.0`; since `v0.62.0`, `connectors-core` also turns it
-on through `b10x-loom-connectors`' own normal dependencies.
+`serde_json`'s `arbitrary_precision` is on for `b10x-loom-sdk` since `v0.62.0` through
+`connectors-core`, by `b10x-loom-connectors`' own normal dependencies.
 `ConnectorsInvoker` fills Commission's `ConnectorInvoker` from the host's `ConnectorEndpoint`
 records (`ess/commission/domains/responsibility.yaml`), one per instance, and a
 `CredentialResolver` the host injects; it reads no credential itself. It describes on

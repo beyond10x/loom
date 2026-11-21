@@ -7,9 +7,9 @@
 //!    `/loom` or `/intake` (the root manifest's own `repository = ".../loom"` field excepted:
 //!    it names this repository, not a dependency);
 //! 2. `Cargo.lock` resolves exactly one copy each of `b10x-loom-commission`, `b10x-loom-governor`,
-//!    `b10x-loom-executor`, `b10x-canon` and `b10x-canon-engineering`; the Commission, governor
-//!    and Loom copies are the path ones (no `source`), and no package comes from one of the four
-//!    repositories above;
+//!    `b10x-loom-executor` and `b10x-canon`, and holds no package named `b10x-canon-engineering`;
+//!    the Commission, governor and Loom copies are the path ones (no `source`), and no package
+//!    comes from one of the four repositories above;
 //! 3. `cargo metadata --format-version 1 --no-deps` on the root manifest lists the four intake
 //!    packages as workspace members, each built from its `crates/loom-intake-*` directory.
 
@@ -23,13 +23,16 @@ const ABSORBED_REPOSITORIES: [&str; 4] = ["commission", "governor", "loom", "int
 const GITHUB_ORG: &str = "github.com/beyond10x/";
 
 /// The packages `Cargo.lock` must resolve exactly once, and whether that copy must be the path one.
-const SINGLE_COPY: [(&str, bool); 5] = [
+const SINGLE_COPY: [(&str, bool); 4] = [
     ("b10x-loom-commission", true),
     ("b10x-loom-governor", true),
     ("b10x-loom-executor", true),
     ("b10x-canon", false),
-    ("b10x-canon-engineering", false),
 ];
+
+/// The packages `Cargo.lock` must not hold: engineering-protocols' crates, whose definitions Loom
+/// vendors (`protocols/engineering/`).
+const ABSENT: [&str; 1] = ["b10x-canon-engineering"];
 
 /// The intake packages and the directory each must be built from.
 const INTAKE_PACKAGES: [(&str, &str); 4] = [
@@ -204,6 +207,13 @@ fn lock_resolves_one_path_copy_of_each_absorbed_crate() {
             ));
         } else if must_be_path && let Some(source) = found[0] {
             problems.push(format!("{name}: resolved from {source}, not by path"));
+        }
+    }
+    for name in ABSENT {
+        if copies.iter().any(|(n, _)| n == name) {
+            problems.push(format!(
+                "{name}: the lock holds a package no manifest names"
+            ));
         }
     }
     problems.extend(absorbed_sources);
