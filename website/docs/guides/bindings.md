@@ -3,15 +3,17 @@ title: Bind a protocol's actions
 sidebar_position: 6
 description: Write a loom.bindings/1 document that says, per action of a protocol, who performs it, how its result becomes evidence, and what it may spend; Loom refuses a file that does not fit the protocol when it loads it.
 lede: A bindings file is the one place an operator declares how each action of one protocol is performed. Loom decodes it, holds it against the compiled protocol and names the action and the member of every defect.
-source: crates/loom-bindings/src/lib.rs, crates/loom-bindings/src/decode.rs, crates/loom-bindings/src/load.rs, crates/loom-bindings/tests/bindings_document.rs, ess/domains/bindings.yaml
+source: crates/loom-bindings/src/lib.rs, crates/loom-bindings/src/decode.rs, crates/loom-bindings/src/load.rs, crates/loom-bindings/src/program.rs, crates/loom-bindings/tests/bindings_document.rs, crates/loom-bindings/tests/bound_program.rs, ess/domains/bindings.yaml
 ---
 
 # Bind a protocol's actions
 
-Unreleased. `b10x-loom-bindings` decodes and checks a `loom.bindings/1` document. It executes
-nothing, starts no process and opens no network connection; the commands that run a bound action
-take the checked document in later releases, and `b10x-loom run --action-bindings` still reads the
-older `intake.bindings` format.
+Unreleased. `b10x-loom-bindings` decodes and checks a `loom.bindings/1` document, and its program
+effect port, `ProgramEffects`, performs an action bound to a `program` executor (see
+[Running a program binding](#running-a-program-binding)). Decoding and checking start no process,
+and the crate opens no network connection. The commands that run the other executors take the
+checked document in later releases, and `b10x-loom run --action-bindings` still reads the older
+`intake.bindings` format.
 
 A bindings file belongs to one protocol, registered as `name@major`. It holds one binding per
 action it performs. An action with no binding is not an error: `unbound` lists those. The file is
@@ -199,3 +201,50 @@ workspace, a `retry_when` kind the protocol does not declare, an evidence `from`
 not take, and an `independence` dimension the protocol does not declare. Each refusal names the action and the
 member, such as `action draft.write, member tools.allow[1]`. The reasons are the members of
 `loom.bindings.BindingsRefusalReason` in the [reference](../reference/ess/loom-bindings.md).
+
+## Running a program binding
+
+A host builds `ProgramEffects` per case, from the governor that holds the case, the checked
+document, the case's workspace root, the store directory and its own runner, which it may not give.
+The port is a Commission effect port: it performs the actions bound to `program` and no other.
+
+- The runner is admitted when the port is built, before anything starts. No runner is refused
+  `NoRunner`. A runner that launches through Substrate's `local` adapter is admitted only when it
+  was opened with the reason the `--unconfined-bindings` flag gives, and is refused
+  `CommandUnconfined` for any other. The runner then checks it can start a child in the workspace
+  root, and its refusal is passed on: a runner that runs test commands only is refused `NoRunner`.
+- Every program starts through that runner alone, the `arguments_from` argv included, with its
+  `argv` (no shell), the arguments as one JSON object on standard input, `PATH` alone in its
+  environment, the binding's `timeout_seconds` (60 when absent), and the workspace root as its start
+  directory. Under a runner that is not `local`, a program at an absolute path outside `/usr`,
+  `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH` that is not UTF-8
+  refuses the step, `<program> was not started: the host's PATH is not UTF-8`, and starts nothing.
+- The arguments are the request's, else the binding's `arguments`, else the object the
+  `arguments_from` argv prints, else `{}`. A request has no arguments when they are the empty object
+  `{}`; any other value, `null` included, reaches the program as written. An `arguments_from` argv
+  that does not exit 0, or prints anything but one JSON object of at most 1 MiB, refuses the step
+  `ArgumentsUnreadable`, and the bound program does not start.
+- An action runs at most `budget.max_runs` times in a case: the count is the observations the
+  port kept for that action in that case, kept in the case's store, so it survives a reopen. One
+  more is refused `RunsSpent`, and nothing starts.
+- Each run's standard output followed by its standard error is kept as one file, `blobs/<sha256>`
+  in the store directory, written to a temporary file there and renamed; a link at that name is
+  replaced, never written through, and a `blobs` that is a link fails the step with nothing
+  written or recorded. The port keeps one
+  observation of the run (`loom.bindings.ProgramRun`): the case, the action, the exit code, the
+  blob's SHA-256 and whether the program was killed at its timeout.
+- For each `evidence` entry the port reads the value its `from` names: the exit code, `timeout`
+  for a program killed at its timeout, or the value at the JSON pointer of the report, the program's
+  standard output read as one JSON object of at most 1 MiB, nested at most 64 deep, that names no
+  member of an object twice; a text value is read as its text, any other as its JSON. The
+  `arguments_from` output is read by the same rule. It looks the value up in `results`,
+  falling to `*`. A value neither lists refuses the step `ResultNotInTable`; a report that cannot be
+  read, or that lacks the pointer, refuses it `ReportUnreadable`. A refused step records nothing.
+- Otherwise the port records one record per entry (`loom.bindings.RecordedEvidence`), of the
+  entry's `kind` about its `subject`, with the entry's `producer`, the observation's instant, the
+  revision the case holds for the subject and, as `upstream_revisions`, for each `upstream`
+  artifact. The record cites the observation. A program never names a result, a revision, a
+  producer or an instant: members of its report with those names change nothing.
+
+The step refusals are the members of `loom.bindings.ProgramRefusalReason` in the
+[reference](../reference/ess/loom-bindings.md).

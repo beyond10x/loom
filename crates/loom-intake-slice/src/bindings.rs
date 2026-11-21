@@ -23,7 +23,10 @@
 //! launches through `local` for another reason; no runner, or one that starts no child, is
 //! refused [`ConfinementRefusal::NoRunner`]. A runner that is not `local` gets the program file
 //! mounted read-only at its own path when it lies outside the system view Substrate binds. The
-//! commands run in the host's workspace, or in a private directory made for the run.
+//! commands run in the host's workspace, or in a private directory made for the run. The admission
+//! of a host runner ([`admit_bound_program_runner`]) and the child a bound program starts as
+//! ([`bound_program_child`]) are public: the program effect port of `b10x-loom-bindings` holds
+//! the same two rules through them.
 //!
 //! Exit status 0 is `Performed`, with the program's standard output, one JSON object, as the
 //! report; any other end is `Refused`, naming why. The report's `evidence` member (a list of
@@ -314,9 +317,7 @@ impl CommandRunner {
         })
     }
 
-    /// The child `binding`'s program is started as: its argv, `arguments` on standard input,
-    /// `PATH` alone, `timeout`; and, under a runner that is not `local`, its program file mounted
-    /// read-only at its own path when that is absolute and outside [`SYSTEM_VIEW`].
+    /// The child `binding`'s program is started as ([`bound_program_child`]).
     ///
     /// # Errors
     /// The host's `PATH` is not UTF-8, which no child environment carries.
@@ -326,35 +327,13 @@ impl CommandRunner {
         arguments: &str,
         timeout: Duration,
     ) -> Result<ChildCommand, String> {
-        let mut set = BTreeMap::new();
-        for name in INHERITED {
-            if let Some(value) = std::env::var_os(name) {
-                let value = value
-                    .into_string()
-                    .map_err(|_| format!("the host's {name} is not UTF-8"))?;
-                set.insert((*name).to_owned(), value);
-            }
-        }
-        let program = &binding.argv[0];
-        let mut child = ChildCommand::new(
-            program.clone(),
-            binding.argv[1..].iter().cloned(),
+        bound_program_child(
+            &binding.argv,
+            arguments,
+            timeout,
             &self.workspace,
+            self.runner.local_reason(),
         )
-        .with_environment(ExecEnvironment {
-            allow: Vec::new(),
-            set,
-        })
-        .with_stdin(arguments.as_bytes().to_vec())
-        .with_timeout(timeout);
-        let path = Path::new(program);
-        if self.runner.local_reason().is_none()
-            && path.is_absolute()
-            && !SYSTEM_VIEW.iter().any(|system| path.starts_with(system))
-        {
-            child = child.at_host_path(path);
-        }
-        Ok(child)
     }
 
     fn run(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
@@ -380,22 +359,92 @@ fn select_runner(
         })?;
         return Ok(Arc::new(runner));
     }
-    match host {
-        None => Err(refusal(
+    if host.is_none() {
+        return Err(refusal(
             ConfinementRefusal::NoRunner,
             "the request binds commands and names no runner to start them; a bound command starts only through the host's runner, or under the local adapter with --unconfined-bindings or unconfined_bindings: true",
-        )),
-        Some(host) => match host.local_reason() {
-            Some(reason) => Err(refusal(
-                ConfinementRefusal::CommandUnconfined,
-                format!(
-                    "the host's runner launches through the local adapter for another reason ({}); bound commands run unconfined only with --unconfined-bindings or unconfined_bindings: true",
-                    escape_reason(reason)
-                ),
-            )),
-            None => Ok(Arc::clone(host)),
-        },
+        ));
     }
+    admit_bound_program_runner(host)
+}
+
+/// Admits `host`, the runner a host gives for bound programs, before any program starts: a
+/// runner that launches through Substrate's `local` adapter is admitted only with
+/// [`UNCONFINED_FLAG_REASON`], and is refused [`ConfinementRefusal::CommandUnconfined`] for any
+/// other reason; a runner that is not `local` is admitted; no runner is refused
+/// [`ConfinementRefusal::NoRunner`]. The run's `CommandRunner::select` takes the flag's runner
+/// and the file's opt-in first, then this; the program effect port of `b10x-loom-bindings` takes
+/// this alone. An admitted runner still answers [`TestRunner::preflight_child`] before it starts
+/// anything.
+///
+/// # Errors
+/// The refusal, as above.
+pub fn admit_bound_program_runner(
+    host: Option<&Arc<dyn TestRunner>>,
+) -> Result<Arc<dyn TestRunner>, ConfinementError> {
+    let Some(host) = host else {
+        return Err(refusal(
+            ConfinementRefusal::NoRunner,
+            "the host gave no runner to start bound programs; a bound program starts only through the runner its host gives",
+        ));
+    };
+    match host.local_reason() {
+        Some(reason) if reason != UNCONFINED_FLAG_REASON => Err(refusal(
+            ConfinementRefusal::CommandUnconfined,
+            format!(
+                "the host's runner launches through the local adapter for another reason ({}); bound commands run unconfined only with --unconfined-bindings or unconfined_bindings: true",
+                escape_reason(reason)
+            ),
+        )),
+        _ => Ok(Arc::clone(host)),
+    }
+}
+
+/// The child a bound program is started as: `argv` (its first word the program, never a shell),
+/// `arguments` as JSON on standard input, an environment of [`INHERITED`] alone at the host
+/// process's values, `timeout`, and `workspace` as its start directory; and, when `local_reason`
+/// is `None` (a runner that is not `local`), the program file mounted read-only at its own path
+/// when that path is absolute and outside the system view Substrate binds (`/usr`, `/bin`,
+/// `/lib`, `/lib64`). `local_reason` is the runner's [`TestRunner::local_reason`]: `local` refuses
+/// a host path. The run's bound commands and the program effect port of `b10x-loom-bindings` are
+/// both built here.
+///
+/// # Errors
+/// The host's `PATH` is not UTF-8, which no child environment carries; `argv` is empty.
+pub fn bound_program_child(
+    argv: &[String],
+    arguments: &str,
+    timeout: Duration,
+    workspace: &Path,
+    local_reason: Option<&str>,
+) -> Result<ChildCommand, String> {
+    let mut set = BTreeMap::new();
+    for name in INHERITED {
+        if let Some(value) = std::env::var_os(name) {
+            let value = value
+                .into_string()
+                .map_err(|_| format!("the host's {name} is not UTF-8"))?;
+            set.insert((*name).to_owned(), value);
+        }
+    }
+    let Some((program, args)) = argv.split_first() else {
+        return Err("the binding names no program".to_owned());
+    };
+    let mut child = ChildCommand::new(program.clone(), args.iter().cloned(), workspace)
+        .with_environment(ExecEnvironment {
+            allow: Vec::new(),
+            set,
+        })
+        .with_stdin(arguments.as_bytes().to_vec())
+        .with_timeout(timeout);
+    let path = Path::new(program);
+    if local_reason.is_none()
+        && path.is_absolute()
+        && !SYSTEM_VIEW.iter().any(|system| path.starts_with(system))
+    {
+        child = child.at_host_path(path);
+    }
+    Ok(child)
 }
 
 fn refusal(reason: ConfinementRefusal, detail: impl fmt::Display) -> ConfinementError {
