@@ -446,13 +446,17 @@ types:
         type: String
       - name: detail
         type: String
+
   # One record that sends a bound action back to work (story bound-program-retry-records): an
   # evidence record the governor holds for the case whose facts name a `kind` and a `result` the
   # binding's `retry_when` lists, about the revision the case holds for its `subject`, never
   # `none`. Every member is read from the held record (its evidence id, its facts' kind, subject,
-  # subject revision, result and instant, its producer) and, for `blob_sha256`, from the
-  # observation it cites when that is a run of a bound program (`loom/bound-program`) that kept a
-  # blob. Nothing a program prints or a request names is a member.
+  # subject revision, result and instant, its producer) and, for `action`, `exit` and
+  # `blob_sha256`, from the first observation it cites that is a run of a bound program
+  # (`loom/bound-program`) in the same case: the action that run was for, its exit code (absent
+  # for a run killed at its timeout, refused by its runner or with no status) and the blob it kept.
+  # A record that cites no such run names none of the three. Nothing a program prints, a request
+  # names or the bindings document says is a member.
   - name: loom.bindings.RetryRecord
     kind: struct
     fields:
@@ -470,6 +474,10 @@ types:
         type: String
       - name: observed_at
         type: Timestamp
+      - name: action
+        type: Optional<String>
+      - name: exit
+        type: Optional<Integer>
       - name: blob_sha256
         type: Optional<String>
 
