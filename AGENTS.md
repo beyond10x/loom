@@ -1011,9 +1011,10 @@ Failed (`LoomAgentCompleted`, `LoomAgentFailed`, each naming `exit_code`) and re
 (`RunEnd`: `exit_code`, `finished_at`, `reason`, each optional), `finished` preserves a Completed
 or Failed one, `no-run`
 is a `StateConflict` from any other state, and `unknown` is `NotFound`. A Completed or Failed
-resource leaves only by `respecified` at a new generation. The command takes no generation: on
-ess/25 a subject-fact guard (a stale generation) cannot combine with the subject-state guards the
-outcomes need, so the controller compares the Job's generation itself (§ Operator). `spec.workspace`
+resource leaves only by `respecified` at a new generation. The command takes no generation: the
+specification does not combine a subject-fact guard (a stale generation) with the subject-state
+guards the outcomes need (`ess/27` would allow it), so the controller compares the Job's
+generation itself (§ Operator). `spec.workspace`
 (`mountPath`, optional `claimName`) is a read-write volume on either variant. `spec.secretRef`
 (`name`) gives a Secret as the environment; `spec.secretFiles` (`name`, `mountPath`) gives another
 as files the pod user owns (`story:loom-agent-trial-fixes`), so a pod can hold a model key as an
@@ -1715,8 +1716,9 @@ or signal, the stderr tail below, and `reason`, the error without that tail, wal
 as the tail is), naming the predecessor it continued, which stays for the
 next call (`crates/loom-session-executor/tests/adversary_w20261023w3_u2.rs`); one refused before
 its child started is no record. `RecordFailedSession` is an obligation of the
-generated model (its `creates:` leaves `files` undetermined, `ess/25` having no empty-list
-literal, and `failure.reason` generated), kept by the executor's own store against the generated
+generated model (its `creates:` leaves `files` undetermined, the specification storing no empty
+list there, which `ess/31` would allow, and `failure.reason` generated), kept by the executor's
+own store against the generated
 trait; it refuses a failure no child ends with (`FailureRefused`: a code with a `NotMeasured` end,
 none with a measured one; `failure_refusal`). When
 it ended without the JSON line naming its action, with one that does not read, or in an error, the reason names how the harness

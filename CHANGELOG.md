@@ -28,6 +28,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** Canon `0.8.0` -> `0.9.0`, `b10x-canon-engineering` `0.15.2` -> `0.16.0`: `ProtocolEntry::model` is Canon 0.9.0's `Protocol`; Canon reserves the evidence kind `case_outcome`, refusing its records without `child_case` or `result` (story:canon-0-9-0-pin)
 - `ProtocolCatalog::engineering` reads the vendored files of engineering-protocols `0.16.0`, held to `protocols/engineering/lock.json` (story:engineering-protocol-lock)
 - **Breaking:** a Suspension's `action_request_id`, `expected_case_revision`, `action` and `arguments` are `Option`, so is each `ActionRequestId` of its commands and events; `TakeSuspension` and `ReleaseSuspension` gain `decision_request_id` and the refusal `OtherDecision`, so a Decision hold is taken and released only by naming it; `ResumeRefusal` gains three variants (story:decision-suspension-reason)
+- `ess/system.yaml` declares format `ess/31` on the pinned `ess` 0.86.0; the regenerated `loom` model answers as before (story:ess-format-31)
 
 ## [0.57.2] - 2026-11-05
 
