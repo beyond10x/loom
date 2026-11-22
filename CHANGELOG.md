@@ -39,6 +39,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
 - An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
+- Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
 
 ### Changed
 

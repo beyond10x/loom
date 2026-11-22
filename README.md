@@ -167,7 +167,29 @@ It keeps typed working state and a recent event tail, with retrievable run-local
 64 KiB serialized request ceiling. The default remains `legacy`; recorded byte reductions do not
 establish live quality or cost savings. See [working context](website/docs/concepts/working-context.md).
 
-You need a Rust toolchain that builds edition 2024, and `git`.
+Each release from `0.59.0` on carries `b10x-loom` for Linux on x86-64 as a release asset, with
+its SHA-256 checksum beside it (an earlier release has none: build it from source below). It
+links the glibc of Debian bookworm (2.36) or newer, and the libraries the `loom-agent` image
+installs for it (`libssl3`, `libcurl4`, `ca-certificates`):
+
+```console
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.58.0/b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.58.0/b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz
+./b10x-loom-0.58.0-x86_64-unknown-linux-gnu/b10x-loom --version
+```
+
+```text
+b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz: OK
+b10x-loom 0.58.0
+```
+
+The checksum file comes from the same place as the archive. A CI that installs Loom keeps the
+version and the digest in its own repository and checks the download against that digest:
+`echo "$SHA256  $f" | sha256sum -c -`.
+
+To build from source you need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
 git clone --branch 0.58.0 https://github.com/beyond10x/loom.git
