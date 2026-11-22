@@ -186,7 +186,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Package and library names are the `loom-` names | `crates/loom-executor/tests/crate_names.rs` |
 | No manifest names an archived Commission, governor or intake repository | `crates/loom-executor/tests/governor_import.rs`, `intake_import.rs`, `commission_import.rs` |
 | The SDK stability page (`website/docs/reference/sdk-stability.md`) lists exactly the ports a host implements and the `loom_sdk` paths control-plane imports, each resolving through `loom_sdk`; a change to that surface updates the page and names any break in a `**Breaking:**` bullet of `CHANGELOG.md` | `crates/loom-sdk/tests/host_ports.rs` (`a_host_implements_every_port_through_loom_sdk_alone`, `the_stability_page_lists_exactly_the_ports_this_test_implements`, `every_control_plane_path_on_the_page_resolves`) |
-| The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field, of a record kind or of a record one of its fields holds; any other change fails the gate until the committed contract moves | `task docs-check` (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`, `a_record_field_states_its_fields_each_judged_as_a_kinds_field`, `a_field_of_a_nested_record_the_page_leaves_out_is_named`) |
+| The `run --output jsonl` records and exit statuses change within `schema_version` 1 only by a new optional field, of a record kind or of a record one of its fields holds; any other change fails the gate until the committed contract moves | `task docs-slow`, and `task docs-check` through the stamp (`crates/loom-docs/src/run_events.rs`, `the_v1_contract_matches_the_declared_events`, `a_removed_renamed_or_retyped_field_is_a_break`, `a_new_record_kind_is_a_break`, `a_new_optional_field_is_not_a_break`, `a_record_field_states_its_fields_each_judged_as_a_kinds_field`, `a_field_of_a_nested_record_the_page_leaves_out_is_named`) |
 | A run whose agent is the session executor, wrapped by `EventStream::sessions`, writes one `Session` record per session, its fields equal to `metaharness::protocol::summarize` of the session's record and its digest the step's, and no `Turn`, `ToolCall` or `Usage` record for the session's own turns; Loom's own records are as without it; a record that does not project, and a summary whose cost is no finite number or whose count is past the largest integer, writes no summary field and says why in `projection_error`, which names no directory of the machine, and the run goes on | `crates/loom-cli/tests/session_events.rs` (`a_session_event_holds_the_summary_of_the_recorded_session`, `loom_s_own_records_are_as_without_the_session_record`, `a_record_that_does_not_project_is_named_with_why_and_fails_nothing`), `crates/loom-session-executor/tests/proposes.rs` (`the_session_record_is_summarized_by_metaharness`), `crates/loom-cli/tests/adversary_w20261022w2_u2.rs` (`adversary_a_token_count_past_the_largest_integer_is_never_written_as_another_count`, `adversary_a_projection_error_names_no_directory_of_the_machine`) |
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
 | A release's CHANGELOG entry says what breaks for a consumer: a `**Breaking:**` bullet per break or the line `No breaking changes.`, never both, and no `**Breaking:**` bullet that names nothing or says `none`; a `Breaking:` sentence in prose does not count; `No breaking changes.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; a `**Breaking:**` bullet is refused on a tag that moves only the patch version, and removing a path the previous tag's SDK stability page lists is refused unless an earlier release listed it under `### Deprecated`; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_bullet`, `release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_no_breaking_changes_when_no_stable_surface_changed`, `release_check_refuses_a_breaking_bullet_that_names_no_break`, `release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes`, `release_check_passes_on_the_first_tag`, `a_removal_without_a_deprecated_release_is_refused`, `a_breaking_entry_on_a_patch_tag_is_refused`, `release_workflow_verifies_the_tag_and_reuses_the_check`), `crates/loom-xtask/tests/adversary_w20261023w1_u4.rs` |
@@ -275,8 +275,9 @@ change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
 with the tests open. CI installs `ess` 0.96.0 (`.github/workflows/check.yml`); move that pin when a
-newer ESS ships. The pin is two lines in each of `check.yml` and `pages.yml`: `ESS_VERSION` and
-`ESS_SHA256`. Move both in both files in one commit; the digest is the
+newer ESS ships. The pin is two lines in each step that installs `ess`, the jobs `check` and
+`docs-slow` of `check.yml` and the job of `pages.yml`: `ESS_VERSION` and `ESS_SHA256`. Move both in
+all three in one commit; the digest is the
 `ess-<version>-x86_64-unknown-linux-gnu.tar.gz` line of that release's `SHA256SUMS`. A version
 moved without its digest fails the install step of every job in under 30 s.
 
@@ -302,7 +303,8 @@ Before a change is reported done, in this order:
    the test step (`task test-step`), `task durable-check`, `task consumer-check`,
    `task embedder-check` (`cargo check --offline --locked` of the embedder fixture, an engine on
    `b10x-loom-tree` alone), then `task docs-check` and
-   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`, which
+   `task commission:docs-drift`. `task docs-check` is `loom-xtask docs-stamp --check` and builds no
+   `loom-docs` (§ Generated files). CI runs exactly this (`check.yml`, job `loom / task check`, which
    installs cargo-nextest by a pinned version and digest). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
    `cargo nextest run --workspace --locked` (`.config/nextest.toml`: a test is killed and fails at
@@ -491,13 +493,29 @@ Where a test puts its scratch depends on what it needs from the directories abov
 | `generated/rust/intake/` | synthesis over `ess/intake/`, via `loom-xtask` | `task intake-generate` | `task intake-drift` |
 | `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `loom-xtask crd-generate`, projecting the JSON Schemas `ess generate --kind schema` writes for `ess/` through `b10x_loom_resource::crd` | `task crd-generate` | `task crd-drift` |
 | `charts/loom-agents/crds/loomagents.loom.beyond10x.dev.yaml` | a byte copy of `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `task crd-generate` | `task chart-check`, `crates/loom-operator/tests/chart.rs` |
-| `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` |
-| `website/docs/reference/operator-cli.md` | `loom-docs`, from `b10x_loom_operator::cli::Cli` (`crates/loom-operator/src/cli.rs`) | `task docs-generate` | `task docs-check` |
-| `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` |
-| `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` |
-| `docs/contracts/run-events-v1.json` | `loom-docs`, the V1 contract of `run --output jsonl` from `ess/intake/` and `b10x_loom_cli::events` | `task docs-generate` | `task docs-check`, failing only on a break |
-| `docs/contracts/run-log-v1.json` | `loom-docs`, the contract of a case's run log from `loom.runlog` (`ess/`) | `task docs-generate` | `task docs-check`, failing on any difference |
+| `website/docs/reference/cli.md` | `loom-docs`, from `b10x_loom_cli::Cli` (`crates/loom-cli/src/lib.rs`) | `task docs-generate` | `task docs-check` (the stamp); `task docs-slow` (bytes) |
+| `website/docs/reference/operator-cli.md` | `loom-docs`, from `b10x_loom_operator::cli::Cli` (`crates/loom-operator/src/cli.rs`) | `task docs-generate` | `task docs-check` (the stamp); `task docs-slow` (bytes) |
+| `website/docs/reference/crates.md` | `loom-docs`, from `cargo metadata` | `task docs-generate` | `task docs-check` (the stamp); `task docs-slow` (bytes) |
+| `website/docs/reference/ess/`, `website/data/ess/` | `loom-docs`, from `ess/` and `ess/intake/` | `task docs-generate` | `task docs-check` (the stamp); `task docs-slow` (bytes) |
+| `docs/contracts/run-events-v1.json` | `loom-docs`, the V1 contract of `run --output jsonl` from `ess/intake/` and `b10x_loom_cli::events` | `task docs-generate` | `task docs-check` (the stamp); `task docs-slow`, failing only on a break |
+| `docs/contracts/run-log-v1.json` | `loom-docs`, the contract of a case's run log from `loom.runlog` (`ess/`) | `task docs-generate` | `task docs-check` (the stamp); `task docs-slow`, failing on any difference |
 | `website/docs/reference/commission/` | `loom-commission-docs`, from `ess/commission/` | `task commission:docs` | `task commission:docs-drift` |
+| `website/docs/reference/.generated.json` | `loom-docs`, after the pages: the SHA-256 of every input file of the generator, the `ess` version line and the SHA-256 of every file it writes | `task docs-generate` | `task docs-slow` (bytes) |
+
+`task docs-check` builds nothing: `loom-xtask docs-stamp --check` hashes the generator's inputs
+(`INPUTS` in `crates/loom-docs/src/stamp.rs`: `crates/loom-cli/`, `crates/loom-docs/`,
+`crates/loom-operator/`, `ess/`, `website/docs/reference/run-events.md`, `Cargo.lock` and every
+workspace `Cargo.toml`), runs `ess --version` and hashes the generated files, compares all three
+with the committed stamp and fails naming the first that differs, with `run task docs-generate`; it
+also refuses a raw admonition title in any page under `website/docs`. `stamp.rs` is one file that
+`loom-docs` declares and `loom-xtask` includes by `#[path]`, so `loom-xtask` never depends on
+`loom-docs` or `b10x-loom-cli`. `loom-docs` reads a file only through `stamp::read_input` and
+`stamp::read_input_dir`, which refuse one that is neither an input nor an output
+(`every_file_loom_docs_reads_is_an_input` in `crates/loom-xtask/src/docs_stamp.rs`). `task
+docs-generate` is the one build of `loom-docs`, and runs only when an input changed; a merge whose
+stamp conflicts runs it. `task docs-slow` regenerates and compares bytes with the committed pages
+and the stamp; CI's job `docs-slow` runs it when `docs-stamp --slow-needed` prints `run`: on a pull
+request whose stamp differs from its base branch's and on every push to `main`.
 
 Never edit these by hand; change the source and regenerate. The generated Rust is never formatted:
 `generated/rustfmt.toml` sets `disable_all_formatting`, so `cargo fmt --all` leaves it alone. Do not

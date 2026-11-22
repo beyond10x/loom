@@ -16,8 +16,10 @@ or with `--output human`, the output is the human lines described in
 The records are declared in ESS as the `intake.events` domain
 ([`ess/intake/domains/events.yaml`](https://github.com/beyond10x/loom/blob/main/ess/intake/domains/events.yaml),
 reference: [Run events domain](ess/intake-events.md)), and the writer builds each line from the
-types generated from it. `loom-docs generate --check` (`task docs-check`) fails when this page
-leaves out a record kind, one of its fields or the schema version.
+types generated from it. `loom-docs generate` (`task docs-generate`, and `task docs-slow` with
+`--check`) fails when this page leaves out a record kind, one of its fields or the schema version.
+The page is an input of the generator, so `task docs-check` fails after an edit of it until
+`task docs-generate` has run.
 
 A record is a projection of what the run does. It grants no authority and is not evidence: a
 `ToolCall` record is what a model asked for, not what happened.
@@ -176,9 +178,10 @@ The contract is committed as
 [`docs/contracts/run-events-v1.json`](https://github.com/beyond10x/loom/blob/main/docs/contracts/run-events-v1.json):
 the record kinds, their fields with type and optionality, the schema versions and the exit
 statuses, written by `loom-docs generate` from the declaration. `loom-docs generate --check`
-(`task docs-check`) compares the declaration with it, names each difference by kind and field, and
+(`task docs-slow`) compares the declaration with it, names each difference by kind and field, and
 fails on a break, so the stream cannot change under a reader unless the contract file moves with
-it.
+it. `task docs-check` fails on any change of the declaration or of the file until `task
+docs-generate` has run.
 
 ## A recorded run
 

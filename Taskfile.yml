@@ -195,12 +195,21 @@ tasks:
       - aep plan artifact validate
 
   docs-generate:
-    desc: Regenerate the derived documentation pages under website/docs/reference/.
+    desc: Regenerate the derived documentation pages and contracts, then their stamp website/docs/reference/.generated.json; the one build of loom-docs.
+    env:
+      SLOT_TIMEOUT: 30m
     cmds:
       - cargo run --locked -p loom-docs -- generate
 
   docs-check:
-    desc: Fail when the generated documentation pages are missing, stale or edited by hand.
+    desc: Fail when an input of the documentation generator, the ess version or a generated file differs from the committed stamp, or a page has a raw admonition title; builds no loom-docs.
+    cmds:
+      - cargo run --locked -q -p loom-xtask -- docs-stamp --check
+
+  docs-slow:
+    desc: The slow lane of the documentation, regenerate every page and contract and fail unless the committed ones and the stamp are equal to them.
+    env:
+      SLOT_TIMEOUT: 30m
     cmds:
       - cargo run --locked -p loom-docs -- generate --check
 
