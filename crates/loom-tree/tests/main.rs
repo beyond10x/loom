@@ -175,6 +175,7 @@ fn run_tree_returns_the_principal_of_a_person_decision() {
         time: at,
         runner: std::sync::Arc::new(runner),
         confinement: Some("local".into()),
+        cgroup_root: None,
     };
     let ran = run_tree(&store, &catalog, &settings, None, None).unwrap();
 
@@ -225,6 +226,7 @@ fn run_settings_are_built_from_items_of_this_crate_alone() {
         time: TreeTime::At("2026-11-22T08:00:00Z".into()),
         runner,
         confinement: None,
+        cgroup_root: None,
     };
     assert_eq!(settings.max_steps, Some(1));
 }
@@ -349,6 +351,7 @@ actions:
                 time: TreeTime::At("2026-11-22T08:00:00Z".into()),
                 runner: std::sync::Arc::new(runner),
                 confinement: None,
+                cgroup_root: None,
             }
         }
 
@@ -614,6 +617,7 @@ mod embed {
             time: at,
             runner: runner.runner(),
             confinement: Some("local".into()),
+            cgroup_root: None,
         };
         let mut observed = Vec::new();
         let mut observer = |case: &str, line: &RunLogLine| {

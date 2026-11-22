@@ -181,6 +181,7 @@ impl Nest {
             time: TreeTime::At(AT.into()),
             runner: Arc::new(runner),
             confinement: None,
+            cgroup_root: None,
         }
     }
 

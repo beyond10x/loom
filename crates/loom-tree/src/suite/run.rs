@@ -1067,6 +1067,7 @@ impl SuiteRun<'_> {
                 time: time.clone(),
                 runner: Arc::clone(&self.settings.runner),
                 confinement: self.settings.confinement.clone(),
+                cgroup_root: None,
             };
             let ran = match run_tree(&running.store, self.catalog, &settings, None, self.cancel) {
                 Ok(ran) => ran,

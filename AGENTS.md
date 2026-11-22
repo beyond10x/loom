@@ -1637,7 +1637,9 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   ends through its one legitimate outcome, or waits: a person action or a capability
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
   `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
-  `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+  `RunSettings::confinement`, and `--cgroup-root <the run's>` when `RunSettings::cgroup_root`
+  names the root the run was given). Every printed command runs unchanged (tests `the_printed_*`,
+  `a_handoff_command_carries_the_cgroup_root_the_run_had`).
   A decision whose command carries `--principal` names that value as `principal`
   (`story:next-decision-names-the-principal`): for `ApproveAction` the binding's
   `executor.principal`, the one `person_action` and `PersonEffects` check; for `Approve` always

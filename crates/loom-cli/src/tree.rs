@@ -262,6 +262,7 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
             .confinement
             .to_possible_value()
             .map(|value| value.get_name().to_owned()),
+        cgroup_root: arguments.cgroup_root.as_deref().map(resolved).transpose()?,
     };
     let ran = run_tree(
         &resolved(&arguments.store)?,

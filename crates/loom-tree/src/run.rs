@@ -103,6 +103,10 @@ pub struct RunSettings {
     /// The `--confinement` value of the runner, which the `tree run` a handoff prints carries so
     /// that, run unchanged, it starts its programs as this run does; `None` prints no flag.
     pub confinement: Option<String>,
+    /// The cgroup root the run was named (`--cgroup-root`), which that `tree run` carries too, so
+    /// that it runs under the root this run did; `None` prints no flag, as for a run that started
+    /// itself again in a scope of its own.
+    pub cgroup_root: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for RunSettings {
@@ -113,6 +117,7 @@ impl std::fmt::Debug for RunSettings {
             .field("time", &self.time)
             .field("runner", &self.runner.label())
             .field("confinement", &self.confinement)
+            .field("cgroup_root", &self.cgroup_root)
             .finish()
     }
 }
@@ -343,7 +348,7 @@ fn run_cancellable(
                     &id,
                     &case.bindings,
                     &action,
-                    &handoff_command(&store, settings.confinement.as_deref()),
+                    &handoff_command(&store, settings),
                 )
                 .into_iter()
                 .collect::<Vec<_>>();
@@ -486,7 +491,7 @@ fn run_cancellable(
             &workspace,
             revision,
             &history,
-            settings.confinement.as_deref(),
+            &handoff_command(&store, settings),
             &checks,
             &mut emit,
         )?;
@@ -1181,9 +1186,9 @@ fn waiting_actions<S: loom_governor::FallibleCaseStore>(
         .collect())
 }
 
-/// The command a `Handoff` decision prints: `tree run` of `store` again, under `confinement` when
-/// it is named.
-fn handoff_command(store: &Path, confinement: Option<&str>) -> Vec<String> {
+/// The command a `Handoff` decision prints: `tree run` of `store` again, under the run's
+/// `confinement` and on its `cgroup_root` when `settings` name them.
+fn handoff_command(store: &Path, settings: &RunSettings) -> Vec<String> {
     let mut command = vec![
         "b10x-loom".to_owned(),
         "tree".to_owned(),
@@ -1191,8 +1196,11 @@ fn handoff_command(store: &Path, confinement: Option<&str>) -> Vec<String> {
         "--store".to_owned(),
         store.display().to_string(),
     ];
-    if let Some(confinement) = confinement {
-        command.extend(["--confinement".to_owned(), confinement.to_owned()]);
+    if let Some(confinement) = &settings.confinement {
+        command.extend(["--confinement".to_owned(), confinement.clone()]);
+    }
+    if let Some(root) = &settings.cgroup_root {
+        command.extend(["--cgroup-root".to_owned(), root.display().to_string()]);
     }
     command
 }
@@ -1225,19 +1233,17 @@ fn handoff_decision(
 }
 
 /// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
-/// and names a `handoff` ([`handoff_decision`]), the command [`handoff_command`]. A binding with
-/// `handoff_when` gives its decision only when its check, run now with its line written, exits 0;
-/// a check that gives no exit status refuses the run `HandoffCheckFailed`.
+/// and names a `handoff` ([`handoff_decision`]), the command `command` ([`handoff_command`]). A
+/// binding with `handoff_when` gives its decision only when its check, run now with its line
+/// written, exits 0; a check that gives no exit status refuses the run `HandoffCheckFailed`.
 fn handoffs<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
     bindings: &BindingsDocument,
-    store: &Path,
-    confinement: Option<&str>,
+    command: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<Vec<NextDecision>, Refused> {
-    let command = handoff_command(store, confinement);
     let frontier = governor
         .frontier(case)
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
@@ -1248,7 +1254,7 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
         .iter()
         .filter(|action| action.status != ActionStatus::Blocked)
     {
-        let Some(decision) = handoff_decision(case, bindings, &action.action, &command) else {
+        let Some(decision) = handoff_decision(case, bindings, &action.action, command) else {
             continue;
         };
         if checks.has_check(&action.action) {
@@ -1279,7 +1285,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     workspace: &Path,
     revision: i64,
     history: &LogHistory,
-    confinement: Option<&str>,
+    handoff: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(TreeStop, Vec<NextDecision>), Refused> {
@@ -1374,7 +1380,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     if decisions.is_empty() {
         // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
         // has done what it may, and a person continues from its text, then runs the tree again.
-        decisions = handoffs(governor, case, bindings, store, confinement, checks, emit)?;
+        decisions = handoffs(governor, case, bindings, handoff, checks, emit)?;
         if !decisions.is_empty() {
             return Ok((TreeStop::AwaitingPerson, decisions));
         }
@@ -1704,5 +1710,76 @@ where
         )
         .case(case.0.clone())
         .action(action.to_owned())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
+    use b10x_loom_intake_slice::confinement::{
+        ConfinementAdapter, EngineConfinement, EngineRunner,
+    };
+
+    use super::{RunSettings, handoff_command};
+    use crate::TreeTime;
+
+    fn settings(confinement: Option<&str>, cgroup_root: Option<&str>) -> RunSettings {
+        let runner = EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Local,
+            local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+            cgroup_root: None,
+        })
+        .unwrap();
+        RunSettings {
+            max_steps: None,
+            max_wall_seconds: None,
+            time: TreeTime::At("2026-11-22T08:00:00Z".into()),
+            runner: Arc::new(runner),
+            confinement: confinement.map(str::to_owned),
+            cgroup_root: cgroup_root.map(PathBuf::from),
+        }
+    }
+
+    /// A handoff's `tree run` carries the run's `--cgroup-root` when the run was named one, and
+    /// no such flag when it was not, so that, run unchanged, it runs where this run did.
+    #[test]
+    fn a_handoff_command_carries_the_cgroup_root_the_run_had() {
+        let store = Path::new("/srv/tree/store");
+        assert_eq!(
+            handoff_command(
+                store,
+                &settings(Some("substrate"), Some("/sys/fs/cgroup/held"))
+            ),
+            [
+                "b10x-loom",
+                "tree",
+                "run",
+                "--store",
+                "/srv/tree/store",
+                "--confinement",
+                "substrate",
+                "--cgroup-root",
+                "/sys/fs/cgroup/held",
+            ]
+        );
+        assert_eq!(
+            handoff_command(store, &settings(Some("substrate"), None)),
+            [
+                "b10x-loom",
+                "tree",
+                "run",
+                "--store",
+                "/srv/tree/store",
+                "--confinement",
+                "substrate",
+            ]
+        );
+        assert_eq!(
+            handoff_command(store, &settings(None, None)),
+            ["b10x-loom", "tree", "run", "--store", "/srv/tree/store"]
+        );
     }
 }

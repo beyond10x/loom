@@ -594,6 +594,7 @@ fn settings(max_steps: Option<i64>) -> RunSettings {
         time: TreeTime::At(AT.to_owned()),
         runner: Arc::new(runner),
         confinement: Some("local".to_owned()),
+        cgroup_root: None,
     }
 }
 
