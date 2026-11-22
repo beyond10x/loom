@@ -133,12 +133,17 @@ impl Tree {
 
     /// `tree open` of the child protocol `tour-leg@1` alone, as a tree of one case.
     fn open_leg(&self) -> Output {
+        self.open_leg_with("tour-leg.bindings.yaml")
+    }
+
+    /// `tree open` of `tour-leg@1` alone with the bindings file `bindings` of the workspace.
+    fn open_leg_with(&self, bindings: &str) -> Output {
         self.command()
             .args(["tree", "open", "--protocol", "tour-leg@1", "--at", AT])
             .arg("--store")
             .arg(self.store())
             .arg("--bindings")
-            .arg(self.workspace().join("tour-leg.bindings.yaml"))
+            .arg(self.workspace().join(bindings))
             .arg("--workspace")
             .arg(self.workspace())
             .output()
@@ -837,4 +842,51 @@ fn a_status_of_an_unknown_format_is_refused() {
         "{}",
         refused.0.detail
     );
+}
+
+#[test]
+fn a_spent_run_budget_ends_the_retries_of_a_step() {
+    // A writer that changes nothing, sent back by a check that stays invalid, under a budget of
+    // three runs: the run takes it three times, is refused once, and is stuck. Without the bound
+    // a refused step stayed due through its retry records (844 refusals in one run of the stub
+    // cycle); `--max-steps 100` keeps a regression from running on.
+    let tree = Tree::new("spent-budget");
+    // One stop already: the check finds the route short, about a revision the case holds.
+    fs::write(tree.workspace().join("route.txt"), "start\n").unwrap();
+    let opened = tree.open_leg_with("tour-leg-idle.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let ran = tree
+        .command()
+        .args([
+            "tree",
+            "run",
+            "--confinement",
+            "local",
+            "--max-steps",
+            "100",
+            "--at",
+            AT,
+        ])
+        .arg("--store")
+        .arg(tree.store())
+        .output()
+        .unwrap();
+    let lines = log_lines(&tree, "root");
+    let writes = lines
+        .iter()
+        .filter(|line| matches!(&line.event, RunLogEvent::ActionFinished(finished) if finished.action == "route.write"))
+        .count();
+    assert!(
+        writes <= 20,
+        "route.write finished {writes} times in one run"
+    );
+    assert_eq!(writes, 4, "three runs and one refusal");
+    assert_eq!(
+        ran.status.code(),
+        Some(4),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    assert_eq!(json(&ran)["stop"], "Stuck");
 }
