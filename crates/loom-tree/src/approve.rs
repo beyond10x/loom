@@ -21,7 +21,7 @@ use loom_protocols::ProtocolCatalog;
 use crate::approvals::record_approval;
 use crate::log::Logs;
 use crate::person::{PERFORMED, PersonEffects, ProgramEnd, ProgramEnded};
-use crate::run::{case_bindings, one_step};
+use crate::run::{artifact_revisions, case_bindings, one_step, revision_moves};
 use crate::status::members;
 use crate::store::{existing_store, read_manifest};
 use crate::{Refused, StoreLock, TreeTime, unreadable};
@@ -358,7 +358,7 @@ fn prepare_program<S: FallibleCaseStore>(
 }
 
 /// The line the case's log gains for a person's program that did not end well: its exit, or why
-/// it has none, its blob, and no evidence.
+/// it has none, its blob, and no evidence; the caller names its moves.
 fn finished(action: &str, ended: &ProgramEnded) -> ActionFinished {
     let run = &ended.run;
     let (exit, refusal) = if run.timed_out {
@@ -539,14 +539,16 @@ fn take_person_action<S: FallibleCaseStore>(
         runner,
         ended: RefCell::new(None),
     };
+    // The revisions before the step, so the line of a program that did not end well names the
+    // moves it wrote too (`story:tree-replay-command`, D6 a).
+    let revisions_before = artifact_revisions(governor, &case)?;
     let stepped = one_step(governor, store, &case, action, &effects, &request.time);
     // A program that did not end well refused the step: its run is logged, and the refusal names
     // how it ended.
     if let Some(ended) = effects.ended.into_inner() {
-        logs.append(
-            request.case,
-            RunLogEvent::ActionFinished(finished(action, &ended)),
-        )?;
+        let mut line = finished(action, &ended);
+        line.revisions = revision_moves(&revisions_before, &artifact_revisions(governor, &case)?);
+        logs.append(request.case, RunLogEvent::ActionFinished(line))?;
         return Err(program_failed(request, action, &ended));
     }
     logs.append(request.case, RunLogEvent::ActionFinished(stepped?))?;

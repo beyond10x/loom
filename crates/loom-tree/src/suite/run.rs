@@ -35,7 +35,8 @@ use super::select::{CycleView, select_values};
 use crate::{
     ApproveRequest, CloseRequest, HoldRequest, KeptProtocol, OpenRequest, Reasons, Refused,
     ReopenRequest, RunSettings, TreeTime, open_tree, read_manifest, read_protocols_directory,
-    run_tree, status_json, tree_status, verify_json, verify_tree,
+    replay_difference, replay_json, replay_tree, run_tree, status_json, tree_status, verify_json,
+    verify_tree,
 };
 use loom::primitives::Decimal;
 use loom::tree::{SelectItem, WaitingCycle};
@@ -1422,7 +1423,23 @@ impl SuiteRun<'_> {
                 self.write(running, step, label)?;
                 StepEnd::done(None)
             }
-            other @ (StepKind::Decide | StepKind::Allow | StepKind::Replay) => {
+            // As `tree replay`: 3 when a compared case differs, its object the step's output
+            // (`story:tree-replay-command`).
+            StepKind::Replay => {
+                match replay_tree(&running.store, self.catalog, step.case.as_deref()) {
+                    Ok(replayed) => StepEnd {
+                        exit: if replay_difference(&replayed).is_some() {
+                            3
+                        } else {
+                            0
+                        },
+                        refusal: None,
+                        output: Some(replay_json(&replayed)),
+                    },
+                    Err(refusal) => StepEnd::refused(&refusal),
+                }
+            }
+            other @ (StepKind::Decide | StepKind::Allow) => {
                 return Err(difference(
                     label,
                     step_name(other),

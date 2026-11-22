@@ -2,8 +2,8 @@
 //! an absent optional member is left out, and an enum is its variant's name.
 
 use loom::tree::{
-    CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence, StatusLog,
-    StatusRun, TreeProtocol, TreeRefusal, TreeRun, TreeStatus, TreeVerify,
+    CaseReplay, CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence,
+    StatusLog, StatusRun, TreeProtocol, TreeRefusal, TreeReplay, TreeRun, TreeStatus, TreeVerify,
 };
 use serde_json::{Map, Value, json};
 
@@ -209,6 +209,56 @@ pub fn verify_json(verified: &TreeVerify) -> Value {
         verified.failure.as_ref().map(failure_json),
     );
     Value::Object(object)
+}
+
+fn case_replay_json(case: &CaseReplay) -> Value {
+    let mut object = Map::new();
+    object.insert("case".into(), json!(case.case));
+    object.insert("evaluated".into(), json!(case.evaluated));
+    put(&mut object, "seq", case.seq.map(Value::from));
+    put(&mut object, "at", case.at.clone().map(Value::from));
+    put(
+        &mut object,
+        "case_revision",
+        case.case_revision.map(Value::from),
+    );
+    put(
+        &mut object,
+        "logged_case_revision",
+        case.logged_case_revision.map(Value::from),
+    );
+    put(
+        &mut object,
+        "unmatched_line",
+        case.unmatched_line.map(Value::from),
+    );
+    put(
+        &mut object,
+        "state_matches_log",
+        case.state_matches_log.map(Value::from),
+    );
+    put(
+        &mut object,
+        "decision_digest",
+        case.decision_digest.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "logged_decision_digest",
+        case.logged_decision_digest.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "decision_matches_log",
+        case.decision_matches_log.map(Value::from),
+    );
+    Value::Object(object)
+}
+
+/// `replayed` as one JSON object, `{"cases": [...]}`: a case with no `evaluated` line is exactly
+/// `{"case", "evaluated": false}`.
+pub fn replay_json(replayed: &TreeReplay) -> Value {
+    json!({"cases": replayed.cases.iter().map(case_replay_json).collect::<Vec<_>>()})
 }
 
 /// One decision a waiting tree names, as one JSON object.

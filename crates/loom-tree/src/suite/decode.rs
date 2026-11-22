@@ -731,7 +731,9 @@ fn step_members(kind: StepKind) -> &'static [&'static str] {
         StepKind::Stop => &["principal", "reason"],
         StepKind::Resume => &[],
         StepKind::Reopen => &["principal"],
-        StepKind::Allow | StepKind::Replay => &["case", "principal"],
+        StepKind::Allow => &["case", "principal"],
+        // A replay records nothing, so it names no principal (`story:tree-replay-command`, D1 a).
+        StepKind::Replay => &["case"],
     }
 }
 

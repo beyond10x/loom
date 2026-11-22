@@ -383,6 +383,53 @@ b10x-loom: tree verify: case root line 3: BrokenChain: prev is not the SHA-256 o
 (exit 3)
 ```
 
+## Replay the decisions
+
+`tree replay` decides every case again as of the last `evaluated` line of its run log and says,
+per case, whether the case and Canon's decision still equal what that line recorded. Each case is
+rebuilt by undoing, newest first, the lines after that one: an `action finished` line removes its
+records and moves each revision it names back, a `child opened` line removes the link and the
+child's outcome record, a `terminated` line clears the end. The rebuilt cases are decided through
+the same path `tree run` decides with. On the two-level tour run to its end:
+
+```console
+$ b10x-loom tree replay --store store | jq -c '.cases[] | {case, seq, state_matches_log, decision_matches_log}'
+{"case":"root","seq":13,"state_matches_log":true,"decision_matches_log":true}
+{"case":"root.first","seq":19,"state_matches_log":true,"decision_matches_log":true}
+{"case":"root.north","seq":11,"state_matches_log":true,"decision_matches_log":true}
+{"case":"root.south","seq":11,"state_matches_log":true,"decision_matches_log":true}
+(exit 0)
+```
+
+Each entry also holds `case_revision` and `decision_digest` beside the logged
+`logged_case_revision` and `logged_decision_digest`. A case whose log holds no `evaluated` line
+yet is listed as `{"case": …, "evaluated": false}` and is not compared. A revision moved or a
+record received outside the log, or a line whose undo does not apply, makes the case differ: the
+command still prints every case, names the first that differs on standard error and exits 3.
+Here a `child closed` line was appended after the root's last `evaluated` line, while its
+`child opened` precedes it:
+
+```console
+$ b10x-loom tree replay --store store > replay.json
+b10x-loom: tree replay: case root differs from its log: state at line 13
+(exit 3)
+$ jq -c '.cases[0] | {case, state_matches_log, unmatched_line}' replay.json
+{"case":"root","state_matches_log":false,"unmatched_line":13}
+```
+
+`--case` replays one case and the cases below it; a case the tree does not hold is refused
+`CaseNotInTree`, exit 1:
+
+```console
+$ b10x-loom tree replay --store store --case root.nowhere
+b10x-loom: tree refused: CaseNotInTree: case "root.nowhere": the tree rooted at root holds no such case
+{"case":"root.nowhere","detail":"the tree rooted at root holds no such case","reason":"CaseNotInTree"}
+(exit 1)
+```
+
+The store is read and never held, and nothing is written. A log that does not verify is refused
+`LogRefused`.
+
 ## One writer
 
 A command that writes holds `tree.lock` in the store for the whole command. A second one is
@@ -468,9 +515,9 @@ arrives: as expected (9.0 s)
 waits: as expected (1.9 s)
 wrong: FAILED: expect.outcome (outcome, OutcomeDiffers): expected arrived, found turned_back (3.3 s)
 later: pending, still failing: check-log-says-hello (equals, CheckFailed): expected hello, found 26 bytes, sha256 a77f6b1ee3b7 (1.8 s)
-replays: pending, waits for story:tree-replay-command (replay)
+allows: pending, waits for story:tree-stop-record-and-labels (allow)
 cycles: 3 expected, 2 as expected, 1 failed: wrong
-pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: replays on story:tree-replay-command)
+pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: allows on story:tree-stop-record-and-labels)
 (exit 1)
 ```
 
@@ -543,7 +590,7 @@ default ones.
 | `stop` | `tree hold` (`principal`, `reason`, by default `suite step <label>`) |
 | `resume` | one `tree run`, answering no wait; a held tree gives exit 1, refusal `TreeStopped` |
 | `reopen` | `tree reopen` (`principal`) |
-| `status`, `verify` | `tree status`, `tree verify`; a named one gives its JSON output to `{step: <name>}` |
+| `status`, `verify`, `replay` | `tree status`, `tree verify`, `tree replay` (`case`); a named one gives its JSON output to `{step: <name>}` |
 | `write` | no tree command: copies the file `from` of the suite's directory to `to` in the cycle's workspace |
 
 A step states `exit` (a status, or `{not: <status>}`), `refusal`, `at` (minutes after `--at`) and
@@ -644,9 +691,8 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 
 | Part | Waits for |
 |---|---|
-| steps `open`, `run`, `approve`, `close`, `status`, `verify`, `write`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when`; `approve` with `result`, `reasons` or `deny` | available |
+| steps `open`, `run`, `approve`, `close`, `status`, `verify`, `replay`, `write`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when`; `approve` with `result`, `reasons` or `deny` | available |
 | `stop`, `resume`, `allow`, `reopen`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
-| `replay` | `story:tree-replay-command` |
 | `calls` | `story:agent-node-run-records` |
 | `engine` | `story:engine-configuration-document` |
 | `fixtures`; event `RunSettings` | `story:engine-agents-section` |
