@@ -142,8 +142,9 @@ pub const CANCEL_WATCH: Duration = Duration::from_millis(100);
 /// runs, within 10 s of being set.
 ///
 /// # Errors
-/// [`Refused`]: `StoreInUse` naming the holder, `NotATree`, `LogRefused`, `BindingsRefused`,
-/// `ConfinementRefused` or `StoreUnreadable`.
+/// [`Refused`]: `StoreInUse` naming the holder, `NotATree`, `TreeStopped` naming the hold and the
+/// `tree reopen` command that lifts it ([`crate::hold`]; nothing is written), `LogRefused`,
+/// `BindingsRefused`, `ConfinementRefused` or `StoreUnreadable`.
 pub fn run_tree(
     store: &Path,
     catalog: &ProtocolCatalog,
@@ -198,6 +199,9 @@ fn run_cancellable(
     read_manifest(&store)?;
     let _held = StoreLock::acquire(&store)?;
     let manifest = read_manifest(&store)?;
+    // A held tree runs nothing: refused holding the store, before any store opens or line is
+    // written (`story:tree-suite-stop-resume-reopen-steps`).
+    crate::stop::refuse_held(&store, &manifest.root)?;
     let workspace = PathBuf::from(&manifest.workspace);
     let cases =
         FileCaseStore::open(store.clone()).map_err(|error| unreadable("the case store", error))?;

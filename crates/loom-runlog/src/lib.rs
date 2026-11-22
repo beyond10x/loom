@@ -42,6 +42,11 @@
 //! spelling, does not read, under the same rule. A `BudgetSpent` line written before the member
 //! existed holds none and reads; a reader from before it refuses a line that holds it.
 //!
+//! A `StopRecorded` (the principal and the reason of a hold) and a `StopLifted` (the principal and
+//! `stop`, the `seq` of the line it lifts) are the lines `tree hold` and `tree reopen` write to a
+//! tree's root log (`story:tree-suite-stop-resume-reopen-steps`); a reader from before them
+//! refuses the kinds.
+//!
 //! What the log cannot show: a change to the last line alone is not detected, as a cut at a line
 //! boundary is not, since no line after it names its digest, and the next append makes the change
 //! permanent. A log whose last lines were removed whole, or rewritten from some line on with a
@@ -65,7 +70,7 @@ use loom::primitives::Timestamp;
 use loom::runlog::{
     ActionFinished, ActionStarted, AuthorityRecorded, CaseOpened, ChildClosed, ChildOpened,
     Discarded, Evaluated, HandoffChecked, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal,
-    RunLogRefused, Stopped, Terminated,
+    RunLogRefused, StopLifted, StopRecorded, Stopped, Terminated,
 };
 use loom::tree::SpentBudget;
 use loom_governor::{FileStoreError, LockedDir, case_file_stem, durable};
@@ -562,6 +567,15 @@ pub fn encode(line: &RunLogLine) -> String {
             optional(&mut out, "budget", &event.budget);
         }
         RunLogEvent::Terminated(event) => text(&mut out, "reason", &event.reason),
+        RunLogEvent::StopRecorded(event) => {
+            text(&mut out, "principal", &event.principal);
+            text(&mut out, "reason", &event.reason);
+        }
+        RunLogEvent::StopLifted(event) => {
+            text(&mut out, "principal", &event.principal);
+            member(&mut out, "stop");
+            push_integer(&mut out, event.stop);
+        }
     }
     out.push('}');
     out
@@ -581,6 +595,8 @@ fn kind(event: &RunLogEvent) -> &'static str {
         RunLogEvent::AuthorityRecorded(_) => "AuthorityRecorded",
         RunLogEvent::Stopped(_) => "Stopped",
         RunLogEvent::Terminated(_) => "Terminated",
+        RunLogEvent::StopRecorded(_) => "StopRecorded",
+        RunLogEvent::StopLifted(_) => "StopLifted",
     }
 }
 
@@ -605,6 +621,8 @@ fn event_members(kind: &str) -> Option<&'static [&'static str]> {
         "AuthorityRecorded" => &["capability", "decision", "principal"],
         "Stopped" => &["stop", "next", "budget"],
         "Terminated" => &["reason"],
+        "StopRecorded" => &["principal", "reason"],
+        "StopLifted" => &["principal", "stop"],
         _ => return None,
     })
 }
@@ -742,6 +760,14 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
                 budget,
             })
         }
+        "StopRecorded" => RunLogEvent::StopRecorded(StopRecorded {
+            principal: text("principal")?,
+            reason: text("reason")?,
+        }),
+        "StopLifted" => RunLogEvent::StopLifted(StopLifted {
+            principal: text("principal")?,
+            stop: integer_at(member_at(value, "", "stop")?, "stop", "an integer")?,
+        }),
         _ => RunLogEvent::Terminated(Terminated {
             reason: text("reason")?,
         }),

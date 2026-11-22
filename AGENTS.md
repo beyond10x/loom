@@ -1808,6 +1808,19 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   named with the reader's refusal, line and detail, its case's entry holds nothing read from it,
   and the command still exits 0. `budget` is the one the case's last `stopped` line names. A
   status printed before `log` and `budget` existed reads with both absent.
+- `tree hold` and `tree reopen` (`stop.rs`, `story:tree-suite-stop-resume-reopen-steps`; the verb
+  `tree stop` stays `story:tree-daemon`'s) take the store lock and append one line to the root's
+  run log: `StopRecorded` (principal, reason) and `StopLifted` (principal, `stop` the `seq` it
+  lifts). The tree is held while the root's log holds a `StopRecorded` with no `StopLifted` after
+  it (`current_hold`); the log is the record, no other file. `run_tree` checks it right after the
+  lock and before any store opens (`refuse_held`): `TreeStopped`, exit 1, naming the hold and the
+  `tree reopen` command, nothing written. A second hold is `TreeAlreadyStopped`, a reopen of an
+  unheld tree `TreeNotStopped`; the principal (1 to `MAX_NAME_BYTES`) and the reason (1 to
+  `MAX_REASON_BYTES`, 1024), neither with a control character, are checked before the store is
+  opened (`StopUnusable`). Approve, close, status and verify ignore the hold. It locks nobody out:
+  cutting the last line of a log verifies. The suite's `stop`, `resume` (one `run_tree`, no wait
+  answered) and `reopen` steps call the same functions (`tests/tree_run/stop.rs`,
+  `tests/tree_test/mod.rs`, `the_stop_steps_run_as_runbooks_cycle`).
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.

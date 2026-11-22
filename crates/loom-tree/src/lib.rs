@@ -18,6 +18,10 @@
 //! [`tree_status`] and [`verify_tree`] read and never take the store: a live view reads the tree
 //! while a run holds it.
 //!
+//! [`hold`] (`tree hold`) records a principal's hold on the tree as a `stop recorded` line in the
+//! root's run log and [`reopen`] (`tree reopen`) lifts it with a `stop lifted` line; while the tree
+//! is held ([`current_hold`]) [`run_tree`] is refused `TreeStopped` and writes nothing.
+//!
 //! Every instant a command writes is the host clock's, or the one `--at` gives ([`TreeTime`]), so
 //! two runs from the same inputs and the same `--at` write the same bytes.
 //!
@@ -42,6 +46,7 @@ mod protocols;
 mod read;
 mod run;
 mod status;
+mod stop;
 mod store;
 mod time;
 mod verify;
@@ -78,6 +83,9 @@ pub use protocols::{
 pub use read::read_status;
 pub use run::{RunObserver, RunSettings, TREE_PRINCIPAL, run_tree};
 pub use status::{STATUS_FORMAT, tree_status};
+pub use stop::{
+    HoldLifted, HoldRequest, MAX_REASON_BYTES, ReopenRequest, TreeHold, current_hold, hold, reopen,
+};
 pub use store::{FORMAT, MANIFEST, read_manifest};
 pub use time::TreeTime;
 pub use verify::verify_tree;

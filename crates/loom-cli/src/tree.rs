@@ -21,17 +21,18 @@ use b10x_loom_tree::suite::{
     SuiteRefused, SuiteSettings, cycle_line, report_json, run_suite, summary_lines, workers_served,
 };
 use b10x_loom_tree::{
-    ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
-    approve as record, open_tree, person_program, read_protocols_directory, refusal_json, run_json,
-    run_tree, status_json, stored_catalog, tree_status, verify_json, verify_tree,
+    ApproveRequest, CloseRequest, HoldRequest, OpenRequest, Reasons, Refused, ReopenRequest,
+    RunSettings, TreeTime, approve as record, open_tree, person_program, read_protocols_directory,
+    refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status, verify_json,
+    verify_tree,
 };
 use serde_json::json;
 
 use crate::{
     REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
     TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs,
-    TreeCloseArgs, TreeCommand, TreeConfinement, TreeOpenArgs, TreeRunArgs, TreeStoreArgs,
-    TreeTestArgs, start_delegated, tree_run_exit_status,
+    TreeCloseArgs, TreeCommand, TreeConfinement, TreeHoldArgs, TreeOpenArgs, TreeReopenArgs,
+    TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -43,6 +44,8 @@ pub fn command(command: &TreeCommand) -> u8 {
         TreeCommand::Close(arguments) => close(arguments),
         TreeCommand::Status(arguments) => status(arguments),
         TreeCommand::Verify(arguments) => verify(arguments),
+        TreeCommand::Hold(arguments) => hold(arguments),
+        TreeCommand::Reopen(arguments) => reopen(arguments),
         TreeCommand::Test(arguments) => return test(arguments),
     };
     match ended {
@@ -534,6 +537,56 @@ fn close(arguments: &TreeCloseArgs) -> Result<u8, Refused> {
         "{}",
         printable(
             &json!({"case": closed.case, "outcome": closed.outcome, "at": closed.at.0}).to_string()
+        )
+    );
+    Ok(0)
+}
+
+/// `tree hold`: the members are checked by the library before the store is read, so no catalog is
+/// built and nothing of the store is read for a refused member.
+fn hold(arguments: &TreeHoldArgs) -> Result<u8, Refused> {
+    let time = TreeTime::from_flag(arguments.at.as_deref())?;
+    let held = b10x_loom_tree::hold(&HoldRequest {
+        store: &resolved(&arguments.store)?,
+        principal: &arguments.principal,
+        reason: &arguments.reason,
+        time,
+    })?;
+    println!(
+        "{}",
+        printable(
+            &json!({
+                "case": held.case,
+                "seq": held.seq,
+                "at": held.at.0,
+                "principal": held.principal,
+                "reason": held.reason,
+            })
+            .to_string()
+        )
+    );
+    Ok(0)
+}
+
+/// `tree reopen`, as [`hold`]: the principal is checked before the store is read.
+fn reopen(arguments: &TreeReopenArgs) -> Result<u8, Refused> {
+    let time = TreeTime::from_flag(arguments.at.as_deref())?;
+    let lifted = b10x_loom_tree::reopen(&ReopenRequest {
+        store: &resolved(&arguments.store)?,
+        principal: &arguments.principal,
+        time,
+    })?;
+    println!(
+        "{}",
+        printable(
+            &json!({
+                "case": lifted.hold.case,
+                "seq": lifted.seq,
+                "at": lifted.at.0,
+                "principal": lifted.principal,
+                "stop": lifted.hold.seq,
+            })
+            .to_string()
         )
     );
     Ok(0)

@@ -1,7 +1,7 @@
 format: loom.tree-suite/1
 defaults:
-  protocol: tour@1
-  bindings: bindings/tour.bindings.yaml
+  protocol: tour-leg@1
+  bindings: bindings/tour-leg.bindings.yaml
   seed: [{from: stubs, to: stubs}, {from: seeds/route.txt, to: route.txt}]
 cycles:
   - name: run-stop

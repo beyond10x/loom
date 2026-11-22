@@ -286,6 +286,13 @@ pub enum TreeCommand {
     /// Verify the run log of every case of the tree and name the first line that fails.
     #[command(after_help = TREE_VERIFY_HELP)]
     Verify(TreeStoreArgs),
+    /// Hold the tree: record in its root case's run log that a principal stopped it and why;
+    /// tree run is refused until tree reopen lifts the hold.
+    #[command(after_help = TREE_HOLD_HELP)]
+    Hold(TreeHoldArgs),
+    /// Lift the hold tree hold recorded, so that tree run goes on.
+    #[command(after_help = TREE_REOPEN_HELP)]
+    Reopen(TreeReopenArgs),
     /// Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers
     /// at once, each in its own directory of --scratch, and print per cycle whether it ended as the
     /// suite expects.
@@ -406,6 +413,60 @@ Exit status:
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error";
 
+/// What `tree hold --help` says about the hold and the exit status.
+pub const TREE_HOLD_HELP: &str = "The hold is one stop recorded line, the principal and the \
+reason, in the root case's run log, written under the store lock. While the tree is held, tree run \
+is refused TreeStopped and writes nothing; tree approve, tree close, tree status and tree verify \
+work as on any other tree, and an approval does not lift the hold. tree reopen lifts it. The \
+principal is 1 to 200 bytes and the reason 1 to 1024 bytes, neither with a control character. The \
+hold records a decision and locks nobody out: whoever can write the store can cut its line.
+
+Exit status:
+  0  the hold is recorded; it is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeAlreadyStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid";
+
+/// What `tree reopen --help` says about the lift and the exit status.
+pub const TREE_REOPEN_HELP: &str = "The lift is one stop lifted line, the principal and the seq of \
+the stop recorded line it lifts, in the root case's run log, written under the store lock. After \
+it tree run goes on as it would have without the hold.
+
+Exit status:
+  0  the hold is lifted; the lift is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeNotStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid";
+
+/// The arguments of `b10x-loom tree hold`.
+#[derive(Debug, Args)]
+pub struct TreeHoldArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The principal who holds the tree.
+    #[arg(long, value_name = "PRINCIPAL")]
+    pub principal: String,
+    /// Why the tree is held.
+    #[arg(long, value_name = "TEXT")]
+    pub reason: String,
+    /// The instant the hold records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of `b10x-loom tree reopen`.
+#[derive(Debug, Args)]
+pub struct TreeReopenArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The principal who lifts the hold.
+    #[arg(long, value_name = "PRINCIPAL")]
+    pub principal: String,
+    /// The instant the lift records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
 /// The precondition of `tree run`'s default confinement and its remedy, which `tree run --help`
 /// and every confinement refusal of `tree run` state.
 macro_rules! tree_confinement_precondition {
@@ -443,7 +504,7 @@ signal changes nothing.
 
 Exit status:
   0  the root is terminated through its one legitimate outcome
-  1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
+  1  refused, nothing written: StoreInUse naming the holder, TreeStopped naming the hold and the tree reopen command that lifts it, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
   5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run"

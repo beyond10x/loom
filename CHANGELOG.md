@@ -14,6 +14,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- `b10x-loom tree hold` and `tree reopen` (`b10x_loom_tree::hold`, `reopen`, `current_hold`): a principal's hold on a tree as a `StopRecorded` line in the root's run log and its lift as a `StopLifted` line naming it, under the store lock; refusals `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable` (story:tree-suite-stop-resume-reopen-steps)
+- `tree run` on a held tree is refused `TreeStopped`, exit 1, naming the hold and the `tree reopen` command, and writes nothing (story:tree-suite-stop-resume-reopen-steps)
+- Suite steps `stop` (member `reason`, default `suite step <label>`), `resume` and `reopen`, and the `log` events `StopRecorded` and `StopLifted`, run; the three steps take no `case` (story:tree-suite-stop-resume-reopen-steps)
+- **Breaking:** `loom::runlog::RunLogEvent` gains `StopRecorded` and `StopLifted`, `TreeRefusalReason` gains `TreeStopped`, `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable`, and `CycleStep` gains `reason`: an exhaustive `match` needs the arms and a struct literal names the field; an older reader refuses the two kinds; a `stop`, `resume` or `reopen` step naming `case` is refused `MemberUndeclared` (story:tree-suite-stop-resume-reopen-steps)
 - `from: runs` (`ResultSource::Runs`, `RUNS_SPENT`): a program entry records `spent` on the run reaching `budget.max_runs` (story:outcome-when-reads-the-run-count)
 - `tree run` holds a writer idle while its only open evidence is its own `from: runs` kinds (story:outcome-when-reads-the-run-count)
 - `loom_governor::durable`: every sync of the tree path's stores through one counted door; its test-only feature `test-unsynced-store` (story:tree-run-tests-fit-the-budget)

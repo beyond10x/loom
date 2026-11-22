@@ -541,6 +541,7 @@ fn bare_step(kind: StepKind) -> CycleStep {
         reasons: None,
         deny: None,
         option: None,
+        reason: None,
     }
 }
 
@@ -698,11 +699,11 @@ fn step_members(kind: StepKind) -> &'static [&'static str] {
         ],
         StepKind::Close => &["case", "outcome", "principal"],
         StepKind::Decide => &["case", "option", "principal"],
-        StepKind::Stop
-        | StepKind::Resume
-        | StepKind::Allow
-        | StepKind::Reopen
-        | StepKind::Replay => &["case", "principal"],
+        // A hold belongs to the tree: its three steps name no case.
+        StepKind::Stop => &["principal", "reason"],
+        StepKind::Resume => &[],
+        StepKind::Reopen => &["principal"],
+        StepKind::Allow | StepKind::Replay => &["case", "principal"],
     }
 }
 
@@ -787,6 +788,7 @@ fn step(value: &Value, at: &str) -> Decoded<CycleStep> {
         reasons: members.texts("reasons")?,
         deny: members.boolean("deny")?,
         option: members.text("option")?,
+        reason: members.text("reason")?,
     })
 }
 

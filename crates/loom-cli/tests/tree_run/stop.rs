@@ -3,18 +3,49 @@
 //! and writes nothing, and `tree reopen` lifts the hold.
 //!
 //! The fixture is the `review@1` case of `fixtures/tree-two-level/` at its first wait
-//! ([`reviewed`]); each test works on a fresh copy. `tree hold` and `tree reopen` start the binary,
-//! which these tests are about (their flags, refusals and exit statuses); the other commands run in
-//! process as the rest of the file runs them. No test reaches the network, a model or a
-//! credential, and each ends within 60 s.
+//! ([`reviewed`]); each test works on a fresh copy. As in the rest of the file, the commands run
+//! in process through `b10x_loom_tree` and answer as `crates/loom-cli/src/tree.rs` makes the
+//! answer; `tree hold` and `tree reopen` start the binary where the binary is what is tested (a
+//! printed refusal, a member refused before the store is read, the lift's output). No test reaches
+//! the network, a model or a credential, and each ends within 60 s.
 
 use super::*;
 
 /// The principal of every hold and reopen of these tests.
 const OWNER: &str = "person:owner";
 
+/// `tree hold --at AT` of `store` by `principal` for `reason`, in process: what the command
+/// prints, or its refusal.
+fn hold_in(store: &Path, principal: &str, reason: &str) -> Output {
+    answered(
+        b10x_loom_tree::hold(&b10x_loom_tree::HoldRequest {
+            store,
+            principal,
+            reason,
+            time: at(),
+        }),
+        |held| {
+            (
+                0,
+                json!({
+                    "case": held.case,
+                    "seq": held.seq,
+                    "at": held.at.0,
+                    "principal": held.principal,
+                    "reason": held.reason,
+                }),
+            )
+        },
+    )
+}
+
+/// `tree hold` of the tree's store by [`OWNER`] for `reason`, in process.
+fn hold(tree: &Tree, reason: &str) -> Output {
+    hold_in(&tree.store(), OWNER, reason)
+}
+
 /// `tree hold --at AT --store <store>` with `flags` after, started as `b10x-loom`.
-fn hold_at(tree: &Tree, store: &Path, flags: &[&str]) -> Output {
+fn hold_started(tree: &Tree, store: &Path, flags: &[&str]) -> Output {
     tree.command()
         .args(["tree", "hold", "--at", AT, "--store"])
         .arg(store)
@@ -23,27 +54,34 @@ fn hold_at(tree: &Tree, store: &Path, flags: &[&str]) -> Output {
         .unwrap()
 }
 
-/// `tree hold` of the tree's store by [`OWNER`] for `reason`.
-fn hold(tree: &Tree, reason: &str) -> Output {
-    hold_at(
-        tree,
-        &tree.store(),
-        &["--principal", OWNER, "--reason", reason],
+/// `tree reopen --at AT` of the tree's store by [`OWNER`], in process.
+fn reopen(tree: &Tree) -> Output {
+    answered(
+        b10x_loom_tree::reopen(&b10x_loom_tree::ReopenRequest {
+            store: &tree.store(),
+            principal: OWNER,
+            time: at(),
+        }),
+        |lifted| {
+            (
+                0,
+                json!({
+                    "case": lifted.hold.case,
+                    "seq": lifted.seq,
+                    "at": lifted.at.0,
+                    "principal": lifted.principal,
+                    "stop": lifted.hold.seq,
+                }),
+            )
+        },
     )
 }
 
-/// `tree reopen --at AT` of the tree's store by [`OWNER`], started as `b10x-loom`.
-fn reopen(tree: &Tree) -> Output {
+/// [`reopen`], started as `b10x-loom`.
+fn reopen_started(tree: &Tree) -> Output {
     tree.command()
-        .args([
-            "tree",
-            "reopen",
-            "--at",
-            AT,
-            "--principal",
-            OWNER,
-            "--store",
-        ])
+        .args(["tree", "reopen", "--at", AT, "--principal", OWNER])
+        .arg("--store")
         .arg(tree.store())
         .output()
         .unwrap()
@@ -85,14 +123,14 @@ fn lines_of(tree: &Tree, kind: &str) -> Vec<Value> {
         .collect()
 }
 
-/// The decisions a run printed, with the store's path written as `<store>`, so that two copies
-/// of one tree compare.
+/// The decisions a run printed, with the test's directory (the store's and the workspace's
+/// parent) written as `<root>`, so that two copies of one tree compare.
 fn decisions_of(tree: &Tree, ran: &Output) -> Value {
-    let store = tree.store().canonicalize().unwrap();
+    let root = tree.root.canonicalize().unwrap();
     let text = json(ran)["decisions"]
         .to_string()
-        .replace(&store.display().to_string(), "<store>")
-        .replace(&tree.store().display().to_string(), "<store>");
+        .replace(&root.display().to_string(), "<root>")
+        .replace(&tree.root.display().to_string(), "<root>");
     serde_json::from_str(&text).unwrap()
 }
 
@@ -121,7 +159,13 @@ fn status_of(tree: &Tree) -> Vec<Value> {
 #[test]
 fn a_held_tree_refuses_to_run() {
     let tree = reviewed("held-run");
-    done(&hold(&tree, "hold for review"));
+    let held = hold_started(
+        &tree,
+        &tree.store(),
+        &["--principal", OWNER, "--reason", "hold for review"],
+    );
+    done(&held);
+    assert_eq!(json(&held)["principal"], OWNER, "{}", stdout(&held));
     let before = every_file(&tree.store());
     let ran = tree.run();
     let said = refused_with(&ran, "TreeStopped");
@@ -144,7 +188,8 @@ fn a_reopened_tree_runs_on() {
     let tree = reviewed("reopened");
     let never = reviewed("never-held");
     done(&hold(&tree, "hold for review"));
-    done(&reopen(&tree));
+    let lift = reopen_started(&tree);
+    done(&lift);
     let ran = tree.run();
     let unheld = never.run();
     assert_eq!(
@@ -171,6 +216,13 @@ fn a_reopened_tree_runs_on() {
     assert_eq!(lifted[0]["stop"], recorded[0]["seq"], "{lifted:?}");
     assert_ne!(lifted[0]["stop"], lifted[0]["seq"]);
     assert_ne!(lifted[0]["stop"], json!(0));
+    // The binary printed the lift as the log holds it.
+    let printed = json(&lift);
+    assert_eq!(
+        (&printed["seq"], &printed["stop"]),
+        (&lifted[0]["seq"], &lifted[0]["stop"]),
+        "{printed}"
+    );
     // The lines read back through the run log's reader.
     let lines = log_lines(&tree, "root");
     assert_eq!(lines.len(), root_lines(&tree).len());
@@ -204,16 +256,15 @@ fn an_unusable_reason_or_principal_is_refused() {
     let before = every_file(&tree.store());
     let long_reason = "r".repeat(1025);
     let long_principal = "p".repeat(201);
-    for (flags, member) in [
-        (["--principal", OWNER, "--reason", "two\nlines"], "reason"),
-        (["--principal", OWNER, "--reason", &long_reason], "reason"),
-        (
-            ["--principal", &long_principal, "--reason", "why"],
-            "principal",
-        ),
-        (["--principal", "bell\u{7}", "--reason", "why"], "principal"),
+    // The member is named in the detail ("the reason ...", "the principal ..."), not only as the
+    // refusal document's `reason` key.
+    for (principal, reason, member) in [
+        (OWNER, "two\nlines", "the reason"),
+        (OWNER, long_reason.as_str(), "the reason"),
+        (long_principal.as_str(), "why", "the principal"),
+        ("bell\u{7}", "why", "the principal"),
     ] {
-        let said = refused_with(&hold_at(&tree, &tree.store(), &flags), "StopUnusable");
+        let said = refused_with(&hold_in(&tree.store(), principal, reason), "StopUnusable");
         assert!(said.contains(member), "{member}: {said}");
         assert_eq!(
             every_file(&tree.store()),
@@ -221,16 +272,18 @@ fn an_unusable_reason_or_principal_is_refused() {
             "{member}: the refusal wrote"
         );
     }
-    // Before the store is opened: a store that does not exist is never read, nor made.
+    // Before the store is opened, through the binary: a store that does not exist is never
+    // read, nor made.
     let absent = tree.root.join("no-such-store");
     let said = refused_with(
-        &hold_at(
+        &hold_started(
             &tree,
             &absent,
             &["--principal", OWNER, "--reason", "two\nlines"],
         ),
         "StopUnusable",
     );
+    assert!(said.contains("the reason"), "{said}");
     assert!(!said.contains("NotATree"), "{said}");
     assert!(
         !absent.exists(),
