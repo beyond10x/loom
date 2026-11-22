@@ -133,6 +133,7 @@ fn catalog(name: &str, yaml: &str) -> ProtocolCatalog {
 
 fn governor(name: &str, yaml: &str) -> CanonGovernor<MemoryCaseStore> {
     CanonGovernor::new(MemoryCaseStore::default())
+        .with_host_case_outcomes()
         .with_protocol_yaml(name, yaml)
         .expect("registers")
 }
