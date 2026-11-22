@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 9c277197e8ce1ef974b931ae3ce283c80f935dc7225a6e7d42b142c9e308fd51
+// contract digest 0465e7fb4efe20ffa0d868ecec387270fe18707d24f87f3392fce7a2b077ae18
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run log — `loom.runlog`.
@@ -98,6 +98,19 @@ pub struct Evaluated {
     pub decision_digest: String,
 }
 
+/// HandoffChecked — `loom.runlog.HandoffChecked`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandoffChecked {
+    /// `action` — `String`.
+    pub action: String,
+    /// `exit` — `Optional<Integer>`.
+    pub exit: Option<i64>,
+    /// `refusal` — `Optional<String>`.
+    pub refusal: Option<String>,
+    /// `blob_digest` — `Optional<String>`.
+    pub blob_digest: Option<String>,
+}
+
 /// RevisionMove — `loom.runlog.RevisionMove`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevisionMove {
@@ -128,6 +141,8 @@ pub enum RunLogEvent {
     Discarded(Discarded),
     /// Tagged `Evaluated` — `loom.runlog.Evaluated`.
     Evaluated(Evaluated),
+    /// Tagged `HandoffChecked` — `loom.runlog.HandoffChecked`.
+    HandoffChecked(HandoffChecked),
     /// Tagged `Stopped` — `loom.runlog.Stopped`.
     Stopped(Stopped),
     /// Tagged `Terminated` — `loom.runlog.Terminated`.
