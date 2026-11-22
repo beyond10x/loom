@@ -1270,3 +1270,86 @@ fn when_reads_the_catalog_and_the_suite() {
     ));
     reading.within_bound();
 }
+
+/// A suite whose one cycle's one step is the `write` step `step`, a flow map's members.
+fn one_write(step: &str) -> String {
+    format!(
+        "format: loom.tree-suite/1\ndefaults: {{protocol: finding@1, bindings: b.yaml}}\ncycles:\n  - name: one\n    steps:\n      - {{do: write, {step}}}\n"
+    )
+}
+
+/// `story:suite-cycle-writes-a-workspace-file` test 5: a `to` that is not a path of plain names
+/// in the workspace, and a `from` that leaves the suite's directory, are refused naming the member.
+#[test]
+fn write_paths_are_refused_before_any_cycle() {
+    let started = Instant::now();
+    let mut cases: Vec<(String, SuiteRefusalReason, &str)> =
+        ["/etc/x", "../x", "a/../b", "./a", ""]
+            .into_iter()
+            .map(|to| {
+                (
+                    one_write(&format!("from: seeds/f.yaml, to: {to:?}")),
+                    SuiteRefusalReason::PathOutsideCycle,
+                    "cycles[0].steps[0].to",
+                )
+            })
+            .collect();
+    cases.push((
+        one_write("from: ../x, to: findings.yaml"),
+        SuiteRefusalReason::PathOutsideSuite,
+        "cycles[0].steps[0].from",
+    ));
+    for (suite, reason, member) in cases {
+        let refused = decode_suite(&suite).unwrap_err();
+        assert_eq!(
+            (refused.reason(), refused.member()),
+            (reason, Some(member)),
+            "{suite}"
+        );
+    }
+    for to in ["findings.yaml", "a/b.yaml", "a.b/c-d_e"] {
+        let suite = one_write(&format!("from: seeds/f.yaml, to: {to}"));
+        assert!(decode_suite(&suite).is_ok(), "{suite}");
+    }
+    assert!(started.elapsed() < BOUND);
+}
+
+/// `story:suite-cycle-writes-a-workspace-file` test 7: a `write` declares `from`, `to`, `name`
+/// and `checks` alone, and needs both paths.
+#[test]
+fn write_declares_only_its_members() {
+    let started = Instant::now();
+    let paths = "from: seeds/f.yaml, to: findings.yaml";
+    let mut cases: Vec<(String, SuiteRefusalReason, String)> =
+        ["exit: 0", "refusal: StoreInUse", "at: 3", "case: first"]
+            .into_iter()
+            .map(|member| {
+                let name = member.split(':').next().unwrap();
+                (
+                    one_write(&format!("{paths}, {member}")),
+                    SuiteRefusalReason::MemberUndeclared,
+                    format!("cycles[0].steps[0].{name}"),
+                )
+            })
+            .collect();
+    for (given, missing) in [("from: seeds/f.yaml", "to"), ("to: findings.yaml", "from")] {
+        cases.push((
+            one_write(given),
+            SuiteRefusalReason::MemberMissing,
+            format!("cycles[0].steps[0].{missing}"),
+        ));
+    }
+    for (suite, reason, member) in cases {
+        let refused = decode_suite(&suite).unwrap_err();
+        assert_eq!(
+            (refused.reason(), refused.member()),
+            (reason, Some(member.as_str())),
+            "{suite}"
+        );
+    }
+    let named = one_write(&format!(
+        "{paths}, name: decides, checks: [{{check: exists, select: [{{doc: {{in: work, path: findings.yaml}}}}]}}]"
+    ));
+    assert!(decode_suite(&named).is_ok(), "{named}");
+    assert!(started.elapsed() < BOUND);
+}

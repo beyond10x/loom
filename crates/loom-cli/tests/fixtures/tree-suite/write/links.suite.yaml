@@ -1,0 +1,20 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+  seed:
+    - {from: stubs/links.sh, to: stubs/first.sh}
+    - {from: stubs/apply.sh, to: stubs/apply.sh}
+    - {from: seeds/ledger.txt, to: ledger.txt}
+    - {from: paths/outside.txt, to: outside.txt}
+cycles:
+  - name: link-file
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, name: through-out, from: seeds/findings-decided.yaml, to: out}
+  - name: link-dir
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, name: through-up, from: seeds/findings-decided.yaml, to: up/x}

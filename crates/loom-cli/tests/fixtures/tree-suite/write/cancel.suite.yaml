@@ -1,0 +1,15 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+cycles:
+  - name: cancelled
+    seed:
+      - {from: stubs/held.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+      - {from: paths/markers.txt, to: markers.txt}
+    steps:
+      - {do: open}
+      - {do: run, name: held}
+      - {do: write, name: never, from: seeds/findings-decided.yaml, to: findings.yaml}
