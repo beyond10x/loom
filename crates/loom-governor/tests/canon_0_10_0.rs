@@ -1,15 +1,19 @@
-//! Acceptance for `story:canon-0-10-0-pin`: Loom decides with Canon 0.10.0. Every decision document
-//! it hands out names `0.10.0`, lists an approval-required action under `pending_decisions` and an
-//! admissible action's missing kinds under `missing_evidence`; Canon reads `canon-authority/1`
-//! entries keyed by capability, scope, case revision and principal; a protocol using a 0.10.0
-//! member registers and is decided, its judgement marks changing no frontier; a protocol with
-//! `imports` is refused, naming Canon's `MissingImport`.
+//! Acceptance for `story:canon-0-10-0-pin` and `story:canon-0-11-0-pin`: Loom decides with Canon
+//! 0.11.0. Every decision document it hands out names `0.11.0`, lists an approval-required action
+//! under `pending_decisions` and an admissible action's missing kinds under `missing_evidence`;
+//! Canon reads `canon-authority/1` entries keyed by capability, scope, case revision and
+//! principal; a protocol using a 0.10.0 member registers and is decided, its judgement marks
+//! changing no frontier; a protocol with `imports` is refused, naming Canon's `MissingImport`. A
+//! protocol using a 0.11.0 member registers and is decided; a decision counts only while its `when`
+//! holds; a `descended` form is `unknown` in a case the governor holds, which gives no
+//! `descends_from`.
 //!
 //! The protocols are written here in the forms of Canon's fixtures at tag `0.10.0`
 //! (`fixtures/investigation/capability-scope.yaml`, `supplied-evidence/`,
 //! `judgement-marking.yaml`, `child-outcome-subject.yaml`, `pending-decisions.yaml`,
-//! `missing-evidence.yaml`). Two catalogs are built at most once per test process (`OnceLock`, a
-//! few milliseconds), the one of `pin-check@1` apart, so a test of the decision document fails on
+//! `missing-evidence.yaml`) and at tag `0.11.0` (`fixtures/investigation/decision-condition.yaml`,
+//! `revision-ordering.yaml`). Three catalogs are built at most once per test process (`OnceLock`,
+//! a few milliseconds), the one of `pin-check@1` apart, so a test of the decision document fails on
 //! another Canon for its own reason; no test makes a model, network or clock call.
 
 use std::collections::BTreeMap;
@@ -18,7 +22,13 @@ use std::sync::OnceLock;
 use b10x_canon::eval::{Refusal, Supplied, case_from_value, evaluate_with};
 use b10x_canon::ir::compile;
 use b10x_canon::model::Decision;
-use b10x_loom_commission::model::responsibility::{CaseId, Frontier, frontier_state};
+use b10x_loom_commission::model::json as commission_json;
+use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
+use b10x_loom_commission::model::responsibility::{
+    CaseId, EvidenceData, EvidenceId, Frontier, Observation, ObservationData, ObservationId,
+    frontier_state,
+};
+use b10x_loom_commission::ports::evidence::{ObservationPort as _, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
 use loom_governor::model::evaluation::{
     CaseSnapshot, EvaluationRequest, EvidenceRecord, ProtocolName,
@@ -149,6 +159,44 @@ actions:
   inspect: {}
 "#;
 
+/// A protocol with every 0.11.0 member the story names: `revised_by` on an artifact,
+/// `records_together` on an action, a claim over a `descended` form, and an outcome requiring a
+/// decision with a `when`.
+const ELEVEN: &str = "pin-eleven@1";
+const ELEVEN_YAML: &str = r#"
+format: protocol/1
+protocol: {id: pin.eleven, revision: 1}
+artifacts:
+  change: {revised_by: pin.revise}
+evidence_kinds:
+  publication: {}
+  test_result: {}
+claims:
+  refused:
+    true_when: {evidence: {kind: publication, result: refused}}
+  red.then.green:
+    true_when:
+      descended:
+        first: {kind: test_result, result: failed}
+        then: {kind: test_result, result: passed}
+        subject: change
+actions:
+  submit:
+    may_produce:
+      - evidence: publication
+  test:
+    may_produce:
+      - evidence: test_result
+      - evidence: publication
+    records_together:
+      - kinds: [test_result, publication]
+outcomes:
+  withdrawn:
+    requires: {decision: withdraw, when: {claim: refused}}
+  done:
+    requires: {claim: red.then.green}
+"#;
+
 fn source() -> ProtocolSource {
     ProtocolSource {
         kind: SourceKind::Memory,
@@ -179,6 +227,12 @@ fn catalog() -> &'static ProtocolCatalog {
 fn members_catalog() -> &'static ProtocolCatalog {
     static CATALOG: OnceLock<ProtocolCatalog> = OnceLock::new();
     CATALOG.get_or_init(|| catalog_of(&[(MEMBERS, MEMBERS_YAML), (UNMARKED, UNMARKED_YAML)]))
+}
+
+/// The catalog holding the protocol that uses 0.11.0 members.
+fn eleven_catalog() -> &'static ProtocolCatalog {
+    static CATALOG: OnceLock<ProtocolCatalog> = OnceLock::new();
+    CATALOG.get_or_init(|| catalog_of(&[(ELEVEN, ELEVEN_YAML)]))
 }
 
 fn governor(name: &str, yaml: &str) -> CanonGovernor<MemoryCaseStore> {
@@ -270,11 +324,11 @@ fn merge_status(authority: &str) -> String {
 }
 
 #[test]
-fn the_decision_document_names_canon_0_10_0() {
+fn the_decision_document_names_canon_0_11_0() {
     let canon = evaluated(&[]);
     assert_eq!(
         canon["explanation"]["computed_from"]["semantics"]["canon"],
-        json!("0.10.0"),
+        json!("0.11.0"),
         "{canon:#}"
     );
 }
@@ -462,4 +516,216 @@ fn a_protocol_with_imports_is_refused_naming_missing_import() {
         .with_protocol_yaml(IMPORTS, IMPORTS_YAML)
         .expect_err("the governor refuses it too");
     assert!(format!("{refused:?}").contains("pin.review"), "{refused:?}");
+}
+
+fn uuid(n: u64) -> Uuid {
+    Uuid(format!("00000000-0000-4000-8000-{n:012x}"))
+}
+
+/// A `canon-evidence/1` record of `kind` with `result` about `change` at `revision`, naming `item`.
+fn change_record(id: &str, kind: &str, result: &str, item: &str, revision: &str) -> Value {
+    json!({
+        "format": "canon-evidence/1",
+        "id": id,
+        "kind": kind,
+        "result": result,
+        "item": item,
+        "subject": "change",
+        "subject_revision": revision,
+    })
+}
+
+/// Hands the governor `record`, citing an observation of its own that the governor received first.
+fn submit(governor: &CanonGovernor<MemoryCaseStore>, case: &CaseId, n: u64, record: &Value) {
+    let observation = ObservationId(uuid(0x100 + n));
+    governor
+        .observe(Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "host/fixture".to_owned(),
+            subject: "change".to_owned(),
+            observed_at: Timestamp("2026-11-22T10:00:00Z".to_owned()),
+            payload: commission_json::Value::Null,
+        }))
+        .expect("the governor keeps the observation");
+    submit_evidence(
+        governor,
+        "service:ci",
+        EvidenceData {
+            evidence_id: EvidenceId(uuid(n)),
+            case_id: case.clone(),
+            kind: record["kind"].as_str().expect("kind").to_owned(),
+            subject_revision: governor.current_revision(case).expect("revision"),
+            producer: String::new(),
+            observation_ids: vec![observation],
+            facts: commission_json::parse(&record.to_string()).expect("JSON"),
+            provenance: commission_json::Value::Null,
+        },
+    )
+    .expect("the governor takes the evidence");
+}
+
+/// The decision document behind the frontier the governor issues for `case` now.
+fn document_of(governor: &CanonGovernor<MemoryCaseStore>, case: &CaseId) -> Value {
+    let frontier = governor.frontier(case).expect("the frontier");
+    let document = governor
+        .decision_document(case, &frontier.data().frontier_id)
+        .expect("the governor holds the case")
+        .expect("the governor keeps the document it just issued");
+    serde(&document)
+}
+
+/// The explicit decisions `document` lists as pending.
+fn pending_decisions(document: &Value) -> Vec<Value> {
+    document["pending_decisions"]["decisions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn a_protocol_with_0_11_0_members_registers_and_is_decided() {
+    assert!(
+        eleven_catalog().get(ELEVEN).is_some(),
+        "ProtocolCatalog::add_yaml holds it"
+    );
+    let from_catalog = CanonGovernor::new(MemoryCaseStore::default())
+        .with_catalog(eleven_catalog())
+        .expect("the catalog holding it is admitted");
+    let from_yaml = governor(ELEVEN, ELEVEN_YAML);
+    for (admission, governor) in [
+        ("with_catalog", &from_catalog),
+        ("with_protocol_yaml", &from_yaml),
+    ] {
+        let case = open(governor, ELEVEN, &["change"]);
+        let frontier = governor.frontier(&case).expect("the frontier");
+        let actions: Vec<&str> = frontier
+            .data()
+            .actions
+            .iter()
+            .map(|entry| entry.action.as_str())
+            .collect();
+        assert_eq!(actions, ["submit", "test"], "{admission}");
+        let document = document_of(governor, &case);
+        assert_eq!(document["format"], json!("canon-decision/1"), "{admission}");
+        assert_eq!(
+            document["claims"]["red.then.green"],
+            json!({"value": "unknown"}),
+            "{admission}: {document:#}"
+        );
+        assert_eq!(
+            document["outcomes"]["withdrawn"]["status"],
+            json!("blocked"),
+            "{admission}: {document:#}"
+        );
+    }
+}
+
+#[test]
+fn a_decision_counts_only_while_its_when_holds() {
+    let governor = governor(ELEVEN, ELEVEN_YAML);
+    let case = open(&governor, ELEVEN, &["change"]);
+
+    let before = document_of(&governor, &case);
+    assert_eq!(
+        before["outcomes"]["withdrawn"],
+        json!({
+            "reasons": [{"claim": "refused", "value": "unknown"}],
+            "status": "blocked",
+        }),
+        "blocked by the claim of `when`: {before:#}"
+    );
+    assert_eq!(
+        pending_decisions(&before),
+        Vec::<Value>::new(),
+        "no decision is pending while `when` is not true: {before:#}"
+    );
+
+    submit(
+        &governor,
+        &case,
+        1,
+        &change_record("pub-1", "publication", "refused", "p1", "a1"),
+    );
+    let after = document_of(&governor, &case);
+    assert_eq!(
+        after["claims"]["refused"],
+        json!({"value": "true"}),
+        "{after:#}"
+    );
+    assert_eq!(
+        after["outcomes"]["withdrawn"],
+        json!({
+            "reasons": [{"decision": "withdraw", "present": false}],
+            "status": "blocked",
+        }),
+        "blocked naming the decision: {after:#}"
+    );
+    let revision = format!(
+        "r{}",
+        governor.current_revision(&case).expect("the revision")
+    );
+    assert_eq!(
+        pending_decisions(&after),
+        [json!({
+            "case_revision": revision,
+            "decision": "withdraw",
+            "options": ["taken"],
+            "outcome": "withdrawn",
+        })],
+        "{after:#}"
+    );
+}
+
+#[test]
+fn a_descended_form_is_unknown_in_a_loom_case() {
+    let governor = governor(ELEVEN, ELEVEN_YAML);
+    let case = open(&governor, ELEVEN, &["change"]);
+    let failed = change_record("t-failed", "test_result", "failed", "t1", "a1");
+    let passed = change_record("t-passed", "test_result", "passed", "t1", "a1");
+    submit(&governor, &case, 1, &failed);
+    submit(&governor, &case, 2, &passed);
+    let document = document_of(&governor, &case);
+    assert_eq!(
+        document["claims"]["red.then.green"],
+        json!({"value": "unknown"}),
+        "{document:#}"
+    );
+    assert_eq!(
+        document["explanation"]["computed_from"]["case"]["artifacts"]["change"],
+        json!({"revision": "a1"}),
+        "the governor gives no descends_from: {document:#}"
+    );
+
+    // The same form decides once a snapshot gives the ancestry, which only a caller of `evaluate`
+    // can: a failed run about `a0` and a passed one about `a1`, the current revision.
+    let decided = |artifact: Value| {
+        let snapshot = json!({
+            "format": "canon-case/1",
+            "id": "case-1",
+            "protocol": "pin.eleven",
+            "artifacts": {"change": artifact},
+            "revision": "r1",
+        });
+        let request = EvaluationRequest {
+            protocol: ProtocolName(ELEVEN.into()),
+            snapshot: CaseSnapshot(json::parse(&snapshot.to_string()).expect("JSON")),
+            evidence: [
+                change_record("t-failed", "test_result", "failed", "t1", "a0"),
+                passed.clone(),
+            ]
+            .iter()
+            .map(|record| EvidenceRecord(json::parse(&record.to_string()).expect("JSON")))
+            .collect(),
+            at: None,
+            decisions: Vec::new(),
+        };
+        let decision = evaluate(eleven_catalog(), &request)
+            .unwrap_or_else(|refusal| panic!("evaluate decides: {refusal:?}"));
+        serde(&decision.canon)["claims"]["red.then.green"]["value"].clone()
+    };
+    assert_eq!(
+        decided(json!({"revision": "a1", "descends_from": ["a0"]})),
+        json!("true")
+    );
+    assert_eq!(decided(json!({"revision": "a1"})), json!("unknown"));
 }

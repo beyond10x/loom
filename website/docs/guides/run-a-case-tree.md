@@ -225,6 +225,12 @@ evaluation writes one `HandoffChecked` line to the case's run log before the sto
 with the check's `exit` or `refusal` and the `blob_digest` of its output; `tree status` and
 `tree verify` read that line and never run the check.
 
+A check holds the run's cancel as a step's program does: a cancel set while it runs, before a step
+or at a stuck stop, kills it with every process it started (under `local` its process group), its
+`HandoffChecked` line holds no `exit` and the refusal `Cancelled: action <action>: the check
+<program> was cancelled`, the writer does not run, and the run stops `Cancelled` naming the action
+(exit 5), within 7 s of the flag. A check that ended before the cancel was read keeps its answer.
+
 ## A person action without a capability
 
 A person action whose protocol action needs no capability is taken by `tree approve --action`

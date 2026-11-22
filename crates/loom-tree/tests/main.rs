@@ -3,6 +3,7 @@
 //! `crates/loom-cli/tests/tree_run.rs`. Scratch is under `CARGO_TARGET_TMPDIR`; no test reaches the
 //! network, a model or a credential.
 
+mod cancel_sec;
 mod suite_format;
 mod take_over;
 
@@ -302,21 +303,43 @@ actions:
         store: PathBuf,
         workspace: PathBuf,
         catalog: ProtocolCatalog,
+        /// A directory of the test's scratch outside the workspace, where a `handoff_when` check
+        /// marks its progress (its workspace is read-only).
+        marks: PathBuf,
     }
 
     impl Halt {
         fn open(label: &str) -> Self {
+            Self::open_with(label, DO, None)
+        }
+
+        /// A tree whose `do.sh` is `program` and, when `check` is given, whose `work.do` binding
+        /// carries `handoff_when: [sh, check.sh, <marks>]` and a `handoff`, `check.sh` holding it.
+        fn open_with(label: &str, program: &str, check: Option<&str>) -> Self {
             let dir = super::scratch(label);
             let protocols = dir.join("protocols");
             let workspace = dir.join("workspace");
+            let marks = dir.join("marks");
             std::fs::create_dir_all(&protocols).unwrap();
             std::fs::create_dir_all(workspace.join("target")).unwrap();
+            std::fs::create_dir_all(&marks).unwrap();
             std::fs::write(protocols.join("halt.yaml"), PROTOCOL).unwrap();
             std::fs::write(workspace.join("work.txt"), "work\n").unwrap();
             std::fs::write(workspace.join("look.sh"), "exit 0\n").unwrap();
-            std::fs::write(workspace.join("do.sh"), DO).unwrap();
+            std::fs::write(workspace.join("do.sh"), program).unwrap();
+            let mut document = BINDINGS.to_owned();
+            if let Some(check) = check {
+                std::fs::write(workspace.join("check.sh"), check).unwrap();
+                document = document.replace(
+                    "    timeout_seconds: 60\n",
+                    &format!(
+                        "    timeout_seconds: 60\n    handoff: a person finishes the work\n    handoff_when: [sh, check.sh, {}]\n",
+                        marks.display()
+                    ),
+                );
+            }
             let bindings = dir.join("halt.bindings.yaml");
-            std::fs::write(&bindings, BINDINGS).unwrap();
+            std::fs::write(&bindings, document).unwrap();
             let directory = read_protocols_directory(&protocols).unwrap();
             let store = dir.join("store");
             open_tree(&OpenRequest {
@@ -335,6 +358,7 @@ actions:
                 store,
                 workspace,
                 catalog: directory.catalog,
+                marks,
             }
         }
 
@@ -374,11 +398,19 @@ actions:
         /// answers the run, its lines, the instant the flag was set and the instant `run_tree`
         /// returned.
         fn cancelled_after(&self, after: Duration) -> (TreeRun, Vec<RunLogLine>, Instant, Instant) {
+            self.cancelled_once(&self.workspace.join("target/started"), after)
+        }
+
+        /// [`Halt::cancelled_after`], the flag set `after` `mark` exists.
+        fn cancelled_once(
+            &self,
+            mark: &Path,
+            after: Duration,
+        ) -> (TreeRun, Vec<RunLogLine>, Instant, Instant) {
             let flag = AtomicBool::new(false);
-            let started = self.workspace.join("target/started");
             std::thread::scope(|scope| {
                 let setter = scope.spawn(|| {
-                    wait_for(&started);
+                    wait_for(mark);
                     std::thread::sleep(after);
                     flag.store(true, Ordering::SeqCst);
                     Instant::now()
@@ -529,6 +561,163 @@ actions:
         );
         let read = b10x_loom_tree::read_status(printed.to_string().as_bytes()).unwrap();
         assert_eq!(read.cases[0].runs, status.cases[0].runs);
+    }
+
+    // A cancel set while a `handoff_when` check runs (`story:handoff-check-holds-the-cancel`).
+    // `check.sh` takes `<marks>` as its one argument.
+
+    /// A check that marks its start, starts a process that marks `late` 3 s later, and sleeps 20 s.
+    const CHECK_SLEEPS: &str =
+        "touch \"$1/started\"\n(sleep 3 && touch \"$1/late\") &\nsleep 20\nexit 1\n";
+
+    /// A check that counts its calls in `<marks>/n`: the first exits 1, the second runs `second`.
+    fn check_counting(second: &str) -> String {
+        format!(
+            "n=$(cat \"$1/n\" 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > \"$1/n\"\nif [ \"$n\" -eq 1 ]; then exit 1; fi\n{second}"
+        )
+    }
+
+    /// The `handoff checked` lines of `lines` naming `action`.
+    fn checked(lines: &[RunLogLine], action: &str) -> Vec<b10x_loom_tree::runlog::HandoffChecked> {
+        lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                RunLogEvent::HandoffChecked(checked) if checked.action == action => {
+                    Some(checked.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_cancelled_check_ends_within_seven_seconds() {
+        let tree = Halt::open_with("cancel-check-seven", DO, Some(CHECK_SLEEPS));
+        let (run, _, set, returned) =
+            tree.cancelled_once(&tree.marks.join("started"), Duration::ZERO);
+        let taken = returned.saturating_duration_since(set);
+        assert!(
+            returned > set && taken < Duration::from_secs(7),
+            "run_tree returned {taken:?} after the flag was set during the check ({run:?})"
+        );
+        std::thread::sleep(Duration::from_secs(4));
+        assert!(
+            !tree.marks.join("late").exists(),
+            "a process of the check outlived the cancel"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_cancelled_check_stops_the_run_cancelled() {
+        let tree = Halt::open_with("cancel-check-stop", DO, Some(CHECK_SLEEPS));
+        let (run, lines, _, _) = tree.cancelled_once(&tree.marks.join("started"), Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        assert_eq!(
+            stopped(&lines),
+            ("Cancelled".to_owned(), vec!["work.do".to_owned()])
+        );
+        let checks = checked(&lines, "work.do");
+        assert_eq!(checks.len(), 1, "{lines:#?}");
+        assert_eq!(checks[0].exit, None, "{:?}", checks[0]);
+        let refusal = checks[0].refusal.as_deref().unwrap_or_default();
+        assert!(refusal.starts_with("Cancelled:"), "{:?}", checks[0]);
+        // The tree writes no `action started` line: no line of the run names a step of `work.do`,
+        // and `do.sh` never marked its start.
+        assert!(
+            !lines.iter().any(|line| matches!(
+                &line.event,
+                RunLogEvent::ActionFinished(finished) if finished.action == "work.do"
+            )),
+            "{lines:#?}"
+        );
+        assert!(!tree.workspace.join("target/started").exists());
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_check_at_a_stuck_stop_holds_the_cancel() {
+        let check = check_counting(CHECK_SLEEPS);
+        let tree = Halt::open_with("cancel-check-stuck", "exit 1\n", Some(&check));
+        let (run, lines, set, returned) =
+            tree.cancelled_once(&tree.marks.join("started"), Duration::ZERO);
+        let taken = returned.saturating_duration_since(set);
+        assert!(
+            returned > set && taken < Duration::from_secs(7),
+            "run_tree returned {taken:?} after the flag was set during the stuck stop's check ({run:?})"
+        );
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        assert_eq!(
+            stopped(&lines),
+            ("Cancelled".to_owned(), vec!["work.do".to_owned()])
+        );
+        let checks = checked(&lines, "work.do");
+        assert_eq!(checks.len(), 2, "{lines:#?}");
+        assert_eq!(
+            (checks[0].exit, checks[0].refusal.as_deref()),
+            (Some(1), None)
+        );
+    }
+
+    /// The positive control of [`a_check_at_a_stuck_stop_holds_the_cancel`]: the stuck stop's
+    /// check is reached, and its exit 0 offers `work.do`'s handoff.
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn the_stuck_stop_check_runs() {
+        let tree = Halt::open_with(
+            "cancel-check-stuck-runs",
+            "exit 1\n",
+            Some(&check_counting("exit 0\n")),
+        );
+        let (run, lines) = tree.run(&Halt::settings(None), &AtomicBool::new(false));
+        assert_eq!(run.stop, TreeStop::AwaitingPerson, "{run:?}");
+        assert_eq!(run.decisions.len(), 1, "{run:?}");
+        assert_eq!(
+            run.decisions[0].kind,
+            b10x_loom_tree::model::DecisionKind::Handoff
+        );
+        assert_eq!(run.decisions[0].action.as_deref(), Some("work.do"));
+        assert_eq!(run.decisions[0].decides, "a person finishes the work");
+        assert_eq!(checked(&lines, "work.do").len(), 2, "{lines:#?}");
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_check_that_ended_keeps_its_answer() {
+        let tree = Halt::open_with("cancel-check-ended", DO, Some("exit 1\n"));
+        let (run, lines, _, _) = tree.cancelled_after(Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        let checks = checked(&lines, "work.do");
+        assert_eq!(checks.len(), 1, "{lines:#?}");
+        assert_eq!(
+            (checks[0].exit, checks[0].refusal.as_deref()),
+            (Some(1), None),
+            "{:?}",
+            checks[0]
+        );
+        let finished: Vec<_> = lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                RunLogEvent::ActionFinished(finished) if finished.action == "work.do" => {
+                    Some(finished.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(finished.len(), 1, "{lines:#?}");
+        assert!(
+            finished[0]
+                .refusal
+                .as_deref()
+                .is_some_and(|refusal| refusal.starts_with("Cancelled:")),
+            "{:?}",
+            finished[0]
+        );
+        assert_eq!(
+            stopped(&lines),
+            ("Cancelled".to_owned(), vec!["work.do".to_owned()])
+        );
     }
 }
 

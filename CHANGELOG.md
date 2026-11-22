@@ -25,6 +25,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x_loom_bindings::content_revision`, `placements` and `PlacedRevisions`: a placed artifact's revision is its content digest (story:bound-artifact-revisions)
 - `CanonGovernor::record_step` writes a step's revision moves and records in one store write; `FileCaseStore::update_until` (story:bound-artifact-revisions)
 - `ProtocolCatalog` and `CanonGovernor` take a protocol with a scoped requirement, `supplied_by`, `author`, `revises`, `decided_by` or a `children` form's `subject` and `revision`; one with `imports` is refused `MissingImport` (story:canon-0-10-0-pin)
+- `ProtocolCatalog` and `CanonGovernor` take a protocol with `when` on a decision, `revised_by`, `records_together` or a `descended` form, which is `unknown` in a Loom case (story:canon-0-11-0-pin)
 - `b10x_loom_bindings::retry_records`; a retried bound program gets `LOOM_RETRY_FEEDBACK`, a `loom.retry-feedback/1` document whose records name `action` and `exit` (story:bound-program-retry-records)
 - `CanonGovernor::open_children`, `terminate` and `tree`: a `case_open` action opens child cases, each child's outcome replaces its `case_outcome` record in the parent (story:child-case-runtime)
 - `b10x_loom_bindings::OpenEffects` performs an `open` binding; `check_case_open` holds `open` to `case_open` at load (story:child-case-runtime)
@@ -72,6 +73,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - **Breaking:** a `run_tree` whose cancel flag is set before a step stops `Cancelled` (`TreeStop::Cancelled`, new), its `stopped` line naming the action that was to be taken next, no longer `BudgetSpent` with no `next`; a step its cancel ended stops `Cancelled` naming its action; `b10x-loom tree run` still exits 5 (story:cancel-a-running-bound-program)
 - **Breaking:** `ConfinementRefusal` and `ProgramRefusalReason` gain `Cancelled`; `ProgramRun` gains `cancelled`, `StatusRun` gains `cancelled` (story:cancel-a-running-bound-program)
+- **Breaking:** `run_handoff_check` takes `cancel: Option<&Cancel>`, and `HandoffCheck` gains `cancelled` (story:handoff-check-holds-the-cancel)
 
 - **Breaking:** `RunOptions` gains the public field `model_retry`: a literal names it or ends in `..RunOptions::default()`
 - `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
@@ -92,6 +94,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - A `program` step of an action that does not write whose program changed a placed artifact records nothing, `Discarded` (story:bound-artifact-revisions)
 - `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
 - **Breaking:** Canon `0.9.0` -> `0.10.0`: `ProtocolEntry::model` is Canon 0.10.0's `Protocol`; every decision document names `0.10.0` and gains `missing_evidence` and `pending_decisions` where they apply; frontier ids change (story:canon-0-10-0-pin)
+- **Breaking:** Canon `0.10.0` -> `0.11.0`: `ProtocolEntry::model` is Canon 0.11.0's `Protocol`; every decision document names `0.11.0`; frontier ids change (story:canon-0-11-0-pin)
 - **Breaking:** `loom::bindings::ProgramRun` gains `retry_of`, the evidence ids of the retry records a run was given (story:bound-program-retry-records)
 - **Breaking:** `CaseState` gains `parent`, `children` and `termination`; Loom 0.58.0 and earlier refuse a case file that holds them (story:child-case-runtime)
 - **Breaking:** `loom.governor.StoredCase` gains `parent`, `children` and `termination`, with the new `CaseLink` and `CaseTermination` (story:child-case-runtime)
@@ -129,6 +132,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Fixed
 
+- `run_tree`: a cancel ends a running `handoff_when` check within 7 s, its line refused `Cancelled:` and the run `Cancelled` (story:handoff-check-holds-the-cancel)
 - `SubstrateRunner::run_child`: a cancel ends a child that reads none of its input within 100 ms, refused `Cancelled`, never at its timeout or as a result (story:cancel-a-running-bound-program)
 - `run_handoff_check` refuses exit 129 to 192 (`SIGNAL_EXITS`, how Substrate reports a signal-ended check), never a skip (story:handoff-when-a-program-decides)
 - `run_tree` takes over a run stopped between a child's line and its parent's: a missing `case opened`, `child opened`, `terminated` or `child closed` line is written once

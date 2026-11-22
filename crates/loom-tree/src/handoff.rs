@@ -8,8 +8,10 @@
 //! hands the proposal on, and the writer runs in that step. A check that gave no exit status
 //! (a launch error, a timeout, a signal) takes no step and refuses the run `HandoffCheckFailed`,
 //! naming the action. At a stuck stop a binding with `handoff_when` offers its handoff only when
-//! its check, run the same way, exits 0. The line is the record of the check's answer: no reader
-//! of the log runs the check again.
+//! its check, run the same way, exits 0. Every check holds the run's cancel
+//! (story:handoff-check-holds-the-cancel): a check it ended takes no step, and the run stops
+//! `Cancelled`, naming the action. The line is the record of the check's answer: no reader of
+//! the log runs the check again.
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -21,7 +23,7 @@ use b10x_loom_commission::model::responsibility::{
     frontier_state,
 };
 use b10x_loom_commission::ports::executor::AgentExecutor;
-use b10x_loom_intake_slice::confinement::TestRunner;
+use b10x_loom_intake_slice::confinement::{Cancel, TestRunner};
 use loom::bindings::BindingsDocument;
 use loom::runlog::{HandoffChecked, RunLogEvent, RunLogLine};
 use loom::tree::TreeRefusalReason;
@@ -39,6 +41,8 @@ pub(crate) struct HandoffChecks<'a, S> {
     pub(crate) workspace: &'a Path,
     pub(crate) store: &'a Path,
     pub(crate) runner: &'a Arc<dyn TestRunner>,
+    /// The run's cancel, which every check holds, as every program of the run does.
+    pub(crate) cancel: &'a Cancel,
 }
 
 impl<S: loom_governor::FallibleCaseStore> HandoffChecks<'_, S> {
@@ -67,6 +71,7 @@ impl<S: loom_governor::FallibleCaseStore> HandoffChecks<'_, S> {
             self.workspace,
             self.store,
             self.runner,
+            Some(self.cancel),
         ) else {
             return Ok(None);
         };
@@ -100,6 +105,8 @@ impl<S: loom_governor::FallibleCaseStore> HandoffChecks<'_, S> {
 pub(crate) enum CheckHeld {
     /// The check of the action exited 0: its handoff is offered.
     HandedOff(String),
+    /// The run's cancel ended the check of the action: the run stops `Cancelled`, naming it.
+    Cancelled(String),
     /// The check gave no exit status, or its line could not be written: the run is refused.
     Refused(Refused),
 }
@@ -173,7 +180,9 @@ impl<E: AgentExecutor + ?Sized, S: loom_governor::FallibleCaseStore> AgentExecut
             Ok(None) => step,
             Ok(Some((check, line))) => {
                 self.lines.borrow_mut().push(line);
-                if check.refusal.is_some() {
+                if check.cancelled {
+                    held(CheckHeld::Cancelled(action))
+                } else if check.refusal.is_some() {
                     held(CheckHeld::Refused(self.checks.failed(&action, &check)))
                 } else if check.hands_off() {
                     held(CheckHeld::HandedOff(action))

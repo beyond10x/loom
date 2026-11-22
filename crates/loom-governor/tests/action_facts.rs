@@ -3,7 +3,9 @@
 //! leaves an action's open evidence once a record of it arrives at the subject's current revision,
 //! and is back once the subject's revision moves, with the earlier record still held; a record
 //! Canon finds expired at the trusted time counts for nothing either. An action whose effect the
-//! protocol does not declare has none in its facts.
+//! protocol does not declare has none in its facts. A `descended` form's `then` kind is read at the
+//! subject's current revision and its `first` kind over the whole history
+//! (`story:canon-0-11-0-pin`, D3 a).
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -57,6 +59,36 @@ actions:
 outcomes:
   accepted:
     requires: {claim: reviewed}
+"#;
+
+/// A protocol whose claim reads a `descended` form: a `failed_run` on an earlier revision, then a
+/// `passed_run` about the current one, each produced by its own action.
+const DESCENDED: &str = r#"
+format: protocol/1
+protocol: {id: facts.descended, revision: 1}
+artifacts: {implementation: {}}
+evidence_kinds:
+  failed_run: {}
+  passed_run: {}
+claims:
+  fixed:
+    true_when:
+      descended:
+        first: {kind: failed_run, result: fail}
+        then: {kind: passed_run, result: pass}
+        subject: implementation
+actions:
+  run_before:
+    effect: read
+    may_produce:
+      - evidence: failed_run
+  run_after:
+    effect: read
+    may_produce:
+      - evidence: passed_run
+outcomes:
+  accepted:
+    requires: {claim: fixed}
 "#;
 
 const PRODUCER: &str = "trusted:test-runner";
@@ -286,5 +318,37 @@ fn a_held_record_that_does_not_apply_counts_for_nothing() {
         open_of(&facts, "review"),
         ["reviewed"],
         "a record that does not apply counts for nothing: {facts:?}"
+    );
+}
+
+#[test]
+fn descended_reads_then_at_the_current_revision() {
+    let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_protocol_yaml("facts-descended@1", DESCENDED)
+        .unwrap();
+    let case = governor
+        .open("facts-descended@1", revisions(), CaseInputs::none())
+        .unwrap();
+    record(&governor, &case, 1, "failed_run", "r1");
+    record(&governor, &case, 2, "passed_run", "r1");
+    let at_r1 = governor.action_facts(&case).unwrap();
+    assert!(
+        open_of(&at_r1, "run_after").is_empty(),
+        "a then record about r1 counts at r1: {at_r1:?}"
+    );
+    assert!(open_of(&at_r1, "run_before").is_empty(), "{at_r1:?}");
+
+    governor
+        .update_revision(&case, "implementation", "r2")
+        .unwrap();
+    let at_r2 = governor.action_facts(&case).unwrap();
+    assert_eq!(
+        open_of(&at_r2, "run_after"),
+        ["passed_run"],
+        "a then record about r1 does not count once the subject moved to r2"
+    );
+    assert!(
+        open_of(&at_r2, "run_before").is_empty(),
+        "a first record about r1 still counts at r2: {at_r2:?}"
     );
 }
