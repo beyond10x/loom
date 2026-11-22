@@ -1352,6 +1352,19 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   moves before every `frontier` and `completion`. Held by `crates/loom-bindings/tests/bound_revisions.rs`
   and `crates/loom-governor/tests/step_write.rs` (a crash at each `WriteStep` of
   `FileCaseStore::update_until` leaves neither or both).
+- `retry_records(governor, case, binding)` (`retry.rs`, `story:bound-program-retry-records`) is
+  each held record of the case whose facts name, once each, a `kind` (the record's own) and a
+  `result` the binding's `retry_when` lists, about the revision the case holds for the facts'
+  `subject`, never `none`, in the order received; its `action`, `exit` and `blob_sha256` only
+  from the first cited `PROGRAM_SOURCE` observation of that case (the blob only when it names 64
+  lowercase hex digits), none of them otherwise. After the run count and the placements and before
+  the arguments, a step with records keeps the `loom.retry-feedback/1` document through
+  `keep_blob`; `retry::given` rebuilds the bound child's environment through `child::environment`
+  from `ProgramEnvironment` (`PATH`, `LOOM_RETRY_FEEDBACK` = `RETRY_FEEDBACK_VARIABLE` at its
+  canonical path, `LOOM_CASE` last), mounted `at_host_path` unless the runner is `local`; with none
+  the variable is absent and nothing is written. A log is the last 60 lines, at most 65536 bytes of
+  text, of a blob that is a regular file hashing to its name, one per distinct blob. The run's
+  `ProgramRun.retry_of` names the records. Held by `crates/loom-bindings/tests/bound_retry.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 

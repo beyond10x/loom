@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "4fb73bd9a3e929b4f366604f76e7c25f0820d3eee25a1084286d906e203f2002",
-    "contract_digest": "13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5"
+    "source_digest": "a25d2d21956bfb7ee2c0b7900db12d40f4fed217a3e33e5e6150af063af83eee",
+    "contract_digest": "8c68eb9f9d600aec0de35057af0205203e30b03ee18d4541adb4b46f23f05478"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -496,6 +496,27 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.RetryCondition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryFeedback",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryLog",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryRecord",
       "disposition": {
         "disposition": "generated"
       }
