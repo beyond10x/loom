@@ -4,6 +4,7 @@
 //! network, a model or a credential.
 
 mod cancel_sec;
+mod runs_spent;
 mod suite_format;
 mod take_over;
 
