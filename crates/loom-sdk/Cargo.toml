@@ -32,4 +32,5 @@ serde_json = "1"
 tokio = { version = "1.53", features = ["rt"] }
 
 [dev-dependencies]
+b10x-loom-intake-slice = { path = "../loom-intake-slice", features = ["test-clock"] }
 tempfile = "3"

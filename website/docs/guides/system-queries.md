@@ -9,7 +9,7 @@ source: protocols/system-query/1.yaml, crates/loom-protocols/src/lib.rs, crates/
 # System queries and custom protocols
 
 System queries and custom protocols ship in 0.4.0. From a checkout of tag `0.58.0`, `task install`
-builds and installs `b10x-loom` into `~/.local/bin`; that directory must be on your `PATH`.
+builds and installs `b10x-loom` into `~/.local/bin`, which must be on your `PATH`.
 
 ## Read the time
 
@@ -22,25 +22,26 @@ b10x-loom run --context-policy=bounded "need to know the current time"
 Loom selects `system-query@1`, invokes `system.time.read {}`, prints local time with its numeric
 UTC offset and the corresponding UTC instant, and exits 0 after Canon confirms completion.
 The time comes from the host clock. Model-generated time or success text cannot create evidence.
-The local timezone is the machine's configured timezone; named timezone conversion is not supported.
+The local timezone is the machine's configured timezone. Conversion to a named timezone is not
+supported.
 
 A system query needs no workspace, Git repository, test command or Substrate confinement. A supplied
 `--workspace` is ignored by the clock binding, including a nonexistent path. Software changes still
 require an existing Git worktree and retain test confinement and the merge approval gate.
 
-`--context-policy` defaults to `legacy`; `bounded` limits each serialized model request to 64 KiB,
+`--context-policy` defaults to `legacy`. `bounded` limits each serialized model request to 64 KiB,
 including classification. Add `--context-report PATH` for request bytes, model calls, usage and elapsed
 time without source payloads. See [bounded context](../concepts/working-context.md).
 
 ## Provider overload
 
 Loom retries a transient model failure at most twice, on the same model and account.
-The waits are one and two seconds; a provider-requested delay can extend either wait up to
+The waits are one and two seconds. A provider-requested delay can extend either wait up to
 thirty seconds. Context reports count each attempt, including failed attempts and any reported usage.
 
-A persistent overload stops the run with `Unavailable` and the attempt count. This is a provider
-capacity failure. Earlier builds could misreport `server_is_overloaded` as `Refused`.
-Actual refusals, invalid requests and authorization failures stop immediately. Once a model has
+A persistent overload is a provider capacity failure: it stops the run with `Unavailable` and the
+attempt count. Earlier builds could misreport `server_is_overloaded` as `Refused`.
+Refusals, invalid requests and authorization failures stop immediately. Once a model has
 streamed output, its failed request is final. Tool effects are not retried by this policy.
 
 ## Install a local definition
@@ -58,13 +59,14 @@ b10x-loom protocols remove team-clock@1
 
 Installation validates and snapshots the exact YAML bytes, their SHA-256 digest and provenance.
 Changing or deleting the source file cannot change an installed definition. Replacing a name
-requires `--replace`; bundled names cannot be replaced or removed. The registration name has the
-form `lower-case-name@MAJOR`: lowercase letters, digits and hyphens, starting with a letter and at
-most 100 bytes, and its major must match the definition's revision. A protocol id is not a
-registration name: register `self.improvement/1` as `self-improvement@1`, its dots and underscores
-as hyphens and `/MAJOR` as `@MAJOR`, as the bundled `software-change@1` holds `software.change/1`.
-A refused name is answered with the registration the protocol id the file declares takes, when
-that mapping gives one.
+requires `--replace`. Bundled names cannot be replaced or removed.
+
+The registration name has the form `lower-case-name@MAJOR`: lowercase letters, digits and hyphens,
+starting with a letter and at most 100 bytes. Its major must match the definition's revision. A
+protocol id is not a registration name. Register `self.improvement/1` as `self-improvement@1`,
+its dots and underscores as hyphens and `/MAJOR` as `@MAJOR`, as the bundled `software-change@1`
+holds `software.change/1`. A refused name is answered with the registration the protocol id the
+file declares takes, when that mapping gives one.
 
 The store is `$XDG_DATA_HOME/loom/protocols`, or `~/.local/share/loom/protocols` when that variable is
 absent. Its manifest is atomically replaced. Invalid, missing or digest-mismatched installed records
@@ -73,8 +75,8 @@ stop startup explicitly. Definitions are limited to 1 MiB each and the manifest 
 ## Install from pinned Git
 
 Use `protocols add NAME@MAJOR --source LOCATOR --path RELATIVE_PATH`. A locator has the form
-`git+https://host/repository.git#FULL_COMMIT_SHA`; SSH and local `git+file://` repositories also work.
-The commit pin must contain all 40 hexadecimal characters. Branches and tags are refused.
+`git+https://host/repository.git#FULL_COMMIT_SHA`. SSH and local `git+file://` repositories also
+work. The commit pin must contain all 40 hexadecimal characters. Branches and tags are refused.
 
 Installation fetches the selected regular YAML blob without a checkout. It runs no repository hooks,
 filters or executable plugins. Remote URLs must not contain passwords or tokens. SSH can use the
@@ -87,7 +89,7 @@ or contacting its source.
 definition makes it visible to routing and governor admission. It does not install tools or confer
 authority. This CLI provides the software-change binding and the clock binding. A custom definition
 with the same clock semantics can use the clock binding under its own name. Any other custom
-definition returns `NoLocalExecutor`, unless its actions are bound to commands (below).
+definition returns `NoLocalExecutor`, unless its actions are bound to commands.
 
 ## Bind a custom protocol's actions to commands
 
@@ -106,20 +108,23 @@ action, so a custom protocol needs no embedding host. The file is JSON:
 ```
 
 When the run picks that protocol, each action the governor admits starts its `argv` through the
-run's confinement, without a shell, in `--workspace` or in a private directory made for the run.
-It does not start in the directory `b10x-loom` ran in, and the private directory is removed after
-the run, so give the program and any file it writes as absolute paths. Loom starts no bound program itself: it hands the command to the runner, which starts it. The
-action's arguments arrive as one JSON document on standard input. The environment holds `PATH`
-alone, at the value `b10x-loom` has, and a program still running after `timeout_seconds` (60 when
+run's confinement, without a shell. Loom starts no bound program itself: it hands the command to
+the runner, which starts it. The program runs in `--workspace` or in a private directory made for
+the run, not in the directory `b10x-loom` ran in. The private directory is removed after the run,
+so give the program and any file it writes as absolute paths.
+
+The action's arguments arrive as one JSON document on standard input. The environment holds `PATH`
+alone, at the value `b10x-loom` has. A program still running after `timeout_seconds` (60 when
 absent, at most 3600) is killed: under `linux` with every process it started, under `local` with
 its process group. Under `local` a process that left the group and still holds the program's
-output is not killed, and the step is refused by its runner. Exit status 0 means `Performed`:
-standard output, one JSON object of at most 1 MiB, becomes the action's report. Any other exit
-means `Refused`, citing the tail of standard error. Each step prints the confinement it ran
-under.
+output is not killed, and the step is refused by its runner.
+
+Exit status 0 means `Performed`: standard output, one JSON object of at most 1 MiB, becomes the
+action's report. Any other exit means `Refused`, citing the tail of standard error. Each step
+prints the confinement it ran under.
 
 A report may list evidence about the intent as `"evidence": [{"kind": ..., "result": ...}]`.
-Each kind must be one the action declares in `may_produce`; Loom submits it, and the governor
+Each kind must be one the action declares in `may_produce`. Loom submits it, and the governor
 decides from it whether the case is complete. A report that states an undeclared kind fails the
 run. Nothing else in the report becomes evidence.
 
@@ -174,23 +179,29 @@ b10x-loom: --action-bindings wrong.json: team-ops@1 declares no action note.eras
 
 A binding confers no authority. The governor still admits each action first, and an action that
 needs a capability still needs its grant. `resume` continues `software-change@1` runs only.
-Bound programs run under the run's confinement. Under `--confinement substrate`, the default,
-they run under Substrate's `linux` adapter: the program file is mounted read-only at its own path
-(a program under `/usr`, `/bin`, `/lib` or `/lib64` is already there; one under `/tmp`, or reached
-through a symbolic link, is refused), it writes only under its workspace's `target/`, reads no
-host file outside its workspace, its program and the system view Substrate binds, and reaches no
-network, and each step prints `confinement: substrate`. A host
-whose adapter is not served, a cgroup root that is not delegated included (pass `--cgroup-root`,
-or run inside a delegated scope), stops the run `ConfinementUnavailable`, exit status 3, before
-any model call.
+
+Bound programs run under the run's confinement. Under `--confinement substrate`, the default, they
+run under Substrate's `linux` adapter, and each step prints `confinement: substrate`:
+
+- The program file is mounted read-only at its own path. A program under `/usr`, `/bin`, `/lib`
+  or `/lib64` is already there. One under `/tmp`, or reached through a symbolic link, is refused.
+- The program writes only under its workspace's `target/`.
+- It reads no host file outside its workspace, its program and the system view Substrate binds.
+- It reaches no network.
+
+A host whose adapter is not served stops the run `ConfinementUnavailable`, exit status 3, before
+any model call. A cgroup root that is not delegated is such a host: pass `--cgroup-root`, or run
+inside a delegated scope.
 
 `--unconfined-bindings`, or `"unconfined_bindings": true` in the file, runs them under
 Substrate's `local` adapter instead: unconfined, declared insecure, with the permissions of the
 user who runs `b10x-loom`. Standard error says which one opted in, and each step's confinement
-line names it as the reason (`local (--unconfined-bindings: ...)` or `local (unconfined_bindings:
-true in the run configuration file: ...)`); the flag wins. `--unconfined-bindings` is refused
-beside `--state`. Under `--confinement none` or `--confinement local` without an opt-in, the run
-is refused with exit status 3 before any model call:
+line gives it as the reason, `local (--unconfined-bindings: ...)` or
+`local (unconfined_bindings: true in the run configuration file: ...)`. The flag wins.
+`--unconfined-bindings` is refused beside `--state`.
+
+Under `--confinement none` or `--confinement local` without an opt-in, the run is refused with exit
+status 3 before any model call:
 
 ```console
 $ b10x-loom run --confinement none --action-bindings team-ops.bindings.json "record a note"
@@ -204,5 +215,5 @@ pass the same catalog to `classify_with_catalog`, `CanonGovernor::with_catalog` 
 `run_intent_with_options`. The SDK re-exports the catalog. Existing `run`, `run_with_options` and
 `SliceRequest` callers retain their engineering-only behavior.
 
-A Jira key is currently extracted as a reference; it does not fetch a ticket. System queries do not
+A Jira key is extracted as a reference, and Loom does not fetch the ticket. System queries do not
 add a Jira connector or turn Loom into an unrestricted general-purpose assistant.

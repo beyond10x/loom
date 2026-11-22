@@ -9,7 +9,6 @@
 //! No model or network call is made.
 
 use std::collections::BTreeMap;
-use std::time::Instant;
 
 use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
@@ -153,6 +152,7 @@ fn assert_evaluate_equals_the_governor(label: &str, records: &[Value]) {
     let decision = evaluate(&catalog(), &request(records))
         .unwrap_or_else(|refusal| panic!("{label}: evaluate refused {refusal:?}"));
     let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_host_case_outcomes()
         .with_protocol_yaml(NAME, PROTOCOL)
         .expect("registers");
     let case = governor
@@ -227,7 +227,9 @@ fn evaluate_equals_the_governor_over_histories_with_several_duplicates() {
 /// `adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding` holds for a record Canon
 /// refuses alone (the same bound, 40 times plus 0.25 s): 1000 records for 1000 children decide
 /// once; one more record for the first child sends `evaluate` into the in-order fallback, which
-/// decides every prefix of the 1000.
+/// decides every prefix of the 1000. Both paths count with their least process CPU time over
+/// three rounds, every thread's included, as there: wall time followed the build pool's load,
+/// because every Canon call starts a thread (story:canon-0-10-0-pin).
 #[test]
 fn a_second_record_for_one_child_costs_a_bounded_multiple_of_deciding() {
     let catalog = catalog();
@@ -238,20 +240,31 @@ fn a_second_record_for_one_child_costs_a_bounded_multiple_of_deciding() {
     let decided = request(&records);
     records.push(outcome("dup", Some("c0"), Some("open")));
     let set_aside = request(&records);
-    let start = Instant::now();
-    let fast = evaluate(&catalog, &decided).expect("decided");
-    let decide = start.elapsed().as_secs_f64();
-    let start = Instant::now();
-    let slow = evaluate(&catalog, &set_aside).expect("decided with one set aside");
-    let filter = start.elapsed().as_secs_f64();
+    let (mut decide, mut filter) = (f64::INFINITY, f64::INFINITY);
+    let (mut fast, mut slow) = (None, None);
+    for _ in 0..3 {
+        let start = process_cpu_seconds();
+        fast = Some(evaluate(&catalog, &decided).expect("decided"));
+        decide = decide.min(process_cpu_seconds() - start);
+        let start = process_cpu_seconds();
+        slow = Some(evaluate(&catalog, &set_aside).expect("decided with one set aside"));
+        filter = filter.min(process_cpu_seconds() - start);
+    }
+    let (fast, slow) = (fast.expect("a round"), slow.expect("a round"));
     eprintln!(
-        "n={n}: decide {decide:.4}s, set aside {filter:.4}s, ratio {:.1}",
+        "n={n}: decide {decide:.4}s, set aside {filter:.4}s CPU (least of 3), ratio {:.1}",
         filter / decide
     );
     assert_eq!(slow.canon, fast.canon, "the second record leaves no trace");
     assert!(
         filter <= 40.0 * decide + 0.25,
-        "setting one duplicate child record aside among {n} took {filter:.3}s against \
+        "setting one duplicate child record aside among {n} took {filter:.3}s of CPU against \
          {decide:.3}s to decide them"
     );
+}
+
+/// The CPU time this process has used, every thread's included, in seconds.
+fn process_cpu_seconds() -> f64 {
+    let time = rustix::time::clock_gettime(rustix::time::ClockId::ProcessCPUTime);
+    time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9
 }

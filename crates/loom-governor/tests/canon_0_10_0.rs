@@ -460,7 +460,6 @@ fn a_protocol_with_imports_is_refused_naming_missing_import() {
 
     let refused = CanonGovernor::new(MemoryCaseStore::default())
         .with_protocol_yaml(IMPORTS, IMPORTS_YAML)
-        .err()
-        .expect("the governor refuses it too");
+        .expect_err("the governor refuses it too");
     assert!(format!("{refused:?}").contains("pin.review"), "{refused:?}");
 }

@@ -195,16 +195,34 @@ fn kind(outcome: &HoldSuspensionOutcome) -> &'static str {
     }
 }
 
-/// Invariants 1 to 3: every reason, every member set, both stores, from an empty store.
+/// Invariants 1 to 3: every reason, both stores, from an empty store, over [`CHECK_MASKS`]: no
+/// member, each one alone, all but each one and all four. The slow lane's twin takes every member
+/// set, the six pairs too.
 #[test]
 fn security_w5_u1_both_stores_answer_and_keep_the_same_for_every_reason_and_member_set() {
+    both_stores_answer_and_keep_the_same("matrix", &CHECK_MASKS);
+}
+
+/// [`security_w5_u1_both_stores_answer_and_keep_the_same_for_every_reason_and_member_set`] over
+/// all 16 member sets.
+#[test]
+fn slow_security_w5_u1_both_stores_answer_and_keep_the_same_for_every_reason_and_member_set() {
+    let every: Vec<u8> = (0u8..16).collect();
+    both_stores_answer_and_keep_the_same("slow-matrix", &every);
+}
+
+/// The member sets of `task check`'s matrix: each mask's bits name the request, the expected
+/// revision, the action and the arguments ([`hold`]).
+const CHECK_MASKS: [u8; 10] = [0, 1, 2, 4, 8, 7, 11, 13, 14, 15];
+
+fn both_stores_answer_and_keep_the_same(lane: &str, masks: &[u8]) {
     let mut wrong = Vec::new();
     for (index, reason) in every_reason().into_iter().enumerate() {
-        for mask in 0u8..16 {
+        for mask in masks.iter().copied() {
             let label = format!("{mask:04b} {reason:?}");
             let input = hold(reason.clone(), mask, 0x5b1);
             let memory = SuspensionStore::new();
-            let dir = store_dir(&format!("matrix-{index}-{mask}"));
+            let dir = store_dir(&format!("{lane}-{index}-{mask}"));
             let file = FileSuspensionStore::open(&dir).expect("the store opens");
 
             let in_memory = memory.hold(input.clone());

@@ -27,6 +27,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use b10x_loom_intake_slice::resume::ResumeContextStore;
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const CLASSIFY: &[u8] = include_bytes!("fixtures/catalog-route/classify.sse");
 const SELECT: &[u8] = include_bytes!("fixtures/catalog-route/select.sse");
 const ARGUMENTS: &[u8] = include_bytes!("fixtures/catalog-route/arguments.sse");
@@ -418,10 +421,7 @@ fn a_resume_whose_config_no_longer_serves_the_role_exits_1_before_any_model_call
 /// `run --help` documents the flag.
 #[test]
 fn run_help_documents_the_config_flag() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
-        .args(["run", "--help"])
-        .output()
-        .unwrap();
+    let output = loom_bin::loom().args(["run", "--help"]).output().unwrap();
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("--config <PATH>"), "{help}");
     assert!(help.contains("llm.routes/1"), "{help}");
@@ -464,7 +464,7 @@ impl Scratch {
 
     fn run(&self, args: &[&str]) -> Output {
         let home = self.root.join("home");
-        Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        loom_bin::loom()
             .arg("run")
             .args(["--confinement", "none"])
             .args(args)
@@ -669,7 +669,7 @@ impl Scratch {
         ]);
         self.config(&base_url, BOTH_ROLES);
         let home = self.root.join("home");
-        let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        let output = loom_bin::loom()
             .args(["run", "--confinement", "none", "--config", "loom.yaml"])
             .args([
                 "--state",
@@ -721,7 +721,7 @@ impl Scratch {
     /// when `token`.
     fn command_with(&self, args: &[String], token: bool) -> Output {
         let home = self.root.join("home");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+        let mut command = loom_bin::loom();
         command
             .args(args)
             .env("HOME", &home)

@@ -5,7 +5,8 @@
 //! does not compile, which is its red run. No case reaches a model, the network or a credential:
 //! only `--help` output is read.
 
-use std::process::Command;
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 #[test]
 fn confinement_defaults_to_substrate_and_requires_explicit_opt_out() {
@@ -18,7 +19,7 @@ fn confinement_defaults_to_substrate_and_requires_explicit_opt_out() {
 
 #[test]
 fn reexec_without_private_route_handoff_fails_before_model_access() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let output = loom_bin::loom()
         .args([
             "run",
             "--workspace",
@@ -40,7 +41,7 @@ fn reexec_without_private_route_handoff_fails_before_model_access() {
 /// `b10x-loom` run with `args`, no credentials and no state of the operator's, as
 /// (exit status, standard error).
 fn refused(args: &[&str]) -> (Option<i32>, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let output = loom_bin::loom()
         .args(args)
         .env("HOME", "/loom-no-credentials")
         .env_remove("CODEX_HOME")
@@ -126,10 +127,7 @@ fn none_prints_its_deprecation_naming_local() {
 
 /// Runs `b10x-loom` with `args` and returns its standard output, asserting it succeeded.
 fn help(args: &[&str]) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
-        .args(args)
-        .output()
-        .expect("run b10x-loom");
+    let output = loom_bin::loom().args(args).output().expect("run b10x-loom");
     assert!(
         output.status.success(),
         "`b10x-loom {}` succeeds: {}",

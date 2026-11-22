@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest b025b86c945ec1d4fd0f62b5490b5737b27e425eb0d17d3a01e8420377f33126
+// contract digest 9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -85,10 +85,6 @@ pub trait ArgumentRequestStorage {
 
     /// Removes the instance with this identity.
     fn delete(&mut self, identity: &crate::run::ArgumentRequestId);
-
-    /// Every stored instance, in the order the store keeps them: the order a generated query
-    /// answers an unordered view in.
-    fn list(&self) -> Vec<crate::run::ArgumentRequestSnapshot>;
 }
 
 /// Where `loom.run.Selection` is stored — a port the implementor provides.
@@ -150,8 +146,6 @@ pub trait AgentSessionStorage {
 /// This supplies facts, not authority: the context must verify its request-bound proof.
 #[derive(Debug, Clone, Copy)]
 pub enum ExternalCommand<'a> {
-    /// The executing `loom.run.CheckArguments` input.
-    LoomRunCheckArguments(&'a crate::run::CheckArguments),
     /// The executing `loom.run.RevalidateSelection` input.
     LoomRunRevalidateSelection(&'a crate::run::RevalidateSelection),
 }
@@ -160,7 +154,6 @@ impl ExternalCommand<'_> {
     /// The canonical qualified identity of this command.
     pub fn name(&self) -> &'static str {
         match self {
-            Self::LoomRunCheckArguments(_) => "loom.run.CheckArguments",
             Self::LoomRunRevalidateSelection(_) => "loom.run.RevalidateSelection",
         }
     }
@@ -171,10 +164,6 @@ impl ExternalCommand<'_> {
 /// The caller's attributes, the values the model says the implementation assigns, and the answer
 /// to each `external:` branch.
 pub trait Context {
-    /// A new `String`, which the model says the implementation assigns — a created identity, a
-    /// `{generated: true}` value, or an event field the model leaves undetermined.
-    fn generate_string(&mut self) -> String;
-
     /// Whether the external branch `outcome` of `command` is taken on this invocation.
     ///
     /// Asked in declaration order, before the branch's input guard is read; the first branch
@@ -186,14 +175,11 @@ pub trait Context {
 /// Context answers that may be unavailable, without fabricated values.
 /// Existing `Context` implementations receive the blanket adapter.
 pub trait TryContext {
-/// Assigns the value, or names the unavailable answer.
-fn try_generate_string(&mut self) -> Result<String, UnmetObligation>;
 /// Decides the named external branch, or names the unavailable answer.
 fn try_external(&mut self, command: ExternalCommand<'_>, outcome: &'static str) -> Result<bool, UnmetObligation>;
 }
 
 impl<T: Context + ?Sized> TryContext for T {
-fn try_generate_string(&mut self) -> Result<String, UnmetObligation> { Ok(Context::generate_string(self)) }
 fn try_external(&mut self, command: ExternalCommand<'_>, outcome: &'static str) -> Result<bool, UnmetObligation> { Ok(Context::external(self, command, outcome)) }
 }
 
@@ -879,59 +865,6 @@ impl<P: crate::resource::obligations::StageFilesBehavior> crate::resource::oblig
     }
 }
 
-/// `loom.run.CheckArguments`, generated: every outcome is one the specification fully determines.
-impl<P> crate::run::obligations::CheckArgumentsBehavior for Generated<P>
-where
-    P: TryContext + ArgumentRequestStorage,
-{
-    fn check_arguments(&mut self, input: crate::run::CheckArguments) -> Result<crate::run::CheckArgumentsOutcome, UnmetObligation> {
-        let _ = &input;
-        // `undeclared-not-empty`: an external branch, where the context takes it.
-        if self.ports.try_external(ExternalCommand::LoomRunCheckArguments(&input), "undeclared-not-empty")? {
-            let Some(held) = ArgumentRequestStorage::get(&self.ports, &input.argument_request_id) else {
-                return Ok(crate::run::CheckArgumentsOutcome::WrongStateUnknownInstance);
-            };
-            let _ = &held;
-            let moved = match held.refine() {
-                crate::run::AnyArgumentRequest::Requested(instance) => crate::run::AnyArgumentRequest::Mismatched(instance.mismatch()),
-                _ => return Ok(crate::run::CheckArgumentsOutcome::WrongState { error: crate::run::ArgumentRequestStateConflict { argument_request_id: input.argument_request_id.clone() } }),
-            };
-            let next = moved.snapshot();
-            let answer = crate::run::CheckArgumentsOutcome::UndeclaredNotEmpty { arguments_mismatched: crate::run::ArgumentsMismatched { argument_request_id: input.argument_request_id.clone(), action: input.action.clone(), declared: false, reason: self.ports.try_generate_string()? } };
-            ArgumentRequestStorage::put(&mut self.ports, next);
-            return Ok(answer);
-        }
-        // `mismatched`: an external branch, where the context takes it.
-        if self.ports.try_external(ExternalCommand::LoomRunCheckArguments(&input), "mismatched")? {
-            let Some(held) = ArgumentRequestStorage::get(&self.ports, &input.argument_request_id) else {
-                return Ok(crate::run::CheckArgumentsOutcome::WrongStateUnknownInstance);
-            };
-            let _ = &held;
-            let moved = match held.refine() {
-                crate::run::AnyArgumentRequest::Requested(instance) => crate::run::AnyArgumentRequest::Mismatched(instance.mismatch()),
-                _ => return Ok(crate::run::CheckArgumentsOutcome::WrongState { error: crate::run::ArgumentRequestStateConflict { argument_request_id: input.argument_request_id.clone() } }),
-            };
-            let next = moved.snapshot();
-            let answer = crate::run::CheckArgumentsOutcome::Mismatched { arguments_mismatched: crate::run::ArgumentsMismatched { argument_request_id: input.argument_request_id.clone(), action: input.action.clone(), declared: true, reason: self.ports.try_generate_string()? } };
-            ArgumentRequestStorage::put(&mut self.ports, next);
-            return Ok(answer);
-        }
-        // `matched`: the default.
-        let Some(held) = ArgumentRequestStorage::get(&self.ports, &input.argument_request_id) else {
-            return Ok(crate::run::CheckArgumentsOutcome::WrongStateUnknownInstance);
-        };
-        let _ = &held;
-        let moved = match held.refine() {
-            crate::run::AnyArgumentRequest::Requested(instance) => crate::run::AnyArgumentRequest::Matched(instance.r#match()),
-            _ => return Ok(crate::run::CheckArgumentsOutcome::WrongState { error: crate::run::ArgumentRequestStateConflict { argument_request_id: input.argument_request_id.clone() } }),
-        };
-        let next = moved.snapshot();
-        let answer = crate::run::CheckArgumentsOutcome::Matched { arguments_matched: crate::run::ArgumentsMatched { argument_request_id: input.argument_request_id.clone() } };
-        ArgumentRequestStorage::put(&mut self.ports, next);
-        return Ok(answer);
-    }
-}
-
 /// `loom.run.OverruleSelection`, generated: every outcome is one the specification fully determines.
 impl<P> crate::run::obligations::OverruleSelectionBehavior for Generated<P>
 where
@@ -1295,24 +1228,6 @@ where
                 run: held.data.run,
                 last_run: held.data.last_run,
                 conditions: held.data.conditions,
-                state: held.state,
-            })
-            .collect())
-    }
-}
-
-/// `loom.run.ArgumentRequests`, generated: every row is one the specification fully determines from the stored `loom.run.ArgumentRequest`s.
-impl<P> crate::run::obligations::ArgumentRequestsQuery for Generated<P>
-where
-    P: ArgumentRequestStorage,
-{
-    fn argument_requests(&self) -> Result<Vec<crate::run::ArgumentRequests>, UnmetObligation> {
-        let admitted = ArgumentRequestStorage::list(&self.ports);
-        Ok(admitted
-            .into_iter()
-            .map(|held| crate::run::ArgumentRequests {
-                argument_request_id: held.data.argument_request_id,
-                selection_id: held.data.selection_id,
                 state: held.state,
             })
             .collect())

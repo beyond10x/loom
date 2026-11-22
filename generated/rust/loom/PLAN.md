@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest b025b86c945ec1d4fd0f62b5490b5737b27e425eb0d17d3a01e8420377f33126
+  contract digest 9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-433 capabilities: **417 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+459 capabilities: **443 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -70,14 +70,24 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.BindingsRefusalReason` |
 | domain type | `loom.bindings.BoundAction` |
 | domain type | `loom.bindings.BoundStep` |
+| domain type | `loom.bindings.ChildNameSource` |
+| domain type | `loom.bindings.ChildNames` |
+| domain type | `loom.bindings.CopiedRecord` |
+| domain type | `loom.bindings.CopyRefusal` |
+| domain type | `loom.bindings.CopyRefusalReason` |
 | domain type | `loom.bindings.DiscardReason` |
 | domain type | `loom.bindings.EvidenceEntry` |
 | domain type | `loom.bindings.Executor` |
 | domain type | `loom.bindings.ExecutorSpec` |
+| domain type | `loom.bindings.ExitClass` |
+| domain type | `loom.bindings.ExitClasses` |
+| domain type | `loom.bindings.OpenRefusal` |
+| domain type | `loom.bindings.OpenRefusalReason` |
 | domain type | `loom.bindings.ProducerIndependence` |
 | domain type | `loom.bindings.ProgramEnvironment` |
 | domain type | `loom.bindings.ProgramRefusal` |
 | domain type | `loom.bindings.ProgramRefusalReason` |
+| domain type | `loom.bindings.ProgramRoot` |
 | domain type | `loom.bindings.ProgramRun` |
 | domain type | `loom.bindings.RecordedEvidence` |
 | domain type | `loom.bindings.ResultRule` |
@@ -152,6 +162,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.evaluation.EvidenceRecord` |
 | domain type | `loom.evaluation.ExplicitDecision` |
 | domain type | `loom.evaluation.ProtocolName` |
+| domain type | `loom.governor.CaseLink` |
+| domain type | `loom.governor.CaseTermination` |
 | domain type | `loom.governor.CompletionRule` |
 | domain type | `loom.governor.StoredArtifact` |
 | domain type | `loom.governor.StoredCase` |
@@ -266,6 +278,27 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.session.ToolDecision` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
+| domain type | `loom.tree.ApprovalDecision` |
+| domain type | `loom.tree.CaseApproval` |
+| domain type | `loom.tree.CaseStatus` |
+| domain type | `loom.tree.DecisionKind` |
+| domain type | `loom.tree.LogFailure` |
+| domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.StatusApproval` |
+| domain type | `loom.tree.StatusCopy` |
+| domain type | `loom.tree.StatusEvidence` |
+| domain type | `loom.tree.StatusRun` |
+| domain type | `loom.tree.TreeBudget` |
+| domain type | `loom.tree.TreeCatalog` |
+| domain type | `loom.tree.TreeLogHead` |
+| domain type | `loom.tree.TreeManifest` |
+| domain type | `loom.tree.TreeProtocol` |
+| domain type | `loom.tree.TreeRefusal` |
+| domain type | `loom.tree.TreeRefusalReason` |
+| domain type | `loom.tree.TreeRun` |
+| domain type | `loom.tree.TreeStatus` |
+| domain type | `loom.tree.TreeStop` |
+| domain type | `loom.tree.TreeVerify` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |
@@ -326,8 +359,6 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.resource.RecordCheck` |
 | command behaviour | `loom.resource.RecordCheck` |
 | command contract | `loom.resource.StageFiles` |
-| command contract | `loom.run.CheckArguments` |
-| command behaviour | `loom.run.CheckArguments` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
 | command contract | `loom.run.ProjectCatalogue` |
@@ -363,8 +394,6 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.resource.LoomAgentRunObserved` |
 | event type | `loom.resource.LoomAgentRunning` |
 | event type | `loom.run.ActionSelected` |
-| event type | `loom.run.ArgumentsMatched` |
-| event type | `loom.run.ArgumentsMismatched` |
 | event type | `loom.run.ArgumentsRequested` |
 | event type | `loom.run.CatalogueProjected` |
 | event type | `loom.run.SelectionAdmitted` |
@@ -402,7 +431,6 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.resource.StageRefused` |
 | error type | `loom.resource.StaleGeneration` |
 | error type | `loom.run.ActionNotInCatalogue` |
-| error type | `loom.run.ArgumentRequestStateConflict` |
 | error type | `loom.run.CatalogueExists` |
 | error type | `loom.run.CatalogueNotFound` |
 | error type | `loom.run.CatalogueRevisionMismatch` |
@@ -420,8 +448,6 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | view query | `loom.decision.OpenDecisionsForPrincipal` |
 | view type | `loom.resource.LoomAgents` |
 | view query | `loom.resource.LoomAgents` |
-| view type | `loom.run.ArgumentRequests` |
-| view query | `loom.run.ArgumentRequests` |
 | view type | `loom.run.Catalogues` |
 | view query | `loom.run.Catalogues` |
 | view type | `loom.run.SelectionRecords` |

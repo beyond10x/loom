@@ -688,3 +688,14 @@ fn argument_schema_reads_the_declared_schema_and_undeclared_otherwise() {
         ]
     );
 }
+
+#[test]
+fn loom_protocols_re_exports_the_canon_it_links() {
+    // The catalog's model is a value of the re-exported crate's type: one Canon, not two.
+    let catalog = ProtocolCatalog::bundled().unwrap();
+    let model: &loom_protocols::canon::model::Protocol =
+        &catalog.get("system-query@1").unwrap().model;
+    assert!(loom_protocols::canon::validate::validate(model).is_ok());
+    let parsed = loom_protocols::canon::model::parse(SYSTEM_QUERY_YAML).unwrap();
+    assert_eq!(parsed.protocol.id, model.protocol.id);
+}

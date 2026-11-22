@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest b025b86c945ec1d4fd0f62b5490b5737b27e425eb0d17d3a01e8420377f33126
+// contract digest 9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Slack — `loom.slack`.

@@ -9,23 +9,24 @@ source: docs/contracts/loom-action-selection.md
 source_url: https://github.com/beyond10x/loom/blob/main/docs/contracts/loom-action-selection.md
 ---
 
-## Two roles
+## Selector and argument generator
 
 **`ActionSelector` picks one action.** Given the run's context and the candidate actions, it returns
 one action id and, optionally, a confidence. Two strategies exist: the slice's `ModelSelector`, a
 model asked for one forced `select_action` tool call, and scripted rule selectors in tests and the
-SDK example. A fast typed selector and a hybrid are planned.
+SDK example. A fast typed selector is planned.
 
 **`ArgumentGenerator` fills in one action.** Given the selected action, it returns that action's
-arguments as JSON. It never sees the choice between actions; it only completes the one already
+arguments as JSON. It does not see the choice between actions and completes only the one already
 chosen.
 
-A selector is given the selection context and the projected catalogue's entries, and returns one
-choice; Loom refuses a choice the catalogue does not list. A generator is given the argument context
-and the one catalogue entry the selection names, never the rest of the catalogue, and returns a
-JSON value, which becomes the proposed action's arguments. Before the generator is called, Loom
-records the argument request against the selection it serves. The candidate descriptors in the
-contract are the design the catalogue entries grow into.
+A selector is given the selection context and the projected catalogue's entries and returns one
+choice, which Loom refuses when the catalogue does not list it.
+
+A generator is given the argument context and the one catalogue entry the selection names, not the
+rest of the catalogue, and returns a JSON value that becomes the proposed action's arguments.
+Before the generator is called, Loom records the argument request against the selection it serves.
+The candidate descriptors in the contract are the design the catalogue entries grow into.
 
 A host that hands Loom the argument schemas of the protocol it runs (`Loom::with_argument_schemas`,
 built from `ProtocolEntry::argument_schemas`) gets the generated arguments checked against the
@@ -37,7 +38,7 @@ the model. The plugin host's turns check their arguments this way.
 
 ## Safety rules
 
-These hold for every selector, fast or slow, local or hosted. They are stated in the repository's
+These hold for every selector, fast or slow, local or hosted, and are stated in the repository's
 action-selection contract,
 [`docs/contracts/loom-action-selection.md`](https://github.com/beyond10x/loom/blob/main/docs/contracts/loom-action-selection.md).
 
@@ -53,14 +54,16 @@ action-selection contract,
 7. Selection telemetry is available to the embedding host and to trials for evaluation (Atlas
    ADR 0101), and is never evidence.
 
-Rules 1 to 4 hold today. The catalogue is projected from the frontier of each step; Loom puts every
-selection to Commission's admission check, and one it refuses, such as an action outside the
-frontier, is never proposed, whatever confidence the selector reported; the Commission runtime
-revalidates every proposal before the effect port sees it. Rule 7 holds too: Loom writes one
-`SelectionRecord` per selection (its strategy, candidate count, chosen action, confidence, latency
-and the tokens the selector reported, and on an overruled fast selection the strategy it fell back
-to); a selection refused at the execution boundary adds no record. Rule 5 holds through `HybridSelector`, at a threshold the host supplies; rule
-6 is design.
+Rules 1 to 4 hold today: the catalogue is projected from the frontier of each step, and Loom puts
+every selection to Commission's admission check. A selection it refuses, such as an action outside the
+frontier, is not proposed, whatever confidence the selector reported. The Commission runtime
+revalidates every proposal before the effect port sees it.
+
+Rule 7 holds too: Loom writes one `SelectionRecord` per selection, with its strategy, candidate
+count, chosen action, confidence, latency and the tokens the selector reported. On an overruled
+fast selection the record adds the strategy it fell back to, and a selection refused at the
+execution boundary adds no record. Rule 5 holds through `HybridSelector`, at a threshold the host supplies,
+and rule 6 is design.
 
 ## Beyond tool selection
 

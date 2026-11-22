@@ -29,6 +29,7 @@ b10x-loom-mandate = { path = "../loom-mandate" }
 b10x-loom-plugin = { path = "../loom-plugin" }
 b10x-loom-plugin-slack = { path = "../loom-plugin-slack" }
 b10x-loom-sdk = { path = "../loom-sdk" }
+b10x-loom-tree = { path = "../loom-tree" }
 b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 b10x-llm-models = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 b10x-llm-routing = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
@@ -43,6 +44,7 @@ tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "signal", "macr
 [dev-dependencies]
 b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
+b10x-loom-intake-slice = { path = "../loom-intake-slice", features = ["test-clock"] }
 chrono = "0.4"
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

@@ -1,0 +1,39 @@
+format: protocol/1
+protocol:
+  id: roadmap
+  revision: 1
+  description: >-
+    The root of story open-children-from-arguments-from, of the shape of Runbook's: epics.open
+    opens one epic case per name its arguments_from program prints; roadmap.note, a program
+    action, records one note about the roadmap and so moves the case revision.
+artifacts:
+  roadmap: {}
+evidence_kinds:
+  case_outcome: {}
+  epics_opened: {}
+  note: {}
+claims:
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  epics.open:
+    effect: write
+    case_open: {protocol: epic, subject: roadmap}
+    may_produce:
+      - evidence: epics_opened
+    arguments:
+      type: object
+      properties:
+        epics:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+      required: [epics]
+      additionalProperties: false
+  roadmap.note:
+    effect: write
+    may_produce:
+      - evidence: note

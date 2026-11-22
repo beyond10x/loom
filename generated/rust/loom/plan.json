@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "4641815fb6096729ac85d3e89a80363c7726eb0ed3dc0edf62f344a8225d096a",
-    "contract_digest": "b025b86c945ec1d4fd0f62b5490b5737b27e425eb0d17d3a01e8420377f33126"
+    "source_digest": "99569a3ca60997a0974eaf2fce1366071a58f1772021d81153133d49e9582475",
+    "contract_digest": "9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -411,6 +411,41 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ChildNameSource",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ChildNames",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.CopiedRecord",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.CopyRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.CopyRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.DiscardReason",
       "disposition": {
         "disposition": "generated"
@@ -439,6 +474,34 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ExitClass",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ExitClasses",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.OpenRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.OpenRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.ProducerIndependence",
       "disposition": {
         "disposition": "generated"
@@ -461,6 +524,13 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.ProgramRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramRoot",
       "disposition": {
         "disposition": "generated"
       }
@@ -979,6 +1049,20 @@
     {
       "kind": "domain_type",
       "source": "loom.evaluation.ProtocolName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.CaseLink",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.CaseTermination",
       "disposition": {
         "disposition": "generated"
       }
@@ -1783,6 +1867,153 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.tree.ApprovalDecision",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.CaseApproval",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.CaseStatus",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.DecisionKind",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.LogFailure",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.NextDecision",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.StatusApproval",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.StatusCopy",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.StatusEvidence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.StatusRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeBudget",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeCatalog",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeLogHead",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeManifest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeProtocol",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeRun",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeStatus",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeStop",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.TreeVerify",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.workflow.DeterministicStep",
       "disposition": {
         "disposition": "generated"
@@ -2335,20 +2566,6 @@
     },
     {
       "kind": "command_contract",
-      "source": "loom.run.CheckArguments",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_behavior",
-      "source": "loom.run.CheckArguments",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "command_contract",
       "source": "loom.run.OverruleSelection",
       "disposition": {
         "disposition": "generated"
@@ -2618,20 +2835,6 @@
     },
     {
       "kind": "event_type",
-      "source": "loom.run.ArgumentsMatched",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
-      "source": "loom.run.ArgumentsMismatched",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "event_type",
       "source": "loom.run.ArgumentsRequested",
       "disposition": {
         "disposition": "generated"
@@ -2891,13 +3094,6 @@
     },
     {
       "kind": "error_type",
-      "source": "loom.run.ArgumentRequestStateConflict",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "error_type",
       "source": "loom.run.CatalogueExists",
       "disposition": {
         "disposition": "generated"
@@ -3011,20 +3207,6 @@
     {
       "kind": "view_query",
       "source": "loom.resource.LoomAgents",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "view_type",
-      "source": "loom.run.ArgumentRequests",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "view_query",
-      "source": "loom.run.ArgumentRequests",
       "disposition": {
         "disposition": "generated"
       }

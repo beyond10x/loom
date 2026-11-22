@@ -6,7 +6,10 @@
 use std::fs;
 use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _, symlink};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
+
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 fn scratch(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
@@ -28,7 +31,7 @@ fn empty_dir(base: &Path, name: &str) -> PathBuf {
 }
 
 fn prepare(dirs: &[&Path]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+    let mut command = loom_bin::loom();
     command.args(["agent", "prepare-dirs"]);
     for dir in dirs {
         command.arg("--dir").arg(dir);
