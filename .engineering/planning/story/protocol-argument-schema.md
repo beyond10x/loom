@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:protocol-argument-schema
 kind: story
-status: draft
+status: active
 title: Loom refuses generated arguments that do not match the argument schema its loaded protocol declares
 tags:
 - sdc
@@ -49,7 +49,10 @@ scope:
   path: protocols/inbound-answer/1.yaml
 - confidence: cited
   path: protocols/operator-reply/1.yaml
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T00:22:57Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
+- {from: "proposed", to: "active", at: "2026-11-22T00:22:57Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
 ---
 # story:protocol-argument-schema
 
