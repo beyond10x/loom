@@ -59,24 +59,28 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor;
 
-pub use arguments::{ArgumentContext, ArgumentGenerator, EmptyObjectArguments, OverruleRefused};
+pub use arguments::{
+    ArgumentContext, ArgumentGenerator, ArgumentMismatch, ArgumentSchemas, EmptyObjectArguments,
+    OverruleRefused,
+};
 pub use metering::{MeteredExecutor, MeteredModel, RateCard, RunMeter};
 pub use selection::{
     ActionFactsPort, ActionSelector, CaseFacts, Confidence, DeterministicSelector,
     FirstAdmissibleSelector, HybridSelector, InvalidThreshold, SelectorError, StepHistory,
 };
 
-use arguments::RequestRecord;
+use arguments::{ArgumentVerdict, RequestRecord};
 use model::behaviour::SelectionStorage;
 use model::run::obligations::{
-    RecordSelectionBehavior, RequestArgumentsBehavior, RevalidateSelectionBehavior,
+    CheckArgumentsBehavior, RecordSelectionBehavior, RequestArgumentsBehavior,
+    RevalidateSelectionBehavior,
 };
 use model::run::{
     ActionCatalogue, AnySelection, ArgumentRequestId, ArgumentRequestSnapshot, CatalogueId,
-    OverruleSelection, OverruleSelectionOutcome, RecordSelection, RequestArguments,
-    RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, Selection,
-    SelectionId, SelectionRecordId, SelectionRecordSnapshot, SelectionSnapshot, SelectionStrategy,
-    TurnId, action_catalogue_state, selection_state,
+    CheckArguments, CheckArgumentsOutcome, OverruleSelection, OverruleSelectionOutcome,
+    RecordSelection, RequestArguments, RequestArgumentsOutcome, RevalidateSelection,
+    RevalidateSelectionOutcome, Selection, SelectionId, SelectionRecordId, SelectionRecordSnapshot,
+    SelectionSnapshot, SelectionStrategy, TurnId, action_catalogue_state, selection_state,
 };
 use selection::{Pick, SelectionContext, SelectionRefusal};
 
@@ -102,6 +106,7 @@ pub struct Loom<S, G, V = &'static NoGovernor> {
     record: Mutex<RequestRecord>,
     runs: AtomicU64,
     governor: Option<V>,
+    schemas: Option<ArgumentSchemas>,
 }
 
 /// The governor of a Loom made by [`Loom::new`]: there is none. It has no value, so no call to it
@@ -136,6 +141,7 @@ impl<S, G> Loom<S, G> {
             record: Mutex::default(),
             runs: AtomicU64::new(0),
             governor: None,
+            schemas: None,
         }
     }
 
@@ -156,7 +162,29 @@ impl<S, G> Loom<S, G> {
             record: self.record,
             runs: self.runs,
             governor: Some(governor),
+            schemas: self.schemas,
         }
+    }
+}
+
+impl<S, G, V> Loom<S, G, V> {
+    /// This Loom, checking the arguments its generator writes against `schemas`, the argument
+    /// schemas of the protocol the host runs, after generation and before revalidation
+    /// (`loom.run.CheckArguments`): arguments a declared schema refuses, or anything but `{}` for
+    /// an action that declares none, are recorded `Mismatched` on their argument request, and the
+    /// run proposes nothing and revalidates nothing. A Loom built without it checks nothing and
+    /// records no check. The schemas come from the host alone, never from the model or the
+    /// request.
+    #[must_use]
+    pub fn with_argument_schemas(mut self, schemas: ArgumentSchemas) -> Self {
+        self.schemas = Some(schemas);
+        self
+    }
+
+    /// The outcome of every argument check this Loom has made, one per run that reached it, in
+    /// the order it made them.
+    pub fn argument_checks(&self) -> Vec<CheckArgumentsOutcome> {
+        self.record().argument_checks().to_vec()
     }
 }
 
@@ -586,6 +614,7 @@ impl<S: ActionSelector, G: ArgumentGenerator, V> Loom<S, G, V> {
         else {
             return Err(no_useful_action());
         };
+        let checked_id = argument_request_id.clone();
         let requested = self.record().request_arguments(RequestArguments {
             argument_request_id,
             selection_id: selection_id.clone(),
@@ -598,6 +627,33 @@ impl<S: ActionSelector, G: ArgumentGenerator, V> Loom<S, G, V> {
             prompt: self.prompt.clone(),
         };
         let arguments = arguments.generate(&context, entry).map_err(outage)?;
+        // Safety invariant: arguments the loaded protocol's schema does not admit are never
+        // revalidated or proposed (`loom.run.CheckArguments`); the schemas come from the host.
+        if let Some(schemas) = &self.schemas {
+            let schema = schemas.schema(&selected);
+            let verdict = match arguments::check_value(schema, &arguments) {
+                Ok(()) => ArgumentVerdict::Matched,
+                Err(mismatch) => ArgumentVerdict::Mismatched {
+                    declared: schema.is_some(),
+                    reason: match schema {
+                        Some(_) => format!("`{selected}`: {mismatch}"),
+                        None => format!(
+                            "the protocol declares no argument schema for `{selected}`, which \
+                             takes only `{{}}`: {mismatch}"
+                        ),
+                    },
+                },
+            };
+            let mut record = self.record();
+            record.stage_verdict(checked_id.clone(), verdict);
+            let checked = record.check_arguments(CheckArguments {
+                argument_request_id: checked_id,
+                action: selected.clone(),
+            });
+            if !matches!(checked, Ok(CheckArgumentsOutcome::Matched { .. })) {
+                return Err(no_useful_action());
+            }
+        }
         Ok(Prepared {
             selection_id,
             action: selected,

@@ -1,0 +1,44 @@
+format: protocol/1
+protocol:
+  id: fixture.planner
+  revision: 1
+  description: >-
+    A planner's shape: one action opens a child case per story named in its arguments. Only the
+    argument schema of stories.open is read by argument_schema.rs.
+artifacts:
+  plan:
+    description: the plan whose stories are opened
+evidence_kinds:
+  stories_opened:
+    description: the record that the named stories were opened as child cases
+claims:
+  plan.opened:
+    description: the stories of the plan were opened
+    true_when:
+      evidence:
+        kind: stories_opened
+        subject: plan
+actions:
+  stories.open:
+    description: open one child case per story the arguments name
+    effect: write
+    case_open:
+      protocol: fixture.story
+      subject: plan
+    arguments:
+      type: object
+      properties:
+        stories:
+          type: array
+          minItems: 1
+          items:
+            type: string
+      required: [stories]
+      additionalProperties: false
+    may_produce:
+      - evidence: stories_opened
+outcomes:
+  opened:
+    description: the stories were opened
+    requires:
+      claim: plan.opened

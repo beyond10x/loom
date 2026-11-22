@@ -25,9 +25,6 @@ use crate::{Refused, unreadable};
 /// The format a printed tree status names, which [`crate::read_status`] reads.
 pub const STATUS_FORMAT: &str = "loom.tree-status/1";
 
-/// The file of a tree opened with `--protocols` that names the protocol blobs it keeps.
-pub const PROTOCOLS_FILE: &str = "tree-protocols.json";
-
 /// One case of the tree, its parent and the link the two hold.
 pub(crate) struct Member {
     pub(crate) case: String,
@@ -52,25 +49,6 @@ pub(crate) fn members<S: loom_governor::FallibleCaseStore>(
             link: held.parent,
         })
         .collect())
-}
-
-/// The catalog a tree opened with `--protocols` keeps in its store; `None` for a tree opened
-/// without it, whose commands use the host's catalog.
-///
-/// # Errors
-/// `ProtocolRefused` when the store names kept protocols: this build of `tree open` keeps none,
-/// so such a store was written by another one.
-pub fn stored_catalog(store: &Path) -> Result<Option<ProtocolCatalog>, Refused> {
-    let store = existing_store(store)?;
-    match read_regular(&store.join(PROTOCOLS_FILE))? {
-        None => Ok(None),
-        Some(_) => Err(Refused::new(
-            TreeRefusalReason::ProtocolRefused,
-            format!(
-                "the store names kept protocols in {PROTOCOLS_FILE}, which this build of the tree commands does not read"
-            ),
-        )),
-    }
 }
 
 /// The status of the tree in the store `store`, read with `catalog`. The store is read, never
@@ -162,7 +140,7 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
         workspace: manifest.workspace,
         root: manifest.root,
         cases: statuses,
-        protocols: Vec::new(),
+        protocols: crate::protocols::kept_protocols(&store)?.unwrap_or_default(),
     })
 }
 

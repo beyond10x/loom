@@ -4240,6 +4240,102 @@ mod tests {
         );
     }
 
+    /// The configuration of every driver Loom opens names no Git source
+    /// (story:drop-the-substrate-git-feature).
+    #[test]
+    fn the_driver_config_names_no_git_source() {
+        let fixture = tempfile::tempdir().unwrap();
+        let config = driver_config(fixture.path(), fixture.path(), &DriverEgress::NONE)
+            .expect("a driver configuration");
+        assert!(config.git_sources.is_empty(), "{:?}", config.git_sources);
+    }
+
+    /// Loom builds `b10x-substrate-host` without its `git` feature, so a Git source that reaches
+    /// the driver Loom configures is refused `workspace.git-source-unserved`
+    /// (story:drop-the-substrate-git-feature). At this pin the driver opens with the binding and
+    /// refuses at its first use, the creation of a workspace from it, before it reads the locator
+    /// or asks for authority. The locator's host is under `.invalid`, so nothing is fetched.
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "confinement runs on Linux only")]
+    fn a_git_source_on_loom_s_driver_is_refused_unserved() {
+        use substrate_host::Driver as _;
+        use substrate_wire::{GitSource, GitSourceEnvelope, WorkspaceCreateInput, WorkspaceSource};
+
+        let fixture = tempfile::tempdir().unwrap();
+        let parent = fixture.path().join("workspaces");
+        let state = fixture.path().join("state");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        let mut config =
+            driver_config(&parent, &state, &DriverEgress::NONE).expect("a driver configuration");
+        config.git_sources.push(
+            substrate_host::GitSourceBinding::new(
+                "forge",
+                "https://forge.example.invalid/loom/",
+                None,
+            )
+            .expect("a well-formed Git source binding"),
+        );
+        let driver = match HostDriver::open(config) {
+            Ok(driver) => driver,
+            Err(error) if error.code == "workspace.git-source-unserved" => {
+                panic!(
+                    "the refusal came at open, not at first use: {}",
+                    error.message
+                )
+            }
+            Err(error) => {
+                eprintln!(
+                    "skipped: missing prerequisite: a Substrate host driver that opens here ({}: {})",
+                    error.code, error.message
+                );
+                return;
+            }
+        };
+        let input = WorkspaceCreateInput {
+            source: WorkspaceSource::Git(GitSourceEnvelope {
+                git: GitSource {
+                    source: "forge".to_owned(),
+                    locator: "https://forge.example.invalid/loom/repo.git".to_owned(),
+                    reference: "main".to_owned(),
+                    commit: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+                    depth: 1,
+                },
+            }),
+            labels: substrate_wire::Labels::new(),
+            storage: None,
+            lease_ttl_ms: None,
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let outcome = runtime
+            .block_on(driver.create_workspace_authorized("loom-git", "loom-git", &input, None));
+        match outcome {
+            DispatchOutcome::NotDispatched(error) => {
+                assert_eq!(
+                    (error.code, error.message.as_str()),
+                    (
+                        "workspace.git-source-unserved",
+                        "This build of the host driver has no `git` feature, so it serves no Git source."
+                    )
+                );
+            }
+            DispatchOutcome::Observed(_) => panic!("a Git workspace was created"),
+            DispatchOutcome::ContainedAbsent(error) | DispatchOutcome::OutcomeUnknown(error) => {
+                panic!(
+                    "the Git source was dispatched: {}: {}",
+                    error.code, error.message
+                )
+            }
+        }
+        assert!(
+            !parent.join("loom-git").exists(),
+            "a refused Git source leaves no workspace"
+        );
+    }
+
     /// An applied-confinement projection; the child-result rule does not read it.
     fn projection(network: Vec<AppliedAperture>) -> AppliedConfinement {
         AppliedConfinement {

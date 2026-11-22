@@ -28,6 +28,7 @@ use loom_protocols::ProtocolCatalog;
 
 use crate::lock::{HOLDER_FILE, LOCK_FILE, StoreLock};
 use crate::log::Logs;
+use crate::protocols::{KeptProtocol, keep};
 use crate::store::{
     MANIFEST, MAX_DOCUMENT_BYTES, absolute, document, manifest_json, read_regular, write_file,
 };
@@ -56,6 +57,9 @@ pub struct OpenRequest<'a> {
     pub time: TreeTime,
     /// The tree's catalog, which the governor admits exactly.
     pub catalog: &'a ProtocolCatalog,
+    /// The protocols a `--protocols` directory gave ([`crate::read_protocols_directory`]),
+    /// kept in the store; `catalog` is then theirs. Empty for the host's catalog.
+    pub protocols: Vec<KeptProtocol>,
 }
 
 /// A tree `tree open` opened.
@@ -92,7 +96,11 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
     let workspace = workspace(&request.workspace)?;
     let entry = request.catalog.get(&request.protocol).ok_or_else(|| {
         Refused::new(
-            TreeRefusalReason::UnknownProtocol,
+            if request.protocols.is_empty() {
+                TreeRefusalReason::UnknownProtocol
+            } else {
+                TreeRefusalReason::ProtocolNotInDirectory
+            },
             format!(
                 "the tree's catalog holds no protocol registered as {:?}",
                 crate::time::cut(&request.protocol)
@@ -142,7 +150,11 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
         root: request.case.clone(),
         workspace: path_text(&workspace)?,
         bindings: path_text(&root.file)?,
-        catalog: TreeCatalog::Host,
+        catalog: if request.protocols.is_empty() {
+            TreeCatalog::Host
+        } else {
+            TreeCatalog::Directory
+        },
     });
 
     fs::create_dir_all(&store).map_err(|error| unreadable(store.display(), error))?;
@@ -154,6 +166,9 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
             TreeRefusalReason::StoreNotEmpty,
             format!("{} holds {name:?}", store.display()),
         ));
+    }
+    if !request.protocols.is_empty() {
+        keep(&store, &request.protocols)?;
     }
     let cases =
         FileCaseStore::open(store.clone()).map_err(|error| unreadable("the case store", error))?;

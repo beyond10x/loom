@@ -267,3 +267,34 @@ fn declined_with_a_decline() {
         "a proposed reply is not declined after: {actions}"
     );
 }
+
+/// `reply.send` declares the members the plugin publishes for it (`crates/loom-plugin/src/turn.rs`,
+/// `arguments_schema`): `channel` and `text` required, `thread_ts` optional, as the plugin requires
+/// it only for an item with a ts; no other member. The three actions it shares with
+/// `inbound-answer@1` declare the same schemas there.
+#[test]
+fn reply_send_declares_channel_and_text_as_required() {
+    let catalog = ProtocolCatalog::plugins().expect("the plugin catalog");
+    let entry = catalog.get(NAME).expect("operator-reply@1");
+    assert_eq!(
+        entry.argument_schema("reply.send"),
+        Some(loom_protocols::ArgumentSchema::Declared(json!({
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string"},
+                "thread_ts": {"type": "string"},
+                "text": {"type": "string"}
+            },
+            "required": ["channel", "text"],
+            "additionalProperties": false
+        })))
+    );
+    let inbound = catalog.get("inbound-answer@1").expect("inbound-answer@1");
+    for action in ["source.read", "reply.propose", "reply.decline"] {
+        assert_eq!(
+            entry.argument_schema(action),
+            inbound.argument_schema(action),
+            "{action}"
+        );
+    }
+}

@@ -11,9 +11,9 @@ use crate::encode::loom_json;
 use crate::status::STATUS_FORMAT;
 
 /// What is wrong with a document that names [`STATUS_FORMAT`] but does not decode.
-struct Bad(String);
+pub(crate) struct Bad(pub(crate) String);
 
-type Read<T> = Result<T, Bad>;
+pub(crate) type Read<T> = Result<T, Bad>;
 
 fn member<'a>(object: &'a Value, at: &str, name: &str) -> Read<&'a Value> {
     object
@@ -149,7 +149,7 @@ fn case(value: &Value, at: &str) -> Read<CaseStatus> {
     })
 }
 
-fn protocol(value: &Value, at: &str) -> Read<TreeProtocol> {
+pub(crate) fn protocol(value: &Value, at: &str) -> Read<TreeProtocol> {
     Ok(TreeProtocol {
         registration: text(value, at, "registration")?,
         protocol: text(value, at, "protocol")?,

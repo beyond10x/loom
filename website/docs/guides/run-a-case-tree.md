@@ -129,7 +129,7 @@ A case for which more than one outcome is legitimate is not ended by `tree run`.
 protocol `fork` has the outcomes `kept` and `left`, both legitimate once the road is seen:
 
 ```console
-$ b10x-loom protocols add fork@1 --file crates/loom-cli/tests/fixtures/tree-two-level/protocols/fork.yaml
+$ b10x-loom protocols add fork@1 --file crates/loom-cli/tests/fixtures/tree-two-level/extra/fork.yaml
 installed fork@1
 (exit 0)
 ```
@@ -191,7 +191,7 @@ signs a post with no capability, the clerk seals it under `clerk.seal`, and a st
 `clerk.stamp`; all three wait at once:
 
 ```console
-$ b10x-loom protocols add sign@1 --file crates/loom-cli/tests/fixtures/tree-two-level/protocols/sign.yaml
+$ b10x-loom protocols add sign@1 --file crates/loom-cli/tests/fixtures/tree-two-level/extra/sign.yaml
 installed sign@1
 (exit 0)
 ```
@@ -244,7 +244,7 @@ with them. In the fixture protocol `review`, the reviewer's table lists `perform
 `LOOM_RETRY_FEEDBACK` to `feedback.json`:
 
 ```console
-$ b10x-loom protocols add review@1 --file crates/loom-cli/tests/fixtures/tree-two-level/protocols/review.yaml
+$ b10x-loom protocols add review@1 --file crates/loom-cli/tests/fixtures/tree-two-level/extra/review.yaml
 installed review@1
 (exit 0)
 ```
