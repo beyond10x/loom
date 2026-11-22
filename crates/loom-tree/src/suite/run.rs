@@ -10,6 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -125,7 +126,8 @@ pub fn when_holds(condition: &CycleCondition, catalog: &ProtocolCatalog, suite: 
     values.len() == 1 && holds(&values[0].value, &conditions).unwrap_or(false)
 }
 
-/// The counts of `cycles` in suite order.
+/// The counts of `cycles` in suite order: a full run (`only` absent) of a suite of those cycles
+/// (`suite_cycles` their number).
 pub fn summarize(cycles: Vec<CycleResult>) -> SuiteReport {
     let ran = |result: &&CycleResult| result.run;
     let expected: Vec<&CycleResult> = cycles.iter().filter(ran).filter(|r| !r.pending).collect();
@@ -154,6 +156,8 @@ pub fn summarize(cycles: Vec<CycleResult>) -> SuiteReport {
             .filter(|r| r.not_run_when.is_some())
             .map(|r| r.name.clone())
             .collect(),
+        only: None,
+        suite_cycles: i64::try_from(cycles.len()).unwrap_or(i64::MAX),
         cycles,
     }
 }
@@ -352,10 +356,16 @@ pub struct SuiteSettings {
     pub confinement: Option<String>,
     /// Which step kinds, sources, event kinds and members run; [`SUITE_AVAILABILITY`] by default.
     pub availability: Vec<AvailabilityEntry>,
+    /// How many cycles run at once; 1 by default, which runs them one after another. More than
+    /// one is refused `SubstrateWorkersUnserved` when `confinement` is `substrate`.
+    pub workers: NonZeroUsize,
+    /// The names of the cycles to run; empty by default, which runs every cycle. A name that is no
+    /// cycle of the suite is refused `CycleUnknown`.
+    pub only: Vec<String>,
 }
 
 impl SuiteSettings {
-    /// Settings with [`SUITE_AVAILABILITY`].
+    /// Settings with [`SUITE_AVAILABILITY`], one worker and every cycle.
     pub fn new(
         protocols: PathBuf,
         scratch: PathBuf,
@@ -370,6 +380,8 @@ impl SuiteSettings {
             runner,
             confinement,
             availability: SUITE_AVAILABILITY.to_vec(),
+            workers: NonZeroUsize::MIN,
+            only: Vec::new(),
         }
     }
 }
@@ -383,6 +395,8 @@ impl std::fmt::Debug for SuiteSettings {
             .field("runner", &self.runner.label())
             .field("confinement", &self.confinement)
             .field("availability", &self.availability.len())
+            .field("workers", &self.workers)
+            .field("only", &self.only)
             .finish()
     }
 }

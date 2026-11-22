@@ -23,8 +23,8 @@ use b10x_loom_tree::model::{
 };
 use b10x_loom_tree::suite::{
     Availability, AvailabilityEntry, Captured, CycleView, KindUse, SUITE_AVAILABILITY,
-    capture_after, decode_suite, evaluate_checks, first_waiting, read_suite, select, summarize,
-    summary_lines, waiting_result, when_holds,
+    capture_after, decode_suite, evaluate_checks, first_waiting, not_run_result, read_suite,
+    select, summarize, summary_lines, waiting_result, when_holds,
 };
 use b10x_loom_tree::{OpenRequest, TreeTime, open_tree};
 use loom::primitives::Timestamp;
@@ -1191,6 +1191,34 @@ fn a_waiting_kind_makes_the_cycle_pending() {
             "cycles: 0 expected, 0 as expected, 0 failed: none".to_owned(),
             "pending: 1 (0 still failing: none; passing, move to expected: none; 1 waiting: replays on story:tree-replay-command)".to_owned(),
         ]
+    );
+    assert!(started.elapsed() < BOUND);
+}
+
+/// `story:suite-runs-cycles-in-parallel`, test 13: with `only` set the first summary line says how
+/// many cycles were selected of how many; without it the line is the one of a full run.
+#[test]
+fn the_selection_line_names_the_selected_cycles() {
+    let started = Instant::now();
+    let suite = decode_suite(
+        "format: loom.tree-suite/1\ndefaults: {protocol: tour@1, bindings: b.yaml}\ncycles:\n  - name: a\n  - name: b\n  - name: c\n  - name: d\n  - name: e\n",
+    )
+    .unwrap();
+    let not_run = |index: usize| not_run_result(&suite.cycles[index], 0);
+    let full = summarize(vec![not_run(1), not_run(3)]);
+    assert_eq!(full.only, None);
+    assert_eq!(
+        summary_lines(&full)[0],
+        "cycles: 0 expected, 0 as expected, 0 failed: none"
+    );
+    let mut selected = full.clone();
+    selected.only = Some(vec!["b".to_owned(), "d".to_owned()]);
+    selected.suite_cycles = 5;
+    let line = &summary_lines(&selected)[0];
+    assert!(line.starts_with("cycles: selected 2 of 5,"), "{line}");
+    assert_eq!(
+        line,
+        "cycles: selected 2 of 5, 0 expected, 0 as expected, 0 failed: none"
     );
     assert!(started.elapsed() < BOUND);
 }
