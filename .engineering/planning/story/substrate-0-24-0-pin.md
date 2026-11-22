@@ -30,7 +30,7 @@ scope:
   path: crates/loom-intake-slice/tests/host_git_hardening.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T15:08:36Z", actor: "agent:loom", revision: 13}
 - {from: "proposed", to: "active", at: "2026-11-22T15:09:58Z", actor: "agent:sdc", revision: 14, executor: "agent:loom", correlation: "runbook-batch4-2026-11-22"}
@@ -181,16 +181,59 @@ only measures runs without the `slot` prefix.
      and a ninth is refused `ScopeInvalid`, naming it.
    - `confinement_spec.rs:363` and `:400` pass unchanged.
    - Failing first: on `0.21.0` the eighth root is refused.
-5. **The ioctl floor, under D3 a.** In `crates/loom-intake-slice/tests/bound_command_confined.rs`,
-   beside `under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace` (`:406`, and
-   its `support::delegated` gate):
-   - Test `under_linux_a_bound_program_cannot_move_file_blocks`.
-   - A bound program, POSIX sh, writes a 1 MiB file in its workspace and runs
-     `e4defrag <file>`. It prints e4defrag's exit status and standard error.
-   - The kept output names `Permission denied`, the `EACCES` of `EXT4_IOC_MOVE_EXT`, and the
-     file's SHA-256 is unchanged.
-   - Failing first: on `0.21.0` the ioctl is not filtered. The unit records what `e4defrag`
-     printed there.
+5. **The ioctl floor, under D3 a.** Test `under_linux_a_bound_program_cannot_move_file_blocks`
+   in `crates/loom-intake-slice/tests/bound_command_confined.rs`, under the `support::delegated`
+   gate (`:496` at `30e82c18`).
+   - **Confined.** A bound program, POSIX sh, runs in the child that
+     `bindings::bound_program_child` builds. It has one read-only file beside it: an
+     `/etc/mtab` naming `/workspace` as ext4 (`:509-510`, `:547`).
+     - It writes a fragmented 1 MiB file in its workspace and runs `e4defrag -v` on it, under
+       Substrate's linux adapter.
+     - Result: exit 1, standard error names `Failed to defrag with EXT4_IOC_MOVE_EXT ioctl`,
+       and there is no `[ OK ]`.
+   - **Control, in the same test.** The same file goes through Substrate's `local` adapter, which
+     installs no seccomp filter and reads the host's mount table.
+     - Result: exit 0, `[ OK ]`, and extents N -> M with N > M.
+   - The SHA-256 is unchanged in both runs. The control reads the file the confined call left.
+   - `EACCES` and `Permission denied` are not observed with e4defrag 1.47.4: it prints
+     `ioctl:Success`, an overwritten errno. The refusal is attributed to Substrate's floor
+     because the control succeeds on the same file.
+   - The test skips, naming what is missing, without `e4defrag`, an ext4 workspace or
+     delegation. It fails instead under `LOOM_REQUIRE_DELEGATION=1`.
+   - Planted defect: the confined call run under the control's profile fails the test.
+   - **The lane that holds this line.** Only a lane in which the test runs unskipped counts. That
+     means `e4defrag` at `/usr/bin/e4defrag`, an ext4 workspace (the `TMPDIR` of
+     `tempfile::tempdir`, `support/mod.rs:50-51`), a delegated scope and
+     `LOOM_REQUIRE_DELEGATION=1`. A gate in which it only skips does not hold the line.
+     - **Holds: this host's lane.** It is `cargo nextest run -p b10x-loom-intake-slice -p
+       b10x-loom-bindings` with `LOOM_REQUIRE_DELEGATION=1`, on the Manjaro workstation.
+       - Verified 2026-11-22, read only: `/usr/bin/e4defrag` from e2fsprogs 1.47.4,
+         `/usr/bin/bwrap`, and systemd 261. The agent shells' `TMPDIR`, a directory under
+         the home directory, is on `/`, which is ext4 (`findmnt`).
+       - Last runs, as reported by unit SP and not re-run here: 799 passed and 6 skipped, at
+         `0ad119d5` and again at `eccfece0` after the control was added. The new case ran
+         delegated, in 2.7-6.5 s.
+       - `task check`'s test step on this host is the same lane. It sets
+         `LOOM_REQUIRE_DELEGATION=1` when `systemd-run --user --scope -p Delegate=yes true`
+         passes (`crates/loom-xtask/src/test_step.rs:62-88`, `:94-108`, `:252`).
+     - **OPEN LIMIT: CI's lane is not established.** `.github/workflows/check.yml` (`:23-114`)
+       runs `task check` on `ubuntu-latest`.
+       - Verified: it installs `bubblewrap` only, and it sets `LOOM_REQUIRE_DELEGATION=1` only
+         when the same probe passes (`:103-111`). That probe step comes from `b6c3be29`, which is
+         not on `main`. The last `check` runs (to 2026-11-21, `main` at `b4b5de28`) predate it
+         and this test, so no CI run has executed either.
+       - Inferred, not verified on the runner: Ubuntu's e2fsprogs installs `e4defrag` at
+         `/usr/sbin`, and there `/usr/sbin` is not `/usr/bin`. The test's `/usr/bin/e4defrag`
+         check (`:468`, `:666-685`) would then report it missing.
+       - Inferred: the runner's `/tmp` is ext4.
+       - So in CI the test fails if the probe passes, and skips if it fails. Neither holds the
+         line. Until a CI run shows `ran delegated:
+         under_linux_a_bound_program_cannot_move_file_blocks`, only this host's lane holds it.
+     - **Also open, verified in the code.** `LOOM_REQUIRE_DELEGATION` turns only this test's own
+       skips into failures: `e4defrag` or ext4 missing (`:500-506`). The harness's own skips
+       stay skips under the variable: no bubblewrap (`support/mod.rs:60-62`), no `systemd-run`
+       (`:77`), or a driver refused as missing (`:130-137`). The test step lists skips by name
+       but does not fail on them (`test_step.rs:300-342`).
 6. **Lanes.** These pass:
    - `cargo test -p b10x-loom-intake-slice --test confinement --test confinement_spec --test
      confined_child --test bound_command_confined --test engine_confinement`;
@@ -209,7 +252,8 @@ only measures runs without the `slot` prefix.
    - Its four mount tests, taken over with the admission half only. Their denial halves need a
      deny-list Loom cannot pass (Out of scope). Each is admitted on the new pin, where `0.21.0`
      has no `ExecListProof` for the proof call (compile-red first). They live in
-     `crates/loom-intake-slice/tests/confined_child.rs` (inferred), each under the
+     `crates/loom-intake-slice/tests/confined_child.rs` (`:2091`, `:2132`, `:2189`, `:2225` at
+     `30e82c18`), each under the
      `support::delegated` gate of `bound_command_confined.rs`:
      - `the_toolchain_root_is_admitted_on_the_new_pin`: the toolchain read-only root
        (`confinement.rs:3493-3511`);
@@ -220,11 +264,11 @@ only measures runs without the `slot` prefix.
      - `the_retry_feedback_file_is_admitted_on_the_new_pin`: the feedback file through
        `at_host_path` (`crates/loom-bindings/src/retry.rs:331`).
    - Its confined step:
-     `a_runbook_style_confined_step_runs_through_bound_program_on_the_new_pin`, in
-     `bound_command_confined.rs` beside
-     `under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace` (`:406`).
-     A bound program reads one read-only root and writes its workspace, runs through
-     `ProgramEffects` and exits 0.
+     `a_runbook_style_confined_step_runs_through_bound_program_on_the_new_pin`. The
+     Runbook-style step test lives in `crates/loom-bindings/tests/bound_program.rs` (`:2514` at
+     `30e82c18`).
+     - A `ProgramEffects` program gets no root, only read-only files.
+     - It reads its own program file at its host path, writes its workspace and exits 0.
 
 **Gate.** `task check` exits 0.
 
