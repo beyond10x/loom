@@ -1,5 +1,10 @@
 version: '3'
 
+env:
+  ESS_TOOLCHAIN:
+    sh: |-
+      echo "${ESS_TOOLCHAIN:-$(sed -n 's/^requires: ess //p' ess/ess-inputs.yaml)}"
+
 tasks:
   check:
     desc: Commission's own gate; its build, lint and test steps cover only the Commission crates.

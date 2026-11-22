@@ -35,6 +35,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
 - **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
 - A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
+- `task check` tests with `cargo nextest` (60 s a test, 120 s the step) and reads the committed `generated/ess/loom/` suite; `task slow` resynthesizes; dev and test builds carry no debug info (`[profile.dev] debug = false`); `.cargo/config.toml` builds dependencies and `b10x-loom-governor` at `opt-level = 2` in dev and test builds; `task test-step` runs the tests on 4 threads, as CI's runner has
 - **Breaking:** `ProgramRefusalReason` gains `ArtifactUnreadable`, a placed path that is not digested (story:bound-artifact-revisions)
 - **Breaking:** after a `program` step each placed artifact moves to its content digest, and its records name that revision (story:bound-artifact-revisions)
 - A `program` step of an action that does not write whose program changed a placed artifact records nothing, `Discarded` (story:bound-artifact-revisions)

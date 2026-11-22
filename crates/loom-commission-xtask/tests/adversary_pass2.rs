@@ -143,7 +143,7 @@ fn adversary2_no_hand_model_refuses_a_rename_to_a_generated_name() {
 /// does not name the file. The assertion pins that the change is still caught; once drift runs
 /// before cargo's lock check, this case should also assert that the step names `Cargo.toml`.
 #[test]
-fn adversary2_known_limit_drift_step_fails_on_a_changed_generated_manifest() {
+fn slow_adversary2_known_limit_drift_step_fails_on_a_changed_generated_manifest() {
     let case = case_dir("drift_step_names_a_changed_byte_in_the_generated_manifest");
     let root = repo_copy(&case);
     let manifest = root.join("generated/rust/commission/Cargo.toml");
