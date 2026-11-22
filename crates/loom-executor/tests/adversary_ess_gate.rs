@@ -1,18 +1,33 @@
 //! Adversary cases for `tests/ess_gate.rs` (story:ess-hard-gate, Atlas ADR 0076).
 //!
 //! Each case builds a std-only replica of the repository under `CARGO_TARGET_TMPDIR` — the root
-//! `Cargo.toml`, `AGENTS.md`, `Taskfile.yml`, `ess/` and `crates/loom-executor/tests/ess_gate.rs` copied
-//! verbatim, with an empty library in place of `crates/loom-executor/src` — mutates the replica, and runs the
+//! `Cargo.toml`, `AGENTS.md`, `Taskfile.yml`, `ess/` and `crates/loom-executor/tests/ess_gate.rs`
+//! with its `support/ess_suite.rs` copied verbatim, with an empty library in place of `crates/loom-executor/src` — mutates the replica, and runs the
 //! real gate suite in it with `cargo test --test ess_gate`. The gate is never edited: what is
 //! measured is the exit status of the suite CI runs, over a tree carrying the mutant.
 //!
 //! The repository root is read from `CARGO_MANIFEST_DIR` at run time, not from `env!`, so these
 //! cases read the tree they run in.
+//!
+//! The replica's `ess/` leaves out the decision domain (`ess_suite::drop_decision`), whose
+//! synthesis takes minutes and which no mutant is about, and after the mutant its committed
+//! synthesis is written again from it, as `task suite-generate` does, so the gate's step 3 reads a
+//! synthesis of the mutated tree. Every synthesis is made once per distinct input: the replicas
+//! and their suites share one cache (`LOOM_ESS_SYNTHESIS_CACHE`). The suite runs without its
+//! `slow_` cases, as `task ess-gate` does.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+#[path = "support/ess_suite.rs"]
+mod ess_suite;
+
+/// The synthesis cache every replica, and every suite run in one, shares.
+fn synthesis_cache() -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("ess-synthesis-cache")
+}
 
 const PROBE: &str = "# UNMAPPED: probe\n";
 
@@ -57,11 +72,16 @@ fn replica(at: &Path) {
         fs::copy(root.join(file), at.join(file)).expect("copy root file");
     }
     copy_dir(&root.join("ess"), &at.join("ess"));
-    fs::copy(
-        root.join("crates/loom-executor/tests/ess_gate.rs"),
-        at.join("crates/loom-executor/tests/ess_gate.rs"),
-    )
-    .expect("copy ess_gate.rs");
+    ess_suite::drop_decision(&at.join("ess")).unwrap_or_else(|detail| panic!("{detail}"));
+    fs::create_dir_all(at.join("crates/loom-executor/tests/support"))
+        .expect("create replica support");
+    for file in ["ess_gate.rs", "support/ess_suite.rs"] {
+        fs::copy(
+            root.join("crates/loom-executor/tests").join(file),
+            at.join("crates/loom-executor/tests").join(file),
+        )
+        .unwrap_or_else(|e| panic!("copy {file}: {e}"));
+    }
     fs::write(
         at.join("crates/loom-executor/Cargo.toml"),
         "[package]\nname = \"b10x-loom-executor\"\nversion.workspace = true\nedition.workspace = true\n\
@@ -71,12 +91,43 @@ fn replica(at: &Path) {
     fs::write(at.join("crates/loom-executor/src/lib.rs"), "").expect("write replica lib");
 }
 
-/// `cargo test --test ess_gate` in `tree`, building into `target`.
+/// Writes the replica's committed synthesis from its `ess/` as it is now.
+fn regenerate(tree: &Path) {
+    let ess = ess_program();
+    let run = ess_suite::synthesize_once(&ess, &tree.join("ess"), &synthesis_cache())
+        .unwrap_or_else(|detail| panic!("synthesize the replica: {detail}"));
+    ess_suite::write_generated(tree, &ess, None, &run)
+        .unwrap_or_else(|detail| panic!("write the replica's synthesis: {detail}"));
+}
+
+/// The `ess` of this repository, asking for the release its own `ess/ess-inputs.yaml` requires: a
+/// mutant of the replica's `requires` line never chooses the release that judges it.
+fn ess_program() -> ess_suite::Ess {
+    ess_suite::ess_program(&repo_root())
+}
+
+/// `cargo test --test ess_gate -- --skip slow_` in `tree`, building into `target`, after the
+/// replica's committed synthesis was written from its `ess/`, with this repository's
+/// `ESS_TOOLCHAIN`.
 fn gate_suite(tree: &Path, target: &Path) -> Output {
-    Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
-        .args(["test", "--offline", "--test", "ess_gate"])
+    regenerate(tree);
+    let mut command = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()));
+    if let Some(toolchain) = ess_program().toolchain {
+        command.env("ESS_TOOLCHAIN", toolchain);
+    }
+    command
+        .args([
+            "test",
+            "--offline",
+            "--test",
+            "ess_gate",
+            "--",
+            "--skip",
+            "slow_",
+        ])
         .current_dir(tree)
         .env("CARGO_TARGET_DIR", target)
+        .env("LOOM_ESS_SYNTHESIS_CACHE", synthesis_cache())
         .env("CARGO_INCREMENTAL", "0")
         .env_remove("CARGO_MAKEFLAGS")
         .env_remove("MAKEFLAGS")
@@ -141,7 +192,7 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
 // another worktree's `ess_gate` binary fresh it runs that binary — and the gate checks the other
 // worktree's `ess/`, not the one `task check` was run in.
 #[test]
-fn gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
+fn slow_gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
     let dir = scratch("shared_target");
     let clean = dir.join("worktree-a");
     let marked = dir.join("worktree-b");
@@ -170,7 +221,7 @@ fn gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory() {
 
 // Marker scan: a nested directory and a file ESS never reads (not listed in ess-inputs.yaml).
 #[test]
-fn mutant_marker_in_a_nested_non_yaml_file_is_killed() {
+fn slow_mutant_marker_in_a_nested_non_yaml_file_is_killed() {
     mutant_is_killed(
         "nested_non_yaml",
         |tree| {
@@ -187,7 +238,7 @@ fn mutant_marker_in_a_nested_non_yaml_file_is_killed() {
 
 // Marker scan: a hidden file, the marker mid-line.
 #[test]
-fn mutant_marker_mid_line_in_a_hidden_file_is_killed() {
+fn slow_mutant_marker_mid_line_in_a_hidden_file_is_killed() {
     mutant_is_killed(
         "hidden_mid_line",
         |tree| {
@@ -199,7 +250,7 @@ fn mutant_marker_mid_line_in_a_hidden_file_is_killed() {
 
 // Marker scan: the marker mid-line in the specification itself.
 #[test]
-fn mutant_marker_mid_line_in_run_yaml_is_killed() {
+fn slow_mutant_marker_mid_line_in_run_yaml_is_killed() {
     mutant_is_killed(
         "run_yaml_mid_line",
         |tree| {
@@ -221,7 +272,7 @@ fn mutant_marker_mid_line_in_run_yaml_is_killed() {
 // validation instead. Since ESS 0.82.0 synthesize accepts `Binary64`, so the compiled field's
 // primitive is what kills the mutant, not a synthesize refusal.
 #[test]
-fn mutant_confidence_binary64_is_killed() {
+fn slow_mutant_confidence_binary64_is_killed() {
     mutant_is_killed(
         "confidence_binary64",
         |tree| {
@@ -248,7 +299,7 @@ fn mutant_confidence_binary64_is_killed() {
 // Item 2: the relation Selection.catalogue dropped. It was Turn.catalogue until
 // `story:delete-harness-port` removed the turn with the ported loop.
 #[test]
-fn mutant_relation_dropped_is_killed() {
+fn slow_mutant_relation_dropped_is_killed() {
     mutant_is_killed(
         "relation_dropped",
         |tree| {
@@ -264,7 +315,7 @@ fn mutant_relation_dropped_is_killed() {
 
 // Item 2: the relation kept, its cardinality changed.
 #[test]
-fn mutant_relation_cardinality_many_is_killed() {
+fn slow_mutant_relation_cardinality_many_is_killed() {
     mutant_is_killed(
         "relation_many",
         |tree| {
@@ -281,7 +332,7 @@ fn mutant_relation_cardinality_many_is_killed() {
 // Item 2: a commission run's id back to String, and CommissionRunId of String. The field was
 // Session.commission_run until `story:delete-harness-port`; a workflow run record's `run` is one.
 #[test]
-fn mutant_commission_run_string_is_killed() {
+fn slow_mutant_commission_run_string_is_killed() {
     mutant_is_killed(
         "commission_run_string",
         |tree| {
@@ -296,7 +347,7 @@ fn mutant_commission_run_string_is_killed() {
 }
 
 #[test]
-fn mutant_commission_run_id_of_string_is_killed() {
+fn slow_mutant_commission_run_id_of_string_is_killed() {
     mutant_is_killed(
         "commission_run_id_string",
         |tree| {
@@ -312,7 +363,7 @@ fn mutant_commission_run_id_of_string_is_killed() {
 
 // Acceptance: `task check` runs `task ess-gate`.
 #[test]
-fn mutant_check_without_ess_gate_is_killed() {
+fn slow_mutant_check_without_ess_gate_is_killed() {
     mutant_is_killed(
         "check_without_ess_gate",
         |tree| {

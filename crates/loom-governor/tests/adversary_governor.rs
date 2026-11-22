@@ -155,13 +155,30 @@ fn a_refused_revision_update_moves_nothing() {
 /// outcome.
 /// A replay on a second governor issues the same frontier ids, and two frontiers that differ never
 /// share an id.
+///
+/// `task check` walks one seed on each protocol, 120 steps each: every step kind (a revision
+/// update, evidence about its usual subject and about another artifact) and every pool entry
+/// comes up in it. The slow lane walks the two other seeds (`slow_` twin below).
 #[test]
 fn the_frontier_is_canons_decision_over_random_evidence() {
-    for seed in [0x5eed_0001_u64, 0x5eed_0002, 0x5eed_0003] {
+    for seed in RANDOM_EVIDENCE_SEEDS[..1].iter().copied() {
         random_walk(seed, &software_change_pool());
         random_walk(seed, &incident_response_pool());
     }
 }
+
+/// The seeds of `the_frontier_is_canons_decision_over_random_evidence` that `task check` leaves to
+/// the slow lane.
+#[test]
+fn slow_the_frontier_is_canons_decision_over_random_evidence() {
+    for seed in RANDOM_EVIDENCE_SEEDS[1..].iter().copied() {
+        random_walk(seed, &software_change_pool());
+        random_walk(seed, &incident_response_pool());
+    }
+}
+
+/// The random walks' seeds: the first in `task check`, all three across both lanes.
+const RANDOM_EVIDENCE_SEEDS: [u64; 3] = [0x5eed_0001, 0x5eed_0002, 0x5eed_0003];
 
 struct Pool {
     protocol: &'static str,
@@ -248,10 +265,15 @@ fn random_walk(seed: u64, pool: &Pool) {
     let mut ids_b = Ids::default();
     let mut records: Vec<Value> = Vec::new();
     let mut by_id: BTreeMap<String, String> = BTreeMap::new();
+    // Which step kinds and pool entries the walk reached: each seed must reach all of them.
+    let mut updated = BTreeSet::new();
+    let mut kinds = BTreeSet::new();
+    let (mut about_usual, mut about_other) = (0, 0);
     for step in 0..120 {
         let context = format!("{} seed {seed:#x} step {step}", pool.protocol);
         if rng.below(4) == 0 {
             let (artifact, revisions) = &pool.artifacts[rng.below(pool.artifacts.len())];
+            updated.insert(*artifact);
             let revision = revisions[rng.below(revisions.len())];
             let a = first.update_revision(&case, artifact, revision);
             let b = second.update_revision(&replay, artifact, revision);
@@ -259,12 +281,18 @@ fn random_walk(seed: u64, pool: &Pool) {
             assert!(a.is_ok(), "{context}: {a:?}");
         } else {
             let (kind, usual, results) = &pool.kinds[rng.below(pool.kinds.len())];
+            kinds.insert(*kind);
             // Mostly about its usual subject, sometimes about another declared artifact.
             let subject = if rng.below(5) == 0 {
                 pool.artifacts[rng.below(pool.artifacts.len())].0
             } else {
                 usual
             };
+            if subject == *usual {
+                about_usual += 1;
+            } else {
+                about_other += 1;
+            }
             let revisions = &pool
                 .artifacts
                 .iter()
@@ -306,6 +334,14 @@ fn random_walk(seed: u64, pool: &Pool) {
             );
         }
     }
+    let seen = format!(
+        "{} seed {seed:#x}: updated {updated:?}, kinds {kinds:?}, {about_usual} about the usual \
+         subject, {about_other} about another",
+        pool.protocol
+    );
+    assert_eq!(updated.len(), pool.artifacts.len(), "{seen}");
+    assert_eq!(kinds.len(), pool.kinds.len(), "{seen}");
+    assert!(about_usual > 0 && about_other > 0, "{seen}");
 }
 
 /// Everything of a frontier except its id.

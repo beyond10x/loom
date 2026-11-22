@@ -31,7 +31,7 @@ fn case_dir(name: &str) -> PathBuf {
 }
 
 #[test]
-fn adversary_skeleton_no_hand_model_refuses_hand_written_bootstrap_outcomes_in_port_modules() {
+fn slow_adversary_skeleton_no_hand_model_refuses_hand_written_bootstrap_outcomes_in_port_modules() {
     let root = root();
     let case = case_dir("bootstrap_outcomes_in_ports");
     let src = case.join("src");
