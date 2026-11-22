@@ -3,17 +3,19 @@
 //! and the `loom.tree.SuiteReport` document `--report` writes. A pending cycle is never counted as
 //! expected, failed or skipped, and a cycle waiting for a story is never run.
 //!
-//! [`run_suite`] is the first runner: the cycles one after another in suite order, each in
-//! `<scratch>/<n>/` (`store/`, `work/`), each step through the function of its `tree` command in
-//! process. It starts no `b10x-loom` process and no program of its own, prints nothing, reads no
+//! [`run_suite`] runs the cycles a caller selects, up to `workers` at once, each thread taking the
+//! next cycle in suite order; each cycle works in `<scratch>/<n>/` (`store/`, `work/`), `n` its
+//! position in the suite, and runs each step through the function of its `tree` command in
+//! process. The results, and the observer's calls, are in suite order whatever order the cycles
+//! end in. It starts no `b10x-loom` process and no program of its own, prints nothing, reads no
 //! environment variable and no current directory: every path it is given is absolute.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use b10x_loom_intake_slice::confinement::TestRunner;
@@ -212,8 +214,13 @@ pub fn cycle_line(result: &CycleResult) -> String {
     }
 }
 
-/// The two summary lines of `report`.
+/// The two summary lines of `report`. With `only` set the first says how many cycles were
+/// selected of how many, so that it is never taken for a full run.
 pub fn summary_lines(report: &SuiteReport) -> [String; 2] {
+    let selected = match &report.only {
+        Some(only) => format!("selected {} of {}, ", only.len(), report.suite_cycles),
+        None => String::new(),
+    };
     let still_failing: Vec<String> = report
         .cycles
         .iter()
@@ -232,7 +239,7 @@ pub fn summary_lines(report: &SuiteReport) -> [String; 2] {
     };
     [
         format!(
-            "cycles: {} expected, {} as expected, {} failed: {}",
+            "cycles: {selected}{} expected, {} as expected, {} failed: {}",
             report.expected,
             report.as_expected,
             report.failed.len(),
@@ -303,9 +310,10 @@ fn result_json(result: &CycleResult) -> Value {
     Value::Object(object)
 }
 
-/// `report` as the `loom.tree.SuiteReport` document `--report` writes, member for member.
+/// `report` as the `loom.tree.SuiteReport` document `--report` writes, member for member; `only`
+/// is absent in a full run.
 pub fn report_json(report: &SuiteReport) -> Value {
-    json!({
+    let mut document = json!({
         "cycles": report.cycles.iter().map(result_json).collect::<Vec<_>>(),
         "expected": report.expected,
         "as_expected": report.as_expected,
@@ -314,7 +322,12 @@ pub fn report_json(report: &SuiteReport) -> Value {
         "pending_passing": report.pending_passing,
         "waiting": report.waiting.iter().map(waiting_json).collect::<Vec<_>>(),
         "not_run": report.not_run,
-    })
+        "suite_cycles": report.suite_cycles,
+    });
+    if let (Some(object), Some(only)) = (document.as_object_mut(), &report.only) {
+        object.insert("only".into(), json!(only));
+    }
+    document
 }
 
 /// The seconds of wall time one cycle's `tree run` rounds share.
@@ -327,7 +340,12 @@ pub const SUITE_PRINCIPAL: &str = "operator";
 /// The root case id every cycle opens, as `tree open` without `--case`.
 pub const SUITE_ROOT_CASE: &str = "root";
 
-/// Called with each cycle's result when the cycle ends, in suite order.
+/// The detail of the refusal `SubstrateWorkersUnserved`.
+pub const SUBSTRATE_WORKERS_UNSERVED: &str = "--workers above 1 under --confinement substrate \
+waits for story:suite-runs-cycles-under-one-cgroup-root";
+
+/// Called with each cycle's result in suite order, on the thread that called [`run_suite`]:
+/// result `n` as soon as results `1..=n` have all ended, so a later result that ended first waits.
 pub trait SuiteObserver {
     /// One cycle's result.
     fn cycle(&mut self, result: &CycleResult);
@@ -491,25 +509,72 @@ fn usable_seeds(cycles: &[SuiteCycle], suite_dir: &Path) -> Result<(), SuiteRefu
     Ok(())
 }
 
-/// Runs the suite file `suite` (see the module documentation): reads and decodes it, refuses a
-/// `scratch` that is not absent or empty before the protocols are read, reads the protocols once,
-/// checks every seed, then runs each cycle. A cycle that uses a part `settings.availability`
-/// marks waiting is pending and not run; one whose `when` fails is not run. `observer` is given
-/// each cycle's result when it ends; `cancel`, when set, ends the cycle that runs before its next
-/// step (its difference says so) and runs no further cycle.
+/// `SubstrateWorkersUnserved` when `workers` is more than one and `confinement` is `substrate`:
+/// Substrate keys its driver by a workspace's parent directory, and each cycle's workspace has a
+/// parent of its own, so a second cycle would open a second driver under the root while the first
+/// one's program runs.
 ///
 /// # Errors
-/// [`SuiteRefused`], before any cycle: what [`read_suite`] refuses, `ScratchNotEmpty`,
-/// `ProtocolsUnreadable` and `SeedUnusable`; a relative `suite`, `protocols` or `scratch` is
-/// `SuiteUnreadable`, `ProtocolsUnreadable` or `ScratchNotEmpty`.
+/// [`SuiteRefused`] `SubstrateWorkersUnserved`, saying [`SUBSTRATE_WORKERS_UNSERVED`].
+pub fn workers_served(
+    confinement: Option<&str>,
+    workers: NonZeroUsize,
+) -> Result<(), SuiteRefused> {
+    if workers.get() > 1 && confinement == Some("substrate") {
+        Err(refused(
+            SuiteRefusalReason::SubstrateWorkersUnserved,
+            None,
+            SUBSTRATE_WORKERS_UNSERVED.to_owned(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// The positions of the cycles `only` names, in suite order; every position when it is empty.
+fn selected(cycles: &[SuiteCycle], only: &[String]) -> Result<Vec<usize>, SuiteRefused> {
+    if let Some(unknown) = only
+        .iter()
+        .find(|name| !cycles.iter().any(|cycle| &cycle.name == *name))
+    {
+        return Err(refused(
+            SuiteRefusalReason::CycleUnknown,
+            None,
+            format!("--only names {unknown}, which is no cycle of the suite"),
+        ));
+    }
+    Ok(cycles
+        .iter()
+        .enumerate()
+        .filter(|(_, cycle)| only.is_empty() || only.contains(&cycle.name))
+        .map(|(index, _)| index)
+        .collect())
+}
+
+/// Runs the suite file `suite` (see the module documentation): refuses more than one worker under
+/// `substrate` before it reads anything, reads and decodes the suite, refuses an `only` name that
+/// is no cycle of it, refuses a `scratch` that is not absent or empty before the protocols are
+/// read, reads the protocols once, checks every seed, then runs the selected cycles on up to
+/// `settings.workers` threads. A cycle that uses a part `settings.availability` marks waiting is
+/// pending and not run; one whose `when` fails is not run. `observer` is given each result in
+/// suite order (see [`SuiteObserver`]); `cancel`, when set, starts no further cycle and ends each
+/// running one before its next step, its difference saying so.
+///
+/// # Errors
+/// [`SuiteRefused`], before any cycle: `SubstrateWorkersUnserved`, what [`read_suite`] refuses,
+/// `CycleUnknown`, `ScratchNotEmpty`, `ProtocolsUnreadable` and `SeedUnusable`; a relative
+/// `suite`, `protocols` or `scratch` is `SuiteUnreadable`, `ProtocolsUnreadable` or
+/// `ScratchNotEmpty`.
 pub fn run_suite(
     suite: &Path,
     settings: &SuiteSettings,
-    mut observer: Option<&mut dyn SuiteObserver>,
+    observer: Option<&mut dyn SuiteObserver>,
     cancel: Option<&AtomicBool>,
 ) -> Result<SuiteReport, SuiteRefused> {
+    workers_served(settings.confinement.as_deref(), settings.workers)?;
     let suite = absolute_path(suite, "the suite", SuiteRefusalReason::SuiteUnreadable)?;
     let decoded = read_suite(suite)?;
+    let chosen = selected(&decoded.cycles, &settings.only)?;
     let suite_dir = suite.parent().unwrap_or(suite);
     let scratch = absolute_path(
         &settings.scratch,
@@ -545,28 +610,18 @@ pub fn run_suite(
         settings,
         cancel,
     };
-    let mut results = Vec::new();
-    for (index, cycle) in decoded.cycles.iter().enumerate() {
-        if suite_run.cancelled() {
-            break;
-        }
-        let result = if let Some(waiting) = first_waiting(cycle, &settings.availability) {
-            waiting_result(cycle, waiting)
-        } else if let Some(failed) = cycle
-            .when
-            .iter()
-            .position(|condition| !when_holds(condition, &directory.catalog, suite_dir))
-        {
-            not_run_result(cycle, failed)
-        } else {
-            suite_run.cycle(index, cycle)
-        };
-        if let Some(observer) = observer.as_deref_mut() {
-            observer.cycle(&result);
-        }
-        results.push(result);
+    let results = suite_run.cycles(&decoded.cycles, &chosen, observer);
+    let mut report = summarize(results);
+    report.suite_cycles = i64::try_from(decoded.cycles.len()).unwrap_or(i64::MAX);
+    if !settings.only.is_empty() {
+        report.only = Some(
+            chosen
+                .iter()
+                .map(|&index| decoded.cycles[index].name.clone())
+                .collect(),
+        );
     }
-    Ok(summarize(results))
+    Ok(report)
 }
 
 /// What every cycle of one suite run shares.
@@ -747,6 +802,77 @@ impl SuiteRun<'_> {
     fn cancelled(&self) -> bool {
         self.cancel
             .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+    }
+
+    /// The cycles at the positions `chosen` names, on up to `settings.workers` threads, each
+    /// thread taking the next of them in suite order until none is left or the cancel flag is set.
+    /// The results come back in suite order, and `observer` is given each on this thread as soon
+    /// as every result before it has ended; a cycle that never started has none.
+    fn cycles(
+        &self,
+        cycles: &[SuiteCycle],
+        chosen: &[usize],
+        mut observer: Option<&mut dyn SuiteObserver>,
+    ) -> Vec<CycleResult> {
+        let threads = self.settings.workers.get().min(chosen.len());
+        let next = AtomicUsize::new(0);
+        let mut ended: Vec<Option<CycleResult>> = vec![None; chosen.len()];
+        let mut observed = 0;
+        let mut observe = |result: &CycleResult| {
+            if let Some(observer) = observer.as_deref_mut() {
+                observer.cycle(result);
+            }
+        };
+        std::thread::scope(|scope| {
+            let (sender, receiver) = mpsc::channel();
+            for _ in 0..threads {
+                let sender = sender.clone();
+                let next = &next;
+                scope.spawn(move || {
+                    while !self.cancelled() {
+                        let at = next.fetch_add(1, Ordering::SeqCst);
+                        let Some(&index) = chosen.get(at) else {
+                            break;
+                        };
+                        if self.cancelled() {
+                            break;
+                        }
+                        let result = self.result(index, &cycles[index]);
+                        if sender.send((at, result)).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(sender);
+            for (at, result) in receiver {
+                ended[at] = Some(result);
+                while let Some(Some(result)) = ended.get(observed) {
+                    observe(result);
+                    observed += 1;
+                }
+            }
+        });
+        for result in ended.iter().skip(observed).flatten() {
+            observe(result);
+        }
+        ended.into_iter().flatten().collect()
+    }
+
+    /// The result of `cycle`, the `index`th of the suite: waiting when it uses a part that waits,
+    /// not run when a `when` fails, else run.
+    fn result(&self, index: usize, cycle: &SuiteCycle) -> CycleResult {
+        if let Some(waiting) = first_waiting(cycle, &self.settings.availability) {
+            waiting_result(cycle, waiting)
+        } else if let Some(failed) = cycle
+            .when
+            .iter()
+            .position(|condition| !when_holds(condition, self.catalog, self.suite_dir))
+        {
+            not_run_result(cycle, failed)
+        } else {
+            self.cycle(index, cycle)
+        }
     }
 
     /// Runs `cycle`, the `index`th of the suite, to its result.
@@ -1090,6 +1216,17 @@ impl SuiteRun<'_> {
             };
             round += 1;
             let exit = stop_exit(ran.stop);
+            if ran.stop == TreeStop::Cancelled && self.cancelled() {
+                running.run_exit = Some(exit);
+                running.last_run = Some(ran);
+                return Err(difference(
+                    label,
+                    "run",
+                    DifferenceReason::StepFailed,
+                    "the step runs",
+                    Some("the suite was cancelled".to_owned()),
+                ));
+            }
             let decisions = ran.decisions.clone();
             running.last_run = Some(ran);
             if exit != 3

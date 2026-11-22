@@ -286,8 +286,9 @@ pub enum TreeCommand {
     /// Verify the run log of every case of the tree and name the first line that fails.
     #[command(after_help = TREE_VERIFY_HELP)]
     Verify(TreeStoreArgs),
-    /// Run a loom.tree-suite/1 suite of scripted tree cycles one after another, each in its own
-    /// directory of --scratch, and print per cycle whether it ended as the suite expects.
+    /// Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers
+    /// at once, each in its own directory of --scratch, and print per cycle whether it ended as the
+    /// suite expects.
     #[command(after_help = TREE_TEST_HELP)]
     Test(TreeTestArgs),
 }
@@ -298,13 +299,22 @@ the --report file is written outside --scratch, which must be absent or empty. T
 read once, as tree open --protocols reads them. Each step runs through the function of its tree \
 command in this process; no b10x-loom process is started. A cycle that uses a step kind, source \
 or member that waits for a later story is pending and not run; one whose `when` fails is not run. \
-One line is printed per cycle as it ends, then the two summary lines; a found value that is not a \
-number, a boolean or a name Loom declares is printed as its length and digest.
+One line is printed per cycle in suite order, as soon as it and every cycle before it ended, then \
+the two summary lines; a found value that is not a number, a boolean or a name Loom declares is \
+printed as its length and digest.
+
+--workers N runs up to N cycles at once, each in its own <scratch>/<n>/, n its position in the \
+suite; under --confinement local nothing is confined, so a program can read the other cycles' \
+workspaces. More than one worker under --confinement substrate is refused \
+SubstrateWorkersUnserved. --only NAME runs the named cycles alone (repeat the flag, or separate \
+names with commas); a name that is no cycle of the suite is refused CycleUnknown, and with --only \
+the first summary line reads `cycles: selected <S> of <C>, <N> expected, ...`.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected
   1  a cycle that ran and is not pending did not, or the report could not be written
-  2  refused before any cycle: the command line, the suite, the protocols, a seed or the scratch directory";
+  2  refused before any cycle: the command line, the suite, an --only name (CycleUnknown), --workers \
+above 1 under substrate (SubstrateWorkersUnserved), the protocols, a seed or the scratch directory";
 
 /// The exit status of `tree test` when a cycle did not end as expected.
 pub const TREE_TEST_FAILED: u8 = 1;
@@ -338,6 +348,14 @@ pub struct TreeTestArgs {
     /// root, which `tree test` does not take yet: it is refused before any cycle; pass `local`.
     #[arg(long, value_enum, default_value = "substrate")]
     pub confinement: TreeConfinement,
+    /// How many cycles run at once, 1 to 64. More than 1 under `--confinement substrate` is
+    /// refused SubstrateWorkersUnserved before any cycle.
+    #[arg(long, value_name = "N", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=64))]
+    pub workers: u8,
+    /// Run only the named cycles; the flag repeats and a comma separates names. A name that is no
+    /// cycle of the suite is refused CycleUnknown before any cycle.
+    #[arg(long, value_name = "NAME", value_delimiter = ',')]
+    pub only: Vec<String>,
     /// Also write the result as one loom.tree.SuiteReport JSON document to this file.
     #[arg(long, value_name = "FILE")]
     pub report: Option<PathBuf>,

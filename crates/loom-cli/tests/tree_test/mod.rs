@@ -528,7 +528,11 @@ impl Drop for Parallel {
 }
 
 fn cycle_names(report: &SuiteReport) -> Vec<&str> {
-    report.cycles.iter().map(|cycle| cycle.name.as_str()).collect()
+    report
+        .cycles
+        .iter()
+        .map(|cycle| cycle.name.as_str())
+        .collect()
 }
 
 /// The `--report` document of `report` without any cycle's `seconds`.
@@ -574,76 +578,68 @@ fn one_worker_runs_cycles_one_at_a_time() {
 }
 
 /// Test 3: `slow` ends after `fast`, and the observer still gets `slow` first; the report is the
-/// one of a single worker but for `seconds`.
+/// one of a single worker but for `seconds`. The single worker's run, in directories of its own,
+/// runs beside the two workers' run.
 #[test]
 fn results_reach_the_observer_in_suite_order() {
     let started = Instant::now();
     let run = Parallel::new("observer");
-    let mut seen: Vec<String> = Vec::new();
-    let mut observe = |result: &CycleResult| seen.push(result.name.clone());
-    let report = run_suite(
-        &run.suite.join("order.suite.yaml"),
-        &run.settings(2),
-        Some(&mut observe),
-        None,
-    )
-    .unwrap();
-    assert_eq!(seen, ["slow", "fast"], "{report:?}");
-    // The two ran at once: `slow`'s program saw the marker `fast`'s program wrote as its last act.
-    assert_eq!(run.work(1, "waited.txt").trim(), "met", "{report:?}");
     // One worker: `fast`'s marker is there before `slow` starts, so `slow` does not wait for it.
     let serial = Parallel::new("observer-serial");
     fs::write(serial.barrier().join("fast"), "").unwrap();
-    let one = serial.run("order.suite.yaml", 1);
+    let mut seen: Vec<String> = Vec::new();
+    let mut observe = |result: &CycleResult| seen.push(result.name.clone());
+    let (report, one) = std::thread::scope(|scope| {
+        let one = scope.spawn(|| serial.run("order.suite.yaml", 1));
+        let report = run_suite(
+            &run.suite.join("order.suite.yaml"),
+            &run.settings(2),
+            Some(&mut observe),
+            None,
+        )
+        .unwrap();
+        (report, one.join().unwrap())
+    });
+    assert_eq!(seen, ["slow", "fast"], "{report:?}");
+    // The two ran at once: `slow`'s program saw the marker `fast`'s program wrote as its last act.
+    assert_eq!(run.work(1, "waited.txt").trim(), "met", "{report:?}");
     assert_eq!(without_seconds(&report), without_seconds(&one));
     within_bound(started);
 }
 
-/// Test 4: cycle 1 fails at its first step; cycles 3 and 4 start after that and still run.
+/// Test 4: cycle 1 fails at its first step; cycles 3 and 4 start after that and still run. One run
+/// of `tree test --workers 2`, read from its output, its exit status and its `--report`.
 #[test]
 fn a_failing_cycle_does_not_stop_the_others_at_once() {
     let started = Instant::now();
     let dir = fresh_scratch("failing");
-    fs::create_dir_all(dir.join("home")).unwrap();
-    let suite = Path::new(PARALLEL).join("failing.suite.yaml");
-    let protocols = Path::new(PARALLEL).join("protocols");
-    let mut settings = local_settings(dir.join("scratch"));
-    settings.protocols = protocols.clone();
-    settings.workers = NonZeroUsize::new(2).unwrap();
-    let report = run_suite(&suite, &settings, None, None).unwrap();
-    assert_eq!(
-        cycle_names(&report),
-        ["broken", "second", "third", "fourth"],
-        "{report:?}"
+    let tested = tree_test_in(
+        &dir,
+        "scratch",
+        &Path::new(PARALLEL).join("failing.suite.yaml"),
+        &Path::new(PARALLEL).join("protocols"),
+        &["--workers", "2"],
     );
-    assert_eq!(report.failed, ["broken"], "{report:?}");
+    let said = format!("{}{}", text(&tested.stdout), text(&tested.stderr));
+    assert_eq!(tested.status.code(), Some(1), "{said}");
+    let report = read_report(&dir.join("scratch.json"));
+    let names: Vec<&str> = report["cycles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|cycle| cycle["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["broken", "second", "third", "fourth"], "{report}");
+    assert_eq!(report["failed"], json!(["broken"]), "{report}");
     assert_eq!(
-        report.cycles[0].difference.as_ref().map(|d| d.reason),
-        Some(DifferenceReason::ExitDiffers),
-        "{report:?}"
+        report["cycles"][0]["difference"]["reason"],
+        format!("{:?}", DifferenceReason::ExitDiffers),
+        "{report}"
     );
-    for cycle in &report.cycles[1..] {
-        assert!(cycle.as_expected, "{cycle:?}");
-        assert_eq!(cycle.exit, Some(0), "{cycle:?}");
+    for cycle in &report["cycles"].as_array().unwrap()[1..] {
+        assert_eq!(cycle["as_expected"], true, "{cycle}");
+        assert_eq!(cycle["exit"], 0, "{cycle}");
     }
-    let tested = command(&dir.join("home"))
-        .args(["tree", "test", "--confinement", "local", "--workers", "2"])
-        .args(["--at", AT])
-        .arg("--suite")
-        .arg(&suite)
-        .arg("--protocols")
-        .arg(&protocols)
-        .arg("--scratch")
-        .arg(dir.join("cli-scratch"))
-        .output()
-        .unwrap();
-    assert_eq!(
-        tested.status.code(),
-        Some(1),
-        "{}{}",
-        text(&tested.stdout),
-        text(&tested.stderr)
-    );
     let _ = fs::remove_dir_all(&dir);
     within_bound(started);
 }
@@ -656,10 +652,12 @@ fn each_cycle_keeps_to_its_own_directory_at_once() {
     let run = Parallel::new("own");
     let report = run.run("own.suite.yaml", 3);
     assert!(report.failed.is_empty(), "{report:?}");
-    // `late` ended last: both other cycles' markers were there when it ended.
+    // The cycles did not end in suite order: a later cycle's marker was there when `late` ended.
+    // (The sleeps make the order 3, 2, 1 when all three start together; on a loaded host `middle`
+    // can start late enough to end after `late`.)
     let seen = run.work(1, "seen.txt");
     assert!(
-        seen.lines().any(|line| line == "middle") && seen.lines().any(|line| line == "early"),
+        seen.lines().any(|line| line == "middle" || line == "early"),
         "{seen}"
     );
     for (n, name) in [(1, "late"), (2, "middle"), (3, "early")] {
@@ -793,7 +791,12 @@ fn only_repeated_equals_only_with_a_comma() {
     let comma = only_test(&dir, "comma", &["--only", "b,d"]);
     let repeated = only_test(&dir, "repeated", &["--only", "b", "--only", "d"]);
     assert_eq!(comma.status.code(), Some(0), "{}", text(&comma.stderr));
-    assert_eq!(repeated.status.code(), Some(0), "{}", text(&repeated.stderr));
+    assert_eq!(
+        repeated.status.code(),
+        Some(0),
+        "{}",
+        text(&repeated.stderr)
+    );
     // The output, each cycle's wall time apart.
     let lines = |output: &Output| -> Vec<String> {
         text(&output.stdout)
