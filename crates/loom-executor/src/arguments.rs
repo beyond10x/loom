@@ -7,22 +7,45 @@
 //! recorded against the selection it serves (`loom.run.RequestArguments`, outcome `requested`),
 //! in the [`RequestRecord`].
 //!
-//! Validating the arguments against the action's schema (ADR 0073, step 2) is not done here:
-//! where an action schema comes from is still undecided (`decision-blocker:action-argument-schema`).
+//! The generated arguments are checked against the argument schema the protocol the host loaded
+//! declares for the action (ADR 0073, step 2;
+//! `architecture-decision-record:action-argument-schema-from-protocol`), when the host hands Loom
+//! the schemas of that protocol ([`ArgumentSchemas`], [`crate::Loom::with_argument_schemas`]):
+//! after generation and before revalidation. The check is Canon's
+//! (`b10x_canon::validate::check_arguments`), called through [`check`]; an action whose protocol
+//! declares no schema takes only `{}`. Its outcome is recorded on the argument request
+//! (`loom.run.CheckArguments`), and only a `Matched` request's selection is revalidated and
+//! proposed. The schema comes from the host's lookup alone, never from the model or the request.
+//!
+//! The check terminates on any schema and any value: Canon walks a schema with a stack of its own,
+//! refuses one nested past 32 levels as outside its dialect, and descends into a value only where
+//! the schema describes it, so its work is linear in the value's size and its depth at most the
+//! schema's. A value is read for it with `serde_json`, which refuses one nested past 128 levels.
+//! A mismatch names the failing JSON pointer and keyword and Canon's one-line reason, each cut to
+//! at most [`QUOTED_BYTES`] bytes, so it never carries a large value whole.
 
-use b10x_loom_commission::model::json::Value;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
-use crate::model::behaviour::{Generated, SelectionRecordStorage, SelectionStorage};
+use b10x_canon::validate::{ArgumentsRefused, check_arguments};
+use b10x_loom_commission::model::json::{Value, push_value};
+
+use crate::model::behaviour::{
+    ArgumentRequestStorage, ExternalCommand, Generated, SelectionRecordStorage, SelectionStorage,
+    TryContext, unmet_context,
+};
 use crate::model::obligation::UnmetObligation;
 use crate::model::run::obligations::{
-    OverruleSelectionBehavior, RecordSelectionBehavior, RequestArgumentsBehavior,
+    CheckArgumentsBehavior, OverruleSelectionBehavior, RecordSelectionBehavior,
+    RequestArgumentsBehavior,
 };
 use crate::model::run::{
-    AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestSnapshot,
-    ArgumentsRequested, CatalogueEntry, CatalogueId, OverruleSelection, OverruleSelectionOutcome,
-    RecordSelection, RecordSelectionOutcome, RequestArguments, RequestArgumentsOutcome,
-    RevalidateSelectionOutcome, SelectionId, SelectionNotFound, SelectionNotSelected,
-    SelectionRecordId, SelectionRecordSnapshot, SelectionSnapshot, SelectionState,
+    AnyArgumentRequest, ArgumentRequest, ArgumentRequestData, ArgumentRequestId,
+    ArgumentRequestSnapshot, ArgumentsRequested, CatalogueEntry, CatalogueId, CheckArguments,
+    CheckArgumentsOutcome, OverruleSelection, OverruleSelectionOutcome, RecordSelection,
+    RecordSelectionOutcome, RequestArguments, RequestArgumentsOutcome, RevalidateSelectionOutcome,
+    SelectionId, SelectionNotFound, SelectionNotSelected, SelectionRecordId,
+    SelectionRecordSnapshot, SelectionSnapshot, SelectionState,
 };
 
 /// What a generator is told besides the selected entry.
@@ -54,6 +77,215 @@ impl ArgumentGenerator for EmptyObjectArguments {
     }
 }
 
+/// How many bytes of a pointer or a reason a mismatch quotes.
+pub const QUOTED_BYTES: usize = 120;
+
+/// The argument schemas of the protocol a host runs, by action id: what the host hands
+/// [`crate::Loom::with_argument_schemas`], built from the protocol entry it runs
+/// (`loom_protocols::ProtocolEntry::argument_schemas`). An action with `None`, or one the lookup
+/// does not list, declares no schema and takes only `{}`. A later pair for an id replaces an
+/// earlier one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArgumentSchemas {
+    schemas: BTreeMap<String, Option<serde_json::Value>>,
+}
+
+impl ArgumentSchemas {
+    /// The schema the protocol declares for `action`; `None` when it declares none, or does not
+    /// list the action.
+    #[must_use]
+    pub fn schema(&self, action: &str) -> Option<&serde_json::Value> {
+        self.schemas.get(action).and_then(Option::as_ref)
+    }
+}
+
+impl FromIterator<(String, Option<serde_json::Value>)> for ArgumentSchemas {
+    fn from_iter<I: IntoIterator<Item = (String, Option<serde_json::Value>)>>(pairs: I) -> Self {
+        Self {
+            schemas: pairs.into_iter().collect(),
+        }
+    }
+}
+
+/// Why [`check`] refused one call's arguments. Every pointer and reason is cut to at most
+/// [`QUOTED_BYTES`] bytes, its control characters escaped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgumentMismatch {
+    /// The arguments do not satisfy the schema: Canon's first refusal, in document order.
+    Refused {
+        /// The RFC 6901 JSON Pointer into the arguments; empty for the whole document.
+        pointer: String,
+        /// The dialect keyword that refused.
+        keyword: &'static str,
+        /// Canon's reason.
+        reason: String,
+    },
+    /// The schema is outside Canon's argument-schema dialect: its first offence. No argument was
+    /// checked.
+    OutsideDialect {
+        /// The JSON Pointer inside the schema.
+        pointer: String,
+        /// Canon's reason.
+        reason: String,
+    },
+    /// An object of the arguments names a member twice. A reader keeps one of the two and an
+    /// effect port may read the other, so no schema is asked.
+    DuplicateMember {
+        /// The JSON Pointer of the member.
+        pointer: String,
+    },
+    /// The arguments are no JSON document `serde_json` reads (a number it cannot hold, or a value
+    /// nested past its limit).
+    Unreadable {
+        /// `serde_json`'s reason.
+        reason: String,
+    },
+}
+
+impl fmt::Display for ArgumentMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Refused {
+                pointer,
+                keyword,
+                reason,
+            } => write!(
+                f,
+                "arguments at `{pointer}` refused by `{keyword}`: {reason}"
+            ),
+            Self::OutsideDialect { pointer, reason } => write!(
+                f,
+                "the argument schema is outside Canon's argument-schema dialect at `{pointer}`: \
+                 {reason}; no argument was checked"
+            ),
+            Self::DuplicateMember { pointer } => {
+                write!(f, "arguments at `{pointer}` name a member twice")
+            }
+            Self::Unreadable { reason } => {
+                write!(f, "the arguments do not read as JSON: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ArgumentMismatch {}
+
+/// Checks one call's `arguments` against `schema`, the argument schema a protocol declares for
+/// the action (`None`: it declares none, so only `{}` passes), with Canon's
+/// `b10x_canon::validate::check_arguments`. Pure. Canon's first refusal is the mismatch.
+///
+/// # Errors
+///
+/// [`ArgumentMismatch::Refused`] for arguments the schema refuses,
+/// [`ArgumentMismatch::OutsideDialect`] for a schema outside Canon's dialect.
+pub fn check(
+    schema: Option<&serde_json::Value>,
+    arguments: &serde_json::Value,
+) -> Result<(), ArgumentMismatch> {
+    match check_arguments(schema, arguments) {
+        Ok(()) => Ok(()),
+        Err(ArgumentsRefused::Arguments(refusals)) => Err(refusals.first().map_or_else(
+            || ArgumentMismatch::Refused {
+                pointer: String::new(),
+                keyword: "type",
+                reason: "Canon refused the arguments and named no refusal".to_owned(),
+            },
+            |first| ArgumentMismatch::Refused {
+                pointer: quoted(&first.pointer),
+                keyword: first.keyword,
+                reason: quoted(&first.reason),
+            },
+        )),
+        Err(ArgumentsRefused::Schema(offences)) => {
+            let (pointer, reason) = offences.first().map_or_else(
+                || (String::new(), "Canon named no offence".to_owned()),
+                |(pointer, reason)| (quoted(pointer), quoted(reason)),
+            );
+            Err(ArgumentMismatch::OutsideDialect { pointer, reason })
+        }
+    }
+}
+
+/// [`check`] of arguments as Loom holds them: refused when an object names a member twice, else
+/// written with Commission's `json::push_value` and read with `serde_json::from_str`, so Loom
+/// rounds no number of its own, then checked.
+///
+/// # Errors
+///
+/// [`ArgumentMismatch::DuplicateMember`], [`ArgumentMismatch::Unreadable`], or what [`check`]
+/// returns.
+pub fn check_value(
+    schema: Option<&serde_json::Value>,
+    arguments: &Value,
+) -> Result<(), ArgumentMismatch> {
+    if let Some(pointer) = duplicate_member(arguments) {
+        return Err(ArgumentMismatch::DuplicateMember {
+            pointer: quoted(&pointer),
+        });
+    }
+    let mut text = String::new();
+    push_value(&mut text, arguments);
+    let read: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| ArgumentMismatch::Unreadable {
+            reason: quoted(&error.to_string()),
+        })?;
+    check(schema, &read)
+}
+
+/// The pointer of the first member an object of `value` names twice, walked with a stack of its
+/// own, so a deep value cannot overflow it.
+fn duplicate_member(value: &Value) -> Option<String> {
+    let mut stack = vec![(String::new(), value)];
+    while let Some((pointer, value)) = stack.pop() {
+        let token = |key: &str| key.replace('~', "~0").replace('/', "~1");
+        match value {
+            Value::Object(members) => {
+                let mut named = BTreeSet::new();
+                for (key, _) in members {
+                    if !named.insert(key.as_str()) {
+                        return Some(format!("{pointer}/{}", token(key)));
+                    }
+                }
+                for (key, member) in members.iter().rev() {
+                    stack.push((format!("{pointer}/{}", token(key)), member));
+                }
+            }
+            Value::Array(items) => {
+                for (index, item) in items.iter().enumerate().rev() {
+                    stack.push((format!("{pointer}/{index}"), item));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `text` with its control characters escaped, cut to at most [`QUOTED_BYTES`] bytes on a
+/// character boundary and marked `…` when cut.
+fn quoted(text: &str) -> String {
+    let escaped: String = text
+        .chars()
+        .flat_map(|character| {
+            let escape = character.is_control();
+            let shown: Vec<char> = if escape {
+                character.escape_default().collect()
+            } else {
+                vec![character]
+            };
+            shown
+        })
+        .collect();
+    if escaped.len() <= QUOTED_BYTES {
+        return escaped;
+    }
+    let mut end = QUOTED_BYTES - '…'.len_utf8();
+    while !escaped.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &escaped[..end])
+}
+
 /// The selections Loom made, the telemetry of each (`loom.run.SelectionRecord`), the argument
 /// requests that serve them and the outcome of every revalidation of them
 /// ([`crate::revalidation`]), in the order they were recorded. A selection, selection record or
@@ -64,6 +296,8 @@ pub struct RequestRecord {
     selection_records: Vec<SelectionRecordSnapshot>,
     argument_requests: Vec<ArgumentRequestSnapshot>,
     revalidations: Vec<RevalidateSelectionOutcome>,
+    argument_checks: Vec<CheckArgumentsOutcome>,
+    verdicts: Vec<(ArgumentRequestId, ArgumentVerdict)>,
 }
 
 impl RequestRecord {
@@ -339,6 +573,141 @@ impl RequestArgumentsBehavior for RequestRecord {
     }
 }
 
+/// What Loom found when it checked one argument request's arguments, staged on the record for
+/// `loom.run.CheckArguments` ([`RequestRecord::stage_verdict`]) to record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgumentVerdict {
+    /// The arguments satisfy the declared schema, or are `{}` for an action that declares none.
+    Matched,
+    /// The arguments were refused.
+    Mismatched {
+        /// Whether the protocol declares a schema for the action.
+        declared: bool,
+        /// Why, naming the action, the pointer and the keyword; never the whole value.
+        reason: String,
+    },
+}
+
+impl RequestRecord {
+    /// The outcome of every `loom.run.CheckArguments`, in the order they were made.
+    #[must_use]
+    pub fn argument_checks(&self) -> &[CheckArgumentsOutcome] {
+        &self.argument_checks
+    }
+
+    /// Stages `verdict` for the next `loom.run.CheckArguments` of `argument_request_id`, replacing
+    /// one staged before. The check takes it; a check with none staged is unmet and records
+    /// nothing.
+    pub fn stage_verdict(
+        &mut self,
+        argument_request_id: ArgumentRequestId,
+        verdict: ArgumentVerdict,
+    ) {
+        self.verdicts
+            .retain(|(staged, _)| *staged != argument_request_id);
+        self.verdicts.push((argument_request_id, verdict));
+    }
+}
+
+/// The record and the verdict staged for one check, as the storage and context ports of the
+/// generated `CheckArguments`.
+struct Checking<'r> {
+    record: &'r mut RequestRecord,
+    verdict: Option<ArgumentVerdict>,
+}
+
+impl ArgumentRequestStorage for Checking<'_> {
+    fn get(&self, identity: &ArgumentRequestId) -> Option<ArgumentRequestSnapshot> {
+        self.record
+            .argument_requests
+            .iter()
+            .find(|held| &held.data.argument_request_id == identity)
+            .cloned()
+    }
+
+    fn put(&mut self, snapshot: ArgumentRequestSnapshot) {
+        let requests = &mut self.record.argument_requests;
+        match requests
+            .iter_mut()
+            .find(|held| held.data.argument_request_id == snapshot.data.argument_request_id)
+        {
+            Some(held) => *held = snapshot,
+            None => requests.push(snapshot),
+        }
+    }
+
+    fn delete(&mut self, identity: &ArgumentRequestId) {
+        self.record
+            .argument_requests
+            .retain(|held| &held.data.argument_request_id != identity);
+    }
+
+    fn list(&self) -> Vec<ArgumentRequestSnapshot> {
+        self.record.argument_requests.clone()
+    }
+}
+
+impl TryContext for Checking<'_> {
+    /// The staged mismatch's reason; unanswered for a match or with nothing staged.
+    fn try_generate_string(&mut self) -> Result<String, UnmetObligation> {
+        match &self.verdict {
+            Some(ArgumentVerdict::Mismatched { reason, .. }) => Ok(reason.clone()),
+            _ => Err(unmet_context("loom.run.CheckArguments")),
+        }
+    }
+
+    /// `undeclared-not-empty` is taken for a staged mismatch of an action that declares no
+    /// schema, `mismatched` for one that declares one; with nothing staged, or for any other
+    /// command, the branch is unanswered and the check refused rather than decided by a default.
+    fn try_external(
+        &mut self,
+        command: ExternalCommand<'_>,
+        outcome: &'static str,
+    ) -> Result<bool, UnmetObligation> {
+        let ExternalCommand::LoomRunCheckArguments(_) = command else {
+            return Err(unmet_context("loom.run.CheckArguments"));
+        };
+        let declared = match &self.verdict {
+            None => return Err(unmet_context("loom.run.CheckArguments")),
+            Some(ArgumentVerdict::Matched) => return Ok(false),
+            Some(ArgumentVerdict::Mismatched { declared, .. }) => *declared,
+        };
+        match outcome {
+            "undeclared-not-empty" => Ok(!declared),
+            "mismatched" => Ok(declared),
+            _ => Err(unmet_context("loom.run.CheckArguments")),
+        }
+    }
+}
+
+/// `loom.run.CheckArguments`, generated, over the requests this record holds and the verdict
+/// staged for the one named ([`RequestRecord::stage_verdict`]): a mismatch moves a `Requested`
+/// request to `Mismatched` (`undeclared-not-empty` when the protocol declares no schema for the
+/// action, `mismatched` when it declares one), a match to `Matched`; a request the record does
+/// not hold, or one no longer `Requested`, is refused `wrong-state`. Both refusals are
+/// `external:`: the record holds neither the schema nor the arguments, and the verdict is Canon's
+/// ([`check_value`]). With nothing staged the check is unmet and records nothing; every other
+/// outcome is recorded ([`RequestRecord::argument_checks`]).
+impl CheckArgumentsBehavior for RequestRecord {
+    fn check_arguments(
+        &mut self,
+        input: CheckArguments,
+    ) -> Result<CheckArgumentsOutcome, UnmetObligation> {
+        let verdict = self
+            .verdicts
+            .iter()
+            .position(|(staged, _)| *staged == input.argument_request_id)
+            .map(|at| self.verdicts.remove(at).1);
+        let outcome = Generated::new(Checking {
+            record: self,
+            verdict,
+        })
+        .check_arguments(input)?;
+        self.argument_checks.push(outcome.clone());
+        Ok(outcome)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,6 +719,154 @@ mod tests {
 
     fn uuid(n: u32) -> Uuid {
         Uuid(format!("00000000-0000-4000-8000-{n:012x}"))
+    }
+
+    #[test]
+    fn check_passes_canons_refusal_through_with_its_pointer_and_keyword() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"limit": {"type": "integer"}}
+        });
+
+        let refused = check(Some(&schema), &serde_json::json!({"limit": "20"}));
+
+        let Err(ArgumentMismatch::Refused {
+            pointer, keyword, ..
+        }) = &refused
+        else {
+            panic!("not a refusal: {refused:?}");
+        };
+        assert_eq!(
+            (pointer.as_str(), *keyword),
+            ("/limit", "type"),
+            "{refused:?}"
+        );
+        assert_eq!(
+            check(Some(&schema), &serde_json::json!({"limit": 20})),
+            Ok(())
+        );
+        // Canon's order: a location's own refusals (`required` at ``) before its members'.
+        let required = serde_json::json!({
+            "type": "object",
+            "properties": {"limit": {"type": "integer"}, "name": {"type": "string"}},
+            "required": ["name"]
+        });
+        assert!(
+            matches!(
+                check(Some(&required), &serde_json::json!({"limit": "20"})),
+                Err(ArgumentMismatch::Refused { ref pointer, keyword: "required", .. }) if pointer.is_empty()
+            ),
+            "the first pair is the whole document's"
+        );
+    }
+
+    #[test]
+    fn a_schema_outside_canons_dialect_is_a_mismatch_naming_the_dialect() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"target": {"$ref": "#/$defs/target"}}
+        });
+
+        // The arguments would satisfy any schema of `target`: none is checked.
+        let refused = check(Some(&schema), &serde_json::json!({"target": 1}));
+
+        let Err(mismatch @ ArgumentMismatch::OutsideDialect { pointer, .. }) = &refused else {
+            panic!("not outside the dialect: {refused:?}");
+        };
+        assert!(pointer.starts_with("/properties/target"), "{pointer}");
+        assert!(
+            mismatch
+                .to_string()
+                .contains("outside Canon's argument-schema dialect"),
+            "{mismatch}"
+        );
+    }
+
+    #[test]
+    fn a_mismatch_quotes_at_most_120_bytes_of_the_value() {
+        let long = "x".repeat(4096);
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"note": {"type": "string", "maxLength": 1}},
+            "additionalProperties": false
+        });
+
+        for (label, arguments) in [
+            ("a long string", serde_json::json!({ "note": long })),
+            ("a long member name", serde_json::json!({ long.clone(): 1 })),
+        ] {
+            let refused = check(Some(&schema), &arguments).expect_err(label);
+            let ArgumentMismatch::Refused {
+                pointer, reason, ..
+            } = &refused
+            else {
+                panic!("{label}: not a refusal: {refused:?}");
+            };
+            assert!(pointer.len() <= QUOTED_BYTES, "{label}: {pointer}");
+            assert!(reason.len() <= QUOTED_BYTES, "{label}: {reason}");
+            let shown = refused.to_string();
+            assert!(
+                !shown.contains(&long[..=QUOTED_BYTES]),
+                "{label}: more than {QUOTED_BYTES} bytes of the value quoted"
+            );
+            assert!(shown.len() <= 3 * QUOTED_BYTES, "{label}: {}", shown.len());
+        }
+    }
+
+    #[test]
+    fn a_number_past_a_double_is_checked_as_this_build_holds_it() {
+        let held: serde_json::Value = serde_json::from_str("9007199254740992.5").expect("a number");
+        let arbitrary_precision = held.to_string() == "9007199254740992.5";
+        println!(
+            "arbitrary_precision: {}",
+            if arbitrary_precision { "on" } else { "off" }
+        );
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"n": {"type": "number", "maximum": 9_007_199_254_740_992_u64}}
+        });
+        let arguments: serde_json::Value =
+            serde_json::from_str(r#"{"n": 9007199254740992.5}"#).expect("the arguments");
+
+        let checked = check(Some(&schema), &arguments);
+
+        if arbitrary_precision {
+            assert!(
+                matches!(
+                    &checked,
+                    Err(ArgumentMismatch::Refused { keyword: "maximum", pointer, .. }) if pointer == "/n"
+                ),
+                "{checked:?}"
+            );
+        } else {
+            assert_eq!(checked, Ok(()));
+        }
+    }
+
+    /// A member named twice is refused before Canon reads the arguments: `serde_json` keeps the
+    /// last of the two, and `Value::member` the first.
+    #[test]
+    fn check_value_refuses_a_member_named_twice() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"limit": {"type": "integer"}}
+        });
+        let twice = Value::Object(vec![(
+            "outer".to_owned(),
+            Value::Object(vec![
+                ("limit".to_owned(), Value::Text("all".to_owned())),
+                ("limit".to_owned(), Value::Number("20".to_owned())),
+            ]),
+        )]);
+
+        assert_eq!(
+            check_value(Some(&schema), &twice),
+            Err(ArgumentMismatch::DuplicateMember {
+                pointer: "/outer/limit".to_owned()
+            })
+        );
+        let once = Value::Object(vec![("limit".to_owned(), Value::Number("20".to_owned()))]);
+        assert_eq!(check_value(Some(&schema), &once), Ok(()));
     }
 
     fn selected(id: u32) -> Selection<crate::model::run::selection_state::Selected> {
