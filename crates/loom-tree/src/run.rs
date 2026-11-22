@@ -792,6 +792,49 @@ fn waiting_actions<S: loom_governor::FallibleCaseStore>(
         .collect())
 }
 
+/// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
+/// and names a `handoff`: the text is what is decided, and `tree run` again is the command.
+fn handoffs<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    store_text: &str,
+) -> Result<Vec<NextDecision>, Refused> {
+    let frontier = governor
+        .frontier(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
+    Ok(frontier
+        .data()
+        .actions
+        .iter()
+        .filter(|action| action.status != ActionStatus::Blocked)
+        .filter_map(|action| {
+            let bound = bindings.actions.iter().find(|bound| {
+                bound.action == action.action && bound.executor.kind != Executor::Person
+            })?;
+            let text = bound.handoff.clone()?;
+            Some(NextDecision {
+                case: case.0.clone(),
+                kind: DecisionKind::Handoff,
+                action: Some(action.action.clone()),
+                capability: None,
+                decides: text,
+                subject: None,
+                revision: None,
+                path: None,
+                outcome: None,
+                command: vec![
+                    "b10x-loom".to_owned(),
+                    "tree".to_owned(),
+                    "run".to_owned(),
+                    "--store".to_owned(),
+                    store_text.to_owned(),
+                ],
+            })
+        })
+        .collect())
+}
+
 /// Why `case`, in which no step was taken, waits, and the decisions that let it go on.
 #[allow(clippy::too_many_arguments)]
 fn waits<S: loom_governor::FallibleCaseStore>(
@@ -888,6 +931,14 @@ fn waits<S: loom_governor::FallibleCaseStore>(
             });
         }
         return Ok((TreeStop::AwaitingPerson, decisions));
+    }
+    if decisions.is_empty() {
+        // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
+        // has done what it may, and a person continues from its text, then runs the tree again.
+        decisions = handoffs(governor, case, bindings, &store_text)?;
+        if !decisions.is_empty() {
+            return Ok((TreeStop::AwaitingPerson, decisions));
+        }
     }
     Ok(if decisions.is_empty() {
         (TreeStop::Stuck, decisions)

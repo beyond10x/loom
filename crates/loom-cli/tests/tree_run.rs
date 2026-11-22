@@ -1040,3 +1040,41 @@ fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
         stderr(&again)
     );
 }
+
+#[test]
+fn a_writer_with_a_handoff_waits_on_a_person_with_its_text() {
+    // The writer writes nothing and nothing sends it back: once it ran and the check found the
+    // route short, nothing is useful, and its handoff is the decision.
+    let tree = Tree::new("handoff");
+    let opened = tree.open_leg_with("tour-leg-handoff.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    for _ in 0..2 {
+        let waited = tree.run();
+        assert_eq!(
+            waited.status.code(),
+            Some(3),
+            "{}{}",
+            stdout(&waited),
+            stderr(&waited)
+        );
+        let waited = json(&waited);
+        assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+        let decision = &waited["decisions"][0];
+        assert_eq!(decision["kind"], "Handoff", "{waited}");
+        assert_eq!(decision["action"], "route.write", "{waited}");
+        assert_eq!(
+            decision["decides"],
+            "Add a second stop to route.txt, then run the tree again."
+        );
+        let store = tree.store().display().to_string();
+        assert_eq!(
+            decision["command"],
+            json!(["b10x-loom", "tree", "run", "--store", store])
+        );
+    }
+    let writes = log_lines(&tree, "root")
+        .iter()
+        .filter(|line| matches!(&line.event, RunLogEvent::ActionFinished(finished) if finished.action == "route.write"))
+        .count();
+    assert_eq!(writes, 1, "the writer runs once at its revision");
+}
