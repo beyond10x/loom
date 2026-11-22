@@ -1,0 +1,955 @@
+//! `tree run`: the tree driven on Commission's loop, one step of one case at a time, until the
+//! root is terminated through its one legitimate outcome or the tree waits.
+//!
+//! Each step is one [`run_until_blocked`] of one case with a step budget of one: the Loom executor
+//! over the [`DeterministicSelector`] and the governor's action facts, with the history the case's
+//! run log gives ([`LogHistory`]); the tree's authority ([`TreeAuthority`]); and the case's bound
+//! executors as its effect port ([`TreeEffects`]). Every selected action is revalidated by the
+//! loop against the case revision, the frontier and authority before its effect.
+//!
+//! Before each step the run asks the cancel handle, the step budget and the wall-time budget, in
+//! that order; any of them ends the run `BudgetSpent` before the step. A case whose completion
+//! gives exactly one legitimate outcome and in which no action is useful is terminated through it.
+//! A case in which nothing is useful waits: on authority (an admissible action whose capability no
+//! approval allows), on a person (an admissible action bound to `person`, or two legitimate
+//! outcomes to close between), or is stuck.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
+
+use b10x_loom_bindings::{PlacedRevisions, ProgramEffects, retry_records};
+use b10x_loom_commission::model::behaviour::Generated;
+use b10x_loom_commission::model::json::Value as CommissionJson;
+use b10x_loom_commission::model::responsibility::{
+    ActionStatus, AgentRevisionId, AuthorityContext, CaseId, Commission, CommissionData,
+    CommissionId, EffectOutcome, ExecutorOutcome, ExecutorOutcomeProposedAction, Frontier,
+    PrincipalId, ProposedActionArguments, RunId, RunOutcome, Unit, commission_state,
+    frontier_state,
+};
+use b10x_loom_commission::outcome::RunStore;
+use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
+use b10x_loom_commission::ports::executor::AgentExecutor;
+use b10x_loom_commission::ports::governor::Governor as _;
+use b10x_loom_commission::runtime::{LoopEnd, run_until_blocked};
+use b10x_loom_executor::selection::StepHistory as _;
+use b10x_loom_executor::{DeterministicSelector, EmptyObjectArguments, Loom};
+use b10x_loom_intake_slice::confinement::TestRunner;
+use b10x_loom_runlog::log_file_name;
+use loom::bindings::{BindingsDocument, Executor};
+use loom::runlog::{ActionFinished, Evaluated, RunLogEvent, RunLogLine, Stopped, Terminated};
+use loom::tree::{
+    ApprovalDecision, DecisionKind, NextDecision, TreeManifest, TreeRefusalReason, TreeRun,
+    TreeStop,
+};
+use loom_governor::{CanonGovernor, FileCaseStore};
+use loom_protocols::ProtocolCatalog;
+use sha2::{Digest as _, Sha256};
+
+use crate::approvals::read_approvals;
+use crate::context::{StepContext, derived_uuid};
+use crate::history::LogHistory;
+use crate::log::Logs;
+use crate::open::load;
+use crate::status::members;
+use crate::store::{existing_store, read_manifest, read_regular};
+use crate::{Refused, StoreLock, TreeAuthority, TreeTime, unreadable};
+
+/// The principal a tree's commission acts for.
+pub const TREE_PRINCIPAL: &str = "loom-tree";
+
+/// The principal a printed `tree approve` command names for a capability no `person` binding of
+/// the case holds.
+pub const DEFAULT_PRINCIPAL: &str = "operator";
+
+/// Called with each run-log line right after it is written, with the case whose log it is.
+pub trait RunObserver {
+    /// One line of `case`'s log, as written.
+    fn line(&mut self, case: &str, line: &RunLogLine);
+}
+
+impl<F: FnMut(&str, &RunLogLine)> RunObserver for F {
+    fn line(&mut self, case: &str, line: &RunLogLine) {
+        self(case, line);
+    }
+}
+
+/// How a run goes.
+#[derive(Clone)]
+pub struct RunSettings {
+    /// The most steps the run takes; `None` sets no bound.
+    pub max_steps: Option<i64>,
+    /// The most seconds of wall time the run takes before a step; `None` sets no bound.
+    pub max_wall_seconds: Option<i64>,
+    /// Where the run reads its instants.
+    pub time: TreeTime,
+    /// The runner every bound program of the tree starts through.
+    pub runner: Arc<dyn TestRunner>,
+}
+
+impl std::fmt::Debug for RunSettings {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("RunSettings")
+            .field("max_steps", &self.max_steps)
+            .field("max_wall_seconds", &self.max_wall_seconds)
+            .field("time", &self.time)
+            .field("runner", &self.runner.label())
+            .finish()
+    }
+}
+
+/// What a case of the run is.
+struct Held {
+    case: String,
+    bindings: BindingsDocument,
+}
+
+/// Runs the tree in `store` with `catalog` (see the module documentation). `observer` is given
+/// each run-log line as it is written; `cancel`, when set, ends the run before its next step.
+///
+/// # Errors
+/// [`Refused`]: `StoreInUse` naming the holder, `NotATree`, `LogRefused`, `BindingsRefused`,
+/// `ConfinementRefused` or `StoreUnreadable`.
+pub fn run_tree(
+    store: &Path,
+    catalog: &ProtocolCatalog,
+    settings: &RunSettings,
+    mut observer: Option<&mut dyn RunObserver>,
+    cancel: Option<&AtomicBool>,
+) -> Result<TreeRun, Refused> {
+    let store = existing_store(store)?;
+    read_manifest(&store)?;
+    let _held = StoreLock::acquire(&store)?;
+    let manifest = read_manifest(&store)?;
+    let workspace = PathBuf::from(&manifest.workspace);
+    let cases =
+        FileCaseStore::open(store.clone()).map_err(|error| unreadable("the case store", error))?;
+    let governor = CanonGovernor::new(cases)
+        .with_catalog(catalog)
+        .map_err(|error| {
+            Refused::new(
+                TreeRefusalReason::UnknownProtocol,
+                format!("the tree's catalog is refused: {error}"),
+            )
+        })?;
+    let logs = Logs::open(&store, settings.time.clone())?;
+    let started = Instant::now();
+    let wall = settings
+        .max_wall_seconds
+        .map(|seconds| (started, u64::try_from(seconds).unwrap_or(0)));
+    let mut steps = 0i64;
+    let mut emit = |case: &str, line: RunLogLine| {
+        if let Some(observer) = observer.as_deref_mut() {
+            observer.line(case, &line);
+        }
+    };
+
+    loop {
+        let held = tree_cases(&governor, &manifest.root, &manifest.bindings, catalog)?;
+        for case in &held {
+            logs.reconcile(&case.case)?;
+        }
+        let stop_before = if cancel.is_some_and(|cancel| cancel.load(Ordering::SeqCst)) {
+            Some("the run was cancelled".to_owned())
+        } else if settings.max_steps.is_some_and(|max| steps >= max) {
+            Some(format!("the run took its {steps} steps"))
+        } else if wall.is_some_and(|(started, seconds)| started.elapsed().as_secs() >= seconds) {
+            Some(format!(
+                "the run's {} s of wall time are spent",
+                settings.max_wall_seconds.unwrap_or_default()
+            ))
+        } else {
+            None
+        };
+        // The deepest open case first: every open child before its parent's next step.
+        let Some(case) = held
+            .iter()
+            .rev()
+            .find(|case| !terminated(&store, &case.case))
+        else {
+            return Ok(TreeRun {
+                stop: TreeStop::Terminal,
+                case: manifest.root.clone(),
+                steps,
+                decisions: Vec::new(),
+                detail: None,
+            });
+        };
+        if let Some(detail) = stop_before {
+            let line = logs.append(
+                &case.case,
+                RunLogEvent::Stopped(Stopped {
+                    stop: "BudgetSpent".to_owned(),
+                    next: Vec::new(),
+                }),
+            )?;
+            emit(&case.case, line);
+            return Ok(TreeRun {
+                stop: TreeStop::BudgetSpent,
+                case: case.case.clone(),
+                steps,
+                decisions: Vec::new(),
+                detail: Some(detail),
+            });
+        }
+        let id = CaseId(case.case.clone());
+        // What the workspace holds now: a file changed between two steps or two runs moves its
+        // artifact before the case is evaluated.
+        PlacedRevisions::new(&governor, &case.bindings, &workspace)
+            .refresh(&id)
+            .map_err(|error| {
+                Refused::new(TreeRefusalReason::StoreUnreadable, error.to_string())
+                    .case(case.case.clone())
+            })?;
+        if let Some(line) = evaluated(&governor, &logs, &store, &case.case)? {
+            emit(&case.case, line);
+        }
+        let legitimate = legitimate_outcomes(&governor, &id)?;
+        let lines = read_lines(&store, &case.case)?;
+        let due = due_actions(&governor, &id, &case.bindings)?;
+        let revision = governor
+            .current_revision(&id)
+            .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
+        let history = LogHistory::new(&lines, revision, due);
+        let before: BTreeSet<String> = evidence_ids(&governor, &id)?;
+        let effects = TreeEffects::new(
+            &governor,
+            &id,
+            &case.bindings,
+            &workspace,
+            &store,
+            &settings.runner,
+        )?;
+        let selector = DeterministicSelector::new(id.clone(), &governor, &history);
+        let executor = Loom::new(selector, EmptyObjectArguments, "Run the tree's case.")
+            .with_governor(&governor)
+            .with_instance(format!("tree-{}", case.case));
+        let ordinal = i64::try_from(lines.len()).unwrap_or(i64::MAX);
+        let end = drive(
+            &governor,
+            &store,
+            &id,
+            revision,
+            ordinal,
+            &executor,
+            &effects,
+            &settings.time,
+            wall,
+        )?;
+
+        if let (Some(request), Some(outcome)) = (end.admitted.last(), end.effects.last()) {
+            steps += 1;
+            let after = evidence_ids(&governor, &id)?;
+            let (exit, refusal, blob_digest) = effect_summary(outcome);
+            let line = logs.append(
+                &case.case,
+                RunLogEvent::ActionFinished(ActionFinished {
+                    action: request.action.clone(),
+                    exit,
+                    refusal,
+                    blob_digest,
+                    evidence: after.difference(&before).cloned().collect(),
+                    revisions: Vec::new(),
+                }),
+            )?;
+            emit(&case.case, line);
+            continue;
+        }
+
+        // The deterministic selector takes only admissible actions. One that awaits approval is
+        // proposed once `tree approve` allowed its capability for the case at this revision; the
+        // loop revalidates it and asks the tree's authority, as for any other request.
+        let approvals = TreeAuthority::new(BTreeMap::from([(
+            case.case.clone(),
+            read_approvals(&store, &case.case)?,
+        )]));
+        let approved = waiting_actions(&governor, &id, &case.bindings, &history, revision)?
+            .into_iter()
+            .find(|(action, capability, kind)| {
+                *kind != Executor::Person
+                    && effects.performs(action)
+                    && capability.as_deref().is_some_and(|capability| {
+                        approvals.decision(&case.case, capability, revision)
+                            == Some(ApprovalDecision::Allow)
+                    })
+            });
+        if let Some((action, _, _)) = approved {
+            let end = drive(
+                &governor,
+                &store,
+                &id,
+                revision,
+                ordinal + 1,
+                &Propose(action.clone()),
+                &effects,
+                &settings.time,
+                wall,
+            )?;
+            if let Some(outcome) = end.effects.last() {
+                steps += 1;
+                let after = evidence_ids(&governor, &id)?;
+                let (exit, refusal, blob_digest) = effect_summary(outcome);
+                let line = logs.append(
+                    &case.case,
+                    RunLogEvent::ActionFinished(ActionFinished {
+                        action,
+                        exit,
+                        refusal,
+                        blob_digest,
+                        evidence: after.difference(&before).cloned().collect(),
+                        revisions: Vec::new(),
+                    }),
+                )?;
+                emit(&case.case, line);
+                continue;
+            }
+        }
+
+        // No step was taken: the case completes, waits or is stuck.
+        let completed = matches!(end.outcome, RunOutcome::Completed(_));
+        if legitimate.len() == 1
+            && (completed
+                || waiting_actions(&governor, &id, &case.bindings, &history, revision)?.is_empty())
+        {
+            let line = logs.append(
+                &case.case,
+                RunLogEvent::Terminated(Terminated {
+                    reason: legitimate[0].clone(),
+                }),
+            )?;
+            emit(&case.case, line);
+            if case.case == manifest.root {
+                return Ok(TreeRun {
+                    stop: TreeStop::Terminal,
+                    case: case.case.clone(),
+                    steps,
+                    decisions: Vec::new(),
+                    detail: Some(legitimate[0].clone()),
+                });
+            }
+            continue;
+        }
+        let (stop, decisions) = waits(
+            &governor,
+            &id,
+            &case.bindings,
+            &legitimate,
+            &store,
+            &workspace,
+            revision,
+            &history,
+        )?;
+        let line = logs.append(
+            &case.case,
+            RunLogEvent::Stopped(Stopped {
+                stop: format!("{stop:?}"),
+                next: decisions
+                    .iter()
+                    .map(|decision| decision.decides.clone())
+                    .collect(),
+            }),
+        )?;
+        emit(&case.case, line);
+        return Ok(TreeRun {
+            stop,
+            case: case.case.clone(),
+            steps,
+            decisions,
+            detail: None,
+        });
+    }
+}
+
+/// The cases of the tree, the root first and each before its children, with the bindings each
+/// runs under.
+fn tree_cases<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    root: &str,
+    root_bindings: &str,
+    catalog: &ProtocolCatalog,
+) -> Result<Vec<Held>, Refused> {
+    let mut held = Vec::new();
+    for member in members(governor, root)? {
+        let id = CaseId(member.case.clone());
+        let protocol = governor
+            .protocol(&id)
+            .map_err(|error| unreadable(format!("case {}", member.case), format!("{error:?}")))?;
+        let entry = catalog.get(&protocol).ok_or_else(|| {
+            Refused::new(
+                TreeRefusalReason::UnknownProtocol,
+                format!("the tree's catalog holds no protocol registered as {protocol}"),
+            )
+            .case(member.case.clone())
+        })?;
+        let file = PathBuf::from(root_bindings);
+        let loaded = load(&file, entry.name(), &entry.model)?;
+        held.push(Held {
+            case: member.case,
+            bindings: loaded.document,
+        });
+    }
+    Ok(held)
+}
+
+/// The lines of `case`'s log in `store`.
+fn read_lines(store: &Path, case: &str) -> Result<Vec<RunLogLine>, Refused> {
+    let bytes = read_regular(&store.join(log_file_name(case)))?.unwrap_or_default();
+    b10x_loom_runlog::verify(&bytes).map_err(|refused| {
+        Refused::new(
+            TreeRefusalReason::LogRefused,
+            format!(
+                "line {}: {:?}: {}",
+                refused.line, refused.refusal, refused.detail
+            ),
+        )
+        .case(case)
+    })
+}
+
+/// Whether `case`'s log holds its `terminated` line.
+fn terminated(store: &Path, case: &str) -> bool {
+    read_lines(store, case).is_ok_and(|lines| {
+        lines
+            .iter()
+            .any(|line| matches!(line.event, RunLogEvent::Terminated(_)))
+    })
+}
+
+/// Appends `evaluated` to `case`'s log when the case revision or the decision differs from the
+/// last `evaluated` line's.
+fn evaluated<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    store: &Path,
+    case: &str,
+) -> Result<Option<RunLogLine>, Refused> {
+    let id = CaseId(case.to_owned());
+    let frontier = governor
+        .frontier(&id)
+        .map_err(|error| unreadable(format!("case {case}"), format!("{error:?}")))?;
+    let data = frontier.data();
+    let document = governor
+        .decision_document(&id, &data.frontier_id)
+        .map_err(|error| unreadable(format!("case {case}"), format!("{error:?}")))?;
+    let digest = document.as_ref().map_or_else(String::new, |document| {
+        let bytes = serde_json::to_vec(&plain(document)).unwrap_or_default();
+        hex(&Sha256::digest(&bytes))
+    });
+    let last = read_lines(store, case)?
+        .into_iter()
+        .rev()
+        .find_map(|line| match line.event {
+            RunLogEvent::Evaluated(evaluated) => Some(evaluated),
+            _ => None,
+        });
+    if last.as_ref().is_some_and(|last| {
+        last.case_revision == data.case_revision && last.decision_digest == digest
+    }) {
+        return Ok(None);
+    }
+    logs.append(
+        case,
+        RunLogEvent::Evaluated(Evaluated {
+            case_revision: data.case_revision,
+            frontier: data.frontier_id.0.0.clone(),
+            decision_digest: digest,
+        }),
+    )
+    .map(Some)
+}
+
+/// The outcomes Canon reports `legitimate` for `case` now, in the decision's order.
+fn legitimate_outcomes<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+) -> Result<Vec<String>, Refused> {
+    let failed = |error: b10x_loom_commission::model::responsibility::GovernorError| {
+        unreadable(format!("case {}", case.0), format!("{error:?}"))
+    };
+    let frontier = governor.frontier(case).map_err(failed)?;
+    let Some(document) = governor
+        .decision_document(case, &frontier.data().frontier_id)
+        .map_err(failed)?
+    else {
+        return Ok(Vec::new());
+    };
+    let outcomes = plain(&document);
+    Ok(outcomes
+        .get("outcomes")
+        .and_then(serde_json::Value::as_object)
+        .into_iter()
+        .flatten()
+        .filter(|(_, entry)| entry["status"] == "legitimate")
+        .map(|(outcome, _)| outcome.clone())
+        .collect())
+}
+
+/// The actions due again whatever their history: each writer with a retry record.
+fn due_actions<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+) -> Result<BTreeSet<String>, Refused> {
+    let mut due = BTreeSet::new();
+    for binding in &bindings.actions {
+        let records = retry_records(governor, case, binding)
+            .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
+        if !records.is_empty() {
+            due.insert(binding.action.clone());
+        }
+    }
+    Ok(due)
+}
+
+/// The ids of the records `case` holds.
+fn evidence_ids<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+) -> Result<BTreeSet<String>, Refused> {
+    Ok(governor
+        .evidence(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?
+        .into_iter()
+        .map(|record| record.evidence_id.0.0)
+        .collect())
+}
+
+/// The exit, the refusal and the blob digest an effect's outcome names: an exit or a refusal,
+/// exactly one, as an `action finished` line holds.
+fn effect_summary(outcome: &EffectOutcome) -> (Option<i64>, Option<String>, Option<String>) {
+    match outcome {
+        EffectOutcome::Performed(performed) => {
+            let report = plain_commission(&performed.report);
+            let blob = report["blob_sha256"]
+                .as_str()
+                .or_else(|| report["run"]["blob_sha256"].as_str())
+                .map(str::to_owned);
+            let Some(run) = report.get("run") else {
+                // An effect that starts no program (a person's, an opening, a copy) ended.
+                return (Some(0), None, blob);
+            };
+            match run["exit"].as_i64() {
+                Some(exit) => (Some(exit), None, blob),
+                None => {
+                    let refusal = run["runner_refusal"].as_str().map_or_else(
+                        || {
+                            if run["timed_out"].as_bool() == Some(true) {
+                                "timed out".to_owned()
+                            } else {
+                                "ended with no exit".to_owned()
+                            }
+                        },
+                        str::to_owned,
+                    );
+                    (None, Some(refusal), blob)
+                }
+            }
+        }
+        EffectOutcome::Refused(refused) => (None, Some(refused.reason.clone()), None),
+        EffectOutcome::Pending(_) => (None, Some("pending".to_owned()), None),
+    }
+}
+
+/// The actions of `case` a person or an approval would let go on: admissible or awaiting approval,
+/// bound to a person or under a capability, and not taken at `revision` unless due again.
+fn waiting_actions<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    history: &LogHistory,
+    revision: i64,
+) -> Result<Vec<(String, Option<String>, Executor)>, Refused> {
+    let frontier = governor
+        .frontier(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
+    Ok(frontier
+        .data()
+        .actions
+        .iter()
+        .filter(|action| action.status != ActionStatus::Blocked)
+        .filter(|action| {
+            history.due(&action.action).unwrap_or(true)
+                || !history
+                    .performed_at(&action.action, revision)
+                    .unwrap_or(false)
+        })
+        .filter_map(|action| {
+            let bound = bindings
+                .actions
+                .iter()
+                .find(|bound| bound.action == action.action)?;
+            let waits = bound.executor.kind == Executor::Person || action.capability.is_some();
+            waits.then(|| {
+                (
+                    action.action.clone(),
+                    action.capability.clone(),
+                    bound.executor.kind,
+                )
+            })
+        })
+        .collect())
+}
+
+/// Why `case`, in which no step was taken, waits, and the decisions that let it go on.
+#[allow(clippy::too_many_arguments)]
+fn waits<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    legitimate: &[String],
+    store: &Path,
+    workspace: &Path,
+    revision: i64,
+    history: &LogHistory,
+) -> Result<(TreeStop, Vec<NextDecision>), Refused> {
+    let store_text = store.display().to_string();
+    let mut decisions = Vec::new();
+    let mut person = false;
+    for (action, capability, kind) in waiting_actions(governor, case, bindings, history, revision)?
+    {
+        let bound = bindings.actions.iter().find(|bound| bound.action == action);
+        let subject = bound
+            .and_then(|bound| bound.evidence.first())
+            .map(|entry| entry.subject.clone());
+        let path = subject.as_ref().and_then(|subject| {
+            bindings
+                .artifacts
+                .iter()
+                .find(|placed| placed.artifact == *subject)
+                .map(|placed| workspace.join(&placed.path).display().to_string())
+        });
+        let subject_revision = subject.as_ref().and_then(|subject| {
+            governor
+                .revisions(case)
+                .ok()
+                .and_then(|revisions| revisions.get(subject).cloned())
+        });
+        let principal = bound
+            .and_then(|bound| bound.executor.principal.clone())
+            .unwrap_or_else(|| DEFAULT_PRINCIPAL.to_owned());
+        let mut command = vec![
+            "b10x-loom".to_owned(),
+            "tree".to_owned(),
+            "approve".to_owned(),
+            "--store".to_owned(),
+            store_text.clone(),
+            "--case".to_owned(),
+            case.0.clone(),
+        ];
+        if let Some(capability) = &capability {
+            command.extend(["--capability".to_owned(), capability.clone()]);
+        }
+        command.extend(["--principal".to_owned(), principal]);
+        let kind = if kind == Executor::Person {
+            person = true;
+            command.extend(["--action".to_owned(), action.clone()]);
+            DecisionKind::ApproveAction
+        } else {
+            DecisionKind::Approve
+        };
+        decisions.push(NextDecision {
+            case: case.0.clone(),
+            kind,
+            action: Some(action.clone()),
+            capability,
+            decides: format!("{action} of case {} at revision {revision}", case.0),
+            subject,
+            revision: subject_revision,
+            path,
+            outcome: None,
+            command,
+        });
+    }
+    if decisions.is_empty() && legitimate.len() > 1 {
+        for outcome in legitimate {
+            decisions.push(NextDecision {
+                case: case.0.clone(),
+                kind: DecisionKind::Close,
+                action: None,
+                capability: None,
+                decides: format!("close case {} through {outcome}", case.0),
+                subject: None,
+                revision: None,
+                path: None,
+                outcome: Some(outcome.clone()),
+                command: vec![
+                    "b10x-loom".to_owned(),
+                    "tree".to_owned(),
+                    "close".to_owned(),
+                    "--store".to_owned(),
+                    store_text.clone(),
+                    "--case".to_owned(),
+                    case.0.clone(),
+                    "--outcome".to_owned(),
+                    outcome.clone(),
+                ],
+            });
+        }
+        return Ok((TreeStop::AwaitingPerson, decisions));
+    }
+    Ok(if decisions.is_empty() {
+        (TreeStop::Stuck, decisions)
+    } else if person {
+        (TreeStop::AwaitingPerson, decisions)
+    } else {
+        (TreeStop::AwaitingAuthority, decisions)
+    })
+}
+
+/// The effect port of one case: its `program` bindings through [`ProgramEffects`]. A `person`
+/// action is never performed by a run.
+pub(crate) struct TreeEffects<'a, S: loom_governor::FallibleCaseStore> {
+    programs: ProgramEffects<'a, S>,
+}
+
+impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
+    fn new(
+        governor: &'a CanonGovernor<S>,
+        case: &CaseId,
+        bindings: &'a BindingsDocument,
+        workspace: &Path,
+        store: &Path,
+        runner: &Arc<dyn TestRunner>,
+    ) -> Result<Self, Refused> {
+        let programs = ProgramEffects::new(
+            governor,
+            case.clone(),
+            bindings,
+            workspace,
+            store,
+            Some(Arc::clone(runner)),
+        )
+        .map_err(|error| {
+            Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())
+                .case(case.0.clone())
+        })?;
+        Ok(Self { programs })
+    }
+}
+
+impl<S: loom_governor::FallibleCaseStore> EffectPort for TreeEffects<'_, S> {
+    fn performs(&self, action: &str) -> bool {
+        self.programs.performs(action)
+    }
+
+    fn invoke(
+        &self,
+        commission: &Commission<commission_state::Assigned>,
+        request: &AdmittedRequest,
+    ) -> Result<EffectOutcome, EffectError> {
+        self.programs.invoke(commission, request)
+    }
+}
+
+/// `value` as a `serde_json` value.
+pub(crate) fn plain(value: &loom::json::Value) -> serde_json::Value {
+    use loom::json::Value;
+    match value {
+        Value::Null => serde_json::Value::Null,
+        Value::Bool(value) => serde_json::Value::Bool(*value),
+        Value::Number(spelling) => {
+            serde_json::from_str(spelling).unwrap_or(serde_json::Value::Null)
+        }
+        Value::Text(text) => serde_json::Value::String(text.clone()),
+        Value::Array(items) => serde_json::Value::Array(items.iter().map(plain).collect()),
+        Value::Object(members) => serde_json::Value::Object(
+            members
+                .iter()
+                .map(|(name, member)| (name.clone(), plain(member)))
+                .collect(),
+        ),
+    }
+}
+
+/// A Commission `value` as a `serde_json` value.
+pub(crate) fn plain_commission(value: &CommissionJson) -> serde_json::Value {
+    match value {
+        CommissionJson::Null => serde_json::Value::Null,
+        CommissionJson::Bool(value) => serde_json::Value::Bool(*value),
+        CommissionJson::Number(spelling) => {
+            serde_json::from_str(spelling).unwrap_or(serde_json::Value::Null)
+        }
+        CommissionJson::Text(text) => serde_json::Value::String(text.clone()),
+        CommissionJson::Array(items) => {
+            serde_json::Value::Array(items.iter().map(plain_commission).collect())
+        }
+        CommissionJson::Object(members) => serde_json::Value::Object(
+            members
+                .iter()
+                .map(|(name, member)| (name.clone(), plain_commission(member)))
+                .collect(),
+        ),
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// One step of `case` on Commission's loop: `executor` proposes, the tree's authority over the
+/// approvals the store holds for the case decides, and `effects` performs. The ids of the step are
+/// derived from the case, its revision and `ordinal` (the lines its log holds), so two runs from
+/// the same store give the same ids.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn drive<S, E, F>(
+    governor: &CanonGovernor<S>,
+    store: &Path,
+    case: &CaseId,
+    revision: i64,
+    ordinal: i64,
+    executor: &E,
+    effects: &F,
+    time: &TreeTime,
+    wall: Option<(Instant, u64)>,
+) -> Result<LoopEnd, Refused>
+where
+    S: loom_governor::FallibleCaseStore,
+    E: AgentExecutor + ?Sized,
+    F: EffectPort + ?Sized,
+{
+    let authority = TreeAuthority::new(BTreeMap::from([(
+        case.0.clone(),
+        read_approvals(store, &case.0)?,
+    )]));
+    let instant = time.now()?;
+    let mut context = StepContext::new(
+        &case.0,
+        revision,
+        ordinal,
+        time.clone(),
+        b10x_loom_commission::model::primitives::Timestamp(instant.0),
+        wall,
+    );
+    let commission = Commission::new(CommissionData {
+        commission_id: CommissionId(derived_uuid(&["commission", &case.0, &ordinal.to_string()])),
+        agent_revision_id: AgentRevisionId(derived_uuid(&["agent", TREE_PRINCIPAL])),
+        case_id: case.clone(),
+        principal: PrincipalId(TREE_PRINCIPAL.to_owned()),
+        authority_context: AuthorityContext(CommissionJson::Null),
+    });
+    let run_case = case.0.clone();
+    let mut runs = Generated::new(RunStore::new(move || {
+        RunId(derived_uuid(&["run", &run_case, &ordinal.to_string()]))
+    }));
+    run_until_blocked(
+        governor,
+        executor,
+        &authority,
+        effects,
+        &commission,
+        &mut runs,
+        &mut context,
+    )
+    .map_err(|error| unreadable(format!("the loop of case {}", case.0), format!("{error:?}")))
+}
+
+/// The executor of `tree approve --action`: it proposes its one action while the frontier lists it.
+pub(crate) struct Propose(pub(crate) String);
+
+impl AgentExecutor for Propose {
+    fn run(
+        &self,
+        _commission: &Commission<commission_state::Assigned>,
+        frontier: &Frontier<frontier_state::Issued>,
+    ) -> ExecutorOutcome {
+        if frontier
+            .data()
+            .actions
+            .iter()
+            .any(|listed| listed.action == self.0)
+        {
+            ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+                action: self.0.clone(),
+                arguments: ProposedActionArguments(CommissionJson::Object(Vec::new())),
+            })
+        } else {
+            ExecutorOutcome::NoUsefulAction(Unit(true))
+        }
+    }
+}
+
+/// The bindings document `case` of the tree runs under.
+///
+/// # Errors
+/// `CaseNotInTree`, or as the tree's bindings files are read.
+pub(crate) fn case_bindings<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    manifest: &TreeManifest,
+    catalog: &ProtocolCatalog,
+    case: &str,
+) -> Result<BindingsDocument, Refused> {
+    tree_cases(governor, &manifest.root, &manifest.bindings, catalog)?
+        .into_iter()
+        .find(|held| held.case == case)
+        .map(|held| held.bindings)
+        .ok_or_else(|| {
+            Refused::new(
+                TreeRefusalReason::CaseNotInTree,
+                format!("the tree rooted at {} holds no such case", manifest.root),
+            )
+            .case(crate::time::cut(case))
+        })
+}
+
+/// One step of `case` in which `action` is proposed and `effects` performs it, as the line the
+/// case's log gains.
+///
+/// # Errors
+/// `NotAPersonAction` when the loop does not perform the action, naming why.
+pub(crate) fn one_step<S, F>(
+    governor: &CanonGovernor<S>,
+    store: &Path,
+    case: &CaseId,
+    action: &str,
+    effects: &F,
+    time: &TreeTime,
+) -> Result<ActionFinished, Refused>
+where
+    S: loom_governor::FallibleCaseStore,
+    F: EffectPort + ?Sized,
+{
+    let revision = governor
+        .current_revision(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
+    let ordinal = i64::try_from(read_lines(store, &case.0)?.len()).unwrap_or(i64::MAX);
+    let before = evidence_ids(governor, case)?;
+    let end = drive(
+        governor,
+        store,
+        case,
+        revision,
+        ordinal,
+        &Propose(action.to_owned()),
+        effects,
+        time,
+        None,
+    )?;
+    match end.effects.last() {
+        Some(outcome @ EffectOutcome::Performed(_)) => {
+            let after = evidence_ids(governor, case)?;
+            let (exit, refusal, blob_digest) = effect_summary(outcome);
+            Ok(ActionFinished {
+                action: action.to_owned(),
+                exit,
+                refusal,
+                blob_digest,
+                evidence: after.difference(&before).cloned().collect(),
+                revisions: Vec::new(),
+            })
+        }
+        Some(EffectOutcome::Refused(refused)) => Err(Refused::new(
+            TreeRefusalReason::NotAPersonAction,
+            refused.reason.clone(),
+        )
+        .case(case.0.clone())
+        .action(action.to_owned())),
+        _ => Err(Refused::new(
+            TreeRefusalReason::NotAPersonAction,
+            format!("the loop did not perform the action: {:?}", end.outcome),
+        )
+        .case(case.0.clone())
+        .action(action.to_owned())),
+    }
+}

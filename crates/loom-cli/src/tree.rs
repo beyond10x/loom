@@ -7,24 +7,31 @@
 //! move the cursor or start a line.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
+use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner, SubstrateRunner, TestRunner,
+};
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
-    ApproveRequest, OpenRequest, Refused, TreeTime, approve as record, open_tree, refusal_json,
-    status_json, tree_status, verify_json, verify_tree,
+    ApproveRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record, open_tree,
+    refusal_json, run_json, run_tree, status_json, tree_status, verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
 
 use crate::{
-    TREE_LOG_FAILED, TREE_REFUSED, TreeApproveArgs, TreeCommand, TreeOpenArgs, TreeStoreArgs,
+    TREE_LOG_FAILED, TREE_REFUSED, TreeApproveArgs, TreeCommand, TreeConfinement, TreeOpenArgs,
+    TreeRunArgs, TreeStoreArgs, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
 pub fn command(command: &TreeCommand) -> u8 {
     let ended = match command {
         TreeCommand::Open(arguments) => open(arguments),
+        TreeCommand::Run(arguments) => run(arguments),
         TreeCommand::Approve(arguments) => approve(arguments),
         TreeCommand::Status(arguments) => status(arguments),
         TreeCommand::Verify(arguments) => verify(arguments),
@@ -102,6 +109,85 @@ fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
     Ok(0)
 }
 
+/// The runner of `confinement`: `local` opened for the reason the `--unconfined-bindings` flag
+/// gives, the one reason the bound-program port admits; `substrate` its linux adapter.
+fn tree_runner(confinement: TreeConfinement) -> Result<Arc<dyn TestRunner>, Refused> {
+    match confinement {
+        TreeConfinement::Substrate => Ok(Arc::new(SubstrateRunner::new(None))),
+        TreeConfinement::Local => EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Local,
+            local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+            cgroup_root: None,
+        })
+        .map(|runner| Arc::new(runner) as Arc<dyn TestRunner>)
+        .map_err(|error| {
+            Refused::new(
+                b10x_loom_tree::model::TreeRefusalReason::ConfinementRefused,
+                error.to_string(),
+            )
+        }),
+    }
+}
+
+fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
+    let time = TreeTime::from_flag(arguments.at.as_deref())?;
+    let catalog = host_catalog()?;
+    let settings = RunSettings {
+        max_steps: arguments.max_steps,
+        max_wall_seconds: arguments.max_wall_seconds,
+        time,
+        runner: tree_runner(arguments.confinement)?,
+    };
+    let ran = run_tree(
+        &resolved(&arguments.store)?,
+        &catalog,
+        &settings,
+        None,
+        None,
+    )?;
+    println!("{}", printable(&run_json(&ran).to_string()));
+    for decision in &ran.decisions {
+        eprintln!(
+            "b10x-loom: tree waits: case {}: {}",
+            printable(&decision.case),
+            printable(&decision.decides)
+        );
+        eprintln!(
+            "  run: {}",
+            printable(
+                &decision
+                    .command
+                    .iter()
+                    .map(|word| shell_word(word))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
+        );
+    }
+    if let Some(detail) = &ran.detail {
+        eprintln!(
+            "b10x-loom: tree run: {:?}: case {}: {}",
+            ran.stop,
+            printable(&ran.case),
+            printable(detail)
+        );
+    }
+    Ok(tree_run_exit_status(ran.stop))
+}
+
+/// `word` as one word of a POSIX shell: bare when it holds only safe characters, else quoted.
+fn shell_word(word: &str) -> String {
+    let safe = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./@=:,+".contains(c));
+    if safe {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', r"'\''"))
+    }
+}
+
 fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     let catalog = host_catalog()?;
@@ -116,6 +202,7 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
         } else {
             ApprovalDecision::Allow
         },
+        action: arguments.action.as_deref(),
         time,
         catalog: &catalog,
     })?;

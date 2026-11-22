@@ -1,7 +1,10 @@
 //! The JSON documents the tree commands print, member for member as `loom.tree` declares them;
 //! an absent optional member is left out, and an enum is its variant's name.
 
-use loom::tree::{CaseStatus, LogFailure, TreeProtocol, TreeRefusal, TreeStatus, TreeVerify};
+use loom::tree::{
+    CaseStatus, LogFailure, NextDecision, TreeProtocol, TreeRefusal, TreeRun, TreeStatus,
+    TreeVerify,
+};
 use serde_json::{Map, Value, json};
 
 fn put(object: &mut Map<String, Value>, name: &str, value: Option<Value>) {
@@ -80,5 +83,55 @@ pub fn verify_json(verified: &TreeVerify) -> Value {
         "failure",
         verified.failure.as_ref().map(failure_json),
     );
+    Value::Object(object)
+}
+
+/// One decision a waiting tree names, as one JSON object.
+pub fn decision_json(decision: &NextDecision) -> Value {
+    let mut object = Map::new();
+    object.insert("case".into(), json!(decision.case));
+    object.insert("kind".into(), json!(format!("{:?}", decision.kind)));
+    put(
+        &mut object,
+        "action",
+        decision.action.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "capability",
+        decision.capability.clone().map(Value::from),
+    );
+    object.insert("decides".into(), json!(decision.decides));
+    put(
+        &mut object,
+        "subject",
+        decision.subject.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "revision",
+        decision.revision.clone().map(Value::from),
+    );
+    put(&mut object, "path", decision.path.clone().map(Value::from));
+    put(
+        &mut object,
+        "outcome",
+        decision.outcome.clone().map(Value::from),
+    );
+    object.insert("command".into(), json!(decision.command));
+    Value::Object(object)
+}
+
+/// `run` as one JSON object.
+pub fn run_json(run: &TreeRun) -> Value {
+    let mut object = Map::new();
+    object.insert("stop".into(), json!(format!("{:?}", run.stop)));
+    object.insert("case".into(), json!(run.case));
+    object.insert("steps".into(), json!(run.steps));
+    object.insert(
+        "decisions".into(),
+        Value::Array(run.decisions.iter().map(decision_json).collect()),
+    );
+    put(&mut object, "detail", run.detail.clone().map(Value::from));
     Value::Object(object)
 }

@@ -268,6 +268,10 @@ pub enum TreeCommand {
     /// loom.bindings/1 file and the initial artifact revisions.
     #[command(after_help = TREE_OPEN_HELP)]
     Open(TreeOpenArgs),
+    /// Drive the tree: one step of one case at a time on Commission's loop, until the root is
+    /// terminated through its one legitimate outcome or the tree waits.
+    #[command(after_help = TREE_RUN_HELP)]
+    Run(TreeRunArgs),
     /// Record a principal's decision on one capability for one case of the tree, at the case's
     /// current revision.
     #[command(after_help = TREE_APPROVE_HELP)]
@@ -321,6 +325,61 @@ Exit status:
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error";
 
+/// What `tree run --help` says about the steps, the waits and the exit status.
+pub const TREE_RUN_HELP: &str = "Every open child takes its steps before its parent's next one; \
+each step is selected by the deterministic selector and performed through the action's bound \
+executor. A case is terminated when its completion gives exactly one legitimate outcome and no \
+action in it is useful. When the tree waits, each decision is printed with the exact command that \
+records it. A person action is never taken by tree run.
+
+Exit status:
+  0  the root is terminated through its one legitimate outcome
+  1  refused, nothing written: StoreInUse naming the holder, or the store or a bindings file cannot be read
+  3  the tree waits on a person or on authority: each decision and its command on standard error
+  4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
+  5  the step or wall-time budget is spent, or the run was cancelled";
+
+/// The exit status of `tree run` for each way it stops.
+pub fn tree_run_exit_status(stop: b10x_loom_tree::model::TreeStop) -> u8 {
+    use b10x_loom_tree::model::TreeStop;
+    match stop {
+        TreeStop::Terminal => 0,
+        TreeStop::AwaitingPerson | TreeStop::AwaitingAuthority => 3,
+        TreeStop::Stuck => 4,
+        TreeStop::BudgetSpent => 5,
+    }
+}
+
+/// The confinement every bound program of a tree run starts under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TreeConfinement {
+    /// Substrate's linux adapter; refused when it is unavailable.
+    Substrate,
+    /// Unconfined, declared insecure, through Substrate's local adapter, recorded on every launch.
+    Local,
+}
+
+/// The arguments of `b10x-loom tree run`.
+#[derive(Debug, Args)]
+pub struct TreeRunArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The most steps the run takes.
+    #[arg(long, value_name = "N")]
+    pub max_steps: Option<i64>,
+    /// The most seconds of wall time the run takes before a step.
+    #[arg(long, value_name = "SECONDS")]
+    pub max_wall_seconds: Option<i64>,
+    /// The confinement every bound program starts under.
+    #[arg(long, value_enum, default_value = "substrate")]
+    pub confinement: TreeConfinement,
+    /// The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when
+    /// absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
 /// The exit status of a refused tree command.
 pub const TREE_REFUSED: u8 = 1;
 
@@ -373,6 +432,10 @@ pub struct TreeApproveArgs {
     /// Deny the capability instead of approving it.
     #[arg(long)]
     pub deny: bool,
+    /// Then take this `person` action of the case as the principal: the records its binding
+    /// declares are produced by the principal about the subject's revision now.
+    #[arg(long, value_name = "ACTION", conflicts_with = "deny")]
+    pub action: Option<String>,
     /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
     #[arg(long, value_name = "INSTANT")]
     pub at: Option<String>,

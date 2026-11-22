@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use b10x_loom_runlog::{RunLog, digest, encode, log_file_name, verify};
-use loom::runlog::RunLogEvent;
+use loom::runlog::{RunLogEvent, RunLogLine};
 use loom::tree::{LogFailure, TreeLogHead, TreeRefusalReason};
 use loom_governor::case_file_stem;
 use serde_json::json;
@@ -143,8 +143,8 @@ impl Logs {
         })
     }
 
-    /// Appends `event` to `case`'s log, then writes its head.
-    pub(crate) fn append(&self, case: &str, event: RunLogEvent) -> Result<(), Refused> {
+    /// Appends `event` to `case`'s log, then writes its head, and returns the line written.
+    pub(crate) fn append(&self, case: &str, event: RunLogEvent) -> Result<RunLogLine, Refused> {
         let at = self.time.now()?;
         let line = self.log.append(case, at, event).map_err(|error| {
             Refused::new(TreeRefusalReason::LogRefused, error.to_string()).case(case)
@@ -156,7 +156,8 @@ impl Logs {
                 seq: line.seq,
                 digest: digest(encode(&line).as_bytes()),
             },
-        )
+        )?;
+        Ok(line)
     }
 
     /// Makes `case`'s log fit for an append: one that verifies with its head as it is, or whose

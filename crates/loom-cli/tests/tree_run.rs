@@ -113,6 +113,53 @@ impl Tree {
         self.open_into(&self.store(), "tour.bindings.yaml")
     }
 
+    /// `tree open` of the child protocol `tour-leg@1` alone, as a tree of one case.
+    fn open_leg(&self) -> Output {
+        self.command()
+            .args(["tree", "open", "--protocol", "tour-leg@1", "--at", AT])
+            .arg("--store")
+            .arg(self.store())
+            .arg("--bindings")
+            .arg(self.workspace().join("tour-leg.bindings.yaml"))
+            .arg("--workspace")
+            .arg(self.workspace())
+            .output()
+            .unwrap()
+    }
+
+    /// `tree run` on the store, every program through the `local` runner.
+    fn run(&self) -> Output {
+        self.command()
+            .args([
+                "tree",
+                "run",
+                "--confinement",
+                "local",
+                "--at",
+                AT,
+                "--store",
+            ])
+            .arg(self.store())
+            .output()
+            .unwrap()
+    }
+
+    /// Runs the command a waiting `tree run` printed, from its JSON.
+    fn decided(&self, decision: &Value) -> Output {
+        let words: Vec<String> = decision["command"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|word| word.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(words[0], "b10x-loom", "{decision}");
+        self.command()
+            .args(&words[1..])
+            .args(["--at", AT])
+            .output()
+            .unwrap()
+    }
+
     fn tree(&self, verb: &str) -> Output {
         self.command()
             .args(["tree", verb, "--store"])
@@ -327,4 +374,62 @@ fn two_opens_with_the_same_at_write_the_same_bytes() {
         "{names:?}"
     );
     assert_eq!(snapshot(&first), snapshot(&second));
+}
+
+#[test]
+fn a_one_case_tree_runs_through_its_waits_to_its_outcome() {
+    let tree = Tree::new("one-case");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+
+    // The writer runs until the check is valid; the approval of the route is a person's.
+    let first = tree.run();
+    assert_eq!(
+        first.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&first),
+        stderr(&first)
+    );
+    let waited = json(&first);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    let decision = &waited["decisions"][0];
+    assert_eq!(decision["action"], "route.approve", "{waited}");
+    assert_eq!(decision["kind"], "ApproveAction", "{waited}");
+    assert_eq!(
+        fs::read_to_string(tree.workspace().join("route.txt")).unwrap(),
+        "stop\nstop\n"
+    );
+    let approved = tree.decided(decision);
+    assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
+
+    // The ticket waits on its capability, then is issued and the case ends through `passed`.
+    let second = tree.run();
+    assert_eq!(
+        second.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&second),
+        stderr(&second)
+    );
+    let waited = json(&second);
+    assert_eq!(waited["stop"], "AwaitingAuthority", "{waited}");
+    let decision = &waited["decisions"][0];
+    assert_eq!(decision["capability"], "guide.issue", "{waited}");
+    let approved = tree.decided(decision);
+    assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
+
+    let last = tree.run();
+    assert_eq!(
+        last.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&last),
+        stderr(&last)
+    );
+    let ended = json(&last);
+    assert_eq!(ended["stop"], "Terminal", "{ended}");
+    assert_eq!(ended["detail"], "passed", "{ended}");
+    let verified = tree.tree("verify");
+    assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
 }

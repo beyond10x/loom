@@ -1,17 +1,21 @@
 //! `tree approve`: a principal's decision on one capability for one case of the tree, recorded at
 //! the case's current revision.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use b10x_loom_commission::model::responsibility::CaseId;
+use b10x_loom_commission::model::primitives::Timestamp as CommissionTimestamp;
+use b10x_loom_commission::model::responsibility::{ActionStatus, CaseId};
 use b10x_loom_commission::ports::governor::Governor as _;
+use loom::bindings::{BindingsDocument, Executor};
 use loom::runlog::{AuthorityRecorded, RunLogEvent};
-use loom::tree::{ApprovalDecision, CaseApproval, TreeRefusalReason};
-use loom_governor::{CanonGovernor, FileCaseStore};
+use loom::tree::{ApprovalDecision, CaseApproval, TreeManifest, TreeRefusalReason};
+use loom_governor::{CanonGovernor, FallibleCaseStore, FileCaseStore};
 use loom_protocols::ProtocolCatalog;
 
 use crate::approvals::record_approval;
 use crate::log::Logs;
+use crate::person::PersonEffects;
+use crate::run::{case_bindings, one_step};
 use crate::status::members;
 use crate::store::{existing_store, read_manifest};
 use crate::{Refused, StoreLock, TreeTime, unreadable};
@@ -32,6 +36,8 @@ pub struct ApproveRequest<'a> {
     pub principal: &'a str,
     /// The decision.
     pub decision: ApprovalDecision,
+    /// The `person` action the principal then takes, with `--action`.
+    pub action: Option<&'a str>,
     /// Where the command reads its instants.
     pub time: TreeTime,
     /// The tree's catalog.
@@ -90,6 +96,9 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<CaseApproval, Refused> {
         .map_err(|error| unreadable(format!("case {}", request.case), format!("{error:?}")))?;
     let logs = Logs::open(&store, request.time.clone())?;
     logs.reconcile(request.case)?;
+    if let Some(action) = request.action {
+        person_action(&governor, &manifest, request, action)?;
+    }
     let approval = CaseApproval {
         case: request.case.to_owned(),
         capability: request.capability.to_owned(),
@@ -107,5 +116,89 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<CaseApproval, Refused> {
             principal: approval.principal.clone(),
         }),
     )?;
+    if let Some(action) = request.action
+        && approval.decision == ApprovalDecision::Allow
+    {
+        take_person_action(&governor, &store, &manifest, request, action, &logs)?;
+    }
     Ok(approval)
+}
+
+/// The bindings document of `request`'s case, and why `action` cannot be taken as its principal
+/// now, if it cannot: it must be bound to `person` in the case, its principal the one named, and
+/// admissible.
+fn person_action<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    manifest: &TreeManifest,
+    request: &ApproveRequest<'_>,
+    action: &str,
+) -> Result<BindingsDocument, Refused> {
+    let case = CaseId(request.case.to_owned());
+    let bindings = case_bindings(governor, manifest, request.catalog, request.case)?;
+    let refused = |detail: String| {
+        Refused::new(TreeRefusalReason::NotAPersonAction, detail)
+            .case(request.case.to_owned())
+            .action(crate::time::cut(action).to_owned())
+    };
+    let Some(bound) = bindings
+        .actions
+        .iter()
+        .find(|bound| bound.action == action && bound.executor.kind == Executor::Person)
+    else {
+        return Err(refused("the case binds no such action to a person".into()));
+    };
+    if bound.executor.principal.as_deref() != Some(request.principal) {
+        return Err(refused(format!(
+            "the action is bound to the person {}, not to the principal named",
+            bound.executor.principal.as_deref().unwrap_or("nobody")
+        )));
+    }
+    let frontier = governor
+        .frontier(&case)
+        .map_err(|error| unreadable(format!("case {}", request.case), format!("{error:?}")))?;
+    let admissible = frontier
+        .data()
+        .actions
+        .iter()
+        .any(|listed| listed.action == action && listed.status != ActionStatus::Blocked);
+    if !admissible {
+        return Err(refused(
+            "the action is not admissible in the case now".into(),
+        ));
+    }
+    Ok(bindings)
+}
+
+/// Takes the `person` action `action` of `request`'s case as its principal, through Commission's
+/// loop: the approval just recorded is the authority it is revalidated against.
+fn take_person_action<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    store: &Path,
+    manifest: &TreeManifest,
+    request: &ApproveRequest<'_>,
+    action: &str,
+    logs: &Logs,
+) -> Result<(), Refused> {
+    let bindings = person_action(governor, manifest, request, action)?;
+    let case = CaseId(request.case.to_owned());
+    let at = request.time.now()?;
+    let revision = governor
+        .current_revision(&case)
+        .map_err(|error| unreadable(format!("case {}", request.case), format!("{error:?}")))?;
+    let seed = format!(
+        "{}-{revision}",
+        crate::approvals::read_approvals(store, request.case)?.len()
+    );
+    let effects = PersonEffects {
+        governor,
+        case: case.clone(),
+        bindings: &bindings,
+        workspace: PathBuf::from(&manifest.workspace),
+        principal: request.principal.to_owned(),
+        at: CommissionTimestamp(at.0.clone()),
+        seed: seed.clone(),
+    };
+    let ended = one_step(governor, store, &case, action, &effects, &request.time)?;
+    logs.append(request.case, RunLogEvent::ActionFinished(ended))?;
+    Ok(())
 }
