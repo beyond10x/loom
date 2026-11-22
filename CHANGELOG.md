@@ -136,6 +136,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - `run_tree`: a cancel ends a running `handoff_when` check within 7 s, its line refused `Cancelled:` and the run `Cancelled` (story:handoff-check-holds-the-cancel)
+- `run_tree` takes a step its cancel ended again at the same revision, never `Stuck`; the run still counts against `budget.max_runs` (story:cancelled-step-may-run-again)
 - `SubstrateRunner::run_child`: a cancel ends a child that reads none of its input within 100 ms, refused `Cancelled`, never at its timeout or as a result (story:cancel-a-running-bound-program)
 - `run_handoff_check` refuses exit 129 to 192 (`SIGNAL_EXITS`, how Substrate reports a signal-ended check), never a skip (story:handoff-when-a-program-decides)
 - `run_tree` takes over a run stopped between a child's line and its parent's: a missing `case opened`, `child opened`, `terminated` or `child closed` line is written once

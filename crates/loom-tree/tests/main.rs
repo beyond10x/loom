@@ -760,8 +760,9 @@ actions:
     }
 
     /// `do.sh` counting its calls in `target/n`: the first exits 1, the second runs as [`DO`]
-    /// does, every later one exits 0.
-    const DO_COUNTING: &str = "n=$(cat target/n 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > target/n\nif [ \"$n\" -eq 1 ]; then exit 1; fi\nif [ \"$n\" -eq 2 ]; then\n  touch target/started\n  sleep 3 && touch target/late &\n  sleep 30\nfi\nexit 0\n";
+    /// does, every later one writes `work.txt` and exits 0. The write moves `work`, so the failed
+    /// `done` record of the first call no longer makes `work.do` due.
+    const DO_COUNTING: &str = "n=$(cat target/n 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > target/n\nif [ \"$n\" -eq 1 ]; then exit 1; fi\nif [ \"$n\" -eq 2 ]; then\n  touch target/started\n  sleep 3 && touch target/late &\n  sleep 30\nfi\necho done > work.txt\nexit 0\n";
 
     /// `RETRY` makes `work.do` due again on a failed `done` record.
     const RETRY: &str = "    retry_when: {done: [failed]}\n";
