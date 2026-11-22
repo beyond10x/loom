@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "cc27dfe37dcd96c9863b766ff0fc8c869c4e5e692adc09de52bc34dd0af52530",
-    "contract_digest": "33282ce3e6dd4322f1b932d10fd58ca2bcec59f50d56cba08d623026cf3c9161"
+    "source_digest": "793a1a28da93e3b5d9e2b7647f7d1e2a9ad7ead8ca26fa70466c90b59393c6bf",
+    "contract_digest": "9c3ea9185784d1164c6e047c29b4caa574b85bb96d2bd9e617e1d8915bd12782"
   },
   "scope": {
     "profile": "component-skeletons",

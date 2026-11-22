@@ -186,6 +186,15 @@ $ b10x-loom tree close --store fork-store --case root --outcome left --at 2026-1
 An outcome that is not legitimate for the case now is refused `OutcomeNotLegitimate`, and the
 store keeps every byte.
 
+An outcome's decision can wait for a writer's spent allowance: with a `from: runs` entry on the
+writer (see [Bindings](./bindings.md)), `requires: {decision: give_up, when: {claim: work.spent}}`
+counts `give_up` only once the run that reaches `budget.max_runs` wrote its `spent` record. Before
+that the outcome is blocked by the claim, and Canon neither counts `give_up` nor lists it under
+`pending_decisions`; after it `give_up` is pending. A decision recorded early is kept at the case
+revision it was taken at and counts once the writer is spent, provided no step moved an artifact
+in between; otherwise it is given again at the new revision. `when` holds claims and case inputs
+only: an evidence form in it is refused at registration, `evidence-in-decision-condition`.
+
 ## A writer's handoff
 
 A writer whose binding names a `handoff` hands the case to a person when it has done what it may:
@@ -492,13 +501,19 @@ default ones.
 |---|---|
 | `open` | `tree open` of the cycle's protocol and bindings into its store |
 | `run` | rounds of `tree run`, each exit 3 answered from `decide`; `rounds: 1` runs one |
-| `approve` | `tree approve` (`case`, `capability` or `action`, `principal`) |
+| `approve` | `tree approve` (`case`, `capability` or `action`, `principal`, `result`, `reasons`, `deny`) |
 | `close` | `tree close` (`case`, `outcome`) |
 | `status`, `verify` | `tree status`, `tree verify`; a named one gives its JSON output to `{step: <name>}` |
 | `write` | no tree command: copies the file `from` of the suite's directory to `to` in the cycle's workspace |
 
 A step states `exit` (a status, or `{not: <status>}`), `refusal`, `at` (minutes after `--at`) and
 `checks`, evaluated right after it.
+
+An `approve` step or entry passes `result` as `tree approve --result` and `reasons`, a list joined
+by line feeds, as `--reasons`, so the 60-line bound counts the entries and the lines inside them;
+`deny: true` records a `Deny`, and the wait on that capability stays. An entry takes the action of
+a printed `ApproveAction`; a `result` on a wait for a capability alone is refused
+`NotAPersonAction`, which ends the cycle `StepFailed`.
 
 A `write` step states `from`, `to`, `name` and `checks` alone, and both paths are required. It
 writes a file between two steps, a person's decision for the next `run` to read:
@@ -589,8 +604,8 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 
 | Part | Waits for |
 |---|---|
-| steps `open`, `run`, `approve`, `close`, `status`, `verify`, `write`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when` | available |
-| `stop`, `resume`, `allow`, `reopen`; `approve` with `result`, `reasons` or `deny`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
+| steps `open`, `run`, `approve`, `close`, `status`, `verify`, `write`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when`; `approve` with `result`, `reasons` or `deny` | available |
+| `stop`, `resume`, `allow`, `reopen`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
 | `replay` | `story:tree-replay-command` |
 | `calls` | `story:agent-node-run-records` |
 | `engine` | `story:engine-configuration-document` |

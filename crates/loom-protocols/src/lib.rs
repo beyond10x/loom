@@ -298,9 +298,9 @@ impl ProtocolCatalog {
             ));
         }
         b10x_canon::validate::validate(&model)
-            .map_err(|e| format!("{name}: invalid protocol: {e:?}"))?;
+            .map_err(|e| format!("{name}: invalid protocol: {}", problems(&e)))?;
         b10x_canon::ir::compile(&model)
-            .map_err(|e| format!("{name}: cannot compile protocol: {e:?}"))?;
+            .map_err(|e| format!("{name}: cannot compile protocol: {}", problems(&e)))?;
         self.entries.insert(
             name.into(),
             ProtocolEntry {
@@ -358,6 +358,12 @@ pub fn registration_for(id: &str, revision: &str) -> Option<String> {
     }
     let name = format!("{}@{revision}", id.replace(['.', '_'], "-"));
     parse_registration(&name).map(|_| name)
+}
+/// Canon's problems with a protocol: the code of each (`Problem::code`, the one Canon's own
+/// refusals name), then each problem as Canon's type holds it.
+fn problems(problems: &[b10x_canon::validate::Problem]) -> String {
+    let codes: Vec<&str> = problems.iter().map(|problem| problem.code()).collect();
+    format!("{}: {problems:?}", codes.join(", "))
 }
 /// The refusal of `name`, which [`parse_registration`] refused, for the definition `yaml` the
 /// host handed with it: the id and revision it declares when it is within

@@ -16,6 +16,20 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - `tree test`: the suite step `write` copies a regular file of the suite's directory, at most `suite::MAX_WRITE_BYTES` (1 MiB), to a path of plain names in the cycle's workspace between two steps, never following a link (story:suite-cycle-writes-a-workspace-file)
 - **Breaking:** `loom::tree::CycleStep` gains `from` and `to`, a literal names them; `StepKind` gains `Write`, an exhaustive `match` needs the arm (story:suite-cycle-writes-a-workspace-file)
+- `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
+
+### Changed
+
+- ESS 0.97.4 (format unchanged)
+
+### Fixed
+
+- `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
+
+## [0.59.0] - 2026-11-22
+
+### Added
+
 - `from: runs` (`ResultSource::Runs`, `RUNS_SPENT`): a program entry records `spent` on the run reaching `budget.max_runs` (story:outcome-when-reads-the-run-count)
 - `tree run` holds a writer idle while its only open evidence is its own `from: runs` kinds (story:outcome-when-reads-the-run-count)
 - `loom_governor::durable`: every sync of the tree path's stores through one counted door; its test-only feature `test-unsynced-store` (story:tree-run-tests-fit-the-budget)
@@ -79,6 +93,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
+- **Breaking:** `ProgramRefusalReason` gains `ProgramSignalled`: a bound program whose exit is 129 to 192 under Substrate (a signal ended it) and that did not time out records nothing and is refused naming the signal, ending the run, before `exits` and the result table are read; the run counts against `budget.max_runs` (story:bound-program-signal-exit-is-refused)
 - `task docs-check` is `loom-xtask docs-stamp --check` against the committed stamp `website/docs/reference/.generated.json` and builds no `loom-docs`; `task docs-slow` regenerates (story:docs-check-builds-once-per-fresh-tree)
 - The test step fails when the `tree_run` tests start `b10x-loom` more than 66 times (`START_BUDGETS`, `LOOM_TREE_RUN_STARTS`; 317 before) and holds their 60 s sum and 20 s kill in their own binary and in `b10x-loom-cli::main` alike; they run the library in process where the binary is not their subject (story:tree-run-tests-fit-the-test-budget)
 - **Breaking:** a `run_tree` whose cancel flag is set before a step stops `Cancelled` (`TreeStop::Cancelled`, new), its `stopped` line naming the action that was to be taken next, no longer `BudgetSpent` with no `next`; a step its cancel ended stops `Cancelled` naming its action; `b10x-loom tree run` still exits 5 (story:cancel-a-running-bound-program)
@@ -87,6 +102,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - **Breaking:** `RunOptions` gains the public field `model_retry`: a literal names it or ends in `..RunOptions::default()`
 - `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
+- ESS moves from 0.96.0 to 0.97.3 (`ess-conformance`, `ess-primitives`, `requires: ess 0.97.3`, the CLI CI installs); generated Rust is unchanged
 - A namespace egress entry beside `spec.boundary` is admitted when the chart's `allowedBoundaryHttpEgress` allows it, outside every allowed upstream's and the model route's namespace (story:boundary-admits-declared-http-egress)
 - **Breaking:** `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`; operator `Config` gains `allowed_boundary_http_egress` (story:boundary-admits-declared-http-egress)
 - **Breaking:** the operator refuses a configuration whose `allowedBoundaryUpstreams` or `modelRoute` URL has a host other than `<service>.<namespace>.svc[.cluster.local]`, such as a short service name or an IP address; admission, given such a URL on a `Config` built without `Config::parse`, admits no namespace egress entry beside `spec.boundary` (story:boundary-admits-declared-http-egress)
@@ -1602,7 +1618,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.58.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.59.0...HEAD
+[0.59.0]: https://github.com/beyond10x/loom/releases/tag/0.59.0
 [0.58.0]: https://github.com/beyond10x/loom/releases/tag/0.58.0
 [0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2
 [0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1

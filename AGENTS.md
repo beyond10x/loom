@@ -274,7 +274,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.96.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.97.4 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships. The pin is two lines in each step that installs `ess`, the jobs `check` and
 `docs-slow` of `check.yml` and the job of `pages.yml`: `ESS_VERSION` and `ESS_SHA256`. Move both in
 all three in one commit; the digest is the
@@ -1602,6 +1602,17 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
   `check`. Each step starts the bound program once; repeated not-called runs are bounded by the
   driving loop's step budget and idle bound. Held by `crates/loom-bindings/tests/program_contract.rs`.
+- A signalled run (`story:bound-program-signal-exit-is-refused`, `program.rs`): Substrate reports
+  a child a signal ended as exit 128 plus the signal (137 for SIGKILL). A run with an exit in
+  `SIGNAL_EXITS` (129..=192, `handoff.rs`) that did not time out records nothing, writes the
+  moves alone and refuses the step `ProgramSignalled` with `ends_run`, its text naming the
+  program, `exit <code>`, `signal <code - 128>` and the blob digest, never the output. The check
+  comes after the run's observation is kept and before the exit classes and the tables:
+  `class_of` gives such an exit no class, so the run counts against `budget.max_runs`, and an
+  `exits` code or a `from: exit` row in 129..=192 is accepted at load and never read for it
+  (D2 a). A timeout still reads `timeout`; under `local` a signal leaves no exit status and the
+  runner's refusal is unchanged. Held by the signal tests of `bound_program.rs` and
+  `crates/loom-cli/tests/tree_run/signal_exit.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 
