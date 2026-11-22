@@ -231,6 +231,77 @@ b10x-loom: tree refused: NotAPersonAction: case "root": action "post.seal": the 
 
 Without `--action`, `--capability` is required.
 
+## A named result and its reasons
+
+`tree approve --action A --result R` ends a person action with a result other than `performed`:
+each `from: effect` entry of `A`'s binding records the result its `results` table maps `R` to.
+`R` must be a value every such entry lists; any other is refused and nothing is written.
+`--reasons TEXT` or `--reasons-file FILE` (a regular file inside the workspace, no link followed)
+give the person's reasons, at most 65536 bytes and 60 lines. They are kept as a blob of the
+store, never in a run-log line, and a writer whose `retry_when` lists the result is sent back
+with them. In the fixture protocol `review`, the reviewer's table lists `performed` (mapped to
+`approved`) and `rejected`, and the writer's `retry_when` lists `rejected`; its stub copies
+`LOOM_RETRY_FEEDBACK` to `feedback.json`:
+
+```console
+$ b10x-loom protocols add review@1 --file crates/loom-cli/tests/fixtures/tree-two-level/protocols/review.yaml
+installed review@1
+(exit 0)
+```
+
+```console
+$ echo draft > draft.txt
+$ b10x-loom tree open --protocol review@1 --store review-store --bindings review.bindings.yaml --workspace . --at 2026-11-22T08:00:00Z
+{"protocol":"review@1","root":"root","store":"~/tour/review-store","workspace":"~/tour"}
+(exit 0)
+```
+
+```console
+$ b10x-loom tree run --confinement local --store review-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, decisions: [.decisions[] | {kind, action}]}'
+{"stop":"AwaitingPerson","steps":0,"decisions":[{"kind":"ApproveAction","action":"draft.judge"},{"kind":"ApproveAction","action":"draft.review"}]}
+b10x-loom: tree waits: case root: draft.judge of case root at revision 1
+  run: b10x-loom tree approve --store ~/tour/review-store --case root --principal reviewer --action draft.judge
+b10x-loom: tree waits: case root: draft.review of case root at revision 1
+  run: b10x-loom tree approve --store ~/tour/review-store --case root --principal reviewer --action draft.review
+(exit 3)
+```
+
+```console
+$ b10x-loom tree approve --store review-store --case root --principal reviewer --action draft.review --result lost --at 2026-11-22T08:01:00Z
+b10x-loom: tree refused: NotAPersonAction: case "root": action "draft.review": the draft_review entry lists no result lost; it lists performed, rejected
+{"action":"draft.review","case":"root","detail":"the draft_review entry lists no result lost; it lists performed, rejected","reason":"NotAPersonAction"}
+(exit 1)
+```
+
+```console
+$ b10x-loom tree approve --store review-store --case root --principal reviewer --action draft.review --result rejected --reasons 'The draft has one line. Add a second.' --at 2026-11-22T08:01:00Z
+{"action":"draft.review","case":"root","principal":"reviewer"}
+(exit 0)
+```
+
+The next run sends the writer back; its feedback holds the reviewer's record, with the action and
+no exit, and the reasons as that record's log:
+
+```console
+$ b10x-loom tree run --confinement local --store review-store --at 2026-11-22T08:02:00Z | jq -c '{stop, steps, decisions: [.decisions[] | {kind, action}]}'
+{"stop":"AwaitingPerson","steps":1,"decisions":[{"kind":"ApproveAction","action":"draft.judge"},{"kind":"ApproveAction","action":"draft.review"}]}
+b10x-loom: tree waits: case root: draft.judge of case root at revision 2
+  run: b10x-loom tree approve --store ~/tour/review-store --case root --principal reviewer --action draft.judge
+b10x-loom: tree waits: case root: draft.review of case root at revision 2
+  run: b10x-loom tree approve --store ~/tour/review-store --case root --principal reviewer --action draft.review
+(exit 3)
+```
+
+```console
+$ jq -c '.records[] | {kind, result, action, exit}' feedback.json
+{"kind":"draft_review","result":"rejected","action":"draft.review","exit":null}
+$ jq -c '.logs[] | {tail}' feedback.json
+{"tail":"The draft has one line. Add a second."}
+```
+
+`--result` needs `--action` and conflicts with `--deny`, which records a denial and takes no
+action; `--reasons` and `--reasons-file` need `--result` and conflict with each other.
+
 ## Verify the run logs
 
 ```console

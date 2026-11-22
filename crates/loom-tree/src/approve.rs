@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use b10x_loom_commission::model::primitives::Timestamp as CommissionTimestamp;
 use b10x_loom_commission::model::responsibility::{ActionStatus, CaseId};
 use b10x_loom_commission::ports::governor::Governor as _;
-use loom::bindings::{BindingsDocument, Executor};
+use loom::bindings::{BindingsDocument, Executor, ResultSource};
 use loom::runlog::{AuthorityRecorded, RunLogEvent};
 use loom::tree::{ApprovalDecision, CaseApproval, TreeManifest, TreeRefusalReason};
 use loom_governor::{CanonGovernor, FallibleCaseStore, FileCaseStore};
@@ -14,7 +14,7 @@ use loom_protocols::ProtocolCatalog;
 
 use crate::approvals::record_approval;
 use crate::log::Logs;
-use crate::person::PersonEffects;
+use crate::person::{PERFORMED, PersonEffects};
 use crate::run::{case_bindings, one_step};
 use crate::status::members;
 use crate::store::{existing_store, read_manifest};
@@ -39,10 +39,25 @@ pub struct ApproveRequest<'a> {
     pub decision: ApprovalDecision,
     /// The `person` action the principal then takes, with `--action`.
     pub action: Option<&'a str>,
+    /// The result the person action ends with, with `--result`: a value every `from: effect` entry
+    /// of the action's binding lists in its `results`; `performed` when `None`.
+    pub result: Option<&'a str>,
+    /// The person's reasons for a named result, kept as a blob of the store.
+    pub reasons: Option<Reasons<'a>>,
     /// Where the command reads its instants.
     pub time: TreeTime,
     /// The tree's catalog.
     pub catalog: &'a ProtocolCatalog,
+}
+
+/// Where a person's reasons come from.
+#[derive(Debug, Clone, Copy)]
+pub enum Reasons<'a> {
+    /// The text itself (`--reasons`).
+    Text(&'a str),
+    /// An absolute path of a regular file inside the tree's workspace (`--reasons-file`), opened
+    /// without following a symbolic link ([`b10x_loom_bindings::read_reasons_file`]).
+    File(&'a Path),
 }
 
 /// Records the decision `request` names (see the module documentation) and returns it; `None`
@@ -53,20 +68,34 @@ pub struct ApproveRequest<'a> {
 /// not a case of the tree; `NotAPersonAction` for a principal or capability that is empty, longer
 /// than [`MAX_NAME_BYTES`] or holds a control character, for no capability without a person
 /// action to allow, and for a person action whose protocol action needs a capability none was
-/// given for; `LogRefused` when the case's run log does not verify; `StoreUnreadable`. Nothing is
-/// written on a refusal.
+/// given for; for a result without a person action to allow or that an entry of the action does
+/// not list, reasons without a result, and reasons that are empty, over 65536 bytes or 60 lines,
+/// or a file not read as [`b10x_loom_bindings::read_reasons_file`] reads it; `LogRefused` when
+/// the case's run log does not verify; `StoreUnreadable`. Nothing is written on a refusal.
 pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Refused> {
-    if request.capability.is_none()
-        && (request.action.is_none() || request.decision != ApprovalDecision::Allow)
-    {
+    let allows_action = request.action.is_some() && request.decision == ApprovalDecision::Allow;
+    if request.capability.is_none() && !allows_action {
         return Err(Refused::new(
             TreeRefusalReason::NotAPersonAction,
             "a decision names a capability; only a person action that needs none is taken without one",
         ));
     }
+    if request.result.is_some() && !allows_action {
+        return Err(Refused::new(
+            TreeRefusalReason::NotAPersonAction,
+            "a result is named only for a person action taken",
+        ));
+    }
+    if request.reasons.is_some() && request.result.is_none() {
+        return Err(Refused::new(
+            TreeRefusalReason::NotAPersonAction,
+            "reasons are given only with a named result",
+        ));
+    }
     for (what, name) in [
         ("principal", Some(request.principal)),
         ("capability", request.capability),
+        ("result", request.result),
     ] {
         let Some(name) = name else { continue };
         if name.is_empty() || name.len() > MAX_NAME_BYTES || name.chars().any(char::is_control) {
@@ -112,6 +141,19 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Ref
     if let Some(action) = request.action {
         person_action(&governor, &manifest, request, action)?;
     }
+    // The reasons are read and bounded before anything is written.
+    let reasons = match request.reasons {
+        None => None,
+        Some(Reasons::Text(text)) => {
+            b10x_loom_bindings::reasons_fit(text)
+                .map_err(|detail| reasons_refused(request, detail))?;
+            Some(text.to_owned())
+        }
+        Some(Reasons::File(path)) => Some(
+            b10x_loom_bindings::read_reasons_file(Path::new(&manifest.workspace), path)
+                .map_err(|detail| reasons_refused(request, detail))?,
+        ),
+    };
     let approval = match request.capability {
         Some(capability) => {
             let approval = CaseApproval {
@@ -138,9 +180,36 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Ref
     if let Some(action) = request.action
         && request.decision == ApprovalDecision::Allow
     {
-        take_person_action(&governor, &store, &manifest, request, action, &logs)?;
+        let reasons_blob = reasons
+            .map(|text| {
+                b10x_loom_bindings::keep_reasons(&store, &text).map_err(|error| {
+                    unreadable(
+                        format!("case {}", request.case),
+                        format!("the reasons: {error}"),
+                    )
+                })
+            })
+            .transpose()?;
+        take_person_action(
+            &governor,
+            &store,
+            &manifest,
+            request,
+            action,
+            &logs,
+            reasons_blob,
+        )?;
     }
     Ok(approval)
+}
+
+/// The refusal of `request`'s reasons, saying `detail`.
+fn reasons_refused(request: &ApproveRequest<'_>, detail: String) -> Refused {
+    let refused = Refused::new(TreeRefusalReason::NotAPersonAction, detail).case(request.case);
+    match request.action {
+        Some(action) => refused.action(crate::time::cut(action).to_owned()),
+        None => refused,
+    }
 }
 
 /// The bindings document of `request`'s case, and why `action` cannot be taken as its principal
@@ -191,6 +260,25 @@ fn person_action<S: FallibleCaseStore>(
             "the action needs the capability {needed}; name it with --capability"
         )));
     }
+    // A named result is one every `from: effect` entry lists: checked over all of them before the
+    // first record, so there is never a half write.
+    if let Some(result) = request.result
+        && let Some(entry) = bound.evidence.iter().find(|entry| {
+            entry.from == ResultSource::Effect
+                && !entry.results.iter().any(|rule| rule.value == result)
+        })
+    {
+        let listed: Vec<&str> = entry
+            .results
+            .iter()
+            .map(|rule| rule.value.as_str())
+            .collect();
+        return Err(refused(format!(
+            "the {} entry lists no result {result}; it lists {}",
+            entry.kind,
+            listed.join(", ")
+        )));
+    }
     Ok(bindings)
 }
 
@@ -203,6 +291,7 @@ fn take_person_action<S: FallibleCaseStore>(
     request: &ApproveRequest<'_>,
     action: &str,
     logs: &Logs,
+    reasons_blob: Option<String>,
 ) -> Result<(), Refused> {
     let bindings = person_action(governor, manifest, request, action)?;
     let case = CaseId(request.case.to_owned());
@@ -225,6 +314,8 @@ fn take_person_action<S: FallibleCaseStore>(
         principal: request.principal.to_owned(),
         at: CommissionTimestamp(at.0.clone()),
         seed: seed.clone(),
+        result: request.result.unwrap_or(PERFORMED).to_owned(),
+        reasons_blob,
     };
     let ended = one_step(governor, store, &case, action, &effects, &request.time)?;
     logs.append(request.case, RunLogEvent::ActionFinished(ended))?;

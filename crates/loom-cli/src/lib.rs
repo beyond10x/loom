@@ -306,7 +306,10 @@ capability for that case while the case is at the revision it was recorded at, a
 another case, another capability or a moved case reads no approval. A denial wins over an \
 approval of the same capability for the same case and revision. A person action whose protocol \
 action needs no capability is taken with --action and no --capability, and records no authority; \
-one that needs a capability is refused without it.
+one that needs a capability is refused without it. --result names the result the person action \
+ends with, one its binding's results list, and --reasons or --reasons-file the person's reasons, \
+which a writer the result sends back reads in its retry feedback; a result an entry does not list \
+is refused and nothing is written.
 
 Exit status:
   0  the decision is recorded; it is printed
@@ -443,6 +446,28 @@ pub struct TreeApproveArgs {
     /// declares are produced by the principal about the subject's revision now.
     #[arg(long, value_name = "ACTION", conflicts_with = "deny")]
     pub action: Option<String>,
+    /// The result the person action ends with: a value every `from: effect` entry of its binding
+    /// lists in its results, which maps it to each record's result; `performed` when absent.
+    #[arg(
+        long,
+        value_name = "RESULT",
+        requires = "action",
+        conflicts_with = "deny"
+    )]
+    pub result: Option<String>,
+    /// The person's reasons for the result, at most 65536 bytes and 60 lines: kept as a blob of
+    /// the store, and the log of the record a writer this result sends back is given.
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "result",
+        conflicts_with = "reasons_file"
+    )]
+    pub reasons: Option<String>,
+    /// The reasons read from a regular file inside the tree's workspace, opened without following
+    /// a symbolic link.
+    #[arg(long, value_name = "FILE", requires = "result")]
+    pub reasons_file: Option<PathBuf>,
     /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
     #[arg(long, value_name = "INSTANT")]
     pub at: Option<String>,

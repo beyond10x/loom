@@ -54,7 +54,8 @@ pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
 pub use resolve::resolve_programs;
 pub use retry::{
-    RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, retry_records,
+    PERSON_SOURCE, RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES,
+    RETRY_LOG_LINES, keep_reasons, read_reasons_file, reasons_fit, retry_records,
 };
 pub use revision::{
     ABSENT, MAX_ARTIFACT_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PlacedRevisions, RefreshError,

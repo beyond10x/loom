@@ -1439,10 +1439,12 @@ fn the_printed_handoff_command_runs() {
     );
 }
 
-/// A `review@1` case brought to its first wait: the writer wrote the draft once, and the review
-/// and the judgement, both a person's with no capability, wait.
+/// A `review@1` case brought to its first wait, `draft.txt` written: the review and the
+/// judgement, both a person's with no capability, wait; the writer waits for a rejection.
 fn reviewed(label: &str) -> Tree {
     let tree = Tree::new(label);
+    // The draft is there before the review: a record about it names its revision.
+    fs::write(tree.workspace().join("draft.txt"), "draft\n").unwrap();
     open_with(&tree, "review@1", "review.bindings.yaml");
     let ran = tree.run();
     assert_eq!(
@@ -1644,7 +1646,7 @@ fn a_rejected_result_sends_the_writer_back_with_the_reasons() {
         .iter()
         .filter(|line| finished(line) == Some("draft.write"))
         .count();
-    assert_eq!(writes, 2, "the writer ran again");
+    assert_eq!(writes, 1, "the rejected draft is written again");
     let feedback: Value =
         serde_json::from_slice(&fs::read(tree.workspace().join("feedback.json")).unwrap()).unwrap();
     let records = feedback["records"].as_array().unwrap();

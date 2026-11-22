@@ -1564,10 +1564,17 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   refused step; test `a_spent_run_budget_ends_the_retries_of_a_step`). With no step taken a case
   ends through its one legitimate outcome, or waits: a person action or a capability
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
-  `handoff` text when nothing else is (command `tree run`).
+  `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
+  `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
 - `tree approve --action` takes a `person` action as its principal through `PersonEffects`
   (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
-  program's are. `tree run` never takes a person action.
+  program's are. `tree run` never takes a person action. Without `--capability` it records no
+  authority, allowed only when the protocol action needs none (`person_action`, `approve.rs`,
+  refuses one that does before anything is written). `--result R` records each `from: effect`
+  entry with the result its table maps `R` to, refused unless every entry lists `R`;
+  `--reasons`/`--reasons-file` (only with `--result`) are bounded to a retry log (`reasons_fit`,
+  `read_reasons_file` in `loom-bindings`), kept as `blobs/<sha256>` and named by the person
+  observation's `blob_sha256`, so `retry_records` gives them to a writer as that record's log.
 - `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
   runs, approvals and copies are read from the governor, the run logs and `observations.json`,
   never from `approvals-<stem>.json`.

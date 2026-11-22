@@ -18,9 +18,9 @@ use b10x_loom_intake_slice::confinement::{
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
-    ApproveRequest, CloseRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record,
-    open_tree, refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status,
-    verify_json, verify_tree,
+    ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
+    approve as record, open_tree, refusal_json, run_json, run_tree, status_json, stored_catalog,
+    tree_status, verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
@@ -208,6 +208,16 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     let store = resolved(&arguments.store)?;
     let catalog = tree_catalog(&store)?;
+    let reasons_file = arguments
+        .reasons_file
+        .as_deref()
+        .map(resolved)
+        .transpose()?;
+    let reasons = match (&arguments.reasons, &reasons_file) {
+        (Some(text), _) => Some(Reasons::Text(text)),
+        (None, Some(path)) => Some(Reasons::File(path)),
+        (None, None) => None,
+    };
     let approval = record(&ApproveRequest {
         store: &store,
         case: &arguments.case,
@@ -219,6 +229,8 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
             ApprovalDecision::Allow
         },
         action: arguments.action.as_deref(),
+        result: arguments.result.as_deref(),
+        reasons,
         time,
         catalog: &catalog,
     })?;
