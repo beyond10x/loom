@@ -40,7 +40,7 @@ fn offered(request: &TurnRequest) -> Vec<String> {
 fn refused_read() -> (&'static str, serde_json::Value) {
     (
         "source_read",
-        json!({"source": "chat", "kind": "list", "input": "C0FIXTURE1"}),
+        json!({"source": "elsewhere", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
     )
 }
 

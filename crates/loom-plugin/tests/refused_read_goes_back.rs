@@ -12,8 +12,9 @@ use b10x_loom_plugin::{Intent, RecordOutcome};
 use serde_json::json;
 use support::{Fixture, Scripted, chat, classification, item, request_text};
 
-/// The refusal the effect port answers for a read whose `input` is no object.
-const REFUSAL: &str = "source.read of `chat` has an `input` that is not an object";
+/// The refusal the effect port answers for a read of a source outside the projection; a read
+/// whose `input` is no object never reaches it (story:protocol-argument-schema).
+const REFUSAL: &str = "the source `elsewhere` is outside this turn's projection";
 
 /// A refused read, then the corrected read, then a proposal: the turn proposes, its one read is the
 /// corrected one, and the request after the refusal carries it.
@@ -28,7 +29,7 @@ fn a_refused_read_goes_back_to_the_model_and_the_turn_goes_on() {
     let (model, seen) = Scripted::new(vec![
         (
             "source_read",
-            json!({"source": "chat", "kind": "list", "input": "C0FIXTURE1"}),
+            json!({"source": "elsewhere", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
         ),
         (
             "source_read",
@@ -84,7 +85,7 @@ fn a_turn_that_stops_after_a_refused_read_names_the_refusal() {
     let projection = project(&config, &classified);
     let refused = (
         "source_read",
-        json!({"source": "chat", "kind": "list", "input": "C0FIXTURE1"}),
+        json!({"source": "elsewhere", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
     );
     let (model, _seen) = Scripted::new(vec![refused.clone(), refused.clone(), refused]);
     let options = TurnOptions {
