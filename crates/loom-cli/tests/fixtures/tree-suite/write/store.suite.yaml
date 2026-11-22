@@ -1,0 +1,28 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+cycles:
+  - name: alone
+    seed:
+      - {from: stubs/quick.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+    steps:
+      - {do: open}
+      - {do: run, name: first, rounds: 1, exit: 3}
+      - do: write
+        name: decides
+        from: seeds/findings-decided.yaml
+        to: findings.yaml
+        checks:
+          - check: compare
+            name: the-store-holds-the-same-files
+            left: {select: [{files: {in: store, glob: "**"}}], take: count, after: first}
+            op: eq
+            right: {select: [{files: {in: store, glob: "**"}}], take: count}
+          - check: compare
+            name: the-root-log-is-unchanged
+            left: {select: [{doc: {in: store, path: runlog-case-726f6f74.jsonl}}, {as: text}], take: digest, after: first}
+            op: eq
+            right: {select: [{doc: {in: store, path: runlog-case-726f6f74.jsonl}}, {as: text}], take: digest}

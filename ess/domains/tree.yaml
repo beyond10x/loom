@@ -502,17 +502,20 @@ types:
       - name: outcome
         type: Optional<String>
 
-  # What a step of a cycle does: one tree command, or one scripted decision.
+  # What a step of a cycle does: one tree command, one scripted decision, or one file of the suite
+  # written into the workspace (`write`).
   - name: loom.tree.StepKind
     kind: enum
-    variants: [open, run, approve, close, decide, stop, resume, allow, reopen, replay, status, verify]
+    variants: [open, run, approve, close, decide, stop, resume, allow, reopen, replay, status, verify, write]
 
   # One step of a cycle: what it does, its name (unique in the cycle), the minutes after `--at` it
   # runs at, the exit it must end with, the refusal it must give, the engine and rounds of a `run`,
   # the checks evaluated right after it, and the members of the command it stands for (the case,
   # the capability or the action, the principal, the outcome of a close, the result, reasons or
   # denial of an approval, the option of a decision, the reason of a `stop`, which is `suite step
-  # <label>` when absent).
+  # <label>` when absent). `from` and `to` are the two members of a `write`: `from` the source, a
+  # regular file of the suite's directory, and `to` the target, a path of plain names in the
+  # cycle's workspace.
   - name: loom.tree.CycleStep
     kind: struct
     fields:
@@ -551,6 +554,10 @@ types:
       - name: option
         type: Optional<String>
       - name: reason
+        type: Optional<String>
+      - name: from
+        type: Optional<String>
+      - name: to
         type: Optional<String>
 
   # The exit a step must end with: exactly `status`, or any status but `not`; one of the two.
@@ -942,8 +949,9 @@ types:
   # Why a cycle did not end as the suite expects, when no check of a kind names it:
   # `ExitDiffers`, `RefusalDiffers`, `OutcomeDiffers`, `StopDiffers`, `VerifyFailed` (a store
   # that does not pass `tree verify`), `ScriptUnused` (a scripted decision not optional and never
-  # used), `RoundsSpent`, `OperandNotOne`, `BlobChanged`, `PathOutsideCycle`,
-  # `SelectionTooLarge`, `SeedUnusable`, `StepFailed` (a step's command could not run).
+  # used), `RoundsSpent`, `OperandNotOne`, `BlobChanged`, `PathOutsideCycle` (also a link at
+  # any component of a `write` step's `to`), `SelectionTooLarge`, `SeedUnusable`, `StepFailed` (a
+  # step's command could not run).
   - name: loom.tree.DifferenceReason
     kind: enum
     variants:
@@ -964,7 +972,7 @@ types:
 
   # The first difference of a cycle: the check it names (its name, else its place, as
   # `expect.checks[<i>]`), its kind (a check kind, or `exit`, `outcome`, `stop`, `refusal`,
-  # `verify`, `decide`, `run`, `seed`), why, the expected value, and what was found when Loom
+  # `verify`, `decide`, `run`, `seed`, `write`), why, the expected value, and what was found when Loom
   # prints it: a number, a boolean or a value Loom declares, any other text as its length and the
   # first 12 hex digits of its SHA-256.
   - name: loom.tree.CheckDifference
@@ -1059,7 +1067,9 @@ types:
   # `SelectUnusable`: a selection not starting with exactly one source, or an operation with more
   # than one key. `StepKindUnknown`, `SourceUnknown`, `EventKindUnknown`: a name the format does not
   # know. `ProtocolsUnreadable`: a file of `--protocols` that Canon refuses. `ScratchNotEmpty`:
-  # `--scratch` holds anything. `SeedUnusable`: a seed entry that is a link or is absent.
+  # `--scratch` holds anything. `SeedUnusable`: a seed entry that is a link or is absent, or a
+  # `write` step's `from` that is a link, is behind a link, is absent, is not a regular file or is
+  # over 1 MiB.
   # `CycleUnknown`: an `--only` name that is no cycle of the suite. `SubstrateWorkersUnserved`:
   # more than one worker under `--confinement substrate`, which waits for
   # story:suite-runs-cycles-under-one-cgroup-root.

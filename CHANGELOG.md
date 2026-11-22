@@ -18,6 +18,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree run` on a held tree is refused `TreeStopped`, exit 1, naming the hold and the `tree reopen` command, and writes nothing (story:tree-suite-stop-resume-reopen-steps)
 - Suite steps `stop` (member `reason`, default `suite step <label>`), `resume` and `reopen`, and the `log` events `StopRecorded` and `StopLifted`, run; the three steps take no `case` (story:tree-suite-stop-resume-reopen-steps)
 - **Breaking:** `loom::runlog::RunLogEvent` gains `StopRecorded` and `StopLifted`, `TreeRefusalReason` gains `TreeStopped`, `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable`, and `CycleStep` gains `reason`: an exhaustive `match` needs the arms and a struct literal names the field; an older reader refuses the two kinds; a `stop`, `resume` or `reopen` step naming `case` is refused `MemberUndeclared` (story:tree-suite-stop-resume-reopen-steps)
+- `tree test`: the suite step `write` copies a regular file of the suite's directory, at most `suite::MAX_WRITE_BYTES` (1 MiB), to a path of plain names in the cycle's workspace between two steps, never following a link (story:suite-cycle-writes-a-workspace-file)
+- **Breaking:** `loom::tree::CycleStep` gains `from` and `to`, a literal names them; `StepKind` gains `Write`, an exhaustive `match` needs the arm (story:suite-cycle-writes-a-workspace-file)
 - `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
 
 ### Changed

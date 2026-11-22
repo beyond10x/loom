@@ -69,6 +69,7 @@ pub const SUITE_AVAILABILITY: &[AvailabilityEntry] = &[
     entry(Step, "close", Available),
     entry(Step, "status", Available),
     entry(Step, "verify", Available),
+    entry(Step, "write", Available),
     entry(Step, "stop", Available),
     entry(Step, "resume", Available),
     entry(Step, "allow", Waits(STOP_AND_LABELS)),
@@ -131,6 +132,7 @@ pub(crate) fn step_name(kind: StepKind) -> &'static str {
         StepKind::Replay => "replay",
         StepKind::Status => "status",
         StepKind::Verify => "verify",
+        StepKind::Write => "write",
     }
 }
 

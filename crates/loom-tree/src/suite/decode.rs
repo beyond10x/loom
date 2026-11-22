@@ -20,7 +20,7 @@ use loom::tree::{
 use serde_json::{Map, Value};
 
 use super::availability::{KindUse, known};
-use super::path::{parse_value_path, stays_below};
+use super::path::{parse_value_path, plain_names, stays_below};
 use super::value::written;
 
 /// The `format` of every suite.
@@ -348,6 +348,21 @@ fn cycle_path(text: String, at: &str) -> Decoded<String> {
     }
 }
 
+/// A `write` step's `to`: a path of the cycle's workspace whose every component is a plain name,
+/// so it holds no `.` or `..` at all.
+fn write_target(text: String, at: &str) -> Decoded<String> {
+    if plain_names(&text) {
+        Ok(text)
+    } else {
+        Err(refuse(
+            SuiteRefusalReason::PathOutsideCycle,
+            at,
+            "is empty or absolute, holds a NUL or a backslash, or a component that is not a plain \
+             name (`.`, `..`, empty)",
+        ))
+    }
+}
+
 /// A cycle's or a step's name: a letter or digit, then letters, digits, `-`, `_` or `.`.
 fn usable_name(name: &str) -> bool {
     name.len() <= MAX_NAME_BYTES
@@ -542,6 +557,8 @@ fn bare_step(kind: StepKind) -> CycleStep {
         deny: None,
         option: None,
         reason: None,
+        from: None,
+        to: None,
     }
 }
 
@@ -679,13 +696,24 @@ fn step_kind(name: &str) -> Option<StepKind> {
         "replay" => StepKind::Replay,
         "status" => StepKind::Status,
         "verify" => StepKind::Verify,
+        "write" => StepKind::Write,
         _ => return None,
     })
 }
 
-/// The members a step of `kind` declares beside `do`, `name`, `at`, `exit`, `refusal`, `checks`.
+/// The members every step declares: `do`, `name`, `checks`, and `at`, `exit` and `refusal` on a
+/// step that runs a tree command, which a `write` does not.
+fn common_members(kind: StepKind) -> &'static [&'static str] {
+    match kind {
+        StepKind::Write => &["do", "name", "checks"],
+        _ => &["do", "name", "at", "exit", "refusal", "checks"],
+    }
+}
+
+/// The members a step of `kind` declares beside its [`common_members`].
 fn step_members(kind: StepKind) -> &'static [&'static str] {
     match kind {
+        StepKind::Write => &["from", "to"],
         StepKind::Open | StepKind::Status | StepKind::Verify => &[],
         StepKind::Run => &["rounds", "engine"],
         StepKind::Approve => &[
@@ -738,9 +766,23 @@ fn step(value: &Value, at: &str) -> Decoded<CycleStep> {
             format!("{kind:?} is no step kind the format knows"),
         ));
     };
-    let mut declared = vec!["do", "name", "at", "exit", "refusal", "checks"];
+    let mut declared = common_members(kind).to_vec();
     declared.extend_from_slice(step_members(kind));
     members.allow(&declared)?;
+    let (from, to) = if kind == StepKind::Write {
+        (
+            Some(suite_path(
+                members.required_text("from")?,
+                &members.path("from"),
+            )?),
+            Some(write_target(
+                members.required_text("to")?,
+                &members.path("to"),
+            )?),
+        )
+    } else {
+        (None, None)
+    };
     let name = members.text("name")?;
     if let Some(name) = &name
         && !usable_name(name)
@@ -789,6 +831,8 @@ fn step(value: &Value, at: &str) -> Decoded<CycleStep> {
         deny: members.boolean("deny")?,
         option: members.text("option")?,
         reason: members.text("reason")?,
+        from,
+        to,
     })
 }
 

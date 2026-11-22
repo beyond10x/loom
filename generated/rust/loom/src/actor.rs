@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest bbf17694c4f60d79dadbe34ee2d6e4f8b55de87b367a3644dc43627ba4fb85cc
+// contract digest cc7165376ac84a9ebb44ad12b76a3c40167d2c97fa90305804bbccdfa8a2a588
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Every actor the specification declares, and the commands each may invoke — as data.

@@ -1,0 +1,32 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+cycles:
+  - name: onto-directory
+    seed:
+      - {from: stubs/directory.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, from: seeds/findings-decided.yaml, to: target}
+  - name: onto-fifo
+    seed:
+      - {from: stubs/fifo.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, from: seeds/findings-decided.yaml, to: target}
+  - name: into-read-only
+    seed:
+      - {from: stubs/readonly.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, from: seeds/findings-decided.yaml, to: ro/x}

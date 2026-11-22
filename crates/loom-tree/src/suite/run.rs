@@ -11,10 +11,11 @@
 //! environment variable and no current directory: every path it is given is absolute.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read as _, Write as _};
 use std::num::NonZeroUsize;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
@@ -509,6 +510,143 @@ fn usable_seeds(cycles: &[SuiteCycle], suite_dir: &Path) -> Result<(), SuiteRefu
     Ok(())
 }
 
+/// The most bytes the file a `write` step copies (its `from`) may hold.
+pub const MAX_WRITE_BYTES: u64 = 1024 * 1024;
+
+/// What a directory entry of `kind` is found as.
+fn entry_kind(kind: fs::FileType) -> &'static str {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt as _;
+        if kind.is_fifo() {
+            return "fifo";
+        }
+        if kind.is_socket() {
+            return "socket";
+        }
+        if kind.is_block_device() || kind.is_char_device() {
+            return "device";
+        }
+    }
+    if kind.is_symlink() {
+        "symbolic link"
+    } else if kind.is_dir() {
+        "directory"
+    } else if kind.is_file() {
+        "regular file"
+    } else {
+        "entry of another kind"
+    }
+}
+
+/// The bytes of a `write` step's `from`, a path of `suite_dir` that stays in it: a regular file of
+/// at most [`MAX_WRITE_BYTES`], with no link at it or at any directory between `suite_dir` and
+/// it, opened without following a link. The error says what it is instead, never what it holds.
+fn write_source(suite_dir: &Path, from: &str) -> Result<Vec<u8>, String> {
+    let mut parts = Vec::new();
+    for component in Path::new(from).components() {
+        match component {
+            Component::Normal(part) => parts.push(part),
+            Component::ParentDir => {
+                parts.pop();
+            }
+            _ => {}
+        }
+    }
+    let Some((last, parents)) = parts.split_last() else {
+        return Err("is the suite's directory".to_owned());
+    };
+    let mut path = suite_dir.to_path_buf();
+    for part in parents {
+        path.push(part);
+        let entry = fs::symlink_metadata(&path).map_err(|error| error.kind().to_string())?;
+        if !entry.file_type().is_dir() {
+            return Err(format!("is behind a {}", entry_kind(entry.file_type())));
+        }
+    }
+    path.push(last);
+    let entry = fs::symlink_metadata(&path).map_err(|error| error.kind().to_string())?;
+    if !entry.file_type().is_file() {
+        return Err(format!(
+            "is a {}, not a regular file",
+            entry_kind(entry.file_type())
+        ));
+    }
+    let over = || "is over 1 MiB".to_owned();
+    if entry.len() > MAX_WRITE_BYTES {
+        return Err(over());
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let unreadable = |error: io::Error| error.kind().to_string();
+    let file = options.open(&path).map_err(unreadable)?;
+    if !file.metadata().map_err(unreadable)?.is_file() {
+        return Err("is not a regular file".to_owned());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_WRITE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(unreadable)?;
+    if bytes.len() as u64 > MAX_WRITE_BYTES {
+        return Err(over());
+    }
+    Ok(bytes)
+}
+
+/// Every `write` step of every cycle copies a usable source ([`write_source`]).
+fn usable_writes(cycles: &[SuiteCycle], suite_dir: &Path) -> Result<(), SuiteRefused> {
+    for (index, cycle) in cycles.iter().enumerate() {
+        for (at, step) in cycle.steps.iter().enumerate() {
+            let (StepKind::Write, Some(from)) = (step.r#do, &step.from) else {
+                continue;
+            };
+            write_source(suite_dir, from).map_err(|error| {
+                refused(
+                    SuiteRefusalReason::SeedUnusable,
+                    Some(format!("cycles[{index}].steps[{at}].from")),
+                    format!("{from}: {error}"),
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// How many temporary files `write` steps of this process have named.
+static WRITES: AtomicU64 = AtomicU64::new(0);
+
+/// Writes `bytes` to a new file `temporary` of mode 0644, never through a link, and renames it
+/// over `target`, removing it when anything after its creation fails.
+fn replace(temporary: &Path, target: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o644).custom_flags(libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(temporary)?;
+    let written = (|| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            file.set_permissions(fs::Permissions::from_mode(0o644))?;
+        }
+        file.write_all(bytes)?;
+        drop(file);
+        fs::rename(temporary, target)
+    })();
+    if written.is_err() {
+        let _ = fs::remove_file(temporary);
+    }
+    written
+}
+
 /// `SubstrateWorkersUnserved` when `workers` is more than one and `confinement` is `substrate`:
 /// Substrate keys its driver by a workspace's parent directory, and each cycle's workspace has a
 /// parent of its own, so a second cycle would open a second driver under the root while the first
@@ -554,15 +692,17 @@ fn selected(cycles: &[SuiteCycle], only: &[String]) -> Result<Vec<usize>, SuiteR
 /// Runs the suite file `suite` (see the module documentation): refuses more than one worker under
 /// `substrate` before it reads anything, reads and decodes the suite, refuses an `only` name that
 /// is no cycle of it, refuses a `scratch` that is not absent or empty before the protocols are
-/// read, reads the protocols once, checks every seed, then runs the selected cycles on up to
-/// `settings.workers` threads. A cycle that uses a part `settings.availability` marks waiting is
-/// pending and not run; one whose `when` fails is not run. `observer` is given each result in
+/// read, reads the protocols once, checks every seed and every `write` step's source, then runs
+/// the selected cycles on up to `settings.workers` threads. A cycle that uses a part
+/// `settings.availability` marks waiting is pending and not run; one whose `when` fails is not
+/// run. `observer` is given each result in
 /// suite order (see [`SuiteObserver`]); `cancel`, when set, starts no further cycle and ends each
 /// running one before its next step, its difference saying so.
 ///
 /// # Errors
 /// [`SuiteRefused`], before any cycle: `SubstrateWorkersUnserved`, what [`read_suite`] refuses,
-/// `CycleUnknown`, `ScratchNotEmpty`, `ProtocolsUnreadable` and `SeedUnusable`; a relative
+/// `CycleUnknown`, `ScratchNotEmpty`, `ProtocolsUnreadable` and `SeedUnusable` (a seed, or a
+/// `write` step's `from`, naming `cycles[<i>].steps[<j>].from`); a relative
 /// `suite`, `protocols` or `scratch` is `SuiteUnreadable`, `ProtocolsUnreadable` or
 /// `ScratchNotEmpty`.
 pub fn run_suite(
@@ -595,6 +735,7 @@ pub fn run_suite(
         )
     })?;
     usable_seeds(&decoded.cycles, suite_dir)?;
+    usable_writes(&decoded.cycles, suite_dir)?;
     fs::create_dir_all(scratch).map_err(|error| {
         refused(
             SuiteRefusalReason::ScratchNotEmpty,
@@ -959,7 +1100,9 @@ impl SuiteRun<'_> {
                     Some("the suite was cancelled".to_owned()),
                 ));
             }
-            minute = step.at.unwrap_or(minute + 1);
+            if step.r#do != StepKind::Write {
+                minute = step.at.unwrap_or(minute + 1);
+            }
             let time = match &self.settings.time {
                 TreeTime::At(at) => {
                     TreeTime::At(instant_after(at, minute).unwrap_or_else(|| at.clone()))
@@ -1093,6 +1236,79 @@ impl SuiteRun<'_> {
             .map_or(SUITE_PRINCIPAL, String::as_str)
     }
 
+    /// A `write` step: the bytes of `from` read again; each directory of `to` below the workspace
+    /// a directory and no link, a missing one made; `to` absent or a regular file; then the bytes
+    /// to a new file beside it, renamed over it. A link at any component of `to` is
+    /// `PathOutsideCycle`; anything else that stops it is `StepFailed`, found as the entry's kind
+    /// or the error's, never as the content. Nothing reaches the run log or the store.
+    fn write(
+        &self,
+        running: &Cycle<'_>,
+        step: &CycleStep,
+        label: &str,
+    ) -> Result<(), CheckDifference> {
+        let failed = |reason: DifferenceReason, found: String| {
+            difference(label, "write", reason, "the file is written", Some(found))
+        };
+        let (Some(from), Some(to)) = (&step.from, &step.to) else {
+            return Err(failed(
+                DifferenceReason::StepFailed,
+                "no from or to".to_owned(),
+            ));
+        };
+        let bytes = write_source(self.suite_dir, from)
+            .map_err(|found| failed(DifferenceReason::StepFailed, format!("from {found}")))?;
+        let parts: Vec<&str> = to.split('/').collect();
+        let Some((last, parents)) = parts.split_last() else {
+            return Err(failed(DifferenceReason::StepFailed, "no to".to_owned()));
+        };
+        let link = || {
+            failed(
+                DifferenceReason::PathOutsideCycle,
+                "a symbolic link".to_owned(),
+            )
+        };
+        let error =
+            |error: io::Error| failed(DifferenceReason::StepFailed, error.kind().to_string());
+        let mut dir = running.work.clone();
+        for part in parents {
+            dir.push(part);
+            match fs::symlink_metadata(&dir) {
+                Ok(entry) if entry.file_type().is_symlink() => return Err(link()),
+                Ok(entry) if entry.file_type().is_dir() => {}
+                Ok(entry) => {
+                    return Err(failed(
+                        DifferenceReason::StepFailed,
+                        entry_kind(entry.file_type()).to_owned(),
+                    ));
+                }
+                Err(missing) if missing.kind() == io::ErrorKind::NotFound => {
+                    fs::create_dir(&dir).map_err(error)?;
+                }
+                Err(other) => return Err(error(other)),
+            }
+        }
+        let target = dir.join(last);
+        match fs::symlink_metadata(&target) {
+            Ok(entry) if entry.file_type().is_symlink() => return Err(link()),
+            Ok(entry) if entry.file_type().is_file() => {}
+            Ok(entry) => {
+                return Err(failed(
+                    DifferenceReason::StepFailed,
+                    entry_kind(entry.file_type()).to_owned(),
+                ));
+            }
+            Err(missing) if missing.kind() == io::ErrorKind::NotFound => {}
+            Err(other) => return Err(error(other)),
+        }
+        let temporary = dir.join(format!(
+            ".loom-write-{}-{}",
+            std::process::id(),
+            WRITES.fetch_add(1, Ordering::SeqCst)
+        ));
+        replace(&temporary, &target, &bytes).map_err(error)
+    }
+
     /// Runs one step through its tree function.
     fn step(
         &self,
@@ -1202,6 +1418,10 @@ impl SuiteRun<'_> {
                 Ok(_) => StepEnd::done(None),
                 Err(refusal) => StepEnd::refused(&refusal),
             },
+            StepKind::Write => {
+                self.write(running, step, label)?;
+                StepEnd::done(None)
+            }
             other @ (StepKind::Decide | StepKind::Allow | StepKind::Replay) => {
                 return Err(difference(
                     label,

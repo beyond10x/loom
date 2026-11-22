@@ -15,8 +15,11 @@
 //! one action runs the program seeded as `stubs/program.sh`) and `fixtures/tree-suite/only.suite.yaml`
 //! (five cycles whose one step is `open`). A test that needs the barrier copies `parallel/` beside
 //! its own directory and writes the barrier directory's path into the copy (see [`Parallel`]).
+//!
+//! Acceptance for `story:suite-cycle-writes-a-workspace-file`, the step `write`, is in `write.rs`.
 
 mod substrate;
+mod write;
 
 use std::fs;
 use std::num::NonZeroUsize;
