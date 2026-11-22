@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cancelled-step-may-run-again
 kind: story
-status: draft
+status: proposed
 title: A step a cancel ended is not performed for the step history, so the next tree run takes it again
 summary: LogHistory and the refused-since filter skip an action finished line refused Cancelled; the run count still counts the cancelled run; tests on the Halt fixture, red first
 tags:
@@ -20,7 +20,9 @@ scope:
   path: crates/loom-tree/src/run.rs
 - confidence: cited
   path: crates/loom-tree/tests/main.rs
-revision: 6
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T13:08:59Z", actor: "agent:loom", revision: 7}
 ---
 ## Outcome
 

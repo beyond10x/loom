@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-suite-stop-resume-reopen-steps
 kind: story
-status: draft
+status: proposed
 title: Suite steps stop, resume and reopen over a tree hold record written by tree hold and tree reopen
 summary: tree hold and tree reopen write StopRecorded and StopLifted in the root log under the store lock; tree run on a held tree is refused TreeStopped; the suite runs stop, resume and reopen; Runbook's run-stop cycle runs; approve members moved out (D130)
 tags:
@@ -55,7 +55,9 @@ scope:
   path: website/docs/guides/run-a-case-tree.md
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 26
+revision: 27
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T13:08:58Z", actor: "agent:loom", revision: 27}
 ---
 ## Outcome
 

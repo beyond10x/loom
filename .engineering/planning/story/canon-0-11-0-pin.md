@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:canon-0-11-0-pin
 kind: story
-status: draft
+status: proposed
 title: Loom builds on Canon 0.11.0, one copy, and every decision document it hands out is Canon 0.11.0's
 summary: five manifests and Cargo.lock to tag 0.11.0; four compile fixes (Predicate::Descended arm, CaseArtifact.descends_from twice, EvidenceRecord.item); decision documents name 0.11.0, frontier ids change; when, revised_by, records_together and descended register; descended stays unknown in Loom
 tags:
@@ -42,7 +42,9 @@ scope:
   path: website/docs/guides/move-to-loom.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 17
+revision: 18
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T13:08:57Z", actor: "agent:loom", revision: 18}
 ---
 ## Outcome
 
