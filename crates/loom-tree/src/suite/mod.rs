@@ -12,6 +12,9 @@
 //!   query string, no expression language, no network.
 //! - [`SUITE_AVAILABILITY`] marks each step kind, source, event kind and member as available or as
 //!   waiting for a named story; a cycle that uses one that waits is pending and never run.
+//! - [`run_suite`] runs the cycles one after another, each step through the function of its
+//!   `tree` command in process, and answers a [`SuiteReport`](loom::tree::SuiteReport); a
+//!   [`SuiteObserver`] is given each cycle's result as it ends.
 
 mod availability;
 mod check;
@@ -30,6 +33,7 @@ pub use decode::{
     decode_suite, read_suite,
 };
 pub use run::{
-    cycle_line, not_run_result, report_json, summarize, summary_lines, waiting_result, when_holds,
+    CYCLE_WALL_SECONDS, SUITE_PRINCIPAL, SUITE_ROOT_CASE, SuiteObserver, SuiteSettings, cycle_line,
+    not_run_result, report_json, run_suite, summarize, summary_lines, waiting_result, when_holds,
 };
 pub use select::{CycleView, MAX_GLOB_PATHS, MAX_SELECTED_FILE_BYTES, Selected, select};

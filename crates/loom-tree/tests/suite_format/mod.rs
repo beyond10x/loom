@@ -168,6 +168,9 @@ fn put_case(store: &Path, case: &str, protocol: &str, records: &[Value]) {
             independence: CaseIndependence::none(),
             evidence,
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .unwrap();
 }
@@ -234,6 +237,7 @@ fn build_end_state(dir: &Path) {
         case: "trip".into(),
         time: TreeTime::At(AT.into()),
         catalog: &catalog,
+        protocols: Vec::new(),
     })
     .unwrap();
 
