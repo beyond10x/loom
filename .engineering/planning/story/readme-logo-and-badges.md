@@ -37,7 +37,7 @@ scope:
   path: website/docusaurus.config.ts
 - confidence: inferred
   path: website/static/img/mark.svg
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T03:12:59Z", actor: "agent:loom", revision: 6}
 ---
@@ -113,7 +113,12 @@ No external service is used, no model is called in a test, and nothing about the
 the machine. The concept: a loom's plain weave of four vertical warp threads (the cases of a tree)
 and three horizontal weft threads (the evidence) crossing over and under each other.
 
-- **Size:** under 4 KB, a `viewBox` of `0 0 64 64`, and a transparent background.
+- **Size:** under 4 KB, a `viewBox` of `0 0 256 256`, and a transparent background.
+- **Approved design:** Timo approved the draft on 2026-11-22 ("Logo is fine."): four
+  vertical warp bars 28 wide at x 40, 88, 136, 184 from y 32 to 224, and three horizontal
+  weft bars 28 high at y 64, 112, 160 from x 28 to 224, rounded corners of 6, every other
+  crossing with the warp on top, a 1.5 stroke of `#0d1117` at 35 % opacity. The unit starts
+  from that geometry and changes it only for a test that fails on it.
 - **Colours:** warp `#1f8a70` and weft `#c0682a`. Both work on white and on dark backgrounds, so
   there is no dark variant. Against white `#ffffff`, the ratios are 4.26:1 and 4.00:1. Against
   GitHub's dark `#0d1117`, they are 4.44:1 and 4.74:1. Against the site's dark `#101a1b`, they are
