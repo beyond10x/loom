@@ -19,7 +19,16 @@ const SUITE: &str = concat!(
 /// `extra` after the common flags.
 fn tree_test(dir: &Path, extra: &[&str]) -> Output {
     command(&dir.join("home"))
-        .args(["tree", "test", "--at", AT, "--suite", SUITE, "--protocols", PROTOCOLS])
+        .args([
+            "tree",
+            "test",
+            "--at",
+            AT,
+            "--suite",
+            SUITE,
+            "--protocols",
+            PROTOCOLS,
+        ])
         .arg("--scratch")
         .arg(dir.join("scratch"))
         .args(extra)
@@ -47,7 +56,10 @@ fn the_substrate_refusal_names_a_remedy_tree_test_accepts() {
     assert!(said.contains("ConfinementRefused"), "{said}");
     assert!(said.contains("--confinement local"), "{said}");
     assert!(refused.stdout.is_empty(), "a refusal printed a cycle");
-    assert!(!dir.join("scratch").exists(), "the refused run made --scratch");
+    assert!(
+        !dir.join("scratch").exists(),
+        "the refused run made --scratch"
+    );
 
     // The flag a `tree run` refusal advises, given to `tree test`, as a user would follow it.
     let followed = tree_test(&dir, &["--cgroup-root", "/sys/fs/cgroup"]);
@@ -78,7 +90,10 @@ fn the_substrate_refusal_writes_nothing() {
     let said = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(2), "{said}");
     assert!(said.contains("ConfinementRefused"), "{said}");
-    assert!(!dir.join("scratch").exists(), "the scratch directory was made: {said}");
+    assert!(
+        !dir.join("scratch").exists(),
+        "the scratch directory was made: {said}"
+    );
     assert!(!report.exists(), "a report was written: {said}");
     assert!(
         dir.join("home").read_dir().unwrap().next().is_none(),

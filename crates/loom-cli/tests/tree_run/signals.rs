@@ -55,7 +55,15 @@ fn open_slow_tree(tree: &Tree) {
 /// `tree run --confinement local` on the store, started, not waited for.
 fn start_run(tree: &Tree) -> Child {
     tree.command()
-        .args(["tree", "run", "--confinement", "local", "--at", AT, "--store"])
+        .args([
+            "tree",
+            "run",
+            "--confinement",
+            "local",
+            "--at",
+            AT,
+            "--store",
+        ])
         .arg(tree.store())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
