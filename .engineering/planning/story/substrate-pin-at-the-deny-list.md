@@ -11,6 +11,7 @@ relations:
 - serves: vision:O1
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:canon-0-10-0-pin
+- depends_on: story:drop-the-substrate-git-feature
 scope:
 - confidence: cited
   path: CHANGELOG.md
@@ -20,7 +21,7 @@ scope:
   path: crates/loom-intake-slice/Cargo.toml
 - confidence: cited
   path: crates/loom-intake-slice/src/confinement.rs
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T04:57:14Z", actor: "agent:loom", revision: 5}
 ---
@@ -35,8 +36,8 @@ Loom builds on a Substrate that holds the executable deny-list:
   Otherwise the pin names the commit, and moving to the tag is a second step once Substrate cuts
   one. Tag `0.23.0` does not contain the commit.
 - At the commit, the manifest's version reads `0.23.0`, so both lines read `version = "=0.23.0"`.
-- `default-features = false, features = ["git"]` stays as it is. `Cargo.lock` holds one copy of
-  each Substrate crate.
+- The feature setting `story:drop-the-substrate-git-feature` leaves (`default-features = false`,
+  no `git`) stays as it is. `Cargo.lock` holds one copy of each Substrate crate.
 - Every compile break is fixed, the confinement tests pass, and one confined step that looks like
   a Runbook step runs through `bound_program` on the new pin.
 
@@ -89,8 +90,8 @@ The changes between the two revisions that touch Loom
 - `ChildCommand::with_read_only_root`, `with_read_only_file` and `at_host_path` (`:1264-1304`) are
   Loom's own, and their bodies do not change.
 - The `git` feature: the features table is the same at both revisions
-  (`git = ["dep:curl", "dep:git2", "dep:gix"]`). No libgit2-check story is in the store at this
-  head. The feature setting is kept unless such a story removes it.
+  (`git = ["dep:curl", "dep:git2", "dep:gix"]`). `story:drop-the-substrate-git-feature` removes
+  it first; this story keeps it off and moves the lock-file test's version and source lines.
 - `rust-version` is `1.97` at both revisions.
 
 ## ESS first
@@ -167,5 +168,5 @@ missing, and the unit's report says which ran on this host.
 
 Edges:
 
-- depends_on `story:canon-0-10-0-pin`.
-- Collides with `story:canon-0-10-0-pin` on `Cargo.lock`.
+- depends_on `story:canon-0-10-0-pin` and `story:drop-the-substrate-git-feature`.
+- Collides with both on `Cargo.lock`, and with the second on `host_git_hardening.rs`.
