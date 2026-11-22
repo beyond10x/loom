@@ -93,8 +93,10 @@ fn read_json(path: &Path) -> Value {
 }
 
 /// The two documents `ess generate --kind schema` writes for `ess/`: the spec type's and the
-/// entity's. The generation takes seconds, so it runs once for every test process of this binary
-/// and input: kept under `CARGO_TARGET_TMPDIR` by the digest of `ess/` and the `ess` version.
+/// entity's. The generation takes about 16 s, so it runs once for every test process of this
+/// binary and input: kept under `CARGO_TARGET_TMPDIR` by the digest of `ess/` and the `ess`
+/// version. `task test-step` fills the same entry beside its build, so its tests find it made; a
+/// run without it makes it in the first test and the others wait.
 fn schemas() -> &'static (Value, Value) {
     static SCHEMAS: OnceLock<(Value, Value)> = OnceLock::new();
     SCHEMAS.get_or_init(|| {
