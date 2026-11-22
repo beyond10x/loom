@@ -34,6 +34,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Fixed
 
+- `LogHistory` dates an action by the moves its `action finished` line names, so a step a later step's write follows is taken again; older logs read as before (story:action-dated-by-revisions-its-step-left)
 - `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
 - The `tree_run` tests start `b10x-loom` 66 times, not 71, and `loom-xtask shared-trees` builds their trees once per source key (story:tree-run-binary-fits-its-start-bound)
 - The `tree test` tests start `b10x-loom` with the test sync switch on (`tests/tree_test/mod.rs`, D138)
