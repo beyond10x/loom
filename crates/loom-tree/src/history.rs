@@ -109,9 +109,14 @@ impl StepHistory for LogHistory {
 mod tests {
     use std::collections::BTreeSet;
 
-    use b10x_loom_executor::selection::StepHistory as _;
+    use b10x_loom_commission::model::responsibility::CaseId;
+    use b10x_loom_executor::model::run::{ActionFacts, CatalogueEntry, CatalogueEntryStatus};
+    use b10x_loom_executor::selection::{
+        ActionFactsPort, CaseFacts, DeterministicSelector, SelectionContext, StepHistory as _,
+    };
+    use b10x_loom_executor::{ActionSelector as _, SelectorError};
     use loom::primitives::Timestamp;
-    use loom::runlog::{ActionFinished, Evaluated, RunLogEvent, RunLogLine};
+    use loom::runlog::{ActionFinished, Evaluated, RevisionMove, RunLogEvent, RunLogLine};
 
     use super::LogHistory;
 
@@ -160,5 +165,262 @@ mod tests {
             BTreeSet::new(),
         );
         assert_eq!(spent.performed_at("a", 3), Ok(true));
+    }
+
+    /// An `evaluated` line at `revision`.
+    fn evaluated(revision: i64) -> RunLogEvent {
+        RunLogEvent::Evaluated(Evaluated {
+            case_revision: revision,
+            frontier: "f".into(),
+            decision_digest: format!("d{revision}"),
+        })
+    }
+
+    /// An `action finished` line for `action`, refused `refusal` or exit 0, naming `moves` moves.
+    fn finished(action: &str, refusal: Option<&str>, moves: usize) -> RunLogEvent {
+        RunLogEvent::ActionFinished(ActionFinished {
+            action: action.into(),
+            exit: refusal.is_none().then_some(0),
+            refusal: refusal.map(str::to_owned),
+            blob_digest: None,
+            evidence: Vec::new(),
+            revisions: (0..moves)
+                .map(|n| RevisionMove {
+                    artifact: format!("{action}-artifact-{n}"),
+                    from: Some("before".into()),
+                    to: "after".into(),
+                })
+                .collect(),
+        })
+    }
+
+    /// The history of a log of `events`, the case at `current` now.
+    fn history(events: Vec<RunLogEvent>, current: i64) -> LogHistory {
+        let at = Timestamp("2026-11-22T08:00:00Z".into());
+        let lines: Vec<RunLogLine> = events
+            .into_iter()
+            .enumerate()
+            .map(|(seq, event)| RunLogLine {
+                seq: i64::try_from(seq).unwrap(),
+                prev: None,
+                at: at.clone(),
+                event,
+            })
+            .collect();
+        LogHistory::new(&lines, current, BTreeSet::new())
+    }
+
+    /// The host's facts of `CASE` at `revision`: each `(action, effect, may produce, open)`.
+    struct Facts(i64, Vec<ActionFacts>);
+
+    impl ActionFactsPort for Facts {
+        fn action_facts(&self, _case: &CaseId) -> Result<CaseFacts, String> {
+            Ok(CaseFacts {
+                case_revision: self.0,
+                actions: self.1.clone(),
+            })
+        }
+    }
+
+    fn facts(action: &str, effect: &str, may_produce: &[&str], open: &[&str]) -> ActionFacts {
+        ActionFacts {
+            action: action.into(),
+            effect: Some(effect.into()),
+            may_produce: may_produce.iter().map(|kind| (*kind).to_owned()).collect(),
+            open_evidence: open.iter().map(|kind| (*kind).to_owned()).collect(),
+        }
+    }
+
+    /// What the deterministic selector takes from `actions` (all admissible) at `revision` with
+    /// `history`.
+    fn select(
+        history: &LogHistory,
+        revision: i64,
+        actions: Vec<ActionFacts>,
+    ) -> Result<String, SelectorError> {
+        let candidates: Vec<CatalogueEntry> = actions
+            .iter()
+            .map(|known| CatalogueEntry {
+                action: known.action.clone(),
+                status: CatalogueEntryStatus::Admissible,
+            })
+            .collect();
+        let selector = DeterministicSelector::new(
+            CaseId("root".into()),
+            Facts(revision, actions),
+            history,
+        );
+        selector
+            .select(
+                &SelectionContext {
+                    prompt: "Take the next useful step.".into(),
+                },
+                &candidates,
+            )
+            .map(|choice| choice.action)
+    }
+
+    #[test]
+    fn an_action_is_useful_again_when_a_later_step_moved_an_artifact() {
+        // `parity-loom-strong-4` run 2, written with moves: A moved nothing, B moved two.
+        let shape = history(
+            vec![
+                evaluated(9),
+                finished("a", None, 0),
+                finished("b", None, 2),
+                evaluated(11),
+            ],
+            11,
+        );
+        assert_eq!(shape.performed_at("a", 9), Ok(true));
+        assert_eq!(shape.performed_at("a", 11), Ok(false));
+        assert_eq!(shape.performed_at("b", 11), Ok(true));
+        assert_eq!(
+            select(
+                &shape,
+                11,
+                vec![
+                    facts("a", "write", &["record"], &["record"]),
+                    facts("b", "write", &["made"], &[]),
+                ],
+            ),
+            Ok("a".to_owned())
+        );
+
+        // A moved one artifact (9 to 10), B one (10 to 11), no `evaluated` line between.
+        let variant = history(
+            vec![
+                evaluated(9),
+                finished("a", None, 1),
+                finished("b", None, 1),
+                evaluated(11),
+            ],
+            11,
+        );
+        assert_eq!(variant.performed_at("a", 9), Ok(true));
+        assert_eq!(variant.performed_at("a", 10), Ok(true));
+        assert_eq!(variant.performed_at("a", 11), Ok(false));
+        assert_eq!(variant.performed_at("b", 10), Ok(true));
+        assert_eq!(variant.performed_at("b", 11), Ok(true));
+    }
+
+    /// Runbook's case: `amend.upstream` at 9 leaves 9 or 10, `requirements.normalise` writes and
+    /// leaves 11, one `evaluated` line at 11, then a check exits non-zero and opens the amend's
+    /// evidence again. The selector offers `amend.upstream` again: the run does not stop `Stuck`.
+    #[test]
+    fn the_amend_step_is_offered_again_after_a_later_step_wrote() {
+        for amend_moves in [0, 1] {
+            let shape = history(
+                vec![
+                    evaluated(9),
+                    finished("amend.upstream", None, amend_moves),
+                    finished("requirements.normalise", None, 2 - amend_moves),
+                    evaluated(11),
+                    finished("requirements.check", Some("ProgramError: exit 1"), 0),
+                    evaluated(11),
+                ],
+                11,
+            );
+            assert_eq!(
+                select(
+                    &shape,
+                    11,
+                    vec![
+                        facts("amend.upstream", "write", &["amended"], &["amended"]),
+                        facts("requirements.check", "read", &["checked"], &[]),
+                        facts("requirements.normalise", "write", &["normalised"], &[]),
+                    ],
+                ),
+                Ok("amend.upstream".to_owned()),
+                "amend.upstream left {} moves",
+                amend_moves
+            );
+        }
+    }
+
+    #[test]
+    fn a_writer_is_not_taken_again_on_its_own_write() {
+        let closed = history(
+            vec![evaluated(9), finished("a", None, 1), evaluated(10)],
+            10,
+        );
+        assert_eq!(closed.performed_at("a", 9), Ok(true));
+        assert_eq!(closed.performed_at("a", 10), Ok(true));
+        let open = history(vec![evaluated(9), finished("a", None, 1)], 10);
+        assert_eq!(open.performed_at("a", 9), Ok(true));
+        assert_eq!(open.performed_at("a", 10), Ok(true));
+    }
+
+    #[test]
+    fn an_older_log_with_no_moves_is_read_as_before() {
+        for older in [
+            history(
+                vec![
+                    evaluated(9),
+                    finished("a", None, 0),
+                    finished("b", None, 0),
+                    evaluated(10),
+                ],
+                10,
+            ),
+            history(
+                vec![
+                    evaluated(9),
+                    finished("a", None, 0),
+                    finished("b", None, 0),
+                ],
+                10,
+            ),
+        ] {
+            for action in ["a", "b"] {
+                for revision in [9, 10] {
+                    assert_eq!(
+                        older.performed_at(action, revision),
+                        Ok(true),
+                        "{action} at {revision}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_cancelled_step_counts_at_no_revision_and_its_move_still_counts() {
+        let log = history(
+            vec![
+                evaluated(9),
+                finished("a", Some("Cancelled: action a: the step was cancelled"), 1),
+                finished("b", None, 0),
+                evaluated(10),
+            ],
+            10,
+        );
+        assert_eq!(log.performed_at("a", 9), Ok(false));
+        assert_eq!(log.performed_at("a", 10), Ok(false));
+        assert_eq!(log.performed_at("b", 10), Ok(true));
+        assert_eq!(log.performed_at("b", 9), Ok(false));
+    }
+
+    #[test]
+    fn a_refused_step_counts_at_both_revisions() {
+        let refused = "ProgramError: action a: exit 1";
+        let alone = history(
+            vec![evaluated(9), finished("a", Some(refused), 1), evaluated(10)],
+            10,
+        );
+        assert_eq!(alone.performed_at("a", 9), Ok(true));
+        assert_eq!(alone.performed_at("a", 10), Ok(true));
+        let followed = history(
+            vec![
+                evaluated(9),
+                finished("a", Some(refused), 1),
+                finished("b", None, 1),
+                evaluated(11),
+            ],
+            11,
+        );
+        assert_eq!(followed.performed_at("a", 9), Ok(true));
+        assert_eq!(followed.performed_at("a", 10), Ok(true));
+        assert_eq!(followed.performed_at("a", 11), Ok(false));
     }
 }
