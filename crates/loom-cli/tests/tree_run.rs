@@ -42,17 +42,25 @@ const AT: &str = "2026-11-22T08:00:00Z";
 struct Tree {
     root: PathBuf,
     started: Instant,
+    /// A shared fixture other tests read: never removed.
+    shared: bool,
 }
 
 impl Tree {
     fn new(label: &str) -> Self {
-        let started = Instant::now();
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("tree-run-{label}-{}-{nanos}", std::process::id()));
+        Self::at(
+            PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+                .join(format!("tree-run-{label}-{}-{nanos}", std::process::id())),
+        )
+    }
+
+    /// A fresh scratch directory at `root`.
+    fn at(root: PathBuf) -> Self {
+        let started = Instant::now();
         fs::create_dir_all(root.join("home")).unwrap();
         fs::create_dir_all(root.join("workspace/stubs")).unwrap();
         let installed = InstallStore::new(root.join("home/loom/protocols"));
@@ -83,7 +91,11 @@ impl Tree {
                 fs::copy(entry.path(), root.join("workspace").join(entry.file_name())).unwrap();
             }
         }
-        Self { root, started }
+        Self {
+            root,
+            started,
+            shared: false,
+        }
     }
 
     /// The catalog of the test's user: the bundled protocols and the two installed.
@@ -221,7 +233,9 @@ impl Drop for Tree {
         if !std::thread::panicking() {
             assert!(took < BOUND, "the test took {took:?}, past its {BOUND:?}");
         }
-        let _ = fs::remove_dir_all(&self.root);
+        if !self.shared {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -612,20 +626,15 @@ fn a_cancelled_run_ends_budget_spent_before_its_next_step() {
 }
 
 /// `tree open` of the two-level tree, then `tree run` and each first printed decision in turn
-/// until a run exits other than 3: per wait the run's JSON and the status read at it, and the last
-/// run's JSON.
-fn run_to_end(tree: &Tree) -> (Vec<(Value, Value)>, Value) {
-    run_to_end_twice(tree, None)
-}
-
-/// [`run_to_end`], taking the decision on `twice` two times in a row.
+/// until a run exits other than 3, taking the decision on `twice` two times in a row: per wait the
+/// run's JSON and the status read at it, and the last run's JSON.
 fn run_to_end_twice(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     run_opened(tree, twice)
 }
 
-/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end`].
+/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end_twice`].
 fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let mut waits = Vec::new();
     for _ in 0..8 {
@@ -653,6 +662,114 @@ fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) 
     panic!("the tree did not end within 8 runs: {waits:?}");
 }
 
+/// The two-level tree run to its end, shared by the status tests: its store and workspace, each
+/// wait with the status read at it, and the last run's JSON.
+struct Ended {
+    tree: Tree,
+    waits: Vec<(Value, Value)>,
+    ended: Value,
+}
+
+/// The SHA-256, as hex, of what the shared ended tree is made from: every file of the fixture
+/// directory (its path, its length and its bytes, in path order), the `b10x-loom` binary and this
+/// test binary, whose helpers drive the run.
+fn ended_digest() -> String {
+    use sha2::{Digest, Sha256};
+    fn files(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                files(&entry.path(), found);
+            } else {
+                found.push(entry.path());
+            }
+        }
+    }
+    let mut found = Vec::new();
+    files(Path::new(FIXTURE), &mut found);
+    found.sort();
+    let mut hasher = Sha256::new();
+    for file in &found {
+        let bytes = fs::read(file).unwrap();
+        hasher.update(
+            file.strip_prefix(FIXTURE)
+                .unwrap()
+                .as_os_str()
+                .as_encoded_bytes(),
+        );
+        hasher.update([0]);
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(&bytes);
+    }
+    hasher.update(fs::read(env!("CARGO_BIN_EXE_b10x-loom")).unwrap());
+    hasher.update(fs::read(std::env::current_exe().unwrap()).unwrap());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The two-level tree run to its end once per test run (the grant of `ticket.issue` taken twice),
+/// kept under `target/` beside the test scratch directories and keyed by [`ended_digest`]: an
+/// open, eight runs and their decisions cost seconds each, so each status test reads a fresh copy of
+/// this one tree. The first test that asks builds it holding a lock file; the others wait
+/// on the lock and read what it left.
+fn ended_tree() -> Ended {
+    let key = ended_digest();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let root = base.join(format!("tree-run-ended-{}", &key[..16]));
+    let lock = fs::File::create(base.join(format!("tree-run-ended-{}.lock", &key[..16]))).unwrap();
+    lock.lock().unwrap();
+    if !root.join("ended.json").exists() {
+        let _ = fs::remove_dir_all(&root);
+        let mut tree = Tree::at(root.clone());
+        tree.shared = true;
+        let (waits, ended) = run_to_end_twice(&tree, Some("ticket.issue"));
+        fs::write(root.join("waits.json"), serde_json::to_vec(&waits).unwrap()).unwrap();
+        fs::write(root.join("ended.json"), serde_json::to_vec(&ended).unwrap()).unwrap();
+    }
+    lock.unlock().unwrap();
+    let waits = serde_json::from_slice(&fs::read(root.join("waits.json")).unwrap()).unwrap();
+    let ended = serde_json::from_slice(&fs::read(root.join("ended.json")).unwrap()).unwrap();
+    // Each test reads a fresh copy; the store names the shared workspace, which nothing writes.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let copy = base.join(format!(
+        "tree-run-ended-copy-{}-{nanos}",
+        std::process::id()
+    ));
+    copy_dir(&root, &copy);
+    Ended {
+        tree: Tree {
+            root: copy,
+            started: Instant::now(),
+            shared: false,
+        },
+        waits,
+        ended,
+    }
+}
+
+/// Copies the directory `from` to `to`, a link as a link.
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let kind = entry.file_type().unwrap();
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else if kind.is_symlink() {
+            std::os::unix::fs::symlink(fs::read_link(entry.path()).unwrap(), &target).unwrap();
+        } else {
+            fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
 /// The entry of `case` in `status`.
 fn entry<'a>(status: &'a Value, case: &str) -> &'a Value {
     status["cases"]
@@ -665,8 +782,7 @@ fn entry<'a>(status: &'a Value, case: &str) -> &'a Value {
 
 #[test]
 fn a_status_names_each_cases_link_protocol_and_stop() {
-    let tree = Tree::new("status-link");
-    let (waits, ended) = run_to_end(&tree);
+    let Ended { tree, waits, ended } = ended_tree();
     assert_eq!(ended["stop"], "Terminal", "{ended}");
     let status = json(&tree.tree("status"));
     let root = entry(&status, "root");
@@ -699,8 +815,7 @@ fn a_status_names_each_cases_link_protocol_and_stop() {
 
 #[test]
 fn a_status_lists_each_record_in_the_order_received() {
-    let tree = Tree::new("status-records");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     let root = entry(&status, "root");
     let records = root["evidence"].as_array().unwrap();
@@ -746,8 +861,7 @@ fn a_status_lists_each_record_in_the_order_received() {
 
 #[test]
 fn a_status_counts_the_attempts_of_a_retried_writer() {
-    let tree = Tree::new("status-runs");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     let first = entry(&status, "root.first");
     let writes: Vec<&Value> = first["runs"]
@@ -779,10 +893,9 @@ fn a_status_counts_the_attempts_of_a_retried_writer() {
 
 #[test]
 fn a_status_lists_each_approval_in_the_order_recorded() {
-    let tree = Tree::new("status-approvals");
-    // The grant of the ticket is recorded twice at one revision: two entries, one decision in
-    // the approvals file.
-    run_to_end_twice(&tree, Some("ticket.issue"));
+    // The grant of the ticket is recorded twice at one revision (the shared tree takes it twice):
+    // two entries, one decision in the approvals file.
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     let first = entry(&status, "root.first");
     let approvals = first["approvals"].as_array().unwrap();
@@ -812,8 +925,7 @@ fn a_status_lists_each_approval_in_the_order_recorded() {
 
 #[test]
 fn a_status_names_the_copy_into_the_root() {
-    let tree = Tree::new("status-copies");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     assert_eq!(
         entry(&status, "root")["copies"],
@@ -829,8 +941,7 @@ fn a_status_names_the_copy_into_the_root() {
 
 #[test]
 fn the_printed_status_is_the_value_of_tree_status() {
-    let tree = Tree::new("status-value");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let printed = tree.tree("status");
     assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
     let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
@@ -988,12 +1099,39 @@ fn record_digests(store: &Path, case: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// A `child opened` or `child closed` line an observer was given: the case whose log holds it,
-/// the line, and the digests of the `case_outcome` records that case's file held right then.
-struct ChildLine {
-    case: String,
-    line: RunLogLine,
-    held: BTreeMap<String, String>,
+/// A `child opened` or `child closed` line as JSON, every member of the line; `null` for any other
+/// line.
+fn child_line_json(line: &RunLogLine) -> Value {
+    let (kind, child, protocol, outcome, record, digest) = match &line.event {
+        RunLogEvent::ChildOpened(opened) => (
+            "ChildOpened",
+            &opened.child,
+            Some(&opened.protocol),
+            None,
+            &opened.record,
+            &opened.record_digest,
+        ),
+        RunLogEvent::ChildClosed(closed) => (
+            "ChildClosed",
+            &closed.child,
+            None,
+            closed.outcome.as_ref(),
+            &closed.record,
+            &closed.record_digest,
+        ),
+        _ => return Value::Null,
+    };
+    json!({
+        "seq": line.seq,
+        "prev": line.prev,
+        "at": line.at.0,
+        "kind": kind,
+        "child": child,
+        "protocol": protocol,
+        "outcome": outcome,
+        "record": record,
+        "record_digest": digest,
+    })
 }
 
 /// The `record` and `record_digest` of a child line; `None` for any other line.
@@ -1011,21 +1149,22 @@ fn record_of(line: &RunLogLine) -> Option<(Option<&str>, Option<&str>)> {
 
 /// The two-level tree run in process to its end: `tree open`, then `run_tree` with an observer,
 /// each first decision taken through the command line, until a run ends `Terminal`. Each child
-/// line the observer was given, in order.
-fn child_lines_to_end(tree: &Tree) -> Vec<ChildLine> {
+/// line the observer was given, in order: the case whose log holds it, the line as JSON and the
+/// digests of the `case_outcome` records the case's file held right then.
+fn child_lines_to_end(tree: &Tree) -> Vec<Value> {
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     let catalog = tree.catalog();
     let store = tree.store();
-    let mut seen: Vec<ChildLine> = Vec::new();
+    let mut seen: Vec<Value> = Vec::new();
     for _ in 0..8 {
         let mut observer = |case: &str, line: &RunLogLine| {
             if record_of(line).is_some() {
-                seen.push(ChildLine {
-                    case: case.to_owned(),
-                    line: line.clone(),
-                    held: record_digests(&store, case),
-                });
+                seen.push(json!({
+                    "case": case,
+                    "line": child_line_json(line),
+                    "held": record_digests(&store, case),
+                }));
             }
         };
         let ran = run_tree(&store, &catalog, &settings(None), Some(&mut observer), None).unwrap();
@@ -1038,10 +1177,46 @@ fn child_lines_to_end(tree: &Tree) -> Vec<ChildLine> {
     panic!("the tree did not end within 8 runs");
 }
 
+/// The two-level tree run in process to its end once per test run, as [`ended_tree`] keeps its
+/// tree: under `target/`, keyed by [`ended_digest`], built by the first test that asks holding a
+/// lock file. A fresh copy of the tree and each child line the observer was given, as
+/// [`child_lines_to_end`] returns them.
+fn observed_tree() -> (Tree, Vec<Value>) {
+    let key = ended_digest();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let root = base.join(format!("tree-run-observed-{}", &key[..16]));
+    let lock =
+        fs::File::create(base.join(format!("tree-run-observed-{}.lock", &key[..16]))).unwrap();
+    lock.lock().unwrap();
+    if !root.join("seen.json").exists() {
+        let _ = fs::remove_dir_all(&root);
+        let mut tree = Tree::at(root.clone());
+        tree.shared = true;
+        let seen = child_lines_to_end(&tree);
+        fs::write(root.join("seen.json"), serde_json::to_vec(&seen).unwrap()).unwrap();
+    }
+    lock.unlock().unwrap();
+    let seen = serde_json::from_slice(&fs::read(root.join("seen.json")).unwrap()).unwrap();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let copy = base.join(format!(
+        "tree-run-observed-copy-{}-{nanos}",
+        std::process::id()
+    ));
+    copy_dir(&root, &copy);
+    let tree = Tree {
+        root: copy,
+        started: Instant::now(),
+        shared: false,
+    };
+    (tree, seen)
+}
+
 #[test]
 fn each_write_of_a_childs_record_appears_in_exactly_one_parent_line() {
-    let tree = Tree::new("child-record-lines");
-    let seen = child_lines_to_end(&tree);
+    let (tree, seen) = observed_tree();
     let store = tree.store();
     let root = case_file(&store, "root");
     let links = root["children"].as_array().unwrap();
@@ -1068,12 +1243,12 @@ fn each_write_of_a_childs_record_appears_in_exactly_one_parent_line() {
         for line in naming {
             let given = seen
                 .iter()
-                .find(|given| given.case == "root" && given.line == *line)
+                .find(|given| given["case"] == "root" && given["line"] == child_line_json(line))
                 .unwrap_or_else(|| panic!("{child}: the observer was not given {line:?}"));
             let (_, digest) = record_of(line).unwrap();
             assert_eq!(
                 digest,
-                given.held.get(record).map(String::as_str),
+                given["held"][record].as_str(),
                 "{child}: the digest is that of the facts right after the write: {line:?}"
             );
         }
@@ -1088,8 +1263,7 @@ fn each_write_of_a_childs_record_appears_in_exactly_one_parent_line() {
 
 #[test]
 fn the_closing_digest_differs_from_the_opening_digest() {
-    let tree = Tree::new("child-record-digests");
-    let (_, ended) = run_to_end(&tree);
+    let Ended { tree, ended, .. } = ended_tree();
     assert_eq!(ended["stop"], "Terminal", "{ended}");
     let mut opened: BTreeMap<String, String> = BTreeMap::new();
     let mut closed: BTreeMap<String, String> = BTreeMap::new();
@@ -1180,16 +1354,16 @@ fn a_status_names_the_child_of_each_case_outcome_record() {
 
 #[test]
 fn an_observer_is_given_the_record_of_each_child_line() {
-    let tree = Tree::new("child-record-observer");
-    let seen = child_lines_to_end(&tree);
-    let written: Vec<RunLogLine> = log_lines(&tree, "root")
-        .into_iter()
-        .filter(|line| record_of(line).is_some())
-        .collect();
-    let observed: Vec<RunLogLine> = seen
+    let (tree, seen) = observed_tree();
+    let written: Vec<Value> = log_lines(&tree, "root")
         .iter()
-        .filter(|given| given.case == "root")
-        .map(|given| given.line.clone())
+        .filter(|line| record_of(line).is_some())
+        .map(child_line_json)
+        .collect();
+    let observed: Vec<Value> = seen
+        .iter()
+        .filter(|given| given["case"] == "root")
+        .map(|given| given["line"].clone())
         .collect();
     assert_eq!(
         observed, written,
@@ -1201,10 +1375,9 @@ fn an_observer_is_given_the_record_of_each_child_line() {
         "three opened, three closed: {observed:#?}"
     );
     for line in &observed {
-        let (record, digest) = record_of(line).unwrap();
         assert!(
-            record.is_some() && digest.is_some(),
-            "the observer is given the record of {line:?}"
+            line["record"].is_string() && line["record_digest"].is_string(),
+            "the observer is given the record of {line}"
         );
     }
 }
@@ -1439,6 +1612,11 @@ fn tour_protocols(tree: &Tree) -> PathBuf {
 
 /// `tree open --protocols dir` of the root `protocol` with the bindings file `tour.bindings.yaml`.
 fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
+    open_from_with(tree, dir, protocol, "tour.bindings.yaml")
+}
+
+/// `tree open --protocols dir` of the root `protocol` with the bindings file `bindings`.
+fn open_from_with(tree: &Tree, dir: &Path, protocol: &str, bindings: &str) -> Output {
     tree.command()
         .args([
             "tree",
@@ -1453,7 +1631,7 @@ fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
         .arg("--protocols")
         .arg(dir)
         .arg("--bindings")
-        .arg(tree.workspace().join("tour.bindings.yaml"))
+        .arg(tree.workspace().join(bindings))
         .arg("--workspace")
         .arg(tree.workspace())
         .output()
@@ -1550,6 +1728,79 @@ fn an_edit_after_tree_open_changes_nothing_in_the_open_tree() {
     assert_eq!(kept_sha256(&tree, "tour-leg@1"), at_open);
     let kept = fs::read_to_string(tree.store().join("blobs").join(&at_open)).unwrap();
     assert_eq!(kept, leg);
+}
+
+#[test]
+fn nothing_in_a_run_selects_or_replaces_a_protocol() {
+    let tree = Tree::new("protocols-unselected");
+    let dir = tour_protocols(&tree);
+    let leg = fixture_protocol("tour-leg.yaml");
+    let workspace = tree.workspace();
+    // Each leg's writer writes a `tour-leg` document of its own over the directory's file and into
+    // the workspace, and prints it as its report.
+    let replacing = fs::read_to_string(workspace.join("tour-leg.bindings.yaml"))
+        .unwrap()
+        .replace(
+            "argv: [sh, stubs/route-write.sh]",
+            &format!("argv: [sh, stubs/route-replace.sh, {}]", dir.display()),
+        );
+    fs::write(workspace.join("tour-leg-replace.bindings.yaml"), &replacing).unwrap();
+    fs::write(
+        workspace.join("tour-replace.bindings.yaml"),
+        fs::read_to_string(workspace.join("tour.bindings.yaml"))
+            .unwrap()
+            .replace("tour-leg.bindings.yaml", "tour-leg-replace.bindings.yaml"),
+    )
+    .unwrap();
+    let opened = open_from_with(&tree, &dir, "tour@1", "tour-replace.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let at_open = json(&tree.tree("status"));
+    // A child bindings file naming `tour@1` does not select the protocol of its case: the run is
+    // refused and records nothing.
+    fs::write(
+        workspace.join("tour-leg-replace.bindings.yaml"),
+        replacing.replace("protocol: tour-leg@1", "protocol: tour@1"),
+    )
+    .unwrap();
+    let refused = tree.run();
+    assert_ne!(refused.status.code(), Some(0), "{}", stdout(&refused));
+    let text = stderr(&refused);
+    assert!(
+        text.contains("BindingsRefused") && text.contains("tour@1"),
+        "{text}"
+    );
+    fs::write(workspace.join("tour-leg-replace.bindings.yaml"), &replacing).unwrap();
+    assert_eq!(json(&tree.tree("status")), at_open);
+    let (_, ended) = run_opened(&tree, None);
+    assert_eq!(ended["detail"], "arrived", "{ended}");
+    // The writers ran: the directory's file and the workspace hold their document.
+    let written = fs::read_to_string(dir.join("tour-leg.yaml")).unwrap();
+    assert!(
+        written.contains("  finished:\n") && written != leg,
+        "{written}"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("tour-leg.yaml")).unwrap(),
+        written
+    );
+    // Every case keeps the registration and the SHA-256 of `tree open`.
+    let status = json(&tree.tree("status"));
+    assert_eq!(status["protocols"], at_open["protocols"], "{status}");
+    let cases = status["cases"].as_array().unwrap();
+    assert!(cases.len() > 2, "{status}");
+    for case in cases {
+        let expected = if case.get("parent").is_none() {
+            "tour@1"
+        } else {
+            "tour-leg@1"
+        };
+        assert_eq!(case["protocol"], expected, "{case}");
+    }
+    let kept = kept_sha256(&tree, "tour-leg@1");
+    assert_eq!(
+        fs::read_to_string(tree.store().join("blobs").join(&kept)).unwrap(),
+        leg
+    );
 }
 
 #[test]
