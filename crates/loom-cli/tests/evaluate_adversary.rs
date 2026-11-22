@@ -4,14 +4,17 @@
 
 use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
+use std::process::{Output, Stdio};
 
 use serde_json::{Value, json};
+
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 const LIMIT: usize = 16 * 1024 * 1024;
 
 fn evaluate(root: &Path, stdin: &[u8]) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let mut child = loom_bin::loom()
         .arg("evaluate")
         .env("XDG_DATA_HOME", root)
         .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")

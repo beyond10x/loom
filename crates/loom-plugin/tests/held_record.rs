@@ -84,7 +84,7 @@ fn a_held_record_is_shared_within_the_process_and_a_second_host_is_still_refused
 
     assert!(
         matches!(
-            StateDir::open(&state, &config),
+            StateDir::open_waiting(&state, &config, REFUSAL_WAIT),
             Err(PluginError::StateInUse { .. })
         ),
         "a second host is refused while the first holds the record"
@@ -96,7 +96,7 @@ fn a_held_record_is_shared_within_the_process_and_a_second_host_is_still_refused
     );
     assert!(
         matches!(
-            StateDir::open(&state, &config),
+            StateDir::open_waiting(&state, &config, REFUSAL_WAIT),
             Err(PluginError::StateInUse { .. })
         ),
         "a second host is refused while a handle on the record lives"
@@ -106,3 +106,7 @@ fn a_held_record_is_shared_within_the_process_and_a_second_host_is_still_refused
     let next = StateDir::open(&state, &config).expect("the next host");
     assert_eq!(next.record().unwrap().len(), 3);
 }
+
+/// How long a refused second host waits for the held lock here: the holder in these cases
+/// keeps it, so the wait only delays the refusal ([`StateDir::open_waiting`]).
+const REFUSAL_WAIT: std::time::Duration = std::time::Duration::from_millis(200);

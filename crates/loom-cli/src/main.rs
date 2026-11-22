@@ -83,6 +83,9 @@ fn main() -> ExitCode {
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
+        Command::Tree(arguments) => {
+            ExitCode::from(b10x_loom_cli::tree::command(&arguments.command))
+        }
     }
 }
 
@@ -935,6 +938,7 @@ fn run_command(arguments: RunArgs) -> ExitCode {
     let options = RunOptions {
         context_policy: arguments.context_policy,
         context_report: arguments.context_report.clone(),
+        ..RunOptions::default()
     };
     let stream = (arguments.output == Output::Jsonl).then(|| EventStream::new(std::io::stdout()));
     let mut metrics = ContextMetrics::new(options.context_policy);

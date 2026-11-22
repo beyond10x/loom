@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest dc478223e9fa6254b8bc95052ca9b9fec458f5ce7d2a03717c1f7831ca73dc60
+// contract digest 9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -127,6 +127,8 @@ pub enum BindingsRefusalReason {
     ExitClassConflict,
     /// `ProgramNotBesideBindings`.
     ProgramNotBesideBindings,
+    /// `ArgumentsUndeclared`.
+    ArgumentsUndeclared,
 }
 
 /// BoundAction — `loom.bindings.BoundAction`.
@@ -169,6 +171,36 @@ pub struct BoundStep {
     pub placements: Vec<ArtifactPlacement>,
     /// `moves` — `List<loom.bindings.RevisionMove>`.
     pub moves: Vec<RevisionMove>,
+}
+
+/// ChildNameSource — `loom.bindings.ChildNameSource`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildNameSource {
+    /// `Name`.
+    Name,
+    /// `Request`.
+    Request,
+    /// `Literal`.
+    Literal,
+    /// `ArgumentsFrom`.
+    ArgumentsFrom,
+}
+
+/// ChildNames — `loom.bindings.ChildNames`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildNames {
+    /// `case` — `String`.
+    pub case: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `case_revision` — `Integer`.
+    pub case_revision: i64,
+    /// `source` — `loom.bindings.ChildNameSource`.
+    pub source: ChildNameSource,
+    /// `names` — `List<String>`.
+    pub names: Vec<String>,
+    /// `blob_sha256` — `Optional<String>`.
+    pub blob_sha256: Option<String>,
 }
 
 /// CopiedRecord — `loom.bindings.CopiedRecord`.
@@ -294,6 +326,36 @@ pub struct ExitClasses {
     pub error: Vec<i64>,
     /// `not_called` — `List<Integer>`.
     pub not_called: Vec<i64>,
+}
+
+/// OpenRefusal — `loom.bindings.OpenRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenRefusal {
+    /// `reason` — `loom.bindings.OpenRefusalReason`.
+    pub reason: OpenRefusalReason,
+    /// `action` — `String`.
+    pub action: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// OpenRefusalReason — `loom.bindings.OpenRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenRefusalReason {
+    /// `ArgumentsUnreadable`.
+    ArgumentsUnreadable,
+    /// `ArgumentsMismatched`.
+    ArgumentsMismatched,
+    /// `EachNotAList`.
+    EachNotAList,
+    /// `EachItemNotText`.
+    EachItemNotText,
+    /// `NoChildNamed`.
+    NoChildNamed,
+    /// `ChildNameRepeated`.
+    ChildNameRepeated,
+    /// `ChildNameInvalid`.
+    ChildNameInvalid,
 }
 
 /// ProducerIndependence — `loom.bindings.ProducerIndependence`.

@@ -31,6 +31,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod arguments;
 mod child;
 mod copy;
 mod decode;
@@ -49,7 +50,7 @@ pub use child::{
 pub use copy::{COPY_SOURCE, CopyEffects};
 pub use decode::decode;
 pub use load::{check, unbound};
-pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};
+pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
 pub use resolve::resolve_programs;
 pub use retry::{

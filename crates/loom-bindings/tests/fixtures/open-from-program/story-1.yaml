@@ -1,0 +1,33 @@
+format: protocol/1
+protocol:
+  id: story
+  revision: 1
+  description: >-
+    The third level, which Runbook does not have: tasks.open opens one task case per name its
+    arguments_from program prints.
+artifacts:
+  story: {}
+evidence_kinds:
+  case_outcome: {}
+  tasks_opened: {}
+claims:
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  tasks.open:
+    effect: write
+    case_open: {protocol: task, subject: story}
+    may_produce:
+      - evidence: tasks_opened
+    arguments:
+      type: object
+      properties:
+        tasks:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+      required: [tasks]
+      additionalProperties: false

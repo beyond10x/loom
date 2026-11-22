@@ -156,29 +156,35 @@ fn a_refused_revision_update_moves_nothing() {
 /// A replay on a second governor issues the same frontier ids, and two frontiers that differ never
 /// share an id.
 ///
-/// `task check` walks one seed on each protocol, 120 steps each: every step kind (a revision
-/// update, evidence about its usual subject and about another artifact) and every pool entry
-/// comes up in it. The slow lane walks the two other seeds (`slow_` twin below).
+/// `task check` walks one seed on each protocol, [`CHECK_STEPS`] steps each: every step kind (a
+/// revision update, evidence about its usual subject and about another artifact) and every pool
+/// entry comes up in it. The slow lane walks all three seeds for [`WALK_STEPS`] steps (`slow_` twin
+/// below); each step decides over every record so far, so a walk's cost grows with the square of
+/// its steps.
 #[test]
 fn the_frontier_is_canons_decision_over_random_evidence() {
     for seed in RANDOM_EVIDENCE_SEEDS[..1].iter().copied() {
-        random_walk(seed, &software_change_pool());
-        random_walk(seed, &incident_response_pool());
+        random_walk(seed, &software_change_pool(), CHECK_STEPS);
+        random_walk(seed, &incident_response_pool(), CHECK_STEPS);
     }
 }
 
-/// The seeds of `the_frontier_is_canons_decision_over_random_evidence` that `task check` leaves to
-/// the slow lane.
+/// `the_frontier_is_canons_decision_over_random_evidence` over every seed, each walk
+/// [`WALK_STEPS`] long.
 #[test]
 fn slow_the_frontier_is_canons_decision_over_random_evidence() {
-    for seed in RANDOM_EVIDENCE_SEEDS[1..].iter().copied() {
-        random_walk(seed, &software_change_pool());
-        random_walk(seed, &incident_response_pool());
+    for seed in RANDOM_EVIDENCE_SEEDS.iter().copied() {
+        random_walk(seed, &software_change_pool(), WALK_STEPS);
+        random_walk(seed, &incident_response_pool(), WALK_STEPS);
     }
 }
 
-/// The random walks' seeds: the first in `task check`, all three across both lanes.
+/// The random walks' seeds: the first in `task check`, all three in the slow lane.
 const RANDOM_EVIDENCE_SEEDS: [u64; 3] = [0x5eed_0001, 0x5eed_0002, 0x5eed_0003];
+/// The steps of a walk in `task check`.
+const CHECK_STEPS: usize = 50;
+/// The steps of a walk in the slow lane.
+const WALK_STEPS: usize = 120;
 
 struct Pool {
     protocol: &'static str,
@@ -243,7 +249,7 @@ fn incident_response_pool() -> Pool {
     }
 }
 
-fn random_walk(seed: u64, pool: &Pool) {
+fn random_walk(seed: u64, pool: &Pool, steps: usize) {
     let ir = ir_of(pool.name, 1);
     let opening: BTreeMap<String, String> = pool
         .artifacts
@@ -269,7 +275,7 @@ fn random_walk(seed: u64, pool: &Pool) {
     let mut updated = BTreeSet::new();
     let mut kinds = BTreeSet::new();
     let (mut about_usual, mut about_other) = (0, 0);
-    for step in 0..120 {
+    for step in 0..steps {
         let context = format!("{} seed {seed:#x} step {step}", pool.protocol);
         if rng.below(4) == 0 {
             let (artifact, revisions) = &pool.artifacts[rng.below(pool.artifacts.len())];

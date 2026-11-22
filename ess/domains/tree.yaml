@@ -1,0 +1,399 @@
+# A tree of protocol cases run from a case store (story tree-run-command): the `b10x-loom tree`
+# command group opens the root case of a tree in a store directory, runs the tree on Commission's
+# loop with the deterministic selector and the bound executors until the root is terminated or the
+# tree waits on a person, records a person's approval for one case, closes a case through a named
+# outcome, verifies every case's run log and prints the tree's status. The crate b10x-loom-tree
+# holds the run logic and b10x-loom-cli the flags. What a command prints and what it keeps in the
+# store beside the case files is declared here; a command is a process, not a stored entity with a
+# lifecycle, so the domain declares types only and no command.
+domain: loom.tree
+
+summary: >-
+  A tree of protocol cases run from a case store: how a run of the tree stops, the decisions a
+  waiting tree names with the command that records each, the budget of one run, a person's
+  approval of one capability for one case, the protocols a tree was opened from, the status of
+  every case of the tree, the result of verifying its run logs, and the refusals of the tree
+  commands.
+
+naming:
+  wire: tree
+  display: Tree
+
+types:
+  # How one `tree run` stopped. `Terminal`: the root case is terminated through an outcome (exit
+  # 0). `AwaitingPerson`: a decision only a person takes is open, an approval of a person action,
+  # the choice between two legitimate outcomes or a writer's handoff (exit 3). `AwaitingAuthority`:
+  # an admissible action needs an approval of its capability (exit 3). `Stuck`: a case has no
+  # useful action, no legitimate outcome and nothing awaiting approval (exit 4). `BudgetSpent`: the
+  # step or the wall-time budget is spent before the next step (exit 5).
+  - name: loom.tree.TreeStop
+    kind: enum
+    variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent]
+
+  # What a printed decision records. `Approve`: `tree approve` of the capability, with which the
+  # next `tree run` takes the action itself. `ApproveAction`: `tree approve --action`, with which
+  # the person takes a `person` action. `Close`: `tree close` through one of the legitimate
+  # outcomes. `Handoff`: the writer's handoff text, after which `tree run` is run again.
+  - name: loom.tree.DecisionKind
+    kind: enum
+    variants: [Approve, ApproveAction, Close, Handoff]
+
+  # One decision a waiting tree names: the case, the action (absent for a close), the capability
+  # an approval is about, what is decided (a sentence, or the handoff text), the subject artifact
+  # with its revision and its path in the workspace when the decision is about one, the outcome a
+  # close records, and the exact command that records the decision as its argv. Nothing a program
+  # printed, no report and no bindings text selects the case, the action, the capability or the
+  # principal of the command; a handoff text is printed as the decision and never as a command.
+  - name: loom.tree.NextDecision
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: kind
+        type: loom.tree.DecisionKind
+      - name: action
+        type: Optional<String>
+      - name: capability
+        type: Optional<String>
+      - name: decides
+        type: String
+      - name: subject
+        type: Optional<String>
+      - name: revision
+        type: Optional<String>
+      - name: path
+        type: Optional<String>
+      - name: outcome
+        type: Optional<String>
+      - name: command
+        type: List<String>
+
+  # The budget of one `tree run`: the steps it may take across every case of the tree and the
+  # seconds of wall time it may run; absent, the command's default. Each present member is at
+  # least 1. The run stops before the step that would pass either.
+  - name: loom.tree.TreeBudget
+    kind: struct
+    fields:
+      - name: max_steps
+        type: Optional<Integer>
+      - name: max_wall_seconds
+        type: Optional<Integer>
+
+  # What one `tree run` ends with: the stop, the case it names (the root when terminated, else the
+  # case that waits, is stuck or was to take the next step), the steps it took, the decisions that
+  # would let the tree go on, and what else the stop says.
+  - name: loom.tree.TreeRun
+    kind: struct
+    fields:
+      - name: stop
+        type: loom.tree.TreeStop
+      - name: case
+        type: String
+      - name: steps
+        type: Integer
+      - name: decisions
+        type: List<loom.tree.NextDecision>
+      - name: detail
+        type: Optional<String>
+
+  # A principal's decision on a capability.
+  - name: loom.tree.ApprovalDecision
+    kind: enum
+    variants: [Allow, Deny]
+
+  # A principal's decision on one capability for one case at one case revision, and the instant it
+  # was recorded; kept in the store beside the case file. It allows that capability for that case
+  # while the case is at that revision, and nothing else.
+  - name: loom.tree.CaseApproval
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: capability
+        type: String
+      - name: decision
+        type: loom.tree.ApprovalDecision
+      - name: principal
+        type: String
+      - name: case_revision
+        type: Integer
+      - name: at
+        type: Timestamp
+
+  # Where a tree's protocols come from: the host's catalog, or the files of the directory
+  # `tree open --protocols` named, kept in the store.
+  - name: loom.tree.TreeCatalog
+    kind: enum
+    variants: [Host, Directory]
+
+  # One protocol of a tree opened with `--protocols`, an entry of `tree-protocols.json`: the
+  # registration it is held under, its protocol id and revision as the document declares them, the
+  # name of the file it was read from and the SHA-256 of its bytes, which name its blob in the
+  # store.
+  - name: loom.tree.TreeProtocol
+    kind: struct
+    fields:
+      - name: registration
+        type: String
+      - name: protocol
+        type: String
+      - name: revision
+        type: Integer
+      - name: file
+        type: String
+      - name: sha256
+        type: String
+
+  # The tree a store holds, `tree.json`, written once by `tree open` beside the root case file: its
+  # format (`loom.tree/1`), the root case, the workspace every case works in (an absolute path),
+  # the root's bindings file (an absolute path) and where its protocols come from.
+  - name: loom.tree.TreeManifest
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: root
+        type: String
+      - name: workspace
+        type: String
+      - name: bindings
+        type: String
+      - name: catalog
+        type: loom.tree.TreeCatalog
+
+  # The last line of a case's run log as the tree last wrote it: its `seq` and the SHA-256 of its
+  # bytes. Kept beside the run log, so a change to the log's last line is seen too.
+  - name: loom.tree.TreeLogHead
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: seq
+        type: Integer
+      - name: digest
+        type: String
+
+  # One record a case of `tree status` holds, in the order the case received it: its position from
+  # 0, the governor's id of it, and, read from its `canon-evidence/1` record, its kind, result,
+  # subject, subject revision and upstream revisions (an object of artifact to revision), its
+  # producer, and the action of the step that gave it (absent when no step did).
+  - name: loom.tree.StatusEvidence
+    kind: struct
+    fields:
+      - name: index
+        type: Integer
+      - name: evidence_id
+        type: String
+      - name: kind
+        type: String
+      - name: result
+        type: Optional<String>
+      - name: subject
+        type: String
+      - name: subject_revision
+        type: String
+      - name: upstream_revisions
+        type: Json
+      - name: producer
+        type: String
+      - name: action
+        type: Optional<String>
+
+  # One run of a bound program of a case: the action, its exit (absent when it timed out or the
+  # runner refused it), its attempt in the action's own chain from 1, whether the next run of the
+  # action was a retry, and the evidence ids the run was given as the records that sent it back.
+  - name: loom.tree.StatusRun
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: attempt
+        type: Integer
+      - name: retried
+        type: Boolean
+      - name: retry_of
+        type: List<String>
+
+  # One `tree approve` on a case, in the order recorded: the capability, the action `--action`
+  # named (absent without it), the answer, the principal and the instant.
+  - name: loom.tree.StatusApproval
+    kind: struct
+    fields:
+      - name: capability
+        type: String
+      - name: action
+        type: Optional<String>
+      - name: answer
+        type: loom.tree.ApprovalDecision
+      - name: actor
+        type: String
+      - name: at
+        type: String
+
+  # One record a `copy` binding copied into a case: the case it was copied from, the case it was
+  # copied into and its kind.
+  - name: loom.tree.StatusCopy
+    kind: struct
+    fields:
+      - name: source_case
+        type: String
+      - name: target_case
+        type: String
+      - name: record_kind
+        type: String
+
+  # One case of `tree status`: its id, its parent (absent for the root), the registration it is
+  # held under, its case revision, the outcome it ended through or the stop its last run recorded,
+  # its open obligations, and the paths of its case file and its run log; then the last segment of
+  # its id below its parent, its protocol id and revision, the decisions its last stop waits on,
+  # its records, the runs of its bound programs, its approvals and the records copied into it.
+  - name: loom.tree.CaseStatus
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: parent
+        type: Optional<String>
+      - name: protocol
+        type: String
+      - name: revision
+        type: Integer
+      - name: outcome
+        type: Optional<String>
+      - name: stop
+        type: Optional<String>
+      - name: open_obligations
+        type: List<String>
+      - name: case_file
+        type: String
+      - name: run_log
+        type: String
+      - name: name
+        type: Optional<String>
+      - name: protocol_id
+        type: String
+      - name: protocol_revision
+        type: String
+      - name: stop_next
+        type: List<String>
+      - name: evidence
+        type: List<loom.tree.StatusEvidence>
+      - name: runs
+        type: List<loom.tree.StatusRun>
+      - name: approvals
+        type: List<loom.tree.StatusApproval>
+      - name: copies
+        type: List<loom.tree.StatusCopy>
+
+  # `tree status`: its format `loom.tree-status/1` and the version of `b10x-loom-tree` that printed
+  # it, the store directory, the workspace, the root case, one entry per case of the tree in tree
+  # order, and, for a tree opened with `--protocols`, each protocol it holds.
+  - name: loom.tree.TreeStatus
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: version
+        type: String
+      - name: store
+        type: String
+      - name: workspace
+        type: String
+      - name: root
+        type: String
+      - name: cases
+        type: List<loom.tree.CaseStatus>
+      - name: protocols
+        type: List<loom.tree.TreeProtocol>
+
+  # The first run log of a tree that does not verify: the case, the line counted from 0 and what
+  # is wrong with it.
+  - name: loom.tree.LogFailure
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: line
+        type: Integer
+      - name: detail
+        type: String
+
+  # `tree verify`: the cases whose logs were read and the first failure, absent when every log
+  # verifies.
+  - name: loom.tree.TreeVerify
+    kind: struct
+    fields:
+      - name: cases
+        type: Integer
+      - name: failure
+        type: Optional<loom.tree.LogFailure>
+
+  # Why a tree command was refused; nothing is written unless the reason says otherwise.
+  # `StoreInUse`: another tree command holds the store, its process id named. `NotATree`: the
+  # store holds no tree. `StoreNotEmpty`: `tree open` on a store that holds anything.
+  # `WorkspaceUnusable`: the workspace is no directory or cannot be read. `BindingsRefused`: a
+  # bindings file of the tree does not decode or does not check against its protocol.
+  # `AgentNotRunYet`: a binding of the tree has an `agent` executor, named with the file, the action
+  # and the story that runs it. `UnknownProtocol`: the root registration is not in the tree's
+  # catalog. `InvalidRevision`: an initial artifact revision is malformed or names an artifact the
+  # protocol does not declare. `InvalidInstant`: `--at` is no RFC 3339 instant. `CaseNotInTree`: the
+  # named case is not a case of the tree. `CaseTerminated`: the named case is terminated already.
+  # `OutcomeNotLegitimate`: `tree close` names an outcome that is not legitimate for the case.
+  # `NotAPersonAction`: `tree approve --action` names an action not bound to `person`, or one the
+  # frontier does not admit. `ConfinementRefused`: the runner for bound programs is refused.
+  # `StoreUnreadable`: a file of the store cannot be read or written. `LogRefused`: a run log of
+  # the tree does not verify, so no command appends to it. `StoredProtocolChanged`: a stored
+  # protocol blob no longer has the SHA-256 `tree-protocols.json` names. `DuplicateProtocol`: two
+  # files of the protocols directory declare one protocol id. `ProtocolRefused`: a file of the
+  # directory is not a regular UTF-8 file within 1 MiB, or Canon refuses it, or its id gives no
+  # registration. `ProtocolLinkLeavesDirectory`: a link of the directory resolves outside it.
+  # `ProtocolNotInDirectory`: the root registration, or a protocol a `case_open` names, is in no
+  # file of the directory. `NoProtocolFiles`: the directory holds no protocol file.
+  - name: loom.tree.TreeRefusalReason
+    kind: enum
+    variants:
+      - StoreInUse
+      - NotATree
+      - StoreNotEmpty
+      - WorkspaceUnusable
+      - BindingsRefused
+      - AgentNotRunYet
+      - UnknownProtocol
+      - InvalidRevision
+      - InvalidInstant
+      - CaseNotInTree
+      - CaseTerminated
+      - OutcomeNotLegitimate
+      - NotAPersonAction
+      - ConfinementRefused
+      - StoreUnreadable
+      - LogRefused
+      - StoredProtocolChanged
+      - DuplicateProtocol
+      - ProtocolRefused
+      - ProtocolLinkLeavesDirectory
+      - ProtocolNotInDirectory
+      - NoProtocolFiles
+      - UnknownStatusFormat
+
+  # A refused tree command: the reason, what is wrong, and where the reason names one the case,
+  # the file, the action, the story that lifts it and the process id of the store's holder.
+  - name: loom.tree.TreeRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.tree.TreeRefusalReason
+      - name: detail
+        type: String
+      - name: case
+        type: Optional<String>
+      - name: file
+        type: Optional<String>
+      - name: action
+        type: Optional<String>
+      - name: story
+        type: Optional<String>
+      - name: holder
+        type: Optional<Integer>

@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest dc478223e9fa6254b8bc95052ca9b9fec458f5ce7d2a03717c1f7831ca73dc60
+  contract digest 9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-436 capabilities: **420 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+459 capabilities: **443 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -70,6 +70,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.BindingsRefusalReason` |
 | domain type | `loom.bindings.BoundAction` |
 | domain type | `loom.bindings.BoundStep` |
+| domain type | `loom.bindings.ChildNameSource` |
+| domain type | `loom.bindings.ChildNames` |
 | domain type | `loom.bindings.CopiedRecord` |
 | domain type | `loom.bindings.CopyRefusal` |
 | domain type | `loom.bindings.CopyRefusalReason` |
@@ -79,6 +81,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.ExecutorSpec` |
 | domain type | `loom.bindings.ExitClass` |
 | domain type | `loom.bindings.ExitClasses` |
+| domain type | `loom.bindings.OpenRefusal` |
+| domain type | `loom.bindings.OpenRefusalReason` |
 | domain type | `loom.bindings.ProducerIndependence` |
 | domain type | `loom.bindings.ProgramEnvironment` |
 | domain type | `loom.bindings.ProgramRefusal` |
@@ -164,8 +168,6 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.governor.StoredArtifact` |
 | domain type | `loom.governor.StoredCase` |
 | domain type | `loom.governor.StoredCaseId` |
-| domain type | `loom.governor.StoredDecisionRequest` |
-| domain type | `loom.governor.StoredDecisionRequestData` |
 | domain type | `loom.governor.StoredEvidence` |
 | domain type | `loom.governor.StoredEvidenceData` |
 | domain type | `loom.governor.StoredIndependence` |
@@ -276,6 +278,27 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.session.ToolDecision` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
+| domain type | `loom.tree.ApprovalDecision` |
+| domain type | `loom.tree.CaseApproval` |
+| domain type | `loom.tree.CaseStatus` |
+| domain type | `loom.tree.DecisionKind` |
+| domain type | `loom.tree.LogFailure` |
+| domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.StatusApproval` |
+| domain type | `loom.tree.StatusCopy` |
+| domain type | `loom.tree.StatusEvidence` |
+| domain type | `loom.tree.StatusRun` |
+| domain type | `loom.tree.TreeBudget` |
+| domain type | `loom.tree.TreeCatalog` |
+| domain type | `loom.tree.TreeLogHead` |
+| domain type | `loom.tree.TreeManifest` |
+| domain type | `loom.tree.TreeProtocol` |
+| domain type | `loom.tree.TreeRefusal` |
+| domain type | `loom.tree.TreeRefusalReason` |
+| domain type | `loom.tree.TreeRun` |
+| domain type | `loom.tree.TreeStatus` |
+| domain type | `loom.tree.TreeStop` |
+| domain type | `loom.tree.TreeVerify` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |

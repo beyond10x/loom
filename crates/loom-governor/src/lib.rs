@@ -202,6 +202,7 @@ mod locked_dir;
 
 pub use children::{
     CHILD_OUTCOME_PRODUCER, ChildError, ChildOpening, TerminateError, TreeCase, UNREVISED,
+    plain_child_name,
 };
 pub use file_decision::FileDecisionStore;
 pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};

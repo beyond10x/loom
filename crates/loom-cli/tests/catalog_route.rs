@@ -21,6 +21,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
 const CLASSIFY: &[u8] = include_bytes!("fixtures/catalog-route/classify.sse");
 const SELECT: &[u8] = include_bytes!("fixtures/catalog-route/select.sse");
@@ -279,7 +282,7 @@ fn a_routed_pick_of_eval_gated_change_stops_no_local_executor_naming_it() {
     const EVAL_GATED_CHANGE: &str = "eval-gated-change@1";
     let scratch = Scratch::new("eval-gated-change");
     let home = scratch.root.join("home");
-    let listed = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let listed = loom_bin::loom()
         .args(["protocols", "list"])
         .env("HOME", &home)
         .env("XDG_DATA_HOME", &home)
@@ -358,10 +361,7 @@ fn a_routed_pick_of_eval_gated_change_stops_no_local_executor_naming_it() {
 /// `run --help` documents the flag.
 #[test]
 fn run_help_documents_the_catalog_flag() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
-        .args(["run", "--help"])
-        .output()
-        .unwrap();
+    let output = loom_bin::loom().args(["run", "--help"]).output().unwrap();
     let help = String::from_utf8_lossy(&output.stdout);
     assert!(help.contains("--catalog <PATH>"), "{help}");
     assert!(help.contains("route alias"), "{help}");
@@ -400,7 +400,7 @@ impl Scratch {
 
     fn run(&self, args: &[&str]) -> Output {
         let home = self.root.join("home");
-        Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        loom_bin::loom()
             .arg("run")
             .args(["--confinement", "none"])
             .args(args)

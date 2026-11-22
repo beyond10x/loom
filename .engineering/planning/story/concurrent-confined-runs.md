@@ -10,6 +10,8 @@ tags:
 relations:
 - serves: vision:O1
 - decomposes: epic:protocol-tree-on-bindings
+- depends_on: story:child-record-in-the-run-log
+- depends_on: story:tree-status-names-what-it-read
 scope:
 - confidence: cited
   path: AGENTS.md
