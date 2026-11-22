@@ -407,9 +407,10 @@ fn another_commissions_suspension_does_not_refuse_a_new_run() {
 }
 
 /// Eight stores over one directory, each with its own lock handle, take one `Pending` Suspension
-/// at once, two hundred times: exactly one takes it each time.
+/// at once, two hundred times: exactly one takes it each time. In the slow lane (`task slow`):
+/// 44 to over 60 s beside the other tests of `task check`.
 #[test]
-fn concurrent_takes_over_one_directory_take_once() {
+fn slow_concurrent_takes_over_one_directory_take_once() {
     let dir = store_dir("concurrent-take");
     let root = dir.join("suspensions");
     let snapshot = template();

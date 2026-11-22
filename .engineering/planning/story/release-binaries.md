@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:release-binaries
 kind: story
-status: draft
+status: active
 title: Every Loom release carries a b10x-loom binary per target, with its checksum, as GitHub Release assets
 tags:
 - sdc
@@ -24,7 +24,10 @@ scope:
   path: crates/loom-xtask/tests/release_check.rs
 - confidence: cited
   path: website/docs/getting-started.md
-revision: 4
+revision: 6
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T00:22:58Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
+- {from: "proposed", to: "active", at: "2026-11-22T00:22:58Z", actor: "agent:sdc", revision: 6, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
 ---
 ## Outcome
 
