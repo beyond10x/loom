@@ -127,6 +127,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | Every selection gets one `SelectionRecord` equal to it, with `fell_back_to` on the overruled fast selection naming the replacement's strategy; a selection refused at the execution boundary adds no record; a record is never evidence | `crates/loom-executor/tests/selection_telemetry.rs` (`selection_telemetry_is_recorded`) |
 | Laya selects behind the confidence fallback; arguments are generated once, only for the finally selected action, and an action outside the frontier never reaches argument generation or revalidation | `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_revalidation`) |
 | The deterministic selector (`DeterministicSelector`, strategy `Deterministic`) calls no model and takes only an admissible, useful candidate (due, or not performed at the case revision and with open evidence or nothing to produce), every non-`write` action before every `write` action, then by id; its facts and history come from the host's `ActionFactsPort` and `StepHistory`, never from the candidates; `CanonGovernor::action_facts` takes a kind out of an action's open evidence once a record of it counts at its subject's current revision and opens it again when that subject moves | `crates/loom-executor/tests/deterministic_selector.rs` (`reads_by_identifier_then_writes_by_identifier_across_four_steps`, `an_admissible_action_whose_kinds_are_all_counted_is_never_selected`, `an_action_the_facts_name_outside_the_candidates_is_never_returned`, `the_selection_record_names_deterministic_no_tokens_and_no_confidence`), `crates/loom-governor/tests/action_facts.rs` (`a_counted_kind_leaves_open_evidence_and_returns_when_the_subject_moves`, `an_expired_record_counts_for_nothing`, `a_held_record_that_does_not_apply_counts_for_nothing`), `crates/loom-governor/tests/adversary_w20261121w1_u3.rs`, `crates/loom-executor/tests/adversary_w20261121w1_u3.rs` (`adversary_a_run_for_another_case_does_not_pick_from_the_selectors_case`) |
+| Generated arguments reach revalidation and a proposal only when they match the argument schema the host's loaded protocol declares for the action (`Loom::with_argument_schemas`, Canon's `check_arguments`), an action declaring none taking only `{}`; a mismatch, or a member named twice, is recorded `Mismatched` on its argument request (`loom.run.CheckArguments`) naming the action, the pointer and the keyword, and nothing is revalidated or proposed; a Loom given no schemas checks nothing | `crates/loom-executor/tests/argument_schema.rs` (`arguments_not_matching_the_declared_schema_are_never_revalidated_or_proposed`, `an_action_with_no_declared_schema_takes_only_the_empty_object`, `a_loom_without_schemas_checks_no_arguments`, `a_case_open_action_takes_only_a_non_empty_list_of_story_names`), `crates/loom-plugin/tests/turn.rs` (`a_source_read_without_kind_is_never_performed`), `crates/loom-selector-laya/tests/laya_arguments_slice.rs` (`generated_arguments_that_do_not_match_release_inspect_are_never_proposed`), `task conform` (`loom.run.CheckArguments`) |
 | A blocked or merge-seeking pick is never proposed | `crates/loom-executor/tests/adversary_executor_admission.rs` |
 | A workflow asks a model only in a judgement step, offering it only that step's actions; a judgement step runs on the host's own `AgentExecutor` when it supplies one, called for that step only, told its instructions and handed only its actions, and a proposal outside them, or reads proposed together, never reach Commission; a step whose action the frontier does not list ends `NeedsHumanJudgment` naming it and nothing is proposed; a step advances only once its request was `Performed`; a definition naming an action outside its protocol is refused at load, naming the step | `crates/loom-executor/tests/workflow_executor.rs` (`deterministic_steps_call_no_model`, `a_judgement_step_offers_the_model_only_its_actions`, `a_judgement_step_runs_on_a_supplied_executor`, `a_supplied_executors_reads_proposed_together_are_never_proposed`, `a_step_the_frontier_does_not_list_ends_needing_human_judgment`, `a_step_advances_only_after_its_effect_was_performed`, `a_definition_naming_an_action_outside_its_protocol_is_refused`), `crates/loom-executor/tests/adversary_w11_u2.rs` |
 | A later step's arguments carry an earlier step's typed output with no model call, and a missing or mistyped output, or one its step did not produce, proposes nothing and ends `NeedsHumanJudgment` naming the step and the output; a reference to a later, unknown or undeclared output is refused at load | `crates/loom-executor/tests/workflow_step_outputs.rs` (`a_later_step_reads_an_earlier_output_without_a_model`, `a_mistyped_output_ends_needing_human_judgment`, `an_absent_output_ends_needing_human_judgment`, `a_reference_to_a_later_or_unknown_step_is_refused_at_load`, `outputs_are_identical_on_a_rerun_with_the_same_reports`) |
@@ -190,6 +191,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
 | A release's CHANGELOG entry says what breaks for a consumer: a `**Breaking:**` bullet per break or the line `No breaking changes.`, never both, and no `**Breaking:**` bullet that names nothing or says `none`; a `Breaking:` sentence in prose does not count; `No breaking changes.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; a `**Breaking:**` bullet is refused on a tag that moves only the patch version, and removing a path the previous tag's SDK stability page lists is refused unless an earlier release listed it under `### Deprecated`; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_bullet`, `release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_no_breaking_changes_when_no_stable_surface_changed`, `release_check_refuses_a_breaking_bullet_that_names_no_break`, `release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes`, `release_check_passes_on_the_first_tag`, `a_removal_without_a_deprecated_release_is_refused`, `a_breaking_entry_on_a_patch_tag_is_refused`, `release_workflow_verifies_the_tag_and_reuses_the_check`), `crates/loom-xtask/tests/adversary_w20261023w1_u4.rs` |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate; its library runs a `loom.agent/1` spec through `loom_sdk::Runtime` alone, and the run ends as the spec's budget and stop policy say | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`; `consumers/pinned/tests/agent_spec.rs`, `an_agent_defined_as_data_runs`), `crates/loom-xtask/tests/pinned_consumer.rs` (`the_agent_consumer_runs_a_spec_through_the_sdk_alone`) |
+| Loom builds `b10x-substrate-host` without its `git` feature: `Cargo.lock` holds no `git2`, `libgit2-sys`, `gix`, `gix-*`, `curl`, `curl-sys`, `openssl-sys` or `libz-sys`, no dependency path reaches a Git library, Loom's driver configuration names no Git source and a Git source on that driver is refused `workspace.git-source-unserved` at its first use; `loom-xtask linked-libraries <binary>` fails, naming the library, when `ldd` names `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz`, and `binaries.yml` runs it on the release binary | `crates/loom-intake-slice/tests/host_git_hardening.rs` (`the_lock_file_holds_no_git_library_and_no_curl`, `every_host_git_command_goes_through_a_hardened_helper`), `crates/loom-intake-slice/src/confinement.rs` (`the_driver_config_names_no_git_source`, `a_git_source_on_loom_s_driver_is_refused_unserved`), `crates/loom-xtask/src/linked_libraries.rs` (`linked_libraries_refuses_a_binary_that_links_libgit2`), `crates/loom-xtask/tests/release_check.rs` (`binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum`) |
 
 ## ESS
 
@@ -327,10 +329,54 @@ change under `ess/`, with `task suite-generate` before it, and after a change to
 fast is renamed `slow_…` and runs there, never deleted; so is a test that starts a nested `cargo`
 build or test (the gate's replicas in `adversary_ess_gate.rs` and `adversary2_ess_gate.rs`).
 
+In a batch of waves the committed suite (`generated/ess/loom/suite.json` and
+`generated/ess/loom/synthesis.txt`) is regenerated once per batch, on the merged integration head,
+by the batch gate; never by a unit in its merge round, since each change under `ess/` that an
+earlier merge of the batch brought in makes it stale again. `task suite-generate` takes 534.5 s
+(2026-11-21, ess 0.96.0). ESS has a fix in flight that cuts the synthesis of a whole domain from
+about 254 s to 70 to 90 s of CPU; it is not released. A unit that merges the integration head
+keeps the integration side of `generated/ess/loom/suite.json` and of its digest file
+`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. The tests that
+read the suite after its digest check (`ess_gate` of `b10x-loom-executor` and `conform` of
+`b10x-loom-conformance`) run in the batch gate only, not in a unit's merge round.
+
 nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
 not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
 keyed by the digest of its inputs and made once for every process (`made_once` in
-`crates/loom-executor/tests/support/ess_suite.rs`).
+`crates/loom-executor/tests/support/ess_suite.rs`). `task test-step` fills the cache the `crd`
+tests of `b10x-loom-resource` read (`ess generate --kind schema`, about 16 s) beside its build of
+the test binaries, so no test of the step makes it or waits for another that does. The same
+holds for the generators: the tests of `loom-xtask` and `loom-commission-xtask` that run
+`generate` or `drift` pass `--ess` a stand-in (`synthesis_stand_in` in `ess_suite.rs`) that
+answers `ess generate synthesize` of `ess/` or `ess/commission/` with a copy of the one synthesis
+made for the tree's digest, which `task test-step` makes beside its build; a call over a changed
+copy of the specification runs `ess` itself. `task drift` and `task commission:drift` still
+synthesize for real. The two packages' tests took 77.4 s and 29.4 s of test time with a synthesis
+per call, 28.3 s and 10.6 s with the stand-in.
+
+A test of a product bound that is seconds long (a deadline, a grace, a settle) sets a short one
+through a parameter of the product, the crate's constant its default, and a test asserts the
+default: `A2aServer::with_deadlines` (`Deadlines::HOST`: 10 s head, 30 s body, 10 s write, 1 s
+drain) and `with_stream_idle` (300 s) in `b10x-loom-a2a`, `ConnectorsRelay::with_bounds`
+(`RelayBounds::HOST`: 5 s connect, 20 s request) in `b10x-loom-connectors`,
+`EngineRunner::with_kill_bounds` (`KillBounds::HOST`: 5 s grace, 5 s settle) in
+`b10x-loom-intake-slice`, `RunOptions::with_model_retry` (`run::MODEL_RETRY`: three attempts,
+1 s then 2 s) there too, and `Host::with_lock_wait` (`state::LOCK_WAIT`, 2 s) and
+`Host::with_model_retry` (`run::MODEL_RETRY`) in `b10x-loom-plugin`.
+
+The executor keeps its observations' instants strictly increasing in whole seconds and waits on
+its clock for the next second, so a run's every observation after the first waited up to 1 s:
+the tests of `b10x-loom-cli` and `b10x-loom-intake-slice` were about 97 % asleep (a profile of
+three of them: 0.1 s of CPU in 3.5 to 4.6 s). Test builds turn on the feature `test-clock` of
+`b10x-loom-intake-slice` (a dev-dependency of the crate on itself, of `b10x-loom-cli` and of
+`b10x-loom-sdk`), under which `SystemClock` reads the host clock plus a virtual offset and a wait on it advances the
+offset instead of sleeping (`clock::test_clock`); no other build has the feature. The processes
+one test starts share the offset through the file `B10X_LOOM_TEST_CLOCK` names, which
+`crates/loom-cli/tests/support/loom.rs` sets for every `b10x-loom` a test of that crate starts,
+so a later command never reads an instant earlier than an earlier one. A test that runs a child
+beside another action holds the child until the action is done (`HOLD` and `release` in those
+test files) instead of sleeping a fixed time. With the retry option above, both packages' tests
+went from 269.6 s to 161.3 s of test time on 4 threads (2026-11-22).
 
 `.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
 builds inherit; the config file wins over one in the home directory, the manifest holds where no
@@ -343,7 +389,11 @@ build of their dependencies takes about twice as long, an incremental one no lon
 `b10x-loom-governor` is built at `opt-level = 2` too: its cost tests
 (`…_costs_a_bounded_multiple_of_deciding`) compare a path in its own code with deciding in
 Canon, a dependency, and with only Canon optimized the ratio rose from about 14 to 40 to 70
-against a bound of 40; with both optimized it is about 18.
+against a bound of 40; with both optimized it is about 18. The workspace's own crates build at
+`opt-level = 1` (`[profile.dev]` there): on 4 threads the tests of `b10x-loom-cli`,
+`b10x-loom-intake-slice` and `b10x-loom-runlog` took 349 s of test time and 92 s of wall time at
+`opt-level = 0`, 252 s and 66 s at 1 (2026-11-22, one loaded host, one run each); rebuilding
+those crates at 1 over built dependencies took 184 s.
 
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
@@ -565,7 +615,14 @@ across a restart. `FileWorkflowRunStore` is the governor's `WorkflowRunStore`, t
 write, a file per Run (`workflow-run-…`); a file holding another Run's record is refused, and
 `crates/loom-commission-testkit/tests/workflow_run_store.rs` holds a workflow run across real process
 restarts. The port and its `RunStoreError` are `b10x-loom-executor`'s (`workflow`, beside
-`WorkflowExecutor`), so the governor depends on the executor and never the reverse. The host
+`WorkflowExecutor`), so the governor depends on the executor and never the reverse.
+`FileDecisionStore` is `b10x-loom-decision`'s `DecisionStore` port over the same lock and write, a
+file per decision request (`decision-…`, as `loom.governor`'s `StoredDecisionRequest`) holding the
+records kept beside it; a write's comparison with the state read, its record-key check and the
+write are one hold of the lock, a file that does not read back exactly as the store writes it or
+holds another request is refused naming it, and a decided request is never decided again
+(`crates/loom-governor/tests/decision_store.rs`, which holds a request across a real process
+restart). The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision. The explicit decisions
 (`canon-decisions/1`) it supplies are the ones the host recorded with `CanonGovernor::decide`, each
@@ -633,12 +690,50 @@ refuses such a case of a built-in protocol naming the case and the input
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
 Canon is named by the `b10x-canon` line of each of `crates/loom-governor/Cargo.toml`,
-`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.9.0"`), pinned
+`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.10.0"`), pinned
 by `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
 with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
 adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
-register and are decided like any other construct, and Loom opens no child case itself.
+register and are decided like any other construct. A catalog or a registration whose openings form
+a cycle is refused `InvalidProtocol` with Canon's `check_openings` text (`case-open-cycle: ... a ->
+b -> a`). Canon 0.10.0 adds a `scope` on a capability requirement, `supplied_by` on an evidence kind, `author`,
+`revises` and `decided_by`, and a `children` form's `subject` and `revision: current`; such a
+protocol registers and Canon decides it, but Loom does not read all of it: the frontier carries the
+capability id alone, the scope only inside Canon's reason, and `action_facts` reads a `children`
+form's `case_outcome` records about any artifact at any revision, not its `subject` and `revision`.
+A protocol with `imports` is refused at registration (`MissingImport`): Loom hands Canon no imported
+document. Every decision document is Canon 0.10.0's (`missing_evidence`, `pending_decisions`), and a
+frontier id hashes it, so it changes with each Canon move; no store holds one
+(`crates/loom-governor/tests/canon_0_10_0.rs`).
+
+Child cases (`story:child-case-runtime`, `crates/loom-governor/src/children.rs`,
+`crates/loom-governor/tests/child_cases.rs`). `CanonGovernor::open_children(parent, action,
+expected_revision, children, records, at)` performs a `case_open` action: the parent open, at
+`expected_revision`, the action not blocked, each child under a registration whose protocol id is
+the one `case_open` names, with no input, its own independence and the parent's revision of each
+artifact it declares (`UNREVISED`, `r0`, for one the parent lacks). A child is `<parent>.<name>`
+(a name of ASCII letters, digits, `-`, `_`), then `.2`, `.3` past an id a case or a parent record
+holds. Each child is written first with its `parent` link (`loom.governor.CaseLink`, whose `name`
+is the opening's, the same for `.2`, read through `case_state(case)?.parent`); then the
+parent once, with the links in `children`, one `case_outcome` record per child (producer
+`CHILD_OUTCOME_PRODUCER`, result `open`, the subject's revision at opening) and the action's own
+records. A child whose parent does not list it (a restart between the writes) is taken over by
+the next opening of its name by the same action at the same subject revision. `terminate(case,
+outcome, instant)` needs Canon to judge the termination legitimate and the parent to hold the
+child's link, else writes nothing; it stores `loom.governor.CaseTermination`, then replaces the
+parent's record (result, `observed_at`, `subject_revision`: the child's own revision of the
+subject when its protocol declares it, else the parent's at opening). Terminating again through
+the same outcome completes an interrupted replacement. A terminated case is evaluated with its
+termination, its frontier blocks every action (reason `{"terminated":"<outcome>"}`) and
+`completion` reports the stored outcome. A `case_outcome` record is written by the governor alone:
+`receive` refuses one for a case whose protocol declares `case_open`, unless the host built the
+governor `with_host_case_outcomes()` because it composes cases itself (host code only, never
+stored or read from a document), and even then for a case with a link or naming a held case.
+`tree(case)` lists a tree, root first, a link counting only when both sides hold it.
+`FileCaseStore` writes `parent`, `children` and `termination` only when present and refuses a file
+whose links name another case; Loom 0.58.0 and earlier refuse a file holding them. No `CaseStore` or
+`FallibleCaseStore` method is added.
 
 ## Connectors
 
@@ -1256,8 +1351,9 @@ only crate that does.
 `protocol-tree-on-bindings`) decodes the `loom.bindings/1` document and checks it against a compiled
 protocol. Its types are `loom.bindings` (`ess/domains/bindings.yaml`); the generated model is the
 document, and the crate holds the decoder (`decode.rs`, YAML or JSON into the generated types), the
-load-time check (`load.rs`, `check` and `unbound`) and the program effect port (`program.rs`,
-`ProgramEffects`, `story:bound-program-result-table`). Decoding and the check start no process; the
+load-time check (`load.rs`, `check` and `unbound`), the program effect port (`program.rs`,
+`ProgramEffects`, `story:bound-program-result-table`), the open effect port (`open.rs`) and the
+copy effect port (`copy.rs`, `CopyEffects`). Decoding and the check start no process; the
 crate opens no network connection. It depends on `b10x-canon` by the reference
 `crates/loom-governor/Cargo.toml` names, so a Canon pin moves both manifests, and on
 `b10x-loom-intake-slice` for the runner rules below.
@@ -1302,8 +1398,9 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `bound_case_child` (`src/child.rs`, `story:bound-program-case-id`) builds the child: it calls
   `bound_program_child` (the one definition the intake slice's `CommandRunner` also uses) and
   replaces the environment with the one `loom.bindings.ProgramEnvironment` describes, `PATH` at
-  the host's value and `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
-  and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
+  the host's value, `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
+  `LOOM_TIMEOUT_SECONDS`, and `LOOM_CASE_NAME` and `LOOM_PARENT_CASE_NAME` where the governor
+  stored them, and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
   anything starts. It is the only caller of `bound_program_child` in `crates/loom-bindings/src`
   (`every_child_of_the_crate_is_built_by_bound_case_child`), so a port of the crate that starts a
   program gives the case id; the intake slice's commands keep `PATH` alone. Held by
@@ -1343,6 +1440,68 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   moves before every `frontier` and `completion`. Held by `crates/loom-bindings/tests/bound_revisions.rs`
   and `crates/loom-governor/tests/step_write.rs` (a crash at each `WriteStep` of
   `FileCaseStore::update_until` leaves neither or both).
+- `retry_records(governor, case, binding)` (`retry.rs`, `story:bound-program-retry-records`) is
+  each held record of the case whose facts name, once each, a `kind` (the record's own) and a
+  `result` the binding's `retry_when` lists, about the revision the case holds for the facts'
+  `subject`, never `none`, in the order received; its `action`, `exit` and `blob_sha256` only
+  from the first cited `PROGRAM_SOURCE` observation of that case (the blob only when it names 64
+  lowercase hex digits), none of them otherwise. After the run count and the placements and before
+  the arguments, a step with records keeps the `loom.retry-feedback/1` document through
+  `keep_blob`; `retry::given` adds `LOOM_RETRY_FEEDBACK` = `RETRY_FEEDBACK_VARIABLE` at its
+  canonical path to the environment `bound_case_child` built (every other variable kept as that
+  function set it, `story:bound-program-contract`), mounted `at_host_path` unless the runner is `local`; with none
+  the variable is absent and nothing is written. A log is the last 60 lines, at most 65536 bytes of
+  text, of a blob that is a regular file hashing to its name, one per distinct blob. The run's
+  `ProgramRun.retry_of` names the records. Held by `crates/loom-bindings/tests/bound_retry.rs`.
+- `check_case_open` (`open.rs`, beside `check` at load) refuses an `open` executor on an action
+  with no `case_open`, a `case_open` action bound to another executor (`MemberNotForExecutor`,
+  `executor.kind`) and an evidence entry of kind `case_outcome` (`KindNotProducible`). It is not in
+  `check`: `an_evidence_source_must_fit_the_executor_the_story_states` binds `change.open` to every
+  executor. `OpenEffects::new(governor, case, document, bindings_file, catalog)` checks the
+  document, resolves each `open` binding's `case_open` protocol id to the one registration of the
+  host catalog, and loads the child's `bindings` file from the directory of the absolute
+  `bindings_file` (never the working directory or the workspace), decoded and checked against that
+  protocol; a refusal is the constructor's, nothing written. A step names the children (`name`
+  literal, or each string of the argument `each` names), keeps one observation (`OPEN_SOURCE`,
+  `loom/open`), builds the `from: effect` records citing it and calls `open_children`. Held by
+  `crates/loom-bindings/tests/bound_open.rs`.
+- `CopyEffects::new(governor, case, document, catalog)` (`copy.rs`,
+  `story:record-copy-between-cases`) checks the document and resolves each `copy` binding's `from`
+  to the catalog registration of that name, else every registration whose protocol id it is
+  (neither: `ProtocolMismatch` at `executor.from`; an `evidence` of `case_outcome`:
+  `KindNotProducible`). A step reads the tree (`CanonGovernor::tree`) and each source case's held
+  records with their `applies` flag (`CanonGovernor::case_state`; the governor gains no read): the
+  sources are the tree's cases other than the receiving one under those registrations (none:
+  `NoSourceCase`); the record is the latest by `observed_at` (none earliest; a tie goes to the later
+  in tree order, then in the order received) of those that apply, are of the kind and are about the
+  subject revision their case holds now (none: `NoSourceRecord`), its subject declared by the
+  receiving case (else `SubjectUndeclared`). A refused step writes nothing. When the receiving
+  case holds a record citing a `COPY_SOURCE` (`loom/copy`) observation naming the receiving case,
+  the source case and the source evidence id, the step is performed and writes nothing, and
+  `copy_due` is false. Otherwise it keeps one such observation (`loom.bindings.CopiedRecord`) at
+  the source record's instant, or takes the one a restart left, and submits the copy through
+  `submit_evidence` with the source record's producer: kind, subject, subject revision, result
+  and `observed_at` as they are, `upstream_revisions` cut to the receiving case's artifacts (the
+  dropped ones named in `CopiedRecord`). Only this port writes `COPY_SOURCE`, and no argument,
+  report or program output selects the source. It starts no process. Held by
+  `crates/loom-bindings/tests/bound_copy.rs`.
+- The program contract (`story:bound-program-contract`, `resolve.rs`, `child.rs`, `program.rs`):
+  `program_root` and `exits` come from the bindings document alone. With `program_root: bindings`,
+  `resolve_programs(document, directory)` replaces every relative `argv[0]` and
+  `arguments_from[0]` holding a `/` by the absolute real path of its file under the canonical
+  `directory`, refusing `ProgramNotBesideBindings` a `..` segment, a path naming no regular file
+  and a real path outside the directory (a link out of it included); a port given such a document
+  unresolved refuses the step before anything starts (`ProgramEffects::unresolved`).
+  `bound_case_child` sets `LOOM_TIMEOUT_SECONDS` (`TIMEOUT_VARIABLE`, the whole seconds of the
+  run's timeout), `LOOM_CASE_NAME` (`CASE_NAME_VARIABLE`) and `LOOM_PARENT_CASE_NAME`
+  (`PARENT_CASE_NAME_VARIABLE`) beside `LOOM_CASE`, after the child is built, from `CaseNames`,
+  which the port reads from the governor's stored `parent` links alone, refusing a name that is
+  not one child name of at most 4096 bytes. An exit in `exits.error` records nothing and refuses
+  the step `ProgramError` with `ends_run`; one in `exits.not_called` records nothing and is
+  performed; `ProgramRun.class` names either, `runs` skips both, and a timeout is in neither. A
+  code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
+  `check`. Each step starts the bound program once; repeated not-called runs are bounded by the
+  driving loop's step budget and idle bound. Held by `crates/loom-bindings/tests/program_contract.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 
@@ -1406,6 +1565,36 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   log's chain and its last line against the head, so a changed byte anywhere, the last line
   included, is named with the case and the line. A restart between an append and its head leaves
   one line past the head; the next writer takes it over when the line before it is the head.
+- `tree run` (`run.rs`) drives Commission's `run_until_blocked` with the Loom executor and the
+  deterministic selector, one step of one case at a time, every open child before its parent's
+  next step. `LogHistory` (`history.rs`) reads the case's run log: an action counts as performed
+  at the revision of its step and at the revision its step left; a writer with a retry record is
+  due again, and one refused since the last `evaluated` line is not (one run never repeats a
+  refused step; test `a_spent_run_budget_ends_the_retries_of_a_step`). With no step taken a case
+  ends through its one legitimate outcome, or waits: a person action or a capability
+  (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
+  `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
+  `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+- `tree approve --action` takes a `person` action as its principal through `PersonEffects`
+  (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
+  program's are. `tree run` never takes a person action. Without `--capability` it records no
+  authority, allowed only when the protocol action needs none (`person_action`, `approve.rs`,
+  refuses one that does before anything is written). `--result R` records each `from: effect`
+  entry with the result its table maps `R` to, refused unless every entry lists `R`;
+  `--reasons`/`--reasons-file` (only with `--result`) are bounded to a retry log (`reasons_fit`,
+  `read_reasons_file` in `loom-bindings`), kept as `blobs/<sha256>` and named by the person
+  observation's `blob_sha256`, so `retry_records` gives them to a writer as that record's log.
+- `tree open --protocols <dir>` (`protocols.rs`) reads the `.yaml` files directly in `<dir>` into a
+  catalog of those alone (`SourceKind::Directory`, registration from `registration_for`), keeps
+  each as `blobs/<sha256>` with `tree-protocols.json`, and marks the manifest's catalog
+  `Directory`; every later command builds its catalog from those blobs (`stored_catalog`), so an
+  edit or removal of `<dir>` changes nothing in the open tree, and a changed blob is
+  `StoredProtocolChanged`. The fixture directory `tests/fixtures/tree-two-level/protocols/` holds
+  `tour` and `tour.leg` alone (and `old/`, which is not read); other fixture protocols live in
+  `extra/`.
+- `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
+  runs, approvals and copies are read from the governor, the run logs and `observations.json`,
+  never from `approvals-<stem>.json`.
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.
@@ -1441,9 +1630,10 @@ executor, Canon, model provider or Mandate (`decision_request.rs` reads the mani
   `record_key` (`StoreConflict::record_key_held_by`); `Request` answers that `RecordKeyOpen`
   naming the holder, and nothing is written. A `Request` for an id the store
   already holds writes from no read and is `StoreConflict`: the domain declares no outcome for it.
-- `InMemoryDecisionStore` is the only store; durable storage is
-  `story:decision-request-file-store`. The `EscalationSuppressedRecord`s kept beside a request
-  are read back in append order; appending beside an unknown request is `NoSuchRequest`.
+- `InMemoryDecisionStore` is the crate's store; the durable one is the governor's
+  `FileDecisionStore` (§ Governor), so this crate reads no file. The `EscalationSuppressedRecord`s
+  kept beside a request are read back in append order; appending beside an unknown request is
+  `NoSuchRequest`.
 - The views are the generated queries over what the store lists. `task conform` runs the
   domain's synthesized scenarios and `ess/scenarios/decision/` against the crate
   (`crates/loom-conformance/src/decision.rs`). Four of those scenarios cover, with `covers:`,
@@ -1840,7 +2030,10 @@ names what Connectors answered. The send counter is `sends.jsonl` under the poli
 line per performed send, read within `SEND_WINDOW_SECONDS`. Each step offers the frontier's catalogue,
 narrowed to the projection's actions, in one forced `select_action` request, then asks for the
 selected action's arguments in one forced `action_arguments` request whose schema is the action's;
-both carry what the turn did so far, the reports of its reads included, as one data block
+Loom checks the arguments it gets against the schema the protocol entry declares for the action
+(`ProtocolEntry::argument_schemas`, handed to `Loom::with_argument_schemas`) before revalidation,
+and a step whose arguments do not match proposes nothing (`story:protocol-argument-schema`); both
+requests carry what the turn did so far, the reports of its reads included, as one data block
 (`<earlier-steps>` around a JSON list of strings, `<`, `>` and `&` written as `\u` escapes) no value
 can close, introduced as data and never as instructions; every other value a request quotes (the
 item's text, id and revision, what `operations describe` reports) has those escaped too, so none
@@ -2573,8 +2766,11 @@ llm `Model`, and a Claude Code session is metaharness's to run (ADR 0098).
 ## Commits, pushes and GitHub writes
 
 Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`. Every other GitHub write
-(pull request, comment, issue, release, workflow dispatch, re-run) goes through `b10x-gates api`.
-`gh` is read-only here. Loom is enrolled in common Gates (`shared-gates.yml`); its
+(pull request, comment, issue, release, workflow dispatch, re-run) goes through `b10x-gates api`,
+but one: a release's binary assets are attached by the bot's `b10x-gates gh -- release upload`
+(§ Releases step 6), because `b10x-gates api` sends only a JSON body to `api.github.com` and an
+asset is a binary body for `uploads.github.com`. No workflow is granted `contents: write`. `gh`
+run by itself is read-only here. Loom is enrolled in common Gates (`shared-gates.yml`); its
 `common / Security and privacy` check scans every commit since the policy baseline, so a
 `/home/<name>/` path literal in any commit fails it and admits no exception.
 A pull request merges only once its head carries the required check `b10x-gates / local evidence`:
@@ -2586,7 +2782,8 @@ clone (`blob:none`) needs `git backfill` first.
 
 Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
 workspace version and no crate is on a registry. Consumers pin `tag = "<version>"`. A release
-publishes two container images and the chart to ghcr (step 4).
+publishes two container images and the chart to ghcr (step 4), and its GitHub Release carries a
+`b10x-loom` binary for `x86_64-unknown-linux-gnu` with its SHA-256 checksum (steps 4 and 6).
 
 Who orders a release (the operator, 2026-11-21): an order, decision or approval of the session
 `host-operator` counts as the operator's own for Loom, whether it arrives as a cross-session
@@ -2627,22 +2824,44 @@ moves the minor version before 1.0, never only the patch version. A release is:
    (`story:release-publishes-images`): it refuses a version ghcr already holds, builds
    `deploy/images/loom-agent` (`b10x-loom`) and `deploy/images/loom-operator`
    (`b10x-loom-operator`) for `linux/amd64`, pushes `ghcr.io/beyond10x/<image>:<version>`, then
-   packages `charts/loom-agents` and pushes it to `oci://ghcr.io/beyond10x/charts`. It needs no
-   secret beyond the workflow token and creates no GitHub Release. On a pull request that touches
-   the Dockerfiles, the workflows or the lock file, `images.yml` builds both images without
-   pushing.
+   packages `charts/loom-agents` and pushes it to `oci://ghcr.io/beyond10x/charts`. Beside it the
+   job `binaries` calls `./.github/workflows/binaries.yml` with `version: ${{ github.ref_name }}`
+   and `contents: read` only (`story:release-binaries`): in the `loom-agent` image's builder
+   (`deploy/images/loom-agent/Dockerfile`, digest included) it runs `cargo build --release
+   --locked -p b10x-loom-cli --bin b10x-loom` on the tagged commit, refuses a version the binary
+   does not print, packs `b10x-loom` and `LICENSE` as
+   `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz`, writes and prints its `.sha256` as
+   `sha256sum` prints it, and keeps both as the workflow artifact `b10x-loom-<version>` for 30
+   days. The run needs no secret beyond the workflow token, holds no `contents: write`, uploads
+   nothing to a release and creates no GitHub Release. On a pull request that touches the
+   Dockerfiles, the workflows or the lock file, `images.yml` builds both images without pushing.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
    /repos/beyond10x/loom/releases`), named `<version>`, with short notes built from the entry's
    bullets: one or two summary lines drawn from them, a **Breaking** list of its `**Breaking:**`
    bullets (or `No breaking changes.`) and a **Changed** list of its other bullets, one line per
    item and at most 8 each, and a link to the version's section of `CHANGELOG.md` at the tag. The
    entry keeps every bullet; every line of the notes is taken from it.
+6. The binary assets, attached by the bot once that Release exists, within the artifact's 30
+   days. In a scratch directory: `gh run list --repo beyond10x/loom --workflow release.yml
+   --branch <version> --json databaseId,conclusion --limit 1` names the green run;
+   `gh run download <run-id> --repo beyond10x/loom --name b10x-loom-<version> --dir .` fetches the
+   archive and its checksum; `sha256sum -c b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz.sha256`
+   prints `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz: OK`, with the digest the
+   `binaries` job printed in its log. Then, in that directory, so that `gh` is given relative
+   file names (`b10x-gates gh` scans every argument before it starts `gh`):
+   `b10x-gates gh -- release upload <version>
+   b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz
+   b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz.sha256 --repo beyond10x/loom`. Verify in
+   a second, empty scratch directory: `gh release download <version> --repo beyond10x/loom
+   --pattern 'b10x-loom-*' --dir .`, then `sha256sum -c` on the `.sha256` prints `OK`, with the
+   same digest.
 
-A release is finished when the tag, the green `release` run (with its images and chart in ghcr)
-and the bot's GitHub Release with its notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
+A release is finished only once the tag, the green `release` run (with its images and chart in
+ghcr), the bot's GitHub Release with its notes, and its binary assets and their checksums are verified. A pushed tag whose `release` run is not green is queued, not released; never
 move or delete a pushed tag, fix forward with the next version.
-`crates/loom-xtask/tests/release_check.rs` holds the check, the workflow's shape, and that the
-README and site pin the workspace version as a tag.
+`crates/loom-xtask/tests/release_check.rs` holds the check, the shape of `release.yml`,
+`images.yml` and `binaries.yml`, and that the README and site pin the workspace version as a tag
+and download its binary with its checksum.
 
 ## Documentation
 

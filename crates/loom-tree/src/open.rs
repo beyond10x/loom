@@ -28,8 +28,9 @@ use loom_protocols::ProtocolCatalog;
 
 use crate::lock::{HOLDER_FILE, LOCK_FILE, StoreLock};
 use crate::log::Logs;
+use crate::protocols::{KeptProtocol, keep};
 use crate::store::{
-    MANIFEST, MAX_DOCUMENT_BYTES, document, manifest_json, read_regular, write_file,
+    MANIFEST, MAX_DOCUMENT_BYTES, absolute, document, manifest_json, read_regular, write_file,
 };
 use crate::{AGENT_STORY, Refused, TreeTime, unreadable};
 
@@ -56,6 +57,9 @@ pub struct OpenRequest<'a> {
     pub time: TreeTime,
     /// The tree's catalog, which the governor admits exactly.
     pub catalog: &'a ProtocolCatalog,
+    /// The protocols a `--protocols` directory gave ([`crate::read_protocols_directory`]),
+    /// kept in the store; `catalog` is then theirs. Empty for the host's catalog.
+    pub protocols: Vec<KeptProtocol>,
 }
 
 /// A tree `tree open` opened.
@@ -92,7 +96,11 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
     let workspace = workspace(&request.workspace)?;
     let entry = request.catalog.get(&request.protocol).ok_or_else(|| {
         Refused::new(
-            TreeRefusalReason::UnknownProtocol,
+            if request.protocols.is_empty() {
+                TreeRefusalReason::UnknownProtocol
+            } else {
+                TreeRefusalReason::ProtocolNotInDirectory
+            },
             format!(
                 "the tree's catalog holds no protocol registered as {:?}",
                 crate::time::cut(&request.protocol)
@@ -142,7 +150,11 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
         root: request.case.clone(),
         workspace: path_text(&workspace)?,
         bindings: path_text(&root.file)?,
-        catalog: TreeCatalog::Host,
+        catalog: if request.protocols.is_empty() {
+            TreeCatalog::Host
+        } else {
+            TreeCatalog::Directory
+        },
     });
 
     fs::create_dir_all(&store).map_err(|error| unreadable(store.display(), error))?;
@@ -154,6 +166,9 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
             TreeRefusalReason::StoreNotEmpty,
             format!("{} holds {name:?}", store.display()),
         ));
+    }
+    if !request.protocols.is_empty() {
+        keep(&store, &request.protocols)?;
     }
     let cases =
         FileCaseStore::open(store.clone()).map_err(|error| unreadable("the case store", error))?;
@@ -182,6 +197,7 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
 
 /// A store `tree open` may make: absent, or an empty directory. Nothing is created here.
 fn vacant_store(store: &Path) -> Result<PathBuf, Refused> {
+    let store = absolute(store, "store", TreeRefusalReason::StoreUnreadable)?;
     match fs::symlink_metadata(store) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(store.to_owned()),
         Err(error) => Err(unreadable(store.display(), error)),
@@ -221,6 +237,7 @@ fn occupied(store: &Path) -> Result<Option<String>, Refused> {
 /// The workspace as an absolute path, which must be an existing directory.
 fn workspace(workspace: &Path) -> Result<PathBuf, Refused> {
     let unusable = |detail: String| Refused::new(TreeRefusalReason::WorkspaceUnusable, detail);
+    let workspace = absolute(workspace, "workspace", TreeRefusalReason::WorkspaceUnusable)?;
     let resolved = fs::canonicalize(workspace)
         .map_err(|error| unusable(format!("{}: {error}", workspace.display())))?;
     if !resolved.is_dir() {
@@ -234,6 +251,7 @@ fn workspace(workspace: &Path) -> Result<PathBuf, Refused> {
 
 /// `file` as an absolute path to an existing file.
 fn absolute_file(file: &Path) -> Result<PathBuf, Refused> {
+    let file = absolute(file, "bindings file", TreeRefusalReason::BindingsRefused)?;
     fs::canonicalize(file).map_err(|error| {
         Refused::new(
             TreeRefusalReason::BindingsRefused,
@@ -270,6 +288,10 @@ pub(crate) fn load(
     // An agent binding is named before any other defect of the file.
     agent_refusal(file, &document)?;
     check(&document, registration, protocol).map_err(|refusal| refused(refusal.to_string()))?;
+    // With `program_root: bindings` a program path is the file beside the bindings file.
+    let directory = file.parent().unwrap_or(file);
+    let document = b10x_loom_bindings::resolve_programs(&document, directory)
+        .map_err(|refusal| refused(refusal.to_string()))?;
     Ok(LoadedBindings {
         file: file.to_owned(),
         document,
@@ -357,7 +379,9 @@ fn walk(
         // A link among the directories of the path may lead anywhere: the file read is the one
         // whose real path lies below the directory of the file that names it.
         let real = fs::canonicalize(&file).map_err(|error| {
-            refused(format!("the child bindings file {relative:?} cannot be read: {error}"))
+            refused(format!(
+                "the child bindings file {relative:?} cannot be read: {error}"
+            ))
         })?;
         if !real.starts_with(&directory) {
             return Err(refused(format!(

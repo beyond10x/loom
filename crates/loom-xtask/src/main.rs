@@ -38,6 +38,9 @@
 //! `protocols-vendor --checkout <dir> --tag <tag>` rewrites `protocols/engineering/` and its
 //! `lock.json` from a local engineering-protocols checkout at a tag, reading Git objects only
 //! (see `protocols_vendor`).
+//!
+//! `linked-libraries <binary>` runs `ldd` on a built binary and fails, naming the library, when it
+//! links `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz` (see `linked_libraries`).
 
 use b10x_loom_resource::crd;
 use clap::{Parser, Subcommand};
@@ -52,6 +55,7 @@ use syn::visit::Visit;
 
 #[path = "../../loom-executor/tests/support/ess_suite.rs"]
 mod ess_suite;
+mod linked_libraries;
 mod protocols_vendor;
 mod release;
 mod test_step;
@@ -182,6 +186,12 @@ enum Command {
         #[arg(long)]
         tag: String,
     },
+    /// Run `ldd` on a built binary and fail, naming each library, when it links `libgit2`,
+    /// `libssh2`, `libssl`, `libcrypto` or `libz`. Needs no repository root.
+    LinkedLibraries {
+        /// The binary, e.g. `target/release/b10x-loom`.
+        binary: PathBuf,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -204,6 +214,9 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
+    if let Command::LinkedLibraries { binary } = &cli.command {
+        return linked_libraries::linked_libraries(binary);
+    }
     let root = match cli.root {
         Some(root) => root,
         None => find_root()?,
@@ -282,6 +295,7 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::ProtocolsVendor { checkout, tag } => {
             protocols_vendor::protocols_vendor(&root, &checkout, &tag)
         }
+        Command::LinkedLibraries { binary } => linked_libraries::linked_libraries(&binary),
     }
 }
 

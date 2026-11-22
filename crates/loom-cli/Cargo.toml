@@ -44,9 +44,11 @@ tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "signal", "macr
 [dev-dependencies]
 b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
+b10x-loom-intake-slice = { path = "../loom-intake-slice", features = ["test-clock"] }
 chrono = "0.4"
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 serde = "1"
 serde_json = "1"
 serde_yaml_ng = "0.10"
+sha2 = "0.11.0"

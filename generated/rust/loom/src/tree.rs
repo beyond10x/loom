@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 6b9bf7306a913227cfb789d66c42ee0242e606a83703a6d93b6adc5842cb9178
+// contract digest 0a8f396010bef523ae4083a6baee49e33a2a211a1d6745538f2f3fa5629ca442
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -84,6 +84,22 @@ pub struct CaseStatus {
     pub case_file: String,
     /// `run_log` — `String`.
     pub run_log: String,
+    /// `name` — `Optional<String>`.
+    pub name: Option<String>,
+    /// `protocol_id` — `String`.
+    pub protocol_id: String,
+    /// `protocol_revision` — `String`.
+    pub protocol_revision: String,
+    /// `stop_next` — `List<String>`.
+    pub stop_next: Vec<String>,
+    /// `evidence` — `List<loom.tree.StatusEvidence>`.
+    pub evidence: Vec<StatusEvidence>,
+    /// `runs` — `List<loom.tree.StatusRun>`.
+    pub runs: Vec<StatusRun>,
+    /// `approvals` — `List<loom.tree.StatusApproval>`.
+    pub approvals: Vec<StatusApproval>,
+    /// `copies` — `List<loom.tree.StatusCopy>`.
+    pub copies: Vec<StatusCopy>,
 }
 
 /// CasesSource — `loom.tree.CasesSource`.
@@ -669,6 +685,70 @@ pub enum SourceKind {
     Calls,
 }
 
+/// StatusApproval — `loom.tree.StatusApproval`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusApproval {
+    /// `capability` — `String`.
+    pub capability: String,
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+    /// `answer` — `loom.tree.ApprovalDecision`.
+    pub answer: ApprovalDecision,
+    /// `actor` — `String`.
+    pub actor: String,
+    /// `at` — `String`.
+    pub at: String,
+}
+
+/// StatusCopy — `loom.tree.StatusCopy`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusCopy {
+    /// `source_case` — `String`.
+    pub source_case: String,
+    /// `target_case` — `String`.
+    pub target_case: String,
+    /// `record_kind` — `String`.
+    pub record_kind: String,
+}
+
+/// StatusEvidence — `loom.tree.StatusEvidence`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusEvidence {
+    /// `index` — `Integer`.
+    pub index: i64,
+    /// `evidence_id` — `String`.
+    pub evidence_id: String,
+    /// `kind` — `String`.
+    pub kind: String,
+    /// `result` — `Optional<String>`.
+    pub result: Option<String>,
+    /// `subject` — `String`.
+    pub subject: String,
+    /// `subject_revision` — `String`.
+    pub subject_revision: String,
+    /// `upstream_revisions` — `Json`.
+    pub upstream_revisions: crate::json::Value,
+    /// `producer` — `String`.
+    pub producer: String,
+    /// `action` — `Optional<String>`.
+    pub action: Option<String>,
+}
+
+/// StatusRun — `loom.tree.StatusRun`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusRun {
+    /// `action` — `String`.
+    pub action: String,
+    /// `exit` — `Optional<Integer>`.
+    pub exit: Option<i64>,
+    /// `attempt` — `Integer`.
+    pub attempt: i64,
+    /// `retried` — `Boolean`.
+    pub retried: bool,
+    /// `retry_of` — `List<String>`.
+    pub retry_of: Vec<String>,
+}
+
 /// StepKind — `loom.tree.StepKind`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepKind {
@@ -1002,6 +1082,8 @@ pub enum TreeRefusalReason {
     ProtocolNotInDirectory,
     /// `NoProtocolFiles`.
     NoProtocolFiles,
+    /// `UnknownStatusFormat`.
+    UnknownStatusFormat,
 }
 
 /// TreeRun — `loom.tree.TreeRun`.
@@ -1022,6 +1104,10 @@ pub struct TreeRun {
 /// TreeStatus — `loom.tree.TreeStatus`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeStatus {
+    /// `format` — `String`.
+    pub format: String,
+    /// `version` — `String`.
+    pub version: String,
     /// `store` — `String`.
     pub store: String,
     /// `workspace` — `String`.

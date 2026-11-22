@@ -167,7 +167,29 @@ It keeps typed working state and a recent event tail, with retrievable run-local
 64 KiB serialized request ceiling. The default remains `legacy`; recorded byte reductions do not
 establish live quality or cost savings. See [working context](website/docs/concepts/working-context.md).
 
-You need a Rust toolchain that builds edition 2024, and `git`.
+Each release from `0.59.0` on carries `b10x-loom` for Linux on x86-64 as a release asset, with
+its SHA-256 checksum beside it (an earlier release has none: build it from source below). It
+links the glibc of Debian bookworm (2.36) or newer, and the libraries the `loom-agent` image
+installs for it (`libssl3`, `libcurl4`, `ca-certificates`):
+
+```console
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.58.0/b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.58.0/b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz
+./b10x-loom-0.58.0-x86_64-unknown-linux-gnu/b10x-loom --version
+```
+
+```text
+b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz: OK
+b10x-loom 0.58.0
+```
+
+The checksum file comes from the same place as the archive. A CI that installs Loom keeps the
+version and the digest in its own repository and checks the download against that digest:
+`echo "$SHA256  $f" | sha256sum -c -`.
+
+To build from source you need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
 git clone --branch 0.58.0 https://github.com/beyond10x/loom.git
@@ -734,11 +756,11 @@ surface kept stable within a release line, every port a host implements among it
 | `b10x-loom-plugin` | The plugin host: polls a plugin, classifies each item and answers it in a governed turn over Connectors data sources, one record line per item; a turn given a `SendPolicy` may send the reply it proposed, once admitted |
 | `b10x-loom-plugin-slack` | The slack-handler plugin: walks the Slack channels the bot is a member of, read only, and proposes answers to the messages nobody answered; `b10x-loom plugin run slack-handler` hosts it |
 | `b10x-loom-resource` | The `LoomAgent` Kubernetes resource: its lifecycle record over the generated `loom.resource` behaviour, and the CRD projected from the specification; talks to no cluster |
-| `b10x-loom-bindings` | Decodes the `loom.bindings/1` document, which declares per protocol action its executor, result table, tools, budget and timeout, and refuses at load each defect against the compiled protocol, naming the action and the member; its program effect port, `ProgramEffects`, runs an action bound to a `program` through the host's runner and records evidence by the binding's result table alone, each placed artifact taking the content digest of its path as its revision; every program it starts reads the id of its case from `LOOM_CASE`, beside `PATH` and nothing else |
+| `b10x-loom-bindings` | Decodes the `loom.bindings/1` document, which declares per protocol action its executor, result table, tools, budget and timeout, and refuses at load each defect against the compiled protocol, naming the action and the member; its program effect port, `ProgramEffects`, runs an action bound to a `program` through the host's runner and records evidence by the binding's result table alone, each placed artifact taking the content digest of its path as its revision; every program it starts reads the id of its case from `LOOM_CASE`, its timeout from `LOOM_TIMEOUT_SECONDS` and, for a child case, the names the governor stored for its opening from `LOOM_CASE_NAME` and `LOOM_PARENT_CASE_NAME`, beside `PATH` and nothing else; `resolve_programs` resolves programs named beside the bindings file, and `exits` classes an exit as a program error or as not called, recording nothing; `retry_records` finds the records that send a bound action back, and a retried program alone also reads their `loom.retry-feedback/1` document from `LOOM_RETRY_FEEDBACK`; its copy effect port, `CopyEffects`, copies a record from another case of the same tree |
 | `b10x-loom-operator` | The `b10x-loom-operator` controller: reconciles a `LoomAgent` into a pod and its children, and renders them; installed by `charts/loom-agents` |
-| `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing |
+| `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; executes nothing; keeps cases, Suspensions, workflow runs and decision requests (`FileDecisionStore`) a file each in a directory |
 | `b10x-loom-runlog` | The run log of a case, `runlog-<stem>.jsonl` beside its case file: one JSON line per event, each naming the SHA-256 of the line before, appended atomically under the store's lock; its reader refuses a cut, shortened, reordered or changed log, naming the first line that fails; a change to the last line alone is not detected, as a cut at a line boundary is not, and the log is not signed |
-| `b10x-loom-tree` | Runs a tree of protocol cases from a store directory: `b10x-loom tree open` opens the root case from a registered protocol and a `loom.bindings/1` file, refusing an `agent` binding anywhere in the tree before anything is written; one writer holds the store at a time and a second is refused `StoreInUse` naming it; `tree status` prints every case with its case file and run log, and `tree verify` names the first line of any log with a changed byte, its last line included |
+| `b10x-loom-tree` | Runs a tree of protocol cases from a store directory: `b10x-loom tree open` opens the root case from a registered protocol, or one of the `--protocols <dir>` it keeps in the store, and a `loom.bindings/1` file, refusing an `agent` binding anywhere in the tree before anything is written; one writer holds the store at a time and a second is refused `StoreInUse` naming it; `tree run` drives every case through its bound executors until the root ends or the tree waits, printing the command that answers each wait, which runs unchanged (`tree approve`, `tree approve --action` for a person, with `--capability` only when the action needs one and an optional `--result` its binding lists with `--reasons`, `tree close` between legitimate outcomes, or a writer's handoff); `tree status` prints `loom.tree-status/1` with every case's records, runs, approvals and copies, and `tree verify` names the first line of any log with a changed byte, its last line included |
 | `b10x-loom-decision` | Decision requests as `loom.decision` declares them: applies the eight commands (request, recommend, decide, take the recommendation, record the produced Canon record, escalate, supersede, expire) to a request over a `DecisionStore` port, refusing what the guards refuse with nothing written, and answers the three decision views; an in-memory store; writes no Canon record |
 | `b10x-loom-mandate` | Opt-in: Commission's authority port answered by Mandate's `check` (Mandate `v0.9.0`), with the host's Mandate ports; a Mandate failure grants nothing. `b10x-loom approve` and `resume` use it behind `--mandate`; the SDK does not link it |
 | `b10x-loom-selector-laya` | Experimental: a fast typed action selector over a local or hosted Laya endpoint (`POST /v1/systemone`); no product crate links it |

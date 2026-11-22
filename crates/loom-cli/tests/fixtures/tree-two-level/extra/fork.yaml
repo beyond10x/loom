@@ -1,0 +1,25 @@
+format: protocol/1
+protocol:
+  id: fork
+  revision: 1
+  description: >-
+    A fork in the road. A walker looks at the road; once it is seen the walker may keep to it or
+    leave it, both legitimate, and a person closes the case through one of them.
+artifacts:
+  road: {}
+evidence_kinds:
+  road_look: {}
+claims:
+  road.seen:
+    true_when:
+      evidence: {kind: road_look, subject: road, result: seen}
+actions:
+  road.look:
+    effect: read
+    may_produce:
+      - evidence: road_look
+outcomes:
+  kept:
+    requires: {claim: road.seen}
+  left:
+    requires: {claim: road.seen}

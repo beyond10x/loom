@@ -28,6 +28,9 @@ use llm_core::{
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const INTENT: &str = "Make the failing check pass.";
 const SOFTWARE_CHANGE: &str = "software-change@1";
 
@@ -555,7 +558,7 @@ fn bin(label: &str, args: &[&str]) -> std::process::Output {
     let home = scratch(label).join("home");
     std::fs::create_dir_all(&home).expect("create home");
     let workspace = Fixture::new(label);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+    let mut command = loom_bin::loom();
     command
         .arg("run")
         .arg("--workspace")

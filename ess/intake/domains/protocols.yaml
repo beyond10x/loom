@@ -26,7 +26,7 @@ summary: >-
 types:
   - name: intake.protocols.SourceKind
     kind: enum
-    variants: [Engineering, Loom, Local, Git, Memory]
+    variants: [Engineering, Loom, Local, Git, Memory, Directory]
   - name: intake.protocols.ProtocolSource
     kind: struct
     fields:

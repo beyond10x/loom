@@ -1109,7 +1109,19 @@ fn a_name_given_twice_is_refused_naming_both() {
     let distinct = env(&[("cargo_home", "/a"), ("CARGO_HOME", "/b")]);
     render_document(&command_with(&distinct), &config()).expect("names differ by case");
 
-    let mut many: Vec<(String, String)> = (0..40_000)
+    a_name_repeated_after(5_000);
+}
+
+/// The repeat after 40 000 distinct names of [`a_name_given_twice_is_refused_naming_both`], which
+/// `task check` finds after 5 000.
+#[test]
+fn slow_a_name_given_twice_is_refused_naming_both() {
+    a_name_repeated_after(40_000);
+}
+
+/// A name repeated after `distinct` distinct ones is refused naming both.
+fn a_name_repeated_after(distinct: usize) {
+    let mut many: Vec<(String, String)> = (0..distinct)
         .map(|index| (format!("V{index}"), "x".to_owned()))
         .collect();
     many.push(("V17".to_owned(), "y".to_owned()));
@@ -1119,7 +1131,9 @@ fn a_name_given_twice_is_refused_naming_both() {
         .collect();
     assert_eq!(
         refusal(&serve_with(&env(&entries)), &config()),
-        "refused: EnvNameConflict at spec.env[40000].name: it repeats spec.env[17].name"
+        format!(
+            "refused: EnvNameConflict at spec.env[{distinct}].name: it repeats spec.env[17].name"
+        )
     );
 }
 

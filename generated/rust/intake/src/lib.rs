@@ -1,5 +1,5 @@
 // generated from intake v1
-// contract digest 580c92e6eb1d15ced150fd8c74b88b52f6a70116a600645f3a0299a0c5b3b9c5
+// contract digest ef76b7d637fe5aea69c579f69591a3f6a5f55db932d3ae80eddda2e6244ad274
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Semantic types synthesised from the `intake` specification, v1.

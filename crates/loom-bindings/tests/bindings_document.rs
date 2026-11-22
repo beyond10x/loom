@@ -650,6 +650,31 @@ fn an_effect_entry_takes_the_one_value_performed() {
 }
 
 #[test]
+fn a_person_effect_table_lists_the_results_a_person_names() {
+    let entry = |results: &str| {
+        document(&format!(
+            "  - action: change.sign\n    executor: {{kind: person, principal: alice}}\n    evidence:\n      \
+             - {{kind: signoff, subject: impl, producer: alice, from: effect, results: {results}}}\n"
+        ))
+    };
+    let named = entry("{performed: signed, rejected: rejected}");
+    assert!(refused(&named).is_none(), "{:?}", refused(&named));
+    let values: Vec<String> = decode(&named).unwrap().actions[0].evidence[0]
+        .results
+        .iter()
+        .map(|rule| rule.value.clone())
+        .collect();
+    assert_eq!(values, ["performed", "rejected"]);
+    // A person names one listed value: no `*` stands for any other.
+    assert_refused(
+        &entry("{performed: signed, \"*\": rejected}"),
+        Reason::InvalidEffectResult,
+        Some("change.sign"),
+        "evidence[0].results.*",
+    );
+}
+
+#[test]
 fn an_evidence_entry_needs_a_source_and_a_table() {
     let entry = |body: &str| {
         document(&format!(
@@ -762,6 +787,9 @@ fn index(reason: Reason) -> usize {
         Reason::PathNotInWorkspace => 17,
         Reason::UndeclaredDimension => 18,
         Reason::UndeclaredEvidenceKind => 19,
+        Reason::ExitClassConflict => 20,
+        Reason::ProgramNotBesideBindings => 21,
+        Reason::ArgumentsUndeclared => 22,
     }
 }
 
@@ -796,13 +824,86 @@ fn every_refusal_reason_is_reachable_from_a_document() {
         document(&format!("{GATE}    timeout_seconds: 0\n")),
         document(GATE).replace("docs/spec", "/abs"),
         document(GATE).replace("[different_principal]", "[nothing]"),
+        document(&format!(
+            "{GATE}    exits: {{error: [1], not_called: [1]}}\n"
+        )),
     ];
-    let reached: BTreeSet<usize> = documents
+    let mut reached: BTreeSet<usize> = documents
         .iter()
         .map(|text| index(refused(text).unwrap_or_else(|| panic!("{text}")).0.reason))
         .collect();
-    let all: BTreeSet<usize> = (0..20).collect();
+    // `resolve_programs` refuses against the directory of the bindings file: `tools/gate.sh` is
+    // not beside a file in the build's scratch directory.
+    let beside =
+        decode(&document(GATE).replace("artifacts:", "program_root: bindings\nartifacts:"))
+            .expect("the document decodes");
+    let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(directory).unwrap();
+    reached.insert(index(
+        b10x_loom_bindings::resolve_programs(&beside, directory)
+            .expect_err("the program is not beside the bindings file")
+            .0
+            .reason,
+    ));
+    // The open effect port refuses, as it is built, `arguments_from` on an opening whose protocol
+    // declares no `arguments` schema.
+    reached.insert(index(undeclared_arguments()));
+    let all: BTreeSet<usize> = (0..23).collect();
     assert_eq!(reached, all);
+}
+
+/// The reason `OpenEffects::new` refuses an `open` binding with `arguments_from` on an action that
+/// declares `case_open` and no `arguments` schema.
+fn undeclared_arguments() -> Reason {
+    let nest = "format: protocol/1
+protocol:
+  id: nest
+  revision: 1
+artifacts:
+  spec: {}
+evidence_kinds:
+  case_outcome: {}
+actions:
+  kids.open:
+    effect: write
+    case_open: {protocol: leaf, subject: spec}
+";
+    let mut catalog = loom_protocols::ProtocolCatalog::default();
+    let source = || loom_protocols::ProtocolSource {
+        kind: loom_protocols::SourceKind::Memory,
+        location: "bindings-document-fixture".into(),
+        revision: String::new(),
+        path: String::new(),
+    };
+    let leaf = "format: protocol/1\nprotocol:\n  id: leaf\n  revision: 1\nartifacts:\n  spec: {}\n";
+    catalog.add_yaml("nest@1", nest, source()).unwrap();
+    catalog.add_yaml("leaf@1", leaf, source()).unwrap();
+    let text = "format: loom.bindings/1
+protocol: nest@1
+actions:
+  - action: kids.open
+    executor: {kind: open, each: kids, bindings: nest.yaml}
+    arguments_from: [/bin/true]
+";
+    let document = decode(text).expect("the document decodes");
+    let governor = loom_governor::CanonGovernor::new(loom_governor::MemoryCaseStore::default());
+    let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let refused = b10x_loom_bindings::OpenEffects::new(
+        &governor,
+        b10x_loom_commission::model::responsibility::CaseId("nest".into()),
+        &document,
+        &directory.join("nest.yaml"),
+        &catalog,
+        directory,
+        directory,
+        None,
+    )
+    .map(|_| ())
+    .expect_err("the port is refused");
+    match refused {
+        b10x_loom_bindings::OpenPortError::Refused(refusal) => refusal.0.reason,
+        other => panic!("not a refusal of the document: {other}"),
+    }
 }
 
 /// The first fenced block of `text` whose info string starts with `yaml` and whose body holds

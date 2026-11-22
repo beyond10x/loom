@@ -69,12 +69,12 @@ fn temporaries(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Keeps from two threads while two others open the governor's stores over the same directory
-/// in a loop (each open removes every `.tmp-` file under the lock): every keep succeeds, every
-/// context reads back exactly, and no temporary file is left.
-#[test]
-fn keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing() {
-    let dir = scratch("interleave");
+/// Keeps `per_keeper` contexts from each of two threads while two others open the governor's
+/// stores over the same directory in a loop (each open removes every `.tmp-` file under the lock):
+/// every keep succeeds, every context reads back exactly, and no temporary file is left. Each keep
+/// syncs its file, so the count sets the time.
+fn keeping_contexts_while_stores_open(label: &str, per_keeper: usize) {
+    let dir = scratch(label);
     let path = dir.path().to_owned();
     let store = Arc::new(ResumeContextStore::open(&path).unwrap());
     let stop = Arc::new(AtomicBool::new(false));
@@ -97,7 +97,7 @@ fn keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing(
         .map(|half| {
             let store = Arc::clone(&store);
             std::thread::spawn(move || {
-                for n in (half * 1000)..(half * 1000 + 150) {
+                for n in (half * 1000)..(half * 1000 + per_keeper) {
                     store
                         .keep(&context(n, "interleaved"))
                         .unwrap_or_else(|error| panic!("keep {n}: {error}"));
@@ -115,14 +115,28 @@ fn keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing(
         "the governor stores opened while contexts were kept"
     );
     let kept = store.list().unwrap();
-    assert_eq!(kept.len(), 300);
+    assert_eq!(kept.len(), 2 * per_keeper);
     for half in 0..2 {
-        for n in (half * 1000)..(half * 1000 + 150) {
+        for n in (half * 1000)..(half * 1000 + per_keeper) {
             let expected = context(n, "interleaved");
             assert_eq!(store.get(&expected.commission_id).unwrap(), Some(expected));
         }
     }
     assert!(temporaries(&path).is_empty(), "{:?}", temporaries(&path));
+}
+
+/// [`keeping_contexts_while_stores_open`] with 10 keeps a thread: each waits for the lock the two
+/// opening threads take in a loop, about 150 ms a keep on a loaded host.
+#[test]
+fn keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing() {
+    keeping_contexts_while_stores_open("interleave", 10);
+}
+
+/// [`keeping_contexts_while_stores_open`] with 150 keeps a thread, the count the case held
+/// before, in the slow lane (`task slow`): about 15 s on a loaded host.
+#[test]
+fn slow_keeping_contexts_while_governor_stores_open_over_the_directory_loses_nothing() {
+    keeping_contexts_while_stores_open("interleave-slow", 150);
 }
 
 /// A temporary file a dead resume write left (`.tmp-<pid>-resume-<n>`) is removed by the next

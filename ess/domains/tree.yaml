@@ -173,9 +173,82 @@ types:
       - name: digest
         type: String
 
+  # One record a case of `tree status` holds, in the order the case received it: its position from
+  # 0, the governor's id of it, and, read from its `canon-evidence/1` record, its kind, result,
+  # subject, subject revision and upstream revisions (an object of artifact to revision), its
+  # producer, and the action of the step that gave it (absent when no step did).
+  - name: loom.tree.StatusEvidence
+    kind: struct
+    fields:
+      - name: index
+        type: Integer
+      - name: evidence_id
+        type: String
+      - name: kind
+        type: String
+      - name: result
+        type: Optional<String>
+      - name: subject
+        type: String
+      - name: subject_revision
+        type: String
+      - name: upstream_revisions
+        type: Json
+      - name: producer
+        type: String
+      - name: action
+        type: Optional<String>
+
+  # One run of a bound program of a case: the action, its exit (absent when it timed out or the
+  # runner refused it), its attempt in the action's own chain from 1, whether the next run of the
+  # action was a retry, and the evidence ids the run was given as the records that sent it back.
+  - name: loom.tree.StatusRun
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: attempt
+        type: Integer
+      - name: retried
+        type: Boolean
+      - name: retry_of
+        type: List<String>
+
+  # One `tree approve` on a case, in the order recorded: the capability, the action `--action`
+  # named (absent without it), the answer, the principal and the instant.
+  - name: loom.tree.StatusApproval
+    kind: struct
+    fields:
+      - name: capability
+        type: String
+      - name: action
+        type: Optional<String>
+      - name: answer
+        type: loom.tree.ApprovalDecision
+      - name: actor
+        type: String
+      - name: at
+        type: String
+
+  # One record a `copy` binding copied into a case: the case it was copied from, the case it was
+  # copied into and its kind.
+  - name: loom.tree.StatusCopy
+    kind: struct
+    fields:
+      - name: source_case
+        type: String
+      - name: target_case
+        type: String
+      - name: record_kind
+        type: String
+
   # One case of `tree status`: its id, its parent (absent for the root), the registration it is
   # held under, its case revision, the outcome it ended through or the stop its last run recorded,
-  # its open obligations, and the paths of its case file and its run log.
+  # its open obligations, and the paths of its case file and its run log; then the last segment of
+  # its id below its parent, its protocol id and revision, the decisions its last stop waits on,
+  # its records, the runs of its bound programs, its approvals and the records copied into it.
   - name: loom.tree.CaseStatus
     kind: struct
     fields:
@@ -197,12 +270,33 @@ types:
         type: String
       - name: run_log
         type: String
+      - name: name
+        type: Optional<String>
+      - name: protocol_id
+        type: String
+      - name: protocol_revision
+        type: String
+      - name: stop_next
+        type: List<String>
+      - name: evidence
+        type: List<loom.tree.StatusEvidence>
+      - name: runs
+        type: List<loom.tree.StatusRun>
+      - name: approvals
+        type: List<loom.tree.StatusApproval>
+      - name: copies
+        type: List<loom.tree.StatusCopy>
 
-  # `tree status`: the store directory, the workspace, the root case, one entry per case of the
-  # tree in tree order, and, for a tree opened with `--protocols`, each protocol it holds.
+  # `tree status`: its format `loom.tree-status/1` and the version of `b10x-loom-tree` that printed
+  # it, the store directory, the workspace, the root case, one entry per case of the tree in tree
+  # order, and, for a tree opened with `--protocols`, each protocol it holds.
   - name: loom.tree.TreeStatus
     kind: struct
     fields:
+      - name: format
+        type: String
+      - name: version
+        type: String
       - name: store
         type: String
       - name: workspace
@@ -987,6 +1081,7 @@ types:
       - ProtocolLinkLeavesDirectory
       - ProtocolNotInDirectory
       - NoProtocolFiles
+      - UnknownStatusFormat
 
   # A refused tree command: the reason, what is wrong, and where the reason names one the case,
   # the file, the action, the story that lifts it and the process id of the store's holder.

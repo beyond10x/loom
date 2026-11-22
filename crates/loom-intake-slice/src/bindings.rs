@@ -753,6 +753,31 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EffectPort for CommandEffects<'_, 
 mod tests {
     use super::*;
 
+    /// A protocol a product keeps in its own protocols directory is not Loom's: its actions are
+    /// bound to commands like an installed protocol's.
+    #[test]
+    fn a_protocol_from_a_protocols_directory_is_bound_as_an_installed_one() {
+        let yaml = "format: protocol/1\nprotocol:\n  id: team.note\n  revision: 1\n  description: A note.\nartifacts:\n  intent: {}\nevidence_kinds:\n  note_recorded: {}\nclaims:\n  note.recorded:\n    true_when:\n      evidence: {kind: note_recorded, subject: intent, result: recorded}\nactions:\n  note.record:\n    effect: write\n    may_produce:\n      - evidence: note_recorded\noutcomes:\n  done:\n    requires: {claim: note.recorded}\n";
+        let mut catalog = ProtocolCatalog::default();
+        catalog
+            .add_yaml(
+                "team-note@1",
+                yaml,
+                loom_protocols::ProtocolSource {
+                    kind: SourceKind::Directory,
+                    location: "/products/notes/protocols".into(),
+                    revision: String::new(),
+                    path: "note.yaml".into(),
+                },
+            )
+            .unwrap();
+        let bindings = decode(
+            r#"{"protocol":"team-note@1","bindings":[{"action":"note.record","argv":["true"]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(check(&bindings, &catalog), Ok(()));
+    }
+
     #[test]
     fn a_file_with_an_undeclared_member_is_refused_naming_it() {
         let error = decode(r#"{"protocol":"a@1","bindings":[],"shell":"sh"}"#).unwrap_err();

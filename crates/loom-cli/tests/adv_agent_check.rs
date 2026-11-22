@@ -4,7 +4,10 @@
 //! Documents are written under `CARGO_TARGET_TMPDIR`.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
+
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -25,7 +28,7 @@ fn spec_file(name: &str, bytes: &[u8]) -> PathBuf {
 }
 
 fn run(args: &[&std::ffi::OsStr]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    loom_bin::loom()
         .args(args)
         .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
         .output()

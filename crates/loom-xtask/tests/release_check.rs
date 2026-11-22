@@ -25,6 +25,14 @@
 //! or system configuration; nothing is tagged or committed in the working tree, and nothing
 //! reaches the network.
 //!
+//! `story:release-binaries`: after `check.yml` passes on the tag, `release.yml` calls
+//! `binaries.yml` read-only with the tag as `version`. It builds the locked `b10x-loom` from the
+//! tagged commit in the agent image's builder, packs it with `LICENSE` as
+//! `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` beside its `.sha256`, and keeps both as
+//! the workflow artifact `b10x-loom-<version>`; no workflow holds `contents: write`, reads a
+//! secret or uploads to a release, because the bot attaches the files (AGENTS.md § Releases). The
+//! README and the getting-started page download that archive and check it with `sha256sum -c`.
+//!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time; fixtures land under
 //! `CARGO_TARGET_TMPDIR`.
 
@@ -840,8 +848,32 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
     let mut verifies = false;
     let mut checks = false;
     let mut publishes = false;
+    let mut builds = false;
     for (name, job) in jobs {
         let name = name.as_str().unwrap_or_default();
+        if job["uses"].as_str() == Some("./.github/workflows/binaries.yml") {
+            // `story:release-binaries`: the binaries are built read-only, after the tagged commit
+            // passed check.yml, for the version the tag names.
+            assert_eq!(
+                job.get("permissions"),
+                Some(&read_only),
+                "job {name} must be granted exactly contents: read"
+            );
+            assert_eq!(
+                job["needs"].as_str(),
+                Some("check"),
+                "job {name} builds before the tagged commit passed check.yml"
+            );
+            let version: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str("version: ${{ github.ref_name }}").unwrap();
+            assert_eq!(
+                job["with"], version,
+                "job {name} must call binaries.yml with exactly version: ${{{{ github.ref_name }}}}"
+            );
+            assert!(job.get("secrets").is_none(), "job {name} passes secrets");
+            builds = true;
+            continue;
+        }
         if job["uses"].as_str() == Some("./.github/workflows/images.yml") {
             // `story:release-publishes-images`: the one job that may write packages, and only
             // after the tag is verified and checked.
@@ -895,6 +927,10 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
     assert!(
         publishes,
         "no job of release.yml calls ./.github/workflows/images.yml"
+    );
+    assert!(
+        builds,
+        "no job of release.yml calls ./.github/workflows/binaries.yml"
     );
 
     // `release-check` diffs the stable surfaces against the previous tag, so the job that runs it
@@ -1113,6 +1149,358 @@ fn each_image_runs_its_locked_release_binary_as_a_non_root_user_on_pinned_bases(
             user,
             Some("10001:10001"),
             "{image}: must end as the numeric user the chart and the controller's pods run as"
+        );
+    }
+}
+
+/// The one target a release builds `b10x-loom` for (`story:release-binaries`).
+const TARGET: &str = "x86_64-unknown-linux-gnu";
+
+/// The file names of every workflow under `.github/workflows/`.
+fn workflow_names() -> Vec<String> {
+    let dir = repository().join(".github/workflows");
+    let mut names: Vec<String> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .map(|entry| {
+            entry
+                .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.ends_with(".yml") || name.ends_with(".yaml"))
+        .collect();
+    names.sort();
+    names
+}
+
+/// The one job of `binaries.yml`.
+fn binaries_job(binaries: &serde_yaml_ng::Value) -> &serde_yaml_ng::Value {
+    let jobs = binaries["jobs"]
+        .as_mapping()
+        .unwrap_or_else(|| panic!("binaries.yml has no jobs"));
+    assert_eq!(
+        jobs.len(),
+        1,
+        "binaries.yml must hold one job, binaries / {TARGET}"
+    );
+    jobs.values().next().unwrap()
+}
+
+fn steps(job: &serde_yaml_ng::Value) -> &[serde_yaml_ng::Value] {
+    job["steps"]
+        .as_sequence()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| panic!("the job has no steps"))
+}
+
+/// The index of the first step whose `uses` starts with `action@`.
+fn step_using(steps: &[serde_yaml_ng::Value], action: &str) -> usize {
+    steps
+        .iter()
+        .position(|step| {
+            step["uses"]
+                .as_str()
+                .is_some_and(|uses| uses.starts_with(&format!("{action}@")))
+        })
+        .unwrap_or_else(|| panic!("no step uses {action}"))
+}
+
+/// The index of the first step whose `run` holds `fragment`.
+fn step_running(steps: &[serde_yaml_ng::Value], fragment: &str) -> usize {
+    steps
+        .iter()
+        .position(|step| {
+            step["run"]
+                .as_str()
+                .is_some_and(|run| run.contains(fragment))
+        })
+        .unwrap_or_else(|| panic!("no step runs {fragment}"))
+}
+
+#[test]
+fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
+    let binaries = workflow("binaries.yml");
+    let triggers: Vec<&str> = binaries["on"]
+        .as_mapping()
+        .unwrap_or_else(|| panic!("binaries.yml has no `on` mapping"))
+        .keys()
+        .filter_map(serde_yaml_ng::Value::as_str)
+        .collect();
+    assert_eq!(
+        triggers,
+        ["workflow_call"],
+        "binaries.yml must run only when called"
+    );
+    let input = &binaries["on"]["workflow_call"]["inputs"]["version"];
+    assert_eq!(input["type"].as_str(), Some("string"));
+    assert_eq!(input["required"].as_bool(), Some(true));
+
+    let job = binaries_job(&binaries);
+    assert_eq!(
+        job["name"].as_str(),
+        Some("binaries / x86_64-unknown-linux-gnu")
+    );
+    assert_eq!(job["runs-on"].as_str(), Some("ubuntu-24.04"));
+    assert_eq!(
+        job["env"]["VERSION"].as_str(),
+        Some("${{ inputs.version }}"),
+        "the job reads the version from its input through the environment"
+    );
+    let steps = steps(job);
+
+    // The tagged commit, as the caller's run checked it out: no `ref` names another.
+    let checkout = step_using(steps, "actions/checkout");
+    assert_eq!(
+        steps[checkout]["with"]["persist-credentials"].as_bool(),
+        Some(false)
+    );
+    assert!(
+        steps[checkout]["with"].get("ref").is_none(),
+        "the checkout must build the commit the release run was started for"
+    );
+
+    let build = step_running(
+        steps,
+        "cargo build --release --locked -p b10x-loom-cli --bin b10x-loom",
+    );
+    // story:drop-the-substrate-git-feature: the built binary links no libgit2, libssh2, OpenSSL
+    // or zlib, checked before it is packed.
+    let linked = step_running(
+        steps,
+        "cargo run -q --locked -p loom-xtask -- linked-libraries target/release/b10x-loom",
+    );
+    let package = step_running(steps, "sha256sum");
+    assert!(
+        build < linked && linked < package,
+        "binaries.yml must check the linked libraries after the build and before packing"
+    );
+    let run = steps[package]["run"].as_str().unwrap();
+    for fragment in [
+        r#"[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]"#,
+        r#"test "$(target/release/b10x-loom --version)" = "b10x-loom $VERSION""#,
+        r#"name="b10x-loom-$VERSION-x86_64-unknown-linux-gnu""#,
+        r#"install -m 0755 target/release/b10x-loom "$name/b10x-loom""#,
+        r#"install -m 0644 LICENSE "$name/LICENSE""#,
+        r#"tar -czf "$name.tar.gz" "$name""#,
+        r#"sha256sum "$name.tar.gz" > "$name.tar.gz.sha256""#,
+        r#"cat "$name.tar.gz.sha256""#,
+    ] {
+        assert!(
+            run.contains(fragment),
+            "the packaging step does not run `{fragment}`:\n{run}"
+        );
+    }
+
+    let upload = step_using(steps, "actions/upload-artifact");
+    assert!(
+        checkout < build && build < package && package < upload,
+        "binaries.yml must check out, build, package and then upload, in that order"
+    );
+    let with = &steps[upload]["with"];
+    assert_eq!(
+        with["name"].as_str(),
+        Some("b10x-loom-${{ inputs.version }}")
+    );
+    let archive = format!("b10x-loom-${{{{ inputs.version }}}}-{TARGET}.tar.gz");
+    let paths: Vec<&str> = with["path"]
+        .as_str()
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    assert_eq!(
+        paths,
+        [archive.clone(), format!("{archive}.sha256")],
+        "the artifact must hold the archive and its checksum, and nothing else"
+    );
+    assert_eq!(with["if-no-files-found"].as_str(), Some("error"));
+    assert_eq!(with["retention-days"].as_i64(), Some(30));
+}
+
+#[test]
+fn binaries_workflow_reads_no_secret_uploads_to_no_release_and_puts_no_expression_in_a_shell() {
+    let path = repository().join(".github/workflows/binaries.yml");
+    let text = read(&path);
+    for word in ["secrets", "github.token", "GITHUB_TOKEN", "GH_TOKEN"] {
+        assert!(!text.contains(word), "binaries.yml names {word}");
+    }
+    let binaries = workflow("binaries.yml");
+    let mut actions: Vec<String> = uses(&binaries)
+        .iter()
+        .map(|action| action.split('@').next().unwrap_or_default().to_owned())
+        .collect();
+    actions.sort();
+    assert_eq!(
+        actions,
+        ["actions/checkout", "actions/upload-artifact"],
+        "binaries.yml may only check out and keep a workflow artifact"
+    );
+    for step in steps(binaries_job(&binaries)) {
+        let Some(run) = step["run"].as_str() else {
+            continue;
+        };
+        // A tag name reaches a shell only through the environment, quoted.
+        assert!(
+            !run.contains("${{"),
+            "a step puts an expression into its shell line: {run}"
+        );
+        for word in ["gh ", "curl", "wget", "github.com"] {
+            assert!(!run.contains(word), "a step reaches GitHub ({word}): {run}");
+        }
+    }
+}
+
+#[test]
+fn every_action_of_the_binaries_workflow_is_pinned_as_the_other_workflows_pin_it() {
+    let mut pinned = Vec::new();
+    for name in workflow_names() {
+        if name != "binaries.yml" {
+            pinned.extend(uses(&workflow(&name)));
+        }
+    }
+    let actions = uses(&workflow("binaries.yml"));
+    assert!(!actions.is_empty(), "binaries.yml uses no action");
+    for action in actions {
+        let pin = action.rsplit_once('@').map(|(_, pin)| pin).unwrap_or("");
+        assert!(
+            pin.len() == 40 && pin.bytes().all(|b| b.is_ascii_hexdigit()),
+            "binaries.yml: {action} is not pinned by a commit SHA"
+        );
+        assert!(
+            pinned.contains(&action),
+            "binaries.yml: {action} is pinned to a commit no other workflow uses"
+        );
+    }
+}
+
+#[test]
+fn no_workflow_is_granted_contents_write() {
+    let read_only: serde_yaml_ng::Value = serde_yaml_ng::from_str("contents: read").unwrap();
+    let names = workflow_names();
+    assert!(
+        names.contains(&"binaries.yml".to_owned()),
+        "binaries.yml is missing"
+    );
+    for name in &names {
+        let file = workflow(name);
+        let mut blocks = vec![("the workflow".to_owned(), &file["permissions"])];
+        for (job, body) in file["jobs"].as_mapping().into_iter().flatten() {
+            blocks.push((
+                format!("job {}", job.as_str().unwrap_or_default()),
+                &body["permissions"],
+            ));
+        }
+        for (owner, permissions) in &blocks {
+            assert_ne!(
+                permissions.as_str(),
+                Some("write-all"),
+                "{name}: {owner} is granted write-all"
+            );
+            assert_ne!(
+                permissions["contents"].as_str(),
+                Some("write"),
+                "{name}: {owner} is granted contents: write"
+            );
+        }
+        if name == "binaries.yml" {
+            assert_eq!(blocks.len(), 2, "binaries.yml holds one job");
+            for (owner, permissions) in &blocks {
+                assert_eq!(
+                    *permissions, &read_only,
+                    "binaries.yml: {owner} must be granted exactly contents: read"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_binaries_build_uses_the_agent_images_builder() {
+    let dockerfile = read(&repository().join("deploy/images/loom-agent/Dockerfile"));
+    let builder = dockerfile
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("FROM ")
+                .and_then(|rest| rest.strip_suffix(" AS builder"))
+        })
+        .unwrap_or_else(|| panic!("the loom-agent Dockerfile has no `FROM … AS builder` line"));
+    assert!(
+        builder.contains("@sha256:"),
+        "the builder is not pinned by digest: {builder}"
+    );
+    assert_eq!(
+        binaries_job(&workflow("binaries.yml"))["container"].as_str(),
+        Some(builder),
+        "binaries.yml must build in the loom-agent image's builder"
+    );
+}
+
+/// The body of the `## <heading>` section of `text`, up to the next `## ` heading, its words
+/// joined by single spaces.
+fn section(text: &str, heading: &str) -> String {
+    let marker = format!("\n## {heading}\n");
+    let start = text
+        .find(&marker)
+        .unwrap_or_else(|| panic!("no section `## {heading}`"))
+        + marker.len();
+    let rest = &text[start..];
+    let body = &rest[..rest.find("\n## ").unwrap_or(rest.len())];
+    body.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn agents_md_releases_names_the_attach_and_verify_commands() {
+    let agents = read(&repository().join("AGENTS.md"));
+    let releases = section(&agents, "Releases");
+    for command in [
+        "./.github/workflows/binaries.yml",
+        "gh run download",
+        "b10x-gates gh -- release upload",
+        "gh release download",
+        "sha256sum -c",
+    ] {
+        assert!(
+            releases.contains(command),
+            "AGENTS.md § Releases does not name `{command}`"
+        );
+    }
+    let finished = releases
+        .split_once("A release is finished only once")
+        .map(|(_, rest)| rest.split(". ").next().unwrap_or_default())
+        .unwrap_or_else(|| panic!("AGENTS.md § Releases does not say when a release is finished"));
+    assert!(
+        finished.contains("binary assets and their checksums are verified"),
+        "AGENTS.md § Releases does not finish a release on its verified assets: {finished}"
+    );
+    let writes = section(&agents, "Commits, pushes and GitHub writes");
+    assert!(
+        writes.contains("b10x-gates gh -- release upload"),
+        "AGENTS.md § Commits, pushes and GitHub writes does not name the asset upload"
+    );
+}
+
+#[test]
+fn readme_and_site_download_the_release_binary_with_its_checksum() {
+    let version = workspace_version();
+    let archive = format!("b10x-loom-{version}-{TARGET}.tar.gz");
+    let url = format!("https://github.com/beyond10x/loom/releases/download/{version}/{archive}");
+    for page in ["README.md", "website/docs/getting-started.md"] {
+        let text = read(&repository().join(page));
+        assert!(
+            text.lines().any(|line| line.contains(&url)),
+            "{page} does not download {url}"
+        );
+        assert!(
+            text.lines()
+                .any(|line| line.contains(&format!("{url}.sha256"))),
+            "{page} does not download the checksum of {archive}"
+        );
+        assert!(
+            text.lines()
+                .any(|line| line.trim().starts_with("sha256sum -c") && line.contains(&archive)),
+            "{page} has no `sha256sum -c` line for {archive}"
         );
     }
 }

@@ -19,12 +19,14 @@ use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings};
 use b10x_loom_intake_slice::clock::SystemClock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, ChildCommand, ChildOutput, ConfinementAdapter, ConfinementError,
-    ConfinementRefusal, EngineConfinement, EngineRunner, TestExecution, TestRunner,
+    ConfinementRefusal, EngineConfinement, EngineRunner, KillBounds, SIGNAL_GRACE, TestExecution,
+    TestRunner,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -259,7 +261,8 @@ fn the_flags_runner_selects_local_with_the_flags_reason_and_wins_over_the_file()
 
 /// Under `local` a command that ends while a process it started in a session of its own holds its
 /// output is sent one `Kill` at its timeout and is then refused by its runner, named so: the step
-/// never says it was killed.
+/// never says it was killed. The runner is the one `--unconfined-bindings` gives, which the run
+/// takes before the file's opt-in, with a kill settle of 1 s in place of a host's 5 s.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn under_local_a_command_whose_output_outlives_its_group_is_refused_by_its_runner_never_killed() {
@@ -273,7 +276,23 @@ fn under_local_a_command_whose_output_outlives_its_group_is_refused_by_its_runne
             held.0.display()
         ),
     );
-    let (result, output) = case.run(None, Some(true), &script, pick(), select());
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .expect("local opens with the flag's reason")
+    .with_kill_bounds(KillBounds {
+        signal_grace: SIGNAL_GRACE,
+        kill_settle: Duration::from_secs(1),
+    });
+    let (result, output) = case.run(
+        Some(Arc::new(runner) as Arc<dyn TestRunner>),
+        Some(true),
+        &script,
+        pick(),
+        select(),
+    );
     let run = result.unwrap_or_else(|error| panic!("{error}\n{output}"));
     assert_eq!(run.steps, 1, "{output}");
     assert!(
@@ -561,6 +580,7 @@ impl Case {
             &RunOptions {
                 context_policy: ContextPolicy::Legacy,
                 context_report: None,
+                ..RunOptions::default()
             },
         );
         (result, String::from_utf8_lossy(&output).into_owned())

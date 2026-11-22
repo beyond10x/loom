@@ -21,7 +21,9 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission_testkit::fake_executor::{ExecutorCall, ScriptedExecutor};
 use std::path::PathBuf;
-use std::process::Command;
+
+#[path = "support/made_once.rs"]
+mod made_once;
 
 /// Crates the guard refuses whatever the deny list says: Loom depends on Commission, never the
 /// reverse (Atlas ADR 0075), and Canon left with `story:port-skeleton`.
@@ -94,13 +96,13 @@ fn mandate_violations(listing: &str) -> Vec<String> {
 
 /// The real `cargo tree -p b10x-loom-commission -e normal --all-features --target all --prefix none`
 /// listing for this tree: every optional feature and every target, so a refused crate behind a
-/// feature or a `cfg(target)` table is listed too.
+/// feature or a `cfg(target)` table is listed too. It is listed once a test run for the tree's
+/// manifests and lock file (`made_once::cargo_output`), and the three tests that read it share
+/// it.
 fn real_listing() -> String {
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let out = Command::new(cargo)
-        .env("CARGO_TERM_COLOR", "never")
-        .current_dir(root())
-        .args([
+    made_once::cargo_output(
+        &root(),
+        &[
             "tree",
             "--locked",
             "-p",
@@ -112,15 +114,8 @@ fn real_listing() -> String {
             "all",
             "--prefix",
             "none",
-        ])
-        .output()
-        .unwrap_or_else(|error| panic!("run `cargo tree`: {error}"));
-    assert!(
-        out.status.success(),
-        "`cargo tree` failed:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).into_owned()
+        ],
+    )
 }
 
 fn uuid(n: u8) -> Uuid {

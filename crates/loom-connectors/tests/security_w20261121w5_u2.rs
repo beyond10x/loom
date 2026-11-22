@@ -38,7 +38,9 @@ use b10x_loom_connectors::cli::datasource::{
     SourceName, WriteApproval, WriteOperation, WriteResult,
 };
 use b10x_loom_connectors::cli::{CliError, WriteError, idempotency_key, json};
-use b10x_loom_connectors::relay::{ConnectorsRelay, RelayUrlRefused, loopback_url};
+use b10x_loom_connectors::relay::{
+    CONNECT_BOUND, ConnectorsRelay, REQUEST_BOUND, RelayBounds, RelayUrlRefused, loopback_url,
+};
 use connectors_core::RESPONSE_LIMIT;
 use connectors_core::v1alpha2::{
     AttemptId, AttemptReference, AuditStatus, EffectKnowledge, Error as WireError, ErrorCode,
@@ -1295,8 +1297,44 @@ fn fill(listener: &TcpListener) -> Vec<TcpStream> {
     panic!("the accept queue never filled");
 }
 
-/// A relay whose accept queue is full: the read's describe ends at the 5 s connect bound, long
-/// before the 20 s request bound, as `relay-unavailable:` (nothing was sent).
+/// The bounds of the relay clients the two cases below run, in place of [`RelayBounds::HOST`]: a
+/// connect bound of 1 s, so that a case does not wait a host's 5 s, and a host's request bound of
+/// 20 s, which the connect bound must end a request long before.
+const SHORT_CONNECT: RelayBounds = RelayBounds {
+    connect: Duration::from_secs(1),
+    request: REQUEST_BOUND,
+};
+
+/// Whether `elapsed` ends at [`SHORT_CONNECT`]'s connect bound: no sooner than four fifths of it
+/// and no later than 7 s past it, the margins the cases held at a host's 5 s (4 s to 12 s).
+fn at_the_connect_bound(elapsed: Duration) -> bool {
+    elapsed >= SHORT_CONNECT.connect * 4 / 5
+        && elapsed < SHORT_CONNECT.connect + Duration::from_secs(7)
+}
+
+/// A host's relay client keeps the crate's bounds, 5 s to connect and 20 s for a request; the
+/// cases below set [`SHORT_CONNECT`].
+#[test]
+fn a_hosts_relay_client_keeps_the_crates_bounds() {
+    let relay = ConnectorsRelay::new("http://127.0.0.1:9", adapter(), connection(), vec![])
+        .expect("loopback");
+    assert_eq!(relay.bounds(), RelayBounds::HOST);
+    assert_eq!(
+        RelayBounds::HOST,
+        RelayBounds {
+            connect: Duration::from_secs(5),
+            request: Duration::from_secs(20),
+        }
+    );
+    assert_eq!(
+        (CONNECT_BOUND, REQUEST_BOUND),
+        (RelayBounds::HOST.connect, RelayBounds::HOST.request)
+    );
+}
+
+/// A relay whose accept queue is full: the read's describe ends at the connect bound (1 s here,
+/// 5 s on a host), long before the 20 s request bound, as `relay-unavailable:` (nothing was
+/// sent).
 #[test]
 fn a_connect_that_never_completes_ends_at_the_connect_bound() {
     let listener = small_backlog_listener();
@@ -1305,13 +1343,15 @@ fn a_connect_that_never_completes_ends_at_the_connect_bound() {
         "http://127.0.0.1:{}",
         listener.local_addr().expect("the bound address").port()
     );
-    let relay = ConnectorsRelay::new(&url, adapter(), connection(), vec![]).expect("loopback");
+    let relay = ConnectorsRelay::new(&url, adapter(), connection(), vec![])
+        .expect("loopback")
+        .with_bounds(SHORT_CONNECT);
     let started = Instant::now();
     let message = failed(read(&relay));
     let elapsed = started.elapsed();
     starts(&message, "relay-unavailable:");
     assert!(
-        elapsed >= Duration::from_secs(4) && elapsed < Duration::from_secs(12),
+        at_the_connect_bound(elapsed),
         "answered after {elapsed:?}: {message}"
     );
     drop(fillers);
@@ -1338,7 +1378,9 @@ fn a_write_whose_invoke_cannot_connect_is_refused_unavailable_at_the_connect_bou
         drop(fillers);
         request
     });
-    let relay = ConnectorsRelay::new(&url, adapter(), connection(), vec![]).expect("loopback");
+    let relay = ConnectorsRelay::new(&url, adapter(), connection(), vec![])
+        .expect("loopback")
+        .with_bounds(SHORT_CONNECT);
     let started = Instant::now();
     let result = write(&relay, &admitted());
     let elapsed = started.elapsed();
@@ -1346,10 +1388,7 @@ fn a_write_whose_invoke_cannot_connect_is_refused_unavailable_at_the_connect_bou
     let described = server.join().expect("the fake did not panic");
     assert_eq!(described.path, "/v1/describe");
     assert_eq!(write_refused_code(result), "relay-unavailable");
-    assert!(
-        elapsed >= Duration::from_secs(4) && elapsed < Duration::from_secs(12),
-        "answered after {elapsed:?}"
-    );
+    assert!(at_the_connect_bound(elapsed), "answered after {elapsed:?}");
 }
 
 /// A call on a clone, and on `over`, after the client it came from dropped still answers.

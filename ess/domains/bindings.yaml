@@ -7,8 +7,10 @@
 # protocol give, and (story bound-program-result-table) the run of a `program` binding, the
 # evidence its result table records and the refusals of that step, and (story
 # bound-artifact-revisions) the revision Loom computes for each placed artifact, the revision moves
-# a step writes and a step's discard, and (story bound-program-case-id) the environment of every
-# program that port starts, `PATH` and `LOOM_CASE` and nothing else. An adapter, an aperture and a
+# a step writes and a step's discard, (story bound-program-case-id) the environment of every
+# program that port starts, `PATH` and `LOOM_CASE` and nothing else, and (story
+# record-copy-between-cases) the record a `copy` binding copies from another case of the same tree
+# and the refusals of that step. An adapter, an aperture and a
 # remote endpoint are engine configuration and never binding data.
 domain: loom.bindings
 
@@ -68,8 +70,11 @@ types:
 
   # Where the value of an evidence entry comes from: `Exit` the program's exit code; `Effect`
   # Loom's own report that it performed the action (it opened the children, applied the agent's
-  # outputs, took the person's action), whose one value is `performed`, and an effect that was
-  # refused or failed records nothing; `Report` a JSON pointer into the program's report. A
+  # outputs, took the person's action), whose value is `performed`, and an effect that was
+  # refused or failed records nothing. A Person executor's `Effect` table may also list other
+  # named values, never `*`: the result a person names when taking the action, `performed`
+  # when it names none; a value its table does not list is refused and records nothing.
+  # `Report` is a JSON pointer into the program's report. A
   # Program executor's entries read `Exit` or `Report`, never `Effect`; a Person or Open
   # executor's entries read `Effect` alone; an Agent's and a Copy's are not restricted.
   - name: loom.bindings.ResultSource
@@ -158,11 +163,42 @@ types:
       - name: dimensions
         type: List<String>
 
+  # The exit codes of a Program executor that do not go through its result tables (story
+  # bound-program-contract): `error`, a program error (no evidence, the step refused
+  # `ProgramError`, which ends the run), and `not_called`, a run that did nothing (no evidence, the
+  # step performed). Each entry is a code from 0 to 255; a list the document leaves out is empty,
+  # a code in both lists or in a list and as a key of a `from: exit` table of the same binding is
+  # refused `ExitClassConflict` at load, and a run killed at its timeout is in neither class. Loom
+  # ships no default list: a binding with no `exits` puts every exit through its tables. Only the
+  # bindings document names them.
+  - name: loom.bindings.ExitClasses
+    kind: struct
+    fields:
+      - name: error
+        type: List<Integer>
+      - name: not_called
+        type: List<Integer>
+
+  # The class of a bound program's run whose exit one of `ExitClasses` lists.
+  - name: loom.bindings.ExitClass
+    kind: enum
+    variants: [Error, NotCalled]
+
+  # Where a relative program path with a `/` (an `argv[0]` or `arguments_from[0]`) is read from
+  # (story bound-program-contract): `Workspace`, the default, a path in the workspace; `Bindings`,
+  # a path in the directory of the bindings file, which `resolve_programs` turns into the program's
+  # absolute real path, refusing `ProgramNotBesideBindings` a path with a `..` segment, one that
+  # names no regular file and one whose real path lies outside that directory. A bare name is found
+  # on `PATH` and an absolute path runs as written under either.
+  - name: loom.bindings.ProgramRoot
+    kind: enum
+    variants: [Workspace, Bindings]
+
   # One action's binding: the action id of the protocol, its executor, the arguments (a literal
   # JSON object, or `arguments_from`, an argv whose standard output is the object), the records it
   # writes, the tools an Agent may be offered, budget and timeout (1 to 3600 seconds), the retry
-  # conditions and the handoff text a run shows when this writer has done what it may and a person
-  # continues.
+  # conditions, the handoff text a run shows when this writer has done what it may and a person
+  # continues, and a Program executor's exit classes.
   - name: loom.bindings.BoundAction
     kind: struct
     fields:
@@ -186,10 +222,13 @@ types:
         type: List<loom.bindings.RetryCondition>
       - name: handoff
         type: Optional<String>
+      - name: exits
+        type: Optional<loom.bindings.ExitClasses>
 
   # The document: `format` is `loom.bindings/1`; `protocol` a registration, `name@major`;
-  # `artifacts` maps artifact ids to workspace paths; `independence` maps producers to dimensions
-  # of the protocol; `actions` holds one binding per action, in document order.
+  # `program_root` where a relative program path is read from (absent: `Workspace`); `artifacts`
+  # maps artifact ids to workspace paths; `independence` maps producers to dimensions of the
+  # protocol; `actions` holds one binding per action, in document order.
   - name: loom.bindings.BindingsDocument
     kind: struct
     fields:
@@ -197,6 +236,8 @@ types:
         type: String
       - name: protocol
         type: String
+      - name: program_root
+        type: Optional<loom.bindings.ProgramRoot>
       - name: artifacts
         type: List<loom.bindings.ArtifactPath>
       - name: independence
@@ -206,11 +247,16 @@ types:
 
   # Why a document is refused: at decoding (`Malformed`, `UndeclaredMember`, `MissingMember`,
   # `UnsupportedFormat`, `InvalidArgv`, `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`,
-  # `InvalidToolName`, `InvalidEffectResult`) and at load against the compiled protocol
+  # `InvalidToolName`, `InvalidEffectResult` (an `Effect` key other than `performed`, but a
+  # Person executor's named value other than `*`)) and at load against the compiled protocol
   # (`ProtocolMismatch`, `UnknownAction`, `DuplicateAction`, `KindNotProducible`,
   # `UndeclaredArtifact`, `UndeclaredEvidenceKind` (a `retry_when` kind the protocol does not declare),
   # `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace`,
-  # `UndeclaredDimension`).
+  # `UndeclaredDimension`, `ExitClassConflict` (an exit code in both `exits` lists, or in one and
+  # as a key of a `from: exit` table of the same binding)), and by `resolve_programs` against the
+  # directory of the bindings file (`ProgramNotBesideBindings`), and by the open effect port when
+  # it is built (`ArgumentsUndeclared`: `arguments_from` on an `open` action whose protocol
+  # declares no `arguments` schema, so it takes only `{}`).
   - name: loom.bindings.BindingsRefusalReason
     kind: enum
     variants:
@@ -234,6 +280,9 @@ types:
       - TimeoutOutOfRange
       - PathNotInWorkspace
       - UndeclaredDimension
+      - ExitClassConflict
+      - ProgramNotBesideBindings
+      - ArgumentsUndeclared
 
   # A refusal: the reason, the action it names when it is about one, the member and what is wrong
   # with it. The first defect found is the one reported.
@@ -256,8 +305,13 @@ types:
   # the runner answered a refusal), the SHA-256 of the blob that holds its standard output followed
   # by its standard error (the file `blobs/<sha256>` in the store directory; absent when the runner
   # answered a refusal or the blob could not be kept), whether it was killed at its timeout, and the
-  # runner's refusal as text (absent when the runner answered a run). The observations of one
-  # action in one case from the port are its run count.
+  # runner's refusal as text (absent when the runner answered a run). `class` (story
+  # bound-program-contract) is the exit class the binding's `exits` gives the run's exit code,
+  # absent for any other exit and for a run killed at its timeout. The observations of one action
+  # in one case from the port that hold no `class` are its run count. `retry_of` (story
+  # bound-program-retry-records) holds the evidence ids of the retry records the run was given, in
+  # the order the case received them; it is empty on a run that was given none. A retried run is a
+  # run: it counts against `budget.max_runs` like any other run without a `class`.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -273,6 +327,10 @@ types:
         type: Boolean
       - name: runner_refusal
         type: Optional<String>
+      - name: retry_of
+        type: List<String>
+      - name: class
+        type: Optional<loom.bindings.ExitClass>
 
   # The environment of a program the program effect port starts (story bound-program-case-id),
   # the bound program and its `arguments_from` program alike: `path`, the variable `PATH` at the
@@ -282,7 +340,21 @@ types:
   # other variable reaches such a program, and no host variable is inherited: no request's
   # arguments, `arguments_from` output, program report, bindings document or host variable sets
   # or changes either value. The intake slice's `run --action-bindings` commands are not started
-  # by this port and keep `PATH` alone.
+  # by this port and keep `PATH` alone. `loom_retry_feedback`, the variable `LOOM_RETRY_FEEDBACK`
+  # (story bound-program-retry-records), is the canonical absolute path of the step's
+  # `RetryFeedback` document, set by the port alone, only on the bound program of a step with a
+  # retry record and never on its `arguments_from` program. Story bound-program-contract adds
+  # three variables, each set
+  # by the port after the child is built: `loom_timeout_seconds`, `LOOM_TIMEOUT_SECONDS`, the whole
+  # seconds of that run's timeout (the binding's `timeout_seconds`, else 60); `loom_case_name`,
+  # `LOOM_CASE_NAME`, the name the governor stored in the case's own `parent` link when its parent
+  # opened it (absent for a root case, the same for a repeated child `<id>.2` as for the first);
+  # and `loom_parent_case_name`, `LOOM_PARENT_CASE_NAME`, the name stored in the `parent` link of
+  # that parent (absent unless the parent was itself opened by a case; one level up and no
+  # further). Each name is one child name (ASCII letters, digits, `-` and `_`) of at most 4096
+  # bytes, else the step is refused and nothing starts, and a parent whose stored link cannot be
+  # read refuses the step before anything starts. None of the three is ever set by a request, an
+  # argument, a report, a program's output or the bindings document.
   - name: loom.bindings.ProgramEnvironment
     kind: struct
     fields:
@@ -290,6 +362,14 @@ types:
         type: Optional<String>
       - name: loom_case
         type: String
+      - name: loom_retry_feedback
+        type: Optional<String>
+      - name: loom_timeout_seconds
+        type: Integer
+      - name: loom_case_name
+        type: Optional<String>
+      - name: loom_parent_case_name
+        type: Optional<String>
 
   # An artifact and the revision the case holds for it when the program started.
   - name: loom.bindings.ArtifactRevision
@@ -330,8 +410,10 @@ types:
   # (`RunsSpent`, nothing is started); the case is held under another protocol than the one the
   # bindings document binds (`CaseOfAnotherProtocol`, nothing is started or recorded); a placed
   # artifact cannot be digested (`ArtifactUnreadable`, story bound-artifact-revisions: before the
-  # run nothing is started, after it no revision moves and nothing is recorded). A refused step
-  # records no evidence.
+  # run nothing is started, after it no revision moves and nothing is recorded); the run's exit is
+  # one the binding's `exits.error` lists (`ProgramError`, story bound-program-contract: the step
+  # ends the run, its text names the exit code and the blob digest, never the program's output). A
+  # refused step records no evidence.
   - name: loom.bindings.ProgramRefusalReason
     kind: enum
     variants:
@@ -341,6 +423,7 @@ types:
       - RunsSpent
       - CaseOfAnotherProtocol
       - ArtifactUnreadable
+      - ProgramError
 
   # A refused step: the reason, the action and what is wrong.
   - name: loom.bindings.ProgramRefusal
@@ -436,3 +519,175 @@ types:
         type: String
       - name: detail
         type: String
+
+  # One record that sends a bound action back to work (story bound-program-retry-records): an
+  # evidence record the governor holds for the case whose facts name a `kind` and a `result` the
+  # binding's `retry_when` lists, about the revision the case holds for its `subject`, never
+  # `none`. Every member is read from the held record (its evidence id, its facts' kind, subject,
+  # subject revision, result and instant, its producer) and, for `action`, `exit` and
+  # `blob_sha256`, from the first observation it cites that is a run of a bound program
+  # (`loom/bound-program`) in the same case: the action that run was for, its exit code (absent
+  # for a run killed at its timeout, refused by its runner or with no status) and the blob it kept.
+  # A record that cites no such run names none of the three. Nothing a program prints, a request
+  # names or the bindings document says is a member.
+  - name: loom.bindings.RetryRecord
+    kind: struct
+    fields:
+      - name: evidence_id
+        type: String
+      - name: kind
+        type: String
+      - name: subject
+        type: String
+      - name: subject_revision
+        type: String
+      - name: result
+        type: String
+      - name: producer
+        type: String
+      - name: observed_at
+        type: Timestamp
+      - name: action
+        type: Optional<String>
+      - name: exit
+        type: Optional<Integer>
+      - name: blob_sha256
+        type: Optional<String>
+
+  # The end of a cited blob a retried program is given: the blob's SHA-256 and its last 60 lines,
+  # at most the last 65536 bytes of them, invalid UTF-8 replaced by U+FFFD. A blob that cannot be
+  # read, or whose content does not hash to its name, gives none.
+  - name: loom.bindings.RetryLog
+    kind: struct
+    fields:
+      - name: blob_sha256
+        type: String
+      - name: tail
+        type: String
+
+  # The document a retried bound program is given (`format` `loom.retry-feedback/1`): the case,
+  # the action, its retry records in the order the case received them, and a log per cited blob.
+  # The port keeps it as `blobs/<sha256>` of the store directory before the program starts; it is
+  # written only when there is a retry record.
+  - name: loom.bindings.RetryFeedback
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: records
+        type: List<loom.bindings.RetryRecord>
+      - name: logs
+        type: List<loom.bindings.RetryLog>
+
+  # One record the copy effect port (story record-copy-between-cases) copies into a case, the
+  # payload of the observation the copy cites: the receiving case and the action, the case of the
+  # same tree the record is copied from and that record's evidence id, and the artifacts of its
+  # `upstream_revisions` the receiving protocol does not declare, which the copy drops. The copy
+  # keeps the record's kind, subject, subject revision, result, producer and instant; the
+  # observation's instant is the record's.
+  - name: loom.bindings.CopiedRecord
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: source_case
+        type: String
+      - name: source_evidence
+        type: String
+      - name: dropped_upstream
+        type: List<String>
+
+  # Why the copy effect port refuses a step: no case of the receiving case's tree but itself is held
+  # under the protocol the binding's `from` names (`NoSourceCase`); no such case holds an applying
+  # record of the binding's kind about the current revision of its subject (`NoSourceRecord`); the
+  # record to copy is about an artifact the receiving protocol does not declare
+  # (`SubjectUndeclared`). A refused step writes nothing.
+  - name: loom.bindings.CopyRefusalReason
+    kind: enum
+    variants:
+      - NoSourceRecord
+      - NoSourceCase
+      - SubjectUndeclared
+
+  # A refused copy: the reason, the action and what is wrong.
+  - name: loom.bindings.CopyRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.CopyRefusalReason
+      - name: action
+        type: String
+      - name: detail
+        type: String
+
+  # Why the open effect port refuses a step (story open-children-from-arguments-from): the
+  # `arguments_from` program was refused by its runner, killed at its timeout, ended with an exit
+  # other than 0, or printed more than 1 MiB or anything but one JSON object
+  # (`ArgumentsUnreadable`); the object does not satisfy the action's `arguments` schema
+  # (`ArgumentsMismatched`, naming the JSON pointer and the keyword); the member `each` names is
+  # missing or not a list (`EachNotAList`), holds an entry that is not a string
+  # (`EachItemNotText`), holds no entry (`NoChildNamed`), holds one entry twice
+  # (`ChildNameRepeated`), or holds an entry that is not one plain segment of ASCII letters, digits,
+  # `-` and `_` (`ChildNameInvalid`). Each names the member and the entry's index, never the text
+  # the program printed. A refused step opens no child and writes nothing: no blob, no observation,
+  # no record.
+  - name: loom.bindings.OpenRefusalReason
+    kind: enum
+    variants:
+      - ArgumentsUnreadable
+      - ArgumentsMismatched
+      - EachNotAList
+      - EachItemNotText
+      - NoChildNamed
+      - ChildNameRepeated
+      - ChildNameInvalid
+
+  # A refused opening: the reason, the action and what is wrong.
+  - name: loom.bindings.OpenRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.OpenRefusalReason
+      - name: action
+        type: String
+      - name: detail
+        type: String
+
+  # Where the names of an opening come from: the executor's `name` (`Name`), the member `each`
+  # names of the request's arguments (`Request`), of the binding's literal `arguments`
+  # (`Literal`), or of the object the `arguments_from` program printed (`ArgumentsFrom`).
+  - name: loom.bindings.ChildNameSource
+    kind: enum
+    variants:
+      - Name
+      - Request
+      - Literal
+      - ArgumentsFrom
+
+  # The payload of the `loom/open` observation the open effect port keeps once the names of a step
+  # are checked and before it opens the children: the case and the action, the case revision the
+  # request was made at, where the names come from, the names in the order given, and, for
+  # `ArgumentsFrom`, the SHA-256 of the program's output, kept as `blobs/<digest>` in the store
+  # directory. An observation of source `ArgumentsFrom` at the request's case revision is the list
+  # a resumed opening takes: the program is not run again at that revision.
+  - name: loom.bindings.ChildNames
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: case_revision
+        type: Integer
+      - name: source
+        type: loom.bindings.ChildNameSource
+      - name: names
+        type: List<String>
+      - name: blob_sha256
+        type: Optional<String>

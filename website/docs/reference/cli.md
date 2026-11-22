@@ -39,6 +39,13 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom agent boundary-ready`](#b10x-loom-agent-boundary-ready) | Say whether every boundary port on 127.0.0.1 accepts a connection: the boundary's startup probe |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
+| [`b10x-loom tree`](#b10x-loom-tree) | Run a tree of protocol cases from a case store: open its root case, and print the tree's status and the verdict on its run logs |
+| [`b10x-loom tree open`](#b10x-loom-tree-open) | Open the root case of a tree in an empty store directory, from a registered protocol, a loom.bindings/1 file and the initial artifact revisions |
+| [`b10x-loom tree run`](#b10x-loom-tree-run) | Drive the tree: one step of one case at a time on Commission's loop, until the root is terminated through its one legitimate outcome or the tree waits |
+| [`b10x-loom tree approve`](#b10x-loom-tree-approve) | Record a principal's decision on one capability for one case of the tree, at the case's current revision |
+| [`b10x-loom tree close`](#b10x-loom-tree-close) | Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is |
+| [`b10x-loom tree status`](#b10x-loom-tree-status) | Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log |
+| [`b10x-loom tree verify`](#b10x-loom-tree-verify) | Verify the run log of every case of the tree and name the first line that fails |
 
 ## `b10x-loom run`
 
@@ -645,4 +652,151 @@ Exit status:
   1   anything else failed: the state directory, the resume context, the workspace, the models
   2   the command line is not valid
 Nothing is performed on any status from 10 to 21.
+```
+
+## `b10x-loom tree`
+
+Run a tree of protocol cases from a case store: open its root case, and print the tree's status and the verdict on its run logs
+
+```text
+Usage: b10x-loom tree <COMMAND>
+```
+
+## `b10x-loom tree open`
+
+Open the root case of a tree in an empty store directory, from a registered protocol, a loom.bindings/1 file and the initial artifact revisions
+
+```text
+Usage: b10x-loom tree open [OPTIONS] --store <DIR> --protocol <NAME@MAJOR> --bindings <FILE> --workspace <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory: absent, or an empty directory |
+| `--protocol <NAME@MAJOR>` | yes | none | The registration of the root's protocol, `name@major` |
+| `--protocols <DIR>` | no | none | Read the tree's protocols from the files directly in this directory whose names end in `.yaml`, each under the registration it declares, and keep them in the store: the tree's catalog is those and no other. Without it the tree uses the installed and built-in protocols |
+| `--bindings <FILE>` | yes | none | The root's loom.bindings/1 file |
+| `--workspace <DIR>` | yes | none | The existing directory every case of the tree works in; every path of the bindings is relative to it |
+| `--revision <ARTIFACT=REVISION>` | no | none | The initial revision of one artifact, `ARTIFACT=REVISION`; repeat for each |
+| `--case <ID>` | no | `root` | The id of the root case |
+| `--at <INSTANT>` | no | none | The instant every write of the command records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+Everything is checked before anything is written: the store (absent, or an empty directory), the workspace (an existing directory), --at, the bindings file and, through the `bindings` member of each `open` executor, every bindings file of the tree. A binding with an `agent` executor anywhere in the tree is refused AgentNotRunYet, naming the file, the action and story:bound-agent-node. An artifact no --revision names takes the revision of what is at the path the bindings place it at.
+
+Exit status:
+  0  the tree is open; its root case and store are printed
+  1  refused, nothing written: the reason, and the file, action or case it names, on standard error
+```
+
+## `b10x-loom tree run`
+
+Drive the tree: one step of one case at a time on Commission's loop, until the root is terminated through its one legitimate outcome or the tree waits
+
+```text
+Usage: b10x-loom tree run [OPTIONS] --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--max-steps <N>` | no | none | The most steps the run takes |
+| `--max-wall-seconds <SECONDS>` | no | none | The most seconds of wall time the run takes before a step |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under |
+| `--at <INSTANT>` | no | none | The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+Every open child takes its steps before its parent's next one; each step is selected by the deterministic selector and performed through the action's bound executor. A case is terminated when its completion gives exactly one legitimate outcome and no action in it is useful. When the tree waits, each decision is printed with the exact command that records it; a handoff's command is the next tree run, under this run's --confinement. A person action is never taken by tree run.
+
+Exit status:
+  0  the root is terminated through its one legitimate outcome
+  1  refused, nothing written: StoreInUse naming the holder, or the store or a bindings file cannot be read
+  3  the tree waits on a person or on authority: each decision and its command on standard error
+  4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
+  5  the step or wall-time budget is spent, or the run was cancelled
+```
+
+## `b10x-loom tree approve`
+
+Record a principal's decision on one capability for one case of the tree, at the case's current revision
+
+```text
+Usage: b10x-loom tree approve [OPTIONS] --store <DIR> --case <ID> --principal <PRINCIPAL>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <ID>` | yes | none | The case of the tree the decision is for |
+| `--capability <CAPABILITY>` | no | none | The capability decided. With --action it may be left out when the protocol action needs none: the action is taken and no authority is recorded |
+| `--principal <PRINCIPAL>` | yes | none | The principal who decided |
+| `--deny` | no | `false` | Deny the capability instead of approving it |
+| `--action <ACTION>` | no | none | Then take this `person` action of the case as the principal: the records its binding declares are produced by the principal about the subject's revision now |
+| `--result <RESULT>` | no | none | The result the person action ends with: a value every `from: effect` entry of its binding lists in its results, which maps it to each record's result; `performed` when absent |
+| `--reasons <TEXT>` | no | none | The person's reasons for the result, at most 65536 bytes and 60 lines: kept as a blob of the store, and the log of the record a writer this result sends back is given |
+| `--reasons-file <FILE>` | no | none | The reasons read from a regular file inside the tree's workspace, opened without following a symbolic link |
+| `--at <INSTANT>` | no | none | The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+The decision is kept beside the case file and allows that capability for that case while the case is at the revision it was recorded at, and nothing else: another case, another capability or a moved case reads no approval. A denial wins over an approval of the same capability for the same case and revision. A person action whose protocol action needs no capability is taken with --action and no --capability, and records no authority; one that needs a capability is refused without it. --result names the result the person action ends with, one its binding's results list, and --reasons or --reasons-file the person's reasons, which a writer the result sends back reads in its retry feedback; a result an entry does not list is refused and nothing is written.
+
+Exit status:
+  0  the decision is recorded; it is printed
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, NotAPersonAction, or the store cannot be read
+```
+
+## `b10x-loom tree close`
+
+Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is
+
+```text
+Usage: b10x-loom tree close [OPTIONS] --store <DIR> --case <ID> --outcome <OUTCOME>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <ID>` | yes | none | The case of the tree to close |
+| `--outcome <OUTCOME>` | yes | none | The outcome the case ends through |
+| `--at <INSTANT>` | no | none | The instant the termination records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+## `b10x-loom tree status`
+
+Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log
+
+```text
+Usage: b10x-loom tree status --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+
+```text
+The store is read and never held, so a live view can read it while a run holds it.
+
+Exit status:
+  0  the status is printed
+  1  refused: the store holds no tree or cannot be read
+```
+
+## `b10x-loom tree verify`
+
+Verify the run log of every case of the tree and name the first line that fails
+
+```text
+Usage: b10x-loom tree verify --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+
+```text
+Each log is checked against its chain (a cut, a missing or reordered line, a changed byte) and its last line against the head the tree kept, so a change to any byte of a log is seen. The store is read and never held.
+
+Exit status:
+  0  every log verifies
+  1  refused: the store holds no tree or cannot be read
+  3  a log does not verify: the case and the line, counted from 0, on standard error
 ```

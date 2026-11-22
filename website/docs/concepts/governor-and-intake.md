@@ -16,70 +16,88 @@ The compatibility API opens a case on a protocol of the
 ([GitHub](https://github.com/beyond10x/engineering-protocols)) registry, named `<name>@<major>`
 (`software-change@1`), with the caller's revision of every artifact the protocol declares.
 
-- **It evaluates afresh every time.** Each frontier and completion compiles the protocol and
-  evaluates the case's evidence with Canon. It reads no clock, makes no network or model call, and
-  supplies no authority decision.
-- **It never invents authority.** An action that requires a capability is at best *approval
-  required*; Commission asks its authority provider.
-- **It decides and never acts.** It reports the frontier and whether one outcome is legitimate. It
-  executes nothing.
-- **Evidence applies to a revision.** A test result for the previous revision does not satisfy a
-  claim about the current one: after an edit, the tests run again before the merge becomes
-  possible.
+| Property | What holds |
+|---|---|
+| Fresh evaluation | Each frontier and completion compiles the protocol and evaluates the case's evidence with Canon. The governor reads no clock, makes no network or model call, and supplies no authority decision |
+| Termination | The one decision it keeps. Once the host terminates a case through an outcome Canon judges legitimate (`terminate`), the case is evaluated with it, admits no action and completes with that outcome |
+| Authority | An action that requires a capability is at best *approval required*. Commission asks its authority provider |
+| Decides, does not act | It reports the frontier and whether one outcome is legitimate. It executes nothing |
+| Evidence applies to a revision | A test result for the previous revision does not satisfy a claim about the current one. After an edit, the tests run again before the merge becomes possible |
 
-The case store is a port (`CaseStore`); `MemoryCaseStore` keeps cases in memory.
+A case can open child cases. Performing an action that declares Canon's `case_open`
+(`open_children`) opens each child under the protocol `case_open` names. Each artifact the child
+declares starts at the parent's revision of that artifact, or at `r0` when the parent holds none.
+The governor writes one `case_outcome` record per child into the parent: `open` until the child is
+terminated, then its outcome. The parent's `children` claims read those records, and `tree` lists
+the cases of one tree.
+
+Only the governor writes a `case_outcome` record for a protocol that declares `case_open`. A host
+that composes cases itself, with no child cases run by Loom, allows its own records by building the
+governor `with_host_case_outcomes()`.
+
+The case store is a port, `CaseStore`. `MemoryCaseStore` keeps cases in memory.
 
 Since 0.2.0, a host can register a reviewed Canon model through
-`CanonGovernor::with_protocol(name, &model)`. Canon validates it; duplicate registrations,
+`CanonGovernor::with_protocol(name, &model)`. Canon validates it. Duplicate registrations,
 built-in replacements and actions requiring more capabilities than Commission can represent are
-refused. Protocol adoption is the host's decision, never a model proposal accepted as authority.
-`with_protocol_yaml(name, yaml)` parses through Loom's pinned Canon so the host does not need a
-matching Canon dependency merely to register a definition.
+refused. Protocol adoption is the host's decision: a model proposal is not accepted as authority.
+`with_protocol_yaml(name, yaml)` parses through Loom's pinned Canon, so the host needs no matching
+Canon dependency to register a definition.
 
 Since 0.4.0, Loom provides `ProtocolCatalog`, which combines engineering definitions, Loom's own
 `system-query@1`, and explicitly installed custom definitions. `with_catalog` admits and seals the
 same names and content digests that routing and case initialization use. No later definition can
 replace them. Existing `classify`, `case::open`, and software-slice callers retain their engineering
-catalog behavior; new catalog-aware entrypoints serve custom protocols.
+catalog behavior. New catalog-aware entrypoints serve custom protocols.
 
 `with_evaluation_time` supplies a trusted callback for freshness evaluation. Failure to obtain
 time makes the governor unavailable. No authority or explicit decision enters through that port.
+
 Evidence producers authenticate their observations before calling `submit_evidence`, including
-any product requirement for independent reviewer execution contexts.
-The producer Canon reads for a held record is the one `submit_evidence` attributed it to, never a
-`producer` the record's facts name; the record's `observed_at` comes from its facts, as the host
-wrote it, and the governor reads no clock. The governor `b10x-loom` builds for the slice
-(`run::slice_governor`) evaluates at the host instant, so an evidence kind's `max_age` (30 minutes
-for `operational_observation` in `software.change/1`) expires an old observation.
+any product requirement for independent reviewer execution contexts. The producer Canon reads for
+a held record is the one `submit_evidence` attributed it to, not a `producer` the record's facts
+contain. The record's `observed_at` comes from its facts, as the host wrote it, and the governor
+reads no clock.
+
+The governor `b10x-loom` builds for the slice (`run::slice_governor`) evaluates at
+the host instant, so an evidence kind's `max_age` expires an old observation: 30 minutes for
+`operational_observation` in `software.change/1`.
 
 An outcome that requires an explicit decision (`requires: decision: explicitly_inconclusive`, say)
 becomes legitimate only with that decision. The host records it on the held case with
-`CanonGovernor::decide(&case, outcome, decision, principal)`; the governor stamps it with the
+`CanonGovernor::decide(&case, outcome, decision, principal)`. The governor stamps it with the
 case's current revision and hands it to Canon as a `canon-decisions/1` entry on every later
-evaluation, so the outcome is legitimate until the case moves and blocked again after. Canon
-refuses a decision for an outcome the protocol does not declare or one that does not require it,
-and nothing is recorded. Who may take a decision is the host's to judge, not Loom's.
+evaluation. The outcome is legitimate until the case moves, and blocked again after.
 
-Durable hosts implement `FallibleCaseStore`. Reads and writes return errors; an insert error
-stops opening the case rather than retrying another identifier. Updates are atomic, so a failed
+Canon refuses a decision for an outcome the protocol does not declare or one that does not require
+it, and nothing is recorded. The host judges who may take a decision.
+
+Durable hosts implement `FallibleCaseStore`. Reads and writes return errors. An insert error
+stops opening the case, and no other identifier is tried. Updates are atomic, so a failed
 write preserves previous state. `try_observations` reports read failures. Existing infallible
 `CaseStore` implementations retain their API through a compatibility adapter. Loom supplies no
 database backend: hosts restore their cases and the same admitted protocol definitions.
 
 ### One evaluation, for a caller that keeps its own case
 
-A supervisor that keeps its own case record does not need Commission's types or a case store to get
-a decision. `loom_governor::evaluate(&catalog, &request)` takes a protocol named from the host's
-`ProtocolCatalog`, a `canon-case/1` case snapshot, the `canon-evidence/1` records, an optional
-trusted time and the `canon-decisions/1` explicit decisions taken for the case (`decisions`, empty
-when none; a decision applies only at the snapshot's revision), and returns Canon's decision as the frontier and completion report it: each action's
-status, the capabilities it requires and Canon's reasons, every claim and obligation, the one
-legitimate outcome when the case is complete, and Canon's whole `canon-decision/1` document. It
-uses the same evaluation as `CanonGovernor`, holds nothing, and reads no clock. The request and the
-decision are declared in `ess/domains/evaluation.yaml`.
+A supervisor that keeps its own case record needs neither Commission's types nor a case store to
+get a decision. `loom_governor::evaluate(&catalog, &request)` takes:
 
-`b10x-loom evaluate` is the same call for a program in any language: the request as JSON on standard
-input (or `--input <PATH>`), the decision as JSON on standard output.
+- a protocol named from the host's `ProtocolCatalog`
+- a `canon-case/1` case snapshot
+- the `canon-evidence/1` records
+- an optional trusted time
+- the `canon-decisions/1` explicit decisions taken for the case (`decisions`, empty when none). A
+  decision applies only at the snapshot's revision.
+
+It returns Canon's decision as the frontier and completion report it: each action's status, the
+capabilities it requires and Canon's reasons, every claim and obligation, the one legitimate
+outcome when the case is complete, and Canon's whole `canon-decision/1` document. It uses the same
+evaluation as `CanonGovernor`, holds nothing, and reads no clock. The request and the decision are
+declared in `ess/domains/evaluation.yaml`.
+
+`b10x-loom evaluate` is the same call for a program in any language. It reads the request as JSON
+on standard input, or from `--input <PATH>`, and writes the decision as JSON on standard output.
 
 ```console
 b10x-loom evaluate --input request.json | jq -c '{outcome, actions}'
@@ -89,28 +107,33 @@ b10x-loom evaluate --input request.json | jq -c '{outcome, actions}'
 {"outcome":"answered","actions":[{"action":"system.time.read","status":"Admissible","requires":[],"reasons":[]}]}
 ```
 
-An input it cannot use is refused with exit status 3, naming the input: the protocol (the catalog
-has no such name), the snapshot (including a termination the records do not make legitimate), an
-evidence record by its position, the time, or the decisions (one Canon refuses). A record is refused when it is not a readable
-`canon-evidence/1` record or repeats an earlier record's id. A readable record that does not apply
-to the case, such as one of a kind the protocol does not declare, is set aside as `CanonGovernor`
-sets it aside, and the decision is made from the rest; the decision does not list it. The two
-refusals are where `evaluate` differs from the governor: `CanonGovernor` sets an unreadable record
-aside, and of two records with one id keeps the first and sets the later aside, and still decides;
-`evaluate` refuses the request, naming the record (`duplicate-identifier` and the later position
-for a repeated id). An unreadable record:
+An input it cannot use is refused with exit status 3, and the message names the input:
+
+- the protocol, when the catalog has no such name
+- the snapshot, including a termination the records do not make legitimate
+- an evidence record, by its position, when it is not a readable `canon-evidence/1` record or
+  repeats an earlier record's id
+- the time
+- the decisions, when Canon refuses one
+
+A readable record that does not apply to the case, such as one of a kind the protocol does not
+declare, is set aside as `CanonGovernor` sets it aside. The decision is made from the rest and
+does not list it.
+
+The two record refusals are where `evaluate` differs from the governor. `CanonGovernor` sets an
+unreadable record aside, keeps the first of two records with one id and sets the later aside, and
+still decides. `evaluate` refuses the request, and its message names the record: `duplicate-identifier` and the
+later position for a repeated id. An unreadable record:
 
 ```text
 b10x-loom: evaluation refused: evidence record 0: evidence `clock-1` is not a canon-evidence/1 document: missing field `kind`
 {"input":"Evidence","evidence_index":0,"code":"malformed-input","message":"evidence `clock-1` is not a canon-evidence/1 document: missing field `kind`"}
 ```
 
-The protocol comes only from the catalog the host installed (`protocols add`), never from the
+The protocol comes only from the catalog the host installed with `protocols add`, not from the
 request, so host review of protocols still holds. Authenticating the evidence stays the host's job.
 
 ## Intake
-
-Intake takes what someone asked for, as given, and runs it.
 
 | Crate | Does | Does not |
 |---|---|---|
@@ -124,24 +147,26 @@ for one forced tool call through [llm](https://beyond10x.github.io/llm/)
 bounded transcript of what the executor reported. Whatever else it says is dropped.
 
 Evidence comes from trusted verifiers: the exit status of an executed test command, or a clock
-reading produced by the host clock binding (Atlas ADR 0074). A transcript line that a model-written file imitates can mislead the
-next choice; it cannot become evidence.
+reading produced by the host clock binding (Atlas ADR 0074). A transcript line that a
+model-written file imitates can mislead the next choice, but it cannot become evidence.
 
 :::note[Test confinement]
 Tests use [Substrate](https://beyond10x.github.io/substrate/)
 ([GitHub](https://github.com/beyond10x/substrate)) with no network, read-only source and toolchain,
 and workspace writes only to `target/`. Dependencies are prefetched explicitly. A missing
-confinement guarantee stops the run; only `--confinement local` with `--local-reason` (Substrate's
-`local` adapter, declared insecure, the reason recorded on every launch) and the deprecated
-`--confinement none` opt out. On a host that leaves `SUBSTRATE_CONFINEMENT_LOCAL` unset, the flag
-and the reason are the whole opt-in. Every executed test observation names its actual confinement.
-These changes shipped in 0.2.0.
-The slice's own git calls run none of
-the work tree's hooks, no `core.fsmonitor` command and no signing program, a case does not open
-on a work tree whose own git configuration names a program, and a call is refused once the test
-command changed that configuration or the git directory.
+confinement guarantee stops the run.
+
+Only `--confinement local` with `--local-reason` and the
+deprecated `--confinement none` opt out. `local` is Substrate's `local` adapter, declared insecure,
+with the reason recorded on every launch. On a host that leaves `SUBSTRATE_CONFINEMENT_LOCAL`
+unset, the flag and the reason are the whole opt-in. Every executed test observation records its
+actual confinement. These changes shipped in 0.2.0.
+
+The slice's own git calls run none of the work tree's hooks, no `core.fsmonitor` command and no
+signing program. A case does not open on a work tree whose own git configuration sets a program,
+and a call is refused once the test command changed that configuration or the git directory.
 :::
 
-The `intake.routing` domain specifies these nouns; its [reference](/docs/reference/ess/intake-routing)
+The `intake.routing` domain specifies these nouns. Its [reference](/docs/reference/ess/intake-routing)
 is generated from `ess/intake/`. [Run an intent](../guides/run-an-intent.md) shows the slice from
 the command line.

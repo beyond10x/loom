@@ -62,6 +62,7 @@ use std::time::{Duration, Instant};
 
 use llm_core::Model;
 use loom_sdk::connectors::cli::ConnectorsCli;
+use loom_sdk::intake::slice::run::{MODEL_RETRY, RetryPolicy};
 
 pub use authority::{GRANTED, PluginAuthority};
 pub use codec::{decode_record_line, encode_record_line};
@@ -155,6 +156,8 @@ pub struct TurnModel<'a> {
 pub struct Host<'a> {
     config: &'a PluginConfig,
     environment: Option<Vec<(OsString, OsString)>>,
+    lock_wait: Duration,
+    model_retry: RetryPolicy,
 }
 
 impl<'a> Host<'a> {
@@ -164,7 +167,17 @@ impl<'a> Host<'a> {
         Self {
             config,
             environment: None,
+            lock_wait: state::LOCK_WAIT,
+            model_retry: MODEL_RETRY,
         }
+    }
+
+    /// The host of `config`, waiting `lock_wait` instead of [`state::LOCK_WAIT`] for the lock
+    /// of a state directory another host holds before it refuses the directory.
+    #[must_use]
+    pub fn with_lock_wait(mut self, lock_wait: Duration) -> Self {
+        self.lock_wait = lock_wait;
+        self
     }
 
     /// The host of `config`, starting the Connectors command line from `environment` instead,
@@ -184,9 +197,22 @@ impl<'a> Host<'a> {
         self
     }
 
+    /// The host of `config`, retrying a failed model request of a turn under `policy` instead
+    /// of [`MODEL_RETRY`].
+    #[must_use]
+    pub fn with_model_retry(mut self, policy: RetryPolicy) -> Self {
+        self.model_retry = policy;
+        self
+    }
+
     /// The plugin's configuration.
     pub fn config(&self) -> &PluginConfig {
         self.config
+    }
+
+    /// The retry policy of a turn's model requests.
+    pub fn model_retry(&self) -> RetryPolicy {
+        self.model_retry
     }
 
     /// A read client over every configured source.
@@ -378,7 +404,7 @@ pub fn run_plugin_on<P: Plugin + ?Sized>(
     stop: &AtomicBool,
 ) -> Result<Vec<RecordLine>, PluginError> {
     let config = host.config();
-    let held = state::StateDir::open(state, config)?;
+    let held = state::StateDir::open_waiting(state, config, host.lock_wait)?;
     let threshold = host.threshold()?;
     let interval = u64::try_from(config.poll_interval_seconds)
         .map(Duration::from_secs)
@@ -429,7 +455,7 @@ pub fn run_item<P: Plugin + ?Sized>(
     state: &Path,
     item: &InboundItem,
 ) -> Result<RecordLine, PluginError> {
-    let held = state::StateDir::open(state, host.config())?;
+    let held = state::StateDir::open_waiting(state, host.config(), host.lock_wait)?;
     let threshold = host.threshold()?;
     let mut current = held.load()?;
     if current.handled.contains(&item.id) {

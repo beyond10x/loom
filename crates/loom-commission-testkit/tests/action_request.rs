@@ -26,6 +26,9 @@ use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, Governor
 use std::path::PathBuf;
 use std::process::Command;
 
+#[path = "support/made_once.rs"]
+mod made_once;
+
 const NS: &str = "commission.responsibility.";
 
 const CASE: &str = "case-action-request";
@@ -368,30 +371,13 @@ fn specification_declares_the_command() {
 }
 
 /// Expectation 6: the conformance suite synthesizes, exit 0, with at least one scenario, among
-/// them the revalidation command's.
+/// them the revalidation command's. The synthesis runs once a test run for every test that reads
+/// it (`made_once::commission_synthesis`).
 fn suite_synthesizes() {
-    let out_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("action_request_revalidation");
-    if out_dir.exists() {
-        std::fs::remove_dir_all(&out_dir)
-            .unwrap_or_else(|error| panic!("clear {}: {error}", out_dir.display()));
-    }
-    std::fs::create_dir_all(&out_dir)
-        .unwrap_or_else(|error| panic!("create {}: {error}", out_dir.display()));
-    let out = out_dir.join("suite.json");
-    let run = Command::new("ess")
-        .args(["verify", "conform", "synthesize", "--path"])
-        .arg(root().join("ess/commission"))
-        .arg("--out")
-        .arg(&out)
-        .output()
-        .unwrap_or_else(|error| panic!("run `ess verify conform synthesize`: {error}"));
-    let report = format!(
-        "{}{}",
-        String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
-    );
+    let synthesis = made_once::commission_synthesis(&root());
+    let report = format!("{}{}", synthesis.stdout, synthesis.stderr);
     assert!(
-        run.status.success(),
+        synthesis.code == Some(0),
         "`ess verify conform synthesize` failed:\n{report}"
     );
 
@@ -407,8 +393,8 @@ fn suite_synthesizes() {
         .unwrap_or_else(|| panic!("no scenario count in the summary line `{summary}`"));
     assert!(count >= 1, "the suite holds no scenario: `{summary}`");
 
-    let text = std::fs::read_to_string(&out)
-        .unwrap_or_else(|error| panic!("read {}: {error}", out.display()));
+    let text = std::fs::read_to_string(&synthesis.suite)
+        .unwrap_or_else(|error| panic!("read {}: {error}", synthesis.suite.display()));
     let suite = json::parse(&text).unwrap_or_else(|error| panic!("suite is not JSON: {error:?}"));
     let ids: Vec<&str> = match suite.member("scenarios") {
         Some(Value::Object(members)) => members.iter().map(|(id, _)| id.as_str()).collect(),

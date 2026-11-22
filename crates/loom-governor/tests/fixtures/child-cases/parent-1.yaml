@@ -1,0 +1,32 @@
+format: protocol/1
+protocol:
+  id: parent
+  revision: 1
+  description: >-
+    The parent of story child-case-runtime: one case_open action that opens child cases about the
+    idea and may produce child_opened, and a claim that every child ended passed.
+artifacts:
+  idea: {}
+evidence_kinds:
+  case_outcome: {}
+  child_opened: {}
+claims:
+  child.opened:
+    true_when:
+      evidence: {kind: child_opened, subject: idea}
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  child.open:
+    effect: write
+    case_open: {protocol: child, subject: idea}
+    may_produce:
+      - evidence: child_opened
+  idea.note:
+    effect: write
+    may_produce:
+      - evidence: child_opened
+outcomes:
+  delivered:
+    requires: {claim: children.passed}

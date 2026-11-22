@@ -34,8 +34,6 @@ const CASE: &str = "chg-1842";
 const APPENDER_DIR: &str = "LOOM_RUNLOG_APPENDER_DIR";
 /// The name each appender child writes into its events.
 const APPENDER_NAME: &str = "LOOM_RUNLOG_APPENDER_NAME";
-const TWO_PROCESSES: &str = "two_processes_appending_200_lines_each_leave_400_that_verify";
-const LINES_PER_PROCESS: usize = 200;
 
 /// A fresh directory for one test under cargo's per-target temporary directory.
 fn store_dir(name: &str) -> PathBuf {
@@ -190,9 +188,11 @@ fn temporaries(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
-    let (log, path) = log_with("fifty", 50);
+/// `count` events appended to one log: one JSON line each, `seq` gapless from 0, each `prev` the
+/// SHA-256 of the line before, read back and verified. Each append syncs, so the count sets the
+/// time.
+fn events_verify_with_a_gapless_seq(label: &str, count: usize) {
+    let (log, path) = log_with(label, count);
     assert_eq!(
         path.file_name().and_then(|name| name.to_str()),
         Some(format!("runlog-case-{}.jsonl", hex(CASE.as_bytes())).as_str()),
@@ -200,7 +200,7 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     );
     let bytes = fs::read(&path).expect("the log file reads");
     let raw = lines(&bytes);
-    assert_eq!(raw.len(), 50, "one line per event");
+    assert_eq!(raw.len(), count, "one line per event");
     assert!(bytes.ends_with(b"\n"), "every line ends with a line feed");
     for (index, line) in raw.iter().enumerate() {
         let value: serde_json::Value =
@@ -229,7 +229,7 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     let read = log.read(CASE).expect("the log verifies");
     let verified = verify(&bytes).expect("the bytes verify");
     assert_eq!(read, verified);
-    assert_eq!(read.len(), 50);
+    assert_eq!(read.len(), count);
     for (index, line) in read.iter().enumerate() {
         assert_eq!(line.seq, i64::try_from(index).expect("small"));
         assert_eq!(line.at, at(index));
@@ -241,6 +241,19 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
         let prev = (index > 0).then(|| sha256_hex(&raw[index - 1]));
         assert_eq!(line.prev, prev);
     }
+}
+
+/// [`events_verify_with_a_gapless_seq`] with 20 events.
+#[test]
+fn twenty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
+    events_verify_with_a_gapless_seq("twenty", 20);
+}
+
+/// [`events_verify_with_a_gapless_seq`] with 50 events, the count the case held before, in the
+/// slow lane (`task slow`): about 8 s on a loaded host.
+#[test]
+fn slow_fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
+    events_verify_with_a_gapless_seq("fifty", 50);
 }
 
 #[test]
@@ -448,12 +461,28 @@ fn an_append_to_a_log_that_does_not_verify_is_refused_and_changes_no_byte() {
     }
 }
 
-#[test]
-fn two_processes_appending_200_lines_each_leave_400_that_verify() {
+/// Two processes over one store, each appending `per_process` lines: the log holds every line once,
+/// each a whole JSON document, each process's in its order, and it verifies.
+///
+/// The test binary is each appender: `test` (the calling test's own name) runs again in a child
+/// with [`APPENDER_DIR`] set, and that run appends instead of starting children. Both children
+/// open the store and then wait for the parent's start file, so their appends overlap from the
+/// first one on, whatever the count.
+fn two_processes_append(test: &str, per_process: usize) {
+    let start_file = |dir: &Path| dir.with_extension("start");
     if let Ok(dir) = std::env::var(APPENDER_DIR) {
         let name = std::env::var(APPENDER_NAME).expect("the parent names the appender");
-        let log = RunLog::open(PathBuf::from(dir)).expect("the store opens in the child");
-        for index in 0..LINES_PER_PROCESS {
+        let dir = PathBuf::from(dir);
+        let log = RunLog::open(&dir).expect("the store opens in the child");
+        let waited = std::time::Instant::now();
+        while !start_file(&dir).exists() {
+            assert!(
+                waited.elapsed() < Duration::from_secs(30),
+                "the parent never wrote the start file"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        for index in 0..per_process {
             log.append(
                 CASE,
                 at(index),
@@ -466,11 +495,12 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
         return;
     }
 
-    let dir = store_dir("two-processes");
+    let dir = store_dir(test);
     let log = RunLog::open(&dir).expect("the store opens");
+    let _ = fs::remove_file(start_file(&dir));
     let spawn = |name: &str| -> Child {
         Command::new(std::env::current_exe().expect("the test binary"))
-            .args([TWO_PROCESSES, "--exact", "--nocapture", "--test-threads=1"])
+            .args([test, "--exact", "--nocapture", "--test-threads=1"])
             .env(APPENDER_DIR, &dir)
             .env(APPENDER_NAME, name)
             .stdout(std::process::Stdio::piped())
@@ -479,6 +509,7 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
             .expect("the child starts")
     };
     let children = [("first", spawn("first")), ("second", spawn("second"))];
+    fs::write(start_file(&dir), b"").expect("the start file is written");
     for (name, child) in children {
         let output = child.wait_with_output().expect("the child ends");
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -492,7 +523,7 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
 
     let bytes = fs::read(log.path(CASE)).expect("the log reads");
     let raw = lines(&bytes);
-    assert_eq!(raw.len(), 2 * LINES_PER_PROCESS, "every append is one line");
+    assert_eq!(raw.len(), 2 * per_process, "every append is one line");
     for line in &raw {
         let value: serde_json::Value =
             serde_json::from_slice(line).expect("each line is a complete JSON document");
@@ -509,7 +540,7 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
             .or_default()
             .push(index.parse().expect("an index"));
     }
-    let expected: Vec<usize> = (0..LINES_PER_PROCESS).collect();
+    let expected: Vec<usize> = (0..per_process).collect();
     assert_eq!(
         seen.get("first"),
         Some(&expected),
@@ -519,6 +550,25 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
         seen.get("second"),
         Some(&expected),
         "each process's lines in its order"
+    );
+}
+
+/// The default lane's count: 25 lines a process, overlapping from the start file on.
+#[test]
+fn two_processes_appending_25_lines_each_leave_50_that_verify() {
+    two_processes_append(
+        "two_processes_appending_25_lines_each_leave_50_that_verify",
+        25,
+    );
+}
+
+/// The same with 200 lines a process, in the slow lane (`task slow`): about 50 s on 4 busy
+/// threads, since every append syncs.
+#[test]
+fn slow_two_processes_appending_200_lines_each_leave_400_that_verify() {
+    two_processes_append(
+        "slow_two_processes_appending_200_lines_each_leave_400_that_verify",
+        200,
     );
 }
 
@@ -644,6 +694,9 @@ fn the_log_of_a_case_id_over_100_bytes_sits_beside_its_case_sha256_file() {
             independence: CaseIndependence::none(),
             evidence: Vec::new(),
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("the run log opens over the same directory");

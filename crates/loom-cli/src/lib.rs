@@ -268,10 +268,17 @@ pub enum TreeCommand {
     /// loom.bindings/1 file and the initial artifact revisions.
     #[command(after_help = TREE_OPEN_HELP)]
     Open(TreeOpenArgs),
+    /// Drive the tree: one step of one case at a time on Commission's loop, until the root is
+    /// terminated through its one legitimate outcome or the tree waits.
+    #[command(after_help = TREE_RUN_HELP)]
+    Run(TreeRunArgs),
     /// Record a principal's decision on one capability for one case of the tree, at the case's
     /// current revision.
     #[command(after_help = TREE_APPROVE_HELP)]
     Approve(TreeApproveArgs),
+    /// Terminate one case of the tree through an outcome Canon reports legitimate for it now: the
+    /// choice a waiting `tree run` prints when more than one is.
+    Close(TreeCloseArgs),
     /// Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or
     /// stop, open obligations, and the paths of its case file and run log.
     #[command(after_help = TREE_STATUS_HELP)]
@@ -297,11 +304,16 @@ Exit status:
 pub const TREE_APPROVE_HELP: &str = "The decision is kept beside the case file and allows that \
 capability for that case while the case is at the revision it was recorded at, and nothing else: \
 another case, another capability or a moved case reads no approval. A denial wins over an \
-approval of the same capability for the same case and revision.
+approval of the same capability for the same case and revision. A person action whose protocol \
+action needs no capability is taken with --action and no --capability, and records no authority; \
+one that needs a capability is refused without it. --result names the result the person action \
+ends with, one its binding's results list, and --reasons or --reasons-file the person's reasons, \
+which a writer the result sends back reads in its retry feedback; a result an entry does not list \
+is refused and nothing is written.
 
 Exit status:
   0  the decision is recorded; it is printed
-  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, or the store cannot be read";
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, NotAPersonAction, or the store cannot be read";
 
 /// What `tree status --help` says about the output and the exit status.
 pub const TREE_STATUS_HELP: &str = "The store is read and never held, so a live view can read it \
@@ -321,6 +333,62 @@ Exit status:
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error";
 
+/// What `tree run --help` says about the steps, the waits and the exit status.
+pub const TREE_RUN_HELP: &str = "Every open child takes its steps before its parent's next one; \
+each step is selected by the deterministic selector and performed through the action's bound \
+executor. A case is terminated when its completion gives exactly one legitimate outcome and no \
+action in it is useful. When the tree waits, each decision is printed with the exact command that \
+records it; a handoff's command is the next tree run, under this run's --confinement. A person \
+action is never taken by tree run.
+
+Exit status:
+  0  the root is terminated through its one legitimate outcome
+  1  refused, nothing written: StoreInUse naming the holder, or the store or a bindings file cannot be read
+  3  the tree waits on a person or on authority: each decision and its command on standard error
+  4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
+  5  the step or wall-time budget is spent, or the run was cancelled";
+
+/// The exit status of `tree run` for each way it stops.
+pub fn tree_run_exit_status(stop: b10x_loom_tree::model::TreeStop) -> u8 {
+    use b10x_loom_tree::model::TreeStop;
+    match stop {
+        TreeStop::Terminal => 0,
+        TreeStop::AwaitingPerson | TreeStop::AwaitingAuthority => 3,
+        TreeStop::Stuck => 4,
+        TreeStop::BudgetSpent => 5,
+    }
+}
+
+/// The confinement every bound program of a tree run starts under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TreeConfinement {
+    /// Substrate's linux adapter; refused when it is unavailable.
+    Substrate,
+    /// Unconfined, declared insecure, through Substrate's local adapter, recorded on every launch.
+    Local,
+}
+
+/// The arguments of `b10x-loom tree run`.
+#[derive(Debug, Args)]
+pub struct TreeRunArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The most steps the run takes.
+    #[arg(long, value_name = "N")]
+    pub max_steps: Option<i64>,
+    /// The most seconds of wall time the run takes before a step.
+    #[arg(long, value_name = "SECONDS")]
+    pub max_wall_seconds: Option<i64>,
+    /// The confinement every bound program starts under.
+    #[arg(long, value_enum, default_value = "substrate")]
+    pub confinement: TreeConfinement,
+    /// The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when
+    /// absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
 /// The exit status of a refused tree command.
 pub const TREE_REFUSED: u8 = 1;
 
@@ -336,6 +404,12 @@ pub struct TreeOpenArgs {
     /// The registration of the root's protocol, `name@major`.
     #[arg(long, value_name = "NAME@MAJOR")]
     pub protocol: String,
+    /// Read the tree's protocols from the files directly in this directory whose names end in
+    /// `.yaml`, each under the registration it declares, and keep them in the store: the tree's
+    /// catalog is those and no other. Without it the tree uses the installed and built-in
+    /// protocols.
+    #[arg(long, value_name = "DIR")]
+    pub protocols: Option<PathBuf>,
     /// The root's loom.bindings/1 file.
     #[arg(long, value_name = "FILE")]
     pub bindings: PathBuf,
@@ -364,16 +438,60 @@ pub struct TreeApproveArgs {
     /// The case of the tree the decision is for.
     #[arg(long, value_name = "ID")]
     pub case: String,
-    /// The capability decided.
-    #[arg(long, value_name = "CAPABILITY")]
-    pub capability: String,
+    /// The capability decided. With --action it may be left out when the protocol action needs
+    /// none: the action is taken and no authority is recorded.
+    #[arg(long, value_name = "CAPABILITY", required_unless_present = "action")]
+    pub capability: Option<String>,
     /// The principal who decided.
     #[arg(long, value_name = "PRINCIPAL")]
     pub principal: String,
     /// Deny the capability instead of approving it.
     #[arg(long)]
     pub deny: bool,
+    /// Then take this `person` action of the case as the principal: the records its binding
+    /// declares are produced by the principal about the subject's revision now.
+    #[arg(long, value_name = "ACTION", conflicts_with = "deny")]
+    pub action: Option<String>,
+    /// The result the person action ends with: a value every `from: effect` entry of its binding
+    /// lists in its results, which maps it to each record's result; `performed` when absent.
+    #[arg(
+        long,
+        value_name = "RESULT",
+        requires = "action",
+        conflicts_with = "deny"
+    )]
+    pub result: Option<String>,
+    /// The person's reasons for the result, at most 65536 bytes and 60 lines: kept as a blob of
+    /// the store, and the log of the record a writer this result sends back is given.
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "result",
+        conflicts_with = "reasons_file"
+    )]
+    pub reasons: Option<String>,
+    /// The reasons read from a regular file inside the tree's workspace, opened without following
+    /// a symbolic link.
+    #[arg(long, value_name = "FILE", requires = "result")]
+    pub reasons_file: Option<PathBuf>,
     /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of `b10x-loom tree close`.
+#[derive(Debug, Args)]
+pub struct TreeCloseArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The case of the tree to close.
+    #[arg(long, value_name = "ID")]
+    pub case: String,
+    /// The outcome the case ends through.
+    #[arg(long, value_name = "OUTCOME")]
+    pub outcome: String,
+    /// The instant the termination records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
     #[arg(long, value_name = "INSTANT")]
     pub at: Option<String>,
 }

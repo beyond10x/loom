@@ -1,0 +1,11 @@
+format: loom.bindings/1
+protocol: story@1
+program_root: bindings
+artifacts:
+  story: story.md
+actions:
+  - action: tasks.open
+    executor: {kind: open, each: tasks, bindings: task.yaml}
+    arguments_from: [bin/list-tasks]
+    evidence:
+      - {kind: tasks_opened, subject: story, producer: drive, from: effect, results: {performed: opened}}

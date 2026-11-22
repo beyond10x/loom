@@ -4,7 +4,7 @@ use b10x_loom_intake_slice::{
     context::ContextPolicy,
     executor::TestCommand,
     intent::{IntentRequest, run_intent_with_options},
-    run::{RunOptions, StopReason},
+    run::{MODEL_RETRY, RunOptions, StopReason},
 };
 use chrono::{DateTime, FixedOffset};
 use llm_core::{
@@ -12,6 +12,7 @@ use llm_core::{
     StopReason as TurnStop, StreamSink, ToolCall, ToolChoice, TurnObservation, TurnOutcome,
     TurnRequest,
 };
+use llm_routing::RetryPolicy;
 use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
@@ -19,6 +20,13 @@ use std::cell::Cell;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Duration;
+/// The production attempts (`MODEL_RETRY`) with a 1 ms backoff base: `model_retry`'s unit tests
+/// hold the production waits on a paused clock.
+const QUICK_RETRY: RetryPolicy = RetryPolicy {
+    backoff_base: Duration::from_millis(1),
+    ..MODEL_RETRY
+};
 const INTENT: &str = "need to know the current time";
 const YAML: &str = include_str!("../../../protocols/system-query/1.yaml");
 struct FixedClock {
@@ -88,6 +96,7 @@ fn run_case(
         &RunOptions {
             context_policy: policy,
             context_report: Some(report.clone()),
+            ..RunOptions::default()
         },
     )
     .unwrap();
@@ -263,6 +272,7 @@ fn clock_failure_has_no_success_evidence_and_retains_metrics() {
         &RunOptions {
             context_policy: ContextPolicy::Bounded,
             context_report: Some(report.clone()),
+            ..RunOptions::default()
         },
     )
     .unwrap_err();
@@ -378,6 +388,7 @@ fn oversized_intent_or_catalog_stops_before_classification_call() {
             &RunOptions {
                 context_policy: ContextPolicy::Bounded,
                 context_report: Some(report.clone()),
+                ..RunOptions::default()
             },
         )
         .unwrap_err();
@@ -423,6 +434,7 @@ fn transient_overload_retries_each_stage_without_repeating_the_clock_effect() {
                 &RunOptions {
                     context_policy: policy,
                     context_report: Some(report.clone()),
+                    model_retry: QUICK_RETRY,
                 },
             )
             .unwrap();
@@ -485,6 +497,7 @@ fn exhausted_overload_and_real_refusal_never_read_the_clock() {
             &RunOptions {
                 context_policy: ContextPolicy::Bounded,
                 context_report: Some(report.clone()),
+                model_retry: QUICK_RETRY,
             },
         )
         .unwrap_err();

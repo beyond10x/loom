@@ -4,15 +4,22 @@ use crate::tree::{self, Map as Mapping, Node as Value};
 use crate::{DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, FORMAT, MAX_DOCUMENT_BYTES, Refusal, refuse};
 use loom::bindings::{
     ActionBudget, ArtifactPath, BindingsDocument, BindingsRefusalReason as Reason, BoundAction,
-    EvidenceEntry, Executor, ExecutorSpec, ProducerIndependence, ResultRule, ResultSource,
-    RetryCondition, ToolAllowList,
+    EvidenceEntry, Executor, ExecutorSpec, ExitClasses, ProducerIndependence, ProgramRoot,
+    ResultRule, ResultSource, RetryCondition, ToolAllowList,
 };
 use loom::json::Value as Json;
 
 type Decoded<T> = Result<T, Refusal>;
 
-const TOP: [&str; 5] = ["format", "protocol", "artifacts", "independence", "actions"];
-const ACTION: [&str; 10] = [
+const TOP: [&str; 6] = [
+    "format",
+    "protocol",
+    "program_root",
+    "artifacts",
+    "independence",
+    "actions",
+];
+const ACTION: [&str; 11] = [
     "action",
     "executor",
     "arguments",
@@ -23,7 +30,11 @@ const ACTION: [&str; 10] = [
     "timeout_seconds",
     "retry_when",
     "handoff",
+    "exits",
 ];
+const EXITS: [&str; 2] = ["error", "not_called"];
+/// The highest exit code an `exits` list holds.
+const MAX_EXIT_CODE: i64 = 255;
 const EXECUTOR: [&str; 12] = [
     "kind",
     "argv",
@@ -50,7 +61,8 @@ const BUDGET: [&str; 4] = [
 ///
 /// # Errors
 /// The first defect: text that is not a YAML object, an undeclared member, a missing or other
-/// `format`, a malformed `protocol`, `argv`, result table, tool name, budget or timeout, or an
+/// `format`, a malformed `protocol`, `program_root` (`workspace` or `bindings`), `argv`, result
+/// table, tool name, budget, timeout or `exits` list (exit codes from 0 to 255), or an
 /// executor without the members its kind needs. Whether the actions and artifacts exist in a
 /// protocol is [`crate::check`]'s.
 pub fn decode(text: &str) -> Decoded<BindingsDocument> {
@@ -107,9 +119,23 @@ pub fn decode(text: &str) -> Decoded<BindingsDocument> {
             ));
         }
     };
+    let program_root = match top.get("program_root") {
+        None => None,
+        Some(Value::String(root)) if root == "workspace" => Some(ProgramRoot::Workspace),
+        Some(Value::String(root)) if root == "bindings" => Some(ProgramRoot::Bindings),
+        Some(other) => {
+            return Err(refuse(
+                Reason::Malformed,
+                None,
+                "program_root",
+                format!("is {}; it is workspace or bindings", shown(other)),
+            ));
+        }
+    };
     Ok(BindingsDocument {
         format,
         protocol,
+        program_root,
         artifacts: artifacts(top)?,
         independence: independence(top)?,
         actions: actions(top)?,
@@ -245,7 +271,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         Some(Value::Sequence(entries)) => entries
             .iter()
             .enumerate()
-            .map(|(i, entry)| evidence_entry(entry, action, i))
+            .map(|(i, entry)| evidence_entry(entry, action, i, executor.kind == Executor::Person))
             .collect::<Decoded<Vec<_>>>()?,
         Some(other) => {
             return Err(refuse(
@@ -280,6 +306,10 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         .get("handoff")
         .map(|value| non_empty(value, action, "handoff"))
         .transpose()?;
+    let exits = map
+        .get("exits")
+        .map(|value| exits(value, action))
+        .transpose()?;
     Ok(BoundAction {
         action: id.clone(),
         executor,
@@ -291,6 +321,51 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         timeout_seconds,
         retry_when,
         handoff,
+        exits,
+    })
+}
+
+/// The exit classes of a program binding: `error` and `not_called`, each a list of exit codes
+/// from 0 to [`MAX_EXIT_CODE`], empty when the document leaves it out.
+fn exits(value: &Value, action: Option<&str>) -> Decoded<ExitClasses> {
+    let map = object(value, action, "exits")?;
+    known(map, &EXITS, action, "exits.")?;
+    let codes = |name: &str| -> Decoded<Vec<i64>> {
+        let member = format!("exits.{name}");
+        let Some(value) = map.get(name) else {
+            return Ok(Vec::new());
+        };
+        let Value::Sequence(items) = value else {
+            return Err(refuse(
+                Reason::Malformed,
+                action,
+                member,
+                format!("is {}; it is a list of exit codes", shown(value)),
+            ));
+        };
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                item.as_i64()
+                    .filter(|code| (0..=MAX_EXIT_CODE).contains(code))
+                    .ok_or_else(|| {
+                        refuse(
+                            Reason::Malformed,
+                            action,
+                            format!("{member}[{index}]"),
+                            format!(
+                                "is {}; it is an exit code from 0 to {MAX_EXIT_CODE}",
+                                shown(item)
+                            ),
+                        )
+                    })
+            })
+            .collect()
+    };
+    Ok(ExitClasses {
+        error: codes("error")?,
+        not_called: codes("not_called")?,
     })
 }
 
@@ -477,7 +552,14 @@ fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String
     Ok(out)
 }
 
-fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<EvidenceEntry> {
+/// One evidence entry of `action`; `person`: the action is bound to a person, whose `effect` table
+/// may name results other than `performed`.
+fn evidence_entry(
+    value: &Value,
+    action: Option<&str>,
+    index: usize,
+    person: bool,
+) -> Decoded<EvidenceEntry> {
     let slot = format!("evidence[{index}]");
     let map = object(value, action, &slot)?;
     known(map, &ENTRY, action, &format!("{slot}."))?;
@@ -551,7 +633,11 @@ fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<
                         ));
                     }
                 };
-                if from == ResultSource::Effect && value != "performed" {
+                // A person names the result of the action taking it; any other effect is performed.
+                if from == ResultSource::Effect
+                    && value != "performed"
+                    && (!person || value == crate::ANY_KEY)
+                {
                     return Err(refuse(
                         Reason::InvalidEffectResult,
                         action,

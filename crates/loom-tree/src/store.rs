@@ -168,8 +168,29 @@ pub fn read_manifest(dir: &Path) -> Result<TreeManifest, Refused> {
     })
 }
 
+/// `path`, which must be absolute: the library never resolves a path against the current
+/// directory, its caller does. `what` names the path; `reason` is the refusal of a relative one.
+pub(crate) fn absolute<'a>(
+    path: &'a Path,
+    what: &str,
+    reason: TreeRefusalReason,
+) -> Result<&'a Path, Refused> {
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Err(Refused::new(
+            reason,
+            format!(
+                "the {what} {} is not an absolute path; the caller resolves it",
+                path.display()
+            ),
+        ))
+    }
+}
+
 /// The store directory `dir` as an absolute path, which must exist.
 pub(crate) fn existing_store(dir: &Path) -> Result<PathBuf, Refused> {
+    let dir = absolute(dir, "store", TreeRefusalReason::NotATree)?;
     let entry = fs::symlink_metadata(dir).map_err(|error| {
         Refused::new(
             TreeRefusalReason::NotATree,

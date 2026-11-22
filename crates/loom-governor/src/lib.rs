@@ -110,6 +110,21 @@
 //! Observations are kept apart, in the order received ([`CanonGovernor::observations`]), and are
 //! never evidence (Atlas ADR 0074).
 //!
+//! # Child cases
+//!
+//! An action that declares Canon's `case_open` is performed by [`CanonGovernor::open_children`]:
+//! it opens each child under the protocol `case_open` names, `<parent>.<name>` (then
+//! `<parent>.<name>.2`, `.3`), holds the link ([`CaseLink`]) on both sides, and writes into the
+//! parent, in the one write that records the links, one `case_outcome` record per child with result
+//! `open`. [`CanonGovernor::terminate`] terminates a case through an outcome Canon judges
+//! legitimate and, for a child, replaces that record with the child's outcome. A terminated case
+//! is evaluated with its termination, its frontier admits no action and it completes with the
+//! stored outcome. A `case_outcome` record submitted through the evidence port is refused for a
+//! case that opened a child or was opened as one, and whenever it names a case the store holds: a
+//! child's outcome is the governor's to write. [`CanonGovernor::tree`] lists a tree of cases. A
+//! catalog or registration whose `case_open` openings form a cycle is refused, as Canon's
+//! `check_openings` names it.
+//!
 //! # Stateless evaluation
 //!
 //! [`evaluate`] is the same evaluation for a caller that keeps its own case record: it takes an
@@ -131,7 +146,8 @@
 //! `Cargo.lock`, and compiles the catalog's engineering protocols. Commission is the path
 //! dependency `b10x-loom-commission`, built from this repository's own tree. The engineering
 //! protocols are the files `b10x-loom-protocols` vendors under `protocols/engineering/`, held to
-//! their lock.
+//! their lock. Decision requests are `b10x-loom-decision`'s, a path dependency whose
+//! `DecisionStore` port [`FileDecisionStore`] implements in a directory.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -146,6 +162,10 @@ pub use loom as model;
 /// (`loom.governor.CompletionRule`, [`CanonGovernor::with_completion_rule`]).
 pub use loom::governor::CompletionRule;
 
+/// The link between a parent case and a child it opened, and how a case terminated
+/// (`loom.governor.CaseLink`, `loom.governor.CaseTermination`; see "Child cases").
+pub use loom::governor::{CaseLink, CaseTermination};
+
 use loom::evaluation::{
     ActionStatus as DecidedStatus, ClaimValue, DecidedAction, DecidedClaim, DecidedObligation,
     EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest, ExplicitDecision,
@@ -158,7 +178,7 @@ use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
     ArtifactId, CASE_FORMAT, CASE_OUTCOME, Case, CaseArtifact, Decision, Declarations,
     EvidenceKindId, EvidenceRecord, ExclusionReason, IndependenceDimensionId, InputId, InputValue,
-    Instant as CanonInstant, OutcomeRequirement, Predicate, Principal, Revision,
+    Instant as CanonInstant, OutcomeId, OutcomeRequirement, Predicate, Principal, Revision,
     Truth as CanonTruth, is_identifier,
 };
 use b10x_loom_commission::model::json;
@@ -173,11 +193,18 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_executor::{ActionFactsPort, CaseFacts};
 use loom::run::ActionFacts;
 
+mod children;
+mod file_decision;
 mod file_run_store;
 mod file_store;
 mod file_suspension;
 mod locked_dir;
 
+pub use children::{
+    CHILD_OUTCOME_PRODUCER, ChildError, ChildOpening, TerminateError, TreeCase, UNREVISED,
+    plain_child_name,
+};
+pub use file_decision::FileDecisionStore;
 pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
 pub use file_store::WriteStep;
 pub use file_store::{FileCaseStore, FileStoreError, case_file_stem};
@@ -206,6 +233,13 @@ pub struct CaseState {
     /// Every explicit decision recorded for the case ([`CanonGovernor::decide`]), in the order
     /// recorded, each at the Canon case revision (`r<revision>`) it was taken at.
     pub decisions: Vec<ExplicitDecision>,
+    /// The link to the case that opened this one through a `case_open` action; `None` for a root
+    /// (see the crate documentation, "Child cases").
+    pub parent: Option<CaseLink>,
+    /// The link to every child case this one opened, in the order opened.
+    pub children: Vec<CaseLink>,
+    /// The outcome the case terminated through and when; `None` while it is open.
+    pub termination: Option<CaseTermination>,
 }
 
 /// The value of each case input a case opens with, keyed by input id (`risk` → `standard`): the
@@ -718,6 +752,9 @@ pub struct CanonGovernor<S, T = NoEvaluationTime> {
     /// The documents behind the frontiers this governor issued, keyed by case id
     /// ([`CanonGovernor::decision_document`]).
     kept: Mutex<BTreeMap<String, KeptDocuments>>,
+    /// Whether the evidence port receives a `case_outcome` record for a case whose protocol declares
+    /// `case_open` ([`CanonGovernor::with_host_case_outcomes`]); host code alone sets it.
+    host_case_outcomes: bool,
 }
 
 impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
@@ -730,6 +767,7 @@ impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
             time: T::default(),
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
+            host_case_outcomes: false,
         }
     }
 }
@@ -761,6 +799,7 @@ impl<S: FallibleCaseStore> CanonGovernor<S> {
             time: NoEvaluationTime,
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
+            host_case_outcomes: false,
         }
     }
 }
@@ -794,6 +833,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             protocols.insert(name.to_owned(), ir);
             outcome_orders.insert(name.to_owned(), declared_outcomes(&entry.model));
         }
+        children::no_opening_cycle("catalog", protocols.values())?;
         self.protocols = protocols;
         self.outcome_orders = outcome_orders;
         self.catalog_definitions = Some(
@@ -871,6 +911,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             )
         })?;
         representable(name, &ir)?;
+        children::no_opening_cycle(name, self.protocols.values().chain([&ir]))?;
         self.protocols.insert(name.to_owned(), ir);
         self.outcome_orders
             .insert(name.to_owned(), declared_outcomes(model));
@@ -887,6 +928,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             time,
             completion_rule: self.completion_rule,
             kept: self.kept,
+            host_case_outcomes: self.host_case_outcomes,
         }
     }
 
@@ -1413,6 +1455,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
                 capability: action.requires.into_iter().next(),
                 reasons: action.reasons,
             })
+            .map(|action| children::after_termination(&state, action))
             .collect();
         let rendered = render(&decision);
         let frontier_id = FrontierId(frontier_uuid(&state, &rendered));
@@ -1429,6 +1472,14 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
 
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
         let (state, _, decision) = self.decided(case)?;
+        if let Some(termination) = &state.termination {
+            // Canon judged it again above; the case completes with the outcome it holds.
+            return Ok(CompletionDetermination::Complete(
+                CompletionDeterminationComplete {
+                    outcome: termination.outcome.clone(),
+                },
+            ));
+        }
         let outcome = match self.completion_rule {
             CompletionRule::ExactlyOne => completed(&decision),
             CompletionRule::FirstDeclared => {
@@ -1511,7 +1562,9 @@ impl<S: FallibleCaseStore, T> CanonGovernor<S, T> {
 impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, T> {
     fn receive(&self, evidence: AttributedEvidence) -> Result<(), GovernorError> {
         let data = evidence.into_evidence().into_data();
-        let (_, ir) = self.held_with_ir(&data.case_id)?;
+        let (held, ir) = self.held_with_ir(&data.case_id)?;
+        // A child's outcome is written by the governor alone (see "Child cases").
+        self.refuse_submitted_outcome(&held, &ir, &data)?;
         // Commission's `GovernorError` names no record; `check_evidence` names it for the host.
         self.check_evidence(&data)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
@@ -1669,6 +1722,8 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
                 });
             }
             self.check_evidence(data).map_err(StepError::Evidence)?;
+            // A child's outcome is the governor's to write, through a step as through `receive`.
+            self.refuse_submitted_outcome(&held, &ir, data)?;
         }
         if records.is_empty()
             && revisions
@@ -1922,6 +1977,9 @@ fn opened(
         independence: independence.clone(),
         evidence: Vec::new(),
         decisions: Vec::new(),
+        parent: None,
+        children: Vec::new(),
+        termination: None,
     }
 }
 
@@ -2006,7 +2064,11 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
                 })
                 .collect(),
         ),
-        termination: None,
+        // A terminated case is evaluated with its termination, which Canon judges again.
+        termination: state
+            .termination
+            .as_ref()
+            .map(|termination| OutcomeId::new(termination.outcome.as_str())),
         revision: Some(Revision::new(format!("r{}", state.revision))),
         inputs: Declarations::new(
             state

@@ -327,6 +327,153 @@ pub fn synthesize_once(ess: &Ess, spec: &Path, cache: &Path) -> Result<Synthesis
     })
 }
 
+/// The cache directory, under a target directory's `tmp/` (a test's `CARGO_TARGET_TMPDIR`), of
+/// [`plain_synthesis_once`].
+pub const PLAIN_SYNTHESIS_CACHE: &str = "ess-plain-synthesis-cache";
+
+/// The specification whose plain synthesis `b10x-loom-commission-testkit`'s tests read, relative
+/// to the repository root: `task test-step` fills [`plain_synthesis_once`] for it before the tests.
+pub const PLAIN_SYNTHESIS_SPECIFICATION: &str = "ess/commission";
+
+/// `ess verify conform synthesize --path <spec> --out <dir>/suite.json`, with no other option, run
+/// in `cwd`: made once for every process that shares `cache` ([`made_once`], keyed by
+/// [`inputs_digest`] of `spec` and the `ess` version). The directory holds `suite.json`,
+/// `stdout`, `stderr` and `code` (the exit code, or `signal`); a failed synthesis is kept too, so
+/// every caller reports the same refusal.
+pub fn plain_synthesis_once(
+    ess: &Ess,
+    cwd: &Path,
+    spec: &Path,
+    cache: &Path,
+) -> Result<PathBuf, String> {
+    let version = ess_version(ess, Some(cwd))?;
+    let key = inputs_digest(spec, &version)?;
+    let key = format!("plain-{}", key.trim_start_matches("sha256:"));
+    made_once(cache, &key, |dir| {
+        let output = command(ess, Some(cwd))
+            .args(["verify", "conform", "synthesize", "--path"])
+            .arg(spec)
+            .arg("--out")
+            .arg(dir.join("suite.json"))
+            .output()
+            .map_err(|e| {
+                format!(
+                    "run `{} verify conform synthesize` (is ess on PATH?): {e}",
+                    ess.display()
+                )
+            })?;
+        let code = output
+            .status
+            .code()
+            .map_or_else(|| "signal".to_owned(), |c| c.to_string());
+        fs::write(dir.join("stdout"), &output.stdout)
+            .and_then(|()| fs::write(dir.join("stderr"), &output.stderr))
+            .and_then(|()| fs::write(dir.join("code"), code))
+            .map_err(|e| format!("write under {}: {e}", dir.display()))
+    })
+}
+
+/// The cache directory, under a target directory's `tmp/` (a test's `CARGO_TARGET_TMPDIR`), of
+/// [`synthesis_stand_in`].
+pub const STAND_IN_CACHE: &str = "ess-synthesis-cache";
+
+/// The options both generators synthesize their Rust crate with (`loom-xtask generate`,
+/// `loom-commission-xtask generate`).
+pub const RUST_CRATE: [&str; 4] = ["--target", "rust", "--layout", "crate"];
+
+/// The specifications whose Rust crate a generator's tests synthesize, relative to the
+/// repository root: `task test-step` fills [`synthesis_stand_in`] for each before the tests.
+pub const GENERATED_SPECIFICATIONS: [&str; 2] = ["ess", "ess/commission"];
+
+/// The program [`synthesis_stand_in`] writes. A call `generate synthesize --path <spec>
+/// <options> --out <dir>` whose options are the cached ones and whose `<spec>` holds the same
+/// files as the cached copy (`diff -r`) gets the cached output copied to `<dir>`; any other call
+/// runs `ess` on `PATH` with the same arguments.
+const STAND_IN: &str = r#"#!/usr/bin/env bash
+here="$(cd "$(dirname "$0")" && pwd)"
+args=("$@")
+n=${#args[@]}
+if [ "$n" -ge 6 ] && [ "${args[0]}" = generate ] && [ "${args[1]}" = synthesize ] \
+  && [ "${args[2]}" = --path ] && [ "${args[$((n - 2))]}" = --out ]; then
+  options="${args[*]:4:$((n - 6))}"
+  if [ "$options" = "$(cat "$here/options")" ] \
+    && diff -r -q "${args[3]}" "$here/spec" > /dev/null 2>&1; then
+    mkdir -p "${args[$((n - 1))]}" && cp -R "$here/out/." "${args[$((n - 1))]}/" && exit 0
+  fi
+fi
+exec ess "$@"
+"#;
+
+/// What `ess generate synthesize --path <spec> <options> --out <dir>` writes for `spec` as it is
+/// now, made once for every process that shares `cache` ([`made_once`], keyed by
+/// [`inputs_digest`] of `spec`, the `ess` version and `options`), and the path of a stand-in
+/// `ess` that answers such a call with a copy of it. A generator's tests pass the stand-in as
+/// their `ess`: each test still runs the generator end to end (its scratch, staging, swap and
+/// comparison), while the synthesis, seconds each time, runs once a test run. A call over a
+/// changed copy of `spec`, or with other options, runs `ess` itself.
+pub fn synthesis_stand_in(
+    ess: &Ess,
+    spec: &Path,
+    options: &[&str],
+    cache: &Path,
+) -> Result<PathBuf, String> {
+    let version = ess_version(ess, None)?;
+    let inputs = inputs_digest(spec, &version)?;
+    let key = digest(format!("{inputs}\n{}", options.join(" ")).as_bytes());
+    let key = format!("synthesis-{}", key.trim_start_matches("sha256:"));
+    let dir = made_once(cache, &key, |dir| {
+        let out = dir.join("out");
+        let output = ess
+            .command()
+            .args(["generate", "synthesize", "--path"])
+            .arg(spec)
+            .args(options)
+            .arg("--out")
+            .arg(&out)
+            .output()
+            .map_err(|e| format!("run `{} generate synthesize`: {e}", ess.display()))?;
+        if !output.status.success() {
+            return Err(format!(
+                "`{} generate synthesize --path {}` exited {}:\n{}{}",
+                ess.display(),
+                spec.display(),
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        copy_dir(spec, &dir.join("spec"))?;
+        fs::write(dir.join("options"), options.join(" "))
+            .map_err(|e| format!("write {}: {e}", dir.join("options").display()))?;
+        let program = dir.join("ess");
+        fs::write(&program, STAND_IN).map_err(|e| format!("write {}: {e}", program.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("make {} executable: {e}", program.display()))?;
+        }
+        Ok(())
+    })?;
+    Ok(dir.join("ess"))
+}
+
+/// `from` copied to `to`, every file and directory, links followed.
+fn copy_dir(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|e| format!("create {}: {e}", to.display()))?;
+    for entry in fs::read_dir(from).map_err(|e| format!("read {}: {e}", from.display()))? {
+        let entry = entry.map_err(|e| format!("read {}: {e}", from.display()))?;
+        let target = to.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            fs::copy(entry.path(), &target)
+                .map_err(|e| format!("copy {}: {e}", entry.path().display()))?;
+        }
+    }
+    Ok(())
+}
+
 /// `<cache>/<key>`, a directory `make` filled once for every process that shares `cache`: the
 /// first caller fills a fresh directory beside it and renames it into place; a caller that finds
 /// it reads it, and one that finds it being made waits. A runner that starts each test in its own

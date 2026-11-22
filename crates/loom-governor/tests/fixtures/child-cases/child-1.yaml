@@ -1,0 +1,39 @@
+format: protocol/1
+protocol:
+  id: child
+  revision: 1
+  description: >-
+    The child of story child-case-runtime: it does not declare the parent's subject `idea`. It
+    ends passed or failed by its verdict; its review counts only from a producer independent of
+    its work.
+artifacts:
+  work: {}
+evidence_kinds:
+  verdict: {}
+  review: {}
+independence_dimensions:
+  different_agent_run: {description: the run that reviews is not the one that worked}
+claims:
+  work.passed:
+    true_when:
+      evidence: {kind: verdict, subject: work, result: passed}
+  work.failed:
+    true_when:
+      evidence: {kind: verdict, subject: work, result: failed}
+  work.reviewed:
+    true_when:
+      evidence: {kind: review, subject: work, result: pass, independent_on: [different_agent_run]}
+actions:
+  work.do:
+    effect: write
+    may_produce:
+      - evidence: verdict
+  work.review:
+    effect: read
+    may_produce:
+      - evidence: review
+outcomes:
+  passed:
+    requires: {claim: work.passed}
+  failed:
+    requires: {claim: work.failed}

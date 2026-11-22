@@ -633,6 +633,9 @@ fn the_log_file_has_the_mode_of_the_case_file_beside_it() {
             independence: CaseIndependence::none(),
             evidence: Vec::new(),
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("opens");
@@ -642,18 +645,18 @@ fn the_log_file_has_the_mode_of_the_case_file_beside_it() {
     assert_eq!(mode(&log.path(CASE)), mode(&case));
 }
 
-/// Many threads, each with its own `RunLog` over one directory, append to one case: every line
-/// lands once, the log verifies.
-#[test]
-fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
-    let dir = store_dir("threads");
+/// Eight threads, each with its own `RunLog` over one directory, append `per_thread` lines each to
+/// one case: every line lands once, the log verifies. Each append reads the log and syncs its
+/// file and directory, so the count sets the time.
+fn eight_threads_append(label: &str, per_thread: usize) {
+    let dir = store_dir(label);
     RunLog::open(&dir).expect("opens");
     let handles: Vec<_> = (0..8)
         .map(|t| {
             let dir = dir.clone();
             thread::spawn(move || {
                 let log = RunLog::open(&dir).expect("opens in a thread");
-                for i in 0..25 {
+                for i in 0..per_thread {
                     log.append(
                         CASE,
                         at(i),
@@ -673,7 +676,7 @@ fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
         .expect("opens")
         .read(CASE)
         .expect("verifies");
-    assert_eq!(read.len(), 200);
+    assert_eq!(read.len(), 8 * per_thread);
     let reasons: BTreeSet<String> = read
         .iter()
         .map(|l| match &l.event {
@@ -681,7 +684,20 @@ fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
             other => panic!("{other:?}"),
         })
         .collect();
-    assert_eq!(reasons.len(), 200, "every line once");
+    assert_eq!(reasons.len(), 8 * per_thread, "every line once");
+}
+
+/// [`eight_threads_append`] with 5 lines a thread.
+#[test]
+fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
+    eight_threads_append("threads", 5);
+}
+
+/// [`eight_threads_append`] with 25 lines a thread, the count the case held before, in the slow
+/// lane (`task slow`): about 23 s on a loaded host.
+#[test]
+fn slow_eight_threads_with_their_own_run_logs_leave_every_line_once() {
+    eight_threads_append("threads-slow", 25);
 }
 
 /// A long line (4 MiB of event text) is written and read back whole.

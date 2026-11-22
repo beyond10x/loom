@@ -25,10 +25,17 @@
 
 mod approvals;
 mod approve;
+mod close;
+mod context;
 mod encode;
+mod history;
 mod lock;
 mod log;
 mod open;
+mod person;
+mod protocols;
+mod read;
+mod run;
 mod status;
 mod store;
 mod time;
@@ -38,15 +45,33 @@ pub mod suite;
 
 use std::fmt;
 
+/// The runners a [`RunSettings`] starts bound programs through, and the reason a `local` runner
+/// is admitted for, so that an embedder builds the settings from this crate alone.
+pub use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
+pub use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner, TestRunner,
+};
+/// The name of a case's run log in the store, and the reading of a log's bytes into its lines.
+pub use b10x_loom_runlog::{log_file_name, verify as read_log};
+/// The run-log lines a [`RunObserver`] is given.
+pub use loom::runlog;
 pub use loom::tree as model;
 
 pub use approvals::{TreeAuthority, approvals_file_name, read_approvals};
-pub use approve::{ApproveRequest, MAX_NAME_BYTES, approve};
-pub use encode::{refusal_json, status_json, verify_json};
+pub use approve::{ApproveRequest, MAX_NAME_BYTES, Reasons, approve};
+pub use close::{CaseClosed, CloseRequest, close};
+pub use context::derived_uuid;
+pub use encode::{decision_json, refusal_json, run_json, status_json, verify_json};
+pub use history::LogHistory;
 pub use lock::{HOLDER_FILE, LOCK_FILE, StoreLock};
 pub use log::{head_file_name, verify_case_log};
 pub use open::{OpenRequest, OpenedTree, open_tree};
-pub use status::tree_status;
+pub use protocols::{
+    KeptProtocol, PROTOCOLS_FILE, ProtocolDirectory, read_protocols_directory, stored_catalog,
+};
+pub use read::read_status;
+pub use run::{RunObserver, RunSettings, TREE_PRINCIPAL, run_tree};
+pub use status::{STATUS_FORMAT, tree_status};
 pub use store::{FORMAT, MANIFEST, read_manifest};
 pub use time::TreeTime;
 pub use verify::verify_tree;
@@ -57,14 +82,15 @@ use model::{TreeRefusal, TreeRefusalReason};
 /// (`AgentNotRunYet`).
 pub const AGENT_STORY: &str = "story:bound-agent-node";
 
-/// A refused tree command: the generated `loom.tree.TreeRefusal`.
+/// A refused tree command: the generated `loom.tree.TreeRefusal`, boxed so that a `Result` of a
+/// tree function stays small.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refused(pub TreeRefusal);
+pub struct Refused(pub Box<TreeRefusal>);
 
 impl Refused {
     /// A refusal of `reason` saying `detail`, naming nothing else.
     pub fn new(reason: TreeRefusalReason, detail: impl Into<String>) -> Self {
-        Self(TreeRefusal {
+        Self(Box::new(TreeRefusal {
             reason,
             detail: detail.into(),
             case: None,
@@ -72,7 +98,7 @@ impl Refused {
             action: None,
             story: None,
             holder: None,
-        })
+        }))
     }
 
     /// This refusal naming `case`.
