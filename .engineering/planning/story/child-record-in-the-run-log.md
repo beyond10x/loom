@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:child-record-in-the-run-log
 kind: story
-status: proposed
+status: active
 title: A child's case_outcome record appears in exactly one run-log line per write, and the status entry names the child
 summary: optional record and record_digest on child opened and child closed, name on a case_outcome status entry; Runbook's daemon needs every record in one run-log line; after the stub-cycle sha, before concurrent-confined-runs
 tags:
@@ -12,9 +12,10 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:tree-run-command
 - depends_on: story:open-children-from-arguments-from
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T04:04:26Z", actor: "agent:loom", revision: 4}
+- {from: "proposed", to: "active", at: "2026-11-22T05:48:23Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "runbook-activation-2026-11-22T0549Z"}
 ---
 ## Outcome
 

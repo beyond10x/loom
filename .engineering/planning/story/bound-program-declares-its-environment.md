@@ -11,7 +11,9 @@ relations:
 - depends_on: story:bound-program-result-table
 - decomposes: epic:protocol-tree-on-bindings
 - serves: vision:O1
-revision: 2
+- depends_on: story:bound-program-contract
+- depends_on: story:per-run-program-path
+revision: 3
 ---
 ## Outcome
 
@@ -21,23 +23,38 @@ of `story:bound-program-result-table` passes them to the public function of
 parameters, and the port starts that child through `run_child` of the admitted runner, as that
 story does:
 
-- `environment`: variables by name and literal value. The program's environment is these
-  variables and `PATH`; `PATH` keeps the host's value unless the binding declares it, and then
-  the declared value replaces it. No other variable reaches the program.
+- `environment`: variables by name and literal value. The whole environment of a bound program
+  is built by `bound_case_child` (`crates/loom-bindings/src/child.rs:60`, its `environment` at
+  `:114-137`): `PATH`, `LOOM_CASE`, `LOOM_TIMEOUT_SECONDS`, `LOOM_CASE_NAME`,
+  `LOOM_PARENT_CASE_NAME` and, on a retry, `LOOM_RETRY_FEEDBACK`. Nothing is inherited from the
+  host. This story adds the declared variables to that set. They never replace a `LOOM_*`
+  variable: a declared name starting `LOOM_` is refused `EnvironmentNameRefused`. No other
+  variable reaches the program.
+- Which `PATH` wins, the narrower one. When the run sets a program path
+  (`story:per-run-program-path`), the run's value is the program's `PATH`, and a `PATH` the
+  binding declares is not used. When the run sets none, a declared `PATH` replaces the host's
+  value. Otherwise `PATH` keeps the host's value.
 - `read_only_roots`: host directories by absolute path. Under `linux` each is mounted read-only
   at its own host path, so a path in `environment` or `argv` names the same directory under both
   adapters.
+- Substrate's cap on read-only roots is shared. At Loom's pin it is 4 roots
+  (`MAX_READ_ONLY_ROOTS`, Substrate wire `lib.rs:192` at `adfde402`, and on Substrate's `main`).
+  A step's declared roots and the run's program-path entries outside the system view
+  (`story:per-run-program-path`) together count against it. The program file and the retry
+  feedback file are read-only files and count against `MAX_READ_ONLY_FILES` (16, `:232`), not
+  against the roots. A step whose roots and program-path entries together exceed the cap is
+  refused `ReachRefused` before it starts, naming both counts.
 - `writable`: directories of the workspace by relative path. Under `linux` the program writes
   there beside `target/`, which stays writable as today; the rest of the workspace stays
   read-only.
 
 What the program sees:
 
-- Under `linux`: exactly the declared variables and `PATH`; the system view, `/proc`, `/dev`, a
+- Under `linux`: the declared variables, `PATH` and `LOOM_*`; the system view, `/proc`, `/dev`, a
   private `/tmp` and the workspace at `/workspace`; each declared root, read-only; writes under
   `target/` and the declared directories alone; no network. The applied confinement names exactly
   the roots and writable paths requested, or the result is refused, as today.
-- Under `local`: exactly the declared variables and `PATH`, checked by Substrate's local adapter;
+- Under `local`: the declared variables, `PATH` and `LOOM_*`, checked by Substrate's local adapter;
   the host's file system and network as the operator. The build function adds no root when the
   runner's `local_reason` is set, as it adds no program mount then, since a `local` runner
   refuses any read-only root; the program already sees them. The writable
@@ -58,7 +75,7 @@ Refused at load, by `decode` or `check`, naming the action and the member (new
 - `EnvironmentNameRefused`: a name that holds `AUTHORIZATION`, `BEARER`, `CREDENTIAL`,
   `PASSWORD`, `PROXY`, `SECRET` or `TOKEN` (Substrate's fragments); a name with `KEY` as one of its
   `_`-separated words (`ANTHROPIC_API_KEY`, `AWS_ACCESS_KEY_ID`); a name starting `LD_` or
-  `DYLD_` (the dynamic loader's).
+  `DYLD_` (the dynamic loader's); a name starting `LOOM_` (the port's own).
 - `InvalidReadOnlyRoot`: a root that is not UTF-8, not absolute (`~` is not expanded), or not
   canonical (a `.`, `..` or empty component, a trailing `/`, more than 64 components, `/`
   itself); a root on, under or holding a mount Substrate owns (`/usr`, `/bin`, `/lib`, `/lib64`,
@@ -107,11 +124,9 @@ The SDC wants a work node to run the product tree's own test command (`cargo tes
 check`, `npm test`) as a bound program, confined, and turn its exit code into evidence. That
 cannot run today:
 
-- A bound program's environment is `PATH` alone (`crates/loom-intake-slice/src/bindings.rs:72`,
-  `:329-349`), and `story:bound-program-result-table` keeps that: its public build function sets
-  "an environment that holds `PATH` alone at the host's value" (its Outcome), pinned by
-  `a_bound_program_starts_with_path_alone_in_its_environment` (its Acceptance). `HOME`,
-  `CARGO_HOME` and `RUSTUP_HOME` are absent.
+- A bound program's environment is `PATH` and the `LOOM_*` variables alone, built whole by
+  `bound_case_child` (`crates/loom-bindings/src/child.rs:60`, `:114-137`) with nothing inherited
+  from the host. `HOME`, `CARGO_HOME` and `RUSTUP_HOME` are absent.
 - Under `linux` a child sees the system view, `/proc`, `/dev`, a private `/tmp`, its workspace
   and only the roots the host names (`crates/loom-intake-slice/src/confinement.rs:1157-1164`);
   "no toolchain or cache is mounted" (`:1144-1145`). The bound path names no root beyond the
@@ -213,6 +228,10 @@ Open questions for the planner (the draft takes the first option of each):
   exit code, and the blob that keeps the program's output. Both stories change
   `ess/domains/bindings.yaml`, `crates/loom-bindings` and
   `crates/loom-intake-slice/src/bindings.rs`.
+- `story:bound-program-contract`: `bound_case_child`, which builds the whole environment that
+  this story adds to (`crates/loom-bindings/src/child.rs:60`).
+- `story:per-run-program-path`: the run's `PATH`, which wins over a declared one, and the
+  program-path entries that share the read-only root cap.
 
 No other story is needed. Same files, ordered by the wave planner: `story:bound-artifact-revisions`,
 `story:bound-agent-node`, `story:capacity-given-to-an-admission-program` and
@@ -255,9 +274,18 @@ protocol and no model and no network:
 - `linux`: a program that reads a host file outside its workspace and its declared roots fails;
   one that writes outside `target/` and its declared directories fails.
 - `local`: a program running `/usr/bin/env` leaves a blob that holds exactly the declared
-  variables and `PATH`; with declared roots the run is not refused `CapabilityUnserved`.
-- With no `environment`, the program's environment is `PATH` alone, as in
-  `story:bound-program-result-table`.
+  variables, `PATH` and the `LOOM_*` variables of `bound_case_child`; with declared roots the run
+  is not refused `CapabilityUnserved`.
+- With no `environment`, the program's environment is `PATH` and the `LOOM_*` variables alone,
+  as `bound_case_child` builds it today.
+- `PATH` precedence: a binding declaring `PATH=/opt/x/bin` in a run whose program path is
+  `/usr/bin:/bin` sees `PATH=/usr/bin:/bin`; the same binding in a run without a program path
+  sees `/opt/x/bin`. A declared `LOOM_CASE` is refused `EnvironmentNameRefused` at load.
+- Shared cap: a binding with 3 declared roots in a run whose program path has 2 entries outside
+  the system view is refused `ReachRefused` before it starts, naming 3 and 2; with 1 entry it
+  starts.
+- Each test of this story ends within 60 s and the test step within 120 s; no model call, no
+  network.
 - A request whose arguments hold `environment`, `read_only_roots` and `writable` members changes
   nothing in the program's environment, mounts or writable paths; the members reach its standard
   input alone.

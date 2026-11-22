@@ -33,13 +33,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
 - `b10x-loom tree open`, `tree approve`, `tree status` and `tree verify` in the new crate `b10x-loom-tree`: one writer per store, `StoreInUse` names it (story:tree-run-command)
 - `b10x-loom tree run` drives a tree of cases on Commission's loop until the root ends or the tree waits, printing each decision as the command that takes it; `b10x_loom_tree::run_tree` takes an observer of each run-log line and a cancel handle (story:tree-run-command)
-- `b10x-loom tree approve --action` takes a `person` action as the approving principal (story:tree-run-command)
+- `b10x-loom tree approve --action` takes a `person` action as the approving principal; its records name the revisions of the `upstream` artifacts their binding entry declares, as a program's do (story:tree-run-command)
 - `tree status` prints `loom.tree-status/1`: per case its link name, protocol id and revision, the decisions it waits on, its records, program runs, approvals and copies; `b10x_loom_tree::read_status`, `stored_catalog` and `STATUS_FORMAT` (story:tree-run-command)
 - `b10x_loom_protocols::canon` re-exports the Canon crate Loom links; an embedder names one runtime dependency.
 - `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
 - An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 - `Loom::with_argument_schemas`, `arguments::check`, `check_value`, `ArgumentSchemas`, `ArgumentMismatch`; `ProtocolEntry::argument_schema(s)` (story:protocol-argument-schema)
+- Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
 
 ### Changed
 
