@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:governor-keeps-a-terminated-case-terminated
 kind: story
-status: proposed
+status: active
 title: A terminated case answers its stored outcome and a blocked frontier at any later time, and refuses writes
 summary: 'termination judged once in terminate; snapshot passes none to Canon; completion stored outcome; writes refused Terminated (D1 a: update_revision, record_step, decide, receive); open_children window out of scope; security-relevant'
 tags:
@@ -22,9 +22,10 @@ scope:
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
   path: crates/loom-governor/tests/child_cases.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T15:08:36Z", actor: "agent:loom", revision: 8}
+- {from: "proposed", to: "active", at: "2026-11-22T15:09:57Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "runbook-batch4-2026-11-22"}
 ---
 ## Outcome
 

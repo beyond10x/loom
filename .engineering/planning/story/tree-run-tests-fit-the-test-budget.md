@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-run-tests-fit-the-test-budget
 kind: story
-status: proposed
+status: active
 title: tree_run tests fit the test budget by starting b10x-loom only where the binary is what a test is about
 summary: 'budget defect: tree_run 246 s summed (CC, load 80-113), step 205 s; library calls in process, a start budget in test_step, budget keyed to survive one binary per crate; D1 b (no split)'
 tags:
@@ -22,9 +22,10 @@ scope:
   path: crates/loom-cli/tests/tree_run.rs
 - confidence: cited
   path: crates/loom-xtask/src/test_step.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T15:08:34Z", actor: "agent:loom", revision: 8}
+- {from: "proposed", to: "active", at: "2026-11-22T15:09:52Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "runbook-batch4-2026-11-22"}
 ---
 ## Outcome
 
