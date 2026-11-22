@@ -129,6 +129,7 @@ fn event(index: usize) -> RunLogEvent {
         8 => RunLogEvent::Stopped(Stopped {
             stop: format!("approval-{marker}"),
             next: vec!["approve".to_owned(), "decline".to_owned()],
+            budget: None,
         }),
         _ => RunLogEvent::Terminated(Terminated {
             reason: format!("completed-{marker}"),
@@ -1012,6 +1013,7 @@ fn log_with_records(label: &str) -> (RunLog, PathBuf, [String; 2]) {
         RunLogEvent::Stopped(Stopped {
             stop: "AwaitingPerson".to_owned(),
             next: Vec::new(),
+            budget: None,
         }),
     ];
     for (index, event) in events.into_iter().enumerate() {
@@ -1146,5 +1148,158 @@ fn a_reader_that_ignores_unknown_members_reads_the_new_child_lines() {
             .filter(|name| !["seq", "prev", "at", "kind"].contains(name) && !old.contains(name))
             .collect();
         assert_eq!(added, ["record", "record_digest"]);
+    }
+}
+
+/// The log `FIRST`, a `stopped` line with `stop`, no decision and `members` after its own, `LAST`.
+fn stopped_log(stop: &str, members: &str) -> Vec<u8> {
+    chain(&[
+        FIRST.to_owned(),
+        format!(r#""kind":"Stopped","stop":"{stop}","next":[]{members}"#),
+        LAST.to_owned(),
+    ])
+}
+
+/// The `stopped` line of `stop` naming `budget`.
+fn stopped(stop: &str, budget: Option<&str>) -> RunLogEvent {
+    RunLogEvent::Stopped(Stopped {
+        stop: stop.to_owned(),
+        next: Vec::new(),
+        budget: budget.map(str::to_owned),
+    })
+}
+
+/// Asserts the log `bytes` is refused `BrokenChain` at its line 1, the detail naming `budget`.
+fn refused_at_the_budget(bytes: &[u8], what: &str) {
+    let refused = refusal(bytes);
+    assert_eq!(
+        (refused.refusal, refused.line),
+        (RunLogRefusal::BrokenChain, 1),
+        "{what}: {refused:?}"
+    );
+    assert!(
+        refused.detail.contains("budget:"),
+        "{what}: the detail names the member: {}",
+        refused.detail
+    );
+}
+
+#[test]
+fn a_stopped_line_with_a_budget_and_another_stop_is_refused() {
+    // On a `BudgetSpent` stop the line reads: the refusals below are the other stops'.
+    let whole = stopped_log("BudgetSpent", r#","budget":"MaxSteps""#);
+    let lines = verify(&whole).unwrap_or_else(|refused| panic!("{refused:?}"));
+    assert_eq!(lines[1].event, stopped("BudgetSpent", Some("MaxSteps")));
+    for (index, stop) in [
+        "AwaitingPerson",
+        "AwaitingAuthority",
+        "Stuck",
+        "Terminal",
+        "budgetspent",
+        "",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        refused_at_the_budget(
+            &stopped_log(stop, r#","budget":"MaxSteps""#),
+            &format!("stop {stop:?}"),
+        );
+        append_is_refused(
+            &format!("budget-beside-stop-{index}"),
+            stopped(stop, Some("MaxSteps")),
+        );
+    }
+}
+
+#[test]
+fn a_stopped_line_with_an_unknown_budget_is_refused() {
+    for (index, budget) in [
+        "cancel",
+        "max_steps",
+        "maxWallSeconds",
+        "MaxRuns",
+        "MaxTurns",
+        "MaxTokens",
+        "Steps",
+        "MaxSteps ",
+        "",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        refused_at_the_budget(
+            &stopped_log("BudgetSpent", &format!(r#","budget":"{budget}""#)),
+            &format!("budget {budget:?}"),
+        );
+        append_is_refused(
+            &format!("unknown-budget-{index}"),
+            stopped("BudgetSpent", Some(budget)),
+        );
+    }
+    refused_at_the_budget(
+        &stopped_log("BudgetSpent", r#","budget":1"#),
+        "a budget that is no string",
+    );
+}
+
+/// A one-leg case's log as Loom wrote it before `budget` existed: two `BudgetSpent` stops, the
+/// last line one of them, and another stop between.
+const OLD_STOPPED_LOG: &str = concat!(
+    "{\"seq\":0,\"at\":\"2026-11-22T08:00:00Z\",\"kind\":\"CaseOpened\",\"case\":\"root\",\"protocol\":\"tour-leg@1\"}\n",
+    "{\"seq\":1,\"prev\":\"a0a4172d05916fef90ac7ea88c28ee4db19e9f90c986bc1a5a97e61c6229422e\",\"at\":\"2026-11-22T08:00:00Z\",\"kind\":\"Stopped\",\"stop\":\"BudgetSpent\",\"next\":[]}\n",
+    "{\"seq\":2,\"prev\":\"dda9cc2f78d2901217d8a8c88e74d31f2e109b829a0baf618c1e5c980f0dc552\",\"at\":\"2026-11-22T08:00:01Z\",\"kind\":\"Stopped\",\"stop\":\"AwaitingPerson\",\"next\":[\"the guide approves the route\"]}\n",
+    "{\"seq\":3,\"prev\":\"1f4b9b9bec6db1dbb4e638cd8327996b7a7524f5d25cc5a3ae884a0f3324c91a\",\"at\":\"2026-11-22T08:00:02Z\",\"kind\":\"Stopped\",\"stop\":\"BudgetSpent\",\"next\":[]}\n",
+);
+
+#[test]
+fn an_old_log_without_a_budget_still_verifies() {
+    let read =
+        verify(OLD_STOPPED_LOG.as_bytes()).expect("a log written before the change verifies");
+    assert_eq!(read.len(), 4);
+    assert_eq!(read[1].event, stopped("BudgetSpent", None));
+    assert_eq!(
+        read[2].event,
+        RunLogEvent::Stopped(Stopped {
+            stop: "AwaitingPerson".to_owned(),
+            next: vec!["the guide approves the route".to_owned()],
+            budget: None,
+        })
+    );
+    assert_eq!(read[3].event, stopped("BudgetSpent", None));
+    // Each line reads back as the bytes it was read from: an absent budget is left out.
+    for (line, raw) in read.iter().zip(lines(OLD_STOPPED_LOG.as_bytes())) {
+        assert_eq!(encode(line).as_bytes(), raw.as_slice());
+    }
+}
+
+#[test]
+fn the_budget_spellings_are_the_three_of_the_story() {
+    use loom::tree::SpentBudget;
+    // The story's list, in the order a run asks the budgets before a step.
+    let story = ["Cancel", "MaxSteps", "MaxWallSeconds"];
+    // Every variant, by an exhaustive match: a fourth one does not compile here.
+    let spelled = |budget: SpentBudget| match budget {
+        SpentBudget::Cancel => "Cancel",
+        SpentBudget::MaxSteps => "MaxSteps",
+        SpentBudget::MaxWallSeconds => "MaxWallSeconds",
+    };
+    let variants = [
+        SpentBudget::Cancel,
+        SpentBudget::MaxSteps,
+        SpentBudget::MaxWallSeconds,
+    ];
+    for (index, (budget, name)) in variants.into_iter().zip(story).enumerate() {
+        assert_eq!(spelled(budget), name);
+        assert_eq!(format!("{budget:?}"), name, "the variant is the spelling");
+        let bytes = stopped_log("BudgetSpent", &format!(r#","budget":"{name}""#));
+        let read = verify(&bytes).unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+        assert_eq!(read[1].event, stopped("BudgetSpent", Some(name)));
+        assert_eq!(encode(&read[1]).as_bytes(), lines(&bytes)[1].as_slice());
+        let (log, _) = log_with(&format!("budget-spelling-{index}"), 1);
+        log.append(CASE, at(1), stopped("BudgetSpent", Some(name)))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let written = log.read(CASE).expect("the log verifies");
+        assert_eq!(written[1].event, stopped("BudgetSpent", Some(name)));
     }
 }

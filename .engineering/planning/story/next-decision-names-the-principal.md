@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:next-decision-names-the-principal
 kind: story
-status: proposed
+status: active
 title: A printed decision names the principal that answers it
 summary: 'NextDecision gains optional principal: the --principal its command carries (ApproveAction, Approve); absent for Close and Handoff; refusal of another principal unchanged (approve.rs:238-243, person.rs:65-71)'
 tags:
@@ -11,9 +11,10 @@ relations:
 - serves: vision:O1
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:tree-run-command
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:29:39Z", actor: "agent:loom", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-22T10:41:24Z", actor: "agent:sdc", revision: 4, executor: "agent:loom", correlation: "runbook-engine-gaps-2026-11-22"}
 ---
 ## Outcome
 

@@ -1,7 +1,8 @@
 //! `read_status`: a printed tree status read back into the value `tree_status` returned.
 
+use loom::runlog::RunLogRefusal;
 use loom::tree::{
-    ApprovalDecision, CaseStatus, StatusApproval, StatusCopy, StatusEvidence, StatusRun,
+    ApprovalDecision, CaseStatus, StatusApproval, StatusCopy, StatusEvidence, StatusLog, StatusRun,
     TreeProtocol, TreeRefusalReason, TreeStatus,
 };
 use serde_json::Value;
@@ -147,6 +148,47 @@ fn case(value: &Value, at: &str) -> Read<CaseStatus> {
         runs: list(value, at, "runs", run)?,
         approvals: list(value, at, "approvals", approval)?,
         copies: list(value, at, "copies", copy)?,
+        log: match value.get("log") {
+            None => None,
+            Some(log) => Some(status_log(log, &format!("{at}.log"))?),
+        },
+        budget: optional_text(value, at, "budget")?
+            .map(|name| {
+                b10x_loom_runlog::spent_budget(&name).ok_or_else(|| {
+                    Bad(format!(
+                        "{at}.budget: {name:?} is not Cancel, MaxSteps or MaxWallSeconds"
+                    ))
+                })
+            })
+            .transpose()?,
+    })
+}
+
+fn status_log(value: &Value, at: &str) -> Read<StatusLog> {
+    let refusal = match optional_text(value, at, "refusal")?.as_deref() {
+        None => None,
+        Some("CutLine") => Some(RunLogRefusal::CutLine),
+        Some("BrokenChain") => Some(RunLogRefusal::BrokenChain),
+        Some("SequenceGap") => Some(RunLogRefusal::SequenceGap),
+        Some(other) => {
+            return Err(Bad(format!(
+                "{at}.refusal: {other:?} is not CutLine, BrokenChain or SequenceGap"
+            )));
+        }
+    };
+    Ok(StatusLog {
+        verified: member(value, at, "verified")?
+            .as_bool()
+            .ok_or_else(|| Bad(format!("{at}.verified: not a boolean")))?,
+        refusal,
+        line: match value.get("line") {
+            None => None,
+            Some(line) => Some(
+                line.as_i64()
+                    .ok_or_else(|| Bad(format!("{at}.line: not an integer")))?,
+            ),
+        },
+        detail: optional_text(value, at, "detail")?,
     })
 }
 

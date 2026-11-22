@@ -1542,6 +1542,12 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   `action finished` leaves `case_outcome` records out. A log without them reads as before; Loom
   0.58.0 and earlier refuse a line that holds them. `tree status` gives a `case_outcome` entry the
   child's link `name`.
+- `Stopped` may hold `budget`, the budget that ended the run (`Cancel`, `MaxSteps` or
+  `MaxWallSeconds`, `loom.tree.SpentBudget`'s variants, spelled by `budget_name`), and only on a
+  `BudgetSpent` stop; a line holding it beside another stop, or another spelling, does not read
+  (`story:tree-status-names-what-it-read`; ESS cannot state the rule). `tree run` writes it on
+  every `BudgetSpent` stop. A `BudgetSpent` line without it, as Loom 0.58.0 wrote, still reads;
+  Loom 0.58.0 and earlier refuse a line that holds it.
 - The crate declares the events and writes what it is given; emitting them is
   `story:tree-run-command`'s. It depends on the governor for the lock and the stem, so the executor
   and Canon reach it only through the governor.
@@ -1617,7 +1623,14 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   `extra/`.
 - `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
   runs, approvals and copies are read from the governor, the run logs and `observations.json`,
-  never from `approvals-<stem>.json`.
+  never from `approvals-<stem>.json`. `protocols` holds one entry per protocol the cases use, once,
+  in the order of its first case, built from the catalog the status was read with (the host's, or
+  the kept one) by `tree_protocol`, which also builds the entries of `tree-protocols.json`: its
+  `sha256` is the catalog's `ProtocolDefinition.sha256` of the document's bytes. Each case's `log`
+  says whether its run log verified (a missing log does, as no line); a log that does not is
+  named with the reader's refusal, line and detail, its case's entry holds nothing read from it,
+  and the command still exits 0. `budget` is the one the case's last `stopped` line names. A
+  status printed before `log` and `budget` existed reads with both absent.
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.

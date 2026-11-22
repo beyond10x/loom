@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "ec891bf21451a1b84a7e03ae429a58b71a11edb90598209a7a75561148cb8bcf",
-    "contract_digest": "9be4b8aca5e19aa93c531fbf4e9e99a6bfa0d4bf3519b293787c618087df2867"
+    "source_digest": "a4eebb677e566f38394285b3a0b0fab8b8d61a735488ad0eaf5abbb791404157",
+    "contract_digest": "9c277197e8ce1ef974b931ae3ce283c80f935dc7225a6e7d42b142c9e308fd51"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1888,28 +1888,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.tree.ArtifactRevision",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.tree.CaseApproval",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CaseSelector",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CaseSource",
       "disposition": {
         "disposition": "generated"
       }
@@ -1923,147 +1902,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.tree.CasesSource",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CheckDifference",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CheckKind",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CompareOp",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.Condition",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ConditionGroup",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.Conditions",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CycleArea",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CycleCondition",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CycleExpectation",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CycleResult",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.CycleStep",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.tree.DecisionKind",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.DeclaredName",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.DifferenceReason",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.DocSource",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ExitExpectation",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.FilesSource",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.Follow",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.FollowTarget",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.LengthBound",
       "disposition": {
         "disposition": "generated"
       }
@@ -2077,13 +1916,6 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.tree.LogSource",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.tree.NextDecision",
       "disposition": {
         "disposition": "generated"
@@ -2091,91 +1923,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.tree.Operand",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.OperandTake",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.PickPosition",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ReadAs",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.RecordsSource",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ScriptedApproval",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ScriptedChoice",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ScriptedClose",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ScriptedDecision",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SeedEntry",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SelectItem",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SelectPick",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SourceKind",
+      "source": "loom.tree.SpentBudget",
       "disposition": {
         "disposition": "generated"
       }
@@ -2203,63 +1951,14 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.tree.StatusLog",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.tree.StatusRun",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.StepKind",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.StopExpectation",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SuiteCheck",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SuiteCycle",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SuiteDefaults",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SuiteRefusal",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SuiteRefusalReason",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.SuiteReport",
       "disposition": {
         "disposition": "generated"
       }
@@ -2336,35 +2035,7 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.tree.TreeSuite",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.tree.TreeVerify",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.UseBound",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.ValueType",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
-      "source": "loom.tree.WaitingCycle",
       "disposition": {
         "disposition": "generated"
       }

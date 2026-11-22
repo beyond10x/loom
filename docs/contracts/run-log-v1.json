@@ -151,6 +151,10 @@
     },
     "Stopped": {
       "fields": {
+        "budget": {
+          "optional": true,
+          "type": "String"
+        },
         "next": {
           "optional": false,
           "type": "List<String>"

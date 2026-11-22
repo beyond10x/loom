@@ -35,6 +35,11 @@
 //! digest 64 lower-case hex digits, under the same rule. A log written before those members
 //! existed reads with both absent; a reader from before them refuses a line that holds them.
 //!
+//! A `Stopped` holds `budget` only beside the stop [`BUDGET_SPENT`], spelled as [`budget_name`]
+//! spells a `loom.tree.SpentBudget`: a line holding it beside another stop, or holding another
+//! spelling, does not read, under the same rule. A `BudgetSpent` line written before the member
+//! existed holds none and reads; a reader from before it refuses a line that holds it.
+//!
 //! What the log cannot show: a change to the last line alone is not detected, as a cut at a line
 //! boundary is not, since no line after it names its digest, and the next append makes the change
 //! permanent. A log whose last lines were removed whole, or rewritten from some line on with a
@@ -60,6 +65,7 @@ use loom::runlog::{
     Discarded, Evaluated, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal, RunLogRefused,
     Stopped, Terminated,
 };
+use loom::tree::SpentBudget;
 use loom_governor::{FileStoreError, LockedDir, case_file_stem};
 use sha2::{Digest as _, Sha256};
 
@@ -68,6 +74,33 @@ pub const PREFIX: &str = "runlog-";
 
 /// What every log file's name ends with.
 pub const EXTENSION: &str = ".jsonl";
+
+/// The stop of a `Stopped` line a budget ended the run with: the one stop whose line names the
+/// budget.
+pub const BUDGET_SPENT: &str = "BudgetSpent";
+
+/// The budgets, in the order a tree run asks them before a step.
+const SPENT_BUDGETS: [SpentBudget; 3] = [
+    SpentBudget::Cancel,
+    SpentBudget::MaxSteps,
+    SpentBudget::MaxWallSeconds,
+];
+
+/// How a `Stopped` line spells `budget`: the variant's name.
+pub fn budget_name(budget: SpentBudget) -> &'static str {
+    match budget {
+        SpentBudget::Cancel => "Cancel",
+        SpentBudget::MaxSteps => "MaxSteps",
+        SpentBudget::MaxWallSeconds => "MaxWallSeconds",
+    }
+}
+
+/// The budget `name` spells as [`budget_name`] does; `None` for any other text.
+pub fn spent_budget(name: &str) -> Option<SpentBudget> {
+    SPENT_BUDGETS
+        .into_iter()
+        .find(|budget| budget_name(*budget) == name)
+}
 
 /// The name of the log file of the case with id `case`: [`PREFIX`], the case file's stem and
 /// [`EXTENSION`].
@@ -518,6 +551,7 @@ pub fn encode(line: &RunLogLine) -> String {
         RunLogEvent::Stopped(event) => {
             text(&mut out, "stop", &event.stop);
             texts(&mut out, "next", &event.next);
+            optional(&mut out, "budget", &event.budget);
         }
         RunLogEvent::Terminated(event) => text(&mut out, "reason", &event.reason),
     }
@@ -559,7 +593,7 @@ fn event_members(kind: &str) -> Option<&'static [&'static str]> {
         "ChildOpened" => &["child", "protocol", "record", "record_digest"],
         "ChildClosed" => &["child", "outcome", "record", "record_digest"],
         "AuthorityRecorded" => &["capability", "decision", "principal"],
-        "Stopped" => &["stop", "next"],
+        "Stopped" => &["stop", "next", "budget"],
         "Terminated" => &["reason"],
         _ => return None,
     })
@@ -678,10 +712,15 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
             decision: text("decision")?,
             principal: text("principal")?,
         }),
-        "Stopped" => RunLogEvent::Stopped(Stopped {
-            stop: text("stop")?,
-            next: texts("next")?,
-        }),
+        "Stopped" => {
+            let stop = text("stop")?;
+            let budget = stopped_budget(value, &stop)?;
+            RunLogEvent::Stopped(Stopped {
+                stop,
+                next: texts("next")?,
+                budget,
+            })
+        }
         _ => RunLogEvent::Terminated(Terminated {
             reason: text("reason")?,
         }),
@@ -724,6 +763,25 @@ fn child_record(value: &Value) -> Result<(Option<String>, Option<String>), Decod
             },
         }),
         _ => Ok((record, digest)),
+    }
+}
+
+/// The `budget` of a `Stopped` line whose stop is `stop`: absent, or one [`spent_budget`] reads
+/// beside [`BUDGET_SPENT`]. ESS cannot state the rule yet, so the reader holds it.
+fn stopped_budget(value: &Value, stop: &str) -> Result<Option<String>, DecodeError> {
+    let budget = optional_text(value, "", "budget")?;
+    match &budget {
+        Some(_) if stop != BUDGET_SPENT => Err(DecodeError {
+            at: "budget".to_owned(),
+            expected: format!("no budget beside a stop other than {BUDGET_SPENT}"),
+            found: "a budget".to_owned(),
+        }),
+        Some(name) if spent_budget(name).is_none() => Err(DecodeError {
+            at: "budget".to_owned(),
+            expected: format!("one of {}", SPENT_BUDGETS.map(budget_name).join(", ")),
+            found: format!("`{name}`"),
+        }),
+        _ => Ok(budget),
     }
 }
 

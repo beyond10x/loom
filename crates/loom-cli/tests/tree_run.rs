@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
-use b10x_loom_tree::model::{TreeRefusalReason, TreeStop};
+use b10x_loom_tree::model::{SpentBudget, TreeRefusalReason, TreeStop};
 use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
 use b10x_loom_tree::{
     RunSettings, STATUS_FORMAT, TreeTime, decision_json, log_file_name, read_log, read_status,
@@ -957,6 +957,276 @@ fn the_printed_status_is_the_value_of_tree_status() {
     assert_eq!(STATUS_FORMAT, "loom.tree-status/1");
     assert_eq!(document["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(read_status(&printed.stdout).unwrap(), value);
+}
+
+/// The two-level tree after one `tree run --max-steps 1` once per test run, kept as
+/// [`ended_tree`] keeps its tree: under `target/`, keyed by [`ended_digest`], built by the first
+/// test that asks holding a lock file. The run opened the first leg and stopped `BudgetSpent` in
+/// it before its next step. A fresh copy of the tree and the run's JSON; a test reads the copy with
+/// `tree status` and never runs it, since its store names the shared workspace.
+fn stepped_tree() -> (Tree, Value) {
+    let key = ended_digest();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let root = base.join(format!("tree-run-stepped-{}", &key[..16]));
+    let lock =
+        fs::File::create(base.join(format!("tree-run-stepped-{}.lock", &key[..16]))).unwrap();
+    lock.lock().unwrap();
+    if !root.join("stepped.json").exists() {
+        let _ = fs::remove_dir_all(&root);
+        let mut tree = Tree::at(root.clone());
+        tree.shared = true;
+        let opened = tree.open();
+        assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+        let ran = tree
+            .command()
+            .args([
+                "tree",
+                "run",
+                "--confinement",
+                "local",
+                "--max-steps",
+                "1",
+                "--at",
+                AT,
+                "--store",
+            ])
+            .arg(tree.store())
+            .output()
+            .unwrap();
+        assert_eq!(
+            ran.status.code(),
+            Some(5),
+            "{}{}",
+            stdout(&ran),
+            stderr(&ran)
+        );
+        fs::write(root.join("stepped.json"), &ran.stdout).unwrap();
+    }
+    lock.unlock().unwrap();
+    let ran = serde_json::from_slice(&fs::read(root.join("stepped.json")).unwrap()).unwrap();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let copy = base.join(format!(
+        "tree-run-stepped-copy-{}-{nanos}",
+        std::process::id()
+    ));
+    copy_dir(&root, &copy);
+    let tree = Tree {
+        root: copy,
+        started: Instant::now(),
+        shared: false,
+    };
+    (tree, ran)
+}
+
+#[test]
+fn a_status_names_each_protocol_its_cases_use_with_its_digest() {
+    let Ended { tree, .. } = ended_tree();
+    let status = json(&tree.tree("status"));
+    let cases = status["cases"].as_array().unwrap();
+    let legs = cases
+        .iter()
+        .filter(|case| case["protocol"] == "tour-leg@1")
+        .count();
+    assert!(legs >= 2, "more than one case uses tour-leg@1: {status}");
+    let catalog = tree.catalog();
+    let listed = status["protocols"].as_array().unwrap();
+    let registrations: Vec<&str> = listed
+        .iter()
+        .map(|protocol| protocol["registration"].as_str().unwrap())
+        .collect();
+    // One entry per protocol the cases use, once, in the order of its first case.
+    assert_eq!(registrations, ["tour@1", "tour-leg@1"], "{status}");
+    for (protocol, (id, file)) in listed
+        .iter()
+        .zip([("tour", "tour.yaml"), ("tour.leg", "tour-leg.yaml")])
+    {
+        let registration = protocol["registration"].as_str().unwrap();
+        let entry = catalog.get(registration).unwrap();
+        assert_eq!(protocol["protocol"], id, "{protocol}");
+        assert_eq!(protocol["revision"], 1, "{protocol}");
+        assert_eq!(protocol["file"], entry.definition.source.path, "{protocol}");
+        assert_eq!(protocol["sha256"], entry.definition.sha256, "{protocol}");
+        // The digest is the one of the protocol's own bytes, as the fixture holds them.
+        let bytes = fs::read(fixture_protocols().join(file)).unwrap();
+        assert_eq!(protocol["sha256"], sha256_hex(&bytes), "{protocol}");
+    }
+}
+
+#[test]
+fn a_status_names_a_log_that_does_not_verify() {
+    let (tree, ran) = stepped_tree();
+    let child = ran["case"].as_str().unwrap().to_owned();
+    assert_ne!(child, "root", "{ran}");
+    let status = json(&tree.tree("status"));
+    for case in status["cases"].as_array().unwrap() {
+        assert_eq!(case["log"], json!({"verified": true}), "{case}");
+    }
+    // One changed byte in the child's first line: its second line no longer names it.
+    let path = tree.store().join(log_file_name(&child));
+    let mut bytes = fs::read(&path).unwrap();
+    let first_line = bytes.iter().position(|byte| *byte == b'\n').unwrap();
+    let at = bytes[..first_line]
+        .windows(8)
+        .position(|window| window == b"tour-leg")
+        .unwrap();
+    bytes[at] = b'T';
+    fs::write(&path, &bytes).unwrap();
+    let expected = read_log(&bytes).unwrap_err();
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let entry_of_child = entry(&status, &child);
+    assert_eq!(
+        entry_of_child["log"],
+        json!({
+            "verified": false,
+            "refusal": "BrokenChain",
+            "line": 1,
+            "detail": expected.detail,
+        }),
+        "{entry_of_child}"
+    );
+    // Nothing is read from a log that does not verify.
+    for member in ["stop", "budget"] {
+        assert!(entry_of_child.get(member).is_none(), "{entry_of_child}");
+    }
+    assert_eq!(entry_of_child["stop_next"], json!([]), "{entry_of_child}");
+    assert_eq!(entry_of_child["approvals"], json!([]), "{entry_of_child}");
+    assert_eq!(
+        entry(&status, "root")["log"],
+        json!({"verified": true}),
+        "{status}"
+    );
+}
+
+#[test]
+fn a_status_reads_a_missing_log_as_verified_and_empty() {
+    let (tree, ran) = stepped_tree();
+    let child = ran["case"].as_str().unwrap().to_owned();
+    fs::remove_file(tree.store().join(log_file_name(&child))).unwrap();
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let entry_of_child = entry(&status, &child);
+    assert_eq!(
+        entry_of_child["log"],
+        json!({"verified": true}),
+        "{entry_of_child}"
+    );
+    for member in ["stop", "budget"] {
+        assert!(entry_of_child.get(member).is_none(), "{entry_of_child}");
+    }
+}
+
+#[test]
+fn a_step_budget_stop_names_max_steps_in_the_log_and_the_status() {
+    let (tree, ran) = stepped_tree();
+    assert_eq!(ran["stop"], "BudgetSpent", "{ran}");
+    assert_eq!(ran["steps"], 1, "{ran}");
+    assert_eq!(ran["detail"], "the run took its 1 steps", "{ran}");
+    let child = ran["case"].as_str().unwrap().to_owned();
+    let lines = log_lines(&tree, &child);
+    let last = lines.last().unwrap();
+    assert!(
+        matches!(
+            &last.event,
+            RunLogEvent::Stopped(stopped)
+                if stopped.stop == "BudgetSpent" && stopped.budget.as_deref() == Some("MaxSteps")
+        ),
+        "{last:?}"
+    );
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let entry_of_child = entry(&status, &child);
+    assert_eq!(entry_of_child["stop"], "BudgetSpent", "{entry_of_child}");
+    assert_eq!(entry_of_child["budget"], "MaxSteps", "{entry_of_child}");
+    assert!(entry(&status, "root").get("budget").is_none(), "{status}");
+    // The printed status reads back as the value `tree_status` returns, budget and logs included.
+    let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
+    assert_eq!(read_status(&printed.stdout).unwrap(), value);
+    let held = value.cases.iter().find(|case| case.case == child).unwrap();
+    assert_eq!(held.budget, Some(SpentBudget::MaxSteps));
+}
+
+#[test]
+fn a_cancelled_run_names_its_budget_in_the_stopped_line() {
+    let tree = Tree::new("cancel-first");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let cancel = AtomicBool::new(true);
+    let ran = run_tree(
+        &tree.store(),
+        &tree.catalog(),
+        &settings(None),
+        None,
+        Some(&cancel),
+    )
+    .unwrap();
+    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.steps, 0, "{ran:?}");
+    assert_eq!(ran.detail.as_deref(), Some("the run was cancelled"));
+    let lines = log_lines(&tree, "root");
+    // The `case opened` line `tree open` wrote, then the stop: no step was taken.
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(
+        lines[1].event,
+        RunLogEvent::Stopped(b10x_loom_tree::runlog::Stopped {
+            stop: "BudgetSpent".to_owned(),
+            next: Vec::new(),
+            budget: Some("Cancel".to_owned()),
+        })
+    );
+    let status = json(&tree.tree("status"));
+    assert_eq!(entry(&status, "root")["budget"], "Cancel", "{status}");
+}
+
+#[test]
+fn a_wall_time_stop_names_max_wall_seconds_in_the_stopped_line() {
+    let tree = Tree::new("wall-time");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let started = Instant::now();
+    let mut settings = settings(None);
+    settings.max_wall_seconds = Some(1);
+    // The first step takes a second: the run's wall time is spent before the next.
+    let mut slept = false;
+    let mut observer = |_: &str, line: &RunLogLine| {
+        if !slept && matches!(line.event, RunLogEvent::ActionFinished(_)) {
+            slept = true;
+            std::thread::sleep(Duration::from_millis(1100));
+        }
+    };
+    let ran = run_tree(
+        &tree.store(),
+        &tree.catalog(),
+        &settings,
+        Some(&mut observer),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.steps, 1, "{ran:?}");
+    assert_eq!(
+        ran.detail.as_deref(),
+        Some("the run's 1 s of wall time are spent")
+    );
+    let lines = log_lines(&tree, "root");
+    let last = lines.last().unwrap();
+    assert!(
+        matches!(
+            &last.event,
+            RunLogEvent::Stopped(stopped)
+                if stopped.stop == "BudgetSpent"
+                    && stopped.budget.as_deref() == Some("MaxWallSeconds")
+        ),
+        "{last:?}"
+    );
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(5), "the run took {took:?}");
 }
 
 #[test]
@@ -2264,7 +2534,8 @@ fn refused_with_an_empty_store(tree: &Tree, output: &Output, reason: &str, named
     assert!(empty, "the store holds {:?}", tree.snapshot());
 }
 
-/// The SHA-256 `tree status` names for the kept protocol `registration`.
+/// The SHA-256 `tree status` names for the protocol `registration`, which a case of the tree uses:
+/// the status lists only those (`kept_entry` reads what `tree open` kept).
 fn kept_sha256(tree: &Tree, registration: &str) -> String {
     let status = json(&tree.tree("status"));
     status["protocols"]
@@ -2275,6 +2546,21 @@ fn kept_sha256(tree: &Tree, registration: &str) -> String {
         .and_then(|kept| kept["sha256"].as_str())
         .unwrap_or_else(|| panic!("no kept {registration}: {status}"))
         .to_owned()
+}
+
+/// The entries of the store's `tree-protocols.json`: what `tree open --protocols` kept.
+fn kept_list(tree: &Tree) -> Vec<Value> {
+    let path = tree.store().join(b10x_loom_tree::PROTOCOLS_FILE);
+    let kept: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    kept["protocols"].as_array().unwrap().clone()
+}
+
+/// The entry `tree-protocols.json` keeps for `registration`.
+fn kept_entry(tree: &Tree, registration: &str) -> Value {
+    kept_list(tree)
+        .into_iter()
+        .find(|kept| kept["registration"] == registration)
+        .unwrap_or_else(|| panic!("tree-protocols.json keeps no {registration}"))
 }
 
 #[test]
@@ -2293,10 +2579,8 @@ fn a_protocols_directory_registers_what_its_files_declare() {
             loom_protocols::SourceKind::Directory
         );
     }
-    let status = json(&tree.tree("status"));
-    let kept: Vec<(&str, &str)> = status["protocols"]
-        .as_array()
-        .unwrap()
+    let kept = kept_list(&tree);
+    let kept: Vec<(&str, &str)> = kept
         .iter()
         .map(|kept| {
             (
@@ -2308,6 +2592,14 @@ fn a_protocols_directory_registers_what_its_files_declare() {
     assert_eq!(
         kept,
         [("tour-leg@1", "tour-leg.yaml"), ("tour@1", "tour.yaml")]
+    );
+    // The status lists the protocols the tree's cases use, from the kept catalog: the root's alone
+    // until a leg is opened, the entry `tree-protocols.json` keeps for it.
+    let status = json(&tree.tree("status"));
+    assert_eq!(
+        status["protocols"],
+        json!([kept_entry(&tree, "tour@1")]),
+        "{status}"
     );
 }
 
@@ -2329,7 +2621,10 @@ fn an_edit_after_tree_open_changes_nothing_in_the_open_tree() {
     let opened = open_from(&tree, &dir, "tour@1");
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     let leg = fixture_protocol("tour-leg.yaml");
-    let at_open = kept_sha256(&tree, "tour-leg@1");
+    let at_open = kept_entry(&tree, "tour-leg@1")["sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     // Under the edited definition no leg could pass, so the root could not arrive.
     fs::write(
         dir.join("tour-leg.yaml"),
@@ -2397,9 +2692,19 @@ fn nothing_in_a_run_selects_or_replaces_a_protocol() {
         fs::read_to_string(workspace.join("tour-leg.yaml")).unwrap(),
         written
     );
-    // Every case keeps the registration and the SHA-256 of `tree open`.
+    // Every case keeps the registration and the SHA-256 of `tree open`: the status lists each
+    // protocol the cases use as `tree-protocols.json` kept it at `tree open`.
     let status = json(&tree.tree("status"));
-    assert_eq!(status["protocols"], at_open["protocols"], "{status}");
+    assert_eq!(
+        status["protocols"],
+        json!([kept_entry(&tree, "tour@1"), kept_entry(&tree, "tour-leg@1")]),
+        "{status}"
+    );
+    assert_eq!(
+        at_open["protocols"],
+        json!([kept_entry(&tree, "tour@1")]),
+        "{at_open}"
+    );
     let cases = status["cases"].as_array().unwrap();
     assert!(cases.len() > 2, "{status}");
     for case in cases {
@@ -2547,7 +2852,7 @@ fn a_changed_stored_protocol_is_refused() {
     let blob = tree
         .store()
         .join("blobs")
-        .join(kept_sha256(&tree, "tour-leg@1"));
+        .join(kept_entry(&tree, "tour-leg@1")["sha256"].as_str().unwrap());
     let mut bytes = fs::read(&blob).unwrap();
     bytes[0] ^= 1;
     fs::write(&blob, &bytes).unwrap();
