@@ -50,10 +50,29 @@ fn copy_of_repository(name: &str) -> PathBuf {
     to
 }
 
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
+
+/// The `ess` the generator runs here: a stand-in that answers the synthesis of the repository's
+/// `ess/` from a copy made once a test run (`ess_suite::synthesis_stand_in`, which `task
+/// test-step` fills before the tests), and runs `ess` itself for any other call.
+fn stand_in() -> PathBuf {
+    let root = repository();
+    ess_suite::synthesis_stand_in(
+        &ess_suite::ess_program(&root),
+        &root.join("ess"),
+        &ess_suite::RUST_CRATE,
+        &Path::new(env!("CARGO_TARGET_TMPDIR")).join(ess_suite::STAND_IN_CACHE),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
 fn xtask(root: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_loom-xtask"))
         .arg("--root")
         .arg(root)
+        .arg("--ess")
+        .arg(stand_in())
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("run loom-xtask: {e}"))
@@ -135,7 +154,8 @@ fn no_hand_model_refuses_cfg_gated_and_nested_module_types() {
 /// The Taskfile's `generate` runs `generate-bootstrap` (the `ess generate synthesize` line, when
 /// `generated/rust/loom/Cargo.toml` is absent) and then `loom-xtask generate`. From an absent tree,
 /// bootstrap then `generate` twice leaves a tree `drift` accepts, and nothing beside it in
-/// `generated/rust/`.
+/// `generated/rust/`. Each synthesis is [`stand_in`]'s copy of the one `ess` wrote for
+/// `ess/`, made once a test run; the committed tree is compared with it as with a fresh one.
 #[test]
 fn bootstrap_then_generate_twice_leaves_no_drift_and_no_debris() {
     let taskfile = repository().join("Taskfile.yml");
@@ -159,7 +179,8 @@ fn bootstrap_then_generate_twice_leaves_no_drift_and_no_debris() {
         .unwrap_or_else(|e| panic!("remove generated: {e}"));
     let scratch = root.join("scratch");
 
-    let boot = Command::new("ess")
+    let ess = stand_in();
+    let boot = Command::new(&ess)
         .args(&bootstrap)
         .current_dir(&root)
         .output()
@@ -170,6 +191,8 @@ fn bootstrap_then_generate_twice_leaves_no_drift_and_no_debris() {
         let generated = Command::new(env!("CARGO_BIN_EXE_loom-xtask"))
             .arg("--root")
             .arg(&root)
+            .arg("--ess")
+            .arg(&ess)
             .args(["generate", "--scratch"])
             .arg(&scratch)
             .output()
@@ -183,6 +206,8 @@ fn bootstrap_then_generate_twice_leaves_no_drift_and_no_debris() {
     let drift = Command::new(env!("CARGO_BIN_EXE_loom-xtask"))
         .arg("--root")
         .arg(&root)
+        .arg("--ess")
+        .arg(&ess)
         .args(["drift", "--scratch"])
         .arg(&scratch)
         .output()
@@ -197,6 +222,8 @@ fn bootstrap_then_generate_twice_leaves_no_drift_and_no_debris() {
     let same_as_committed = Command::new(env!("CARGO_BIN_EXE_loom-xtask"))
         .arg("--root")
         .arg(&root)
+        .arg("--ess")
+        .arg(&ess)
         .args(["drift", "--scratch"])
         .arg(&scratch)
         .arg("--generated")

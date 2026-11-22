@@ -343,7 +343,14 @@ not once a binary. A product that takes seconds is kept in a cache under `CARGO_
 keyed by the digest of its inputs and made once for every process (`made_once` in
 `crates/loom-executor/tests/support/ess_suite.rs`). `task test-step` fills the cache the `crd`
 tests of `b10x-loom-resource` read (`ess generate --kind schema`, about 16 s) beside its build of
-the test binaries, so no test of the step makes it or waits for another that does.
+the test binaries, so no test of the step makes it or waits for another that does. The same
+holds for the generators: the tests of `loom-xtask` and `loom-commission-xtask` that run
+`generate` or `drift` pass `--ess` a stand-in (`synthesis_stand_in` in `ess_suite.rs`) that
+answers `ess generate synthesize` of `ess/` or `ess/commission/` with a copy of the one synthesis
+made for the tree's digest, which `task test-step` makes beside its build; a call over a changed
+copy of the specification runs `ess` itself. `task drift` and `task commission:drift` still
+synthesize for real. The two packages' tests took 77.4 s and 29.4 s of test time with a synthesis
+per call, 28.3 s and 10.6 s with the stand-in.
 
 A test of a product bound that is seconds long (a deadline, a grace, a settle) sets a short one
 through a parameter of the product, the crate's constant its default, and a test asserts the
