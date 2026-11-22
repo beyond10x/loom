@@ -14,6 +14,16 @@ use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{ChildCommand, ChildSignal, SubstrateRunner};
 
+/// A child's shell line that holds until the host creates `target/release` in its workspace
+/// ([`release`]), at most 30 s: the child runs exactly as long as the host's check needs.
+const HOLD: &str =
+    "i=0; while [ ! -e target/release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done";
+
+/// Ends the [`HOLD`] of the child working in `workspace`.
+fn release(workspace: &std::path::Path) {
+    std::fs::write(workspace.join("target/release"), "").expect("the release marker");
+}
+
 fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
     support::delegated(name, &[], case);
 }
@@ -70,7 +80,10 @@ fn security_a_live_child_dropped_inside_an_async_runtime_is_killed_without_a_pan
             let child = runner
                 .spawn_child(&ChildCommand::new(
                     "sh",
-                    ["-c", "touch target/started; sleep 3; touch target/survived"],
+                    [
+                        "-c",
+                        format!("touch target/started; {HOLD}; touch target/survived").as_str(),
+                    ],
                     workspace,
                 ))
                 .expect("the shell starts live");
@@ -86,7 +99,9 @@ fn security_a_live_child_dropped_inside_an_async_runtime_is_killed_without_a_pan
             let dropped = catch_unwind(AssertUnwindSafe(|| {
                 runtime.block_on(async move { drop(child) });
             }));
-            std::thread::sleep(Duration::from_secs(5));
+            // A child that outlived the drop leaves its hold within 50 ms of the release.
+            release(workspace);
+            std::thread::sleep(Duration::from_secs(1));
             let survived = workspace.join("target/survived").exists();
             assert!(
                 dropped.is_ok() && !survived,

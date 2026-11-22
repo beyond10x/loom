@@ -1,9 +1,12 @@
 //! Exercise the actual CLI with an isolated installation store and no model access.
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
+
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 fn cli(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    loom_bin::loom()
         .args(args)
         .env("XDG_DATA_HOME", root)
         .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")

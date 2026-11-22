@@ -16,6 +16,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
 const CLASSIFY: &[u8] = include_bytes!("fixtures/catalog-route/classify.sse");
 const SELECT: &[u8] = include_bytes!("fixtures/catalog-route/select.sse");
@@ -637,7 +640,7 @@ impl Scratch {
 
     fn command(&self, args: &[&str]) -> Command {
         let home = self.root.join("home");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+        let mut command = loom_bin::loom();
         command
             .arg("run")
             .args(["--confinement", "none"])
