@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:every-printed-decision-command-runs
 kind: story
-status: proposed
+status: active
 title: Every decision tree run prints carries a command that, run unchanged, records that decision and exits 0
 summary: one test per decision kind executes the printed command; a person action without a capability prints a command that runs
 tags:
@@ -22,9 +22,10 @@ scope:
   path: crates/loom-tree/src/approve.rs
 - confidence: cited
   path: crates/loom-tree/src/run.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:58Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T07:13:45Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "runbook-model-run-order-2026-11-22"}
 ---
 ## Outcome
 

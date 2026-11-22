@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-run-takes-a-delegated-cgroup
 kind: story
-status: proposed
+status: active
 title: tree run in the default substrate confinement gets a delegated cgroup of its own, and two runs never share a parent slice
 summary: tree run moves into its own delegated leaf as run does or takes --cgroup-root, a refusal names tree run's own remedy, two runs never share one parent; security-relevant
 tags:
@@ -24,9 +24,10 @@ scope:
   path: crates/loom-cli/tests/tree_run.rs
 - confidence: cited
   path: crates/loom-intake-slice/src/confinement.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:56Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T07:13:52Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "runbook-model-run-order-2026-11-22"}
 ---
 ## Outcome
 

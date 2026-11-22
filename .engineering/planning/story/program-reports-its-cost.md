@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:program-reports-its-cost
 kind: story
-status: proposed
+status: active
 title: A bound program can report what its step cost, and the run, the log and the status carry it
 summary: usage_from pointer into the report; optional cost_micro_usd on ProgramRun, ActionFinished and status runs[], absent when unnamed; no budget acts on it yet
 tags:
@@ -39,9 +39,10 @@ scope:
   path: generated/ess/loom/
 - confidence: cited
   path: generated/rust/loom/
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:59Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T07:13:51Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "runbook-model-run-order-2026-11-22"}
 ---
 ## Outcome
 

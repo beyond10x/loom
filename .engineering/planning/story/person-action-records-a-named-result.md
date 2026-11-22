@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:person-action-records-a-named-result
 kind: story
-status: proposed
+status: active
 title: A person action can end with a named result and its reasons, and a writer's retry_when reruns on it
 summary: 'tree approve --action A --result R --reasons: R from the binding''s declared results, reasons kept as a blob the retry feedback carries; --deny unchanged; security-relevant'
 tags:
@@ -25,9 +25,10 @@ scope:
   path: crates/loom-tree/src/approve.rs
 - confidence: cited
   path: crates/loom-tree/src/person.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:57Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T07:13:47Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "runbook-model-run-order-2026-11-22"}
 ---
 ## Outcome
 

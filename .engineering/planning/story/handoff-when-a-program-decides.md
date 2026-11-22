@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:handoff-when-a-program-decides
 kind: story
-status: proposed
+status: active
 title: 'A writer''s handoff can depend on a fact only a program can read: handoff_when holds an argv that decides'
 summary: 'handoff_when argv run like a bound program before the action: exit 0 gives the Handoff decision, another exit skips it, launch error or timeout refuses; one run-log line; security-relevant'
 tags:
@@ -37,9 +37,10 @@ scope:
   path: generated/ess/loom/
 - confidence: cited
   path: generated/rust/loom/
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:59Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T07:13:50Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "runbook-model-run-order-2026-11-22"}
 ---
 ## Outcome
 
