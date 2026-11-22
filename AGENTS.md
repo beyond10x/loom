@@ -2761,13 +2761,25 @@ verified evidence. The store expires with its briefing and grants no cross-run a
   `select_runner` keeps its own) and `bindings::bound_program_child`, which the program effect port
   of `b10x-loom-bindings` (§ Bindings document) also uses, so each rule has one definition.
   `run` passes the flag's `local` runner, none for the file's opt-in, and
-  `SubstrateRunner` on `--cgroup-root` otherwise (no delegated re-exec for bound commands);
+  `SubstrateRunner` on the held `--cgroup-root` otherwise (no delegated re-exec for bound commands);
   `--confinement none` or `local` without an opt-in stops `ConfinementUnavailable
   (CommandUnconfined: ...)` before any model call (`bindings_refused`); `--unconfined-bindings`
   beside `--state` is refused, exit 2; standard error names the opt-in.
   `crates/loom-intake-slice/tests/bound_command_confined.rs` holds the runner, the reasons and,
   delegated, the `linux` case; `crates/loom-cli/tests/custom_protocol_commands.rs`
   (`a_custom_protocol_runs_through_declared_commands`) runs the binary against scripts.
+- `run --cgroup-root R` under `--confinement substrate` holds `R` as `tree run` does
+  (`hold_cgroup_root`, `story:run-cgroup-root-holds-the-root`): once, before any model call and
+  before any store writes `--state`, and every `SubstrateRunner` of the run, the bound commands'
+  and the tests', runs on the held root until the run returns. `resume` holds the root its kept
+  context names (`ResumeContext.cgroup_root`) the same way, before any model call or runner. A
+  root another process holds (a `run`, a `resume`, a `tree run`) or one that does not qualify
+  stops `run` `ConfinementUnavailable`, exit 3 (its protocol empty without `--action-bindings`:
+  nothing is routed yet), and `resume` exit 1, each naming the root and Substrate's text, and is
+  never re-executed: only a `run` with no `--cgroup-root` starts itself again in a scope of its
+  own, which it does not hold. Under the re-exec marker the child reads its handoff before the
+  hold. `crates/loom-cli/tests/run_holds_the_root/` (a module of `tests/main.rs`, not of
+  `tree_run.rs`, whose starts are bounded) holds it on a delegated scope.
 - With `--mandate <FILE>`, `approve` and `resume` clear the approval through Mandate (§ Mandate);
   a Mandate refusal is `NotGranted` (16) and performs nothing. A `resume` without `--mandate`
   refuses a grant naming a Mandate approval `NotGranted` (16) and performs nothing.

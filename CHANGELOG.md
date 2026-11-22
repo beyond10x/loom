@@ -31,6 +31,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
 
+### Security
+
+- `b10x-loom run --cgroup-root` and `resume` hold the root before any model call; one another run or `tree run` holds is refused, never re-executed (story:run-cgroup-root-holds-the-root)
+
 ## [0.59.0] - 2026-11-22
 
 ### Added
