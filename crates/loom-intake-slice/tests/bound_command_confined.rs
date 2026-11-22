@@ -663,6 +663,55 @@ impl MoveBlocks {
     }
 }
 
+/// The directories a tool of the ioctl case is looked for in.
+fn program_search_path() -> Vec<PathBuf> {
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default()
+}
+
+/// Where the tool `name` is.
+fn locate_program(name: &str, search: &[PathBuf]) -> Option<PathBuf> {
+    let _ = search;
+    let path = Path::new("/usr/bin").join(name);
+    path.is_file().then_some(path)
+}
+
+/// The locator finds a tool that only a later directory of its search holds, past a relative
+/// entry and a non-executable file of the same name, and answers the file a link there names.
+/// Its search covers `/usr/sbin` and `/sbin`, where Ubuntu's e2fsprogs puts `e4defrag`.
+#[test]
+fn the_locator_finds_a_tool_only_in_a_second_directory() {
+    let root = tempfile::Builder::new()
+        .prefix("locator-")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let [first, second, third] = ["first", "second", "third"].map(|name| root.join(name));
+    for directory in [&first, &second, &third] {
+        std::fs::create_dir(directory).unwrap();
+    }
+    let name = "loom-locator-probe-tool";
+    std::fs::write(first.join(name), "not executable").unwrap();
+    let tool = third.join("real-tool");
+    std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::os::unix::fs::symlink(&tool, second.join(name)).unwrap();
+
+    let search = [PathBuf::from("relative"), first.clone(), second.clone()];
+    assert_eq!(locate_program(name, &search), Some(tool.clone()));
+    assert_eq!(locate_program(name, &[first.clone()]), None);
+    assert_eq!(locate_program(name, &[]), None);
+
+    let search = program_search_path();
+    for directory in ["/usr/sbin", "/sbin", "/usr/bin", "/bin"] {
+        assert!(
+            search.iter().any(|entry| entry == Path::new(directory)),
+            "{directory}: {search:?}"
+        );
+    }
+}
+
 /// What this host lacks for the ioctl case, if anything: `e4defrag`, or an ext4 workspace.
 fn ioctl_prerequisite(workspace: &Path) -> Option<String> {
     if !Path::new(E4DEFRAG).is_file() {
