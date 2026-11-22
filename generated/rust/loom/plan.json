@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "afb7cbe93277fea548eebe4af33f885e7b4a6687af114c264f6ef5db21c590e3",
-    "contract_digest": "d8d7d39dbecbd81471f7e6f22a7ef0473ff3fc40b31db137f4535fc29e93e708"
+    "source_digest": "99569a3ca60997a0974eaf2fce1366071a58f1772021d81153133d49e9582475",
+    "contract_digest": "9f09fd33cc3cd667e839b4c4222ffeb8f4cd07529330430838df7a7aba24cb8c"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -411,6 +411,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ChildNameSource",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ChildNames",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.CopiedRecord",
       "disposition": {
         "disposition": "generated"
@@ -468,6 +482,20 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.ExitClasses",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.OpenRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.OpenRefusalReason",
       "disposition": {
         "disposition": "generated"
       }

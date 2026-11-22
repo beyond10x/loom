@@ -250,7 +250,9 @@ types:
   # `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace`,
   # `UndeclaredDimension`, `ExitClassConflict` (an exit code in both `exits` lists, or in one and
   # as a key of a `from: exit` table of the same binding)), and by `resolve_programs` against the
-  # directory of the bindings file (`ProgramNotBesideBindings`).
+  # directory of the bindings file (`ProgramNotBesideBindings`), and by the open effect port when
+  # it is built (`ArgumentsUndeclared`: `arguments_from` on an `open` action whose protocol
+  # declares no `arguments` schema, so it takes only `{}`).
   - name: loom.bindings.BindingsRefusalReason
     kind: enum
     variants:
@@ -276,6 +278,7 @@ types:
       - UndeclaredDimension
       - ExitClassConflict
       - ProgramNotBesideBindings
+      - ArgumentsUndeclared
 
   # A refusal: the reason, the action it names when it is about one, the member and what is wrong
   # with it. The first defect found is the one reported.
@@ -618,3 +621,69 @@ types:
         type: String
       - name: detail
         type: String
+
+  # Why the open effect port refuses a step (story open-children-from-arguments-from): the
+  # `arguments_from` program was refused by its runner, killed at its timeout, ended with an exit
+  # other than 0, or printed more than 1 MiB or anything but one JSON object
+  # (`ArgumentsUnreadable`); the object does not satisfy the action's `arguments` schema
+  # (`ArgumentsMismatched`, naming the JSON pointer and the keyword); the member `each` names is
+  # missing or not a list (`EachNotAList`), holds an entry that is not a string
+  # (`EachItemNotText`), holds no entry (`NoChildNamed`), holds one entry twice
+  # (`ChildNameRepeated`), or holds an entry that is not one plain segment of ASCII letters, digits,
+  # `-` and `_` (`ChildNameInvalid`). Each names the member and the entry's index, never the text
+  # the program printed. A refused step opens no child and writes nothing: no blob, no observation,
+  # no record.
+  - name: loom.bindings.OpenRefusalReason
+    kind: enum
+    variants:
+      - ArgumentsUnreadable
+      - ArgumentsMismatched
+      - EachNotAList
+      - EachItemNotText
+      - NoChildNamed
+      - ChildNameRepeated
+      - ChildNameInvalid
+
+  # A refused opening: the reason, the action and what is wrong.
+  - name: loom.bindings.OpenRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.OpenRefusalReason
+      - name: action
+        type: String
+      - name: detail
+        type: String
+
+  # Where the names of an opening come from: the executor's `name` (`Name`), the member `each`
+  # names of the request's arguments (`Request`), of the binding's literal `arguments`
+  # (`Literal`), or of the object the `arguments_from` program printed (`ArgumentsFrom`).
+  - name: loom.bindings.ChildNameSource
+    kind: enum
+    variants:
+      - Name
+      - Request
+      - Literal
+      - ArgumentsFrom
+
+  # The payload of the `loom/open` observation the open effect port keeps once the names of a step
+  # are checked and before it opens the children: the case and the action, the case revision the
+  # request was made at, where the names come from, the names in the order given, and, for
+  # `ArgumentsFrom`, the SHA-256 of the program's output, kept as `blobs/<digest>` in the store
+  # directory. An observation of source `ArgumentsFrom` at the request's case revision is the list
+  # a resumed opening takes: the program is not run again at that revision.
+  - name: loom.bindings.ChildNames
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: case_revision
+        type: Integer
+      - name: source
+        type: loom.bindings.ChildNameSource
+      - name: names
+        type: List<String>
+      - name: blob_sha256
+        type: Optional<String>

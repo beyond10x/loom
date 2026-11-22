@@ -1,0 +1,15 @@
+format: loom.bindings/1
+protocol: roadmap@1
+program_root: bindings
+artifacts:
+  roadmap: roadmap.md
+actions:
+  - action: epics.open
+    executor: {kind: open, each: epics, bindings: epic.yaml}
+    arguments_from: [bin/list-epics]
+    evidence:
+      - {kind: epics_opened, subject: roadmap, producer: drive, from: effect, results: {performed: opened}}
+  - action: roadmap.note
+    executor: {kind: program, argv: [bin/note]}
+    evidence:
+      - {kind: note, subject: roadmap, producer: drive, from: exit, results: {"0": noted, "*": failed}}

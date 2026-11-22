@@ -207,8 +207,9 @@ fn child_named(data: &EvidenceData) -> Option<&str> {
     }
 }
 
-/// Whether `name` is one plain segment of a child id.
-fn plain_segment(name: &str) -> bool {
+/// Whether `name` is one plain segment of a child id: non-empty, ASCII letters, digits, `-` and
+/// `_` alone. An opening refuses any other name, and so does a port before it writes.
+pub fn plain_child_name(name: &str) -> bool {
     !name.is_empty()
         && name
             .bytes()
@@ -218,7 +219,7 @@ fn plain_segment(name: &str) -> bool {
 /// Whether `link.name` is one plain segment and the child id the opening built from it:
 /// `<parent>.<name>`, or `<parent>.<name>.<n>` with `n` from 2, written without a leading zero.
 pub(crate) fn link_name_fits(link: &CaseLink) -> bool {
-    if !plain_segment(&link.name) {
+    if !plain_child_name(&link.name) {
         return false;
     }
     let base = format!("{}.{}", link.parent.0, link.name);
@@ -441,7 +442,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         }
         let mut names = BTreeSet::new();
         for child in children {
-            if !plain_segment(&child.name) {
+            if !plain_child_name(&child.name) {
                 return Err(ChildError::InvalidName {
                     name: child.name.clone(),
                 });

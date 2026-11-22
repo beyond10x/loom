@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use b10x_loom_bindings::{
-    MAX_DOCUMENT_BYTES, OpenEffects, Refusal, check, check_case_open, decode,
+    MAX_DOCUMENT_BYTES, OpenEffects, OpenPortError, Refusal, check, check_case_open, decode,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
@@ -117,6 +117,35 @@ fn loaded(text: &str) -> BindingsDocument {
     check(&document, "parent@1", &parent_protocol())
         .unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
     document
+}
+
+/// `OpenEffects::new` for documents with no `arguments_from`: no runner, the scratch's `workspace`
+/// and `store` beside the bindings directory; a refusal of the document as the constructor's error.
+fn open_port<'a>(
+    governor: &'a CanonGovernor<FileCaseStore>,
+    case: CaseId,
+    document: &'a BindingsDocument,
+    file: &Path,
+    catalog: &ProtocolCatalog,
+) -> Result<OpenEffects<'a, FileCaseStore>, Refusal> {
+    let root = file
+        .ancestors()
+        .find(|directory| directory.join("store").is_dir())
+        .expect("the bindings file is in a scratch");
+    OpenEffects::new(
+        governor,
+        case,
+        document,
+        file,
+        catalog,
+        &root.join("workspace"),
+        &root.join("store"),
+        None,
+    )
+    .map_err(|error| match error {
+        OpenPortError::Refused(refusal) => refusal,
+        OpenPortError::Runner(error) => panic!("no runner is needed: {error}"),
+    })
 }
 
 fn governor(scratch: &Scratch) -> (CanonGovernor<FileCaseStore>, CaseId) {
@@ -231,7 +260,7 @@ fn an_each_argument_with_three_entries_opens_three_children_and_three_records() 
     let file = scratch.write("conf/parent.yaml", &text);
     let document = loaded(&text);
     let (governor, case) = governor(&scratch);
-    let effects = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog()).unwrap();
+    let effects = open_port(&governor, case.clone(), &document, &file, &catalog()).unwrap();
     performed(&drive(
         &governor,
         &effects,
@@ -274,7 +303,7 @@ fn a_named_child_opened_again_gets_the_next_numbered_id() {
     let file = scratch.write("conf/parent.yaml", &text);
     let document = loaded(&text);
     let (governor, case) = governor(&scratch);
-    let effects = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog()).unwrap();
+    let effects = open_port(&governor, case.clone(), &document, &file, &catalog()).unwrap();
     performed(&drive(&governor, &effects, &case, json!({})));
     performed(&drive(&governor, &effects, &case, json!({})));
     let tree: Vec<String> = governor
@@ -307,8 +336,7 @@ fn a_child_artifact_the_parent_does_not_hold_opens_at_r0_wherever_it_is_placed()
         let file = scratch.write("conf/parent.yaml", &text);
         let document = loaded(&text);
         let (governor, case) = governor(&scratch);
-        let effects =
-            OpenEffects::new(&governor, case.clone(), &document, &file, &catalog()).unwrap();
+        let effects = open_port(&governor, case.clone(), &document, &file, &catalog()).unwrap();
         performed(&drive(&governor, &effects, &case, json!({})));
         let opened = governor
             .case_state(&CaseId("case-1.review".into()))
@@ -383,7 +411,7 @@ fn the_child_is_opened_with_the_independence_of_the_bindings_file_beside_the_par
     let file = scratch.write("conf/parent.yaml", &text);
     let document = loaded(&text);
     let (governor, case) = governor(&scratch);
-    let effects = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog()).unwrap();
+    let effects = open_port(&governor, case.clone(), &document, &file, &catalog()).unwrap();
     performed(&drive(&governor, &effects, &case, json!({})));
     let child = CaseId("case-1.review".into());
     let declared: Vec<String> = governor
@@ -449,7 +477,7 @@ fn a_child_protocol_the_catalog_does_not_hold_is_refused_before_anything_is_writ
     };
     let before = listing(&scratch.store());
     let without_child = catalog_of(&[("parent@1", PARENT)]);
-    let refused = OpenEffects::new(&governor, case.clone(), &document, &file, &without_child)
+    let refused = open_port(&governor, case.clone(), &document, &file, &without_child)
         .map(|_| ())
         .expect_err("the child protocol is not in the catalog");
     assert_eq!(refused.0.action.as_deref(), Some(OPEN), "{refused}");
@@ -458,7 +486,7 @@ fn a_child_protocol_the_catalog_does_not_hold_is_refused_before_anything_is_writ
         "conf/sub/child.yaml",
         "format: loom.bindings/1\nprotocol: parent@1\nactions: []\n",
     );
-    let refused = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog())
+    let refused = open_port(&governor, case.clone(), &document, &file, &catalog())
         .map(|_| ())
         .expect_err("the child file binds another protocol");
     assert_eq!(refused.0.reason, Reason::ProtocolMismatch, "{refused}");
@@ -498,7 +526,7 @@ fn a_child_bindings_file_at_the_size_bound_is_read_and_one_over_it_is_refused_be
         "conf/sub/child.yaml",
         &child_bindings_of_size(MAX_DOCUMENT_BYTES + 1),
     );
-    let refused = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog())
+    let refused = open_port(&governor, case.clone(), &document, &file, &catalog())
         .map(|_| ())
         .expect_err("a child bindings file over the bound is refused");
     assert_eq!(refused.0.reason, Reason::Malformed, "{refused}");
@@ -511,7 +539,7 @@ fn a_child_bindings_file_at_the_size_bound_is_read_and_one_over_it_is_refused_be
         "conf/sub/child.yaml",
         &child_bindings_of_size(MAX_DOCUMENT_BYTES),
     );
-    let effects = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog())
+    let effects = open_port(&governor, case.clone(), &document, &file, &catalog())
         .expect("a child bindings file at the bound is read");
     performed(&drive(&governor, &effects, &case, json!({})));
     assert_eq!(

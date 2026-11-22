@@ -270,6 +270,27 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `ArgumentsUnreadable`, and the bound program does not start. The `arguments_from` program
   starts on every step that reaches it, leaves no observation and does not count against
   `budget.max_runs`.
+- An `open` executor with `each` reads the names of its children from the same object: the
+  request's arguments, else the binding's `arguments`, else the object its `arguments_from`
+  program prints. That program runs as a `program` binding's does, with the same environment
+  (never `LOOM_RETRY_FEEDBACK`), on the request's arguments in the workspace root, under the
+  binding's `timeout_seconds`. `OpenEffects::new` takes the workspace, the store directory and the
+  host's runner, which only a document with `arguments_from` needs, and refuses `arguments_from`
+  on an action whose protocol declares no `arguments` schema (`ArgumentsUndeclared`). When the
+  action declares a schema, the object is held to it with Canon's `check_arguments`
+  (`ArgumentsMismatched`, naming the JSON pointer and the keyword). The member `each` names must be
+  a list (`EachNotAList`) of strings (`EachItemNotText`) with at least one entry (`NoChildNamed`),
+  each given once (`ChildNameRepeated`) and one plain segment of ASCII letters, digits, `-` and `_`
+  (`ChildNameInvalid`); a refusal names the entry's index, never its text. A program that cannot
+  give its object refuses the step `ArgumentsUnreadable`. A refused step opens no child and writes
+  nothing.
+- Once the names are checked, the program's output is kept as `blobs/<sha256>` in the store
+  directory and the names as one `loom/open` observation (`loom.bindings.ChildNames`: the case,
+  the action, the case revision, the source, the names in order and the blob digest); then the
+  children open. A step cut before the governor's write takes that list again at the same case
+  revision and does not run the program twice; the governor takes over each child already written.
+  At another case revision the program runs again. The step's report holds `names`, `source` and
+  `blob_sha256` beside `children` and `evidence`.
 - A case held under another protocol than the document's `protocol` refuses the step
   `CaseOfAnotherProtocol`, naming both, before anything starts, and nothing is recorded.
 - A port hands an action's program to its runner at most `budget.max_runs` times in a case,
