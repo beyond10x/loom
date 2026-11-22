@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:drop-the-substrate-git-feature
 kind: story
-status: proposed
+status: active
 title: Loom links Substrate without its git feature, so the binary needs no libgit2
 summary: remove features = [git] from the host dependency; Cargo.lock loses git2, gix, curl; a lock-file test and an ldd check; a Git source stays refused
 tags:
@@ -22,9 +22,10 @@ scope:
   path: crates/loom-intake-slice/tests/host_git_hardening.rs
 - confidence: cited
   path: crates/loom-xtask/
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:46:20Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T05:48:22Z", actor: "agent:sdc", revision: 6, executor: "agent:loom", correlation: "runbook-activation-2026-11-22T0549Z"}
 ---
 ## Outcome
 
