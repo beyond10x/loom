@@ -15,7 +15,7 @@ test-unsynced-store = []
 
 [dependencies]
 b10x-loom-protocols = { path = "../loom-protocols" }
-b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.10.0" }
+b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.11.0" }
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-decision = { path = "../loom-decision" }
 b10x-loom-executor = { path = "../loom-executor" }
