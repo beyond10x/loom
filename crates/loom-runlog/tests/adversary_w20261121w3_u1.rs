@@ -150,8 +150,14 @@ fn contract_line(contract: &Value, kind: &str) -> serde_json::Map<String, Value>
     {
         // A child line's `record_digest` is a SHA-256 (story child-record-in-the-run-log), a form
         // the contract cannot state.
+        // A `stopped` line holds `budget` only on a `BudgetSpent` stop and only as one of the
+        // budgets' spellings (story tree-status-names-what-it-read), which it cannot state either.
         let value = if name == "record_digest" {
             json!(digest(b"facts"))
+        } else if kind == "Stopped" && name == "stop" {
+            json!("BudgetSpent")
+        } else if kind == "Stopped" && name == "budget" {
+            json!("MaxSteps")
         } else {
             sample(stated)
         };

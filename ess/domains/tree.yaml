@@ -25,10 +25,20 @@ types:
   # the choice between two legitimate outcomes or a writer's handoff (exit 3). `AwaitingAuthority`:
   # an admissible action needs an approval of its capability (exit 3). `Stuck`: a case has no
   # useful action, no legitimate outcome and nothing awaiting approval (exit 4). `BudgetSpent`: the
-  # step or the wall-time budget is spent before the next step (exit 5).
+  # run was cancelled, or its step or wall-time budget is spent, before the next step
+  # (`loom.tree.SpentBudget`, exit 5).
   - name: loom.tree.TreeStop
     kind: enum
     variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent]
+
+  # The budget that ended a `tree run` `BudgetSpent`, asked in this order before each step:
+  # `Cancel`, the run's cancel handle was set; `MaxSteps`, the run took its `max_steps` steps;
+  # `MaxWallSeconds`, its `max_wall_seconds` of wall time are spent. An action's own run limit
+  # (`budget.max_runs` of a binding) ends no run: it refuses that action's step. A tree run starts
+  # no model, so no model-call budget ends one.
+  - name: loom.tree.SpentBudget
+    kind: enum
+    variants: [Cancel, MaxSteps, MaxWallSeconds]
 
   # What a printed decision records. `Approve`: `tree approve` of the capability, with which the
   # next `tree run` takes the action itself. `ApproveAction`: `tree approve --action`, with which
@@ -126,10 +136,11 @@ types:
     kind: enum
     variants: [Host, Directory]
 
-  # One protocol of a tree opened with `--protocols`, an entry of `tree-protocols.json`: the
-  # registration it is held under, its protocol id and revision as the document declares them, the
-  # name of the file it was read from and the SHA-256 of its bytes, which name its blob in the
-  # store.
+  # One protocol of a tree: an entry of `tree-protocols.json` for a tree opened with
+  # `--protocols`, and of `tree status`'s `protocols`. The registration it is held under, its
+  # protocol id and revision as the document declares them, the file it was read from (the
+  # catalog's source path) and the SHA-256 of the document's bytes as read, which names its blob
+  # in the store of a tree opened with `--protocols`.
   - name: loom.tree.TreeProtocol
     kind: struct
     fields:
@@ -248,11 +259,30 @@ types:
       - name: record_kind
         type: String
 
+  # Whether a case's run log verified when `tree status` read it. `verified` is true when the log
+  # verifies or is missing (read as a log of no line), and then `refusal`, `line` and `detail` are
+  # absent. Otherwise it is false and they are the reader's refusal, the first line that fails it
+  # counted from 0, and what is wrong with that line; the case's entry then holds no stop, budget,
+  # approval or action read from that log.
+  - name: loom.tree.StatusLog
+    kind: struct
+    fields:
+      - name: verified
+        type: Boolean
+      - name: refusal
+        type: Optional<loom.runlog.RunLogRefusal>
+      - name: line
+        type: Optional<Integer>
+      - name: detail
+        type: Optional<String>
+
   # One case of `tree status`: its id, its parent (absent for the root), the registration it is
   # held under, its case revision, the outcome it ended through or the stop its last run recorded,
   # its open obligations, and the paths of its case file and its run log; then the last segment of
   # its id below its parent, its protocol id and revision, the decisions its last stop waits on,
-  # its records, the runs of its bound programs, its approvals and the records copied into it.
+  # its records, the runs of its bound programs, its approvals and the records copied into it; then
+  # whether its run log verified (absent only in a status printed before the member existed) and,
+  # when its last `stopped` line is a `BudgetSpent` stop naming one, the budget that ended that run.
   - name: loom.tree.CaseStatus
     kind: struct
     fields:
@@ -290,10 +320,16 @@ types:
         type: List<loom.tree.StatusApproval>
       - name: copies
         type: List<loom.tree.StatusCopy>
+      - name: log
+        type: Optional<loom.tree.StatusLog>
+      - name: budget
+        type: Optional<loom.tree.SpentBudget>
 
   # `tree status`: its format `loom.tree-status/1` and the version of `b10x-loom-tree` that printed
   # it, the store directory, the workspace, the root case, one entry per case of the tree in tree
-  # order, and, for a tree opened with `--protocols`, each protocol it holds.
+  # order, and one entry per protocol the tree's cases use, read from the catalog the status was
+  # read with (the host's, or the one a tree opened with `--protocols` keeps): listed once however
+  # many cases use it, in the order of its first case.
   - name: loom.tree.TreeStatus
     kind: struct
     fields:

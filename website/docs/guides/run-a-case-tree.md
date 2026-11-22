@@ -128,8 +128,12 @@ $ b10x-loom tree status --store store | jq -c '.cases[] | {case, protocol, outco
 
 `tree status` prints `loom.tree-status/1`: per case its link, protocol, outcome or stop, its
 records in the order received, its program runs with their attempts, its approvals and the records
-a `copy` binding copied into it. `tree status` and `tree verify` read the store and never hold it,
-so a live view can read the tree while a run holds it.
+a `copy` binding copied into it, whether its run log verified (`log`; a log that does not is named
+with the refusal, the line and what is wrong, and nothing is read from it) and, after a
+`BudgetSpent` stop, the budget that ended the run (`budget`: `Cancel`, `MaxSteps` or
+`MaxWallSeconds`). `protocols` lists each protocol the cases use once, with the SHA-256 of its
+document. `tree status` and `tree verify` read the store and never hold it, so a live view can read
+the tree while a run holds it.
 
 ## Choose between two outcomes
 
