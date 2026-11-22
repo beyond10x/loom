@@ -2028,6 +2028,138 @@ fn the_shared_trees_are_made() {
     drop(observed_tree());
 }
 
+/// A key of the shared trees no other test uses: this process's and this instant's.
+fn a_key_of_its_own() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("own{}x{nanos}", std::process::id())
+}
+
+/// The directories of `base` whose names start with the attempt prefix of `name` under `key`.
+fn attempts(base: &Path, name: &str, key: &str) -> Vec<PathBuf> {
+    let prefix = format!("tree-run-{name}-{key}-");
+    let mut found: Vec<PathBuf> = fs::read_dir(base)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn a_half_built_attempt_is_never_read() {
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let key = a_key_of_its_own();
+    // What a killed builder leaves: an attempt directory of the key, a file, no sentinel.
+    let killed = base.join(format!("tree-run-tiny-{key}-1-0"));
+    fs::create_dir_all(&killed).unwrap();
+    fs::write(killed.join("half.txt"), b"half").unwrap();
+
+    let (building, built) = std::sync::mpsc::channel::<()>();
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let first = {
+        let key = key.clone();
+        std::thread::spawn(move || {
+            shared_fixture("tiny", "done.json", &key, |root| {
+                fs::create_dir_all(root).unwrap();
+                fs::write(root.join("made.txt"), b"made").unwrap();
+                building.send(()).unwrap();
+                wait.recv().unwrap();
+                fs::write(root.join("done.json"), b"{}").unwrap();
+            })
+        })
+    };
+    built.recv().unwrap();
+    // While the builder runs, no directory of the key holds the sentinel.
+    for attempt in attempts(&base, "tiny", &key) {
+        assert!(!attempt.join("done.json").exists(), "{}", attempt.display());
+    }
+    let called = Arc::new(AtomicBool::new(false));
+    let second = {
+        let (key, called) = (key.clone(), Arc::clone(&called));
+        std::thread::spawn(move || {
+            shared_fixture("tiny", "done.json", &key, |_| {
+                called.store(true, Ordering::SeqCst);
+            })
+        })
+    };
+    // The second asker reaches the lock and waits on it before the first seals its attempt.
+    std::thread::sleep(Duration::from_millis(200));
+    go.send(()).unwrap();
+    let made = first.join().unwrap();
+    let read = second.join().unwrap();
+
+    assert_eq!(made, read, "the waiter reads the builder's directory");
+    assert!(!called.load(Ordering::SeqCst), "the waiter built again");
+    assert_ne!(made, killed);
+    assert!(made.join("done.json").is_file() && made.join("made.txt").is_file());
+    // The half-built attempt is untouched: not read, not reused, not removed.
+    assert_eq!(fs::read(killed.join("half.txt")).unwrap(), b"half");
+    assert!(!killed.join("done.json").exists());
+    assert_eq!(attempts(&base, "tiny", &key), [killed.clone(), made.clone()]);
+    // Asked again, the sealed attempt is read and the builder is not called.
+    let again = shared_fixture("tiny", "done.json", &key, |_| panic!("built again"));
+    assert_eq!(again, made);
+    for attempt in [killed, made] {
+        fs::remove_dir_all(attempt).unwrap();
+    }
+    let _ = fs::remove_file(base.join(format!("tree-run-tiny-{key}.lock")));
+}
+
+#[test]
+fn a_start_in_a_fixture_build_is_counted_as_the_fixture() {
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let key = a_key_of_its_own();
+    let starts = base.join(format!("tree-run-starts-{key}"));
+    let before = std::env::var_os(STARTS);
+    // SAFETY: nextest runs each test in a process of its own, and this runs before the test
+    // starts a thread or a process; the step's own starts file is not this process's.
+    unsafe { std::env::set_var(STARTS, &starts) };
+    let made = shared_fixture("tiny", "done.json", &key, |root| {
+        let tree = Tree {
+            root: root.to_owned(),
+            started: Instant::now(),
+            shared: true,
+        };
+        fs::create_dir_all(root).unwrap();
+        let version = tree.command().arg("--version").output().unwrap();
+        assert_eq!(version.status.code(), Some(0), "{}", stderr(&version));
+        fs::write(root.join("done.json"), b"{}").unwrap();
+    });
+    let tree = Tree {
+        root: made.clone(),
+        started: Instant::now(),
+        shared: true,
+    };
+    let version = tree.command().arg("--version").output().unwrap();
+    assert_eq!(version.status.code(), Some(0), "{}", stderr(&version));
+    // SAFETY: as above; no thread of this test runs.
+    unsafe {
+        match before {
+            Some(value) => std::env::set_var(STARTS, value),
+            None => std::env::remove_var(STARTS),
+        }
+    }
+    let lines = fs::read_to_string(&starts).unwrap();
+    let lines: Vec<&str> = lines.lines().collect();
+    assert!(lines.contains(&"fixture:tiny"), "{lines:?}");
+    assert!(
+        lines.contains(&"a_start_in_a_fixture_build_is_counted_as_the_fixture"),
+        "{lines:?}"
+    );
+    fs::remove_dir_all(&made).unwrap();
+    let _ = fs::remove_file(&starts);
+    let _ = fs::remove_file(base.join(format!("tree-run-tiny-{key}.lock")));
+}
+
 /// The variable naming the directory [`observed_tree`] has its child process build the tree in.
 const OBSERVED_ROOT: &str = "TREE_RUN_OBSERVED_ROOT";
 

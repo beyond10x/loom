@@ -942,6 +942,25 @@ mod tests {
         assert_eq!((text.as_str(), failure), ("", None));
     }
 
+    /// A start the timed run counts as `fixture:<tree>` was made by a test building a shared tree
+    /// the setup should have built (`story:tree-run-binary-fits-its-start-bound`): it fails the
+    /// step, naming the tree, though the count is within the bound; the same count of test lines
+    /// passes.
+    #[test]
+    fn a_fixture_start_in_the_timed_run_fails_the_step() {
+        let budget = &START_BUDGETS[0];
+        let ran = parse_junit(&tree_run_report(&[1.0, 2.0]));
+        let (text, failure) = start_verdict(budget, &ran, Some("case_0\nfixture:ended\ncase_1\n"));
+        let failure = failure.expect("a fixture start in the timed run fails the step");
+        assert!(
+            failure.contains("tree_run") && failure.contains("ended"),
+            "{failure}"
+        );
+        assert!(text.contains("3 starts"), "{text}");
+        let (text, failure) = start_verdict(budget, &ran, Some("case_0\ncase_0\ncase_1\n"));
+        assert_eq!(failure, None, "{text}");
+    }
+
     /// The `tree_run` tests are held to their summed budget in both layouts of
     /// `story:one-test-binary-per-crate`: as the binary `b10x-loom-cli::tree_run`, and as the
     /// module `tree_run` of `b10x-loom-cli::main`, its tests named `tree_run::…`. Another module of

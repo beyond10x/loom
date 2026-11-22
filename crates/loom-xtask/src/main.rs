@@ -64,6 +64,7 @@ mod ess_suite;
 mod linked_libraries;
 mod protocols_vendor;
 mod release;
+mod shared_trees;
 #[path = "../../loom-docs/src/stamp.rs"]
 mod stamp;
 mod test_step;
