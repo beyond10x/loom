@@ -4669,17 +4669,17 @@ mod tests {
         );
     }
 
-    /// A driver the table's tests open: no Substrate driver, only the directory it was opened for.
+    /// A driver the table's tests open: no Substrate driver.
     #[derive(Debug)]
-    struct FakeDriver(PathBuf);
+    struct FakeDriver;
 
     /// An opener that counts its calls in `calls` and opens a [`FakeDriver`].
     fn counting(
         calls: &std::cell::Cell<usize>,
     ) -> impl FnOnce(&DriverKey) -> Result<FakeDriver, ConfinementError> + '_ {
-        move |key| {
+        move |_| {
             calls.set(calls.get() + 1);
-            Ok(FakeDriver(key.directory.clone()))
+            Ok(FakeDriver)
         }
     }
 
@@ -4760,8 +4760,7 @@ mod tests {
                 &table_key(root.path(), "elsewhere", DriverEgress::NONE),
                 counting(&calls),
             )
-            .err()
-            .expect("another directory under a running root opens nothing");
+            .expect_err("another directory under a running root opens nothing");
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
         assert_eq!(error.detail, running_detail(root.path()));
         assert_eq!(calls.get(), 1, "the opener was not called again");
@@ -4793,8 +4792,7 @@ mod tests {
         };
         let error = table
             .driver(&table_key(root.path(), "here", bundle), counting(&calls))
-            .err()
-            .expect("another egress under a running root opens nothing");
+            .expect_err("another egress under a running root opens nothing");
         assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
         assert_eq!(error.detail, running_detail(root.path()));
         assert_eq!(calls.get(), 1, "the opener was not called again");
