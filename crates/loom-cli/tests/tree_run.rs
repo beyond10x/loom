@@ -44,8 +44,6 @@ mod handoff_when;
 mod principal;
 #[path = "tree_run/signals.rs"]
 mod signals;
-#[path = "tree_run/sync_switch_marker.rs"]
-mod sync_switch_marker;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 
@@ -1576,6 +1574,18 @@ fn observed_tree() -> (Tree, Vec<Value>) {
         shared: false,
     };
     (tree, seen)
+}
+
+/// Not a test of its own: the test step (`crates/loom-xtask/src/test_step.rs`) runs it after its
+/// build and before its timed run, so the shared trees ([`ended_tree`], [`stepped_tree`],
+/// [`observed_tree`]) are made once and no test of the timed run makes one or waits on the lock of
+/// another that does: a waiter's wait counted in the binary's summed time, once per waiter.
+#[test]
+#[ignore = "run by the test step before its timed run"]
+fn the_shared_trees_are_made() {
+    drop(ended_tree());
+    drop(stepped_tree());
+    drop(observed_tree());
 }
 
 /// The variable naming the directory [`observed_tree`] has its child process build the tree in.

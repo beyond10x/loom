@@ -72,6 +72,8 @@ tasks:
 
   suite-generate:
     desc: Rewrite generated/ess/loom/, the conformance suite synthesized from ess/ (--suite-format 5) and the digest of its inputs; takes minutes, run it after every change under ess/.
+    env:
+      SLOT_TIMEOUT: 30m
     cmds:
       - cargo run -q --locked -p loom-xtask -- suite-generate
 
@@ -89,8 +91,11 @@ tasks:
 
   slow:
     desc: The slow lane, not part of check; run it after every change under ess/. Synthesizes ess/ again and fails unless generated/ess/loom/ is equal byte for byte, then runs every slow_ test.
+    env:
+      SLOT_TIMEOUT: 30m
     cmds:
       - cargo run -q --locked -p loom-xtask -- suite-check
+      - cargo nextest run --workspace --locked --profile slow --no-run
       - cargo nextest run --workspace --locked --profile slow
 
   generate:
