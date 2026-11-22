@@ -281,26 +281,69 @@ fn security_a_long_stderr_line_holding_many_urls_is_walked_in_linear_time() {
     );
 }
 
-#[test]
-fn security_a_stderr_of_many_pem_end_lines_is_walked_in_linear_time() {
-    let end = ["-----END ", "PRIVATE", " KEY-----"].concat();
+/// Rounds of each stderr the pem-end cases take the least time of.
+const PEM_ROUNDS: usize = 2;
+
+/// `starting`, then `lines` lines `<at> <line>`, then the refusal.
+fn numbered(lines: usize, line: &str) -> String {
     let mut stderr = String::from("starting\n");
-    for at in 0..100_000 {
-        stderr.push_str(&format!("{at} {end}\n"));
+    for at in 0..lines {
+        stderr.push_str(&format!("{at} {line}\n"));
     }
     stderr.push_str(&format!("{REFUSED}\n"));
-    let outcome = session("many-ends", &stderr);
+    stderr
+}
+
+/// A stderr of `lines` `-----END` lines without a `-----BEGIN` is walked in time linear in its
+/// length: the walk withholds every line before the last one, and its session takes at most
+/// twice (and 0.25 s more) what a session over a stderr of the same size and line count without
+/// one takes, each the least of [`PEM_ROUNDS`] rounds taken back to back in this process. The
+/// earlier fill, which marked every line before each `-----END` again, did `lines²/2` writes in
+/// each of the walk's four readings, many times the session's own time at 30 000 lines; a ratio
+/// to a baseline taken beside it holds on a loaded host, where a bound of 10 s of wall time did
+/// not (11.7 to 17.5 s at 100 000 lines, 2026-11-21).
+fn many_pem_ends_walk_linearly(lines: usize) {
+    let end = ["-----END ", "PRIVATE", " KEY-----"].concat();
+    let ends = numbered(lines, &end);
+    let plain = numbered(lines, &"x".repeat(end.len()));
+    assert_eq!(ends.len(), plain.len(), "the baseline is as long");
+    let mut least_ends = Duration::MAX;
+    let mut least_plain = Duration::MAX;
+    for round in 0..PEM_ROUNDS {
+        let baseline = session(&format!("plain-{lines}-{round}"), &plain);
+        assert!(
+            !baseline.why.contains("withheld"),
+            "the baseline holds no credential's shape: {:?}",
+            tail_of(&baseline.why)
+        );
+        least_plain = least_plain.min(baseline.took);
+        let outcome = session(&format!("many-ends-{lines}-{round}"), &ends);
+        assert!(
+            tail_of(&outcome.why).ends_with(&format!("they hold a credential's shape]\n{REFUSED}")),
+            "the tail withholds every line before the last `-----END`: {:?}",
+            tail_of(&outcome.why)
+        );
+        least_ends = least_ends.min(outcome.took);
+    }
     assert!(
-        tail_of(&outcome.why).ends_with(&format!("they hold a credential's shape]\n{REFUSED}")),
-        "the tail withholds every line before the last `-----END`: {:?}",
-        tail_of(&outcome.why)
+        least_ends <= least_plain * 2 + Duration::from_millis(250),
+        "a {} byte stderr of {lines} `-----END` lines took {least_ends:?} to walk, past twice the \
+         {least_plain:?} of one as long without them (least of {PEM_ROUNDS} each)",
+        ends.len()
     );
-    assert!(
-        outcome.took < BOUND,
-        "a {} byte stderr took {:?} to walk, past {BOUND:?}",
-        stderr.len(),
-        outcome.took
-    );
+}
+
+/// [`many_pem_ends_walk_linearly`] at 30 000 lines.
+#[test]
+fn security_a_stderr_of_many_pem_end_lines_is_walked_in_linear_time() {
+    many_pem_ends_walk_linearly(30_000);
+}
+
+/// [`many_pem_ends_walk_linearly`] at 100 000 lines, the count the case held before, in the slow
+/// lane (`task slow`): about 40 s.
+#[test]
+fn slow_security_a_stderr_of_many_pem_end_lines_is_walked_in_linear_time() {
+    many_pem_ends_walk_linearly(100_000);
 }
 
 /// The kinds of line the property draws from.

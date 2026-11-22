@@ -75,9 +75,34 @@ use crate::cli::write::admits;
 use crate::cli::{CliError, SourceEntities, WRITE_PROFILES, WriteError, idempotency_key};
 
 /// The bound on making a connection to the relay.
-const CONNECT_BOUND: Duration = Duration::from_secs(5);
+pub const CONNECT_BOUND: Duration = Duration::from_secs(5);
 /// The bound on one whole request, its answer read included.
-const REQUEST_BOUND: Duration = Duration::from_secs(20);
+pub const REQUEST_BOUND: Duration = Duration::from_secs(20);
+
+/// The bounds a relay client's requests run under. A host's client keeps [`RelayBounds::HOST`]
+/// ([`CONNECT_BOUND`], [`REQUEST_BOUND`]); a test sets a shorter connect bound
+/// ([`ConnectorsRelay::with_bounds`]) so that it does not wait 5 s for a connect to end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelayBounds {
+    /// Making a connection to the relay.
+    pub connect: Duration,
+    /// One whole request, its answer read included.
+    pub request: Duration,
+}
+
+impl RelayBounds {
+    /// A host's bounds: [`CONNECT_BOUND`] and [`REQUEST_BOUND`].
+    pub const HOST: RelayBounds = RelayBounds {
+        connect: CONNECT_BOUND,
+        request: REQUEST_BOUND,
+    };
+}
+
+impl Default for RelayBounds {
+    fn default() -> Self {
+        Self::HOST
+    }
+}
 const DESCRIBE_PATH: &str = "/v1/describe";
 const INVOKE_PATH: &str = "/v1alpha2/invoke";
 const LOOPBACK_PREFIX: &str = "http://127.0.0.1:";
@@ -149,6 +174,7 @@ pub fn loopback_url(value: &str) -> Result<RelayUrl, RelayUrlRefused> {
 struct Shared {
     runtime: Option<tokio::runtime::Runtime>,
     http: Result<reqwest::Client, String>,
+    bounds: RelayBounds,
 }
 
 impl Shared {
@@ -159,6 +185,7 @@ impl Shared {
     }
 
     fn bounded(connect: Duration, request: Duration) -> Self {
+        let bounds = RelayBounds { connect, request };
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .thread_name("loom-connectors-relay")
@@ -170,6 +197,7 @@ impl Shared {
                 return Self {
                     runtime: None,
                     http: Err(format!("the relay client's runtime did not start: {error}")),
+                    bounds,
                 };
             }
         };
@@ -184,6 +212,7 @@ impl Shared {
         Self {
             runtime: Some(runtime),
             http,
+            bounds,
         }
     }
 }
@@ -239,6 +268,22 @@ impl ConnectorsRelay {
             sources,
             shared: Arc::new(Shared::start()),
         })
+    }
+
+    /// This client on a new HTTP client and runtime under `bounds` in place of
+    /// [`RelayBounds::HOST`]. A host keeps [`RelayBounds::HOST`]; a test sets a short connect
+    /// bound so that it does not wait 5 s for a connect that never completes.
+    #[must_use]
+    pub fn with_bounds(self, bounds: RelayBounds) -> Self {
+        Self {
+            shared: Arc::new(Shared::bounded(bounds.connect, bounds.request)),
+            ..self
+        }
+    }
+
+    /// The bounds this client's requests run under.
+    pub fn bounds(&self) -> RelayBounds {
+        self.shared.bounds
     }
 
     /// The same client (URL, pair, HTTP client and runtime) over other `sources`; a source of
@@ -1295,5 +1340,31 @@ mod tests {
     fn the_bounds_are_five_and_twenty_seconds() {
         assert_eq!(CONNECT_BOUND, Duration::from_secs(5));
         assert_eq!(REQUEST_BOUND, Duration::from_secs(20));
+        assert_eq!(
+            RelayBounds::HOST,
+            RelayBounds {
+                connect: CONNECT_BOUND,
+                request: REQUEST_BOUND
+            }
+        );
+        assert_eq!(RelayBounds::default(), RelayBounds::HOST);
+        let relay = ConnectorsRelay::new(
+            "http://127.0.0.1:9",
+            AdapterAlias("a".to_owned()),
+            ConnectionId("c".to_owned()),
+            Vec::new(),
+        )
+        .expect("a loopback URL");
+        assert_eq!(relay.bounds(), RelayBounds::HOST, "a host's client");
+        assert_eq!(
+            relay.over(Vec::new()).bounds(),
+            RelayBounds::HOST,
+            "over keeps them"
+        );
+        let short = RelayBounds {
+            connect: Duration::from_secs(1),
+            request: REQUEST_BOUND,
+        };
+        assert_eq!(relay.with_bounds(short).bounds(), short);
     }
 }
