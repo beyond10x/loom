@@ -59,6 +59,7 @@ impl Tree {
             ("tour-leg@1", "tour-leg.yaml"),
             ("fork@1", "fork.yaml"),
             ("sign@1", "sign.yaml"),
+            ("review@1", "review.yaml"),
         ] {
             installed
                 .install_file(
@@ -1435,5 +1436,319 @@ fn the_printed_handoff_command_runs() {
     assert!(
         matches!(&written.last().unwrap().event, RunLogEvent::Stopped(stopped) if stopped.stop == "AwaitingPerson"),
         "{written:?}"
+    );
+}
+
+/// A `review@1` case brought to its first wait: the writer wrote the draft once, and the review
+/// and the judgement, both a person's with no capability, wait.
+fn reviewed(label: &str) -> Tree {
+    let tree = Tree::new(label);
+    open_with(&tree, "review@1", "review.bindings.yaml");
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let waited = json(&ran);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    assert_eq!(waited["decisions"].as_array().unwrap().len(), 2, "{waited}");
+    tree
+}
+
+/// `tree approve` of the person action `action` of the root as `reviewer`, with `flags` after.
+fn review(tree: &Tree, action: &str, flags: &[&str]) -> Output {
+    tree.command()
+        .args(["tree", "approve", "--at", AT, "--store"])
+        .arg(tree.store())
+        .args([
+            "--case",
+            "root",
+            "--principal",
+            "reviewer",
+            "--action",
+            action,
+        ])
+        .args(flags)
+        .output()
+        .unwrap()
+}
+
+/// Every file below `store` and its bytes, by path.
+fn every_file(store: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut directories = vec![store.to_owned()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(&directory).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                directories.push(entry.path());
+            } else {
+                files.push((entry.path(), fs::read(entry.path()).unwrap_or_default()));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// `output` refused `NotAPersonAction` with exit 1, saying each of `named`.
+fn refused_naming(output: &Output, named: &[&str]) {
+    let said = stderr(output);
+    assert_eq!(output.status.code(), Some(1), "{said}");
+    assert!(said.contains("NotAPersonAction"), "{said}");
+    for name in named {
+        assert!(said.contains(name), "{name}: {said}");
+    }
+}
+
+#[test]
+fn a_person_records_the_named_result() {
+    let tree = reviewed("named-result");
+    let before = log_lines(&tree, "root").len();
+    let taken = review(&tree, "draft.review", &["--result", "rejected"]);
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let reviews = records_of(&tree, "root", "draft_review");
+    assert_eq!(reviews.len(), 1, "{reviews:?}");
+    assert_eq!(reviews[0]["result"], "rejected", "{reviews:?}");
+    assert_eq!(reviews[0]["producer"], "reviewer", "{reviews:?}");
+    let written = lines_since(&tree, "root", before);
+    assert_eq!(written.len(), 1, "{written:?}");
+    let RunLogEvent::ActionFinished(ended) = &written[0].event else {
+        panic!("{written:?}");
+    };
+    assert_eq!(ended.action, "draft.review");
+    assert_eq!(
+        ended.evidence,
+        [reviews[0]["evidence_id"].as_str().unwrap()]
+    );
+}
+
+#[test]
+fn an_undeclared_result_is_refused_and_writes_nothing() {
+    let tree = reviewed("undeclared-result");
+    let before = every_file(&tree.store());
+    let refused = review(&tree, "draft.review", &["--result", "lost"]);
+    refused_naming(&refused, &["draft.review", "lost", "performed", "rejected"]);
+    assert_eq!(every_file(&tree.store()), before);
+}
+
+#[test]
+fn a_result_one_entry_does_not_list_writes_no_record() {
+    // The judgement's first entry lists `rejected`, its second (`draft_note`) only `performed`.
+    let tree = reviewed("one-entry-unlisted");
+    let before = every_file(&tree.store());
+    let refused = review(&tree, "draft.judge", &["--result", "rejected"]);
+    refused_naming(
+        &refused,
+        &["draft.judge", "rejected", "draft_note", "performed"],
+    );
+    assert_eq!(every_file(&tree.store()), before);
+}
+
+#[test]
+fn without_a_result_the_person_performed() {
+    let tree = reviewed("performed");
+    let taken = review(&tree, "draft.review", &[]);
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let reviews = records_of(&tree, "root", "draft_review");
+    assert_eq!(reviews.len(), 1, "{reviews:?}");
+    assert_eq!(reviews[0]["result"], "approved", "{reviews:?}");
+}
+
+/// `tree approve` with `flags` on a tree opened in `label`: refused by the command line with exit
+/// 2, the store unchanged.
+fn refused_by_the_command_line(label: &str, flags: &[&str]) {
+    let tree = Tree::new(label);
+    open_with(&tree, "review@1", "review.bindings.yaml");
+    let before = every_file(&tree.store());
+    let refused = tree
+        .command()
+        .args(["tree", "approve", "--store"])
+        .arg(tree.store())
+        .args(["--case", "root", "--principal", "reviewer"])
+        .args(flags)
+        .output()
+        .unwrap();
+    assert_eq!(
+        refused.status.code(),
+        Some(2),
+        "{flags:?}: {}",
+        stderr(&refused)
+    );
+    assert_eq!(every_file(&tree.store()), before, "{flags:?}");
+}
+
+#[test]
+fn a_result_with_deny_is_refused() {
+    refused_by_the_command_line(
+        "result-deny",
+        &["--capability", "c", "--deny", "--result", "rejected"],
+    );
+}
+
+#[test]
+fn a_result_without_an_action_is_refused() {
+    refused_by_the_command_line(
+        "result-no-action",
+        &["--capability", "c", "--result", "rejected"],
+    );
+}
+
+#[test]
+fn reasons_and_a_reasons_file_together_are_refused() {
+    refused_by_the_command_line(
+        "reasons-both",
+        &[
+            "--action",
+            "draft.review",
+            "--result",
+            "rejected",
+            "--reasons",
+            "short",
+            "--reasons-file",
+            "reasons.txt",
+        ],
+    );
+}
+
+#[test]
+fn reasons_without_a_named_result_are_refused() {
+    refused_by_the_command_line(
+        "reasons-no-result",
+        &["--action", "draft.review", "--reasons", "short"],
+    );
+}
+
+#[test]
+fn a_rejected_result_sends_the_writer_back_with_the_reasons() {
+    let tree = reviewed("rejected-feedback");
+    let reasons = "The draft has one line.\nAdd a second, then ask again.\n";
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons", reasons],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let writes = log_lines(&tree, "root")
+        .iter()
+        .filter(|line| finished(line) == Some("draft.write"))
+        .count();
+    assert_eq!(writes, 2, "the writer ran again");
+    let feedback: Value =
+        serde_json::from_slice(&fs::read(tree.workspace().join("feedback.json")).unwrap()).unwrap();
+    let records = feedback["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1, "{feedback}");
+    let record = &records[0];
+    assert_eq!(record["result"], "rejected", "{feedback}");
+    assert_eq!(record["action"], "draft.review", "{feedback}");
+    assert!(record["exit"].is_null(), "{feedback}");
+    let digest = record["blob_sha256"].as_str().unwrap();
+    let log = feedback["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|log| log["blob_sha256"] == digest)
+        .unwrap_or_else(|| panic!("no log of {digest}: {feedback}"));
+    assert!(
+        log["tail"].as_str().unwrap().ends_with(reasons),
+        "{feedback}"
+    );
+    assert_eq!(log["tail"], reasons, "{feedback}");
+}
+
+#[test]
+fn reasons_out_of_bounds_or_outside_the_workspace_are_refused() {
+    let tree = reviewed("reasons-bounds");
+    let workspace = tree.workspace();
+    fs::write(workspace.join("long.txt"), "x".repeat(65537)).unwrap();
+    fs::write(workspace.join("lines.txt"), "line\n".repeat(61)).unwrap();
+    fs::write(workspace.join("fits.txt"), "fits\n").unwrap();
+    std::os::unix::fs::symlink(workspace.join("fits.txt"), workspace.join("link.txt")).unwrap();
+    let outside = tree.root.join("outside.txt");
+    fs::write(&outside, "outside\n").unwrap();
+    let before = every_file(&tree.store());
+    for file in [
+        workspace.join("long.txt"),
+        workspace.join("lines.txt"),
+        workspace.join("link.txt"),
+        outside,
+        workspace.join("absent.txt"),
+        workspace.join("stubs"),
+    ] {
+        let path = file.display().to_string();
+        let refused = review(
+            &tree,
+            "draft.review",
+            &["--result", "rejected", "--reasons-file", &path],
+        );
+        refused_naming(&refused, &[]);
+        assert_eq!(every_file(&tree.store()), before, "{path}");
+    }
+    let refused = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons", &"y".repeat(65537)],
+    );
+    refused_naming(&refused, &[]);
+    assert_eq!(every_file(&tree.store()), before);
+    // At the bounds the reasons are kept whole.
+    fs::write(workspace.join("edge.txt"), "z\n".repeat(60)).unwrap();
+    let path = workspace.join("edge.txt").display().to_string();
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons-file", &path],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+}
+
+#[test]
+fn the_reasons_are_kept_as_a_blob_not_in_the_log() {
+    let tree = reviewed("reasons-blob");
+    let reasons = "Marker 7f3a: the second paragraph repeats the first.";
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons", reasons],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    assert!(!stdout(&taken).contains("7f3a"), "{}", stdout(&taken));
+    let files = every_file(&tree.store());
+    let holding: Vec<&PathBuf> = files
+        .iter()
+        .filter(|(_, bytes)| String::from_utf8_lossy(bytes).contains("7f3a"))
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(holding.len(), 1, "{holding:?}");
+    assert_eq!(
+        holding[0].parent().unwrap().file_name().unwrap(),
+        "blobs",
+        "{holding:?}"
+    );
+    assert_eq!(fs::read(holding[0]).unwrap(), reasons.as_bytes());
+    // An approval with reasons keeps them too: `performed` is a named result like any other.
+    let tree = reviewed("reasons-performed");
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "performed", "--reasons", reasons],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    assert!(
+        every_file(&tree.store())
+            .iter()
+            .any(|(path, bytes)| bytes == reasons.as_bytes()
+                && path.parent().unwrap().ends_with("blobs"))
     );
 }
