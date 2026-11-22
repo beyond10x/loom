@@ -31,14 +31,14 @@
 //! arguments (the request's, else the
 //! binding's literal `arguments`, else the object the `arguments_from` argv prints, else `{}`; a
 //! request has none when its arguments are the empty object), an `arguments_from` that does not
-//! exit 0 or prints anything but one JSON object within [`MAX_REPORT_BYTES`] refused
+//! exit 0 or prints anything but one JSON object within `MAX_REPORT_BYTES` refused
 //! `ArgumentsUnreadable` before the bound program starts; the run; the blob of its standard output
 //! followed by its standard error, kept as `blobs/<sha256>` in the store directory through a
 //! temporary file and a rename; one observation of the run (`loom.bindings.ProgramRun`), kept for
 //! every call of `run_child` whatever it answered and whether the blob was kept or not, before a
 //! runner refusal or a blob failure ends the step; then, for
 //! each `evidence` entry, the value its `from` names (the exit code, `timeout` for a run killed at
-//! its timeout, or the JSON pointer into the report, one JSON object within [`MAX_REPORT_BYTES`])
+//! its timeout, or the JSON pointer into the report, one JSON object within `MAX_REPORT_BYTES`)
 //! looked up in its `results`, falling to `*`. A value neither lists is `ResultNotInTable`, a
 //! report that cannot be read `ReportUnreadable`; either records nothing. Otherwise one record per
 //! entry is submitted, of the entry's kind about its subject, with the entry's producer, the
@@ -80,9 +80,7 @@ use b10x_loom_commission::ports::evidence::{
     AttributedEvidence, EvidencePort, ObservationPort, submit_evidence,
 };
 use b10x_loom_commission::ports::governor::Governor;
-use b10x_loom_intake_slice::bindings::{
-    DEFAULT_TIMEOUT_SECONDS, MAX_REPORT_BYTES, admit_bound_program_runner,
-};
+use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{ConfinementError, TestExecution, TestRunner};
 use loom::bindings::{
@@ -97,6 +95,7 @@ use loom_governor::{
 use crate::revision::{describe, placements, revisions_of};
 use sha2::{Digest as _, Sha256};
 
+use crate::arguments::{NotPrinted, case_names, one_object, run_arguments_from};
 use crate::resolve::beside;
 use crate::{CaseNames, bound_case_child};
 
@@ -193,39 +192,6 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         Ok(i64::try_from(count).unwrap_or(i64::MAX))
     }
 
-    /// The names the governor stored for the opening of this case and of its parent: none for a
-    /// root case, the name of its link for a child, and the name of the parent's own link when the
-    /// parent was opened too. The inner error is a parent that cannot be read or does not list this
-    /// case among its children; it names the two cases and quotes nothing the store holds.
-    fn names(&self) -> Result<Result<CaseNames, String>, EffectError> {
-        let state = self.governor.case_state(&self.case).map_err(governor)?;
-        let Some(link) = state.parent else {
-            return Ok(Ok(CaseNames::default()));
-        };
-        let parent = CaseId(link.parent.0.clone());
-        // The governor's error is not quoted: it may hold text read from the parent's file.
-        let Ok(parent_state) = self.governor.case_state(&parent) else {
-            return Ok(Err(format!(
-                "case {} is a child of `{}`, which cannot be read",
-                self.case.0, parent.0
-            )));
-        };
-        if !parent_state
-            .children
-            .iter()
-            .any(|child| child.child.0 == self.case.0)
-        {
-            return Ok(Err(format!(
-                "case {} is a child of `{}`, which does not list it among its children",
-                self.case.0, parent.0
-            )));
-        }
-        Ok(Ok(CaseNames {
-            case_name: Some(link.name),
-            parent_case_name: parent_state.parent.map(|grand| grand.name),
-        }))
-    }
-
     /// The member of `binding` that names a program beside the bindings file when the document's
     /// `program_root` is `bindings`: a document [`crate::resolve_programs`] did not resolve,
     /// whose program would otherwise be read as a workspace path.
@@ -312,7 +278,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         };
         // Read before anything starts and before anything is written: a name the governor holds
         // that is not a child name, or a parent that cannot be read, starts and writes nothing.
-        let names = match self.names()? {
+        let names = match case_names(self.governor, &self.case)? {
             Ok(names) => names,
             Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
         };
@@ -592,51 +558,22 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             return Ok("{}".to_owned());
         };
         let action = binding.action.as_str();
-        let program = argv
-            .first()
-            .map_or("the arguments_from program", String::as_str);
-        let unreadable = |detail: String| {
-            Err(refusal(
-                ProgramRefusalReason::ArgumentsUnreadable,
-                action,
-                detail,
-            ))
-        };
-        let child = match bound_case_child(
+        match run_arguments_from(
             argv,
             &commission_text(requested),
             timeout,
             &self.workspace,
-            self.runner.local_reason(),
+            self.runner.as_ref(),
             &self.case,
             names,
         ) {
-            Ok(child) => child,
-            Err(why) => return Err(refused(format!("{program} was not started: {why}"))),
-        };
-        let execution = match self.runner.run_child(&child) {
-            Ok(execution) => execution,
-            Err(refusal) => {
-                return unreadable(format!("{program} was refused by its runner: {refusal}"));
-            }
-        };
-        if execution.timed_out {
-            return unreadable(format!("{program} was killed at its timeout"));
-        }
-        if execution.exit_code != Some(0) {
-            return unreadable(format!(
-                "{program} ended exit status {}",
-                execution
-                    .exit_code
-                    .map_or_else(|| "unknown".to_owned(), |code| code.to_string())
-            ));
-        }
-        match one_object(
-            &execution.child_output.stdout,
-            execution.child_output.stdout_truncated,
-        ) {
-            Ok(object) => Ok(object.to_string()),
-            Err(why) => unreadable(format!("{program}'s output {why}")),
+            Ok(printed) => Ok(printed.object.to_string()),
+            Err(NotPrinted::NotStarted(why)) => Err(refused(why)),
+            Err(NotPrinted::Unreadable(why)) => Err(refusal(
+                ProgramRefusalReason::ArgumentsUnreadable,
+                action,
+                why,
+            )),
         }
     }
 
@@ -805,48 +742,6 @@ fn look_up(entry: &EvidenceEntry, value: Option<&str>) -> Option<Option<String>>
         .map(|rule| rule.result.clone())
 }
 
-/// `bytes` read as one JSON object of at most [`MAX_REPORT_BYTES`], nested at most 64 deep and
-/// naming no member of an object twice; `truncated` says the runner kept only part of them. `Err`
-/// says why not, as a predicate.
-fn one_object(bytes: &[u8], truncated: bool) -> Result<serde_json::Value, String> {
-    if truncated || bytes.len() > MAX_REPORT_BYTES {
-        return Err(format!("is longer than {MAX_REPORT_BYTES} bytes"));
-    }
-    let text = std::str::from_utf8(bytes).map_err(|_| "is not UTF-8".to_owned())?;
-    // Commission's reader keeps every member as written and bounds the nesting, so a member named
-    // twice, which a pointer could read either way, is found.
-    let read =
-        commission_json::parse(text).map_err(|error| format!("is not one JSON value: {error}"))?;
-    if !matches!(read, commission_json::Value::Object(_)) {
-        return Err("is not a JSON object".to_owned());
-    }
-    if let Some(name) = named_twice(&read) {
-        return Err(format!("names the member {name:?} twice in one object"));
-    }
-    serde_json::from_str(text).map_err(|error| format!("is not one JSON value: {error}"))
-}
-
-/// The first member name an object of `value` holds twice.
-fn named_twice(value: &commission_json::Value) -> Option<String> {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
-        match value {
-            commission_json::Value::Array(items) => pending.extend(items),
-            commission_json::Value::Object(members) => {
-                let mut seen = std::collections::BTreeSet::new();
-                for (name, member) in members {
-                    if !seen.insert(name.as_str()) {
-                        return Some(name.clone());
-                    }
-                    pending.push(member);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Keeps `bytes` as `<store>/blobs/<digest>`, written to a temporary file in that directory and
 /// renamed. A regular file already there that holds the same bytes is kept; anything else under
 /// that name, a link included, is replaced by the rename and never written through. A `blobs`
@@ -1012,7 +907,7 @@ fn commission_value(value: &serde_json::Value) -> Result<commission_json::Value,
 /// Writes a generated JSON value as JSON text, each number in the spelling it arrived in.
 macro_rules! json_writer {
     ($name:ident, $json:path) => {
-        fn $name(value: &$json) -> String {
+        pub(crate) fn $name(value: &$json) -> String {
             use $json as Value;
             fn push(out: &mut String, value: &Value) {
                 match value {

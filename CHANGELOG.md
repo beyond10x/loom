@@ -29,6 +29,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `loom.bindings.CopiedRecord`, `CopyRefusalReason` and `CopyRefusal`, the copy's observation and its refusals (story:record-copy-between-cases)
 - `program_root: bindings` and `b10x_loom_bindings::resolve_programs`: a bound program named beside its bindings file (story:bound-program-contract)
 - A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
+- An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
+- `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 
 ### Changed
 
@@ -61,6 +63,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `bound_case_child` takes `CaseNames`; `ProgramEnvironment` gains `loom_timeout_seconds`, `loom_case_name`, `loom_parent_case_name` (story:bound-program-contract)
 - **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
 - **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
+- **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
 
 ### Removed
 
