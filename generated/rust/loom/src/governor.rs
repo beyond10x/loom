@@ -1,12 +1,40 @@
 // generated from loom v1
-// contract digest 13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5
+// contract digest 9f79aca3cd7aa969980cf587db849fa9f34e30da462730044e916a23b82b94e3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Governor — `loom.governor`.
 //!
-//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, every evidence record received with whether it applies, and every explicit decision recorded for it; and the observations kept beside the cases.
+//! The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, every evidence record received with whether it applies, every explicit decision recorded for it, the links to the case that opened it and to the cases it opened, and how it terminated; and the observations kept beside the cases.
 //!
 //! Everything this bounded context declares that the synthesis plan marks generated.
+
+/// CaseLink — `loom.governor.CaseLink`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseLink {
+    /// `parent` — `loom.governor.StoredCaseId`.
+    pub parent: StoredCaseId,
+    /// `child` — `loom.governor.StoredCaseId`.
+    pub child: StoredCaseId,
+    /// `name` — `String`.
+    pub name: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `outcome_evidence` — `Uuid`.
+    pub outcome_evidence: crate::primitives::Uuid,
+    /// `subject` — `String`.
+    pub subject: String,
+    /// `subject_revision` — `String`.
+    pub subject_revision: String,
+}
+
+/// CaseTermination — `loom.governor.CaseTermination`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseTermination {
+    /// `outcome` — `String`.
+    pub outcome: String,
+    /// `instant` — `Timestamp`.
+    pub instant: crate::primitives::Timestamp,
+}
 
 /// CompletionRule — `loom.governor.CompletionRule`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +73,12 @@ pub struct StoredCase {
     pub evidence: Vec<StoredEvidence>,
     /// `decisions` — `Optional<List<loom.evaluation.ExplicitDecision>>`.
     pub decisions: Option<Vec<crate::evaluation::ExplicitDecision>>,
+    /// `parent` — `Optional<loom.governor.CaseLink>`.
+    pub parent: Option<CaseLink>,
+    /// `children` — `Optional<List<loom.governor.CaseLink>>`.
+    pub children: Option<Vec<CaseLink>>,
+    /// `termination` — `Optional<loom.governor.CaseTermination>`.
+    pub termination: Option<CaseTermination>,
 }
 
 /// StoredCaseId — `loom.governor.StoredCaseId`: a distinct wrapper around `String`.

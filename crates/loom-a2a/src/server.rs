@@ -41,7 +41,7 @@ use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
 use crate::admit::{AdmitA2aRequestOutcome, Bearer, Presented, a2a_refusal_spelling};
-use crate::http::{Connection, Head, Response};
+use crate::http::{Connection, Deadlines, Head, Response};
 use crate::tasks::{TaskEvents, Tasks};
 use crate::wire;
 
@@ -91,12 +91,13 @@ pub trait Answerer {
 }
 
 /// The A2A listener of one agent: its exposure, the bearer every request but a probe carries, its
-/// tasks, and how long a stream may carry no event.
+/// tasks, how long a stream may carry no event, and the deadlines of each connection.
 pub struct A2aServer {
     exposure: A2aExposure,
     bearer: Bearer,
     tasks: Tasks,
     stream_idle: Duration,
+    deadlines: Deadlines,
 }
 
 /// One message handed to the thread that runs turns: its task, its item, whether its connection
@@ -244,7 +245,26 @@ impl A2aServer {
             bearer,
             tasks: Tasks::default(),
             stream_idle: STREAM_IDLE,
+            deadlines: Deadlines::HOST,
         })
+    }
+
+    /// This listener with `deadlines` for each connection in place of [`Deadlines::HOST`]. A host
+    /// keeps [`Deadlines::HOST`]; a test sets short ones so that it does not wait 10 s for a cut.
+    #[must_use]
+    pub fn with_deadlines(mut self, deadlines: Deadlines) -> Self {
+        self.deadlines = deadlines;
+        self
+    }
+
+    /// The deadlines each connection of this listener is read and answered under.
+    pub fn deadlines(&self) -> Deadlines {
+        self.deadlines
+    }
+
+    /// How long a stream of this listener may carry no event.
+    pub fn stream_idle(&self) -> Duration {
+        self.stream_idle
     }
 
     /// This listener with `idle` as its idle bound in place of [`STREAM_IDLE`]. A host keeps
@@ -349,7 +369,8 @@ impl A2aServer {
                             let Ok(handle) = stream.try_clone() else {
                                 continue;
                             };
-                            let Ok(connection) = Connection::new(stream) else {
+                            let Ok(connection) = Connection::with_deadlines(stream, self.deadlines)
+                            else {
                                 continue;
                             };
                             let id = slots.unadmitted(handle);
