@@ -16,16 +16,16 @@ use b10x_loom_intake_slice::confinement::{
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
-    ApproveRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record, open_tree,
-    refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status, verify_json,
-    verify_tree,
+    ApproveRequest, CloseRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record,
+    open_tree, refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status,
+    verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
 
 use crate::{
-    TREE_LOG_FAILED, TREE_REFUSED, TreeApproveArgs, TreeCommand, TreeConfinement, TreeOpenArgs,
-    TreeRunArgs, TreeStoreArgs, tree_run_exit_status,
+    TREE_LOG_FAILED, TREE_REFUSED, TreeApproveArgs, TreeCloseArgs, TreeCommand, TreeConfinement,
+    TreeOpenArgs, TreeRunArgs, TreeStoreArgs, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -34,6 +34,7 @@ pub fn command(command: &TreeCommand) -> u8 {
         TreeCommand::Open(arguments) => open(arguments),
         TreeCommand::Run(arguments) => run(arguments),
         TreeCommand::Approve(arguments) => approve(arguments),
+        TreeCommand::Close(arguments) => close(arguments),
         TreeCommand::Status(arguments) => status(arguments),
         TreeCommand::Verify(arguments) => verify(arguments),
     };
@@ -227,6 +228,26 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
                 "at": approval.at.0,
             })
             .to_string()
+        )
+    );
+    Ok(0)
+}
+
+fn close(arguments: &TreeCloseArgs) -> Result<u8, Refused> {
+    let time = TreeTime::from_flag(arguments.at.as_deref())?;
+    let store = resolved(&arguments.store)?;
+    let catalog = tree_catalog(&store)?;
+    let closed = b10x_loom_tree::close(&CloseRequest {
+        store: &store,
+        case: &arguments.case,
+        outcome: &arguments.outcome,
+        time,
+        catalog: &catalog,
+    })?;
+    println!(
+        "{}",
+        printable(
+            &json!({"case": closed.case, "outcome": closed.outcome, "at": closed.at.0}).to_string()
         )
     );
     Ok(0)

@@ -489,18 +489,29 @@ fn closed(
     outcome: &str,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
+    closed_lines(logs, &case.case, case.parent.as_deref(), outcome, emit)
+}
+
+/// Appends `terminated` to `case`'s log and, for a child, `child closed` to its `parent`'s.
+pub(crate) fn closed_lines(
+    logs: &Logs,
+    case: &str,
+    parent: Option<&str>,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
     let line = logs.append(
-        &case.case,
+        case,
         RunLogEvent::Terminated(Terminated {
             reason: outcome.to_owned(),
         }),
     )?;
-    emit(&case.case, line);
-    if let Some(parent) = &case.parent {
+    emit(case, line);
+    if let Some(parent) = parent {
         let line = logs.append(
             parent,
             RunLogEvent::ChildClosed(ChildClosed {
-                child: case.case.clone(),
+                child: case.to_owned(),
                 outcome: Some(outcome.to_owned()),
             }),
         )?;
@@ -510,7 +521,7 @@ fn closed(
 }
 
 /// The outcome the governor terminated `case` through, when it did.
-fn termination<S: loom_governor::FallibleCaseStore>(
+pub(crate) fn termination<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &str,
 ) -> Result<Option<String>, Refused> {
@@ -648,7 +659,7 @@ fn evaluated<S: loom_governor::FallibleCaseStore>(
 }
 
 /// The outcomes Canon reports `legitimate` for `case` now, in the decision's order.
-fn legitimate_outcomes<S: loom_governor::FallibleCaseStore>(
+pub(crate) fn legitimate_outcomes<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
 ) -> Result<Vec<String>, Refused> {

@@ -54,7 +54,11 @@ impl Tree {
         fs::create_dir_all(root.join("home")).unwrap();
         fs::create_dir_all(root.join("workspace/stubs")).unwrap();
         let installed = InstallStore::new(root.join("home/loom/protocols"));
-        for (name, file) in [("tour@1", "tour.yaml"), ("tour-leg@1", "tour-leg.yaml")] {
+        for (name, file) in [
+            ("tour@1", "tour.yaml"),
+            ("tour-leg@1", "tour-leg.yaml"),
+            ("fork@1", "fork.yaml"),
+        ] {
             installed
                 .install_file(
                     name,
@@ -929,4 +933,110 @@ fn a_person_record_names_the_revisions_of_its_declared_upstream() {
     );
     let undeclared = approval_record("person-no-upstream", "tour-leg.bindings.yaml");
     assert_eq!(undeclared["upstream_revisions"], json!({}), "{undeclared}");
+}
+
+#[test]
+fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
+    let tree = Tree::new("close");
+    let opened = tree
+        .command()
+        .args([
+            "tree",
+            "open",
+            "--protocol",
+            "fork@1",
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .arg("--bindings")
+        .arg(tree.workspace().join("fork.bindings.yaml"))
+        .arg("--workspace")
+        .arg(tree.workspace())
+        .output()
+        .unwrap();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+
+    // Once the road is seen both outcomes are legitimate: the run waits and prints two closes.
+    let waited = tree.run();
+    assert_eq!(
+        waited.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&waited),
+        stderr(&waited)
+    );
+    let waited = json(&waited);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    let decisions = waited["decisions"].as_array().unwrap();
+    let outcomes: Vec<&str> = decisions
+        .iter()
+        .map(|decision| decision["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(outcomes, ["kept", "left"], "{waited}");
+    for decision in decisions {
+        assert_eq!(decision["kind"], "Close", "{waited}");
+        assert_eq!(decision["command"][2], "close", "{waited}");
+    }
+
+    // An outcome that is not legitimate is refused and the store keeps every byte.
+    let before = tree.snapshot();
+    let refused = tree
+        .command()
+        .args([
+            "tree",
+            "close",
+            "--case",
+            "root",
+            "--outcome",
+            "lost",
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .output()
+        .unwrap();
+    assert_ne!(refused.status.code(), Some(0), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("OutcomeNotLegitimate"),
+        "{}",
+        stderr(&refused)
+    );
+    assert_eq!(tree.snapshot(), before);
+
+    // The printed command closes the case through `left`; the tree is then terminal through it.
+    let closed = tree.decided(&decisions[1]);
+    assert_eq!(closed.status.code(), Some(0), "{}", stderr(&closed));
+    assert_eq!(json(&closed)["outcome"], "left");
+    let status = json(&tree.tree("status"));
+    assert_eq!(entry(&status, "root")["outcome"], "left", "{status}");
+    let lines = log_lines(&tree, "root");
+    assert!(
+        matches!(&lines.last().unwrap().event, RunLogEvent::Terminated(ended) if ended.reason == "left")
+    );
+    let verified = tree.tree("verify");
+    assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
+    let again = tree
+        .command()
+        .args([
+            "tree",
+            "close",
+            "--case",
+            "root",
+            "--outcome",
+            "kept",
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .output()
+        .unwrap();
+    assert!(
+        stderr(&again).contains("CaseTerminated"),
+        "{}",
+        stderr(&again)
+    );
 }
