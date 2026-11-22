@@ -491,19 +491,39 @@ fn closed<S: loom_governor::FallibleCaseStore>(
     outcome: &str,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
-    let line = logs.append(
+    closed_lines(
+        governor,
+        logs,
         &case.case,
+        case.parent.as_deref(),
+        outcome,
+        emit,
+    )
+}
+
+/// Appends `terminated` to `case`'s log and, for a child, `child closed` to its `parent`'s, naming
+/// the child's record as the termination replaced it.
+pub(crate) fn closed_lines<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    case: &str,
+    parent: Option<&str>,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let line = logs.append(
+        case,
         RunLogEvent::Terminated(Terminated {
             reason: outcome.to_owned(),
         }),
     )?;
-    emit(&case.case, line);
-    if let Some(parent) = &case.parent {
-        let (record, record_digest) = child_record(governor, parent, &case.case)?;
+    emit(case, line);
+    if let Some(parent) = parent {
+        let (record, record_digest) = child_record(governor, parent, case)?;
         let line = logs.append(
             parent,
             RunLogEvent::ChildClosed(ChildClosed {
-                child: case.case.clone(),
+                child: case.to_owned(),
                 outcome: Some(outcome.to_owned()),
                 record,
                 record_digest,
@@ -515,7 +535,7 @@ fn closed<S: loom_governor::FallibleCaseStore>(
 }
 
 /// The outcome the governor terminated `case` through, when it did.
-fn termination<S: loom_governor::FallibleCaseStore>(
+pub(crate) fn termination<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &str,
 ) -> Result<Option<String>, Refused> {
@@ -656,7 +676,7 @@ fn evaluated<S: loom_governor::FallibleCaseStore>(
 }
 
 /// The outcomes Canon reports `legitimate` for `case` now, in the decision's order.
-fn legitimate_outcomes<S: loom_governor::FallibleCaseStore>(
+pub(crate) fn legitimate_outcomes<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
 ) -> Result<Vec<String>, Refused> {
@@ -815,6 +835,49 @@ fn waiting_actions<S: loom_governor::FallibleCaseStore>(
         .collect())
 }
 
+/// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
+/// and names a `handoff`: the text is what is decided, and `tree run` again is the command.
+fn handoffs<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    store_text: &str,
+) -> Result<Vec<NextDecision>, Refused> {
+    let frontier = governor
+        .frontier(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
+    Ok(frontier
+        .data()
+        .actions
+        .iter()
+        .filter(|action| action.status != ActionStatus::Blocked)
+        .filter_map(|action| {
+            let bound = bindings.actions.iter().find(|bound| {
+                bound.action == action.action && bound.executor.kind != Executor::Person
+            })?;
+            let text = bound.handoff.clone()?;
+            Some(NextDecision {
+                case: case.0.clone(),
+                kind: DecisionKind::Handoff,
+                action: Some(action.action.clone()),
+                capability: None,
+                decides: text,
+                subject: None,
+                revision: None,
+                path: None,
+                outcome: None,
+                command: vec![
+                    "b10x-loom".to_owned(),
+                    "tree".to_owned(),
+                    "run".to_owned(),
+                    "--store".to_owned(),
+                    store_text.to_owned(),
+                ],
+            })
+        })
+        .collect())
+}
+
 /// Why `case`, in which no step was taken, waits, and the decisions that let it go on.
 #[allow(clippy::too_many_arguments)]
 fn waits<S: loom_governor::FallibleCaseStore>(
@@ -911,6 +974,14 @@ fn waits<S: loom_governor::FallibleCaseStore>(
             });
         }
         return Ok((TreeStop::AwaitingPerson, decisions));
+    }
+    if decisions.is_empty() {
+        // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
+        // has done what it may, and a person continues from its text, then runs the tree again.
+        decisions = handoffs(governor, case, bindings, &store_text)?;
+        if !decisions.is_empty() {
+            return Ok((TreeStop::AwaitingPerson, decisions));
+        }
     }
     Ok(if decisions.is_empty() {
         (TreeStop::Stuck, decisions)

@@ -146,7 +146,8 @@
 //! `Cargo.lock`, and compiles the catalog's engineering protocols. Commission is the path
 //! dependency `b10x-loom-commission`, built from this repository's own tree. The engineering
 //! protocols are the files `b10x-loom-protocols` vendors under `protocols/engineering/`, held to
-//! their lock.
+//! their lock. Decision requests are `b10x-loom-decision`'s, a path dependency whose
+//! `DecisionStore` port [`FileDecisionStore`] implements in a directory.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -193,6 +194,7 @@ use b10x_loom_executor::{ActionFactsPort, CaseFacts};
 use loom::run::ActionFacts;
 
 mod children;
+mod file_decision;
 mod file_run_store;
 mod file_store;
 mod file_suspension;
@@ -202,6 +204,7 @@ pub use children::{
     CHILD_OUTCOME_PRODUCER, ChildError, ChildOpening, TerminateError, TreeCase, UNREVISED,
     plain_child_name,
 };
+pub use file_decision::FileDecisionStore;
 pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
 pub use file_store::WriteStep;
 pub use file_store::{FileCaseStore, FileStoreError, case_file_stem};

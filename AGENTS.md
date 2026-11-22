@@ -191,6 +191,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A release tag equals the workspace version and has a CHANGELOG entry | `loom-xtask release-check`, run by `release.yml` (`crates/loom-xtask/tests/release_check.rs`) |
 | A release's CHANGELOG entry says what breaks for a consumer: a `**Breaking:**` bullet per break or the line `No breaking changes.`, never both, and no `**Breaking:**` bullet that names nothing or says `none`; a `Breaking:` sentence in prose does not count; `No breaking changes.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; a `**Breaking:**` bullet is refused on a tag that moves only the patch version, and removing a path the previous tag's SDK stability page lists is refused unless an earlier release listed it under `### Deprecated`; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_bullet`, `release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_no_breaking_changes_when_no_stable_surface_changed`, `release_check_refuses_a_breaking_bullet_that_names_no_break`, `release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes`, `release_check_passes_on_the_first_tag`, `a_removal_without_a_deprecated_release_is_refused`, `a_breaking_entry_on_a_patch_tag_is_refused`, `release_workflow_verifies_the_tag_and_reuses_the_check`), `crates/loom-xtask/tests/adversary_w20261023w1_u4.rs` |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate; its library runs a `loom.agent/1` spec through `loom_sdk::Runtime` alone, and the run ends as the spec's budget and stop policy say | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`; `consumers/pinned/tests/agent_spec.rs`, `an_agent_defined_as_data_runs`), `crates/loom-xtask/tests/pinned_consumer.rs` (`the_agent_consumer_runs_a_spec_through_the_sdk_alone`) |
+| Loom builds `b10x-substrate-host` without its `git` feature: `Cargo.lock` holds no `git2`, `libgit2-sys`, `gix`, `gix-*`, `curl`, `curl-sys`, `openssl-sys` or `libz-sys`, no dependency path reaches a Git library, Loom's driver configuration names no Git source and a Git source on that driver is refused `workspace.git-source-unserved` at its first use; `loom-xtask linked-libraries <binary>` fails, naming the library, when `ldd` names `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz`, and `binaries.yml` runs it on the release binary | `crates/loom-intake-slice/tests/host_git_hardening.rs` (`the_lock_file_holds_no_git_library_and_no_curl`, `every_host_git_command_goes_through_a_hardened_helper`), `crates/loom-intake-slice/src/confinement.rs` (`the_driver_config_names_no_git_source`, `a_git_source_on_loom_s_driver_is_refused_unserved`), `crates/loom-xtask/src/linked_libraries.rs` (`linked_libraries_refuses_a_binary_that_links_libgit2`), `crates/loom-xtask/tests/release_check.rs` (`binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum`) |
 
 ## ESS
 
@@ -614,7 +615,14 @@ across a restart. `FileWorkflowRunStore` is the governor's `WorkflowRunStore`, t
 write, a file per Run (`workflow-run-…`); a file holding another Run's record is refused, and
 `crates/loom-commission-testkit/tests/workflow_run_store.rs` holds a workflow run across real process
 restarts. The port and its `RunStoreError` are `b10x-loom-executor`'s (`workflow`, beside
-`WorkflowExecutor`), so the governor depends on the executor and never the reverse. The host
+`WorkflowExecutor`), so the governor depends on the executor and never the reverse.
+`FileDecisionStore` is `b10x-loom-decision`'s `DecisionStore` port over the same lock and write, a
+file per decision request (`decision-…`, as `loom.governor`'s `StoredDecisionRequest`) holding the
+records kept beside it; a write's comparison with the state read, its record-key check and the
+write are one hold of the lock, a file that does not read back exactly as the store writes it or
+holds another request is refused naming it, and a decided request is never decided again
+(`crates/loom-governor/tests/decision_store.rs`, which holds a request across a real process
+restart). The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision. The explicit decisions
 (`canon-decisions/1`) it supplies are the ones the host recorded with `CanonGovernor::decide`, each
@@ -1567,6 +1575,29 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   log's chain and its last line against the head, so a changed byte anywhere, the last line
   included, is named with the case and the line. A restart between an append and its head leaves
   one line past the head; the next writer takes it over when the line before it is the head.
+- `tree run` (`run.rs`) drives Commission's `run_until_blocked` with the Loom executor and the
+  deterministic selector, one step of one case at a time, every open child before its parent's
+  next step. `LogHistory` (`history.rs`) reads the case's run log: an action counts as performed
+  at the revision of its step and at the revision its step left; a writer with a retry record is
+  due again, and one refused since the last `evaluated` line is not (one run never repeats a
+  refused step; test `a_spent_run_budget_ends_the_retries_of_a_step`). With no step taken a case
+  ends through its one legitimate outcome, or waits: a person action or a capability
+  (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
+  `handoff` text when nothing else is (command `tree run`).
+- `tree approve --action` takes a `person` action as its principal through `PersonEffects`
+  (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
+  program's are. `tree run` never takes a person action.
+- `tree open --protocols <dir>` (`protocols.rs`) reads the `.yaml` files directly in `<dir>` into a
+  catalog of those alone (`SourceKind::Directory`, registration from `registration_for`), keeps
+  each as `blobs/<sha256>` with `tree-protocols.json`, and marks the manifest's catalog
+  `Directory`; every later command builds its catalog from those blobs (`stored_catalog`), so an
+  edit or removal of `<dir>` changes nothing in the open tree, and a changed blob is
+  `StoredProtocolChanged`. The fixture directory `tests/fixtures/tree-two-level/protocols/` holds
+  `tour` and `tour.leg` alone (and `old/`, which is not read); other fixture protocols live in
+  `extra/`.
+- `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
+  runs, approvals and copies are read from the governor, the run logs and `observations.json`,
+  never from `approvals-<stem>.json`.
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.
@@ -1602,9 +1633,10 @@ executor, Canon, model provider or Mandate (`decision_request.rs` reads the mani
   `record_key` (`StoreConflict::record_key_held_by`); `Request` answers that `RecordKeyOpen`
   naming the holder, and nothing is written. A `Request` for an id the store
   already holds writes from no read and is `StoreConflict`: the domain declares no outcome for it.
-- `InMemoryDecisionStore` is the only store; durable storage is
-  `story:decision-request-file-store`. The `EscalationSuppressedRecord`s kept beside a request
-  are read back in append order; appending beside an unknown request is `NoSuchRequest`.
+- `InMemoryDecisionStore` is the crate's store; the durable one is the governor's
+  `FileDecisionStore` (§ Governor), so this crate reads no file. The `EscalationSuppressedRecord`s
+  kept beside a request are read back in append order; appending beside an unknown request is
+  `NoSuchRequest`.
 - The views are the generated queries over what the store lists. `task conform` runs the
   domain's synthesized scenarios and `ess/scenarios/decision/` against the crate
   (`crates/loom-conformance/src/decision.rs`). Four of those scenarios cover, with `covers:`,

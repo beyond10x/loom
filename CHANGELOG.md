@@ -34,6 +34,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom tree open`, `tree approve`, `tree status` and `tree verify` in the new crate `b10x-loom-tree`: one writer per store, `StoreInUse` names it (story:tree-run-command)
 - `b10x-loom tree run` drives a tree of cases on Commission's loop until the root ends or the tree waits, printing each decision as the command that takes it; `b10x_loom_tree::run_tree` takes an observer of each run-log line and a cancel handle (story:tree-run-command)
 - `b10x-loom tree approve --action` takes a `person` action as the approving principal; its records name the revisions of the `upstream` artifacts their binding entry declares, as a program's do (story:tree-run-command)
+- A waiting `tree run` names the `handoff` text of an admissible writer when nothing is useful and nothing awaits approval: a `Handoff` decision whose command is `tree run` again (story:tree-run-command)
+- **Breaking:** `intake.protocols.SourceKind` (`loom_protocols::SourceKind`) gains `Directory`, the source of a protocol a tree read from a `--protocols` directory: an exhaustive `match` on it needs the arm (story:tree-run-command)
+- `b10x-loom tree open --protocols <dir>` reads the tree's protocols from the `.yaml` files directly in `<dir>`, each under the registration it declares, keeps them in the store as blobs with `tree-protocols.json`, and every later tree command builds its catalog from those alone; refused: `DuplicateProtocol`, `ProtocolRefused`, `ProtocolLinkLeavesDirectory`, `ProtocolNotInDirectory`, `NoProtocolFiles`, and `StoredProtocolChanged` for a changed blob. `loom_protocols::registration_for` is public (story:tree-run-command)
+- `b10x-loom tree close --case <id> --outcome <name>` terminates a case through an outcome Canon reports legitimate for it now, the choice a waiting `tree run` prints when more than one is; another outcome is refused `OutcomeNotLegitimate` and writes nothing (story:tree-run-command)
 - `tree status` prints `loom.tree-status/1`: per case its link name, protocol id and revision, the decisions it waits on, its records, program runs, approvals and copies; `b10x_loom_tree::read_status`, `stored_catalog` and `STATUS_FORMAT` (story:tree-run-command)
 - `b10x_loom_protocols::canon` re-exports the Canon crate Loom links; an embedder names one runtime dependency.
 - `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
@@ -43,6 +47,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
 - `tree run` names each write of a child's `case_outcome` record in its parent's log: `child opened` and `child closed` carry `record` and `record_digest` (story:child-record-in-the-run-log)
 - `tree status` gives a `case_outcome` entry `name`, the link name of the child it is about (story:child-record-in-the-run-log)
+- `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
 
 ### Changed
 
@@ -77,6 +82,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
 - **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
 - **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
+- `b10x-substrate-host` is built without its `git` feature: `b10x-loom` no longer links libgit2, libssh2, OpenSSL or zlib; a Git workspace source would need the feature back (story:drop-the-substrate-git-feature)
 - **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
 - **Breaking:** `loom::runlog::ChildOpened` and `ChildClosed` gain `record` and `record_digest`, both or neither; Loom 0.58.0 and earlier refuse a run log that holds them (story:child-record-in-the-run-log)
 - **Breaking:** `loom::tree::StatusEvidence` gains `name`; a literal names it (story:child-record-in-the-run-log)
