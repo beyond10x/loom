@@ -83,6 +83,9 @@ fn main() -> ExitCode {
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
+        Command::Tree(arguments) => {
+            ExitCode::from(b10x_loom_cli::tree::command(&arguments.command))
+        }
     }
 }
 

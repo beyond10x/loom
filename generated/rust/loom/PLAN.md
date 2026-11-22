@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5
+  contract digest ebc9d11ceaee6c0cdfda5635d3aa5e2bbf27b6d2cf06c94d23b72ed7fa7e8eeb
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-423 capabilities: **407 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+440 capabilities: **424 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -263,6 +263,23 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.session.ToolDecision` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
+| domain type | `loom.tree.ApprovalDecision` |
+| domain type | `loom.tree.CaseApproval` |
+| domain type | `loom.tree.CaseStatus` |
+| domain type | `loom.tree.DecisionKind` |
+| domain type | `loom.tree.LogFailure` |
+| domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.TreeBudget` |
+| domain type | `loom.tree.TreeCatalog` |
+| domain type | `loom.tree.TreeLogHead` |
+| domain type | `loom.tree.TreeManifest` |
+| domain type | `loom.tree.TreeProtocol` |
+| domain type | `loom.tree.TreeRefusal` |
+| domain type | `loom.tree.TreeRefusalReason` |
+| domain type | `loom.tree.TreeRun` |
+| domain type | `loom.tree.TreeStatus` |
+| domain type | `loom.tree.TreeStop` |
+| domain type | `loom.tree.TreeVerify` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |

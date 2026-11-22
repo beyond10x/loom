@@ -1323,6 +1323,37 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   `crates/loom-runlog/tests/run_log.rs` holds every refusal, the 400-line two-process append, a
   crash at each step and the held lock.
 
+## Tree command
+
+`b10x-loom-tree` (`crates/loom-tree`, `story:tree-run-command`, epic `protocol-tree-on-bindings`)
+runs a tree of protocol cases from a store directory; `b10x-loom tree` (`crates/loom-cli/src/tree.rs`,
+the clap types in `lib.rs`) holds only its flags, output and exit status. Its types are `loom.tree`
+(`ess/domains/tree.yaml`): types only, no command, so no conformance scenario.
+
+- The store holds the governor's case files and the run logs, and beside them `tree.json`
+  (`TreeManifest`, written once by `tree open`: the root case, the workspace and the root's
+  bindings file, both absolute, and the catalog kind), `loghead-<stem>.json` per case
+  (`TreeLogHead`: the `seq` and SHA-256 of the last line the tree appended), `tree.lock` and,
+  while a writer holds the store, `tree.holder` with its process id. A writer takes `tree.lock`
+  (`StoreLock`, an exclusive lock held for the whole command) before it opens any governor store,
+  so a second writer is refused `StoreInUse` naming the holder and writes nothing. `tree status`
+  and `tree verify` read and never take the lock, so a live view reads the tree during a run.
+- `tree open` checks everything it reads before it writes: the store (absent or empty), the
+  workspace, `--at`, and the root's bindings file and, through the `bindings` member of every
+  `open` executor (relative to the directory of the file that names it), every bindings file of
+  the tree, each decoded and checked against the protocol its `case_open` names (the one
+  registration of the catalog with that id). An `agent` executor anywhere is `AgentNotRunYet`,
+  naming the file, the action and `story:bound-agent-node`, before any other defect of that file.
+  The root is opened in a memory governor first, so a revision the governor refuses writes nothing;
+  an artifact no `--revision` names takes the revision of what is at its placed path.
+- Every event goes through `RunLog::append` and then the head is written. `tree verify` checks each
+  log's chain and its last line against the head, so a changed byte anywhere, the last line
+  included, is named with the case and the line. A restart between an append and its head leaves
+  one line past the head; the next writer takes it over when the line before it is the head.
+- Every instant is the host clock's (UTC to the second) or the one `--at` gives
+  (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
+- Held by `crates/loom-cli/tests/tree_run.rs`.
+
 ## Decision requests
 
 `b10x-loom-decision` (`crates/loom-decision`, `story:decision-request-entity`, epic

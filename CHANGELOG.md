@@ -20,6 +20,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
 - `b10x_loom_bindings::content_revision`, `placements` and `PlacedRevisions`: a placed artifact's revision is its content digest (story:bound-artifact-revisions)
 - `CanonGovernor::record_step` writes a step's revision moves and records in one store write; `FileCaseStore::update_until` (story:bound-artifact-revisions)
+- `b10x-loom tree open`, `tree approve`, `tree status` and `tree verify` in the new crate `b10x-loom-tree`: one writer per store, `StoreInUse` names it (story:tree-run-command)
 
 ### Changed
 
@@ -39,6 +40,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** after a `program` step each placed artifact moves to its content digest, and its records name that revision (story:bound-artifact-revisions)
 - A `program` step of an action that does not write whose program changed a placed artifact records nothing, `Discarded` (story:bound-artifact-revisions)
 - `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
+- **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
 
 ### Removed
 

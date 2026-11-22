@@ -197,6 +197,7 @@ pub mod model_catalog;
 pub mod plugin;
 pub mod regular_file;
 pub mod stage;
+pub mod tree;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
 pub fn exit_status(reason: StopReason) -> u8 {
@@ -247,6 +248,152 @@ pub enum Command {
     /// once, release the Suspension, and run on until the run stops.
     #[command(after_help = RESUME_HELP)]
     Resume(ResumeArgs),
+    /// Run a tree of protocol cases from a case store: open its root case, and print the tree's
+    /// status and the verdict on its run logs.
+    Tree(TreeArgs),
+}
+
+/// The arguments of `b10x-loom tree`.
+#[derive(Debug, Args)]
+pub struct TreeArgs {
+    /// The tree command to run.
+    #[command(subcommand)]
+    pub command: TreeCommand,
+}
+
+/// The commands of `b10x-loom tree`.
+#[derive(Debug, Subcommand)]
+pub enum TreeCommand {
+    /// Open the root case of a tree in an empty store directory, from a registered protocol, a
+    /// loom.bindings/1 file and the initial artifact revisions.
+    #[command(after_help = TREE_OPEN_HELP)]
+    Open(TreeOpenArgs),
+    /// Record a principal's decision on one capability for one case of the tree, at the case's
+    /// current revision.
+    #[command(after_help = TREE_APPROVE_HELP)]
+    Approve(TreeApproveArgs),
+    /// Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or
+    /// stop, open obligations, and the paths of its case file and run log.
+    #[command(after_help = TREE_STATUS_HELP)]
+    Status(TreeStoreArgs),
+    /// Verify the run log of every case of the tree and name the first line that fails.
+    #[command(after_help = TREE_VERIFY_HELP)]
+    Verify(TreeStoreArgs),
+}
+
+/// What `tree open --help` says about the store, the checks and the exit status.
+pub const TREE_OPEN_HELP: &str = "Everything is checked before anything is written: the store \
+(absent, or an empty directory), the workspace (an existing directory), --at, the bindings file \
+and, through the `bindings` member of each `open` executor, every bindings file of the tree. A \
+binding with an `agent` executor anywhere in the tree is refused AgentNotRunYet, naming the file, \
+the action and story:bound-agent-node. An artifact no --revision names takes the revision of what \
+is at the path the bindings place it at.
+
+Exit status:
+  0  the tree is open; its root case and store are printed
+  1  refused, nothing written: the reason, and the file, action or case it names, on standard error";
+
+/// What `tree approve --help` says about the decision and the exit status.
+pub const TREE_APPROVE_HELP: &str = "The decision is kept beside the case file and allows that \
+capability for that case while the case is at the revision it was recorded at, and nothing else: \
+another case, another capability or a moved case reads no approval. A denial wins over an \
+approval of the same capability for the same case and revision.
+
+Exit status:
+  0  the decision is recorded; it is printed
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, or the store cannot be read";
+
+/// What `tree status --help` says about the output and the exit status.
+pub const TREE_STATUS_HELP: &str = "The store is read and never held, so a live view can read it \
+while a run holds it.
+
+Exit status:
+  0  the status is printed
+  1  refused: the store holds no tree or cannot be read";
+
+/// What `tree verify --help` says about the output and the exit status.
+pub const TREE_VERIFY_HELP: &str = "Each log is checked against its chain (a cut, a missing or \
+reordered line, a changed byte) and its last line against the head the tree kept, so a change to \
+any byte of a log is seen. The store is read and never held.
+
+Exit status:
+  0  every log verifies
+  1  refused: the store holds no tree or cannot be read
+  3  a log does not verify: the case and the line, counted from 0, on standard error";
+
+/// The exit status of a refused tree command.
+pub const TREE_REFUSED: u8 = 1;
+
+/// The exit status of `tree verify` when a log does not verify.
+pub const TREE_LOG_FAILED: u8 = 3;
+
+/// The arguments of `b10x-loom tree open`.
+#[derive(Debug, Args)]
+pub struct TreeOpenArgs {
+    /// The store directory: absent, or an empty directory.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The registration of the root's protocol, `name@major`.
+    #[arg(long, value_name = "NAME@MAJOR")]
+    pub protocol: String,
+    /// The root's loom.bindings/1 file.
+    #[arg(long, value_name = "FILE")]
+    pub bindings: PathBuf,
+    /// The existing directory every case of the tree works in; every path of the bindings is
+    /// relative to it.
+    #[arg(long, value_name = "DIR")]
+    pub workspace: PathBuf,
+    /// The initial revision of one artifact, `ARTIFACT=REVISION`; repeat for each.
+    #[arg(long = "revision", value_name = "ARTIFACT=REVISION", value_parser = artifact_revision)]
+    pub revisions: Vec<(String, String)>,
+    /// The id of the root case.
+    #[arg(long, value_name = "ID", default_value = "root")]
+    pub case: String,
+    /// The instant every write of the command records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's
+    /// when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of `b10x-loom tree approve`.
+#[derive(Debug, Args)]
+pub struct TreeApproveArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The case of the tree the decision is for.
+    #[arg(long, value_name = "ID")]
+    pub case: String,
+    /// The capability decided.
+    #[arg(long, value_name = "CAPABILITY")]
+    pub capability: String,
+    /// The principal who decided.
+    #[arg(long, value_name = "PRINCIPAL")]
+    pub principal: String,
+    /// Deny the capability instead of approving it.
+    #[arg(long)]
+    pub deny: bool,
+    /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of a tree command that names only the store.
+#[derive(Debug, Args)]
+pub struct TreeStoreArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+}
+
+/// `ARTIFACT=REVISION` as the pair it names.
+fn artifact_revision(text: &str) -> Result<(String, String), String> {
+    match text.split_once('=') {
+        Some((artifact, revision)) if !artifact.is_empty() && !revision.is_empty() => {
+            Ok((artifact.to_owned(), revision.to_owned()))
+        }
+        _ => Err("expected ARTIFACT=REVISION".into()),
+    }
 }
 
 /// The arguments of `b10x-loom approve`.
