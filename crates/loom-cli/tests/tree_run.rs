@@ -40,17 +40,25 @@ const AT: &str = "2026-11-22T08:00:00Z";
 struct Tree {
     root: PathBuf,
     started: Instant,
+    /// A shared fixture other tests read: never removed.
+    shared: bool,
 }
 
 impl Tree {
     fn new(label: &str) -> Self {
-        let started = Instant::now();
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-            .join(format!("tree-run-{label}-{}-{nanos}", std::process::id()));
+        Self::at(
+            PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+                .join(format!("tree-run-{label}-{}-{nanos}", std::process::id())),
+        )
+    }
+
+    /// A fresh scratch directory at `root`.
+    fn at(root: PathBuf) -> Self {
+        let started = Instant::now();
         fs::create_dir_all(root.join("home")).unwrap();
         fs::create_dir_all(root.join("workspace/stubs")).unwrap();
         let installed = InstallStore::new(root.join("home/loom/protocols"));
@@ -81,7 +89,11 @@ impl Tree {
                 fs::copy(entry.path(), root.join("workspace").join(entry.file_name())).unwrap();
             }
         }
-        Self { root, started }
+        Self {
+            root,
+            started,
+            shared: false,
+        }
     }
 
     /// The catalog of the test's user: the bundled protocols and the two installed.
@@ -219,7 +231,9 @@ impl Drop for Tree {
         if !std::thread::panicking() {
             assert!(took < BOUND, "the test took {took:?}, past its {BOUND:?}");
         }
-        let _ = fs::remove_dir_all(&self.root);
+        if !self.shared {
+            let _ = fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -610,20 +624,15 @@ fn a_cancelled_run_ends_budget_spent_before_its_next_step() {
 }
 
 /// `tree open` of the two-level tree, then `tree run` and each first printed decision in turn
-/// until a run exits other than 3: per wait the run's JSON and the status read at it, and the last
-/// run's JSON.
-fn run_to_end(tree: &Tree) -> (Vec<(Value, Value)>, Value) {
-    run_to_end_twice(tree, None)
-}
-
-/// [`run_to_end`], taking the decision on `twice` two times in a row.
+/// until a run exits other than 3, taking the decision on `twice` two times in a row: per wait the
+/// run's JSON and the status read at it, and the last run's JSON.
 fn run_to_end_twice(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     run_opened(tree, twice)
 }
 
-/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end`].
+/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end_twice`].
 fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let mut waits = Vec::new();
     for _ in 0..8 {
@@ -651,6 +660,114 @@ fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) 
     panic!("the tree did not end within 8 runs: {waits:?}");
 }
 
+/// The two-level tree run to its end, shared by the status tests: its store and workspace, each
+/// wait with the status read at it, and the last run's JSON.
+struct Ended {
+    tree: Tree,
+    waits: Vec<(Value, Value)>,
+    ended: Value,
+}
+
+/// The SHA-256, as hex, of what the shared ended tree is made from: every file of the fixture
+/// directory (its path, its length and its bytes, in path order), the `b10x-loom` binary and this
+/// test binary, whose helpers drive the run.
+fn ended_digest() -> String {
+    use sha2::{Digest, Sha256};
+    fn files(dir: &Path, found: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                files(&entry.path(), found);
+            } else {
+                found.push(entry.path());
+            }
+        }
+    }
+    let mut found = Vec::new();
+    files(Path::new(FIXTURE), &mut found);
+    found.sort();
+    let mut hasher = Sha256::new();
+    for file in &found {
+        let bytes = fs::read(file).unwrap();
+        hasher.update(
+            file.strip_prefix(FIXTURE)
+                .unwrap()
+                .as_os_str()
+                .as_encoded_bytes(),
+        );
+        hasher.update([0]);
+        hasher.update((bytes.len() as u64).to_be_bytes());
+        hasher.update(&bytes);
+    }
+    hasher.update(fs::read(env!("CARGO_BIN_EXE_b10x-loom")).unwrap());
+    hasher.update(fs::read(std::env::current_exe().unwrap()).unwrap());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The two-level tree run to its end once per test run (the grant of `ticket.issue` taken twice),
+/// kept under `target/` beside the test scratch directories and keyed by [`ended_digest`]: an
+/// open, eight runs and their decisions cost seconds each, so each status test reads a fresh copy of
+/// this one tree. The first test that asks builds it holding a lock file; the others wait
+/// on the lock and read what it left.
+fn ended_tree() -> Ended {
+    let key = ended_digest();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let root = base.join(format!("tree-run-ended-{}", &key[..16]));
+    let lock = fs::File::create(base.join(format!("tree-run-ended-{}.lock", &key[..16]))).unwrap();
+    lock.lock().unwrap();
+    if !root.join("ended.json").exists() {
+        let _ = fs::remove_dir_all(&root);
+        let mut tree = Tree::at(root.clone());
+        tree.shared = true;
+        let (waits, ended) = run_to_end_twice(&tree, Some("ticket.issue"));
+        fs::write(root.join("waits.json"), serde_json::to_vec(&waits).unwrap()).unwrap();
+        fs::write(root.join("ended.json"), serde_json::to_vec(&ended).unwrap()).unwrap();
+    }
+    lock.unlock().unwrap();
+    let waits = serde_json::from_slice(&fs::read(root.join("waits.json")).unwrap()).unwrap();
+    let ended = serde_json::from_slice(&fs::read(root.join("ended.json")).unwrap()).unwrap();
+    // Each test reads a fresh copy; the store names the shared workspace, which nothing writes.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let copy = base.join(format!(
+        "tree-run-ended-copy-{}-{nanos}",
+        std::process::id()
+    ));
+    copy_dir(&root, &copy);
+    Ended {
+        tree: Tree {
+            root: copy,
+            started: Instant::now(),
+            shared: false,
+        },
+        waits,
+        ended,
+    }
+}
+
+/// Copies the directory `from` to `to`, a link as a link.
+fn copy_dir(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let kind = entry.file_type().unwrap();
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else if kind.is_symlink() {
+            std::os::unix::fs::symlink(fs::read_link(entry.path()).unwrap(), &target).unwrap();
+        } else {
+            fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+}
+
 /// The entry of `case` in `status`.
 fn entry<'a>(status: &'a Value, case: &str) -> &'a Value {
     status["cases"]
@@ -663,8 +780,7 @@ fn entry<'a>(status: &'a Value, case: &str) -> &'a Value {
 
 #[test]
 fn a_status_names_each_cases_link_protocol_and_stop() {
-    let tree = Tree::new("status-link");
-    let (waits, ended) = run_to_end(&tree);
+    let Ended { tree, waits, ended } = ended_tree();
     assert_eq!(ended["stop"], "Terminal", "{ended}");
     let status = json(&tree.tree("status"));
     let root = entry(&status, "root");
@@ -697,8 +813,7 @@ fn a_status_names_each_cases_link_protocol_and_stop() {
 
 #[test]
 fn a_status_lists_each_record_in_the_order_received() {
-    let tree = Tree::new("status-records");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     let root = entry(&status, "root");
     let records = root["evidence"].as_array().unwrap();
@@ -744,8 +859,7 @@ fn a_status_lists_each_record_in_the_order_received() {
 
 #[test]
 fn a_status_counts_the_attempts_of_a_retried_writer() {
-    let tree = Tree::new("status-runs");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     let first = entry(&status, "root.first");
     let writes: Vec<&Value> = first["runs"]
@@ -777,10 +891,9 @@ fn a_status_counts_the_attempts_of_a_retried_writer() {
 
 #[test]
 fn a_status_lists_each_approval_in_the_order_recorded() {
-    let tree = Tree::new("status-approvals");
-    // The grant of the ticket is recorded twice at one revision: two entries, one decision in
-    // the approvals file.
-    run_to_end_twice(&tree, Some("ticket.issue"));
+    // The grant of the ticket is recorded twice at one revision (the shared tree takes it twice):
+    // two entries, one decision in the approvals file.
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     let first = entry(&status, "root.first");
     let approvals = first["approvals"].as_array().unwrap();
@@ -810,8 +923,7 @@ fn a_status_lists_each_approval_in_the_order_recorded() {
 
 #[test]
 fn a_status_names_the_copy_into_the_root() {
-    let tree = Tree::new("status-copies");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let status = json(&tree.tree("status"));
     assert_eq!(
         entry(&status, "root")["copies"],
@@ -827,8 +939,7 @@ fn a_status_names_the_copy_into_the_root() {
 
 #[test]
 fn the_printed_status_is_the_value_of_tree_status() {
-    let tree = Tree::new("status-value");
-    run_to_end(&tree);
+    let Ended { tree, .. } = ended_tree();
     let printed = tree.tree("status");
     assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
     let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
