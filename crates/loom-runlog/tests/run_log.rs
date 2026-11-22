@@ -188,9 +188,11 @@ fn temporaries(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
-    let (log, path) = log_with("fifty", 50);
+/// `count` events appended to one log: one JSON line each, `seq` gapless from 0, each `prev` the
+/// SHA-256 of the line before, read back and verified. Each append syncs, so the count sets the
+/// time.
+fn events_verify_with_a_gapless_seq(label: &str, count: usize) {
+    let (log, path) = log_with(label, count);
     assert_eq!(
         path.file_name().and_then(|name| name.to_str()),
         Some(format!("runlog-case-{}.jsonl", hex(CASE.as_bytes())).as_str()),
@@ -198,7 +200,7 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     );
     let bytes = fs::read(&path).expect("the log file reads");
     let raw = lines(&bytes);
-    assert_eq!(raw.len(), 50, "one line per event");
+    assert_eq!(raw.len(), count, "one line per event");
     assert!(bytes.ends_with(b"\n"), "every line ends with a line feed");
     for (index, line) in raw.iter().enumerate() {
         let value: serde_json::Value =
@@ -227,7 +229,7 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     let read = log.read(CASE).expect("the log verifies");
     let verified = verify(&bytes).expect("the bytes verify");
     assert_eq!(read, verified);
-    assert_eq!(read.len(), 50);
+    assert_eq!(read.len(), count);
     for (index, line) in read.iter().enumerate() {
         assert_eq!(line.seq, i64::try_from(index).expect("small"));
         assert_eq!(line.at, at(index));
@@ -239,6 +241,19 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
         let prev = (index > 0).then(|| sha256_hex(&raw[index - 1]));
         assert_eq!(line.prev, prev);
     }
+}
+
+/// [`events_verify_with_a_gapless_seq`] with 20 events.
+#[test]
+fn twenty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
+    events_verify_with_a_gapless_seq("twenty", 20);
+}
+
+/// [`events_verify_with_a_gapless_seq`] with 50 events, the count the case held before, in the
+/// slow lane (`task slow`): about 8 s on a loaded host.
+#[test]
+fn slow_fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
+    events_verify_with_a_gapless_seq("fifty", 50);
 }
 
 #[test]

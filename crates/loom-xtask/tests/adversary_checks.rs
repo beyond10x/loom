@@ -49,10 +49,29 @@ fn copy_of_repository(name: &str) -> PathBuf {
     to
 }
 
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
+
+/// The `ess` the generator runs here: a stand-in that answers the synthesis of the repository's
+/// `ess/` from a copy made once a test run (`ess_suite::synthesis_stand_in`, which `task
+/// test-step` fills before the tests), and runs `ess` itself for any other call.
+fn stand_in() -> PathBuf {
+    let root = repository();
+    ess_suite::synthesis_stand_in(
+        &ess_suite::ess_program(&root),
+        &root.join("ess"),
+        &ess_suite::RUST_CRATE,
+        &Path::new(env!("CARGO_TARGET_TMPDIR")).join(ess_suite::STAND_IN_CACHE),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
 fn xtask(root: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_loom-xtask"))
         .arg("--root")
         .arg(root)
+        .arg("--ess")
+        .arg(stand_in())
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("run loom-xtask: {e}"))
