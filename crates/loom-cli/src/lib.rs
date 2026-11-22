@@ -405,7 +405,7 @@ pub fn tree_run_exit_status(stop: b10x_loom_tree::model::TreeStop) -> u8 {
         TreeStop::Terminal => 0,
         TreeStop::AwaitingPerson | TreeStop::AwaitingAuthority => 3,
         TreeStop::Stuck => 4,
-        TreeStop::BudgetSpent => 5,
+        TreeStop::BudgetSpent | TreeStop::Cancelled => 5,
     }
 }
 

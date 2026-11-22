@@ -701,6 +701,40 @@ fn a_local_test_past_its_timeout_is_killed_with_its_group() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// A cancel set before the launch (`story:cancel-a-running-bound-program`)
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_child_whose_cancel_is_set_is_refused_before_launch() {
+    use b10x_loom_intake_slice::confinement::Cancel as ChildCancel;
+    let fixture = Fixture::new();
+    let marker = fixture.outside.join("marker");
+    let cancel = ChildCancel::new();
+    cancel.cancel();
+    let child = shell(
+        &format!("touch '{}'", marker.display()),
+        &fixture.workspace,
+        &[],
+    )
+    .with_cancel(cancel);
+    // `linux` is refused before any check or driver open, so it needs no delegated scope.
+    let linux = EngineRunner::open(&linux_confinement()).expect("linux builds");
+    for (adapter, runner) in [("local", local_runner()), ("linux", linux)] {
+        for child in [child.clone(), child.clone().with_stdin(b"input\n".to_vec())] {
+            let error = runner
+                .run_child(&child)
+                .expect_err("a child whose cancel is set is refused");
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::Cancelled,
+                "{adapter}: {error}"
+            );
+            assert!(!marker.exists(), "{adapter}: the child started");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Refusals under `local`
 
 #[test]

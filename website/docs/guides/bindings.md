@@ -272,7 +272,7 @@ The port is a Commission effect port: it performs the actions bound to `program`
   that does not exit 0, or prints anything but one JSON object of at most 1 MiB, refuses the step
   `ArgumentsUnreadable`, and the bound program does not start. The `arguments_from` program
   starts on every step that reaches it, leaves no observation and does not count against
-  `budget.max_runs`.
+  `budget.max_runs`, unless its cancel ends it (below).
 - An `open` executor with `each` reads the names of its children from the same object: the
   request's arguments, else the binding's `arguments`, else the object its `arguments_from`
   program prints. That program runs as a `program` binding's does, with the same environment
@@ -327,6 +327,18 @@ The port is a Commission effect port: it performs the actions bound to `program`
   reads `timeout`, whatever the lists hold. Each step starts the bound program once, so what
   bounds repeated not-called runs is the loop that drives the port, its step budget and idle
   bound.
+- A port built `with_cancel(cancel)` (`confinement::Cancel`) reads the handle after the run count:
+  set then, the step is refused `Cancelled: action <action>: …`, nothing starts and nothing is
+  observed. Every program the step starts, the `arguments_from` program included, holds it. Set
+  while one runs, its runner kills it with every process it started, with no grace (under `linux`
+  at its next read step, at most 1 s; under `local` within 100 ms, then waiting at most
+  `KillBounds::kill_settle`), and `run_child` returns within 7 s. The step is then refused
+  `Cancelled: action <action>: <program> was ended by its cancel: …`, and the refusal ends the run
+  (`EffectRefused`). The run's observation is kept with `cancelled: true`, no `exit` and a
+  `runner_refusal` naming `Cancelled`, and counts against `budget.max_runs`; the placed
+  artifacts' moves are written alone; no table is read, no blob is kept and no record is written,
+  so no retry record comes from the step. A handle set after the program ended changes nothing.
+  `OpenEffects::with_cancel` gives its `arguments_from` program the handle the same way.
 - Otherwise the port records one record per entry (`loom.bindings.RecordedEvidence`), of the
   entry's `kind` about its `subject`, with the entry's `producer`, the observation's instant, the
   revision the case holds for the subject once the step is written and, as `upstream_revisions`,

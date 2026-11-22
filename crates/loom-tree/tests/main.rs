@@ -143,3 +143,303 @@ fn run_settings_are_built_from_items_of_this_crate_alone() {
     };
     assert_eq!(settings.max_steps, Some(1));
 }
+
+// ---------------------------------------------------------------------------------------------
+// A cancelled tree run (`story:cancel-a-running-bound-program`)
+//
+// The tree writes no `action started` line, so "at a step's start" is read from the program
+// itself: `do.sh` writes `target/started` first.
+
+mod cancel {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    use b10x_loom_tree::model::{TreeRun, TreeStop};
+    use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
+    use b10x_loom_tree::{
+        ConfinementAdapter, EngineConfinement, EngineRunner, OpenRequest, RunSettings, TreeTime,
+        UNCONFINED_FLAG_REASON, open_tree, read_protocols_directory, run_tree, tree_status,
+    };
+    use loom_protocols::ProtocolCatalog;
+
+    const PROTOCOL: &str = "format: protocol/1
+protocol:
+  id: halt
+  revision: 1
+artifacts:
+  work: {}
+evidence_kinds:
+  looked: {}
+  done: {}
+claims:
+  work.done:
+    true_when:
+      evidence: {kind: done, subject: work, result: ok}
+actions:
+  work.look:
+    effect: read
+    may_produce:
+      - evidence: looked
+  work.do:
+    effect: write
+    may_produce:
+      - evidence: done
+outcomes:
+  finished:
+    requires: {claim: work.done}
+";
+
+    const BINDINGS: &str = r#"format: loom.bindings/1
+protocol: halt@1
+artifacts:
+  work: work.txt
+actions:
+  - action: work.look
+    executor: {kind: program, argv: [sh, look.sh]}
+    evidence:
+      - {kind: looked, subject: work, producer: looker, from: exit, results: {"0": ok, "*": failed}}
+  - action: work.do
+    executor: {kind: program, argv: [sh, do.sh]}
+    timeout_seconds: 60
+    evidence:
+      - {kind: done, subject: work, producer: doer, from: exit, results: {"0": ok, "*": failed}}
+"#;
+
+    /// The program a cancel ends: it marks its start, a process of its own writes `target/late`
+    /// 3 s later, and it sleeps 30 s.
+    const DO: &str = "touch target/started\nsleep 3 && touch target/late & sleep 30\n";
+
+    /// A tree of one `halt@1` root, opened, its catalog and its directories.
+    struct Halt {
+        store: PathBuf,
+        workspace: PathBuf,
+        catalog: ProtocolCatalog,
+    }
+
+    impl Halt {
+        fn open(label: &str) -> Self {
+            let dir = super::scratch(label);
+            let protocols = dir.join("protocols");
+            let workspace = dir.join("workspace");
+            std::fs::create_dir_all(&protocols).unwrap();
+            std::fs::create_dir_all(workspace.join("target")).unwrap();
+            std::fs::write(protocols.join("halt.yaml"), PROTOCOL).unwrap();
+            std::fs::write(workspace.join("work.txt"), "work\n").unwrap();
+            std::fs::write(workspace.join("look.sh"), "exit 0\n").unwrap();
+            std::fs::write(workspace.join("do.sh"), DO).unwrap();
+            let bindings = dir.join("halt.bindings.yaml");
+            std::fs::write(&bindings, BINDINGS).unwrap();
+            let directory = read_protocols_directory(&protocols).unwrap();
+            let store = dir.join("store");
+            open_tree(&OpenRequest {
+                store: store.clone(),
+                workspace: workspace.clone(),
+                protocol: "halt@1".into(),
+                bindings,
+                revisions: Vec::new(),
+                case: "root".into(),
+                time: TreeTime::At("2026-11-22T08:00:00Z".into()),
+                catalog: &directory.catalog,
+                protocols: directory.kept,
+            })
+            .unwrap();
+            Self {
+                store,
+                workspace,
+                catalog: directory.catalog,
+            }
+        }
+
+        fn settings(max_wall_seconds: Option<i64>) -> RunSettings {
+            let runner = EngineRunner::open(&EngineConfinement {
+                adapter: ConfinementAdapter::Local,
+                local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+                cgroup_root: None,
+            })
+            .unwrap();
+            RunSettings {
+                max_steps: None,
+                max_wall_seconds,
+                time: TreeTime::At("2026-11-22T08:00:00Z".into()),
+                runner: std::sync::Arc::new(runner),
+                confinement: None,
+            }
+        }
+
+        /// `run_tree` with `flag`, the lines it wrote in the order written.
+        fn run(&self, settings: &RunSettings, flag: &AtomicBool) -> (TreeRun, Vec<RunLogLine>) {
+            let mut lines = Vec::new();
+            let mut observer = |_: &str, line: &RunLogLine| lines.push(line.clone());
+            let run = run_tree(
+                &self.store,
+                &self.catalog,
+                settings,
+                Some(&mut observer),
+                Some(flag),
+            )
+            .expect("the tree runs");
+            (run, lines)
+        }
+
+        /// [`Halt::run`] with `flag` set from a thread of its own `after` `do.sh` started;
+        /// answers the run, its lines, the instant the flag was set and the instant `run_tree`
+        /// returned.
+        fn cancelled_after(&self, after: Duration) -> (TreeRun, Vec<RunLogLine>, Instant, Instant) {
+            let flag = AtomicBool::new(false);
+            let started = self.workspace.join("target/started");
+            std::thread::scope(|scope| {
+                let setter = scope.spawn(|| {
+                    wait_for(&started);
+                    std::thread::sleep(after);
+                    flag.store(true, Ordering::SeqCst);
+                    Instant::now()
+                });
+                let (run, lines) = self.run(&Self::settings(None), &flag);
+                let returned = Instant::now();
+                let set = setter.join().expect("the flag was set");
+                (run, lines, set, returned)
+            })
+        }
+
+        fn late(&self) -> PathBuf {
+            self.workspace.join("target/late")
+        }
+    }
+
+    /// Waits until `path` exists, at most 30 s.
+    fn wait_for(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{} never appeared",
+                path.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// The `stopped` line `lines` end with: its stop and its `next`.
+    fn stopped(lines: &[RunLogLine]) -> (String, Vec<String>) {
+        match &lines.last().expect("the run wrote lines").event {
+            RunLogEvent::Stopped(stopped) => (stopped.stop.clone(), stopped.next.clone()),
+            other => panic!("the last line is no stop: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_tree_run_cancelled_during_a_step_stops_after_it() {
+        let tree = Halt::open("cancel-during");
+        let (run, lines, _, _) = tree.cancelled_after(Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        let cancelled: Vec<_> = lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                RunLogEvent::ActionFinished(finished)
+                    if finished
+                        .refusal
+                        .as_deref()
+                        .is_some_and(|refusal| refusal.starts_with("Cancelled")) =>
+                {
+                    Some(finished.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cancelled.len(), 1, "{lines:#?}");
+        assert_eq!(cancelled[0].action, "work.do");
+        assert_eq!(cancelled[0].exit, None);
+        assert!(cancelled[0].evidence.is_empty(), "{:?}", cancelled[0]);
+        assert_eq!(
+            stopped(&lines),
+            ("Cancelled".to_owned(), vec!["work.do".to_owned()])
+        );
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_tree_run_cancelled_from_another_thread_returns_within_ten_seconds() {
+        let tree = Halt::open("cancel-thread");
+        let (run, _, set, returned) = tree.cancelled_after(Duration::from_secs(1));
+        let taken = returned.saturating_duration_since(set);
+        assert!(
+            returned > set && taken < Duration::from_secs(10),
+            "run_tree returned {taken:?} after the flag was set"
+        );
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        std::thread::sleep(Duration::from_secs(4));
+        assert!(
+            !tree.late().exists(),
+            "a process of the program outlived the cancel"
+        );
+    }
+
+    #[test]
+    fn a_cancel_before_a_step_stops_cancelled() {
+        let tree = Halt::open("cancel-before");
+        let flag = AtomicBool::new(true);
+        let (run, lines) = tree.run(&Halt::settings(None), &flag);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        assert_eq!(run.case, "root");
+        assert_eq!(
+            stopped(&lines),
+            ("Cancelled".to_owned(), vec!["work.look".to_owned()])
+        );
+        assert!(
+            !lines
+                .iter()
+                .any(|line| matches!(line.event, RunLogEvent::ActionFinished(_))),
+            "a step was taken: {lines:#?}"
+        );
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_status_names_a_cancelled_stop_and_its_action() {
+        let tree = Halt::open("cancel-status-stop");
+        let (run, _, _, _) = tree.cancelled_after(Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        let status = tree_status(&tree.store, &tree.catalog).unwrap();
+        let root = &status.cases[0];
+        assert_eq!(root.stop.as_deref(), Some("Cancelled"));
+        assert_eq!(root.stop_next, ["work.do"]);
+        // A run whose wall-time budget is spent still stops `BudgetSpent`.
+        let spent = Halt::open("cancel-status-wall");
+        let (run, lines) = spent.run(&Halt::settings(Some(0)), &AtomicBool::new(false));
+        assert_eq!(run.stop, TreeStop::BudgetSpent, "{run:?}");
+        assert_eq!(stopped(&lines).0, "BudgetSpent");
+        let status = tree_status(&spent.store, &spent.catalog).unwrap();
+        assert_eq!(status.cases[0].stop.as_deref(), Some("BudgetSpent"));
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_status_marks_the_cancelled_run() {
+        let tree = Halt::open("cancel-status-run");
+        tree.cancelled_after(Duration::ZERO);
+        let status = tree_status(&tree.store, &tree.catalog).unwrap();
+        let runs = &status.cases[0].runs;
+        assert_eq!(runs.len(), 2, "{runs:#?}");
+        assert_eq!(
+            (runs[0].action.as_str(), runs[0].exit, runs[0].cancelled),
+            ("work.look", Some(0), None)
+        );
+        assert_eq!(
+            (runs[1].action.as_str(), runs[1].exit, runs[1].cancelled),
+            ("work.do", None, Some(true))
+        );
+        let printed = b10x_loom_tree::status_json(&status);
+        assert_eq!(
+            printed["cases"][0]["runs"][1]["cancelled"], true,
+            "{printed}"
+        );
+        assert!(
+            printed["cases"][0]["runs"][0].get("cancelled").is_none(),
+            "{printed}"
+        );
+        let read = b10x_loom_tree::read_status(printed.to_string().as_bytes()).unwrap();
+        assert_eq!(read.cases[0].runs, status.cases[0].runs);
+    }
+}

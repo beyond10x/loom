@@ -273,6 +273,92 @@ fn a_timed_out_child_is_a_result_with_no_exit_status() {
     );
 }
 
+/// The cancelled program of `story:cancel-a-running-bound-program`: it marks its start in
+/// `target/started`, a process of its own writes `target/late` 3 s later, and it sleeps 30 s.
+const CANCELLED_STUB: &str = "/usr/bin/touch target/started; \
+    /usr/bin/sleep 3 && /usr/bin/touch target/late & /usr/bin/sleep 30";
+
+/// Runs [`CANCELLED_STUB`] confined with a 60 s timeout and a cancel handle set 1 s after it
+/// started, and answers the refusal and how long after the cancel `run_child` returned.
+fn cancelled_confined_child(
+    runner: &SubstrateRunner,
+    workspace: &Path,
+) -> (ConfinementError, Duration) {
+    use b10x_loom_intake_slice::confinement::Cancel;
+    let cancel = Cancel::new();
+    let started = workspace.join("target/started");
+    let setter = {
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while !started.exists() {
+                assert!(Instant::now() < deadline, "the program never started");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            std::thread::sleep(Duration::from_secs(1));
+            cancel.cancel();
+            Instant::now()
+        })
+    };
+    let child = ChildCommand::new("sh", ["-c", CANCELLED_STUB], workspace)
+        .with_timeout(Duration::from_secs(60))
+        .with_cancel(cancel);
+    let answer = runner.run_child(&child);
+    let returned = Instant::now();
+    let cancelled_at = setter.join().expect("the handle was set");
+    let error = answer.expect_err("a cancelled child is refused");
+    assert!(
+        returned > cancelled_at,
+        "returned before its cancel: {error}"
+    );
+    (error, returned - cancelled_at)
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_cancelled_confined_program_ends_within_seven_seconds() {
+    delegated(
+        "a_cancelled_confined_program_ends_within_seven_seconds",
+        |runner, workspace| {
+            let (error, taken) = cancelled_confined_child(runner, workspace);
+            assert_eq!(error.reason, ConfinementRefusal::Cancelled, "{error}");
+            assert!(
+                error
+                    .detail
+                    .starts_with("the child was killed by its cancel after "),
+                "{error}"
+            );
+            assert!(
+                taken < Duration::from_secs(7),
+                "returned {taken:?} after its cancel"
+            );
+        },
+    );
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_cancelled_confined_program_leaves_no_process() {
+    delegated(
+        "a_cancelled_confined_program_leaves_no_process",
+        |runner, workspace| {
+            let (error, _) = cancelled_confined_child(runner, workspace);
+            assert_eq!(error.reason, ConfinementRefusal::Cancelled, "{error}");
+            std::thread::sleep(Duration::from_secs(4));
+            assert!(
+                !workspace.join("target/late").exists(),
+                "a process of the cancelled program outlived it"
+            );
+        },
+    );
+}
+
 /// Try to write each path and say, per path, whether the write was `written` or `refused`.
 fn write_each(paths: &[&str]) -> String {
     format!(

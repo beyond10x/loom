@@ -44,7 +44,7 @@ use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPo
 use b10x_loom_commission::ports::evidence::ObservationPort;
 use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
-use b10x_loom_intake_slice::confinement::{ConfinementError, TestRunner};
+use b10x_loom_intake_slice::confinement::{Cancel, ConfinementError, TestRunner};
 use loom::bindings::{
     BindingsDocument, BindingsRefusal, BindingsRefusalReason as Reason, BoundAction,
     ChildNameSource, Executor, OpenRefusal, OpenRefusalReason, ProgramRoot,
@@ -144,6 +144,8 @@ pub struct OpenEffects<'a, S, T = NoEvaluationTime> {
     store: PathBuf,
     /// The admitted runner, when a binding of the document has `arguments_from`.
     runner: Option<Arc<dyn TestRunner>>,
+    /// The handle an `arguments_from` program holds ([`OpenEffects::with_cancel`]).
+    cancel: Option<Cancel>,
 }
 
 impl<S, T> std::fmt::Debug for OpenEffects<'_, S, T> {
@@ -387,7 +389,20 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> OpenEffects<'a, S, T> {
             workspace: workspace.to_owned(),
             store: store.to_owned(),
             runner,
+            cancel: None,
         })
+    }
+
+    /// This port with `cancel`, which the `arguments_from` program a step starts holds, as a
+    /// program port's does ([`crate::ProgramEffects::with_cancel`]): set before the program
+    /// starts or while it runs, the step is refused `Cancelled`, ending the run, and no child is
+    /// opened.
+    #[must_use]
+    pub fn with_cancel(self, cancel: Cancel) -> Self {
+        Self {
+            cancel: Some(cancel),
+            ..self
+        }
     }
 
     /// The binding of `action` when it is bound to `open`.
@@ -674,9 +689,14 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> OpenEffects<'a, S, T> {
                 runner.as_ref(),
                 &self.case,
                 &names,
+                self.cancel.as_ref(),
             ) {
                 Ok(printed) => Ok(printed),
                 Err(NotPrinted::NotStarted(why)) => Err(refused(format!("{action}: {why}"))),
+                Err(NotPrinted::Cancelled(cancelled)) => Err(crate::program::cancelled_step(
+                    action,
+                    format!("{program} was ended by its cancel: {}", cancelled.detail),
+                )),
                 Err(NotPrinted::Unreadable(why)) => Err(open_refusal(
                     OpenRefusalReason::ArgumentsUnreadable,
                     action,

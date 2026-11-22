@@ -1478,3 +1478,95 @@ fn a_retried_writer_that_moves_the_draft_records_the_moved_revision_and_is_not_s
         serde_json::json!([])
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// A cancelled step (`story:cancel-a-running-bound-program`)
+
+/// A recording runner whose first child of `program` its cancel ended: the runner answers it as
+/// one whose kill a cancel handle sent.
+struct CancelsFirst {
+    inner: Arc<Recording>,
+    program: &'static str,
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+impl TestRunner for CancelsFirst {
+    fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
+        self.inner.run(command, root)
+    }
+
+    fn backend(&self) -> Backend {
+        self.inner.backend()
+    }
+
+    fn local_reason(&self) -> Option<&str> {
+        self.inner.local_reason()
+    }
+
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        let answer = self.inner.run_child(child);
+        if child.program() == self.program && !self.cancelled.swap(true, Ordering::SeqCst) {
+            return Err(ConfinementError {
+                reason: ConfinementRefusal::Cancelled,
+                detail: "the child was killed by its cancel after 1.0 s".to_owned(),
+            });
+        }
+        answer
+    }
+
+    fn preflight_child(&self, root: &Path) -> Result<(), ConfinementError> {
+        self.inner.preflight_child(root)
+    }
+}
+
+#[test]
+fn a_cancelled_step_is_not_retried() {
+    let scratch = Scratch::new();
+    let document = recorded_document(RETRY);
+    let governor = governor();
+    let recording = Arc::new(Recording::new().answering(CHECK_STUB, 1, b"the check failed\n"));
+    let runner = Arc::new(CancelsFirst {
+        inner: Arc::clone(&recording),
+        program: WRITE_STUB,
+        cancelled: std::sync::atomic::AtomicBool::new(false),
+    });
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        Arc::clone(&runner) as Arc<dyn TestRunner>,
+    );
+    // One recorded check sends the writer back.
+    assert_performed(&drive(&governor, &effects, CHECK, "{}"));
+    let check = retries(&governor, writer(&document));
+    assert_eq!(check.len(), 1, "{check:#?}");
+    // The writer's step is cancelled: no record, its run observed `cancelled`.
+    let reason = refusal(&drive(&governor, &effects, WRITE, "{}"));
+    assert!(
+        reason.starts_with("Cancelled: action draft.write: "),
+        "{reason}"
+    );
+    let cancelled = runs_of(&governor, WRITE);
+    assert_eq!(cancelled.len(), 1, "{cancelled:#?}");
+    assert_eq!(cancelled[0]["cancelled"], serde_json::json!(true));
+    assert_eq!(retries(&governor, writer(&document)), check);
+    // The writer's second run is given the check's record alone.
+    assert_performed(&drive(&governor, &effects, WRITE, "{}"));
+    let second = recording.writer_child();
+    let feedback = feedback_at(Path::new(
+        &variable(&second).expect("the second run is given the variable"),
+    ));
+    assert_eq!(feedback.records, check);
+    let blob = check[0].blob_sha256.clone().expect("a cited blob");
+    assert_eq!(
+        feedback.logs,
+        [RetryLog {
+            blob_sha256: blob,
+            tail: "the check failed\n".to_owned(),
+        }]
+    );
+    let runs = runs_of(&governor, WRITE);
+    assert_eq!(runs.len(), 2, "{runs:#?}");
+    assert_eq!(runs[1]["retry_of"], serde_json::json!(ids(&check)));
+    assert_eq!(runs[1]["cancelled"], serde_json::json!(false));
+}

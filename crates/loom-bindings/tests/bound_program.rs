@@ -14,8 +14,9 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use b10x_loom_bindings::{PROGRAM_SOURCE, ProgramEffects, check, decode};
 use b10x_loom_commission::model::behaviour::Generated;
@@ -34,8 +35,9 @@ use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{
-    AppliedConfinement, Backend, ChildCommand, ChildOutput, ConfinementAdapter, ConfinementError,
-    ConfinementRefusal, EngineConfinement, EngineRunner, TestExecution, TestRunner,
+    AppliedConfinement, Backend, Cancel, ChildCommand, ChildOutput, ConfinementAdapter,
+    ConfinementError, ConfinementRefusal, EngineConfinement, EngineRunner, TestExecution,
+    TestRunner,
 };
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
 use loom::bindings::BindingsDocument;
@@ -1759,4 +1761,577 @@ fn a_case_of_another_protocol_starts_no_program() {
     assert!(port_observations(&governor).is_empty());
     assert!(records(&governor).is_empty());
     assert!(scratch.blob_names().is_empty());
+}
+
+// ---------------------------------------------------------------------------------------------
+// A cancel handle (`story:cancel-a-running-bound-program`)
+
+/// The program a cancel ends, after its marker: a process of its own writes `target/late` 3 s
+/// after it started, and it sleeps 30 s itself. A process the cancel left writes the file.
+const CANCELLED_STUB: &str = "sleep 3 && touch target/late & sleep 30\n";
+/// The program's timeout, far past every bound below.
+const SIXTY_SECONDS: &str = "    timeout_seconds: 60\n";
+/// How long after the program started its handle is set.
+const CANCEL_AFTER: Duration = Duration::from_secs(1);
+/// From the cancel to the step's end, under a host's kill bounds.
+const SEVEN_SECONDS: Duration = Duration::from_secs(7);
+/// How long after the step the test looks for `target/late`: past the 3 s the process sleeps.
+const LATE_LOOK: Duration = Duration::from_secs(4);
+
+/// Sets `cancel` once `started` exists and `after` passed, from a thread of its own; answers the
+/// instant it set it.
+fn cancel_when(
+    started: PathBuf,
+    after: Duration,
+    cancel: Cancel,
+) -> std::thread::JoinHandle<Instant> {
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !started.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "{} never appeared",
+                started.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(after);
+        cancel.cancel();
+        Instant::now()
+    })
+}
+
+/// A step of [`CHECK`] bound to the marking [`CANCELLED_STUB`] with the extra `members`, whose
+/// handle is set [`CANCEL_AFTER`] the program started.
+struct CancelledStep {
+    governor: CanonGovernor<MemoryCaseStore>,
+    scratch: Scratch,
+    end: LoopEnd,
+    /// When the handle was set.
+    cancelled_at: Instant,
+    /// When the step returned.
+    returned: Instant,
+}
+
+impl CancelledStep {
+    fn run(members: &str, entries: &[String]) -> Self {
+        let scratch = Scratch::new();
+        std::fs::create_dir(scratch.workspace.join("target")).unwrap();
+        let program = scratch.marking("program.sh", CANCELLED_STUB);
+        let document = document(&bound(
+            CHECK,
+            &[&program],
+            &format!("{SIXTY_SECONDS}{members}"),
+            entries,
+        ));
+        let governor = governor();
+        let cancel = Cancel::new();
+        let setter = cancel_when(scratch.marker(), CANCEL_AFTER, cancel.clone());
+        let (end, returned) = {
+            let effects = port(&governor, &document, &scratch, CASE, Some(flag_runner()))
+                .unwrap()
+                .with_cancel(cancel);
+            let end = drive(&governor, &effects, CASE, CHECK, args("{}"));
+            (end, Instant::now())
+        };
+        let cancelled_at = setter.join().expect("the handle was set");
+        Self {
+            governor,
+            scratch,
+            end,
+            cancelled_at,
+            returned,
+        }
+    }
+
+    fn gate() -> Self {
+        Self::run("", &[entry("gate", "exit", VALID_TABLE)])
+    }
+
+    /// The step's refusal and whether it ends the run.
+    fn refused(&self) -> (String, bool) {
+        match only_effect(&self.end) {
+            EffectOutcome::Refused(refused) => (refused.reason.clone(), refused.ends_run),
+            other => panic!("not refused: {other:?}"),
+        }
+    }
+
+    fn late(&self) -> PathBuf {
+        self.scratch.workspace.join("target/late")
+    }
+}
+
+/// `step` was refused `Cancelled`, ending the run, within [`SEVEN_SECONDS`] of its cancel.
+fn assert_cancelled_within_seven_seconds(step: &CancelledStep) {
+    let (reason, ends_run) = step.refused();
+    assert!(
+        reason.starts_with("Cancelled: action spec.check: "),
+        "{reason}"
+    );
+    assert!(ends_run, "a cancelled step ends the run: {reason}");
+    let taken = step.returned.saturating_duration_since(step.cancelled_at);
+    assert!(
+        step.returned > step.cancelled_at && taken < SEVEN_SECONDS,
+        "the step returned {taken:?} after its cancel"
+    );
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_program_ends_within_seven_seconds() {
+    assert_cancelled_within_seven_seconds(&CancelledStep::gate());
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_program_leaves_no_process() {
+    let step = CancelledStep::gate();
+    assert_cancelled_within_seven_seconds(&step);
+    std::thread::sleep(LATE_LOOK);
+    assert!(
+        !step.late().exists(),
+        "a process of the cancelled program outlived it"
+    );
+}
+
+/// A runner that runs each child through `inner`, then sets `cancel`: the handle is set after the
+/// program ended and before the port reads its result.
+struct CancelAfterRun {
+    inner: Arc<dyn TestRunner>,
+    cancel: Cancel,
+}
+
+impl TestRunner for CancelAfterRun {
+    fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
+        self.inner.run(command, root)
+    }
+
+    fn backend(&self) -> Backend {
+        self.inner.backend()
+    }
+
+    fn label(&self) -> String {
+        self.inner.label()
+    }
+
+    fn local_reason(&self) -> Option<&str> {
+        self.inner.local_reason()
+    }
+
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        let answer = self.inner.run_child(child);
+        self.cancel.cancel();
+        answer
+    }
+
+    fn preflight_child(&self, root: &Path) -> Result<(), ConfinementError> {
+        self.inner.preflight_child(root)
+    }
+}
+
+/// What a step of [`CHECK`] bound to a program that exits 0 at once leaves, its instants and ids
+/// aside: the outcome's report, the records' facts and the observation's payload. With `cancel`,
+/// the port holds a handle the runner sets once the program ended.
+fn exits_at_once(
+    cancel: Option<Cancel>,
+) -> (
+    serde_json::Value,
+    Vec<serde_json::Value>,
+    Vec<serde_json::Value>,
+) {
+    let scratch = Scratch::new();
+    let program = scratch.script("program.sh", "exit 0\n");
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        "",
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let runner: Arc<dyn TestRunner> = match &cancel {
+        Some(cancel) => Arc::new(CancelAfterRun {
+            inner: flag_runner(),
+            cancel: cancel.clone(),
+        }),
+        None => flag_runner(),
+    };
+    let end = {
+        let effects = port(&governor, &document, &scratch, CASE, Some(runner)).unwrap();
+        let effects = match cancel.clone() {
+            Some(cancel) => effects.with_cancel(cancel),
+            None => effects,
+        };
+        drive(&governor, &effects, CASE, CHECK, args("{}"))
+    };
+    if let Some(cancel) = &cancel {
+        assert!(cancel.is_cancelled(), "the runner set the handle");
+    }
+    let mut report = match only_effect(&end) {
+        EffectOutcome::Performed(performed) => plain(&performed.report),
+        other => panic!("not performed: {other:?}"),
+    };
+    for record in report["evidence"].as_array_mut().unwrap() {
+        record["observed_at"] = serde_json::Value::Null;
+    }
+    let facts = records(&governor)
+        .iter()
+        .map(|record| {
+            let mut facts = plain(&record.facts);
+            facts["id"] = serde_json::Value::Null;
+            facts["observed_at"] = serde_json::Value::Null;
+            facts
+        })
+        .collect();
+    let observations = port_observations(&governor)
+        .iter()
+        .map(|observation| plain(&observation.payload))
+        .collect();
+    (report, facts, observations)
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancel_after_the_program_ended_changes_nothing() {
+    let without = exits_at_once(None);
+    let with = exits_at_once(Some(Cancel::new()));
+    assert_eq!(with, without);
+    assert_eq!(without.1.len(), 1, "{:?}", without.1);
+    assert_eq!(without.2[0]["cancelled"], json!(false), "{:?}", without.2);
+}
+
+#[test]
+fn a_cancel_before_the_start_refuses_the_step_and_starts_nothing() {
+    let scratch = Scratch::new();
+    let members = format!(
+        "    arguments_from: {}\n",
+        serde_json::to_string(&["/opt/stub/arguments"]).unwrap()
+    );
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        &members,
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let runner = Arc::new(Recording::default());
+    let cancel = Cancel::new();
+    cancel.cancel();
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        CASE,
+        Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+    )
+    .unwrap()
+    .with_cancel(cancel);
+    let end = drive(&governor, &effects, CASE, CHECK, args("{}"));
+    match only_effect(&end) {
+        EffectOutcome::Refused(refused) => {
+            assert!(
+                refused.reason.starts_with("Cancelled: action spec.check: "),
+                "{}",
+                refused.reason
+            );
+            assert!(refused.ends_run, "{}", refused.reason);
+        }
+        other => panic!("not refused: {other:?}"),
+    }
+    assert!(
+        runner.children().is_empty(),
+        "a child was given to the runner: {:?}",
+        runner.children()
+    );
+    assert!(port_observations(&governor).is_empty());
+    assert!(records(&governor).is_empty());
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancel_during_the_arguments_program_starts_no_bound_program() {
+    let scratch = Scratch::new();
+    std::fs::create_dir(scratch.workspace.join("target")).unwrap();
+    let arguments_started = scratch.root.join("arguments-started");
+    let from = scratch.script(
+        "arguments.sh",
+        &format!(
+            "/usr/bin/touch '{}'\n{CANCELLED_STUB}",
+            arguments_started.display()
+        ),
+    );
+    let program = scratch.marking("program.sh", "exit 0\n");
+    let members = format!(
+        "{SIXTY_SECONDS}    arguments_from: {}\n",
+        serde_json::to_string(&[&from]).unwrap()
+    );
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        &members,
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let cancel = Cancel::new();
+    let setter = cancel_when(arguments_started, CANCEL_AFTER, cancel.clone());
+    let (end, returned) = {
+        let effects = port(&governor, &document, &scratch, CASE, Some(flag_runner()))
+            .unwrap()
+            .with_cancel(cancel);
+        let end = drive(&governor, &effects, CASE, CHECK, args("{}"));
+        (end, Instant::now())
+    };
+    let cancelled_at = setter.join().expect("the handle was set");
+    let reason = refusal(&end);
+    assert!(
+        reason.starts_with("Cancelled: action spec.check: "),
+        "{reason}"
+    );
+    assert!(
+        returned.saturating_duration_since(cancelled_at) < SEVEN_SECONDS,
+        "{reason}"
+    );
+    assert!(!scratch.marker().exists(), "the bound program started");
+    assert!(records(&governor).is_empty());
+    std::thread::sleep(LATE_LOOK);
+    assert!(
+        !scratch.workspace.join("target/late").exists(),
+        "a process of the cancelled arguments program outlived it"
+    );
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_step_records_no_evidence() {
+    // Every value, a run with no exit included, falls to `*`: only the cancel records nothing.
+    let step = CancelledStep::run("", &[entry("gate", "exit", r#"{"*": invalid}"#)]);
+    assert_cancelled_within_seven_seconds(&step);
+    assert!(
+        records(&step.governor).is_empty(),
+        "{:#?}",
+        records(&step.governor)
+    );
+    assert!(
+        matches!(only_effect(&step.end), EffectOutcome::Refused(_)),
+        "a refused step carries no report, so no evidence"
+    );
+    assert!(step.scratch.blob_names().is_empty(), "a blob was kept");
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_run_is_observed_and_counted() {
+    let step = CancelledStep::run(
+        "    budget: {max_runs: 1}\n",
+        &[entry("gate", "exit", VALID_TABLE)],
+    );
+    assert_cancelled_within_seven_seconds(&step);
+    let observations = port_observations(&step.governor);
+    assert_eq!(observations.len(), 1, "{observations:#?}");
+    let run = plain(&observations[0].payload);
+    assert_eq!(run["cancelled"], json!(true), "{run}");
+    assert!(
+        run["exit"].is_null() && run["blob_sha256"].is_null(),
+        "{run}"
+    );
+    assert!(
+        run["runner_refusal"]
+            .as_str()
+            .is_some_and(|refusal| refusal.starts_with("Cancelled")),
+        "{run}"
+    );
+    // The next step of the action, with no handle, finds its one run spent.
+    let program = step.scratch.marking("program.sh", "exit 0\n");
+    std::fs::remove_file(step.scratch.marker()).unwrap();
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        &format!("{SIXTY_SECONDS}    budget: {{max_runs: 1}}\n"),
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let effects = port(
+        &step.governor,
+        &document,
+        &step.scratch,
+        CASE,
+        Some(flag_runner()),
+    )
+    .unwrap();
+    let reason = refusal(&drive(&step.governor, &effects, CASE, CHECK, args("{}")));
+    assert!(reason.starts_with("RunsSpent"), "{reason}");
+    assert!(!step.scratch.marker().exists(), "the spent action started");
+}
+
+/// A loop context of three steps.
+struct ThreeSteps;
+
+impl LoopContext for ThreeSteps {
+    fn action_request_id(&mut self) -> ActionRequestId {
+        ActionRequestId(uuid(next()))
+    }
+
+    fn observation_id(&mut self) -> ObservationId {
+        ObservationId(uuid(next()))
+    }
+
+    fn now(&mut self) -> Timestamp {
+        Timestamp("2026-11-21T12:00:00Z".to_owned())
+    }
+
+    fn step_budget(&self) -> Option<usize> {
+        Some(3)
+    }
+}
+
+/// An effect port that counts its invocations and hands each to `inner`.
+struct Counted<'p, P> {
+    inner: &'p P,
+    invoked: AtomicUsize,
+}
+
+impl<P: EffectPort> EffectPort for Counted<'_, P> {
+    fn performs(&self, action: &str) -> bool {
+        self.inner.performs(action)
+    }
+
+    fn invoke(
+        &self,
+        commission: &Commission<
+            b10x_loom_commission::model::responsibility::commission_state::Assigned,
+        >,
+        request: &b10x_loom_commission::ports::effect::AdmittedRequest,
+    ) -> Result<EffectOutcome, b10x_loom_commission::ports::effect::EffectError> {
+        self.invoked.fetch_add(1, Ordering::SeqCst);
+        self.inner.invoke(commission, request)
+    }
+}
+
+#[test]
+fn a_cancelled_step_ends_the_run_and_is_not_invoked_again() {
+    let scratch = Scratch::new();
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        "",
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    // The runner answers as one whose kill a cancel ended the program.
+    let runner = Arc::new(Recording {
+        run_error: Some(ConfinementError {
+            reason: ConfinementRefusal::Cancelled,
+            detail: "the child was killed by its cancel after 1.0 s".to_owned(),
+        }),
+        ..Recording::default()
+    });
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        CASE,
+        Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+    )
+    .unwrap()
+    .with_cancel(Cancel::new());
+    let counted = Counted {
+        inner: &effects,
+        invoked: AtomicUsize::new(0),
+    };
+    let proposal = || {
+        ExecutorOutcome::ProposedAction(ExecutorOutcomeProposedAction {
+            action: CHECK.to_owned(),
+            arguments: ProposedActionArguments(args("{}")),
+        })
+    };
+    let executor = ScriptedExecutor::new([proposal(), proposal(), proposal()]);
+    let mut runs = Generated::new(RunStore::new(|| RunId(uuid(next()))));
+    let end = run_until_blocked(
+        &governor,
+        &executor,
+        &StaticAuthorityProvider::new(),
+        &counted,
+        &commission(CASE),
+        &mut runs,
+        &mut ThreeSteps,
+    )
+    .expect("the loop ends");
+    assert!(
+        matches!(
+            end.outcome,
+            b10x_loom_commission::model::responsibility::RunOutcome::EffectRefused(_)
+        ),
+        "{:?}",
+        end.outcome
+    );
+    assert_eq!(counted.invoked.load(Ordering::SeqCst), 1);
+    assert_eq!(runner.children().len(), 1);
+    let reason = refusal(&end);
+    assert!(
+        reason.starts_with("Cancelled: action spec.check: "),
+        "{reason}"
+    );
+    let observations = port_observations(&governor);
+    assert_eq!(observations.len(), 1, "{observations:#?}");
+    assert_eq!(plain(&observations[0].payload)["cancelled"], json!(true));
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancel_of_one_run_leaves_the_other_running() {
+    let first = Scratch::new();
+    std::fs::create_dir(first.workspace.join("target")).unwrap();
+    let second = Scratch::new();
+    let cancelled = first.marking("program.sh", CANCELLED_STUB);
+    // Still running when the first run's handle is set, then exits 0.
+    let finishing = second.marking("program.sh", "sleep 3\nexit 0\n");
+    let first_document = document(&bound(
+        CHECK,
+        &[&cancelled],
+        SIXTY_SECONDS,
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let second_document = document(&bound(
+        CHECK,
+        &[&finishing],
+        SIXTY_SECONDS,
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let first_governor = governor();
+    let second_governor = governor();
+    let first_cancel = Cancel::new();
+    let second_cancel = Cancel::new();
+    let setter = cancel_when(first.marker(), CANCEL_AFTER, first_cancel.clone());
+    let (first_end, second_end) = std::thread::scope(|scope| {
+        let other = scope.spawn(|| {
+            let effects = port(
+                &second_governor,
+                &second_document,
+                &second,
+                CASE,
+                Some(flag_runner()),
+            )
+            .unwrap()
+            .with_cancel(second_cancel.clone());
+            drive(&second_governor, &effects, CASE, CHECK, args("{}"))
+        });
+        let effects = port(
+            &first_governor,
+            &first_document,
+            &first,
+            CASE,
+            Some(flag_runner()),
+        )
+        .unwrap()
+        .with_cancel(first_cancel.clone());
+        let first_end = drive(&first_governor, &effects, CASE, CHECK, args("{}"));
+        (first_end, other.join().expect("the second run ends"))
+    });
+    setter.join().expect("the first handle was set");
+    let reason = refusal(&first_end);
+    assert!(reason.starts_with("Cancelled"), "{reason}");
+    assert!(!second_cancel.is_cancelled());
+    assert_performed(&second_end);
+    let run = plain(&port_observations(&second_governor)[0].payload);
+    assert_eq!(run["exit"], json!(0), "{run}");
+    assert_eq!(run["cancelled"], json!(false), "{run}");
+    assert_eq!(result_of(&record(&second_governor)), json!("valid"));
 }

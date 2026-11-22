@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 092ae05d201a03407e05e1b9a08708b83246b2741faca7c295cc9b29c8df9810
+// contract digest 6b2527fe99745029eca025e9d3d3f5c47942fb32e34b812bfd6d365b205a4e01
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -186,6 +186,8 @@ pub struct StatusRun {
     pub retried: bool,
     /// `retry_of` — `List<String>`.
     pub retry_of: Vec<String>,
+    /// `cancelled` — `Optional<Boolean>`.
+    pub cancelled: Option<bool>,
 }
 
 /// TreeBudget — `loom.tree.TreeBudget`.
@@ -364,6 +366,8 @@ pub enum TreeStop {
     Stuck,
     /// `BudgetSpent`.
     BudgetSpent,
+    /// `Cancelled`.
+    Cancelled,
 }
 
 /// TreeVerify — `loom.tree.TreeVerify`.

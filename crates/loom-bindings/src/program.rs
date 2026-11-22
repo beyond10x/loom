@@ -58,6 +58,11 @@
 //! differs from before) records nothing: the step is `Discarded` (`ChangedByNonWriter`) and its
 //! moves are still written. The report of a performed step carries `step`
 //! (`loom.bindings.BoundStep`): the outcome, the placements and the moves.
+//!
+//! Cancel (`story:cancel-a-running-bound-program`): a port built [`ProgramEffects::with_cancel`]
+//! reads its handle after the run count, refusing the step `Cancelled` with nothing started, and
+//! gives it to every program the step starts; a program its cancel ended refuses the step
+//! `Cancelled`, ending the run, with its run observed (`cancelled: true`) and nothing recorded.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -82,7 +87,9 @@ use b10x_loom_commission::ports::evidence::{
 use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
-use b10x_loom_intake_slice::confinement::{ConfinementError, TestExecution, TestRunner};
+use b10x_loom_intake_slice::confinement::{
+    Cancel, ConfinementError, ConfinementRefusal, TestExecution, TestRunner,
+};
 use loom::bindings::{
     ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason, EvidenceEntry,
     Executor, ExitClass, ProgramRefusal, ProgramRefusalReason, ProgramRoot, ProgramRun,
@@ -117,6 +124,8 @@ pub struct ProgramEffects<'a, S, T = NoEvaluationTime> {
     workspace: PathBuf,
     store: PathBuf,
     runner: Arc<dyn TestRunner>,
+    /// The handle every program a step starts holds ([`ProgramEffects::with_cancel`]).
+    cancel: Option<Cancel>,
 }
 
 impl<S, T> std::fmt::Debug for ProgramEffects<'_, S, T> {
@@ -157,7 +166,25 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             workspace: workspace.to_owned(),
             store: store.to_owned(),
             runner,
+            cancel: None,
         })
+    }
+
+    /// This port with `cancel`: every program a step starts, the `arguments_from` program
+    /// included, holds it ([`b10x_loom_intake_slice::confinement::ChildCommand::with_cancel`]).
+    /// Set before a step's first program starts, the step is refused `Cancelled`, ending the run,
+    /// with nothing started and no observation kept. Set while a program runs, the runner kills
+    /// it with every process it started and the step is refused `Cancelled`, ending the run: the
+    /// run's observation is kept (`cancelled: true`, `runner_refusal` naming `Cancelled`) and
+    /// counts against `budget.max_runs`, the placed artifacts' moves are written alone, and no
+    /// evidence record, result table or blob is written. A handle set after the program ended
+    /// changes nothing.
+    #[must_use]
+    pub fn with_cancel(self, cancel: Cancel) -> Self {
+        Self {
+            cancel: Some(cancel),
+            ..self
+        }
     }
 
     /// The binding of `action` when it is bound to a `program`.
@@ -246,6 +273,14 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 ),
             ));
         }
+        // After the run count and before any program starts: a cancel set now starts nothing and
+        // keeps no observation.
+        if self.cancel.as_ref().is_some_and(Cancel::is_cancelled) {
+            return Ok(cancelled_step(
+                action,
+                "the step's cancel was set before it started; nothing was started",
+            ));
+        }
         let Some(argv) = binding.executor.argv.as_deref() else {
             return Ok(refused(format!("{action} is bound to no argv")));
         };
@@ -285,28 +320,47 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         // After the run count and before anything starts: the records that send the action back,
         // kept as one document, or an error with nothing started and nothing observed.
         let feedback = crate::retry::feedback(self.governor, &self.case, binding, &self.store)?;
-        let arguments = match self.arguments(binding, request, timeout, &names) {
-            Ok(arguments) => arguments,
-            Err(outcome) => return Ok(outcome),
-        };
-        let child = match bound_case_child(
-            argv,
-            &arguments,
-            timeout,
-            &self.workspace,
-            self.runner.local_reason(),
-            &self.case,
-            &names,
-        ) {
-            Ok(child) => child,
-            Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
-        };
-        let child = crate::retry::given(child, feedback.as_ref(), self.runner.local_reason());
-        // Read before the program starts, so the run's observation has an instant even when the
+        // Read before any program starts, so the run's observation has an instant even when the
         // clock cannot be read after it.
         let started_at = instant(&SystemClock).map_err(EffectError::new)?;
-        // The one start of a bound program: through the admitted runner, never here.
-        let answer = self.runner.run_child(&child);
+        let (answer, ran, retry_of) = match self.arguments(binding, request, timeout, &names) {
+            Ok(arguments) => {
+                let child = match bound_case_child(
+                    argv,
+                    &arguments,
+                    timeout,
+                    &self.workspace,
+                    self.runner.local_reason(),
+                    &self.case,
+                    &names,
+                ) {
+                    Ok(child) => child,
+                    Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
+                };
+                let child =
+                    crate::retry::given(child, feedback.as_ref(), self.runner.local_reason());
+                let child = match &self.cancel {
+                    Some(cancel) => child.with_cancel(cancel.clone()),
+                    None => child,
+                };
+                // The one start of a bound program: through the admitted runner, never here.
+                let answer = self.runner.run_child(&child);
+                let retry_of = feedback.map(|given| given.retry_of).unwrap_or_default();
+                (answer, program, retry_of)
+            }
+            Err(NoArguments::Refused(outcome)) => return Ok(outcome),
+            // The `arguments_from` program its cancel ended: a run like the bound program's, kept
+            // and counted, and the bound program never starts.
+            Err(NoArguments::Cancelled(refusal)) => (
+                Err(refusal),
+                binding
+                    .arguments_from
+                    .as_deref()
+                    .and_then(<[String]>::first)
+                    .map_or("the arguments_from program", String::as_str),
+                Vec::new(),
+            ),
+        };
         // Every call above is a run: its observation is kept whatever the runner answered and
         // whether the blob can be kept or not, so it counts against `budget.max_runs`.
         let mut run = ProgramRun {
@@ -316,8 +370,9 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             blob_sha256: None,
             timed_out: false,
             runner_refusal: None,
-            retry_of: feedback.map(|given| given.retry_of).unwrap_or_default(),
+            retry_of,
             class: None,
+            cancelled: false,
         };
         let mut blob_failure = None;
         match &answer {
@@ -334,7 +389,10 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                     Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
                 }
             }
-            Err(refusal) => run.runner_refusal = Some(refusal.to_string()),
+            Err(refusal) => {
+                run.runner_refusal = Some(refusal.to_string());
+                run.cancelled = refusal.reason == ConfinementRefusal::Cancelled;
+            }
         }
         let observed_at = instant(&SystemClock).unwrap_or(started_at);
         let observation = ObservationId(fresh_uuid("program-observation", &self.case.0));
@@ -369,10 +427,18 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .any(|(before, after)| before.revision != after.revision);
         let execution = match answer {
             Ok(execution) => execution,
+            Err(refusal) if run.cancelled => {
+                // The moves alone: a cancelled run reads no table and records nothing.
+                self.write(&targets, Vec::new())?;
+                return Ok(cancelled_step(
+                    action,
+                    format!("{ran} was ended by its cancel: {}", refusal.detail),
+                ));
+            }
             Err(refusal) => {
                 self.write(&targets, Vec::new())?;
                 return Ok(refused(format!(
-                    "{program} was refused by its runner: {refusal}"
+                    "{ran} was refused by its runner: {refusal}"
                 )));
             }
         };
@@ -537,14 +603,14 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
     }
 
     /// The arguments the bound program reads on standard input, as JSON text; `Err` is the step's
-    /// refusal, with no bound program started.
+    /// refusal, or the `arguments_from` program's cancel, with no bound program started.
     fn arguments(
         &self,
         binding: &BoundAction,
         request: &ActionRequestData,
         timeout: Duration,
         names: &CaseNames,
-    ) -> Result<String, EffectOutcome> {
+    ) -> Result<String, NoArguments> {
         let requested = &request.arguments.0;
         let none =
             matches!(requested, commission_json::Value::Object(members) if members.is_empty());
@@ -566,14 +632,16 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             self.runner.as_ref(),
             &self.case,
             names,
+            self.cancel.as_ref(),
         ) {
             Ok(printed) => Ok(printed.object.to_string()),
-            Err(NotPrinted::NotStarted(why)) => Err(refused(why)),
-            Err(NotPrinted::Unreadable(why)) => Err(refusal(
+            Err(NotPrinted::NotStarted(why)) => Err(NoArguments::Refused(refused(why))),
+            Err(NotPrinted::Unreadable(why)) => Err(NoArguments::Refused(refusal(
                 ProgramRefusalReason::ArgumentsUnreadable,
                 action,
                 why,
-            )),
+            ))),
+            Err(NotPrinted::Cancelled(cancelled)) => Err(NoArguments::Cancelled(cancelled)),
         }
     }
 
@@ -795,6 +863,30 @@ pub(crate) fn sha256(bytes: &[u8]) -> String {
         })
 }
 
+/// Why a step has no arguments for its bound program.
+enum NoArguments {
+    /// The step's refusal.
+    Refused(EffectOutcome),
+    /// The `arguments_from` program's runner refused it `Cancelled`.
+    Cancelled(ConfinementError),
+}
+
+/// The step refused `Cancelled`, ending the run: `Cancelled: action <action>: <detail>`.
+pub(crate) fn cancelled_step(action: &str, detail: impl Into<String>) -> EffectOutcome {
+    let refusal = ProgramRefusal {
+        reason: ProgramRefusalReason::Cancelled,
+        action: action.to_owned(),
+        detail: detail.into(),
+    };
+    EffectOutcome::Refused(EffectOutcomeRefused {
+        reason: format!(
+            "{:?}: action {}: {}",
+            refusal.reason, refusal.action, refusal.detail
+        ),
+        ends_run: true,
+    })
+}
+
 /// A refusal of the step that is none of [`ProgramRefusalReason`]'s.
 fn refused(reason: String) -> EffectOutcome {
     EffectOutcome::Refused(EffectOutcomeRefused {
@@ -873,6 +965,7 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
             ExitClass::Error => "error",
             ExitClass::NotCalled => "not_called",
         }),
+        "cancelled": run.cancelled,
     })
 }
 

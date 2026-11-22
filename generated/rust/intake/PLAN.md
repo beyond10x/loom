@@ -1,6 +1,6 @@
 <!--
   generated from intake v1
-  contract digest ef76b7d637fe5aea69c579f69591a3f6a5f55db932d3ae80eddda2e6244ad274
+  contract digest 72297b4d0dc5170238fdcd498f864a8257aede819b2b7916e0e4b356ff99f220
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — intake v1

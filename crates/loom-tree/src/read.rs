@@ -102,6 +102,14 @@ fn run(value: &Value, at: &str) -> Read<StatusRun> {
             .as_bool()
             .ok_or_else(|| Bad(format!("{at}.retried: not a boolean")))?,
         retry_of: texts(value, at, "retry_of")?,
+        cancelled: match value.get("cancelled") {
+            None => None,
+            Some(cancelled) => Some(
+                cancelled
+                    .as_bool()
+                    .ok_or_else(|| Bad(format!("{at}.cancelled: not a boolean")))?,
+            ),
+        },
     })
 }
 
