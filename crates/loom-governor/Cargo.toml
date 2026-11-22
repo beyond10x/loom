@@ -14,6 +14,7 @@ name = "loom_governor"
 b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.9.0" }
 b10x-loom-commission = { path = "../loom-commission" }
+b10x-loom-decision = { path = "../loom-decision" }
 b10x-loom-executor = { path = "../loom-executor" }
 loom = { path = "../../generated/rust/loom" }
 serde_yaml_ng = "0.10"

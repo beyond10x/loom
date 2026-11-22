@@ -81,9 +81,9 @@ const OBSERVATIONS: &str = "observations.json";
 
 /// The longest id, in bytes, whose file is named by its hex: `case-` and 200 hex digits and
 /// `.json` is 210 bytes, under the 255 a file name may have.
-const HEX_NAMED: usize = 100;
+pub(crate) const HEX_NAMED: usize = 100;
 
-fn push_hex(out: &mut String, bytes: &[u8]) {
+pub(crate) fn push_hex(out: &mut String, bytes: &[u8]) {
     for byte in bytes {
         out.push_str(&format!("{byte:02x}"));
     }

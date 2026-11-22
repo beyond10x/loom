@@ -2,12 +2,13 @@
 //! held for each operation, and every write made to a fresh temporary file in the same directory,
 //! synced, and renamed over its target.
 //!
-//! [`FileCaseStore`](crate::FileCaseStore), [`FileSuspensionStore`](crate::FileSuspensionStore)
-//! and [`FileWorkflowRunStore`](crate::FileWorkflowRunStore) all keep their files through a
+//! [`FileCaseStore`](crate::FileCaseStore), [`FileSuspensionStore`](crate::FileSuspensionStore),
+//! [`FileWorkflowRunStore`](crate::FileWorkflowRunStore) and
+//! [`FileDecisionStore`](crate::FileDecisionStore) all keep their files through a
 //! [`LockedDir`], so any of them opened over one directory, in one process or in two, take the same
 //! lock and never interleave a read and a write; their file names never meet (`case-…`,
-//! `observations.json`, `suspension-…`, `workflow-run-…`, and the run logs `b10x-loom-runlog`
-//! keeps through this type, `runlog-…`). Temporary files are named
+//! `observations.json`, `suspension-…`, `workflow-run-…`, `decision-…`, and the run logs
+//! `b10x-loom-runlog` keeps through this type, `runlog-…`). Temporary files are named
 //! `.tmp-<process id>-<counter>` from one counter for the whole process, and a store that opens
 //! removes the ones a dead process left, holding the lock, so it never removes one a live write
 //! is using.

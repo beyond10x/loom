@@ -577,6 +577,7 @@ dependencies = [
  "b10x-canon",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",
+ "b10x-loom-decision",
  "b10x-loom-executor",
  "b10x-loom-protocols",
  "loom",
