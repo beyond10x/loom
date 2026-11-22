@@ -512,9 +512,10 @@ types:
   # runs at, the exit it must end with, the refusal it must give, the engine and rounds of a `run`,
   # the checks evaluated right after it, and the members of the command it stands for (the case,
   # the capability or the action, the principal, the outcome of a close, the result, reasons or
-  # denial of an approval, the option of a decision). `from` and `to` are the two members of a
-  # `write`: `from` the source, a regular file of the suite's directory, and `to` the target, a
-  # path of plain names in the cycle's workspace.
+  # denial of an approval, the option of a decision, the reason of a `stop`, which is `suite step
+  # <label>` when absent). `from` and `to` are the two members of a `write`: `from` the source, a
+  # regular file of the suite's directory, and `to` the target, a path of plain names in the
+  # cycle's workspace.
   - name: loom.tree.CycleStep
     kind: struct
     fields:
@@ -551,6 +552,8 @@ types:
       - name: deny
         type: Optional<Boolean>
       - name: option
+        type: Optional<String>
+      - name: reason
         type: Optional<String>
       - name: from
         type: Optional<String>
@@ -1137,6 +1140,13 @@ types:
   # of an action that does not write changed a placed artifact): the approval, the run's
   # observation, its blob, the moves and one `action finished` line are kept, and no person record
   # is written. The detail names why, the exit or the blob digest, never the program's output.
+  # `TreeStopped` (story tree-suite-stop-resume-reopen-steps): `tree run` on a held tree, after the
+  # store lock is taken and before anything is written; the detail names the hold's instant,
+  # principal and reason and the `tree reopen` command that lifts it. `TreeAlreadyStopped`: `tree
+  # hold` on a tree that is held already. `TreeNotStopped`: `tree reopen` on a tree that is not
+  # held. `StopUnusable`: a `--principal` or `--reason` of `tree hold` or `tree reopen` that is
+  # empty, too long or holds a control character, named with its rule, before the store is opened.
+  # None of the four writes anything.
   - name: loom.tree.TreeRefusalReason
     kind: enum
     variants:
@@ -1165,6 +1175,10 @@ types:
       - UnknownStatusFormat
       - HandoffCheckFailed
       - PersonProgramFailed
+      - TreeStopped
+      - TreeAlreadyStopped
+      - TreeNotStopped
+      - StopUnusable
 
   # A refused tree command: the reason, what is wrong, and where the reason names one the case,
   # the file, the action, the story that lifts it and the process id of the store's holder.

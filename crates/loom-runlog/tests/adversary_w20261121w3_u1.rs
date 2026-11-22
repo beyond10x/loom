@@ -183,9 +183,10 @@ fn one_line(line: &serde_json::Map<String, Value>) -> Vec<u8> {
 fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
     let contract = contract();
     let kinds = contract["kinds"].as_object().expect("kinds");
-    // Ten events of story run-log-hash-chain, and `HandoffChecked` of story
-    // handoff-when-a-program-decides, which holds exactly one of `exit` and `refusal` too.
-    assert_eq!(kinds.len(), 11, "eleven events");
+    // Ten events of story run-log-hash-chain, `HandoffChecked` of story
+    // handoff-when-a-program-decides, which holds exactly one of `exit` and `refusal` too, and
+    // `StopRecorded` and `StopLifted` of story tree-suite-stop-resume-reopen-steps.
+    assert_eq!(kinds.len(), 13, "thirteen events");
     for (kind, body) in kinds {
         let full = contract_line(&contract, kind);
         let exclusive = ["exit", "refusal"];

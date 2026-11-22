@@ -46,6 +46,8 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom tree close`](#b10x-loom-tree-close) | Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is |
 | [`b10x-loom tree status`](#b10x-loom-tree-status) | Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log |
 | [`b10x-loom tree verify`](#b10x-loom-tree-verify) | Verify the run log of every case of the tree and name the first line that fails |
+| [`b10x-loom tree hold`](#b10x-loom-tree-hold) | Hold the tree: record in its root case's run log that a principal stopped it and why; tree run is refused until tree reopen lifts the hold |
+| [`b10x-loom tree reopen`](#b10x-loom-tree-reopen) | Lift the hold tree hold recorded, so that tree run goes on |
 | [`b10x-loom tree test`](#b10x-loom-tree-test) | Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers at once, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects |
 
 ## `b10x-loom run`
@@ -716,7 +718,7 @@ SIGTERM or SIGINT cancels the run: a program it is running is stopped with every
 
 Exit status:
   0  the root is terminated through its one legitimate outcome
-  1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
+  1  refused, nothing written: StoreInUse naming the holder, TreeStopped naming the hold and the tree reopen command that lifts it, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
   5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run
@@ -807,6 +809,53 @@ Exit status:
   0  every log verifies
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error
+```
+
+## `b10x-loom tree hold`
+
+Hold the tree: record in its root case's run log that a principal stopped it and why; tree run is refused until tree reopen lifts the hold
+
+```text
+Usage: b10x-loom tree hold [OPTIONS] --store <DIR> --principal <PRINCIPAL> --reason <TEXT>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--principal <PRINCIPAL>` | yes | none | The principal who holds the tree |
+| `--reason <TEXT>` | yes | none | Why the tree is held |
+| `--at <INSTANT>` | no | none | The instant the hold records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+The hold is one stop recorded line, the principal and the reason, in the root case's run log, written under the store lock. While the tree is held, tree run is refused TreeStopped and writes nothing; tree approve, tree close, tree status and tree verify work as on any other tree, and an approval does not lift the hold. tree reopen lifts it. The principal is 1 to 200 bytes and the reason 1 to 1024 bytes, neither with a control character. The hold records a decision and locks nobody out: whoever can write the store can cut its line.
+
+Exit status:
+  0  the hold is recorded; it is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeAlreadyStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid
+```
+
+## `b10x-loom tree reopen`
+
+Lift the hold tree hold recorded, so that tree run goes on
+
+```text
+Usage: b10x-loom tree reopen [OPTIONS] --store <DIR> --principal <PRINCIPAL>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--principal <PRINCIPAL>` | yes | none | The principal who lifts the hold |
+| `--at <INSTANT>` | no | none | The instant the lift records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+The lift is one stop lifted line, the principal and the seq of the stop recorded line it lifts, in the root case's run log, written under the store lock. After it tree run goes on as it would have without the hold.
+
+Exit status:
+  0  the hold is lifted; the lift is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeNotStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid
 ```
 
 ## `b10x-loom tree test`

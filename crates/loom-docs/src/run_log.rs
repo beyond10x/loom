@@ -125,6 +125,8 @@ mod tests {
             "AuthorityRecorded",
             "Stopped",
             "Terminated",
+            "StopRecorded",
+            "StopLifted",
         ] {
             assert!(contract["kinds"][kind]["fields"].is_object(), "{kind}");
         }

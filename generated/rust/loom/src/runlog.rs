@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 9c3ea9185784d1164c6e047c29b4caa574b85bb96d2bd9e617e1d8915bd12782
+// contract digest cc7165376ac84a9ebb44ad12b76a3c40167d2c97fa90305804bbccdfa8a2a588
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run log — `loom.runlog`.
@@ -143,6 +143,10 @@ pub enum RunLogEvent {
     Evaluated(Evaluated),
     /// Tagged `HandoffChecked` — `loom.runlog.HandoffChecked`.
     HandoffChecked(HandoffChecked),
+    /// Tagged `StopLifted` — `loom.runlog.StopLifted`.
+    StopLifted(StopLifted),
+    /// Tagged `StopRecorded` — `loom.runlog.StopRecorded`.
+    StopRecorded(StopRecorded),
     /// Tagged `Stopped` — `loom.runlog.Stopped`.
     Stopped(Stopped),
     /// Tagged `Terminated` — `loom.runlog.Terminated`.
@@ -182,6 +186,24 @@ pub struct RunLogRefused {
     pub line: i64,
     /// `detail` — `String`.
     pub detail: String,
+}
+
+/// StopLifted — `loom.runlog.StopLifted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopLifted {
+    /// `principal` — `String`.
+    pub principal: String,
+    /// `stop` — `Integer`.
+    pub stop: i64,
+}
+
+/// StopRecorded — `loom.runlog.StopRecorded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopRecorded {
+    /// `principal` — `String`.
+    pub principal: String,
+    /// `reason` — `String`.
+    pub reason: String,
 }
 
 /// Stopped — `loom.runlog.Stopped`.

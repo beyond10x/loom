@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 9c3ea9185784d1164c6e047c29b4caa574b85bb96d2bd9e617e1d8915bd12782
+// contract digest cc7165376ac84a9ebb44ad12b76a3c40167d2c97fa90305804bbccdfa8a2a588
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -322,6 +322,8 @@ pub struct CycleStep {
     pub deny: Option<bool>,
     /// `option` — `Optional<String>`.
     pub option: Option<String>,
+    /// `reason` — `Optional<String>`.
+    pub reason: Option<String>,
     /// `from` — `Optional<String>`.
     pub from: Option<String>,
     /// `to` — `Optional<String>`.
@@ -1138,6 +1140,14 @@ pub enum TreeRefusalReason {
     HandoffCheckFailed,
     /// `PersonProgramFailed`.
     PersonProgramFailed,
+    /// `TreeStopped`.
+    TreeStopped,
+    /// `TreeAlreadyStopped`.
+    TreeAlreadyStopped,
+    /// `TreeNotStopped`.
+    TreeNotStopped,
+    /// `StopUnusable`.
+    StopUnusable,
 }
 
 /// TreeRun — `loom.tree.TreeRun`.

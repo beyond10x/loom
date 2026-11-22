@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "793a1a28da93e3b5d9e2b7647f7d1e2a9ad7ead8ca26fa70466c90b59393c6bf",
-    "contract_digest": "9c3ea9185784d1164c6e047c29b4caa574b85bb96d2bd9e617e1d8915bd12782"
+    "source_digest": "49329c9ba2e0a80b56fb1bb90fddcbc0cf8dd18c255b7c3711017cbf393c289c",
+    "contract_digest": "cc7165376ac84a9ebb44ad12b76a3c40167d2c97fa90305804bbccdfa8a2a588"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1770,6 +1770,20 @@
     {
       "kind": "domain_type",
       "source": "loom.runlog.RunLogRefused",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.StopLifted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.StopRecorded",
       "disposition": {
         "disposition": "generated"
       }

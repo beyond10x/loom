@@ -33,9 +33,9 @@ use super::check::{Captured, capture_after, evaluate_checks, holds};
 use super::decode::{SuiteRefused, read_suite};
 use super::select::{CycleView, select_values};
 use crate::{
-    ApproveRequest, CloseRequest, KeptProtocol, OpenRequest, Reasons, Refused, RunSettings,
-    TreeTime, open_tree, read_manifest, read_protocols_directory, run_tree, status_json,
-    tree_status, verify_json, verify_tree,
+    ApproveRequest, CloseRequest, HoldRequest, KeptProtocol, OpenRequest, Reasons, Refused,
+    ReopenRequest, RunSettings, TreeTime, open_tree, read_manifest, read_protocols_directory,
+    run_tree, status_json, tree_status, verify_json, verify_tree,
 };
 use loom::primitives::Decimal;
 use loom::tree::{SelectItem, WaitingCycle};
@@ -1394,16 +1394,35 @@ impl SuiteRun<'_> {
                 },
                 Err(refusal) => StepEnd::refused(&refusal),
             },
+            StepKind::Stop => {
+                let reason = step
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| format!("suite step {label}"));
+                match crate::hold(&HoldRequest {
+                    store: &running.store,
+                    principal: self.principal(running, step.principal.as_ref()),
+                    reason: &reason,
+                    time: time.clone(),
+                }) {
+                    Ok(_) => StepEnd::done(None),
+                    Err(refusal) => StepEnd::refused(&refusal),
+                }
+            }
+            StepKind::Resume => self.resume(running, label, time)?,
+            StepKind::Reopen => match crate::reopen(&ReopenRequest {
+                store: &running.store,
+                principal: self.principal(running, step.principal.as_ref()),
+                time: time.clone(),
+            }) {
+                Ok(_) => StepEnd::done(None),
+                Err(refusal) => StepEnd::refused(&refusal),
+            },
             StepKind::Write => {
                 self.write(running, step, label)?;
                 StepEnd::done(None)
             }
-            other @ (StepKind::Decide
-            | StepKind::Stop
-            | StepKind::Resume
-            | StepKind::Allow
-            | StepKind::Reopen
-            | StepKind::Replay) => {
+            other @ (StepKind::Decide | StepKind::Allow | StepKind::Replay) => {
                 return Err(difference(
                     label,
                     step_name(other),
@@ -1412,6 +1431,55 @@ impl SuiteRun<'_> {
                     Some(step_name(other).to_owned()),
                 ));
             }
+        })
+    }
+
+    /// The settings of one round of `tree run` in `running`: no step bound, the wall time the
+    /// cycle has left, the suite's runner and confinement.
+    fn round_settings(&self, running: &Cycle<'_>, time: &TreeTime) -> RunSettings {
+        let spent = running.started.elapsed().as_secs();
+        RunSettings {
+            max_steps: None,
+            max_wall_seconds: Some(
+                i64::try_from(CYCLE_WALL_SECONDS.saturating_sub(spent)).unwrap_or(0),
+            ),
+            time: time.clone(),
+            runner: Arc::clone(&self.settings.runner),
+            confinement: self.settings.confinement.clone(),
+            cgroup_root: None,
+        }
+    }
+
+    /// `resume`: exactly one `tree run`, as one round of a `run` step, holding the cycle's cancel
+    /// flag and answering no wait. Its exit is the run's; a refused run (a held tree's
+    /// `TreeStopped`) is exit 1 with the refusal.
+    fn resume(
+        &self,
+        running: &mut Cycle<'_>,
+        label: &str,
+        time: &TreeTime,
+    ) -> Result<StepEnd, CheckDifference> {
+        let settings = self.round_settings(running, time);
+        let ran = match run_tree(&running.store, self.catalog, &settings, None, self.cancel) {
+            Ok(ran) => ran,
+            Err(refusal) => return Ok(StepEnd::refused(&refusal)),
+        };
+        let exit = stop_exit(ran.stop);
+        let cancelled = ran.stop == TreeStop::Cancelled && self.cancelled();
+        running.last_run = Some(ran);
+        if cancelled {
+            return Err(difference(
+                label,
+                "resume",
+                DifferenceReason::StepFailed,
+                "the step runs",
+                Some("the suite was cancelled".to_owned()),
+            ));
+        }
+        Ok(StepEnd {
+            exit,
+            refusal: None,
+            output: None,
         })
     }
 
@@ -1436,17 +1504,7 @@ impl SuiteRun<'_> {
                     Some("the suite was cancelled".to_owned()),
                 ));
             }
-            let spent = running.started.elapsed().as_secs();
-            let settings = RunSettings {
-                max_steps: None,
-                max_wall_seconds: Some(
-                    i64::try_from(CYCLE_WALL_SECONDS.saturating_sub(spent)).unwrap_or(0),
-                ),
-                time: time.clone(),
-                runner: Arc::clone(&self.settings.runner),
-                confinement: self.settings.confinement.clone(),
-                cgroup_root: None,
-            };
+            let settings = self.round_settings(running, time);
             let ran = match run_tree(&running.store, self.catalog, &settings, None, self.cancel) {
                 Ok(ran) => ran,
                 Err(refusal) => return Ok(StepEnd::refused(&refusal)),

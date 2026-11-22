@@ -169,6 +169,30 @@
         }
       }
     },
+    "StopLifted": {
+      "fields": {
+        "principal": {
+          "optional": false,
+          "type": "String"
+        },
+        "stop": {
+          "optional": false,
+          "type": "Integer"
+        }
+      }
+    },
+    "StopRecorded": {
+      "fields": {
+        "principal": {
+          "optional": false,
+          "type": "String"
+        },
+        "reason": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
     "Stopped": {
       "fields": {
         "budget": {

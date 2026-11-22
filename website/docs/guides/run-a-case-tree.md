@@ -3,7 +3,7 @@ title: Run a tree of cases
 sidebar_position: 7
 description: Open a tree of protocol cases with b10x-loom tree open, drive it with tree run, answer what it waits on with tree approve or tree close, and read and check it with tree status and tree verify.
 lede: A tree of cases lives in one store directory. tree run takes one step of one case at a time through the action's bound executor until the root ends or the tree waits on a person, and it prints the exact command that answers each wait.
-source: crates/loom-tree/src/lib.rs, crates/loom-tree/src/run.rs, crates/loom-tree/src/approve.rs, crates/loom-tree/src/close.rs, crates/loom-tree/src/status.rs, crates/loom-tree/src/log.rs, crates/loom-cli/src/tree.rs, crates/loom-cli/tests/tree_run.rs, crates/loom-tree/src/suite/mod.rs, crates/loom-tree/src/suite/run.rs, crates/loom-cli/tests/tree_test/mod.rs, ess/domains/tree.yaml
+source: crates/loom-tree/src/lib.rs, crates/loom-tree/src/run.rs, crates/loom-tree/src/approve.rs, crates/loom-tree/src/close.rs, crates/loom-tree/src/stop.rs, crates/loom-tree/src/status.rs, crates/loom-tree/src/log.rs, crates/loom-cli/src/tree.rs, crates/loom-cli/tests/tree_run.rs, crates/loom-tree/src/suite/mod.rs, crates/loom-tree/src/suite/run.rs, crates/loom-cli/tests/tree_test/mod.rs, ess/domains/tree.yaml
 ---
 
 # Run a tree of cases
@@ -388,6 +388,43 @@ b10x-loom: tree verify: case root line 3: BrokenChain: prev is not the SHA-256 o
 A command that writes holds `tree.lock` in the store for the whole command. A second one is
 refused `StoreInUse`, names the process that holds the store and writes nothing.
 
+## Hold a tree
+
+`tree hold` records that a principal stopped the tree, and why, as one `StopRecorded` line in the
+root case's run log. While that line has no `StopLifted` line after it, `tree run` is refused
+`TreeStopped` before it writes anything, and prints the hold and the command that lifts it. The
+example is a fresh copy of the tour, opened and run to its first wait (`route.approve`):
+
+```console
+$ b10x-loom tree hold --store store --principal person:owner --reason 'the route is under review' --at 2026-11-22T08:02:00Z
+{"at":"2026-11-22T08:02:00Z","case":"root","principal":"person:owner","reason":"the route is under review","seq":13}
+(exit 0)
+```
+
+```console
+$ b10x-loom tree run --confinement local --store store --at 2026-11-22T08:03:00Z
+b10x-loom: tree refused: TreeStopped: case "root": the tree is held since 2026-11-22T08:02:00Z by person:owner: the route is under review; nothing ran. Lift the hold with: b10x-loom tree reopen --store ~/tour/store --principal person:owner
+{"case":"root","detail":"the tree is held since 2026-11-22T08:02:00Z by person:owner: the route is under review; nothing ran. Lift the hold with: b10x-loom tree reopen --store ~/tour/store --principal person:owner","reason":"TreeStopped"}
+(exit 1)
+```
+
+`tree reopen` writes the `StopLifted` line, whose `stop` is the `seq` of the line it lifts; the next
+`tree run` goes on as it would have without the hold, here to the same wait:
+
+```console
+$ b10x-loom tree reopen --store store --principal person:owner --at 2026-11-22T08:04:00Z
+{"at":"2026-11-22T08:04:00Z","case":"root","principal":"person:owner","seq":14,"stop":13}
+(exit 0)
+```
+
+A second `tree hold` is refused `TreeAlreadyStopped`, a `tree reopen` of a tree that is not held
+`TreeNotStopped`; neither writes anything. The principal is 1 to 200 bytes and the reason 1 to
+1024 bytes, neither with a control character; anything else is refused `StopUnusable`, naming the
+member, before the store is read. `tree approve`, `tree close`, `tree status` and `tree verify`
+work on a held tree as on any other, and an approval does not lift the hold. The hold records a
+decision; it locks nobody out: whoever can write the store can cut the line while it is the last
+one, and the log still verifies.
+
 ## Test a tree with a suite of cycles
 
 A suite of scripted tree cycles is a `loom.tree-suite/1` document. `b10x-loom tree test` runs its
@@ -503,6 +540,9 @@ default ones.
 | `run` | rounds of `tree run`, each exit 3 answered from `decide`; `rounds: 1` runs one |
 | `approve` | `tree approve` (`case`, `capability` or `action`, `principal`, `result`, `reasons`, `deny`) |
 | `close` | `tree close` (`case`, `outcome`) |
+| `stop` | `tree hold` (`principal`, `reason`, by default `suite step <label>`) |
+| `resume` | one `tree run`, answering no wait; a held tree gives exit 1, refusal `TreeStopped` |
+| `reopen` | `tree reopen` (`principal`) |
 | `status`, `verify` | `tree status`, `tree verify`; a named one gives its JSON output to `{step: <name>}` |
 | `write` | no tree command: copies the file `from` of the suite's directory to `to` in the cycle's workspace |
 
