@@ -2746,7 +2746,10 @@ fn assert_signalled(end: &LoopEnd, exit: i32) {
         "{exit}: {reason}"
     );
     assert!(ends_run, "{exit}: a signalled step ends the run: {reason}");
-    assert!(reason.contains(&format!("exit {exit},")), "{exit}: {reason}");
+    assert!(
+        reason.contains(&format!("exit {exit},")),
+        "{exit}: {reason}"
+    );
     assert!(
         reason.contains(&format!("signal {} ended", exit - 128)),
         "{exit}: {reason}"
