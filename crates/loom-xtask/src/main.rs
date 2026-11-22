@@ -53,12 +53,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+mod docs_stamp;
 mod durable_check;
 #[path = "../../loom-executor/tests/support/ess_suite.rs"]
 mod ess_suite;
 mod linked_libraries;
 mod protocols_vendor;
 mod release;
+#[path = "../../loom-docs/src/stamp.rs"]
+mod stamp;
 mod test_step;
 mod unsynced_store;
 
