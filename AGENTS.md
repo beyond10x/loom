@@ -413,10 +413,11 @@ dev-dependency of `b10x-loom-cli` alone), under which a process whose own enviro
 counts to the file `B10X_LOOM_TEST_SYNC_COUNTS` names at exit. `tests/tree_run.rs` sets it on
 every `b10x-loom` it starts, and in its own test process before a test's first write for the
 library it runs in process; a bound program never sees it, since its environment is built whole
-(`crates/loom-bindings/src/child.rs`), and no bindings or protocol member sets it. Only
-`durable.rs`, `test_step.rs`, `unsynced_store.rs`, `tests/tree_run.rs` and
-`tests/support/loom.rs` name the variable, and only the last two set it
-(`only_the_allowed_files_name_or_set_the_switch`). The durability tests of the stores run in
+(`crates/loom-bindings/src/child.rs`), and no bindings or protocol member sets it. `tree test`'s
+tests (`tests/tree_test/mod.rs`) set it on every `b10x-loom` they start, so a cycle's tree
+commands wait for no disk sync. Only `durable.rs`, `test_step.rs`, `unsynced_store.rs`,
+`tests/tree_run.rs`, `tests/support/loom.rs` and `tests/tree_test/mod.rs` name the variable, and
+only the last three set it (`only_the_allowed_files_name_or_set_the_switch`). The durability tests of the stores run in
 process and never set it. A build without debug assertions that holds the feature fails to
 compile, `task test-step` refuses to start with the variable in its environment, and
 `binaries.yml` runs `loom-xtask unsynced-store` on the released binary, which fails on the
