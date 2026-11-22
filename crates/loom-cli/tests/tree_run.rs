@@ -42,6 +42,10 @@ mod handoff_when;
 
 #[path = "tree_run/principal.rs"]
 mod principal;
+#[path = "tree_run/signals.rs"]
+mod signals;
+#[path = "tree_run/sync_switch_marker.rs"]
+mod sync_switch_marker;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 

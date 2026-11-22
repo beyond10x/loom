@@ -10,6 +10,8 @@
 //! 60 s bound of one test: the story's 10 s for it is measured, not asserted, because each tree
 //! command fsyncs every write and on a loaded host that alone takes most of 10 s.
 
+mod substrate;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
