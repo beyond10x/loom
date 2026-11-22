@@ -981,6 +981,7 @@ impl SuiteRun<'_> {
                     reasons: None,
                     time: time.clone(),
                     catalog: self.catalog,
+                    runner: Some(Arc::clone(&self.settings.runner)),
                 }) {
                     Ok(_) => StepEnd::done(None),
                     Err(refusal) => StepEnd::refused(&refusal),
@@ -1152,6 +1153,7 @@ impl SuiteRun<'_> {
                         reasons: None,
                         time: time.clone(),
                         catalog: self.catalog,
+                        runner: Some(Arc::clone(&self.settings.runner)),
                     })
                     .map_err(|refusal| {
                         difference(

@@ -217,6 +217,7 @@ fn embed_tree(arguments: &Arguments) -> Result<(), Refused> {
         reasons: None,
         time: time.clone(),
         catalog: &catalog,
+        runner: None,
     })?;
     say(&format!(
         "approved {}",

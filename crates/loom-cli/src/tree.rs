@@ -414,6 +414,7 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
         reasons,
         time,
         catalog: &catalog,
+        runner: None,
     })?;
     // A person action that needs no capability records no authority: the action is printed.
     let printed = match approval {

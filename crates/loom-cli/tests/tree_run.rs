@@ -39,6 +39,8 @@ use sha2::{Digest as _, Sha256};
 mod delegated_cgroup;
 #[path = "tree_run/handoff_when.rs"]
 mod handoff_when;
+#[path = "tree_run/person_program.rs"]
+mod person_program;
 
 #[path = "tree_run/principal.rs"]
 mod principal;
@@ -111,6 +113,7 @@ impl Tree {
             ("tour-leg@1", "tour-leg.yaml"),
             ("fork@1", "../extra/fork.yaml"),
             ("sign@1", "../extra/sign.yaml"),
+            ("answer@1", "../extra/answer.yaml"),
             ("review@1", "../extra/review.yaml"),
         ] {
             installed

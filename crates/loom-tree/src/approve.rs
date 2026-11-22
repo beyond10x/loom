@@ -2,6 +2,9 @@
 //! the case's current revision.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use b10x_loom_intake_slice::confinement::TestRunner;
 
 use b10x_loom_commission::model::primitives::Timestamp as CommissionTimestamp;
 use b10x_loom_commission::model::responsibility::{ActionStatus, CaseId};
@@ -24,7 +27,6 @@ use crate::{Refused, StoreLock, TreeTime, unreadable};
 pub const MAX_NAME_BYTES: usize = 200;
 
 /// What `tree approve` is given.
-#[derive(Debug)]
 pub struct ApproveRequest<'a> {
     /// The store directory `tree open` made.
     pub store: &'a Path,
@@ -48,6 +50,61 @@ pub struct ApproveRequest<'a> {
     pub time: TreeTime,
     /// The tree's catalog.
     pub catalog: &'a ProtocolCatalog,
+    /// The runner the program of a person action whose binding names an `argv` starts through,
+    /// as a program step's does; `None` refuses such an action `ConfinementRefused` (`NoRunner`)
+    /// before anything is written. An action with no program starts nothing and needs none.
+    pub runner: Option<Arc<dyn TestRunner>>,
+}
+
+impl std::fmt::Debug for ApproveRequest<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("ApproveRequest")
+            .field("store", &self.store)
+            .field("case", &self.case)
+            .field("capability", &self.capability)
+            .field("principal", &self.principal)
+            .field("decision", &self.decision)
+            .field("action", &self.action)
+            .field("result", &self.result)
+            .field("reasons", &self.reasons)
+            .field("time", &self.time)
+            .field("runner", &self.runner.as_ref().map(|runner| runner.label()))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether `action` of `case` in the tree `store` holds is bound to a person whose binding names
+/// an `argv`, a program its approval runs: read from the case's bindings, taking no lock of the
+/// store and writing nothing. A host calls it before [`approve`] to know whether the approval
+/// needs a runner.
+///
+/// # Errors
+/// As the store and the tree's bindings files are read: `NotATree`, `CaseNotInTree`,
+/// `UnknownProtocol`, `BindingsRefused`, `StoreUnreadable`.
+pub fn person_program(
+    store: &Path,
+    case: &str,
+    action: &str,
+    catalog: &ProtocolCatalog,
+) -> Result<bool, Refused> {
+    let store = existing_store(store)?;
+    let manifest = read_manifest(&store)?;
+    let cases =
+        FileCaseStore::open(store.clone()).map_err(|error| unreadable("the case store", error))?;
+    let governor = CanonGovernor::new(cases)
+        .with_catalog(catalog)
+        .map_err(|error| {
+            Refused::new(
+                TreeRefusalReason::UnknownProtocol,
+                format!("the tree's catalog is refused: {error}"),
+            )
+        })?;
+    let bindings = case_bindings(&governor, &manifest, catalog, case)?;
+    Ok(bindings.actions.iter().any(|bound| {
+        bound.action == action
+            && bound.executor.kind == Executor::Person
+            && bound.executor.argv.is_some()
+    }))
 }
 
 /// Where a person's reasons come from.
