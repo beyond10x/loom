@@ -1437,7 +1437,7 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
 
 - A document names one protocol (`name@major`) and holds one `actions` list item per bound action.
   Each action has an `executor` (`program`, `agent`, `person`, `open`, `copy`), `evidence` entries
-  (`from` is `exit`, `effect` or a JSON pointer into the program's report), `tools`, `budget`,
+  (`from` is `exit`, `effect`, `runs` or a JSON pointer into the program's report), `tools`, `budget`,
   `timeout_seconds`, `retry_when`, `handoff` and, on a `program`, `handoff_when` (below). An
   adapter, an aperture and a remote endpoint are engine configuration and never binding data.
 - `decode` refuses at the first defect, naming the action and the member: an undeclared member at any
@@ -1458,7 +1458,18 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `protocol` follows the registry's rule (`parse_registration` in `crates/loom-protocols`) without a
   dependency on that crate; keep the two together. `check` also refuses a `retry_when` kind the
   protocol does not declare, an `open` `bindings` path outside the workspace, and an evidence `from`
-  the executor does not take (`effect` on a program; anything but `effect` on a person or an open).
+  the executor does not take (`effect` on a program; anything but `effect` on a person or an open;
+  `runs` on an agent or a copy), each `MemberNotForExecutor` at `evidence[<i>].from`, and a
+  `from: runs` table that lists anything but `spent` (`InvalidEvidence` at `evidence[<i>].results`).
+- `from: runs` (`story:outcome-when-reads-the-run-count`): `ProgramEffects` writes the entry's
+  record, result its table's value for `RUNS_SPENT` (`spent`), only on the run whose count
+  reaches `budget.max_runs`, in the same `record_step` after the run's other records, about the
+  revision the run left, attributed at the step's case revision. A run that writes no records
+  (cancelled, or in an `exits` class) writes none, so a cancelled last run leaves the allowance
+  spent with no `spent` record and the case stops `Stuck` at the next `RunsSpent` (D2 a, held by
+  `a_cancelled_last_run_writes_no_spent_record`). `tree run`'s `step_inputs` puts a writer that is
+  not due and whose open evidence (`action_facts`) is not empty and holds only its own `from: runs`
+  kinds in the idle set, so the spent kind never makes it useful (`crates/loom-tree/tests/runs_spent/`).
   `argv` belongs to a `program` and a `person`; `{principal}` (`PRINCIPAL_PLACEHOLDER`) is
   decoded only in a person's argv, as a whole entry other than `argv[0]`, else `InvalidArgv`.
 - A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no

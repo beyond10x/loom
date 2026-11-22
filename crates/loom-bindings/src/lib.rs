@@ -60,8 +60,8 @@ pub use handoff::{
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
 pub use program::{
-    ANY_KEY, BLOBS, ChildInputs, NotPrepared, PROGRAM_SOURCE, Prepared, ProgramEffects, RunPlace,
-    Started, TIMEOUT_KEY, prepare, start,
+    ANY_KEY, BLOBS, ChildInputs, NotPrepared, PROGRAM_SOURCE, Prepared, ProgramEffects, RUNS_SPENT,
+    RunPlace, Started, TIMEOUT_KEY, prepare, start,
 };
 pub use resolve::resolve_programs;
 pub use retry::{

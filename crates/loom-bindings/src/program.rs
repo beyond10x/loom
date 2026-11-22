@@ -24,6 +24,13 @@
 //! program once, so repeated not-called runs are bounded by the loop that drives the port (its
 //! step budget and idle bound), never by the port.
 //!
+//! A spent allowance (`story:outcome-when-reads-the-run-count`): an entry read `from: runs` takes
+//! its value from the run count, not the run. On the run that brings the count to
+//! `budget.max_runs` its value is [`RUNS_SPENT`] and its record is written in the step's one write
+//! after the run's other records; on any other run it records nothing. A run that records nothing
+//! (cancelled, or in an exit class) writes none either, so a cancelled last run spends the
+//! allowance and leaves no such record.
+//!
 //! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
 //! and nothing starts; the action's run count (the observations this port kept for the action in
 //! the case, [`PROGRAM_SOURCE`]) below its `budget.max_runs`, else `RunsSpent` and nothing starts; the
@@ -121,6 +128,9 @@ pub const BLOBS: &str = "blobs";
 pub const TIMEOUT_KEY: &str = "timeout";
 /// The key of a result table any value it does not list reads.
 pub const ANY_KEY: &str = "*";
+/// The one value a `from: runs` entry reads, and the one key its table lists: the run that brings
+/// the action's run count to its `budget.max_runs` (`story:outcome-when-reads-the-run-count`).
+pub const RUNS_SPENT: &str = "spent";
 
 /// The program effect port of one case (see the module documentation).
 pub struct ProgramEffects<'a, S, T = NoEvaluationTime> {
@@ -392,18 +402,37 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .map_err(governor)?
             + i64::try_from(moving).unwrap_or(i64::MAX);
         revisions.extend(targets.clone());
+        // This run is counted now (its observation is kept and it has no class): it spent the
+        // allowance when the count reached `budget.max_runs`.
+        let counted = |entry: &&EvidenceEntry| entry.from == ResultSource::Runs;
+        let spent = binding.evidence.iter().any(|entry| counted(&entry))
+            && runs(self.governor, &self.case, action)? >= binding.budget.max_runs;
         let mut report = None;
         let mut recorded = Vec::new();
-        for entry in &binding.evidence {
-            let value = match value_of(entry, &execution, &mut report) {
-                Ok(value) => value,
-                Err(detail) => {
-                    self.write(&targets, Vec::new())?;
-                    return Ok(refusal(
-                        ProgramRefusalReason::ReportUnreadable,
-                        action,
-                        detail,
-                    ));
+        // The `from: runs` entries after the others, so their records follow the run's other
+        // records in the step's one write.
+        let entries = binding
+            .evidence
+            .iter()
+            .filter(|entry| !counted(entry))
+            .chain(binding.evidence.iter().filter(counted));
+        for entry in entries {
+            let value = if entry.from == ResultSource::Runs {
+                if !spent {
+                    continue;
+                }
+                Some(RUNS_SPENT.to_owned())
+            } else {
+                match value_of(entry, &execution, &mut report) {
+                    Ok(value) => value,
+                    Err(detail) => {
+                        self.write(&targets, Vec::new())?;
+                        return Ok(refusal(
+                            ProgramRefusalReason::ReportUnreadable,
+                            action,
+                            detail,
+                        ));
+                    }
                 }
             };
             let Some(result) = look_up(entry, value.as_deref()) else {
@@ -1092,7 +1121,8 @@ fn value_of(
     }
     match entry.from {
         ResultSource::Exit => Ok(execution.exit_code.map(|code| code.to_string())),
-        ResultSource::Effect => Ok(None),
+        // The step reads a `from: runs` entry from the run count, never from the run.
+        ResultSource::Effect | ResultSource::Runs => Ok(None),
         ResultSource::Report => {
             let parsed = report.get_or_insert_with(|| {
                 one_object(

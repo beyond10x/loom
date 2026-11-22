@@ -668,6 +668,7 @@ fn evidence_entry(
         }
         Some(Value::String(text)) if text == "exit" => (ResultSource::Exit, None),
         Some(Value::String(text)) if text == "effect" => (ResultSource::Effect, None),
+        Some(Value::String(text)) if text == "runs" => (ResultSource::Runs, None),
         Some(Value::String(text)) if json_pointer(text) => {
             (ResultSource::Report, Some(text.clone()))
         }
@@ -677,7 +678,7 @@ fn evidence_entry(
                 action,
                 from_member,
                 format!(
-                    "is {}; it is exit, effect or a JSON pointer into the program's report",
+                    "is {}; it is exit, effect, runs or a JSON pointer into the program's report",
                     shown(other)
                 ),
             ));

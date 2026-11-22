@@ -2499,6 +2499,167 @@ fn a_cancel_set_at_the_hand_over_starts_nothing_and_keeps_a_counted_observation(
 }
 
 // ---------------------------------------------------------------------------------------------
+// A spent run allowance as a record (`story:outcome-when-reads-the-run-count`)
+
+/// The `from: runs` entry of the run-allowance cases: a `review` about `spec`, `spent` on the run
+/// that reaches `budget.max_runs`.
+const RUNS_ENTRY: &str =
+    "{kind: review, subject: spec, producer: loom, from: runs, results: {spent: spent}}";
+
+/// The records of the case of `kind`.
+fn records_of<S: FallibleCaseStore>(governor: &CanonGovernor<S>, kind: &str) -> Vec<EvidenceData> {
+    records(governor)
+        .into_iter()
+        .filter(|record| record.kind == kind)
+        .collect()
+}
+
+/// The refusal of the document holding `actions` at decoding or at the load-time check.
+fn refused_at_load(actions: &str) -> b10x_loom_bindings::Refusal {
+    let text = format!(
+        "format: loom.bindings/1\nprotocol: {REGISTRATION}\nartifacts:\n  spec: docs/spec\n  impl: src\nactions:\n{actions}"
+    );
+    match decode(&text) {
+        Err(refusal) => refusal,
+        Ok(document) => check(&document, REGISTRATION, &protocol())
+            .err()
+            .unwrap_or_else(|| panic!("not refused:\n{text}")),
+    }
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_runs_entry_writes_spent_on_the_last_run() {
+    let scratch = Scratch::new();
+    // Each run changes `spec`, so the revision each run leaves differs from the one before.
+    let program = scratch.script(
+        "program.sh",
+        "/usr/bin/mkdir -p docs\necho run >> docs/spec\nexit 0\n",
+    );
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        "    budget: {max_runs: 2}\n",
+        // Listed before the `gate` entry: its record still follows the run's other records.
+        &[RUNS_ENTRY.to_owned(), entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let case = CaseId(CASE.to_owned());
+    let effects = port(&governor, &document, &scratch, CASE, Some(flag_runner())).unwrap();
+
+    assert_performed(&drive(&governor, &effects, CASE, CHECK, args("{}")));
+    assert!(
+        records_of(&governor, "review").is_empty(),
+        "the first of two runs wrote a spent record: {:#?}",
+        records(&governor)
+    );
+    let first_revision = governor.revisions(&case).unwrap()["spec"].clone();
+
+    assert_performed(&drive(&governor, &effects, CASE, CHECK, args("{}")));
+    let spent = records_of(&governor, "review");
+    assert_eq!(spent.len(), 1, "{spent:#?}");
+    let facts = plain(&spent[0].facts);
+    assert_eq!(facts["result"], json!("spent"), "{facts}");
+    assert_eq!(facts["subject"], json!("spec"), "{facts}");
+    assert_eq!(spent[0].producer, "loom");
+    let left = governor.revisions(&case).unwrap()["spec"].clone();
+    assert_ne!(left, first_revision, "the second run did not move spec");
+    assert_eq!(facts["subject_revision"], json!(left), "{facts}");
+    let observations = port_observations(&governor);
+    assert_eq!(observations.len(), 2, "{observations:#?}");
+    assert_eq!(
+        spent[0].observation_ids,
+        [observations[1].observation_id.clone()]
+    );
+    // Written with the run's other records, after them.
+    let kinds: Vec<String> = records(&governor)
+        .into_iter()
+        .map(|record| record.kind)
+        .collect();
+    assert_eq!(kinds, ["gate", "gate", "review"]);
+}
+
+#[test]
+fn a_runs_entry_belongs_to_a_program() {
+    let entry = format!("      - {RUNS_ENTRY}\n");
+    for (action, executor) in [
+        ("impl.sign", "{kind: person, principal: p}"),
+        ("impl.open", "{kind: open, name: n, bindings: c.yaml}"),
+        ("impl.write", "{kind: agent, adapter: a}"),
+        ("impl.copy", "{kind: copy, evidence: review, from: other@1}"),
+    ] {
+        let refusal = refused_at_load(&format!(
+            "  - action: {action}\n    executor: {executor}\n    evidence:\n{entry}"
+        ));
+        assert_eq!(
+            refusal.0.reason,
+            loom::bindings::BindingsRefusalReason::MemberNotForExecutor,
+            "{executor}: {refusal}"
+        );
+        assert_eq!(refusal.0.action.as_deref(), Some(action), "{refusal}");
+        assert_eq!(refusal.0.member, "evidence[0].from", "{refusal}");
+    }
+    for table in [r#"{"0": spent}"#, r#"{spent: spent, "0": other}"#] {
+        let refusal = refused_at_load(&bound(
+            CHECK,
+            &["/opt/stub/program"],
+            "",
+            &[format!(
+                "{{kind: review, subject: spec, producer: loom, from: runs, results: {table}}}"
+            )],
+        ));
+        assert_eq!(
+            refusal.0.reason,
+            loom::bindings::BindingsRefusalReason::InvalidEvidence,
+            "{table}: {refusal}"
+        );
+        assert_eq!(refusal.0.action.as_deref(), Some(CHECK), "{refusal}");
+        assert_eq!(refusal.0.member, "evidence[0].results", "{refusal}");
+    }
+}
+
+/// D2 a and its consequence: a cancelled last run spends the allowance and writes no spent
+/// record, so the next step is refused `RunsSpent`.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_last_run_writes_no_spent_record() {
+    let step = CancelledStep::run(
+        "    budget: {max_runs: 1}\n",
+        &[entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()],
+    );
+    assert_cancelled_within_seven_seconds(&step);
+    assert!(
+        records(&step.governor).is_empty(),
+        "{:#?}",
+        records(&step.governor)
+    );
+    let program = step.scratch.marking("program.sh", "exit 0\n");
+    std::fs::remove_file(step.scratch.marker()).unwrap();
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        &format!("{SIXTY_SECONDS}    budget: {{max_runs: 1}}\n"),
+        &[entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()],
+    ));
+    let effects = port(
+        &step.governor,
+        &document,
+        &step.scratch,
+        CASE,
+        Some(flag_runner()),
+    )
+    .unwrap();
+    let reason = refusal(&drive(&step.governor, &effects, CASE, CHECK, args("{}")));
+    assert!(reason.starts_with("RunsSpent"), "{reason}");
+    assert!(!step.scratch.marker().exists(), "the spent action started");
+    assert!(
+        records(&step.governor).is_empty(),
+        "{:#?}",
+        records(&step.governor)
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
 // Under `linux` (`story:substrate-0-24-0-pin`)
 
 /// A Runbook-style confined step: a bound program runs through [`ProgramEffects`] on a Substrate
