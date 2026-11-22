@@ -45,6 +45,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 - `Loom::with_argument_schemas`, `arguments::check`, `check_value`, `ArgumentSchemas`, `ArgumentMismatch`; `ProtocolEntry::argument_schema(s)` (story:protocol-argument-schema)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
+- `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
 
 ### Changed
 

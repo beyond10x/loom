@@ -615,7 +615,14 @@ across a restart. `FileWorkflowRunStore` is the governor's `WorkflowRunStore`, t
 write, a file per Run (`workflow-run-…`); a file holding another Run's record is refused, and
 `crates/loom-commission-testkit/tests/workflow_run_store.rs` holds a workflow run across real process
 restarts. The port and its `RunStoreError` are `b10x-loom-executor`'s (`workflow`, beside
-`WorkflowExecutor`), so the governor depends on the executor and never the reverse. The host
+`WorkflowExecutor`), so the governor depends on the executor and never the reverse.
+`FileDecisionStore` is `b10x-loom-decision`'s `DecisionStore` port over the same lock and write, a
+file per decision request (`decision-…`, as `loom.governor`'s `StoredDecisionRequest`) holding the
+records kept beside it; a write's comparison with the state read, its record-key check and the
+write are one hold of the lock, a file that does not read back exactly as the store writes it or
+holds another request is refused naming it, and a decided request is never decided again
+(`crates/loom-governor/tests/decision_store.rs`, which holds a request across a real process
+restart). The host
 restores the same admitted protocol definitions on recovery and authenticates evidence before
 `submit_evidence`. The governor supplies no authority decision. The explicit decisions
 (`canon-decisions/1`) it supplies are the ones the host recorded with `CanonGovernor::decide`, each
@@ -1616,9 +1623,10 @@ executor, Canon, model provider or Mandate (`decision_request.rs` reads the mani
   `record_key` (`StoreConflict::record_key_held_by`); `Request` answers that `RecordKeyOpen`
   naming the holder, and nothing is written. A `Request` for an id the store
   already holds writes from no read and is `StoreConflict`: the domain declares no outcome for it.
-- `InMemoryDecisionStore` is the only store; durable storage is
-  `story:decision-request-file-store`. The `EscalationSuppressedRecord`s kept beside a request
-  are read back in append order; appending beside an unknown request is `NoSuchRequest`.
+- `InMemoryDecisionStore` is the crate's store; the durable one is the governor's
+  `FileDecisionStore` (§ Governor), so this crate reads no file. The `EscalationSuppressedRecord`s
+  kept beside a request are read back in append order; appending beside an unknown request is
+  `NoSuchRequest`.
 - The views are the generated queries over what the store lists. `task conform` runs the
   domain's synthesized scenarios and `ess/scenarios/decision/` against the crate
   (`crates/loom-conformance/src/decision.rs`). Four of those scenarios cover, with `covers:`,
