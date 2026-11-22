@@ -64,8 +64,8 @@ mod several_apertures;
 mod spec;
 #[cfg(test)]
 mod workdir;
-pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
-pub use engine::EngineRunner;
+pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild, SIGNAL_GRACE};
+pub use engine::{EngineRunner, KILL_SETTLE, KillBounds};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";

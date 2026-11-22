@@ -15,9 +15,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings};
+use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings, UNCONFINED_FLAG_REASON};
 use b10x_loom_intake_slice::clock::SystemClock;
-use b10x_loom_intake_slice::confinement::{SubstrateRunner, TestRunner};
+use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner, KillBounds, SIGNAL_GRACE, SubstrateRunner,
+    TestRunner,
+};
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::TestCommand;
 use b10x_loom_intake_slice::intent::{IntentRequest, run_intent_with_options};
@@ -66,16 +69,33 @@ outcomes:
         - claim: note.recorded
 ";
 
-/// The `local` engine's wait after its deadline's `Kill` (`confinement/engine.rs`, `KILL_SETTLE`).
-const KILL_SETTLE: Duration = Duration::from_secs(5);
+/// The `local` engine's wait after its deadline's `Kill` in the case below: 1 s, in place of a
+/// host's [`b10x_loom_intake_slice::confinement::KILL_SETTLE`] (5 s).
+const KILL_SETTLE: Duration = Duration::from_secs(1);
 
-/// Under `local` (the file's opt-in), a bound command that leaves a process in a session of its
-/// own holding its standard input and output is refused at its timeout plus one kill settle when
-/// its arguments are small (`bound_command_confined.rs`,
+/// The runner `--unconfined-bindings` gives (`UNCONFINED_FLAG_REASON`), which the run takes before
+/// the file's opt-in, with [`KILL_SETTLE`] as its kill settle.
+fn short_settle_runner() -> Arc<dyn TestRunner> {
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .expect("local opens with the flag's reason")
+    .with_kill_bounds(KillBounds {
+        signal_grace: SIGNAL_GRACE,
+        kill_settle: KILL_SETTLE,
+    });
+    Arc::new(runner)
+}
+
+/// Under `local` (the flag's runner, beside the file's opt-in), a bound command that leaves a
+/// process in a session of its own holding its standard input and output is refused at its
+/// timeout plus one kill settle when its arguments are small (`bound_command_confined.rs`,
 /// `under_local_a_command_whose_output_outlives_its_group_is_refused_by_its_runner_never_killed`).
 /// The same command given arguments larger than one pipe buffer must return in the same bound:
 /// the timeout is the operator's limit on the step, and the size of the model's arguments must
-/// not lift it.
+/// not lift it. The settle is 1 s here ([`KILL_SETTLE`]), 5 s on a host.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn under_local_the_timeout_holds_when_the_arguments_exceed_one_pipe_buffer() {
@@ -97,7 +117,14 @@ fn under_local_the_timeout_holds_when_the_arguments_exceed_one_pipe_buffer() {
     // `json_text` writes each backspace as `\u0008`, six bytes: past one 64 KiB pipe buffer.
     let large = "\u{8}".repeat(30_000);
     let started = Instant::now();
-    let (result, output) = case.run(&script, &[], pick(), select_with(json!({ "text": large })));
+    let (result, output) = case.run_opted(
+        Some(short_settle_runner()),
+        Some(true),
+        &script,
+        &[],
+        pick(),
+        select_with(json!({ "text": large })),
+    );
     let took = started.elapsed();
     let run = result.unwrap_or_else(|error| panic!("{error}\n{}", tail(&output)));
     assert_eq!(run.steps, 1, "{}", tail(&output));

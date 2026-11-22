@@ -327,10 +327,31 @@ change under `ess/`, with `task suite-generate` before it, and after a change to
 fast is renamed `slow_…` and runs there, never deleted; so is a test that starts a nested `cargo`
 build or test (the gate's replicas in `adversary_ess_gate.rs` and `adversary2_ess_gate.rs`).
 
+In a batch of waves the committed suite (`generated/ess/loom/suite.json` and
+`generated/ess/loom/synthesis.txt`) is regenerated once per batch, on the merged integration head,
+by the batch gate; never by a unit in its merge round, since each change under `ess/` that an
+earlier merge of the batch brought in makes it stale again. `task suite-generate` takes 534.5 s
+(2026-11-21, ess 0.96.0). ESS has a fix in flight that cuts the synthesis of a whole domain from
+about 254 s to 70 to 90 s of CPU; it is not released. A unit that merges the integration head
+keeps the integration side of `generated/ess/loom/suite.json` and of its digest file
+`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. The tests that
+read the suite after its digest check (`ess_gate` of `b10x-loom-executor` and `conform` of
+`b10x-loom-conformance`) run in the batch gate only, not in a unit's merge round.
+
 nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
 not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
 keyed by the digest of its inputs and made once for every process (`made_once` in
-`crates/loom-executor/tests/support/ess_suite.rs`).
+`crates/loom-executor/tests/support/ess_suite.rs`). `task test-step` fills the cache the `crd`
+tests of `b10x-loom-resource` read (`ess generate --kind schema`, about 16 s) beside its build of
+the test binaries, so no test of the step makes it or waits for another that does.
+
+A test of a product bound that is seconds long (a deadline, a grace, a settle) sets a short one
+through a parameter of the product, the crate's constant its default, and a test asserts the
+default: `A2aServer::with_deadlines` (`Deadlines::HOST`: 10 s head, 30 s body, 10 s write, 1 s
+drain) and `with_stream_idle` (300 s) in `b10x-loom-a2a`, `ConnectorsRelay::with_bounds`
+(`RelayBounds::HOST`: 5 s connect, 20 s request) in `b10x-loom-connectors`,
+`EngineRunner::with_kill_bounds` (`KillBounds::HOST`: 5 s grace, 5 s settle) in
+`b10x-loom-intake-slice`.
 
 `.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
 builds inherit; the config file wins over one in the home directory, the manifest holds where no
