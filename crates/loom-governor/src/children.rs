@@ -57,7 +57,8 @@ pub struct TreeCase {
 }
 
 /// Why no child was opened ([`CanonGovernor::open_children`]). Nothing is written, unless the
-/// error is the store's: then children already written are taken over by the next opening.
+/// error was found after the first child was written (that method's "Errors" names each case):
+/// then the children already written stay held without the parent's link.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChildError {
     /// The store failed, or the parent cannot be decided.
@@ -386,8 +387,17 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// produce, refuses the opening.
     ///
     /// # Errors
-    /// [`ChildError`]; nothing is written, unless the store fails between the children and the
-    /// parent: the next opening of the same name takes the child written over.
+    /// [`ChildError`]. The children are written first, each in its own store write, and the parent
+    /// last, so an error found before the first child is written writes nothing, and one found
+    /// after it leaves the children written so far held, linked to a parent that does not name
+    /// them: the store failing at a child or at the parent; another child of the call opened
+    /// meanwhile (`StoreUnavailable`); the trusted time unreadable (`StoreUnavailable`); the parent
+    /// moved or terminated by another writer between the children's writes and its own (`Stale`);
+    /// and the parent no longer held (`UnknownCase`). The next opening of the same name takes over
+    /// such a child only while its link still matches, so not once the parent's revision of the
+    /// `case_open` subject moved; else the child stays held and the new one gets the next id.
+    /// `b10x-loom-tree` lets one writer hold its store (`StoreLock`), which closes the windows a
+    /// second writer opens there.
     pub fn open_children(
         &self,
         parent: &CaseId,
@@ -638,6 +648,17 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// again through the same outcome writes the child nothing and replaces the parent's record
     /// once more, which completes a termination a restart interrupted; through another outcome it
     /// is refused.
+    ///
+    /// # Limitation
+    /// The termination is not kept as decided: Canon judges it again at every evaluation of the
+    /// case, with the records and the trusted time of that evaluation, and a case whose
+    /// termination it no longer judges legitimate answers `GovernorUnavailable` from `frontier`
+    /// and `completion` instead of the stored outcome. Two things make that happen: the trusted
+    /// time passing the `max_age` of a record the termination rests on, and a later write that
+    /// changes what Canon sees, since [`CanonGovernor::update_revision`],
+    /// [`CanonGovernor::record_step`], [`CanonGovernor::decide`] and evidence the port receives do
+    /// not refuse a terminated case. The callers in this repository (`b10x-loom-tree`'s `tree run`
+    /// and `tree close`) build the governor without a trusted time.
     ///
     /// # Errors
     /// [`TerminateError`]; a refused termination writes nothing.

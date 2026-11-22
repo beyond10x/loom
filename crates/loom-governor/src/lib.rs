@@ -119,11 +119,13 @@
 //! `open`. [`CanonGovernor::terminate`] terminates a case through an outcome Canon judges
 //! legitimate and, for a child, replaces that record with the child's outcome. A terminated case
 //! is evaluated with its termination, its frontier admits no action and it completes with the
-//! stored outcome. A `case_outcome` record submitted through the evidence port is refused for a
-//! case that opened a child or was opened as one, and whenever it names a case the store holds: a
-//! child's outcome is the governor's to write. [`CanonGovernor::tree`] lists a tree of cases. A
-//! catalog or registration whose `case_open` openings form a cycle is refused, as Canon's
-//! `check_openings` names it.
+//! stored outcome, as long as Canon still judges the termination legitimate: it judges it again at
+//! every evaluation, and a case whose termination it no longer judges legitimate answers
+//! `GovernorUnavailable` (see [`CanonGovernor::terminate`], "Limitation"). A `case_outcome` record
+//! submitted through the evidence port is refused for a case that opened a child or was opened as
+//! one, and whenever it names a case the store holds: a child's outcome is the governor's to write.
+//! [`CanonGovernor::tree`] lists a tree of cases. A catalog or registration whose `case_open`
+//! openings form a cycle is refused, as Canon's `check_openings` names it.
 //!
 //! # Stateless evaluation
 //!
@@ -1063,6 +1065,11 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// Records `revision` as the current revision of `artifact` and raises the case revision by
     /// one; returns the new case revision. When `artifact` already holds `revision` nothing
     /// changes, and the current case revision is returned.
+    ///
+    /// A terminated case is not refused: the revision moves under its termination, and once a
+    /// record the termination rests on is about a superseded revision, Canon no longer judges the
+    /// termination legitimate and `frontier` and `completion` answer `GovernorUnavailable`
+    /// instead of the stored outcome ([`CanonGovernor::terminate`], "Limitation").
     pub fn update_revision(
         &self,
         case: &CaseId,
@@ -1423,6 +1430,10 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
         Ok(self.held(case)?.revision)
     }
 
+    /// Canon's frontier for the case as held, at the trusted time. A terminated case's frontier
+    /// blocks every action while Canon judges its termination legitimate; it is
+    /// `GovernorUnavailable` once Canon does not, after the trusted time passed a `max_age` or a
+    /// later write ([`CanonGovernor::terminate`], "Limitation").
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
         let (state, ir, decision) = self.decided(case)?;
         let projection = project(&ir, &decision).ok_or(GovernorError::GovernorUnavailable)?;
@@ -1471,6 +1482,10 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
         }))
     }
 
+    /// The outcome the case completes with, as the completion rule reads Canon's decision. A
+    /// terminated case completes with its stored outcome while Canon judges its termination
+    /// legitimate; it is `GovernorUnavailable` once Canon does not, after the trusted time passed a
+    /// `max_age` or a later write ([`CanonGovernor::terminate`], "Limitation").
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
         let (state, _, decision) = self.decided(case)?;
         if let Some(termination) = &state.termination {

@@ -124,6 +124,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Security
 
 - Two `tree run`s never share a cgroup root: each holds its root by a `flock` on the root's directory, so one run's driver no longer ends another run's confined launches (story:tree-run-takes-a-delegated-cgroup)
+- `FileDecisionStore` refuses a write superseding a decided request that changes more than the supersession: its options, holder, eligible principals, case or question
 
 ## [0.58.0] - 2026-11-21
 

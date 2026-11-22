@@ -35,7 +35,9 @@
 //! Beyond the port's comparison, the store refuses, as a [`StoreFailure`] that writes nothing, a
 //! write that would decide a stored request again or change it once decided: a Decided request
 //! moves only to Decided with its produced record recorded once, or to Superseded, each keeping
-//! its decision, and a Superseded or Expired request takes no write. A new request and an Open or
+//! its decision and every other field: superseding it writes `superseded_by`, `superseded_reason`
+//! and a produced record it did not hold yet, never its options, eligible principals, holder, case
+//! or question. A Superseded or Expired request takes no write. A new request and an Open or
 //! Escalated one take any write the port allows.
 
 use std::fs;
@@ -313,8 +315,16 @@ fn settled(held: &DecisionRequestSnapshot, next: &DecisionRequestSnapshot) -> Op
                 && was.decision_reasons == now.decision_reasons;
             let record_kept =
                 was.produced_record.is_none() || was.produced_record == now.produced_record;
+            // What the write leaves of `now` once its own changes are taken back: a produced
+            // record recorded for the first time and, for Superseded, the supersession.
             let mut unrecorded = now.clone();
             unrecorded.produced_record.clone_from(&was.produced_record);
+            if next.state == Superseded {
+                unrecorded.superseded_by.clone_from(&was.superseded_by);
+                unrecorded
+                    .superseded_reason
+                    .clone_from(&was.superseded_reason);
+            }
             if !decision_kept {
                 Some(format!(
                     "decision request {request} is decided; its decision is never taken again"
@@ -328,6 +338,11 @@ fn settled(held: &DecisionRequestSnapshot, next: &DecisionRequestSnapshot) -> Op
                 Some(format!(
                     "decision request {request} is decided; a write records its produced record \
                      and changes nothing else"
+                ))
+            } else if unrecorded != *was {
+                Some(format!(
+                    "decision request {request} is decided; superseding it records the \
+                     supersession and changes nothing else"
                 ))
             } else {
                 None
