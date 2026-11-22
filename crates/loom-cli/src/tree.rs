@@ -13,10 +13,11 @@ use clap::ValueEnum as _;
 
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{
-    ConfinementAdapter, EngineConfinement, EngineRunner, SubstrateRunner, TestRunner,
+    CgroupRootHold, ConfinementAdapter, EngineConfinement, EngineRunner, SubstrateRunner,
+    TestRunner, hold_cgroup_root, prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::run::printable;
-use b10x_loom_tree::model::ApprovalDecision;
+use b10x_loom_tree::model::{ApprovalDecision, TreeRefusalReason};
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
     approve as record, open_tree, read_protocols_directory, refusal_json, run_json, run_tree,
@@ -26,8 +27,9 @@ use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
 
 use crate::{
-    TREE_LOG_FAILED, TREE_REFUSED, TreeApproveArgs, TreeCloseArgs, TreeCommand, TreeConfinement,
-    TreeOpenArgs, TreeRunArgs, TreeStoreArgs, tree_run_exit_status,
+    REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
+    TreeApproveArgs, TreeCloseArgs, TreeCommand, TreeConfinement, TreeOpenArgs, TreeRunArgs,
+    TreeStoreArgs, start_delegated, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -129,33 +131,159 @@ fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
 }
 
 /// The runner of `confinement`: `local` opened for the reason the `--unconfined-bindings` flag
-/// gives, the one reason the bound-program port admits; `substrate` its linux adapter.
-fn tree_runner(confinement: TreeConfinement) -> Result<Arc<dyn TestRunner>, Refused> {
+/// gives, the one reason the bound-program port admits; `substrate` its linux adapter on
+/// `cgroup_root`, the root this run holds ([`substrate_runner`]).
+fn tree_runner(
+    confinement: TreeConfinement,
+    cgroup_root: Option<&Path>,
+) -> Result<Arc<dyn TestRunner>, Refused> {
     match confinement {
-        TreeConfinement::Substrate => Ok(Arc::new(SubstrateRunner::new(None))),
+        TreeConfinement::Substrate => {
+            substrate_runner(cgroup_root).map(|runner| Arc::new(runner) as Arc<dyn TestRunner>)
+        }
         TreeConfinement::Local => EngineRunner::open(&EngineConfinement {
             adapter: ConfinementAdapter::Local,
             local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
             cgroup_root: None,
         })
         .map(|runner| Arc::new(runner) as Arc<dyn TestRunner>)
-        .map_err(|error| {
-            Refused::new(
-                b10x_loom_tree::model::TreeRefusalReason::ConfinementRefused,
-                error.to_string(),
-            )
-        }),
+        .map_err(|error| Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())),
     }
+}
+
+/// Substrate's linux adapter on `cgroup_root`, refused without one: `tree run` never lets a
+/// driver discover an ancestor, which another run may use too.
+fn substrate_runner(cgroup_root: Option<&Path>) -> Result<SubstrateRunner, Refused> {
+    cgroup_root
+        .map(|root| SubstrateRunner::new(Some(root.to_owned())))
+        .ok_or_else(|| confinement_refused("CgroupUndelegated: tree run holds no cgroup root"))
+}
+
+/// A `ConfinementRefused` refusal saying `detail`, then the precondition and remedy of `tree run`.
+fn confinement_refused(detail: impl std::fmt::Display) -> Refused {
+    Refused::new(
+        TreeRefusalReason::ConfinementRefused,
+        format!("{detail}; {TREE_CONFINEMENT_PRECONDITION}"),
+    )
+}
+
+/// Where a `tree run` under `substrate` runs its confined programs.
+enum Placement {
+    /// Under the root this process holds.
+    Held(CgroupRootHold),
+    /// Nowhere here: the run was started again in a delegated scope of its own and ended with
+    /// this exit status.
+    StartedAgain(u8),
+}
+
+/// The placement of `arguments`' run, `None` under `local`: `--cgroup-root`'s root, held; in a
+/// run started again, the scope it moved into a leaf of, held; otherwise the run started again in
+/// a delegated scope of its own. No root is ever discovered.
+fn place(arguments: &TreeRunArgs) -> Result<Option<Placement>, Refused> {
+    if arguments.confinement == TreeConfinement::Local {
+        if arguments.cgroup_root.is_some() {
+            return Err(Refused::new(
+                TreeRefusalReason::ConfinementRefused,
+                "--cgroup-root names the root of the substrate confinement; --confinement local runs no program under one",
+            ));
+        }
+        return Ok(None);
+    }
+    let root = match &arguments.cgroup_root {
+        Some(root) => resolved(root)?,
+        None if std::env::var_os(REEXEC_MARKER).is_some() => {
+            started_again()?;
+            prepare_delegated_cgroup().map_err(confinement_refused)?
+        }
+        None => return start_again().map(|status| Some(Placement::StartedAgain(status))),
+    };
+    hold_cgroup_root(&root)
+        .map(|hold| Some(Placement::Held(hold)))
+        .map_err(confinement_refused)
+}
+
+/// Starts this `tree run` again in a delegated scope of its own and answers the exit status it
+/// ended with; refused, naming why, when it never started there.
+fn start_again() -> Result<u8, Refused> {
+    let failed = |why: String| {
+        confinement_refused(format!(
+            "CgroupUndelegated: tree run could not start itself again under systemd-run --user --scope -p Delegate=yes: {why}"
+        ))
+    };
+    let state = tempfile::Builder::new()
+        .prefix("loom-delegation-")
+        .tempdir()
+        .map_err(|e| failed(e.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(state.path(), std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| failed(e.to_string()))?;
+    }
+    let ready = state.path().join("ready");
+    let executable = std::env::current_exe().map_err(|e| failed(e.to_string()))?;
+    let status = start_delegated(&executable, &[(REEXEC_READY, ready.as_os_str())])
+        .map_err(|e| failed(format!("systemd-run unavailable: {e}")))?;
+    if !ready.exists() {
+        return Err(failed(format!(
+            "systemd-run exited {status} before tree run started in the scope"
+        )));
+    }
+    Ok(
+        match status.code().and_then(|code| u8::try_from(code).ok()) {
+            Some(code) => code,
+            None => {
+                eprintln!("b10x-loom: tree run: the run started again ended {status}");
+                TREE_REFUSED
+            }
+        },
+    )
+}
+
+/// In a `tree run` started again: says it runs in its scope, creating the file its starter named.
+fn started_again() -> Result<(), Refused> {
+    let ready = std::env::var_os(REEXEC_READY)
+        .map(PathBuf::from)
+        .filter(|ready| {
+            ready.file_name().is_some_and(|name| name == "ready")
+                && ready
+                    .parent()
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("loom-delegation-"))
+        })
+        .ok_or_else(|| {
+            confinement_refused("CgroupUndelegated: the delegation handshake path is missing")
+        })?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&ready)
+        .map(drop)
+        .map_err(|e| {
+            confinement_refused(format!(
+                "CgroupUndelegated: delegation handshake failed: {e}"
+            ))
+        })
 }
 
 fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
+    // Held until the run ends: no other tree run uses this root meanwhile.
+    let held = match place(arguments)? {
+        Some(Placement::StartedAgain(status)) => return Ok(status),
+        Some(Placement::Held(hold)) => Some(hold),
+        None => None,
+    };
     let catalog = tree_catalog(&resolved(&arguments.store)?)?;
     let settings = RunSettings {
         max_steps: arguments.max_steps,
         max_wall_seconds: arguments.max_wall_seconds,
         time,
-        runner: tree_runner(arguments.confinement)?,
+        runner: tree_runner(
+            arguments.confinement,
+            held.as_ref().map(CgroupRootHold::root),
+        )?,
         confinement: arguments
             .confinement
             .to_possible_value()
@@ -167,7 +295,14 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         &settings,
         None,
         None,
-    )?;
+    )
+    .map_err(|mut refused| {
+        // A refusal of the confinement names tree run's own remedy, never `run`'s.
+        if held.is_some() && refused.0.reason == TreeRefusalReason::ConfinementRefused {
+            refused.0.detail = format!("{}; {TREE_CONFINEMENT_PRECONDITION}", refused.0.detail);
+        }
+        refused
+    })?;
     println!("{}", printable(&run_json(&ran).to_string()));
     for decision in &ran.decisions {
         eprintln!(
@@ -306,4 +441,31 @@ fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
             TREE_LOG_FAILED
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `tree run` never discovers an ancestor: the substrate runner it builds holds the root it
+    /// was handed, and without one it builds none.
+    #[test]
+    fn the_tree_runner_never_discovers_an_ancestor() {
+        let refused = substrate_runner(None).unwrap_err();
+        assert_eq!(
+            refused.0.reason,
+            b10x_loom_tree::model::TreeRefusalReason::ConfinementRefused
+        );
+        assert!(
+            refused.0.detail.contains("tree run --cgroup-root"),
+            "{}",
+            refused.0.detail
+        );
+        assert!(tree_runner(TreeConfinement::Substrate, None).is_err());
+
+        let root = Path::new("/sys/fs/cgroup/loom-held-root");
+        let runner = substrate_runner(Some(root)).unwrap();
+        assert_eq!(runner.cgroup_root(), Some(root));
+        assert!(tree_runner(TreeConfinement::Substrate, Some(root)).is_ok());
+    }
 }

@@ -1575,6 +1575,19 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
   `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
   `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+- Under `--confinement substrate` (the default) `tree run` never lets a driver discover an ancestor
+  cgroup (`substrate_runner` in `tree.rs` refuses without a root). `--cgroup-root DIR` names the
+  root; without it `tree run` starts itself again under `systemd-run --user --scope -p
+  Delegate=yes` (`start_delegated`, shared with `run`), and the run started again moves into
+  `loom-controller-<pid>` of its scope (`prepare_delegated_cgroup`), the scope its root. Either way
+  `hold_cgroup_root` (`confinement.rs`) takes a `flock` on the root's directory for the whole run,
+  so a second process naming it is refused, and the kernel drops the hold when the holder ends,
+  killed or not; then `check_cgroup_root` refuses, naming the root and the rule, one that is not
+  a delegated cgroup v2 directory, not writable, without the process in a child, or not empty.
+  Each refusal is `ConfinementRefused` (`CgroupUndelegated` in its detail), before any step, and
+  ends with `TREE_CONFINEMENT_PRECONDITION` (`lib.rs`), which `tree run --help` states too
+  (`crates/loom-cli/tests/tree_run/delegated_cgroup.rs`; its delegated cases skip without
+  bubblewrap or a user systemd manager unless `LOOM_REQUIRE_DELEGATION` is set).
 - `tree approve --action` takes a `person` action as its principal through `PersonEffects`
   (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
   program's are. `tree run` never takes a person action. Without `--capability` it records no
