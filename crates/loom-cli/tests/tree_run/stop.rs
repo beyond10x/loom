@@ -5,9 +5,9 @@
 //! The fixture is the `review@1` case of `fixtures/tree-two-level/` at its first wait
 //! ([`reviewed`]); each test works on a fresh copy. As in the rest of the file, the commands run
 //! in process through `b10x_loom_tree` and answer as `crates/loom-cli/src/tree.rs` makes the
-//! answer; `tree hold` and `tree reopen` start the binary where the binary is what is tested (a
-//! printed refusal, a member refused before the store is read, the lift's output). No test reaches
-//! the network, a model or a credential, and each ends within 60 s.
+//! answer; `tree hold`, `tree run` and `tree reopen` start the binary where the binary is what is
+//! tested (the printed hold, the printed refusal, the lift's output), three starts in all. No test
+//! reaches the network, a model or a credential, and each ends within 60 s.
 
 use super::*;
 
@@ -272,17 +272,9 @@ fn an_unusable_reason_or_principal_is_refused() {
             "{member}: the refusal wrote"
         );
     }
-    // Before the store is opened, through the binary: a store that does not exist is never
-    // read, nor made.
+    // Before the store is opened: a store that does not exist is never read, nor made.
     let absent = tree.root.join("no-such-store");
-    let said = refused_with(
-        &hold_started(
-            &tree,
-            &absent,
-            &["--principal", OWNER, "--reason", "two\nlines"],
-        ),
-        "StopUnusable",
-    );
+    let said = refused_with(&hold_in(&absent, OWNER, "two\nlines"), "StopUnusable");
     assert!(said.contains("the reason"), "{said}");
     assert!(!said.contains("NotATree"), "{said}");
     assert!(

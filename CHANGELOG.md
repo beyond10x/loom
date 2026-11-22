@@ -30,6 +30,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
+- The `tree_run` tests start `b10x-loom` 66 times, not 71, and `loom-xtask shared-trees` builds their trees once per source key (story:tree-run-binary-fits-its-start-bound)
+- The `tree test` tests start `b10x-loom` with the test sync switch on (`tests/tree_test/mod.rs`, D138)
 
 ### Security
 

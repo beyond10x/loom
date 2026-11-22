@@ -21,7 +21,11 @@
 //! fills the schema cache the `crd` tests of `b10x-loom-resource` read ([`fill_schema_cache`]) and
 //! the syntheses the generator tests of `loom-xtask` and `loom-commission-xtask` read
 //! ([`fill_synthesis_stand_in`]) and `b10x-loom-commission-testkit` reads
-//! ([`fill_plain_synthesis`]), so no test of the step makes one or waits for it. `-p <package>` runs the
+//! ([`fill_plain_synthesis`]), so no test of the step makes one or waits for it. After the build it
+//! builds what is missing of the trees the `tree_run` tests share (`crate::shared_trees::make`, not
+//! counted) and gives its nextest run the scope as `LOOM_TEST_SCOPE`, so nextest's setup script
+//! computes the same key and finds them; it prints both times, and a start of `b10x-loom` the timed
+//! run counts in a build of a shared tree ([`FIXTURE_LINE`]) fails it. `-p <package>` runs the
 //! same over named packages, the doc tests over those of them with a library ([`with_library`]);
 //! in a build-pool job nextest runs `SLOT_TOKENS` tests at once.
 
@@ -161,10 +165,16 @@ pub const START_BUDGETS: [StartBudget; 1] = [StartBudget {
     bound: 66,
 }];
 
+/// The start of a line of a starts file written while a test built a shared tree, before the
+/// tree's name (`fixture:ended`), in place of the test's name
+/// (`story:tree-run-binary-fits-its-start-bound`).
+pub const FIXTURE_LINE: &str = "fixture:";
+
 /// The line the step prints about `budget`'s starts and the reason it fails, given the cases of
 /// the run and the text of the starts file (`None` when the run wrote none). Nothing when none of
 /// the budget's tests ran; a failure when they ran and counted no start, since then the counting
-/// is broken.
+/// is broken; a failure when a test of the run built a shared tree ([`FIXTURE_LINE`]), which the
+/// setup builds before the run, naming each tree and its starts.
 pub fn start_verdict(
     budget: &StartBudget,
     cases: &[Case],
@@ -174,25 +184,51 @@ pub fn start_verdict(
     if !cases.iter().any(|case| budget.tests.holds(case)) {
         return (String::new(), None);
     }
-    let count = starts.map_or(0, |text| text.lines().count());
-    let text = format!(
+    let lines: Vec<&str> = starts.map_or_else(Vec::new, |text| text.lines().collect());
+    let count = lines.len();
+    let mut built = std::collections::BTreeMap::<&str, usize>::new();
+    for tree in lines
+        .iter()
+        .filter_map(|line| line.strip_prefix(FIXTURE_LINE))
+    {
+        *built.entry(tree).or_default() += 1;
+    }
+    let built: Vec<String> = built
+        .iter()
+        .map(|(tree, starts)| format!("{tree} ({starts})"))
+        .collect();
+    let mut text = format!(
         "{label}: {count} starts of b10x-loom, of {} ({})",
         budget.bound, budget.variable
     );
-    let failure = if count == 0 {
-        Some(format!(
+    if !built.is_empty() {
+        text.push_str(&format!(
+            ", in builds of shared trees: {}",
+            built.join(", ")
+        ));
+    }
+    let mut failures = Vec::new();
+    if count == 0 {
+        failures.push(format!(
             "{label} ran and counted no start of b10x-loom in {}: the counting is broken",
             budget.variable
-        ))
-    } else if count > budget.bound {
-        Some(format!(
+        ));
+    }
+    if !built.is_empty() {
+        failures.push(format!(
+            "{label} built the shared tree(s) {} in the timed run: the setup (`loom-xtask \
+             shared-trees`) builds them before it, and a test reads them",
+            built.join(", ")
+        ));
+    }
+    if count > budget.bound {
+        failures.push(format!(
             "{label} made {count} starts of b10x-loom, over the {} they may make: run the \
              library in process where a test is not about the binary",
             budget.bound
-        ))
-    } else {
-        None
-    };
+        ));
+    }
+    let failure = (!failures.is_empty()).then(|| failures.join("; "));
     (text, failure)
 }
 
@@ -281,35 +317,19 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
         "test step: test binaries built in {:.1} s (not counted in the budget)",
         build_started.elapsed().as_secs_f64()
     );
-    if runs(SHARED_TREES.0) {
-        let fill_started = Instant::now();
-        let fill = with(
-            &["test"],
-            &[
-                "--locked",
-                "--test",
-                SHARED_TREES.1,
-                "--",
-                "--ignored",
-                "--exact",
-                SHARED_TREES.2,
-            ],
-        );
-        let filled = cargo(root, &fill)?;
-        if filled != Some(0) {
-            return Err(format!(
-                "test step: making the shared trees (cargo {}) exited {}",
-                fill.join(" "),
-                describe(filled)
-            ));
-        }
+    let scope_text = scope.join(" ");
+    if runs(SHARED_TREES) {
+        let made =
+            crate::shared_trees::make(root, &scope_text).map_err(|e| format!("test step: {e}"))?;
         println!(
-            "test step: the shared trees of {}::{} made in {:.1} s (not counted in the budget)",
-            SHARED_TREES.0,
-            SHARED_TREES.1,
-            fill_started.elapsed().as_secs_f64()
+            "test step: pre-step {} (not counted in the budget)",
+            made.line()
         );
     }
+    let setup_report = target_dir(root)
+        .join("nextest")
+        .join(crate::shared_trees::REPORT);
+    let _ = fs::remove_file(&setup_report);
     let (require, said) = require_delegation(
         std::env::var_os(REQUIRE_DELEGATION).as_deref(),
         probe_delegation,
@@ -330,6 +350,9 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
         None => println!("test step: nextest's default test threads on {cpus} CPUs"),
     }
     let mut command = cargo_command(root);
+    // The scope the setup script of the shared trees builds and keys them in, so its `cargo test`
+    // finds this build current (`crates/loom-xtask/src/shared_trees.rs`).
+    command.env("LOOM_TEST_SCOPE", &scope_text);
     if require {
         // A name in a literal, as for the start budgets below: `loom_governor::durable`
         // clears a variable set here only when its name is a literal.
@@ -360,6 +383,12 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
         .map_err(|e| format!("run cargo {}: {e}", nextest.join(" ")))?
         .code();
     let nextest_seconds = started.elapsed().as_secs_f64();
+    if let Ok(line) = fs::read_to_string(&setup_report) {
+        println!(
+            "test step: setup script {} (in the timed window)",
+            line.trim()
+        );
+    }
     let doc_started = Instant::now();
     let doc = if packages.is_empty() {
         cargo(root, &with(&["test", "--doc"], &["--locked"]))?
@@ -380,8 +409,8 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     let doc_seconds = doc_started.elapsed().as_secs_f64();
     let wall = started.elapsed();
 
-    let cases = match fs::read_to_string(&report) {
-        Ok(xml) => parse_junit(&xml),
+    let (setups, cases) = match fs::read_to_string(&report) {
+        Ok(xml) => setup_scripts_apart(parse_junit(&xml)),
         Err(error) => {
             return Err(format!(
                 "test step: no JUnit report at {} ({error}); nextest {}",
@@ -390,6 +419,14 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
             ));
         }
     };
+    for setup in &setups {
+        println!(
+            "test step: setup script {} ran {:.1} s in the timed window{}",
+            setup.name,
+            setup.seconds,
+            if setup.failed { ", FAILED" } else { "" }
+        );
+    }
     let (mut text, mut failures) =
         verdict(&cases, nextest, doc, wall, nextest_seconds, doc_seconds);
     for (budget, file) in &starts {
@@ -503,11 +540,12 @@ pub fn verdict(
     (text, failures)
 }
 
-/// The package, test binary and ignored test that make the trees the tests of
-/// `b10x-loom-cli::tree_run` share (`crates/loom-cli/tests/tree_run.rs`): run after the build and
-/// before the timed run, so no test of the step builds one or waits on the lock of another that
-/// does, a wait each waiter counted in [`BINARY_BUDGETS`].
-const SHARED_TREES: (&str, &str, &str) = ("b10x-loom-cli", "tree_run", "the_shared_trees_are_made");
+/// The package whose `tree_run` tests share trees (`crates/loom-cli/tests/tree_run.rs`): the step
+/// builds what is missing of them with `loom-xtask shared-trees` after its build and before its
+/// timed run, so no test of the step builds one or waits on the lock of another that does, a wait
+/// each waiter counted in [`BINARY_BUDGETS`]. nextest's setup script runs the same in the timed
+/// window and finds them built.
+const SHARED_TREES: &str = "b10x-loom-cli";
 
 /// The package whose `crd` tests read the schema cache.
 const CRD_PACKAGE: &str = "b10x-loom-resource";
@@ -705,6 +743,18 @@ fn with_library(metadata: &serde_json::Value, packages: &[String]) -> Vec<String
         .filter(|package| documented(package))
         .cloned()
         .collect()
+}
+
+/// The prefix of the `classname` nextest gives a setup script in its JUnit report.
+const SETUP_SCRIPT: &str = "@setup-script:";
+
+/// The setup scripts of a report's cases (nextest writes each as a `<testcase>` of its own), and
+/// the tests: a setup script is no test and no binary, and its time is printed on a line of its
+/// own.
+pub fn setup_scripts_apart(cases: Vec<Case>) -> (Vec<Case>, Vec<Case>) {
+    cases
+        .into_iter()
+        .partition(|case| case.binary.starts_with(SETUP_SCRIPT))
 }
 
 /// Every `<testcase>` of a JUnit report: its `classname` (the binary), `name`, `time`, and whether
@@ -959,6 +1009,26 @@ mod tests {
         assert!(text.contains("3 starts"), "{text}");
         let (text, failure) = start_verdict(budget, &ran, Some("case_0\ncase_0\ncase_1\n"));
         assert_eq!(failure, None, "{text}");
+    }
+
+    /// nextest reports its setup script as a `<testcase>`: the step counts it as no test and no
+    /// binary.
+    #[test]
+    fn a_setup_script_in_the_report_is_not_a_test() {
+        let xml = tree_run_report(&[1.0]).replace(
+            "</testsuites>",
+            "    <testsuite name=\"@setup-script:shared-trees\" tests=\"1\">\n        \
+             <testcase name=\"shared-trees\" classname=\"@setup-script:shared-trees\" \
+             timestamp=\"t\" time=\"6.800\"/>\n    </testsuite>\n</testsuites>",
+        );
+        let (setups, cases) = setup_scripts_apart(parse_junit(&xml));
+        assert_eq!(setups.len(), 1, "{setups:?}");
+        assert_eq!((setups[0].name.as_str(), setups[0].seconds), ("shared-trees", 6.8));
+        assert!(
+            cases.iter().all(|case| !case.binary.starts_with("@setup")),
+            "{cases:?}"
+        );
+        assert_eq!(cases.len(), 2, "{cases:?}");
     }
 
     /// The `tree_run` tests are held to their summed budget in both layouts of
