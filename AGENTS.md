@@ -371,7 +371,11 @@ build of their dependencies takes about twice as long, an incremental one no lon
 `b10x-loom-governor` is built at `opt-level = 2` too: its cost tests
 (`…_costs_a_bounded_multiple_of_deciding`) compare a path in its own code with deciding in
 Canon, a dependency, and with only Canon optimized the ratio rose from about 14 to 40 to 70
-against a bound of 40; with both optimized it is about 18.
+against a bound of 40; with both optimized it is about 18. The workspace's own crates build at
+`opt-level = 1` (`[profile.dev]` there): on 4 threads the tests of `b10x-loom-cli`,
+`b10x-loom-intake-slice` and `b10x-loom-runlog` took 349 s of test time and 92 s of wall time at
+`opt-level = 0`, 252 s and 66 s at 1 (2026-11-22, one loaded host, one run each); rebuilding
+those crates at 1 over built dependencies took 184 s.
 
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
