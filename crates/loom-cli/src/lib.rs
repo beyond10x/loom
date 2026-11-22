@@ -398,6 +398,12 @@ pub struct TreeOpenArgs {
     /// The registration of the root's protocol, `name@major`.
     #[arg(long, value_name = "NAME@MAJOR")]
     pub protocol: String,
+    /// Read the tree's protocols from the files directly in this directory whose names end in
+    /// `.yaml`, each under the registration it declares, and keep them in the store: the tree's
+    /// catalog is those and no other. Without it the tree uses the installed and built-in
+    /// protocols.
+    #[arg(long, value_name = "DIR")]
+    pub protocols: Option<PathBuf>,
     /// The root's loom.bindings/1 file.
     #[arg(long, value_name = "FILE")]
     pub bindings: PathBuf,

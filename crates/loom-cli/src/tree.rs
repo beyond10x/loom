@@ -17,8 +17,8 @@ use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record,
-    open_tree, refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status,
-    verify_json, verify_tree,
+    open_tree, read_protocols_directory, refusal_json, run_json, run_tree, status_json,
+    stored_catalog, tree_status, verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
@@ -93,7 +93,13 @@ fn tree_catalog(store: &Path) -> Result<ProtocolCatalog, Refused> {
 
 fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
-    let catalog = host_catalog()?;
+    let (catalog, protocols) = match &arguments.protocols {
+        Some(directory) => {
+            let read = read_protocols_directory(&resolved(directory)?)?;
+            (read.catalog, read.kept)
+        }
+        None => (host_catalog()?, Vec::new()),
+    };
     let opened = open_tree(&OpenRequest {
         store: resolved(&arguments.store)?,
         workspace: resolved(&arguments.workspace)?,
@@ -103,6 +109,7 @@ fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
         case: arguments.case.clone(),
         time,
         catalog: &catalog,
+        protocols,
     })?;
     println!(
         "{}",

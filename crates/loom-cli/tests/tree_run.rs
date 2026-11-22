@@ -57,7 +57,7 @@ impl Tree {
         for (name, file) in [
             ("tour@1", "tour.yaml"),
             ("tour-leg@1", "tour-leg.yaml"),
-            ("fork@1", "fork.yaml"),
+            ("fork@1", "../extra/fork.yaml"),
         ] {
             installed
                 .install_file(
@@ -620,6 +620,11 @@ fn run_to_end(tree: &Tree) -> (Vec<(Value, Value)>, Value) {
 fn run_to_end_twice(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    run_opened(tree, twice)
+}
+
+/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end`].
+fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let mut waits = Vec::new();
     for _ in 0..8 {
         let ran = tree.run();
@@ -1142,4 +1147,293 @@ fn every_command_a_leg_prints_runs_as_printed_to_its_outcome() {
         stderr(&ended)
     );
     assert_eq!(json(&ended)["detail"], "passed");
+}
+
+/// The fixture's protocols directory: `tour.yaml`, `tour-leg.yaml` and the subdirectory `old/`.
+fn fixture_protocols() -> PathBuf {
+    Path::new(FIXTURE).join("protocols")
+}
+
+/// The text of the fixture protocol file `name`.
+fn fixture_protocol(name: &str) -> String {
+    fs::read_to_string(fixture_protocols().join(name)).unwrap()
+}
+
+/// A protocols directory of the test holding `files`, by name.
+fn protocols_dir(tree: &Tree, files: &[(&str, &str)]) -> PathBuf {
+    let dir = tree.root.join("protocols");
+    fs::create_dir_all(&dir).unwrap();
+    for (name, text) in files {
+        fs::write(dir.join(name), text).unwrap();
+    }
+    dir
+}
+
+/// The fixture's two protocols as a directory of the test.
+fn tour_protocols(tree: &Tree) -> PathBuf {
+    protocols_dir(
+        tree,
+        &[
+            ("tour.yaml", &fixture_protocol("tour.yaml")),
+            ("tour-leg.yaml", &fixture_protocol("tour-leg.yaml")),
+        ],
+    )
+}
+
+/// `tree open --protocols dir` of the root `protocol` with the bindings file `tour.bindings.yaml`.
+fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
+    tree.command()
+        .args([
+            "tree",
+            "open",
+            "--protocol",
+            protocol,
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .arg("--protocols")
+        .arg(dir)
+        .arg("--bindings")
+        .arg(tree.workspace().join("tour.bindings.yaml"))
+        .arg("--workspace")
+        .arg(tree.workspace())
+        .output()
+        .unwrap()
+}
+
+/// Asserts `output` is a refusal naming `reason` and each of `named`, and the store holds nothing.
+fn refused_with_an_empty_store(tree: &Tree, output: &Output, reason: &str, named: &[&str]) {
+    assert_ne!(output.status.code(), Some(0), "{}", stdout(output));
+    let text = stderr(output);
+    assert!(text.contains(reason), "{text}");
+    for name in named {
+        assert!(text.contains(name), "{name}: {text}");
+    }
+    let empty = fs::read_dir(tree.store()).map_or(true, |mut entries| entries.next().is_none());
+    assert!(empty, "the store holds {:?}", tree.snapshot());
+}
+
+/// The SHA-256 `tree status` names for the kept protocol `registration`.
+fn kept_sha256(tree: &Tree, registration: &str) -> String {
+    let status = json(&tree.tree("status"));
+    status["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|kept| kept["registration"] == registration)
+        .and_then(|kept| kept["sha256"].as_str())
+        .unwrap_or_else(|| panic!("no kept {registration}: {status}"))
+        .to_owned()
+}
+
+#[test]
+fn a_protocols_directory_registers_what_its_files_declare() {
+    let tree = Tree::new("protocols-registered");
+    let opened = open_from(&tree, &fixture_protocols(), "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let catalog = b10x_loom_tree::stored_catalog(&tree.store())
+        .unwrap()
+        .expect("a kept catalog");
+    let names: Vec<&str> = catalog.iter().map(|entry| entry.name()).collect();
+    assert_eq!(names, ["tour-leg@1", "tour@1"]);
+    for entry in catalog.iter() {
+        assert_eq!(
+            entry.definition.source.kind,
+            loom_protocols::SourceKind::Directory
+        );
+    }
+    let status = json(&tree.tree("status"));
+    let kept: Vec<(&str, &str)> = status["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|kept| {
+            (
+                kept["registration"].as_str().unwrap(),
+                kept["file"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kept,
+        [("tour-leg@1", "tour-leg.yaml"), ("tour@1", "tour.yaml")]
+    );
+}
+
+#[test]
+fn a_tree_from_a_protocols_directory_runs_with_the_directory_deleted() {
+    let tree = Tree::new("protocols-deleted");
+    let dir = tour_protocols(&tree);
+    let opened = open_from(&tree, &dir, "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    fs::remove_dir_all(&dir).unwrap();
+    let (_, ended) = run_opened(&tree, None);
+    assert_eq!(ended["detail"], "arrived", "{ended}");
+}
+
+#[test]
+fn an_edit_after_tree_open_changes_nothing_in_the_open_tree() {
+    let tree = Tree::new("protocols-edited");
+    let dir = tour_protocols(&tree);
+    let opened = open_from(&tree, &dir, "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let leg = fixture_protocol("tour-leg.yaml");
+    let at_open = kept_sha256(&tree, "tour-leg@1");
+    // Under the edited definition no leg could pass, so the root could not arrive.
+    fs::write(
+        dir.join("tour-leg.yaml"),
+        leg.replace("  passed:\n", "  finished:\n"),
+    )
+    .unwrap();
+    let (_, ended) = run_opened(&tree, None);
+    assert_eq!(ended["detail"], "arrived", "{ended}");
+    // The status names the SHA-256 of the file as it was at `tree open`: the kept blob's bytes.
+    assert_eq!(kept_sha256(&tree, "tour-leg@1"), at_open);
+    let kept = fs::read_to_string(tree.store().join("blobs").join(&at_open)).unwrap();
+    assert_eq!(kept, leg);
+}
+
+#[test]
+fn two_files_declaring_one_protocol_and_revision_are_refused() {
+    let tree = Tree::new("protocols-twice");
+    let tour = fixture_protocol("tour.yaml");
+    let dir = tour_protocols(&tree);
+    fs::write(dir.join("tour-copy.yaml"), &tour).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "DuplicateProtocol",
+        &["tour-copy.yaml", "tour.yaml"],
+    );
+}
+
+#[test]
+fn two_files_declaring_one_protocol_id_are_refused() {
+    let tree = Tree::new("protocols-two-revisions");
+    let tour = fixture_protocol("tour.yaml");
+    let dir = tour_protocols(&tree);
+    fs::write(
+        dir.join("tour-two.yaml"),
+        tour.replacen("  revision: 1\n", "  revision: 2\n", 1),
+    )
+    .unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "DuplicateProtocol",
+        &["tour-two.yaml", "tour.yaml"],
+    );
+}
+
+#[test]
+fn a_protocol_canon_refuses_is_refused_naming_the_file() {
+    let tree = Tree::new("protocols-invalid");
+    let dir = tour_protocols(&tree);
+    let invalid = fixture_protocol("tour-leg.yaml")
+        .replace("  id: tour.leg\n", "  id: tour.broken\n")
+        .replace("{claim: ticket.issued}", "{claim: no.such.claim}");
+    fs::write(dir.join("broken.yaml"), invalid).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(&tree, &opened, "ProtocolRefused", &["broken.yaml"]);
+    let detail = &json_line(&opened)["detail"];
+    assert!(detail.as_str().unwrap().len() <= 1024 + 6, "{detail}");
+}
+
+/// The JSON object of the refusal's second line on standard error.
+fn json_line(output: &Output) -> Value {
+    let text = stderr(output);
+    let line = text.lines().find(|line| line.starts_with('{')).unwrap();
+    serde_json::from_str(line).unwrap()
+}
+
+#[test]
+fn a_link_leaving_the_protocols_directory_is_refused() {
+    let tree = Tree::new("protocols-link");
+    let dir = tour_protocols(&tree);
+    let outside = tree.root.join("outside.yaml");
+    fs::write(
+        &outside,
+        fixture_protocol("tour-leg.yaml").replace("  id: tour.leg\n", "  id: tour.outside\n"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("elsewhere.yaml")).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "ProtocolLinkLeavesDirectory",
+        &["elsewhere.yaml", "outside.yaml"],
+    );
+}
+
+#[test]
+fn the_root_protocol_must_be_in_the_protocols_directory() {
+    let tree = Tree::new("protocols-root");
+    let opened = open_from(&tree, &fixture_protocols(), "system-query@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "ProtocolNotInDirectory",
+        &["system-query@1"],
+    );
+}
+
+#[test]
+fn a_child_protocol_the_directory_lacks_is_refused() {
+    let tree = Tree::new("protocols-child");
+    let tour = fixture_protocol("tour.yaml").replacen(
+        "case_open: {protocol: tour.leg,",
+        "case_open: {protocol: tour.detour,",
+        1,
+    );
+    let dir = protocols_dir(
+        &tree,
+        &[
+            ("tour.yaml", &tour),
+            ("tour-leg.yaml", &fixture_protocol("tour-leg.yaml")),
+        ],
+    );
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "ProtocolNotInDirectory",
+        &["tour.detour", "tour.yaml"],
+    );
+}
+
+#[test]
+fn a_directory_with_no_protocol_file_is_refused() {
+    let tree = Tree::new("protocols-none");
+    let dir = protocols_dir(&tree, &[("notes.txt", "not a protocol\n")]);
+    fs::create_dir_all(dir.join("sub")).unwrap();
+    fs::write(dir.join("sub/tour.yaml"), fixture_protocol("tour.yaml")).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(&tree, &opened, "NoProtocolFiles", &[]);
+}
+
+#[test]
+fn a_changed_stored_protocol_is_refused() {
+    let tree = Tree::new("protocols-changed");
+    let dir = tour_protocols(&tree);
+    let opened = open_from(&tree, &dir, "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let blob = tree
+        .store()
+        .join("blobs")
+        .join(kept_sha256(&tree, "tour-leg@1"));
+    let mut bytes = fs::read(&blob).unwrap();
+    bytes[0] ^= 1;
+    fs::write(&blob, &bytes).unwrap();
+    let before = tree.snapshot();
+    let ran = tree.run();
+    assert_ne!(ran.status.code(), Some(0), "{}", stdout(&ran));
+    let text = stderr(&ran);
+    assert!(text.contains("StoredProtocolChanged"), "{text}");
+    assert!(text.contains("tour-leg@1"), "{text}");
+    assert_eq!(tree.snapshot(), before);
 }

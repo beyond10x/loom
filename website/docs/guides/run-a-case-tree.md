@@ -129,7 +129,7 @@ A case for which more than one outcome is legitimate is not ended by `tree run`.
 protocol `fork` has the outcomes `kept` and `left`, both legitimate once the road is seen:
 
 ```console
-$ b10x-loom protocols add fork@1 --file crates/loom-cli/tests/fixtures/tree-two-level/protocols/fork.yaml
+$ b10x-loom protocols add fork@1 --file crates/loom-cli/tests/fixtures/tree-two-level/extra/fork.yaml
 installed fork@1
 (exit 0)
 ```
