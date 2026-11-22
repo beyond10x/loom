@@ -126,6 +126,22 @@ impl<S: FallibleCaseStore> PersonEffects<'_, S> {
             if let Some(result) = &result {
                 facts["result"] = serde_json::Value::String(result.clone());
             }
+            // The revision the case holds for each upstream artifact the entry declares, as the
+            // program and open paths record it; no member when none is declared.
+            if !entry.upstream.is_empty() {
+                facts["upstream_revisions"] = entry
+                    .upstream
+                    .iter()
+                    .map(|artifact| {
+                        let revision = revisions
+                            .get(artifact)
+                            .cloned()
+                            .unwrap_or_else(|| "none".to_owned());
+                        (artifact.clone(), serde_json::Value::String(revision))
+                    })
+                    .collect::<serde_json::Map<_, _>>()
+                    .into();
+            }
             submit_evidence(
                 &held,
                 &self.principal,

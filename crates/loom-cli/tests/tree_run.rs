@@ -890,3 +890,43 @@ fn a_spent_run_budget_ends_the_retries_of_a_step() {
     );
     assert_eq!(json(&ran)["stop"], "Stuck");
 }
+
+/// The `route_approval` record of a one-case leg opened with `bindings`, `notes.txt` holding `abc`,
+/// once its person approved the route.
+fn approval_record(name: &str, bindings: &str) -> Value {
+    let tree = Tree::new(name);
+    fs::write(tree.workspace().join("notes.txt"), "abc").unwrap();
+    let opened = tree.open_leg_with(bindings);
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let waited = tree.run();
+    assert_eq!(
+        waited.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&waited),
+        stderr(&waited)
+    );
+    let approved = tree.decided(&json(&waited)["decisions"][0]);
+    assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
+    let status = json(&tree.tree("status"));
+    entry(&status, "root")["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["kind"] == "route_approval")
+        .cloned()
+        .unwrap_or_else(|| panic!("no route_approval: {status}"))
+}
+
+#[test]
+fn a_person_record_names_the_revisions_of_its_declared_upstream() {
+    // `notes.txt` holding `abc` is at revision `t` and the first 16 hex digits of its SHA-256.
+    let declared = approval_record("person-upstream", "tour-leg-upstream.bindings.yaml");
+    assert_eq!(
+        declared["upstream_revisions"],
+        json!({"notes": "tba7816bf8f01cfea"}),
+        "{declared}"
+    );
+    let undeclared = approval_record("person-no-upstream", "tour-leg.bindings.yaml");
+    assert_eq!(undeclared["upstream_revisions"], json!({}), "{undeclared}");
+}
