@@ -200,20 +200,7 @@ fn a_decider_principal_is_named_and_accepted() {
     assert_eq!(decision["kind"], "ApproveAction", "{decision}");
     assert_eq!(decision["principal"], "decider:model", "{decision}");
     assert_eq!(command_principal(&decision), "decider:model");
-    let taken = tree
-        .command()
-        .args(["tree", "approve", "--at", AT, "--store"])
-        .arg(tree.store())
-        .args([
-            "--case",
-            "root",
-            "--principal",
-            "decider:model",
-            "--action",
-            "post.sign",
-        ])
-        .output()
-        .unwrap();
+    let taken = tree.approved("root", None, "decider:model", Some("post.sign"), None, None);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -260,10 +247,10 @@ const WAITING_LOG: &str = concat!(
     "\n",
     r#"{"seq":1,"prev":"281157692553ceb756ed4f697f567a3c0111c49044efd6d20ae100f3b4923f67","#,
     r#""at":"2026-11-22T08:00:00Z","kind":"Evaluated","case_revision":1,"#,
-    r#""frontier":"0cb27c3f-727b-8eef-8af9-82e30f52fd7a","#,
-    r#""decision_digest":"b1a90b2b4d272737707376d540f0c75589ca1ceeac3eaf9d220d40cacc6fc60e"}"#,
+    r#""frontier":"e2c03f13-a4f5-830c-9bab-26206da2e8f5","#,
+    r#""decision_digest":"845b1e20231cea236d145fccf5d451349a432c25bd23e0f729d4b68017aa2d78"}"#,
     "\n",
-    r#"{"seq":2,"prev":"5529a195d37a712719b82deee9cd0c2f3aee945f2e969be40be2e16ed49bece0","#,
+    r#"{"seq":2,"prev":"0ea3060962870a539f6ed4244615f731dc91d5c424b7ff7ea9a6c770f54a4d88","#,
     r#""at":"2026-11-22T08:00:00Z","kind":"Stopped","stop":"AwaitingPerson","#,
     r#""next":["post.seal of case root at revision 1","post.sign of case root at revision 1","#,
     r#""post.stamp of case root at revision 1"]}"#,
@@ -273,9 +260,8 @@ const WAITING_LOG: &str = concat!(
 #[test]
 fn status_and_run_log_do_not_change() {
     let (tree, _) = waiting_sign("principal-unchanged", "sign.bindings.yaml");
-    let status = tree.tree("status");
-    assert_eq!(status.status.code(), Some(0), "{}", stderr(&status));
-    assert_eq!(placeholders(&tree, &stdout(&status)), WAITING_STATUS);
+    let status = format!("{}\n", tree.status());
+    assert_eq!(placeholders(&tree, &status), WAITING_STATUS);
     let log = fs::read_to_string(tree.store().join(log_file_name("root"))).unwrap();
     assert_eq!(log, WAITING_LOG);
 }

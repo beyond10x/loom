@@ -311,10 +311,16 @@ Before a change is reported done, in this order:
    conformance crates) and `cargo test --doc --workspace --locked`, prints the ten
    slowest tests on every run and fails over 120 s
    (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
-   `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s.
-   Before its timed run it makes the trees those tests share (`the_shared_trees_are_made`, an
-   ignored test of `tree_run.rs`), so no test of the run builds one or waits on the lock of
-   another that does. Its summary line counts the tests that printed a line `skipped:` (a missing
+   `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s,
+   in their own binary and as the module `tree_run::` of `b10x-loom-cli::main` alike. It fails too
+   when they start `b10x-loom` more than 66 times (`START_BUDGETS`): `with_the_switch` appends a
+   line per start to the file `LOOM_TREE_RUN_STARTS` names, which the step sets. Those tests run
+   the library (`b10x_loom_tree`) in process where the binary is not their subject; each command
+   keeps one test through the binary (`each_command_keeps_one_test_through_the_binary`) and every
+   start goes through `with_the_switch` (`every_start_goes_through_with_the_switch`).
+   Before its timed run it makes the installed home those tests copy and the trees they share
+   (`the_shared_trees_are_made`, an ignored test of `tree_run.rs`), so no test of the run builds
+   one or waits on the lock of another that does. Its summary line counts the tests that printed a line `skipped:` (a missing
    prerequisite; nextest's JUnit report keeps a passing test's output) and names each. Where
    `systemd-run --user --scope -p Delegate=yes true` passes it sets `LOOM_REQUIRE_DELEGATION=1` on
    its run, so a delegated test that would skip fails; CI's step `Probe a delegated user scope`
@@ -403,7 +409,8 @@ to 145 s. Test builds turn on the feature `test-unsynced-store` of `b10x-loom-go
 dev-dependency of `b10x-loom-cli` alone), under which a process whose own environment holds
 `B10X_LOOM_TEST_UNSYNCED_STORE=1` syncs nothing and counts each sync it skipped, and writes its
 counts to the file `B10X_LOOM_TEST_SYNC_COUNTS` names at exit. `tests/tree_run.rs` sets it on
-every `b10x-loom` it starts; a bound program never sees it, since its environment is built whole
+every `b10x-loom` it starts, and in its own test process before a test's first write for the
+library it runs in process; a bound program never sees it, since its environment is built whole
 (`crates/loom-bindings/src/child.rs`), and no bindings or protocol member sets it. Only
 `durable.rs`, `test_step.rs`, `unsynced_store.rs`, `tests/tree_run.rs` and
 `tests/support/loom.rs` name the variable, and only the last two set it
