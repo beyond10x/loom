@@ -729,9 +729,10 @@ refuses such a case of a built-in protocol naming the case and the input
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
 Canon is named by the `b10x-canon` line of each of `crates/loom-governor/Cargo.toml`,
-`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.10.0"`), pinned
-by `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
-with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
+`crates/loom-protocols/Cargo.toml`, `crates/loom-bindings/Cargo.toml`,
+`crates/loom-executor/Cargo.toml` and `crates/loom-tree/Cargo.toml` (`tag = "0.11.0"`), pinned by
+`Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
+with `cargo update -p b10x-canon` alone, and change the five lines together; any other crate that
 adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
 register and are decided like any other construct. A catalog or a registration whose openings form
@@ -742,9 +743,14 @@ protocol registers and Canon decides it, but Loom does not read all of it: the f
 capability id alone, the scope only inside Canon's reason, and `action_facts` reads a `children`
 form's `case_outcome` records about any artifact at any revision, not its `subject` and `revision`.
 A protocol with `imports` is refused at registration (`MissingImport`): Loom hands Canon no imported
-document. Every decision document is Canon 0.10.0's (`missing_evidence`, `pending_decisions`), and a
-frontier id hashes it, so it changes with each Canon move; no store holds one
-(`crates/loom-governor/tests/canon_0_10_0.rs`).
+document. Canon 0.11.0 adds `when` on an outcome's decision requirement, `revised_by` on an
+artifact, `records_together` on an action and a `descended` form; such a protocol registers and
+Canon decides it, a decision counting only while its `when` holds. Loom does not read all of it:
+it keeps no revision ancestry, so a case it hands Canon gives no `descends_from` and a `descended`
+form is `unknown` in every Loom case, and its runner does not enforce `records_together`, which
+has no evaluation meaning in Canon (only `canon simulate` reads it). Every decision document is Canon 0.11.0's
+(`missing_evidence`, `pending_decisions`), and a frontier id hashes it, so it changes with each
+Canon move; no store holds one (`crates/loom-governor/tests/canon_0_10_0.rs`).
 
 Child cases (`story:child-case-runtime`, `crates/loom-governor/src/children.rs`,
 `crates/loom-governor/tests/child_cases.rs`). `CanonGovernor::open_children(parent, action,
