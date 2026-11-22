@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use b10x_loom_bindings::{
-    CopyEffects, OpenEffects, PlacedRevisions, ProgramEffects, retry_records,
+    CopyEffects, OpenEffects, OpenPortError, PlacedRevisions, ProgramEffects, retry_records,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionJson;
@@ -217,6 +217,20 @@ pub fn run_tree(
         let legitimate = legitimate_outcomes(&governor, &id)?;
         let lines = read_lines(&store, &case.case)?;
         let mut due = due_actions(&governor, &id, &case.bindings)?;
+        // A step refused since the case was last evaluated is refused again until the case
+        // changes (a spent run budget): it is not due, whatever its retry records say.
+        let refused_since: BTreeSet<String> = lines
+            .iter()
+            .rev()
+            .take_while(|line| !matches!(line.event, RunLogEvent::Evaluated(_)))
+            .filter_map(|line| match &line.event {
+                RunLogEvent::ActionFinished(finished) if finished.refusal.is_some() => {
+                    Some(finished.action.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        due.retain(|action| !refused_since.contains(action));
         let revision = governor
             .current_revision(&id)
             .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
@@ -899,8 +913,23 @@ impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
                 .case(case.0.clone())
                 .file(file.display().to_string())
         };
-        let opens = OpenEffects::new(governor, case.clone(), bindings, file, catalog)
-            .map_err(|error| refused(error.to_string()))?;
+        let opens = OpenEffects::new(
+            governor,
+            case.clone(),
+            bindings,
+            file,
+            catalog,
+            workspace,
+            store,
+            Some(Arc::clone(runner)),
+        )
+        .map_err(|error| match error {
+            OpenPortError::Refused(refusal) => refused(refusal.to_string()),
+            OpenPortError::Runner(error) => {
+                Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())
+                    .case(case.0.clone())
+            }
+        })?;
         let copies = CopyEffects::new(governor, case.clone(), bindings, catalog)
             .map_err(|error| refused(error.to_string()))?;
         let programs = ProgramEffects::new(

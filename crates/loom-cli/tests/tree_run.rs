@@ -683,9 +683,17 @@ fn a_status_lists_each_record_in_the_order_received() {
         .iter()
         .map(|record| record["kind"].as_str().unwrap())
         .collect();
+    // The first leg's opening, the copied approval, then the opening of one leg per name.
     assert_eq!(
         kinds,
-        ["case_outcome", "first_leg_opened", "route_approval"],
+        [
+            "case_outcome",
+            "first_leg_opened",
+            "route_approval",
+            "case_outcome",
+            "case_outcome",
+            "legs_opened"
+        ],
         "{root}"
     );
     // The governor writes the child's `case_outcome` record with the opening, before the step's own.

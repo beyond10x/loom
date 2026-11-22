@@ -120,3 +120,25 @@ fn a_relative_store_is_refused_and_never_resolved_against_the_current_directory(
         );
     }
 }
+
+#[test]
+fn run_settings_are_built_from_items_of_this_crate_alone() {
+    use b10x_loom_tree::{
+        ConfinementAdapter, EngineConfinement, EngineRunner, RunSettings, TestRunner,
+        UNCONFINED_FLAG_REASON,
+    };
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    let runner: std::sync::Arc<dyn TestRunner> = std::sync::Arc::new(runner);
+    let settings = RunSettings {
+        max_steps: Some(1),
+        max_wall_seconds: None,
+        time: TreeTime::At("2026-11-22T08:00:00Z".into()),
+        runner,
+    };
+    assert_eq!(settings.max_steps, Some(1));
+}

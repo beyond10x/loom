@@ -3,9 +3,9 @@ protocol:
   id: tour.leg
   revision: 1
   description: >-
-    One leg of a walking tour. A planner adds a stop to the route until it has two, a check
-    reads its shape, a guide approves the route and issues a ticket. A leg passes once its
-    ticket is issued and fails when it cannot be.
+    One leg of a walking tour. A planner adds a stop to the route while the check finds it
+    invalid, until it has two; a check reads its shape; a guide approves the route and issues a
+    ticket. A leg passes once its ticket is issued and fails when it cannot be.
 artifacts:
   route: {}
   notes: {}
@@ -31,6 +31,7 @@ claims:
 actions:
   route.write:
     effect: write
+    precondition: {claim: route.valid, is: false}
   route.check:
     effect: read
     may_produce:
