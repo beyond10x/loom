@@ -581,6 +581,7 @@ dependencies = [
  "b10x-loom-executor",
  "b10x-loom-protocols",
  "loom",
+ "rustix",
  "serde_json",
  "serde_yaml_ng",
  "sha2 0.11.0",
