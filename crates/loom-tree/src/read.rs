@@ -83,6 +83,7 @@ fn evidence(value: &Value, at: &str) -> Read<StatusEvidence> {
         upstream_revisions: loom_json(member(value, at, "upstream_revisions")?),
         producer: text(value, at, "producer")?,
         action: optional_text(value, at, "action")?,
+        name: optional_text(value, at, "name")?,
     })
 }
 
