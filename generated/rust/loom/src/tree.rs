@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 092ae05d201a03407e05e1b9a08708b83246b2741faca7c295cc9b29c8df9810
+// contract digest 9c277197e8ce1ef974b931ae3ce283c80f935dc7225a6e7d42b142c9e308fd51
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -71,6 +71,10 @@ pub struct CaseStatus {
     pub approvals: Vec<StatusApproval>,
     /// `copies` — `List<loom.tree.StatusCopy>`.
     pub copies: Vec<StatusCopy>,
+    /// `log` — `Optional<loom.tree.StatusLog>`.
+    pub log: Option<StatusLog>,
+    /// `budget` — `Optional<loom.tree.SpentBudget>`.
+    pub budget: Option<SpentBudget>,
 }
 
 /// DecisionKind — `loom.tree.DecisionKind`: one of a closed set of names.
@@ -122,6 +126,17 @@ pub struct NextDecision {
     pub command: Vec<String>,
 }
 
+/// SpentBudget — `loom.tree.SpentBudget`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpentBudget {
+    /// `Cancel`.
+    Cancel,
+    /// `MaxSteps`.
+    MaxSteps,
+    /// `MaxWallSeconds`.
+    MaxWallSeconds,
+}
+
 /// StatusApproval — `loom.tree.StatusApproval`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusApproval {
@@ -171,6 +186,19 @@ pub struct StatusEvidence {
     pub action: Option<String>,
     /// `name` — `Optional<String>`.
     pub name: Option<String>,
+}
+
+/// StatusLog — `loom.tree.StatusLog`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusLog {
+    /// `verified` — `Boolean`.
+    pub verified: bool,
+    /// `refusal` — `Optional<loom.runlog.RunLogRefusal>`.
+    pub refusal: Option<crate::runlog::RunLogRefusal>,
+    /// `line` — `Optional<Integer>`.
+    pub line: Option<i64>,
+    /// `detail` — `Optional<String>`.
+    pub detail: Option<String>,
 }
 
 /// StatusRun — `loom.tree.StatusRun`.
