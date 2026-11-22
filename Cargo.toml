@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "crates/loom-tree/tests/embedder"]
 exclude = ["generated/rust/loom", "generated/rust/commission", "generated/rust/intake"]
 
 [workspace.package]

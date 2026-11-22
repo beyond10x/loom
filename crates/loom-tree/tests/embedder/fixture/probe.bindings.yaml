@@ -1,0 +1,15 @@
+format: loom.bindings/1
+protocol: probe@1
+artifacts:
+  cell: cell.txt
+actions:
+  - action: cell.look
+    executor:
+      kind: program
+      argv: [sh, probe.sh]
+    evidence:
+      - kind: cell_look
+        subject: cell
+        producer: looker
+        from: exit
+        results: {"0": seen, "*": unseen}
