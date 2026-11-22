@@ -11,10 +11,11 @@ publish = false
 name = "b10x_loom_bindings"
 
 [dependencies]
-b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.9.0" }
+b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.10.0" }
 b10x-loom-commission = { path = "../loom-commission" }
 b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+b10x-loom-protocols = { path = "../loom-protocols" }
 loom = { path = "../../generated/rust/loom" }
 rustix = { version = "1", features = ["fs", "std"] }
 serde = "1"

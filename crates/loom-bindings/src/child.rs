@@ -89,6 +89,8 @@ pub fn bound_case_child(
     let described = ProgramEnvironment {
         path: child.environment().set.get(PATH_VARIABLE).cloned(),
         loom_case: case.0.clone(),
+        // The bound program of a retried step gets it from `crate::retry::given`, never here.
+        loom_retry_feedback: None,
         loom_timeout_seconds: i64::try_from(timeout.as_secs()).unwrap_or(i64::MAX),
         loom_case_name: names.case_name.clone(),
         loom_parent_case_name: names.parent_case_name.clone(),
@@ -106,12 +108,16 @@ pub(crate) fn child_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
 
-/// The variables `described` names, and nothing else: `PATH` when the host has one, then
-/// [`CASE_VARIABLE`], [`TIMEOUT_VARIABLE`] and each name it holds.
+/// The variables `described` names, and nothing else: `PATH` when the host has one, the retry
+/// feedback variable when it holds one, then [`CASE_VARIABLE`], [`TIMEOUT_VARIABLE`] and each
+/// name it holds.
 fn environment(described: &ProgramEnvironment) -> ExecEnvironment {
     let mut set = BTreeMap::new();
     if let Some(path) = &described.path {
         set.insert(PATH_VARIABLE.to_owned(), path.clone());
+    }
+    if let Some(feedback) = &described.loom_retry_feedback {
+        set.insert(crate::RETRY_FEEDBACK_VARIABLE.to_owned(), feedback.clone());
     }
     set.insert(CASE_VARIABLE.to_owned(), described.loom_case.clone());
     set.insert(

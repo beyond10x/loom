@@ -477,6 +477,9 @@ fn sample_state(case: &CaseId) -> loom_governor::CaseState {
         independence: loom_governor::CaseIndependence::none(),
         evidence: Vec::new(),
         decisions: Vec::new(),
+        parent: None,
+        children: Vec::new(),
+        termination: None,
     }
 }
 

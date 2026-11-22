@@ -299,7 +299,10 @@ types:
   # runner's refusal as text (absent when the runner answered a run). `class` (story
   # bound-program-contract) is the exit class the binding's `exits` gives the run's exit code,
   # absent for any other exit and for a run killed at its timeout. The observations of one action
-  # in one case from the port that hold no `class` are its run count.
+  # in one case from the port that hold no `class` are its run count. `retry_of` (story
+  # bound-program-retry-records) holds the evidence ids of the retry records the run was given, in
+  # the order the case received them; it is empty on a run that was given none. A retried run is a
+  # run: it counts against `budget.max_runs` like any other run without a `class`.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -315,6 +318,8 @@ types:
         type: Boolean
       - name: runner_refusal
         type: Optional<String>
+      - name: retry_of
+        type: List<String>
       - name: class
         type: Optional<loom.bindings.ExitClass>
 
@@ -326,7 +331,11 @@ types:
   # other variable reaches such a program, and no host variable is inherited: no request's
   # arguments, `arguments_from` output, program report, bindings document or host variable sets
   # or changes either value. The intake slice's `run --action-bindings` commands are not started
-  # by this port and keep `PATH` alone. Story bound-program-contract adds three variables, each set
+  # by this port and keep `PATH` alone. `loom_retry_feedback`, the variable `LOOM_RETRY_FEEDBACK`
+  # (story bound-program-retry-records), is the canonical absolute path of the step's
+  # `RetryFeedback` document, set by the port alone, only on the bound program of a step with a
+  # retry record and never on its `arguments_from` program. Story bound-program-contract adds
+  # three variables, each set
   # by the port after the child is built: `loom_timeout_seconds`, `LOOM_TIMEOUT_SECONDS`, the whole
   # seconds of that run's timeout (the binding's `timeout_seconds`, else 60); `loom_case_name`,
   # `LOOM_CASE_NAME`, the name the governor stored in the case's own `parent` link when its parent
@@ -344,6 +353,8 @@ types:
         type: Optional<String>
       - name: loom_case
         type: String
+      - name: loom_retry_feedback
+        type: Optional<String>
       - name: loom_timeout_seconds
         type: Integer
       - name: loom_case_name
@@ -499,3 +510,66 @@ types:
         type: String
       - name: detail
         type: String
+
+  # One record that sends a bound action back to work (story bound-program-retry-records): an
+  # evidence record the governor holds for the case whose facts name a `kind` and a `result` the
+  # binding's `retry_when` lists, about the revision the case holds for its `subject`, never
+  # `none`. Every member is read from the held record (its evidence id, its facts' kind, subject,
+  # subject revision, result and instant, its producer) and, for `action`, `exit` and
+  # `blob_sha256`, from the first observation it cites that is a run of a bound program
+  # (`loom/bound-program`) in the same case: the action that run was for, its exit code (absent
+  # for a run killed at its timeout, refused by its runner or with no status) and the blob it kept.
+  # A record that cites no such run names none of the three. Nothing a program prints, a request
+  # names or the bindings document says is a member.
+  - name: loom.bindings.RetryRecord
+    kind: struct
+    fields:
+      - name: evidence_id
+        type: String
+      - name: kind
+        type: String
+      - name: subject
+        type: String
+      - name: subject_revision
+        type: String
+      - name: result
+        type: String
+      - name: producer
+        type: String
+      - name: observed_at
+        type: Timestamp
+      - name: action
+        type: Optional<String>
+      - name: exit
+        type: Optional<Integer>
+      - name: blob_sha256
+        type: Optional<String>
+
+  # The end of a cited blob a retried program is given: the blob's SHA-256 and its last 60 lines,
+  # at most the last 65536 bytes of them, invalid UTF-8 replaced by U+FFFD. A blob that cannot be
+  # read, or whose content does not hash to its name, gives none.
+  - name: loom.bindings.RetryLog
+    kind: struct
+    fields:
+      - name: blob_sha256
+        type: String
+      - name: tail
+        type: String
+
+  # The document a retried bound program is given (`format` `loom.retry-feedback/1`): the case,
+  # the action, its retry records in the order the case received them, and a log per cited blob.
+  # The port keeps it as `blobs/<sha256>` of the store directory before the program starts; it is
+  # written only when there is a retry record.
+  - name: loom.bindings.RetryFeedback
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: case
+        type: String
+      - name: action
+        type: String
+      - name: records
+        type: List<loom.bindings.RetryRecord>
+      - name: logs
+        type: List<loom.bindings.RetryLog>

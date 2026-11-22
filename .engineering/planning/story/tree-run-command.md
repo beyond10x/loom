@@ -52,7 +52,7 @@ scope:
   path: website/data/status.json
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":4}}}
 - {from: "proposed", to: "active", at: "2026-11-22T00:22:55Z", actor: "agent:sdc", revision: 15, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
@@ -79,9 +79,11 @@ logic is a new crate, `b10x-loom-tree` (`crates/loom-tree`); `crates/loom-cli` h
   declares is produced by that principal about the subject's revision at that moment;
 - `tree close` terminates a case through a named outcome when more than one is legitimate;
 - `tree verify` checks the run log of every case of the tree and names the first line that fails;
-- `tree status` prints the tree as JSON for a live view: per case its id, protocol, revision,
-  outcome or stop, open obligations, and the path of its case file and run log; and, for a tree
-  opened with `--protocols`, each protocol's registration and sha256.
+- `tree status` prints the tree as JSON for a live view, of format `loom.tree-status/1`: per case
+  its id, link name, parent, protocol with its id and revision, revision, outcome or stop with the
+  decisions it waits on, open obligations, the path of its case file and run log, its evidence
+  records, program runs, approvals and copies; and, for a tree opened with `--protocols`, each
+  protocol's registration and sha256 ("The status of a tree" below).
 
 A case's workspace is the tree's one workspace, the existing directory `tree open` is given as
 `--workspace <dir>` and records in the store beside the root case file: every case of the tree
@@ -139,6 +141,81 @@ when the step or wall-time budget is spent, each naming the case. One writer per
 `tree` command on a store in use is refused naming the holder. Every instant comes from the host
 clock, or from `--at` when given.
 
+**Public library entries.** The logic is in `crates/loom-tree` as public functions over plain
+data (paths, strings, the generated `loom.tree` types); `crates/loom-cli` only parses the flags,
+calls one function and prints what it returns. `run_tree` takes an optional observer, given each
+run-log line as it is appended, and an optional cancel handle, asked before each step: a
+cancelled run stops before the next step as a spent wall-time budget does (`BudgetSpent`). For
+the status the entries are `tree_status`, `stored_catalog`, `status_json`, `read_status` and the
+constant `STATUS_FORMAT`. `crates/loom-protocols` re-exports Canon (`pub use b10x_canon as
+canon;` in its `lib.rs`), so that an embedder names one runtime dependency and links the same
+Canon as Loom. `CHANGELOG.md` gains the bullet "`b10x_loom_protocols::canon` re-exports the
+Canon crate Loom links; an embedder names one runtime dependency."
+
+**The status of a tree.** `tree status` prints the value one public function returns,
+`tree_status(store, catalog) -> Result<TreeStatus, Refused>`, `TreeStatus` being the generated
+`loom.tree.TreeStatus`: the command prints `status_json` of that value and nothing else, so
+Runbook's daemon serves the same value as a view by calling the function, without starting a
+process. The function reads the store and never takes it, so it answers while a `tree run` holds
+the store. Its catalog is the one the tree's other commands use: for a tree opened with
+`--protocols` the one `stored_catalog(store)` builds from the blobs `tree-protocols.json` names,
+else the host's.
+
+The document keeps every member the form before this revision has, with the same meaning:
+`store`, `workspace`, `root`, `cases` and `protocols`, and per case `case`, `parent`, `protocol`
+(the registration), `revision`, `outcome`, `stop`, `open_obligations` (by name), `case_file` and
+`run_log`. It adds:
+
+- `format`, the string `loom.tree-status/1` (`STATUS_FORMAT`), and `version`, the version of
+  `b10x-loom-tree` that printed it. The form before this revision has neither member; it was
+  printed only by the unit's branch and never released. `read_status` takes the bytes of a
+  printed status and returns its `TreeStatus`; a document with no `format`, or with any `format`
+  but `loom.tree-status/1`, is refused `UnknownStatusFormat` naming the format found (or none),
+  and one that does not decode as `TreeStatus` is refused `StoreUnreadable`. `version` is not
+  checked.
+- Per case, `name`: the last segment of the case id below its parent (`north` for
+  `<root>.north`), absent for the root.
+- Per case, `protocol_id` and `protocol_revision`: `protocol` split at its last `@` (`tour-leg@1`
+  gives `tour-leg` and `1`).
+- Per case, `stop_next`: the `next` of the case's last `stopped` run-log line, the decisions that
+  would let it go on, as `stop` is that line's `stop`; empty when the log has no such line.
+  `outcome` is the outcome of the case's termination (`story:child-case-runtime`).
+- Per case, `evidence`: per record the case holds, in the order the case received it (the
+  governor's `evidence` list): `index` (its position, from 0), `evidence_id` (the governor's id
+  of the record), `kind`, `result` (absent when the record has none), `subject` (an artifact
+  name), `subject_revision`, `upstream_revisions` (an object of artifact to revision, empty when
+  the record has none), `producer` and `action`. `kind` to `upstream_revisions` are read from the
+  `canon-evidence/1` record the stored record holds in `facts`: `subject_revision` is that
+  record's string, not the integer case revision the governor keeps beside it. `action` is the
+  action of the step that gave the record, read from the case's `action finished` run-log line
+  whose `evidence` names its `evidence_id` (every step writes one, a `tree approve --action`
+  included); absent when no line does, as for a `case_outcome` record the governor writes for a
+  child. A stored record whose `facts` is not a `canon-evidence/1` record is refused
+  `StoreUnreadable`, naming the case and the index.
+- Per case, `runs`: per run of a bound program of the case, the observations of source
+  `loom/bound-program` whose payload names the case, in the order `observations.json` keeps
+  them: `action`, `exit` (absent when the program timed out or the runner refused it),
+  `attempt`, `retried` and `retry_of`. `retry_of` is the payload's list of the evidence ids the
+  run was given (`story:bound-program-retry-records`), the records that sent the action back,
+  which another action's run may have given (a check's). So the chain is the action's own:
+  `attempt` is 1 for a run whose `retry_of` is empty, else one more than the `attempt` of the run
+  of the same action before it in the case; `retried` is true when the next run of the same
+  action in the case has a `retry_of` that is not empty.
+- Per case, `approvals`: per `tree approve` on the case, in the order recorded: `capability`,
+  `action` (the action `--action` named, absent without it), `answer` (`Allow` or `Deny`),
+  `actor` (the principal) and `at`. They are read from the case's run log: each `tree approve`
+  appends one `authority recorded` line, which gains the optional member `action`. The store's
+  `approvals-<stem>.json` is not the source: it holds the decisions the authority provider reads
+  and replaces a repeated decision of one capability, principal and case revision, so it does not
+  keep every `tree approve` in order. An outcome decision of `tree close` (the governor's
+  `ExplicitDecision` in the case file's `decisions`) is not an approval and is not listed.
+- Per case, `copies`: per record a `copy` binding copied into the case, in the order
+  `observations.json` keeps them: `source_case`, `target_case` (the case) and `record_kind`. A
+  copied record cites one observation of Loom's copy effect whose payload is
+  `loom.bindings.CopiedRecord` (`case`, `action`, `source_case`, `source_evidence`,
+  `dropped_upstream`; `story:record-copy-between-cases`): `target_case` is its `case`, and
+  `record_kind` is the `kind` of the case's record whose `observation_ids` name that observation.
+
 This story is what emits the run log's events and implements the selector's `StepHistory` from
 the store: `performed_at` from the log's `action finished` lines, `due` from `retry_records`
 (`story:bound-program-retry-records`'s function, for a writer of any executor) and `copy_due`
@@ -178,7 +255,10 @@ executor has no subcommand. The SDC's driver has the surface (`init`, `run`, `ap
 `~/beyond10x/sdc/docs/boundary.md` row 1 puts it in Loom's command line. A wait on a person must
 name its command (`~/beyond10x/sdc/docs/driver.md` § Status, third pass: "`run` names the exact
 command when it waits on a person"). The SDC's live view needs the list of cases and where each
-log is (request 7 of session `sdc`), which is what `tree status` gives it.
+log is (request 7 of session `sdc`), which is what `tree status` gives it. Runbook, the design
+authority, decided what else the status carries: per case its evidence, program
+runs, approvals and copies, so that its daemon serves them as a view from the library, without
+reading store files or starting a process, and a reader refuses a form it does not know.
 
 ## Waits on
 
@@ -204,6 +284,26 @@ list of `TreeStatus`, and the refusals `DuplicateProtocol`, `ProtocolRefused`,
 `StoredProtocolChanged`. `intake.protocols.SourceKind`, where it is declared
 (`ess/intake/domains/protocols.yaml:27-29`), gains the variant `Directory`; on that commit
 `task intake-drift` fails too (`Taskfile.yml:56-59`).
+
+The unit's first commit (`9a137f68`, "spec: the loom.tree domain of the tree command group")
+already declares `TreeStatus` and `CaseStatus` with the members kept above. For the status
+members, a later `ess/`-only commit of the unit amends them:
+
+- `loom.tree.TreeStatus` gains `format` (`String`) and `version` (`String`);
+- `loom.tree.CaseStatus` gains `name` (`Optional<String>`), `protocol_id`, `protocol_revision`
+  (`String` each), `stop_next` (`List<String>`), `evidence`, `runs`, `approvals` and `copies`
+  (a list of the four types below each);
+- new types `loom.tree.StatusEvidence` (`index`, `evidence_id`, `kind`, `result` optional,
+  `subject`, `subject_revision`, `upstream_revisions` as `Json`, an object of artifact to
+  revision, `producer`, `action` optional), `loom.tree.StatusRun` (`action`, `exit` optional,
+  `attempt`, `retried`, `retry_of`), `loom.tree.StatusApproval` (`capability`, `action`
+  optional, `answer` as `loom.tree.ApprovalDecision`, `actor`, `at`) and `loom.tree.StatusCopy`
+  (`source_case`, `target_case`, `record_kind`);
+- `loom.tree.TreeRefusalReason` gains `UnknownStatusFormat`;
+- `loom.runlog.AuthorityRecorded` in `ess/domains/runlog.yaml` gains `action`
+  (`Optional<String>`); a line written without it still reads.
+
+On that commit `task drift` fails.
 
 ## Acceptance
 
@@ -302,6 +402,32 @@ produce `route_approval`; a `program` action `ticket.issue` runs under the capab
   same store after an exit 3 continues the tree and repeats no `action finished` line, and both
   commands call one public function of `crates/loom-tree`, `run_tree` (test
   `a_second_start_over_the_same_store_continues_the_tree`).
+- After the run to `arrived`, `tree status` gives every member the form before this revision has,
+  with the same values; the root with no `name` and no `parent`; `<root>.north` with `name`
+  `north`, `parent` the root, `protocol` `tour-leg@1`, `protocol_id` `tour-leg` and
+  `protocol_revision` `1`; and, read after the exit 3 at `ticket.issue`, the waiting case's
+  `stop_next` names the decision `tree run` printed (test
+  `a_status_names_each_cases_link_protocol_and_stop`).
+- The root's `evidence` lists its records in the order received, `index` from 0: the copied
+  `route_approval` with the source record's `result`, `producer`, `subject`, `subject_revision`
+  string and `upstream_revisions`, and `action` the root's `copy` action; each `case_outcome`
+  record with no `action` (test `a_status_lists_each_record_in_the_order_received`).
+- The first child's writer has two `runs`: `attempt` 1 with `retried` true and an empty
+  `retry_of`, then `attempt` 2 with `retried` false and a `retry_of` naming the `invalid` check
+  record (test `a_status_counts_the_attempts_of_a_retried_writer`).
+- Each `tree approve` on a case is one entry of its `approvals`, in the order recorded, with
+  `capability`, `answer` and `actor`, and `action` only for `tree approve --action`; the same
+  decision recorded twice is two entries, while `approvals-<stem>.json` holds it once (test
+  `a_status_lists_each_approval_in_the_order_recorded`).
+- The root's `copies` is one entry, `source_case` the first child, `target_case` the root and
+  `record_kind` `route_approval`, and no other case has one (test
+  `a_status_names_the_copy_into_the_root`).
+- The JSON `tree status` prints equals `status_json(&tree_status(store, &catalog))`, has `format`
+  `loom.tree-status/1` and `version` the crate's version, and `read_status` of the printed bytes
+  equals the value `tree_status` returned (test `the_printed_status_is_the_value_of_tree_status`).
+- `read_status` refuses `UnknownStatusFormat`, naming what it found, a status with `format`
+  `loom.tree-status/2` and one with no `format` (the form before this revision) (test
+  `a_status_of_an_unknown_format_is_refused`).
 
 With the second fixture's protocols as the directory `--protocols` names,
 `crates/loom-cli/tests/fixtures/tree-two-level/protocols/` (`tour.yaml`, `tour-leg.yaml` and a
@@ -345,9 +471,15 @@ subdirectory `old/` whose file declares `tour` at revision 1 too), and fixture d
   report, every case keeps the registration and sha256 of `tree open` (test
   `nothing_in_a_run_selects_or_replaces_a_protocol`).
 - The fixture protocols of `crates/loom-cli/tests/tree_run.rs` are compiled and registered once
-  per test binary (one shared fixture behind a `OnceLock`), each test runs on a fresh copy of it,
-  no stub program waits on a timer, and each test asserts it ended within 60 s
+  per test run (one shared fixture cached on disk under `target/`, keyed by the SHA-256 of its
+  sources; no `OnceLock`, as nextest runs each test in its own process), each test runs on a
+  fresh copy of it, no stub program waits on a timer, and each test asserts it ended within 60 s
   (`slot cargo test -p b10x-loom-cli --test tree_run`).
+- `crates/loom-protocols` re-exports the Canon it links as `b10x_loom_protocols::canon`: a
+  function taking `b10x_canon::model::Protocol` accepts a value typed
+  `b10x_loom_protocols::canon::model::Protocol`, and the `canon` path is the crate whose
+  `model::Protocol` `ProtocolEntry.model` names (test
+  `loom_protocols_re_exports_the_canon_it_links`).
 - `website/docs/reference/cli.md` is regenerated and a guide page shows one tree run with pasted
   output.
 - `task check` exits 0.
@@ -364,10 +496,41 @@ Running Runbook's own protocols and bindings files: that test lives in Runbook
 (`~/beyond10x/sdc`), not in Loom's repository.
 Reading a protocols directory recursively or from Git; built-in or installed protocols beside a
 `--protocols` directory; replacing a protocol of an open tree.
+Outcome decisions of `tree close` in a case's `approvals`; a status of more than one tree.
+No other crate re-exports Canon.
 
 ## Scope
 
 Scope to be rewritten by the scoper after this revision
+
+Added for the status members and the Canon re-export, read on the unit branch
+`impl/tree-run-command` and on `impl/record-copy-between-cases`; **cited** or **inferred** as
+below:
+
+- `crates/loom-tree/src/status.rs`: `tree_status` (`status.rs:41`) builds `TreeStatus`, and
+  `members` (`:23`) returns the root alone on the unit branch — cited; the new members and
+  `stored_catalog` — inferred
+- `crates/loom-tree/src/encode.rs`: `status_json` (`encode.rs:60`) writes each member by hand —
+  cited; it gains the new members, and `read_status` is new — inferred
+- `crates/loom-tree/src/approvals.rs`: `approvals-<stem>.json` (`:27`); `record_approval`
+  (`:103`) replaces a repeated decision — cited
+- `crates/loom-tree/src/approve.rs`: `approve` (`:48`) appends `AuthorityRecorded` (`:102`) —
+  cited; it writes `action` when `--action` is given — inferred
+- `ess/domains/runlog.yaml:139` (`AuthorityRecorded`) and `crates/loom-runlog/src/lib.rs:554`
+  (the members a line of each kind may have) — cited
+- `ess/domains/tree.yaml`: `CaseStatus` (`:179`), `TreeStatus` (`:203`), `TreeRefusalReason`
+  (`:260`) — cited
+- `crates/loom-governor/src/file_store.rs:80`: the store's `observations.json` — cited
+- `crates/loom-bindings/src/program.rs:531-566`: the `canon-evidence/1` record in `facts`, one
+  observation id per record, `subject_revision` the case revision as an integer — cited
+- `ess/domains/bindings.yaml`: `ProgramRun` (`:261-275`) — cited; `CopiedRecord` on
+  `impl/record-copy-between-cases` (`eb9c0653`) — cited
+- `crates/loom-protocols/src/lib.rs`: `use b10x_canon::model::Protocol` (`lib.rs:8`),
+  `ProtocolEntry.model` (`:64`); `pub use b10x_canon as canon;` is new — cited / inferred
+- `crates/loom-protocols/tests/`: the re-export test, in the crate's one integration-test binary
+  once the crate has one (today it has seven test files, `catalog.rs` among them) — cited /
+  inferred
+- `CHANGELOG.md`: the bullet for `b10x_loom_protocols::canon` — cited (story § Outcome)
 
 Added for `tree open --protocols`, read 2026-11-21; **cited** or **inferred** as below:
 
@@ -400,66 +563,116 @@ Added for `tree open --protocols`, read 2026-11-21; **cited** or **inferred** as
 Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
 **inferred** (a reading that could be wrong).
 
-- **Primary surface:** `crates/loom-tree` (`b10x-loom-tree`), a new crate holding the run logic — cited (story § Outcome)
+- **Primary surface:** `crates/loom-tree` (`b10x-loom-tree`), a new crate holding the run logic —
+  cited (story § Outcome)
 - **Files:**
   - `crates/loom-cli/src/lib.rs` (clap types for the `tree` group) — cited (story § Outcome; caller)
-  - `crates/loom-cli/src/main.rs` (dispatch; `Command` is matched exhaustively at `main.rs:63-84`) — cited
+  - `crates/loom-cli/src/main.rs` (dispatch; `Command` is matched exhaustively at `main.rs:63-84`) —
+    cited
   - `crates/loom-cli/tests/tree_run.rs` — cited (story § ESS first)
 - **ESS:**
-  - `ess/domains/tree.yaml` (`TreeRun`, `TreeStop`, `NextDecision`, `TreeStatus`, `TreeBudget`, `StoreInUse`) — cited (story § ESS first)
-  - `ess/system.yaml`, which lists `loom.tree` under `domains:` — cited (story; `ess/system.yaml:10-23`)
-  - `ess/ess-inputs.yaml`, which lists the domain file. Each earlier domain did this (`adcbf763`, `7021cd30` each touch `ess-inputs.yaml` + `system.yaml`) — cited
-- **House-rule test:** `crates/loom-executor/tests/crate_names.rs`. `EXPECTED: [..; 28]` must equal the set of workspace packages (`workspace_package_set_is_the_loom_names`), so the new crate must be added to it — cited
+  - `ess/domains/tree.yaml` (`TreeRun`, `TreeStop`, `NextDecision`, `TreeStatus`, `TreeBudget`,
+    `StoreInUse`) — cited (story § ESS first)
+  - `ess/system.yaml`, which lists `loom.tree` under `domains:` — cited (story;
+    `ess/system.yaml:10-23`)
+  - `ess/ess-inputs.yaml`, which lists the domain file. Each earlier domain did this (`adcbf763`,
+    `7021cd30` each touch `ess-inputs.yaml` + `system.yaml`) — cited
+- **House-rule test:** `crates/loom-executor/tests/crate_names.rs`. `EXPECTED: [..; 28]` must equal
+  the set of workspace packages (`workspace_package_set_is_the_loom_names`), so the new crate must
+  be added to it — cited
 - **Also likely:**
-  - `crates/loom-cli/Cargo.toml`, a path dependency on `b10x-loom-tree` — inferred (story puts the logic in the crate and the flags in the CLI)
-  - `crates/loom-cli/src/tree.rs`, the tree output and exit-status mapping as a module — inferred (same pattern as `agent.rs` and `stage.rs`)
-  - `crates/loom-cli/tests/fixtures/tree/`, the three-level fixture tree with stub programs — inferred (fixtures live in `tests/fixtures/`)
-  - `ess/scenarios/tree-run/`, plus `crates/loom-conformance/src/tree.rs` and `crates/loom-conformance/src/lib.rs` — inferred, and needed **only if** `tree.yaml` declares a command. `crates/loom-conformance/tests/conform.rs:8` needs one scenario per declared command, and `LoomTarget` answers each domain in its own module (`resource.rs:31-35`)
+  - `crates/loom-cli/Cargo.toml`, a path dependency on `b10x-loom-tree` — inferred (story puts the
+    logic in the crate and the flags in the CLI)
+  - `crates/loom-cli/src/tree.rs`, the tree output and exit-status mapping as a module — inferred
+    (same pattern as `agent.rs` and `stage.rs`)
+  - `crates/loom-cli/tests/fixtures/tree/`, the three-level fixture tree with stub programs —
+    inferred (fixtures live in `tests/fixtures/`)
+  - `ess/scenarios/tree-run/`, plus `crates/loom-conformance/src/tree.rs` and
+    `crates/loom-conformance/src/lib.rs` — inferred, and needed **only if** `tree.yaml` declares a
+    command. `crates/loom-conformance/tests/conform.rs:8` needs one scenario per declared command,
+    and `LoomTarget` answers each domain in its own module (`resource.rs:31-35`)
 - **Documents:**
-  - a new guide page showing one tree run with pasted output — cited (story § Acceptance). The path `website/docs/guides/run-a-case-tree.md` is inferred: the name is a placeholder, and the sidebar is autogenerated (`website/sidebars.ts:15`)
-  - `website/data/status.json`: a change that ships a capability updates it (`AGENTS.md:310-312`) — cited
+  - a new guide page showing one tree run with pasted output — cited (story § Acceptance). The path
+    `website/docs/guides/run-a-case-tree.md` is inferred: the name is a placeholder, and the sidebar
+    is autogenerated (`website/sidebars.ts:15`)
+  - `website/data/status.json`: a change that ships a capability updates it (`AGENTS.md:310-312`) —
+    cited
 - **House-rule files (not listed as paths):**
-  - `website/docs/reference/cli.md`, regenerated; "a flag change in `b10x-loom-cli` regenerates the CLI reference" (`AGENTS.md:297,304`)
+  - `website/docs/reference/cli.md`, regenerated; "a flag change in `b10x-loom-cli` regenerates the
+    CLI reference" (`AGENTS.md:297,304`)
   - `website/docs/reference/crates.md`, regenerated for the new crate (`AGENTS.md:299`)
   - `website/docs/reference/ess/` and `generated/rust/loom/`, from `tree.yaml`
   - `CHANGELOG.md`, `README.md` and `AGENTS.md`: a new command and a new crate (`AGENTS.md:310-312`)
   - `Cargo.lock`
-  - `docs/contracts/run-events-v1.json` is **not** touched: it covers only `run --output jsonl` (`AGENTS.md:301,172`) — cited
-  - `website/docs/reference/sdk-stability.md` is touched only if `loom-sdk` re-exports `loom-tree`, which the story does not say (`AGENTS.md:171`) — inferred
-  - no CLI contract test walks every subcommand: `crates/loom-cli/tests/loom_cli.rs` reads only `run --help` — cited
+  - `docs/contracts/run-events-v1.json` is **not** touched: it covers only `run --output jsonl`
+    (`AGENTS.md:301,172`) — cited
+  - `website/docs/reference/sdk-stability.md` is touched only if `loom-sdk` re-exports `loom-tree`,
+    which the story does not say (`AGENTS.md:171`) — inferred
+  - no CLI contract test walks every subcommand: `crates/loom-cli/tests/loom_cli.rs` reads only `run
+    --help` — cited
 - **CLI house pattern:**
-  - each command has a `*_HELP` const with an `Exit status:` table, an exit-status function and a unit test, all in `lib.rs` (`APPROVE_HELP` `lib.rs:59-86`, `approve_exit_status`, `each_stop_reason_has_its_exit_status` `lib.rs:995`). `tree run` follows it with 0/3/4/5 — cited
-  - `--confinement` reuses `lib.rs:985 Confinement`, which `confinement-opens-from-engine-config` changes to `substrate|local` + `--local-reason` — cited
+  - each command has a `*_HELP` const with an `Exit status:` table, an exit-status function and a
+    unit test, all in `lib.rs` (`APPROVE_HELP` `lib.rs:59-86`, `approve_exit_status`,
+    `each_stop_reason_has_its_exit_status` `lib.rs:995`). `tree run` follows it with 0/3/4/5 — cited
+  - `--confinement` reuses `lib.rs:985 Confinement`, which `confinement-opens-from-engine-config`
+    changes to `substrate|local` + `--local-reason` — cited
 - **Composition (what exists):**
   - **Model-free executor exists:**
-    - `Loom<S, G, V>` (`crates/loom-executor/src/lib.rs:97,130,351`) over a selector and `EmptyObjectArguments` (`arguments.rs:45-56`, always `{}`)
-    - `with_governor` revalidates each selection against the current frontier before proposing (`lib.rs:146`)
+    - `Loom<S, G, V>` (`crates/loom-executor/src/lib.rs:97,130,351`) over a selector and
+      `EmptyObjectArguments` (`arguments.rs:45-56`, always `{}`)
+    - `with_governor` revalidates each selection against the current frontier before proposing
+      (`lib.rs:146`)
     - `with_instance` fixes the id namespace (`lib.rs:168`)
-    - all of the above — cited. Empty arguments are enough because bound executors take their argv from the binding — inferred
+    - all of the above — cited. Empty arguments are enough because bound executors take their argv
+      from the binding — inferred
   - **Run records exist:**
-    - `RunStore` (`crates/loom-commission/src/outcome.rs:246-345`) is public and in memory, implements `StartRunBehavior` and `SuspendRunBehavior`, and is used as `Generated::new(RunStore::new(ids))` (`crates/loom-intake-slice/src/run.rs:705`, `crates/loom-cli/tests/session_events.rs:228`) — cited
-    - a fresh Run per `tree run`, with the case store and run log as the only durable state, is enough for `run_until_blocked` — inferred
+    - `RunStore` (`crates/loom-commission/src/outcome.rs:246-345`) is public and in memory,
+      implements `StartRunBehavior` and `SuspendRunBehavior`, and is used as
+      `Generated::new(RunStore::new(ids))` (`crates/loom-intake-slice/src/run.rs:705`,
+      `crates/loom-cli/tests/session_events.rs:228`) — cited
+    - a fresh Run per `tree run`, with the case store and run log as the only durable state, is
+      enough for `run_until_blocked` — inferred
   - **Commission record:**
-    - `operator_commission` is `pub(crate)` (`run.rs:1427`), so `loom-tree` builds its own `CommissionData` (five fields, principal per approver) — cited / inferred
+    - `operator_commission` is `pub(crate)` (`run.rs:1427`), so `loom-tree` builds its own
+      `CommissionData` (five fields, principal per approver) — cited / inferred
   - **Clock and limits:**
-    - the runtime's `Clock`, `Ids`, `Limits` and `HostControl` (`crates/loom-commission/src/runtime.rs:588-649`) are re-exported by `loom-sdk` (`lib.rs:91`). `--max-steps` maps to `Limits::step_budget` and `--max-wall-seconds` to `HostControl::host_stop`, which is asked before each step — cited
-    - a host instant is available from `loom_intake_slice::clock::{SystemClock, instant}` (`clock.rs:61-75`, public) — cited
-    - `loom-tree` needs its own deterministic `Ids`: the slice's `fresh_uuid` is salted with the process id and time (`executor.rs:1645-1653`), so it cannot give byte-identical runs — inferred
+    - the runtime's `Clock`, `Ids`, `Limits` and `HostControl`
+      (`crates/loom-commission/src/runtime.rs:588-649`) are re-exported by `loom-sdk` (`lib.rs:91`).
+      `--max-steps` maps to `Limits::step_budget` and `--max-wall-seconds` to
+      `HostControl::host_stop`, which is asked before each step — cited
+    - a host instant is available from `loom_intake_slice::clock::{SystemClock, instant}`
+      (`clock.rs:61-75`, public) — cited
+    - `loom-tree` needs its own deterministic `Ids`: the slice's `fresh_uuid` is salted with the
+      process id and time (`executor.rs:1645-1653`), so it cannot give byte-identical runs —
+      inferred
   - **Authority does not fit and must be new in `loom-tree`:**
-    - `GrantAuthority` allows a capability only for the request a `Pending` Suspension holds (`crates/loom-intake-slice/src/grant.rs:358-448`). `GrantData` is `intake.routing`'s per-commission grant, and `grant.rs` imports the merge handoff — cited
+    - `GrantAuthority` allows a capability only for the request a `Pending` Suspension holds
+      (`crates/loom-intake-slice/src/grant.rs:358-448`). `GrantData` is `intake.routing`'s
+      per-commission grant, and `grant.rs` imports the merge handoff — cited
     - `NoDelegatedAuthority` is private (`run.rs:1058`) — cited
-    - `loom-tree` needs its own `AuthorityProvider` over per-case, per-capability, per-principal approvals kept in the store. Nothing has to move out of `crates/loom-intake-slice` — inferred
+    - `loom-tree` needs its own `AuthorityProvider` over per-case, per-capability, per-principal
+      approvals kept in the store. Nothing has to move out of `crates/loom-intake-slice` — inferred
   - **Store lock is new:**
-    - no lock that holds the store for one writer and names its process id exists. The governor's `locked_dir` takes a lock per operation (`crates/loom-governor/src/locked_dir.rs:1-12`) — cited
+    - no lock that holds the store for one writer and names its process id exists. The governor's
+      `locked_dir` takes a lock per operation (`crates/loom-governor/src/locked_dir.rs:1-12`) —
+      cited
     - so `StoreInUse` is new code in `loom-tree` — inferred
-  - **Run log bridge:** run-log emission goes through the runtime's `EventSink` (`ports/events.rs:26`, via `HostControl::events`) into `loom-runlog` — inferred
-- **Confidence:** high for `crates/loom-tree`, the CLI files, the ESS files and `crate_names.rs` (the story or a gate test names them); medium for the conformance and scenario additions and the guide path
+  - **Run log bridge:** run-log emission goes through the runtime's `EventSink`
+    (`ports/events.rs:26`, via `HostControl::events`) into `loom-runlog` — inferred
+- **Confidence:** high for `crates/loom-tree`, the CLI files, the ESS files and `crate_names.rs`
+  (the story or a gate test names them); medium for the conformance and scenario additions and the
+  guide path
 - **Would collide with:**
-  - `crates/loom-cli/src/lib.rs` and `main.rs` (the `Confinement` enum and any other `run` or `tree` flags)
+  - `crates/loom-cli/src/lib.rs` and `main.rs` (the `Confinement` enum and any other `run` or `tree`
+    flags)
   - `ess/system.yaml` and `ess/ess-inputs.yaml` (every story that adds an ESS domain)
   - `crates/loom-executor/tests/crate_names.rs` (every story that adds a crate)
   - `crates/loom-tree` (any later unit testing the tree)
   - `crates/loom-conformance/src/lib.rs` (any domain that adds commands)
   - `website/data/status.json`
   - generated: `website/docs/reference/cli.md`, `crates.md`, `generated/rust/loom/`
-- **Safety fact:** the change adds and alters nothing. `Command` is matched exhaustively only in `crates/loom-cli/src/main.rs:63-84`, and `loom-docs` reads it only through clap (`crates/loom-docs/src/cli.rs:132`). The `run` exit-status table that the run-events contract reads (`b10x_loom_cli::EXIT_STATUS`, `crates/loom-docs/src/main.rs:477`) is untouched by a separate `tree` table. Proven to level 2, unproven
+- **Safety fact:** the change adds and alters nothing. `Command` is matched exhaustively only in
+  `crates/loom-cli/src/main.rs:63-84`, and `loom-docs` reads it only through clap
+  (`crates/loom-docs/src/cli.rs:132`). The `run` exit-status table that the run-events contract
+  reads (`b10x_loom_cli::EXIT_STATUS`, `crates/loom-docs/src/main.rs:477`) is untouched by a
+  separate `tree` table. Proven to level 2, unproven

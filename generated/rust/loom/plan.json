@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "7a79f937e6c8b89cdcf656c57393e86a093c7df030d1e3e5d4e136e8f28205b9",
-    "contract_digest": "d734f0d1d18efed9c604461e149ede6e06b33483c97621fba1d53c6e6b556e21"
+    "source_digest": "82a8ddbcc47e14dccd55e7df2eea28a28668e1ebab834cc20d5cb3b6c463e954",
+    "contract_digest": "6e63e7559a7ab1300d4f785af9ffbdcfffbe3286aa8fa5117f3eeab155403b99"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -523,6 +523,27 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.RetryFeedback",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryLog",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryRecord",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.RevisionMove",
       "disposition": {
         "disposition": "generated"
@@ -979,6 +1000,20 @@
     {
       "kind": "domain_type",
       "source": "loom.evaluation.ProtocolName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.CaseLink",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.CaseTermination",
       "disposition": {
         "disposition": "generated"
       }

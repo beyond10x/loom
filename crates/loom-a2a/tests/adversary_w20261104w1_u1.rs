@@ -219,7 +219,7 @@ fn adversary_two_different_message_ids_never_give_one_item() {
 /// The unit's contract (`AdmitA2aRequest` in `ess/domains/agent.yaml`, AGENTS.md § Agent spec):
 /// a stream whose caller takes nothing for the idle bound is cut and its admitted slot freed.
 /// With events the size a turn's are, the caller here takes nothing for the bound ([`IDLE`] on
-/// this file's listener, in place of the host's 300 s) and 4 s more, and the stream must be cut.
+/// this file's listener, in place of the host's 300 s) and 2 s more, and the stream must be cut.
 #[test]
 fn adversary_a_stream_whose_caller_takes_nothing_for_the_bound_is_cut() {
     let (started_tx, started) = channel();
@@ -240,7 +240,7 @@ fn adversary_a_stream_whose_caller_takes_nothing_for_the_bound_is_cut() {
         started
             .recv_timeout(Duration::from_secs(30))
             .expect("the turn started");
-        std::thread::sleep(IDLE.saturating_sub(asked.elapsed()) + Duration::from_secs(4));
+        std::thread::sleep(IDLE.saturating_sub(asked.elapsed()) + Duration::from_secs(2));
         idle.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
         let mut held = Vec::new();
         let mut chunk = [0_u8; 4096];

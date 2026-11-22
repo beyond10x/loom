@@ -20,7 +20,7 @@ use super::{
 };
 
 /// How long a child the host interrupts or terminates has to end before it is killed.
-pub(super) const SIGNAL_GRACE: Duration = Duration::from_secs(5);
+pub const SIGNAL_GRACE: Duration = Duration::from_secs(5);
 
 /// One frame of a live child's output: the bytes it wrote on one stream, as they arrived.
 #[derive(Debug, Clone, PartialEq, Eq)]
