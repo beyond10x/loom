@@ -20,6 +20,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
 - `b10x_loom_bindings::content_revision`, `placements` and `PlacedRevisions`: a placed artifact's revision is its content digest (story:bound-artifact-revisions)
 - `CanonGovernor::record_step` writes a step's revision moves and records in one store write; `FileCaseStore::update_until` (story:bound-artifact-revisions)
+- `program_root: bindings` and `b10x_loom_bindings::resolve_programs`: a bound program named beside its bindings file (story:bound-program-contract)
+- A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
 
 ### Changed
 
@@ -39,6 +41,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** after a `program` step each placed artifact moves to its content digest, and its records name that revision (story:bound-artifact-revisions)
 - A `program` step of an action that does not write whose program changed a placed artifact records nothing, `Discarded` (story:bound-artifact-revisions)
 - `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
+- **Breaking:** every bound program also gets `LOOM_TIMEOUT_SECONDS`, and a child case `LOOM_CASE_NAME` and `LOOM_PARENT_CASE_NAME` (story:bound-program-contract)
+- **Breaking:** `bound_case_child` takes `CaseNames`; `ProgramEnvironment` gains `loom_timeout_seconds`, `loom_case_name`, `loom_parent_case_name` (story:bound-program-contract)
+- **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
+- **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
 
 ### Removed
 

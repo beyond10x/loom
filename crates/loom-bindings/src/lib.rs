@@ -6,7 +6,9 @@
 //! `argv` that is empty or not a list of strings, a result table that is not one. [`check`] holds
 //! the decoded document against the compiled protocol it names, as it is loaded. Both refuse the
 //! first defect found, naming the action and the member. [`unbound`] lists the actions the
-//! document binds nothing to; that is not an error.
+//! document binds nothing to; that is not an error. [`resolve_programs`] turns the program paths
+//! of a document with `program_root: bindings` into the absolute real paths of the files beside
+//! its bindings file.
 //!
 //! [`ProgramEffects`] is the effect port that performs an action bound to a `program` executor,
 //! for any registered protocol: it starts each program through the host's runner alone, as
@@ -23,13 +25,18 @@ mod child;
 mod decode;
 mod load;
 mod program;
+mod resolve;
 mod revision;
 mod tree;
 
-pub use child::{CASE_VARIABLE, MAX_CASE_VARIABLE_BYTES, bound_case_child};
+pub use child::{
+    CASE_NAME_VARIABLE, CASE_VARIABLE, CaseNames, MAX_CASE_VARIABLE_BYTES,
+    PARENT_CASE_NAME_VARIABLE, TIMEOUT_VARIABLE, bound_case_child,
+};
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use resolve::resolve_programs;
 pub use revision::{
     ABSENT, MAX_ARTIFACT_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PlacedRevisions, RefreshError,
     TREE_HEADER, content_revision, placements, revisions_of,

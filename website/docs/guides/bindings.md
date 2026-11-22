@@ -165,6 +165,22 @@ actions:
   no comma and no white space, because the session executor joins the names with commas.
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
   `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 3600.
+- `exits`, on a `program` alone, holds `error` and `not_called`, each a list of exit codes from 0
+  to 255 (a list left out is empty). An exit `error` lists is a program error and one
+  `not_called` lists a run that did nothing; neither goes through the `results` tables. Loom
+  ships no default list: a binding with no `exits` puts every exit through its tables. A code in
+  both lists, or in a list and as a key of a `from: exit` table of the same binding, is refused
+  `ExitClassConflict`.
+- `program_root`, at the top of the document, is `workspace` (the default) or `bindings`. With
+  `bindings`, every `argv[0]` and `arguments_from[0]` that is relative and holds a `/`, such as
+  `tools/lint.sh`, names a file relative to the directory of the bindings file, as an `open`
+  executor's `bindings` does; a bare name such as `sh` is still found on `PATH`, and an absolute
+  path runs as written. The host calls `resolve_programs(document, directory)` with that
+  directory before it builds a port: it answers the document with each such entry replaced by the
+  absolute real path of its file, and refuses `ProgramNotBesideBindings`, naming the action and
+  the member (`executor.argv[0]` or `arguments_from[0]`), an entry with a `..` segment, one that
+  names no regular file, and one whose real path, links resolved, lies outside the directory. A
+  port given a document with `program_root: bindings` that was not resolved starts nothing.
 - `retry_when` maps an evidence kind of the protocol to the results that send the action back to
   work; a result is never empty.
   `handoff` is the text a run shows when this writer has done what it may and a person continues.
@@ -198,7 +214,10 @@ action, an evidence `kind` outside the action's `may_produce`, a `subject`, `ups
 or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 3600, an
 `artifacts`, `inputs`, `outputs` or `open` `bindings` path that is absolute or leaves the
 workspace, a `retry_when` kind the protocol does not declare, an evidence `from` the executor does
-not take, and an `independence` dimension the protocol does not declare. Each refusal names the action and the
+not take, `exits` on an executor that is not a `program`, an exit code in both `exits` lists or in
+one and as a key of a `from: exit` table (`ExitClassConflict`), and an `independence` dimension the
+protocol does not declare. Decoding also refuses a `program_root` other than `workspace` or
+`bindings` and an `exits` entry that is not a code from 0 to 255. Each refusal names the action and the
 member, such as `action draft.write, member tools.allow[1]`. The reasons are the members of
 `loom.bindings.BindingsRefusalReason` in the [reference](../reference/ess/loom-bindings.md).
 
@@ -214,9 +233,10 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `CommandUnconfined` for any other. The runner then checks it can start a child in the workspace
   root, and its refusal is passed on: a runner that runs test commands only is refused `NoRunner`.
 - Every program starts through that runner alone, the `arguments_from` argv included, with its
-  `argv` (no shell), the arguments as one JSON object on standard input, `PATH` and `LOOM_CASE`
-  alone in its environment, the binding's `timeout_seconds` (60 when absent), and the workspace
-  root as its start directory. Under a runner that is not `local`, a program at an absolute path
+  `argv` (no shell), the arguments as one JSON object on standard input, `PATH`, `LOOM_CASE`,
+  `LOOM_CASE_NAME` (a case a parent opened), `LOOM_PARENT_CASE_NAME` (a case whose parent a case
+  opened) and `LOOM_TIMEOUT_SECONDS` alone in its environment, the binding's `timeout_seconds` (60
+  when absent), and the workspace root as its start directory. Under a runner that is not `local`, a program at an absolute path
   outside `/usr`, `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH`
   that is not UTF-8 refuses the step, `<program> was not started: the host's PATH is not UTF-8`,
   and starts nothing.
@@ -228,6 +248,19 @@ The port is a Commission effect port: it performs the actions bound to `program`
   bytes refuses the step, `<program> was not started: the case id is longer than 4096 bytes`, and
   nothing starts or is recorded. The commands of `b10x-loom run --action-bindings` keep `PATH`
   alone.
+- `LOOM_TIMEOUT_SECONDS` is the whole seconds of that run's timeout, the binding's
+  `timeout_seconds` or 60. `LOOM_CASE_NAME` is the name the case's opening gave it, as the
+  governor stored it in the case's `parent` link: the `open` executor's `name` or the entry of its
+  `each` argument, without the repeat suffix, so the child `P.story.2` reads `story` as `P.story`
+  does. `LOOM_PARENT_CASE_NAME` is the name stored in the `parent` link of that parent, one level
+  up and no further: in a tree `P` -> `P.epic` -> `P.epic.story` the programs of `P` get neither,
+  those of `P.epic` get `LOOM_CASE_NAME=epic`, and those of `P.epic.story` get
+  `LOOM_CASE_NAME=story` and `LOOM_PARENT_CASE_NAME=epic`. Like `LOOM_CASE`, the port alone sets
+  each, after the child is built: no request, argument, report, program output, bindings document
+  or host variable changes one. A stored name that is not one child name (ASCII letters, digits,
+  `-` and `_`) of at most 4096 bytes refuses the step, `<program> was not started: the case name
+  is not a child name` (or `the parent case name`), and a parent whose stored link cannot be read
+  refuses it naming the case and the parent; nothing starts or is recorded.
 - The arguments are the request's, else the binding's `arguments`, else the object the
   `arguments_from` argv prints, else `{}`. A request has no arguments when they are the empty object
   `{}`; any other value, `null` included, reaches the program as written. An `arguments_from` argv
@@ -260,6 +293,14 @@ The port is a Commission effect port: it performs the actions bound to `program`
   falling to `*`. A value neither lists refuses the step `ResultNotInTable`; a report that cannot be
   read, or that lacks the pointer, refuses it `ReportUnreadable`. A refused step records no
   evidence.
+- An exit the binding's `exits` lists is read before the tables. One in `error` records nothing
+  and refuses the step `ProgramError`, naming the exit code and the blob's SHA-256 and never what
+  the program printed, and the refusal ends the run (`EffectRefused`). One in `not_called` records
+  nothing and the step is performed. The run's observation holds `class` (`error` or
+  `not_called`), and neither class counts against `budget.max_runs`. A run killed at its timeout
+  reads `timeout`, whatever the lists hold. Each step starts the bound program once, so what
+  bounds repeated not-called runs is the loop that drives the port, its step budget and idle
+  bound.
 - Otherwise the port records one record per entry (`loom.bindings.RecordedEvidence`), of the
   entry's `kind` about its `subject`, with the entry's `producer`, the observation's instant, the
   revision the case holds for the subject once the step is written and, as `upstream_revisions`,

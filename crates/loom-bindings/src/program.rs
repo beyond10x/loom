@@ -9,9 +9,20 @@
 //! either is the constructor's. Every program, the `arguments_from` argv included, starts through
 //! that runner's [`TestRunner::run_child`] alone, as the child [`crate::bound_case_child`] builds:
 //! the argv, the arguments as JSON on standard input and never in an argv, an environment of
-//! `PATH` and `LOOM_CASE` (the id of the case the port was built for) alone, the binding's
-//! timeout, the workspace root as its start directory. A case id longer than
-//! [`crate::MAX_CASE_VARIABLE_BYTES`] refuses the step and nothing starts.
+//! `PATH`, `LOOM_CASE` (the id of the case the port was built for), `LOOM_TIMEOUT_SECONDS` (the
+//! whole seconds of the run's timeout) and, for a case a parent opened, `LOOM_CASE_NAME` and
+//! `LOOM_PARENT_CASE_NAME` as the governor stored them, alone, the binding's timeout, the
+//! workspace root as its start directory. A case id longer than
+//! [`crate::MAX_CASE_VARIABLE_BYTES`] refuses the step and nothing starts. A document whose
+//! `program_root` is `bindings` runs only once [`crate::resolve_programs`] resolved it: a program
+//! it still names beside its bindings file refuses the step and nothing starts.
+//!
+//! Exit classes (`story:bound-program-contract`): a run whose exit the binding's `exits.error`
+//! lists records nothing and refuses the step `ProgramError`, ending the run; one whose exit
+//! `exits.not_called` lists records nothing and the step is performed. Neither is counted against
+//! `budget.max_runs`; a run killed at its timeout is in neither class. Each step starts the bound
+//! program once, so repeated not-called runs are bounded by the loop that drives the port (its
+//! step budget and idle bound), never by the port.
 //!
 //! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
 //! and nothing starts; the action's run count (the observations this port kept for the action in
@@ -76,8 +87,8 @@ use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{ConfinementError, TestExecution, TestRunner};
 use loom::bindings::{
     ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason, EvidenceEntry,
-    Executor, ProgramRefusal, ProgramRefusalReason, ProgramRun, RecordedEvidence, ResultSource,
-    StepOutcome,
+    Executor, ExitClass, ProgramRefusal, ProgramRefusalReason, ProgramRoot, ProgramRun,
+    RecordedEvidence, ResultSource, StepOutcome,
 };
 use loom_governor::{
     CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime, StepWritten,
@@ -86,10 +97,11 @@ use loom_governor::{
 use crate::revision::{describe, placements, revisions_of};
 use sha2::{Digest as _, Sha256};
 
-use crate::bound_case_child;
+use crate::resolve::beside;
+use crate::{CaseNames, bound_case_child};
 
 /// The `source` of every observation the port keeps: one per run of a bound program. The run count
-/// of an action in a case is the number of these naming it and the case.
+/// of an action in a case is the number of these naming it and the case and holding no `class`.
 pub const PROGRAM_SOURCE: &str = "loom/bound-program";
 /// The directory of the store directory that holds the blobs, each named by its SHA-256.
 pub const BLOBS: &str = "blobs";
@@ -157,7 +169,8 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .find(|bound| bound.action == action && bound.executor.kind == Executor::Program)
     }
 
-    /// The runs of `action` in this case: the observations this port kept naming both.
+    /// The runs of `action` in this case: the observations this port kept naming both, but those
+    /// of a run whose exit the binding classes (`exits`), which are not counted.
     fn runs(&self, action: &str) -> Result<i64, EffectError> {
         let observations = self
             .governor
@@ -170,8 +183,39 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 text_member(&observation.payload, "case") == Some(self.case.0.as_str())
                     && text_member(&observation.payload, "action") == Some(action)
             })
+            .filter(|observation| {
+                matches!(
+                    observation.payload.member("class"),
+                    None | Some(commission_json::Value::Null)
+                )
+            })
             .count();
         Ok(i64::try_from(count).unwrap_or(i64::MAX))
+    }
+
+    /// The names the governor stored for the opening of this case and of its parent.
+    fn names(&self) -> Result<CaseNames, EffectError> {
+        Ok(CaseNames::default())
+    }
+
+    /// The member of `binding` that names a program beside the bindings file when the document's
+    /// `program_root` is `bindings`: a document [`crate::resolve_programs`] did not resolve,
+    /// whose program would otherwise be read as a workspace path.
+    fn unresolved(&self, binding: &BoundAction) -> Option<&'static str> {
+        if self.document.program_root != Some(ProgramRoot::Bindings) {
+            return None;
+        }
+        let names = |argv: Option<&Vec<String>>| {
+            argv.and_then(|argv| argv.first())
+                .is_some_and(|program| beside(program))
+        };
+        if names(binding.executor.argv.as_ref()) {
+            Some("executor.argv[0]")
+        } else if names(binding.arguments_from.as_ref()) {
+            Some("arguments_from[0]")
+        } else {
+            None
+        }
     }
 
     fn perform(&self, request: &ActionRequestData) -> Result<EffectOutcome, EffectError> {
@@ -212,6 +256,11 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             return Ok(refused(format!("{action} is bound to no argv")));
         };
         let program = argv.first().map_or("the program", String::as_str);
+        if let Some(member) = self.unresolved(binding) {
+            return Ok(refused(format!(
+                "{program} was not started: {member} names a file beside the bindings file, and the document was not resolved with resolve_programs"
+            )));
+        }
         let seconds = binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let timeout = Duration::from_secs(u64::try_from(seconds).unwrap_or(1));
         // Taken before anything starts, so a timeout the clock cannot hold starts nothing.
@@ -233,7 +282,10 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 ));
             }
         };
-        let arguments = match self.arguments(binding, request, timeout) {
+        // Read before anything starts: a name the governor holds that is not a child name, or a
+        // parent that cannot be read, starts nothing.
+        let names = self.names()?;
+        let arguments = match self.arguments(binding, request, timeout, &names) {
             Ok(arguments) => arguments,
             Err(outcome) => return Ok(outcome),
         };
@@ -244,6 +296,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             &self.workspace,
             self.runner.local_reason(),
             &self.case,
+            &names,
         ) {
             Ok(child) => child,
             Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
@@ -262,6 +315,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             blob_sha256: None,
             timed_out: false,
             runner_refusal: None,
+            class: None,
         };
         let mut blob_failure = None;
         match &answer {
@@ -272,6 +326,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 let digest = sha256(&blob);
                 run.exit = execution.exit_code.map(i64::from);
                 run.timed_out = execution.timed_out;
+                run.class = class_of(binding, execution);
                 match keep_blob(&self.store, &digest, &blob) {
                     Ok(()) => run.blob_sha256 = Some(digest),
                     Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
@@ -322,6 +377,34 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         if let Some(failure) = blob_failure {
             self.write(&targets, Vec::new())?;
             return Err(EffectError::new(failure));
+        }
+        // A classed exit never reaches the tables: it records nothing, its run is not counted,
+        // and a program error ends the run. The revisions still take what the workspace holds.
+        match run.class {
+            Some(ExitClass::Error) => {
+                self.write(&targets, Vec::new())?;
+                return Ok(program_error(action, program, &run));
+            }
+            Some(ExitClass::NotCalled) => {
+                let written = self.write(&targets, Vec::new())?;
+                let discarded = (changed && !writes).then_some(DiscardReason::ChangedByNonWriter);
+                return performed(
+                    &run,
+                    &[],
+                    &BoundStep {
+                        action: action.to_owned(),
+                        outcome: if discarded.is_some() {
+                            StepOutcome::Discarded
+                        } else {
+                            StepOutcome::Recorded
+                        },
+                        discarded,
+                        placements: after,
+                        moves: written.moves,
+                    },
+                );
+            }
+            None => {}
         }
         if changed && !writes {
             // A program of an action that does not write changed what it was to observe: its
@@ -458,6 +541,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         binding: &BoundAction,
         request: &ActionRequestData,
         timeout: Duration,
+        names: &CaseNames,
     ) -> Result<String, EffectOutcome> {
         let requested = &request.arguments.0;
         let none =
@@ -489,6 +573,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             &self.workspace,
             self.runner.local_reason(),
             &self.case,
+            names,
         ) {
             Ok(child) => child,
             Err(why) => return Err(refused(format!("{program} was not started: {why}"))),
@@ -800,6 +885,46 @@ fn refusal(reason: ProgramRefusalReason, action: &str, detail: impl Into<String>
     ))
 }
 
+/// The class `binding`'s `exits` gives the exit of `execution`: none for a run killed at its
+/// timeout, whose status could not be read, or whose exit neither list holds.
+fn class_of(binding: &BoundAction, execution: &TestExecution) -> Option<ExitClass> {
+    if execution.timed_out {
+        return None;
+    }
+    let code = i64::from(execution.exit_code?);
+    let exits = binding.exits.as_ref()?;
+    if exits.error.contains(&code) {
+        Some(ExitClass::Error)
+    } else if exits.not_called.contains(&code) {
+        Some(ExitClass::NotCalled)
+    } else {
+        None
+    }
+}
+
+/// The step refused `ProgramError`, ending the run: `run`'s exit is one the binding's
+/// `exits.error` lists. The text names the exit code and the blob digest, never what the program
+/// printed.
+fn program_error(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome {
+    let refusal = ProgramRefusal {
+        reason: ProgramRefusalReason::ProgramError,
+        action: action.to_owned(),
+        detail: format!(
+            "{program} ended exit status {}, which exits.error lists; nothing was recorded, and its output is the blob {}",
+            run.exit
+                .map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
+            run.blob_sha256.as_deref().unwrap_or("(none)")
+        ),
+    };
+    EffectOutcome::Refused(EffectOutcomeRefused {
+        reason: format!(
+            "{:?}: action {}: {}",
+            refusal.reason, refusal.action, refusal.detail
+        ),
+        ends_run: true,
+    })
+}
+
 fn governor(error: impl std::fmt::Debug) -> EffectError {
     EffectError::new(format!("the governor: {error:?}"))
 }
@@ -812,6 +937,10 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
         "blob_sha256": run.blob_sha256,
         "timed_out": run.timed_out,
         "runner_refusal": run.runner_refusal,
+        "class": run.class.map(|class| match class {
+            ExitClass::Error => "error",
+            ExitClass::NotCalled => "not_called",
+        }),
     })
 }
 

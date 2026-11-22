@@ -762,6 +762,8 @@ fn index(reason: Reason) -> usize {
         Reason::PathNotInWorkspace => 17,
         Reason::UndeclaredDimension => 18,
         Reason::UndeclaredEvidenceKind => 19,
+        Reason::ExitClassConflict => 20,
+        Reason::ProgramNotBesideBindings => 21,
     }
 }
 
@@ -796,12 +798,28 @@ fn every_refusal_reason_is_reachable_from_a_document() {
         document(&format!("{GATE}    timeout_seconds: 0\n")),
         document(GATE).replace("docs/spec", "/abs"),
         document(GATE).replace("[different_principal]", "[nothing]"),
+        document(&format!(
+            "{GATE}    exits: {{error: [1], not_called: [1]}}\n"
+        )),
     ];
-    let reached: BTreeSet<usize> = documents
+    let mut reached: BTreeSet<usize> = documents
         .iter()
         .map(|text| index(refused(text).unwrap_or_else(|| panic!("{text}")).0.reason))
         .collect();
-    let all: BTreeSet<usize> = (0..20).collect();
+    // `resolve_programs` refuses against the directory of the bindings file: `tools/gate.sh` is
+    // not beside a file in the build's scratch directory.
+    let beside =
+        decode(&document(GATE).replace("artifacts:", "program_root: bindings\nartifacts:"))
+            .expect("the document decodes");
+    let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(directory).unwrap();
+    reached.insert(index(
+        b10x_loom_bindings::resolve_programs(&beside, directory)
+            .expect_err("the program is not beside the bindings file")
+            .0
+            .reason,
+    ));
+    let all: BTreeSet<usize> = (0..22).collect();
     assert_eq!(reached, all);
 }
 
