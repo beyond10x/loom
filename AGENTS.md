@@ -1536,6 +1536,21 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   log's chain and its last line against the head, so a changed byte anywhere, the last line
   included, is named with the case and the line. A restart between an append and its head leaves
   one line past the head; the next writer takes it over when the line before it is the head.
+- `tree run` (`run.rs`) drives Commission's `run_until_blocked` with the Loom executor and the
+  deterministic selector, one step of one case at a time, every open child before its parent's
+  next step. `LogHistory` (`history.rs`) reads the case's run log: an action counts as performed
+  at the revision of its step and at the revision its step left; a writer with a retry record is
+  due again, and one refused since the last `evaluated` line is not (one run never repeats a
+  refused step; test `a_spent_run_budget_ends_the_retries_of_a_step`). With no step taken a case
+  ends through its one legitimate outcome, or waits: a person action or a capability
+  (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
+  `handoff` text when nothing else is (command `tree run`).
+- `tree approve --action` takes a `person` action as its principal through `PersonEffects`
+  (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
+  program's are. `tree run` never takes a person action.
+- `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
+  runs, approvals and copies are read from the governor, the run logs and `observations.json`,
+  never from `approvals-<stem>.json`.
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.
