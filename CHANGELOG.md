@@ -25,6 +25,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x_loom_bindings::retry_records`; a retried bound program gets `LOOM_RETRY_FEEDBACK`, a `loom.retry-feedback/1` document whose records name `action` and `exit` (story:bound-program-retry-records)
 - `CanonGovernor::open_children`, `terminate` and `tree`: a `case_open` action opens child cases, each child's outcome replaces its `case_outcome` record in the parent (story:child-case-runtime)
 - `b10x_loom_bindings::OpenEffects` performs an `open` binding; `check_case_open` holds `open` to `case_open` at load (story:child-case-runtime)
+- `b10x_loom_bindings::CopyEffects` copies the latest current record of a kind from another case of the tree; `copy_due` (story:record-copy-between-cases)
+- `loom.bindings.CopiedRecord`, `CopyRefusalReason` and `CopyRefusal`, the copy's observation and its refusals (story:record-copy-between-cases)
 - `program_root: bindings` and `b10x_loom_bindings::resolve_programs`: a bound program named beside its bindings file (story:bound-program-contract)
 - A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
 

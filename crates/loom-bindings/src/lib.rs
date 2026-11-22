@@ -23,10 +23,16 @@
 //! [`OpenEffects`] performs an action bound to `open`: it opens the child cases through
 //! `CanonGovernor::open_children`, under the protocol `case_open` names, with the independence of
 //! the child's bindings file, read beside the parent's (story:child-case-runtime).
+//!
+//! [`CopyEffects`] performs an action bound to `copy`: it copies the latest applying record of the
+//! binding's kind about the current revision of its subject from another case of the same tree,
+//! read through `CanonGovernor::tree` and `CanonGovernor::case_state`, citing an observation of
+//! [`COPY_SOURCE`]; no program runs (story:record-copy-between-cases).
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 mod child;
+mod copy;
 mod decode;
 mod load;
 mod open;
@@ -40,6 +46,7 @@ pub use child::{
     CASE_NAME_VARIABLE, CASE_VARIABLE, CaseNames, MAX_CASE_VARIABLE_BYTES,
     PARENT_CASE_NAME_VARIABLE, TIMEOUT_VARIABLE, bound_case_child,
 };
+pub use copy::{COPY_SOURCE, CopyEffects};
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};

@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 6e63e7559a7ab1300d4f785af9ffbdcfffbe3286aa8fa5117f3eeab155403b99
+  contract digest 6a11f708ca50ab2e73836876ae5a92421f2c85ffa5f8f197194f2f98694a8e71
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-431 capabilities: **415 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+434 capabilities: **418 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -70,6 +70,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.BindingsRefusalReason` |
 | domain type | `loom.bindings.BoundAction` |
 | domain type | `loom.bindings.BoundStep` |
+| domain type | `loom.bindings.CopiedRecord` |
+| domain type | `loom.bindings.CopyRefusal` |
+| domain type | `loom.bindings.CopyRefusalReason` |
 | domain type | `loom.bindings.DiscardReason` |
 | domain type | `loom.bindings.EvidenceEntry` |
 | domain type | `loom.bindings.Executor` |

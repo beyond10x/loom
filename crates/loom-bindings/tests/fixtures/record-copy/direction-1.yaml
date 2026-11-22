@@ -1,0 +1,29 @@
+format: protocol/1
+protocol:
+  id: direction
+  revision: 1
+  description: >-
+    The root of story record-copy-between-cases: it approves its roadmap and opens epic cases
+    about it. It declares `plan`, which an epic does not.
+artifacts:
+  roadmap: {}
+  plan: {}
+  brief: {}
+evidence_kinds:
+  case_outcome: {}
+  roadmap_approval: {}
+claims:
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  roadmap.approve:
+    effect: write
+    may_produce:
+      - evidence: roadmap_approval
+  epics.open:
+    effect: write
+    case_open: {protocol: epic, subject: roadmap}
+outcomes:
+  delivered:
+    requires: {claim: children.passed}
