@@ -63,6 +63,12 @@
 //! reads its handle after the run count, refusing the step `Cancelled` with nothing started, and
 //! gives it to every program the step starts; a program its cancel ended refuses the step
 //! `Cancelled`, ending the run, with its run observed (`cancelled: true`) and nothing recorded.
+//!
+//! One start path (`story:person-action-runs-a-program`): a step's refusals before a start and
+//! its child are [`prepare`]'s, the run and its observation [`start`]'s; the port calls both, and
+//! a person's approval (`b10x-loom-tree`) calls them with the principal that replaces each argv
+//! entry that is exactly [`crate::PRINCIPAL_PLACEHOLDER`], `{}` on standard input and no retry
+//! feedback ([`ChildInputs::empty`]).
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -74,7 +80,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_commission::model::json as commission_json;
-use b10x_loom_commission::model::primitives::Uuid;
+use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionRequestData, CaseId, Commission, EffectOutcome, EffectOutcomePerformed,
     EffectOutcomeRefused, EvidenceData, EvidenceId, GovernorError, Observation, ObservationData,
@@ -88,12 +94,12 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{
-    Cancel, ConfinementError, ConfinementRefusal, TestExecution, TestRunner,
+    Cancel, ChildCommand, ConfinementError, ConfinementRefusal, TestExecution, TestRunner,
 };
 use loom::bindings::{
-    ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason, EvidenceEntry,
-    Executor, ExitClass, ProgramRefusal, ProgramRefusalReason, ProgramRoot, ProgramRun,
-    RecordedEvidence, ResultSource, StepOutcome,
+    ArtifactPlacement, ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason,
+    EvidenceEntry, Executor, ExitClass, ExitClasses, ProgramRefusal, ProgramRefusalReason,
+    ProgramRoot, ProgramRun, RecordedEvidence, ResultSource, StepOutcome,
 };
 use loom_governor::{
     CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime, StepWritten,
@@ -199,47 +205,54 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .find(|bound| bound.action == action && bound.executor.kind == Executor::Program)
     }
 
-    /// The runs of `action` in this case: the observations this port kept naming both, but those
-    /// of a run whose exit the binding classes (`exits`), which are not counted.
-    fn runs(&self, action: &str) -> Result<i64, EffectError> {
-        let observations = self
-            .governor
-            .try_observations()
-            .map_err(|error| EffectError::new(format!("the observations: {error:?}")))?;
-        let count = observations
-            .iter()
-            .filter(|observation| observation.source == PROGRAM_SOURCE)
-            .filter(|observation| {
-                text_member(&observation.payload, "case") == Some(self.case.0.as_str())
-                    && text_member(&observation.payload, "action") == Some(action)
-            })
-            .filter(|observation| {
-                matches!(
-                    observation.payload.member("class"),
-                    None | Some(commission_json::Value::Null)
-                )
-            })
-            .count();
-        Ok(i64::try_from(count).unwrap_or(i64::MAX))
+    /// Where this port's programs start.
+    fn place(&self) -> RunPlace<'_, S, T> {
+        RunPlace {
+            governor: self.governor,
+            case: &self.case,
+            document: self.document,
+            workspace: &self.workspace,
+            store: &self.store,
+            runner: self.runner.as_ref(),
+            cancel: self.cancel.as_ref(),
+        }
     }
 
-    /// The member of `binding` that names a program beside the bindings file when the document's
-    /// `program_root` is `bindings`: a document [`crate::resolve_programs`] did not resolve,
-    /// whose program would otherwise be read as a workspace path.
-    fn unresolved(&self, binding: &BoundAction) -> Option<&'static str> {
-        if self.document.program_root != Some(ProgramRoot::Bindings) {
-            return None;
-        }
-        let names = |argv: Option<&Vec<String>>| {
-            argv.and_then(|argv| argv.first())
-                .is_some_and(|program| beside(program))
-        };
-        if names(binding.executor.argv.as_ref()) {
-            Some("executor.argv[0]")
-        } else if names(binding.arguments_from.as_ref()) {
-            Some("arguments_from[0]")
-        } else {
-            None
+    /// The child's inputs of `binding`'s step for `request`: the retry feedback, kept under the
+    /// store, then the arguments ([`ProgramEffects::arguments`]).
+    fn inputs(
+        &self,
+        binding: &BoundAction,
+        request: &ActionRequestData,
+        timeout: Duration,
+        names: &CaseNames,
+    ) -> Result<ChildInputs, NotPrepared> {
+        // Before the arguments: the records that send the action back, kept as one document, or
+        // an error with nothing started and nothing observed.
+        let feedback = crate::retry::feedback(self.governor, &self.case, binding, &self.store)
+            .map_err(NotPrepared::Failed)?;
+        match self.arguments(binding, request, timeout, names) {
+            Ok(arguments) => Ok(ChildInputs {
+                arguments,
+                feedback,
+                ended: None,
+            }),
+            Err(NoArguments::Refused(outcome)) => Err(NotPrepared::Refused(outcome)),
+            // The `arguments_from` program its cancel ended: a run like the bound program's,
+            // kept and counted, and the bound program never starts.
+            Err(NoArguments::Cancelled(refusal)) => Ok(ChildInputs {
+                arguments: String::new(),
+                feedback: None,
+                ended: Some((
+                    refusal,
+                    binding
+                        .arguments_from
+                        .as_deref()
+                        .and_then(<[String]>::first)
+                        .map_or("the arguments_from program", String::as_str)
+                        .to_owned(),
+                )),
+            }),
         }
     }
 
@@ -266,170 +279,42 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 ),
             ));
         }
-        let runs = self.runs(action)?;
-        if runs >= binding.budget.max_runs {
-            return Ok(refusal(
-                ProgramRefusalReason::RunsSpent,
-                action,
-                format!(
-                    "{action} has run {runs} times in case {}, its budget.max_runs is {}",
-                    self.case.0, binding.budget.max_runs
-                ),
-            ));
-        }
-        // After the run count and before any program starts: a cancel set now starts nothing and
-        // keeps no observation.
-        if self.cancel.as_ref().is_some_and(Cancel::is_cancelled) {
-            return Ok(cancelled_step(
-                action,
-                "the step's cancel was set before it started; nothing was started",
-            ));
-        }
-        let Some(argv) = binding.executor.argv.as_deref() else {
-            return Ok(refused(format!("{action} is bound to no argv")));
+        let place = self.place();
+        let prepared = match prepare(&place, binding, None, |timeout, names| {
+            self.inputs(binding, request, timeout, names)
+        }) {
+            Ok(prepared) => prepared,
+            Err(NotPrepared::Refused(outcome)) => return Ok(outcome),
+            Err(NotPrepared::Failed(error)) => return Err(error),
         };
-        let program = argv.first().map_or("the program", String::as_str);
-        if let Some(member) = self.unresolved(binding) {
-            return Ok(refused(format!(
-                "{program} was not started: {member} names a file beside the bindings file, and the document was not resolved with resolve_programs"
-            )));
-        }
-        let seconds = binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
-        let timeout = Duration::from_secs(u64::try_from(seconds).unwrap_or(1));
-        // Taken before anything starts, so a timeout the clock cannot hold starts nothing.
-        if Instant::now().checked_add(timeout).is_none() {
-            return Ok(refused(format!(
-                "{program} was not started: timeout_seconds {seconds} is past what this host's clock can hold"
-            )));
-        }
-        let writes = self.writes(action)?;
-        // Read before anything starts, so a placed path that cannot be digested starts nothing,
-        // and what the program changed is told from what the workspace held already.
-        let before = match placements(&self.workspace, self.document) {
-            Ok(before) => before,
-            Err(unreadable) => {
-                return Ok(refusal(
-                    ProgramRefusalReason::ArtifactUnreadable,
-                    action,
-                    format!("nothing was started: {}", describe(&unreadable)),
-                ));
-            }
-        };
-        // Read before anything starts and before anything is written: a name the governor holds
-        // that is not a child name, or a parent that cannot be read, starts and writes nothing.
-        let names = match case_names(self.governor, &self.case)? {
-            Ok(names) => names,
-            Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
-        };
-        // After the run count and before anything starts: the records that send the action back,
-        // kept as one document, or an error with nothing started and nothing observed.
-        let feedback = crate::retry::feedback(self.governor, &self.case, binding, &self.store)?;
-        // Read before any program starts, so the run's observation has an instant even when the
-        // clock cannot be read after it.
-        let started_at = instant(&SystemClock).map_err(EffectError::new)?;
-        let (answer, ran, retry_of) = match self.arguments(binding, request, timeout, &names) {
-            Ok(arguments) => {
-                let child = match bound_case_child(
-                    argv,
-                    &arguments,
-                    timeout,
-                    &self.workspace,
-                    self.runner.local_reason(),
-                    &self.case,
-                    &names,
-                ) {
-                    Ok(child) => child,
-                    Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
-                };
-                let child =
-                    crate::retry::given(child, feedback.as_ref(), self.runner.local_reason());
-                let child = match &self.cancel {
-                    Some(cancel) => child.with_cancel(cancel.clone()),
-                    None => child,
-                };
-                // The one start of a bound program: through the admitted runner, never here.
-                let answer = self.runner.run_child(&child);
-                let retry_of = feedback.map(|given| given.retry_of).unwrap_or_default();
-                (answer, program, retry_of)
-            }
-            Err(NoArguments::Refused(outcome)) => return Ok(outcome),
-            // The `arguments_from` program its cancel ended: a run like the bound program's, kept
-            // and counted, and the bound program never starts.
-            Err(NoArguments::Cancelled(refusal)) => (
-                Err(refusal),
-                binding
-                    .arguments_from
-                    .as_deref()
-                    .and_then(<[String]>::first)
-                    .map_or("the arguments_from program", String::as_str),
-                Vec::new(),
-            ),
-        };
-        // Every call above is a run: its observation is kept whatever the runner answered and
-        // whether the blob can be kept or not, so it counts against `budget.max_runs`.
-        let mut run = ProgramRun {
-            case: self.case.0.clone(),
-            action: action.to_owned(),
-            exit: None,
-            blob_sha256: None,
-            timed_out: false,
-            runner_refusal: None,
-            retry_of,
-            class: None,
-            cancelled: false,
-            principal: None,
-        };
-        let mut blob_failure = None;
-        match &answer {
-            Ok(execution) => {
-                let output = &execution.child_output;
-                let mut blob = output.stdout.clone();
-                blob.extend_from_slice(&output.stderr);
-                let digest = sha256(&blob);
-                run.exit = execution.exit_code.map(i64::from);
-                run.timed_out = execution.timed_out;
-                run.class = class_of(binding, execution);
-                match keep_blob(&self.store, &digest, &blob) {
-                    Ok(()) => run.blob_sha256 = Some(digest),
-                    Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
-                }
-            }
-            Err(refusal) => {
-                run.runner_refusal = Some(refusal.to_string());
-                run.cancelled = refusal.reason == ConfinementRefusal::Cancelled;
-            }
-        }
-        let observed_at = instant(&SystemClock).unwrap_or(started_at);
-        let observation = ObservationId(fresh_uuid("program-observation", &self.case.0));
-        self.governor
-            .observe(Observation::new(ObservationData {
-                observation_id: observation.clone(),
-                source: PROGRAM_SOURCE.to_owned(),
-                subject: action.to_owned(),
-                observed_at: observed_at.clone(),
-                payload: commission_value(&run_json(&run))?,
-            }))
-            .map_err(governor)?;
+        let started = start(&place, prepared)?;
+        let changed = started.changed();
+        let Started {
+            run,
+            answer,
+            observation,
+            observed_at,
+            blob_failure,
+            after,
+            writes,
+            program,
+            ran,
+            ..
+        } = started;
+        let program = program.as_str();
         // What the workspace holds once the program ended: the revisions this step writes,
         // whatever else it records, and never a value the program, its report or the request names.
-        let after = match placements(&self.workspace, self.document) {
+        let after = match after {
             Ok(after) => after,
             Err(unreadable) => {
                 return Ok(refusal(
                     ProgramRefusalReason::ArtifactUnreadable,
                     action,
-                    format!(
-                        "no revision moved and nothing was recorded: {}",
-                        describe(&unreadable)
-                    ),
+                    format!("no revision moved and nothing was recorded: {unreadable}"),
                 ));
             }
         };
         let targets = revisions_of(&after);
-        let changed = before
-            .iter()
-            .zip(&after)
-            .any(|(before, after)| before.revision != after.revision);
         let execution = match answer {
             Ok(execution) => execution,
             Err(refusal) if run.cancelled => {
@@ -579,17 +464,6 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         )
     }
 
-    /// Whether the protocol declares `action`'s effect class `write`.
-    fn writes(&self, action: &str) -> Result<bool, EffectError> {
-        let facts = self.governor.action_facts(&self.case).map_err(governor)?;
-        Ok(facts
-            .actions
-            .iter()
-            .find(|facts| facts.action == action)
-            .and_then(|facts| facts.effect.as_deref())
-            == Some(WRITE_EFFECT))
-    }
-
     /// Writes this step to the case in one store write: the revision of every placed artifact
     /// (`targets`) and the `records`.
     fn write(
@@ -704,6 +578,441 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .pop()
             .ok_or_else(|| EffectError::new(format!("the {} record was not held", record.kind)))
     }
+}
+
+/// Where the bound programs of one case start, which [`prepare`] and [`start`] read: the governor
+/// holding the case, the case, its checked bindings document, its workspace root, the store
+/// directory that keeps the blobs, the runner (admitted by
+/// [`b10x_loom_intake_slice::bindings::admit_bound_program_runner`] and checked with
+/// [`TestRunner::preflight_child`] on the workspace before) and the cancel handle every program
+/// holds, if any.
+pub struct RunPlace<'a, S, T = NoEvaluationTime> {
+    /// The governor holding the case.
+    pub governor: &'a CanonGovernor<S, T>,
+    /// The case the programs run for.
+    pub case: &'a CaseId,
+    /// The case's checked bindings document.
+    pub document: &'a BindingsDocument,
+    /// The workspace root, every program's start directory.
+    pub workspace: &'a Path,
+    /// The store directory, which keeps the blobs.
+    pub store: &'a Path,
+    /// The admitted runner every program starts through.
+    pub runner: &'a dyn TestRunner,
+    /// The handle every program holds ([`ProgramEffects::with_cancel`]).
+    pub cancel: Option<&'a Cancel>,
+}
+
+impl<S, T> std::fmt::Debug for RunPlace<'_, S, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunPlace")
+            .field("case", &self.case)
+            .field("protocol", &self.document.protocol)
+            .field("workspace", &self.workspace)
+            .field("store", &self.store)
+            .field("runner", &self.runner.label())
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a bound program's child reads besides its argv, which the caller of [`prepare`] answers:
+/// the arguments, as JSON text on standard input, and the retry feedback.
+pub struct ChildInputs {
+    arguments: String,
+    feedback: Option<crate::retry::Feedback>,
+    /// The `arguments_from` program its cancel ended, and its name: no child is built, and that
+    /// run is the step's run.
+    ended: Option<(ConfinementError, String)>,
+}
+
+impl ChildInputs {
+    /// `{}` on standard input and no retry feedback: what a person's program reads.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            arguments: "{}".to_owned(),
+            feedback: None,
+            ended: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for ChildInputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChildInputs")
+            .field("arguments", &self.arguments)
+            .field("feedback", &self.feedback.is_some())
+            .field("ended", &self.ended)
+            .finish()
+    }
+}
+
+/// Why [`prepare`] starts nothing; [`prepare`] wrote nothing.
+#[derive(Debug)]
+pub enum NotPrepared {
+    /// The step refused: a [`ProgramRefusal`]'s text (`RunsSpent`, `ArtifactUnreadable`,
+    /// `Cancelled`, `ArgumentsUnreadable`) or another (`<program> was not started: …`).
+    Refused(EffectOutcome),
+    /// A read of the governor, the clock or the store failed.
+    Failed(EffectError),
+}
+
+/// A bound program ready to start once through [`start`]: its child, built after every refusal
+/// that comes before a start.
+#[derive(Debug)]
+pub struct Prepared {
+    action: String,
+    program: String,
+    ran: String,
+    child: Result<ChildCommand, ConfinementError>,
+    before: Vec<ArtifactPlacement>,
+    writes: bool,
+    retry_of: Vec<String>,
+    started_at: Timestamp,
+    principal: Option<String>,
+    exits: Option<ExitClasses>,
+}
+
+/// The one run [`start`] made: the run as its observation holds it and what the step reads next.
+#[derive(Debug)]
+pub struct Started {
+    /// The run, as observed.
+    pub run: ProgramRun,
+    /// What the runner answered.
+    pub answer: Result<TestExecution, ConfinementError>,
+    /// The id of the run's observation.
+    pub observation: ObservationId,
+    /// The instant of the run's observation.
+    pub observed_at: Timestamp,
+    /// Why the blob of the run could not be kept, if it could not.
+    pub blob_failure: Option<String>,
+    /// The placements digested before the start.
+    pub before: Vec<ArtifactPlacement>,
+    /// The placements digested after the run, or why one could not be digested.
+    pub after: Result<Vec<ArtifactPlacement>, String>,
+    /// Whether the protocol declares the action's effect class `write`.
+    pub writes: bool,
+    /// The bound program, `argv[0]`.
+    pub program: String,
+    /// The program that ran: the bound program, or the `arguments_from` program its cancel ended.
+    pub ran: String,
+}
+
+impl Started {
+    /// Whether a placed artifact's digest after the run differs from before it; `false` when one
+    /// could not be digested after it.
+    #[must_use]
+    pub fn changed(&self) -> bool {
+        self.after.as_ref().is_ok_and(|after| {
+            self.before
+                .iter()
+                .zip(after)
+                .any(|(before, after)| before.revision != after.revision)
+        })
+    }
+
+    /// The run as its observation and the report of a performed step name it.
+    #[must_use]
+    pub fn run_json(&self) -> serde_json::Value {
+        run_json(&self.run)
+    }
+}
+
+/// Every refusal of `binding`'s step that comes before a start, then the child, in this order
+/// (`story:person-action-runs-a-program`): the run count below `budget.max_runs` (`RunsSpent`),
+/// the cancel handle unset (`Cancelled`), an argv, the program resolved under `program_root:
+/// bindings`, a timeout this host's clock holds, the placed artifacts digested
+/// (`ArtifactUnreadable`), the case names, the child's inputs from `inputs` (given the timeout and
+/// the names), each argv entry that is exactly [`crate::PRINCIPAL_PLACEHOLDER`] replaced by
+/// `principal` as one entry, and the child built ([`bound_case_child`]) with the retry feedback
+/// put on it. It starts nothing and writes nothing; what `inputs` does is the caller's.
+///
+/// # Errors
+/// [`NotPrepared`]: the step's refusal, or a read that failed.
+pub fn prepare<S: FallibleCaseStore, T: EvaluationTime>(
+    place: &RunPlace<'_, S, T>,
+    binding: &BoundAction,
+    principal: Option<&str>,
+    inputs: impl FnOnce(Duration, &CaseNames) -> Result<ChildInputs, NotPrepared>,
+) -> Result<Prepared, NotPrepared> {
+    let action = binding.action.as_str();
+    let runs = runs(place.governor, place.case, action).map_err(NotPrepared::Failed)?;
+    if runs >= binding.budget.max_runs {
+        return Err(NotPrepared::Refused(refusal(
+            ProgramRefusalReason::RunsSpent,
+            action,
+            format!(
+                "{action} has run {runs} times in case {}, its budget.max_runs is {}",
+                place.case.0, binding.budget.max_runs
+            ),
+        )));
+    }
+    // After the run count and before any program starts: a cancel set now starts nothing and
+    // keeps no observation.
+    if place.cancel.is_some_and(Cancel::is_cancelled) {
+        return Err(NotPrepared::Refused(cancelled_step(
+            action,
+            "the step's cancel was set before it started; nothing was started",
+        )));
+    }
+    let Some(argv) = binding.executor.argv.as_deref() else {
+        return Err(NotPrepared::Refused(refused(format!(
+            "{action} is bound to no argv"
+        ))));
+    };
+    let program = argv.first().map_or("the program", String::as_str);
+    let not_started =
+        |why: &str| NotPrepared::Refused(refused(format!("{program} was not started: {why}")));
+    if let Some(member) = unresolved(place.document, binding) {
+        return Err(not_started(&format!(
+            "{member} names a file beside the bindings file, and the document was not resolved with resolve_programs"
+        )));
+    }
+    let seconds = binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
+    let timeout = Duration::from_secs(u64::try_from(seconds).unwrap_or(1));
+    // Taken before anything starts, so a timeout the clock cannot hold starts nothing.
+    if Instant::now().checked_add(timeout).is_none() {
+        return Err(not_started(&format!(
+            "timeout_seconds {seconds} is past what this host's clock can hold"
+        )));
+    }
+    let writes = writes(place.governor, place.case, action).map_err(NotPrepared::Failed)?;
+    // Read before anything starts, so a placed path that cannot be digested starts nothing,
+    // and what the program changed is told from what the workspace held already.
+    let before = placements(place.workspace, place.document).map_err(|unreadable| {
+        NotPrepared::Refused(refusal(
+            ProgramRefusalReason::ArtifactUnreadable,
+            action,
+            format!("nothing was started: {}", describe(&unreadable)),
+        ))
+    })?;
+    // Read before anything starts and before anything is written: a name the governor holds
+    // that is not a child name, or a parent that cannot be read, starts and writes nothing.
+    let names = case_names(place.governor, place.case)
+        .map_err(NotPrepared::Failed)?
+        .map_err(|why| not_started(&why))?;
+    // Read before any program starts, so the run's observation has an instant even when the
+    // clock cannot be read after it.
+    let started_at =
+        instant(&SystemClock).map_err(|why| NotPrepared::Failed(EffectError::new(why)))?;
+    let inputs = inputs(timeout, &names)?;
+    let (child, ran, retry_of) = if let Some((refusal, ran)) = inputs.ended {
+        // The `arguments_from` program its cancel ended: that run is the step's, and the bound
+        // program never starts.
+        (Err(refusal), ran, Vec::new())
+    } else {
+        let argv = with_principal(argv, principal).map_err(|why| not_started(&why))?;
+        let child = bound_case_child(
+            &argv,
+            &inputs.arguments,
+            timeout,
+            place.workspace,
+            place.runner.local_reason(),
+            place.case,
+            &names,
+        )
+        .map_err(|why| not_started(&why))?;
+        let child =
+            crate::retry::given(child, inputs.feedback.as_ref(), place.runner.local_reason());
+        let child = match place.cancel {
+            Some(cancel) => child.with_cancel(cancel.clone()),
+            None => child,
+        };
+        let retry_of = inputs
+            .feedback
+            .map(|given| given.retry_of)
+            .unwrap_or_default();
+        (Ok(child), program.to_owned(), retry_of)
+    };
+    Ok(Prepared {
+        action: action.to_owned(),
+        program: program.to_owned(),
+        ran,
+        child,
+        before,
+        writes,
+        retry_of,
+        started_at,
+        principal: principal.map(str::to_owned),
+        exits: binding.exits.clone(),
+    })
+}
+
+/// `argv` with each entry that is exactly [`crate::PRINCIPAL_PLACEHOLDER`] replaced by
+/// `principal`, as one entry; nothing else is replaced. The decoder keeps the placeholder out of
+/// `argv[0]` and out of every argv but a person's.
+///
+/// # Errors
+/// The argv names the placeholder and no principal is given.
+fn with_principal(argv: &[String], principal: Option<&str>) -> Result<Vec<String>, String> {
+    argv.iter()
+        .map(|entry| {
+            if entry != crate::PRINCIPAL_PLACEHOLDER {
+                return Ok(entry.clone());
+            }
+            principal.map(str::to_owned).ok_or_else(|| {
+                format!(
+                    "the argv names {} and no principal approved the run",
+                    crate::PRINCIPAL_PLACEHOLDER
+                )
+            })
+        })
+        .collect()
+}
+
+/// Runs `prepared`'s child once through `place`'s runner, keeps its blob (its standard output
+/// followed by its standard error) under the store directory, keeps one [`ProgramRun`]
+/// observation whatever the runner answered and whether the blob was kept or not, with the
+/// principal that approved the run when one did, then digests the placed artifacts again. It
+/// writes no revision and no record: what the step writes next is the caller's.
+///
+/// # Errors
+/// The run's observation could not be kept.
+pub fn start<S: FallibleCaseStore, T: EvaluationTime>(
+    place: &RunPlace<'_, S, T>,
+    prepared: Prepared,
+) -> Result<Started, EffectError> {
+    let Prepared {
+        action,
+        program,
+        ran,
+        child,
+        before,
+        writes,
+        retry_of,
+        started_at,
+        principal,
+        exits,
+    } = prepared;
+    // The one start of a bound program: through the admitted runner, never here.
+    let answer = match child {
+        Ok(child) => place.runner.run_child(&child),
+        Err(refusal) => Err(refusal),
+    };
+    // Every call above is a run: its observation is kept whatever the runner answered and
+    // whether the blob can be kept or not, so it counts against `budget.max_runs`.
+    let mut run = ProgramRun {
+        case: place.case.0.clone(),
+        action: action.clone(),
+        exit: None,
+        blob_sha256: None,
+        timed_out: false,
+        runner_refusal: None,
+        retry_of,
+        class: None,
+        cancelled: false,
+        principal,
+    };
+    let mut blob_failure = None;
+    match &answer {
+        Ok(execution) => {
+            let output = &execution.child_output;
+            let mut blob = output.stdout.clone();
+            blob.extend_from_slice(&output.stderr);
+            let digest = sha256(&blob);
+            run.exit = execution.exit_code.map(i64::from);
+            run.timed_out = execution.timed_out;
+            run.class = class_of(exits.as_ref(), execution);
+            match keep_blob(place.store, &digest, &blob) {
+                Ok(()) => run.blob_sha256 = Some(digest),
+                Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
+            }
+        }
+        Err(refusal) => {
+            run.runner_refusal = Some(refusal.to_string());
+            run.cancelled = refusal.reason == ConfinementRefusal::Cancelled;
+        }
+    }
+    let observed_at = instant(&SystemClock).unwrap_or(started_at);
+    let observation = ObservationId(fresh_uuid("program-observation", &place.case.0));
+    place
+        .governor
+        .observe(Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: PROGRAM_SOURCE.to_owned(),
+            subject: action,
+            observed_at: observed_at.clone(),
+            payload: commission_value(&run_json(&run))?,
+        }))
+        .map_err(governor)?;
+    let after =
+        placements(place.workspace, place.document).map_err(|unreadable| describe(&unreadable));
+    Ok(Started {
+        run,
+        answer,
+        observation,
+        observed_at,
+        blob_failure,
+        before,
+        after,
+        writes,
+        program,
+        ran,
+    })
+}
+
+/// The runs of `action` in `case`: the observations kept under [`PROGRAM_SOURCE`] naming both,
+/// but those of a run whose exit the binding classes (`exits`), which are not counted.
+fn runs<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
+    case: &CaseId,
+    action: &str,
+) -> Result<i64, EffectError> {
+    let observations = governor
+        .try_observations()
+        .map_err(|error| EffectError::new(format!("the observations: {error:?}")))?;
+    let count = observations
+        .iter()
+        .filter(|observation| observation.source == PROGRAM_SOURCE)
+        .filter(|observation| {
+            text_member(&observation.payload, "case") == Some(case.0.as_str())
+                && text_member(&observation.payload, "action") == Some(action)
+        })
+        .filter(|observation| {
+            matches!(
+                observation.payload.member("class"),
+                None | Some(commission_json::Value::Null)
+            )
+        })
+        .count();
+    Ok(i64::try_from(count).unwrap_or(i64::MAX))
+}
+
+/// The member of `binding` that names a program beside the bindings file when `document`'s
+/// `program_root` is `bindings`: a document [`crate::resolve_programs`] did not resolve,
+/// whose program would otherwise be read as a workspace path.
+fn unresolved(document: &BindingsDocument, binding: &BoundAction) -> Option<&'static str> {
+    if document.program_root != Some(ProgramRoot::Bindings) {
+        return None;
+    }
+    let names = |argv: Option<&Vec<String>>| {
+        argv.and_then(|argv| argv.first())
+            .is_some_and(|program| beside(program))
+    };
+    if names(binding.executor.argv.as_ref()) {
+        Some("executor.argv[0]")
+    } else if names(binding.arguments_from.as_ref()) {
+        Some("arguments_from[0]")
+    } else {
+        None
+    }
+}
+
+/// Whether the protocol of `case` declares `action`'s effect class `write`.
+fn writes<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
+    case: &CaseId,
+    action: &str,
+) -> Result<bool, EffectError> {
+    let facts = governor
+        .action_facts(case)
+        .map_err(|error| EffectError::new(format!("the governor: {error:?}")))?;
+    Ok(facts
+        .actions
+        .iter()
+        .find(|facts| facts.action == action)
+        .and_then(|facts| facts.effect.as_deref())
+        == Some(WRITE_EFFECT))
 }
 
 /// The evidence port a record passes through to be attributed by Commission's `submit_evidence`:
@@ -913,14 +1222,14 @@ fn refusal(reason: ProgramRefusalReason, action: &str, detail: impl Into<String>
     ))
 }
 
-/// The class `binding`'s `exits` gives the exit of `execution`: none for a run killed at its
+/// The class a binding's `exits` gives the exit of `execution`: none for a run killed at its
 /// timeout, whose status could not be read, or whose exit neither list holds.
-fn class_of(binding: &BoundAction, execution: &TestExecution) -> Option<ExitClass> {
+fn class_of(exits: Option<&ExitClasses>, execution: &TestExecution) -> Option<ExitClass> {
     if execution.timed_out {
         return None;
     }
     let code = i64::from(execution.exit_code?);
-    let exits = binding.exits.as_ref()?;
+    let exits = exits?;
     if exits.error.contains(&code) {
         Some(ExitClass::Error)
     } else if exits.not_called.contains(&code) {
@@ -958,7 +1267,7 @@ fn governor(error: impl std::fmt::Debug) -> EffectError {
 }
 
 fn run_json(run: &ProgramRun) -> serde_json::Value {
-    serde_json::json!({
+    let mut json = serde_json::json!({
         "case": run.case,
         "action": run.action,
         "exit": run.exit,
@@ -971,7 +1280,12 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
             ExitClass::NotCalled => "not_called",
         }),
         "cancelled": run.cancelled,
-    })
+    });
+    // Only a person's run names a principal: a program's run keeps the payload it always had.
+    if let Some(principal) = &run.principal {
+        json["principal"] = serde_json::Value::String(principal.clone());
+    }
+    json
 }
 
 fn record_json(record: &RecordedEvidence) -> serde_json::Value {

@@ -59,7 +59,10 @@ pub use handoff::{
 };
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
-pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use program::{
+    ANY_KEY, BLOBS, ChildInputs, NotPrepared, PROGRAM_SOURCE, Prepared, ProgramEffects, RunPlace,
+    Started, TIMEOUT_KEY, prepare, start,
+};
 pub use resolve::resolve_programs;
 pub use retry::{
     PERSON_SOURCE, RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES,

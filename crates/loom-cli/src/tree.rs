@@ -19,8 +19,8 @@ use b10x_loom_tree::model::{ApprovalDecision, CycleResult, TreeRefusalReason};
 use b10x_loom_tree::suite::{SuiteSettings, cycle_line, report_json, run_suite, summary_lines};
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
-    approve as record, open_tree, read_protocols_directory, refusal_json, run_json, run_tree,
-    status_json, stored_catalog, tree_status, verify_json, verify_tree,
+    approve as record, open_tree, person_program, read_protocols_directory, refusal_json, run_json,
+    run_tree, status_json, stored_catalog, tree_status, verify_json, verify_tree,
 };
 use serde_json::json;
 
@@ -168,12 +168,17 @@ enum Placement {
     StartedAgain(u8),
 }
 
-/// The placement of `arguments`' run, `None` under `local`: `--cgroup-root`'s root, held; in a
-/// run started again, the scope it moved into a leaf of, held; otherwise the run started again in
-/// a delegated scope of its own. No root is ever discovered.
-fn place(arguments: &TreeRunArgs) -> Result<Option<Placement>, Refused> {
-    if arguments.confinement == TreeConfinement::Local {
-        if arguments.cgroup_root.is_some() {
+/// The placement of a command's programs under `confinement`, `None` under `local`:
+/// `cgroup_root`, held; in a command started again, the scope it moved into a leaf of, held;
+/// otherwise the command started again in a delegated scope of its own. No root is ever
+/// discovered. `tree run` and the `tree approve` of a person action that runs a program place
+/// their programs here.
+fn place(
+    confinement: TreeConfinement,
+    cgroup_root: Option<&Path>,
+) -> Result<Option<Placement>, Refused> {
+    if confinement == TreeConfinement::Local {
+        if cgroup_root.is_some() {
             return Err(Refused::new(
                 TreeRefusalReason::ConfinementRefused,
                 "--cgroup-root names the root of the substrate confinement; --confinement local runs no program under one",
@@ -181,7 +186,7 @@ fn place(arguments: &TreeRunArgs) -> Result<Option<Placement>, Refused> {
         }
         return Ok(None);
     }
-    let held = match &arguments.cgroup_root {
+    let held = match cgroup_root {
         Some(root) => TreeRunner::on_root(&resolved(root)?),
         None if std::env::var_os(REEXEC_MARKER).is_some() => {
             started_again()?;
@@ -261,7 +266,7 @@ fn started_again() -> Result<(), Refused> {
 fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     // Held until the run ends: no other tree run uses this root meanwhile.
-    let held = match place(arguments)? {
+    let held = match place(arguments.confinement, arguments.cgroup_root.as_deref())? {
         Some(Placement::StartedAgain(status)) => return Ok(status),
         Some(Placement::Held(runner)) => Some(runner),
         None => None,
@@ -399,6 +404,26 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
         (None, Some(path)) => Some(Reasons::File(path)),
         (None, None) => None,
     };
+    // A person action whose binding names an `argv` runs its program as `tree run` runs its own:
+    // placed under `--confinement` (started again in a delegated scope of its own when it names
+    // `substrate` and no `--cgroup-root`), the root held until the approval ends.
+    let program = match arguments.action.as_deref() {
+        Some(action) if !arguments.deny => {
+            person_program(&store, &arguments.case, action, &catalog)?
+        }
+        _ => false,
+    };
+    let mut held = None;
+    let runner = if program {
+        match place(arguments.confinement, arguments.cgroup_root.as_deref())? {
+            Some(Placement::StartedAgain(status)) => return Ok(status),
+            Some(Placement::Held(runner)) => held = Some(runner),
+            None => {}
+        }
+        Some(tree_runner(arguments.confinement, held.as_ref())?)
+    } else {
+        None
+    };
     let approval = record(&ApproveRequest {
         store: &store,
         case: &arguments.case,
@@ -414,8 +439,17 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
         reasons,
         time,
         catalog: &catalog,
-        runner: None,
+        runner,
+    })
+    .map_err(|mut refused| {
+        // The command that approves again, once the principal fixed the cause: this one, its
+        // paths resolved.
+        if refused.0.reason == TreeRefusalReason::PersonProgramFailed {
+            refused.0.command = Some(approve_command(arguments, &store, reasons_file.as_deref()));
+        }
+        refused
     })?;
+    drop(held);
     // A person action that needs no capability records no authority: the action is printed.
     let printed = match approval {
         Some(approval) => json!({
@@ -434,6 +468,52 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     };
     println!("{}", printable(&printed.to_string()));
     Ok(0)
+}
+
+/// The argv of `tree approve` as `arguments` name it, `store` and `reasons_file` resolved: `b10x-loom
+/// tree approve --store --case [--capability] --principal --action [--result] [--reasons |
+/// --reasons-file] [--at] --confinement [--cgroup-root]`.
+fn approve_command(
+    arguments: &TreeApproveArgs,
+    store: &Path,
+    reasons_file: Option<&Path>,
+) -> Vec<String> {
+    let mut words: Vec<String> = ["b10x-loom", "tree", "approve", "--store"]
+        .map(str::to_owned)
+        .to_vec();
+    words.push(store.display().to_string());
+    words.extend(["--case".to_owned(), arguments.case.clone()]);
+    let mut flag = |name: &str, value: Option<String>| {
+        if let Some(value) = value {
+            words.extend([name.to_owned(), value]);
+        }
+    };
+    flag("--capability", arguments.capability.clone());
+    flag("--principal", Some(arguments.principal.clone()));
+    flag("--action", arguments.action.clone());
+    flag("--result", arguments.result.clone());
+    flag("--reasons", arguments.reasons.clone());
+    flag(
+        "--reasons-file",
+        reasons_file.map(|path| path.display().to_string()),
+    );
+    flag("--at", arguments.at.clone());
+    flag(
+        "--confinement",
+        arguments
+            .confinement
+            .to_possible_value()
+            .map(|value| value.get_name().to_owned()),
+    );
+    flag(
+        "--cgroup-root",
+        arguments
+            .cgroup_root
+            .as_deref()
+            .map(|root| resolved(root).unwrap_or_else(|_| root.to_owned()))
+            .map(|root| root.display().to_string()),
+    );
+    words
 }
 
 fn close(arguments: &TreeCloseArgs) -> Result<u8, Refused> {

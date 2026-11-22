@@ -218,6 +218,8 @@ fn plain(value: &CommissionJson) -> Value {
 /// The revision the case holds for the subject.
 fn subject_revision(tree: &Tree) -> String {
     store_governor(tree)
+        .with_catalog(&tree.catalog())
+        .unwrap()
         .revisions(&CaseId("root".to_owned()))
         .unwrap()["subject"]
         .clone()
