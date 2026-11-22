@@ -55,6 +55,15 @@ impl std::fmt::Display for VendoredError {
 }
 impl std::error::Error for VendoredError {}
 
+/// The argument schema a protocol declares for one of its actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArgumentSchema {
+    /// The action's `arguments`: a JSON Schema in Canon's argument-schema dialect.
+    Declared(serde_json::Value),
+    /// The action declares no `arguments`: it takes only `{}`.
+    Undeclared,
+}
+
 /// A definition and its validated Canon model. Definition availability grants no authority.
 #[derive(Debug, Clone)]
 pub struct ProtocolEntry {
@@ -100,6 +109,31 @@ impl ProtocolEntry {
             .actions
             .iter()
             .map(|(id, _)| id.to_string())
+            .collect()
+    }
+    /// The argument schema this definition declares for `action` (Canon's `Action.arguments`,
+    /// held to Canon's argument-schema dialect by [`ProtocolCatalog::add_yaml`]):
+    /// [`ArgumentSchema::Declared`] with the schema, [`ArgumentSchema::Undeclared`] when the
+    /// action declares none and so takes only `{}`; `None` for an action the definition does not
+    /// declare.
+    pub fn argument_schema(&self, action: &str) -> Option<ArgumentSchema> {
+        self.model
+            .actions
+            .iter()
+            .find(|(id, _)| id.as_str() == action)
+            .map(|(_, declared)| match &declared.arguments {
+                Some(schema) => ArgumentSchema::Declared(schema.clone()),
+                None => ArgumentSchema::Undeclared,
+            })
+    }
+    /// Every action this definition declares, in declaration order, with its argument schema
+    /// (`None`: it declares none): the input a host builds the executor's
+    /// `b10x_loom_executor::arguments::ArgumentSchemas` from.
+    pub fn argument_schemas(&self) -> Vec<(String, Option<serde_json::Value>)> {
+        self.model
+            .actions
+            .iter()
+            .map(|(id, declared)| (id.to_string(), declared.arguments.clone()))
             .collect()
     }
     /// Require the exact clock contract supported by the local host, irrespective of naming.
