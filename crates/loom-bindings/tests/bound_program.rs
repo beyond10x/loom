@@ -8,8 +8,8 @@
 //! artifacts and stub programs; no model, no network. A case that starts a process gives the port
 //! an `EngineRunner` on `local` opened with `UNCONFINED_FLAG_REASON`; a case that reads the
 //! `ChildCommand` the port builds gives it a recording runner that starts nothing. Scratch goes
-//! under `CARGO_TARGET_TMPDIR`, outside every mount Substrate owns. The one `linux` case runs in a
-//! delegated scope through the harness of `b10x-loom-intake-slice`'s tests, or skips naming what is
+//! under `CARGO_TARGET_TMPDIR`, outside every mount Substrate owns. The `linux` cases run in a
+//! delegated scope through the harness of `b10x-loom-intake-slice`'s tests, or skip naming what is
 //! missing.
 
 #[path = "../../loom-intake-slice/tests/support/mod.rs"]
@@ -42,7 +42,7 @@ use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, Cancel, ChildCommand, ChildOutput, ConfinementAdapter,
     ConfinementError, ConfinementRefusal, EngineConfinement, EngineRunner, TestExecution,
-    TestRunner,
+    TestRunner, hold_cgroup_root,
 };
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
 use loom::bindings::BindingsDocument;
@@ -2924,6 +2924,225 @@ fn a_runbook_style_confined_step_runs_through_bound_program_on_the_new_pin() {
                     .ends_with("exit 0\n"),
                 "the program file was not written"
             );
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Two case trees in one process (`story:concurrent-confined-runs`)
+
+/// How long after the first tree's step the second tree's step starts.
+const SECOND_TREE_AFTER: Duration = Duration::from_secs(1);
+
+/// One case tree of a process that runs two: its own case store and blob directory, its own stub
+/// programs, and its own workspace (`target/` created) in the directory the trees share.
+struct Tree {
+    scratch: Scratch,
+    workspace: PathBuf,
+}
+
+/// What one step of a [`Tree`] came to: the port's refusal, if any, and the run it observed.
+struct TreeStep {
+    refused: Option<String>,
+    run: Option<serde_json::Value>,
+}
+
+impl Tree {
+    fn new(shared: &Path, name: &str) -> Self {
+        let workspace = shared.join(name);
+        std::fs::create_dir_all(workspace.join("target")).unwrap();
+        Self {
+            scratch: Scratch::new(),
+            workspace,
+        }
+    }
+
+    /// One step of this tree's case, which binds [`CHECK`] to `argv`, through an `EngineRunner` of
+    /// its own on `linux` over the held root `root`, run on the calling thread.
+    fn step(&self, root: &Path, argv: &[&str]) -> TreeStep {
+        let governor = governor_over(FileCaseStore::open(&self.scratch.store).unwrap());
+        open(&governor, CASE);
+        let document = document(&bound(
+            CHECK,
+            argv,
+            SIXTY_SECONDS,
+            &[entry("gate", "exit", VALID_TABLE)],
+        ));
+        let runner: Arc<dyn TestRunner> = Arc::new(
+            EngineRunner::open(&EngineConfinement {
+                adapter: ConfinementAdapter::Linux,
+                local_reason: None,
+                cgroup_root: Some(root.to_string_lossy().into_owned()),
+            })
+            .expect("linux builds"),
+        );
+        let effects = ProgramEffects::new(
+            &governor,
+            CaseId(CASE.to_owned()),
+            &document,
+            &self.workspace,
+            &self.scratch.store,
+            Some(runner),
+        )
+        .expect("the port admits the Substrate runner");
+        let end = drive(&governor, &effects, CASE, CHECK, args("{}"));
+        let refused = match only_effect(&end) {
+            EffectOutcome::Performed(_) => None,
+            other => Some(format!("{other:?}")),
+        };
+        let run = port_observations(&governor)
+            .first()
+            .map(|observation| plain(&observation.payload));
+        TreeStep { refused, run }
+    }
+}
+
+impl TreeStep {
+    /// The step was performed and its program exited 0.
+    fn assert_exit_zero(&self, tree: &str) {
+        assert_eq!(
+            self.refused, None,
+            "tree {tree}'s step was refused; its run: {:?}",
+            self.run
+        );
+        let run = self.run.as_ref().expect("the run is observed");
+        assert_eq!(run["exit"], json!(0), "tree {tree}: {run}");
+    }
+}
+
+/// The delegated case `name`: the process holds the root of its delegated scope once
+/// (`hold_cgroup_root`), and `case` gets the held root and two trees whose workspaces are sibling
+/// directories of one shared directory.
+fn two_trees(name: &str, case: impl FnOnce(&Path, &Tree, &Tree)) {
+    support::delegated(name, &[], |runner, _| {
+        let hold = hold_cgroup_root(runner.cgroup_root().expect("the harness names its root"))
+            .expect("the process holds its delegated root once");
+        let shared = tempfile::Builder::new()
+            .prefix("two-trees-")
+            .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+            .unwrap();
+        let a = Tree::new(shared.path(), "tree-a");
+        let b = Tree::new(shared.path(), "tree-b");
+        case(hold.root(), &a, &b);
+    });
+}
+
+/// Tree `a`'s step on a plain thread, then [`SECOND_TREE_AFTER`] later tree `b`'s on another; both
+/// steps, once each ended.
+fn at_once(root: &Path, a: (&Tree, &[&str]), b: (&Tree, &[&str])) -> (TreeStep, TreeStep) {
+    std::thread::scope(|scope| {
+        let first = scope.spawn(|| a.0.step(root, a.1));
+        std::thread::sleep(SECOND_TREE_AFTER);
+        let second = scope.spawn(|| b.0.step(root, b.1));
+        (
+            first.join().expect("tree a's thread"),
+            second.join().expect("tree b's thread"),
+        )
+    })
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn slow_two_trees_run_confined_programs_at_once_in_one_process() {
+    two_trees(
+        "slow_two_trees_run_confined_programs_at_once_in_one_process",
+        |root, a, b| {
+            let sleeps = "/usr/bin/sleep 5\nexit 0\n";
+            let program_a = a.scratch.script("program.sh", sleeps);
+            let program_b = b.scratch.script("program.sh", sleeps);
+            let started = Instant::now();
+            let (first, second) = at_once(root, (a, &[&program_a]), (b, &[&program_b]));
+            let wall = started.elapsed();
+            first.assert_exit_zero("a");
+            second.assert_exit_zero("b");
+            assert!(
+                wall < Duration::from_secs(9),
+                "the two runs took {wall:?}: they did not run at once"
+            );
+        },
+    );
+}
+
+/// The program of each tree of the workspace case: it reads its own marker (so a read works there),
+/// then the other tree's marker by its host path (`$1`) and as `../<the other workspace>/marker`
+/// (`$2`), and stays 2 s so the two programs overlap. Exit 6, 7 or 8 names the read that went
+/// wrong.
+const READS_THE_OTHER_MARKER: &str = "/usr/bin/cat marker > /dev/null || exit 6\n\
+     if /usr/bin/cat \"$1\" 2>/dev/null; then exit 7; fi\n\
+     if /usr/bin/cat \"../$2/marker\" 2>/dev/null; then exit 8; fi\n\
+     /usr/bin/sleep 2\n\
+     exit 0\n";
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_confined_program_sees_no_workspace_of_the_other_tree() {
+    two_trees(
+        "a_confined_program_sees_no_workspace_of_the_other_tree",
+        |root, a, b| {
+            for tree in [a, b] {
+                std::fs::write(tree.workspace.join("marker"), "marker").unwrap();
+            }
+            let program_a = a.scratch.script("program.sh", READS_THE_OTHER_MARKER);
+            let program_b = b.scratch.script("program.sh", READS_THE_OTHER_MARKER);
+            let marker_b = b.workspace.join("marker");
+            let marker_a = a.workspace.join("marker");
+            let (first, second) = at_once(
+                root,
+                (a, &[&program_a, marker_b.to_str().unwrap(), "tree-b"]),
+                (b, &[&program_b, marker_a.to_str().unwrap(), "tree-a"]),
+            );
+            first.assert_exit_zero("a");
+            second.assert_exit_zero("b");
+        },
+    );
+}
+
+/// The program of tree b in the process case: it reads every `/proc/<pid>/cmdline` it can see,
+/// exits 9 on one holding `other`, tree a's marker, and 8 when none holds its own marker (`$1`), so
+/// a scan that saw nothing does not pass. The marker of tree a is in this text, never in an argv.
+fn scans_for(other: &str) -> String {
+    format!(
+        "other='{other}'\n\
+         seen=no\n\
+         for f in /proc/[0-9]*/cmdline; do\n\
+         \x20 line=$(/usr/bin/tr '\\000' ' ' < \"$f\" 2>/dev/null) || continue\n\
+         \x20 case \"$line\" in\n\
+         \x20   *\"$other\"*) exit 9 ;;\n\
+         \x20   *\"$1\"*) seen=yes ;;\n\
+         \x20 esac\n\
+         done\n\
+         [ \"$seen\" = yes ] || exit 8\n\
+         exit 0\n"
+    )
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_confined_program_sees_no_process_of_the_other_tree() {
+    two_trees(
+        "a_confined_program_sees_no_process_of_the_other_tree",
+        |root, a, b| {
+            let nonce = format!("{}-{}", std::process::id(), next());
+            let marker_a = format!("loom-tree-a-{nonce}");
+            let marker_b = format!("loom-tree-b-{nonce}");
+            let program_a = a.scratch.script("program.sh", "/usr/bin/sleep 4\nexit 0\n");
+            let program_b = b.scratch.script("program.sh", &scans_for(&marker_a));
+            let (first, second) = at_once(
+                root,
+                (a, &[&program_a, &marker_a]),
+                (b, &[&program_b, &marker_b]),
+            );
+            first.assert_exit_zero("a");
+            second.assert_exit_zero("b");
         },
     );
 }

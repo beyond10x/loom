@@ -5,7 +5,7 @@
 //! its record; under `linux` the runner wraps today's host-driver route.
 //!
 //! No case starts a network connection or a model. The `local` cases run real host processes in
-//! temporary directories; the two `linux` cases marked gated run in a delegated scope through
+//! temporary directories; the `linux` cases marked gated run in a delegated scope through
 //! `tests/support` and skip naming what is missing. The host-policy case starts this binary
 //! again with `SUBSTRATE_CONFINEMENT_LOCAL=refuse` on that child process alone, so no other case
 //! sees the variable.
@@ -25,7 +25,8 @@ use b10x_loom_intake_slice::clock::Clock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, BaselineEnvironment, ChildCommand, ChildError, ChildOutput,
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EgressAperture, EngineConfinement,
-    EngineRunner, ExecEnvironment, TestRunner, discover_cgroup_root, escape_reason,
+    EngineRunner, ExecEnvironment, SubstrateRunner, TestRunner, discover_cgroup_root,
+    escape_reason, hold_cgroup_root,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner, applied_label};
@@ -964,6 +965,84 @@ fn an_undelegated_root_is_refused_and_nothing_falls_back() {
         "{error}"
     );
     assert!(!marker.exists(), "no child started");
+}
+
+/// `story:concurrent-confined-runs`: a process holds its delegated root once, and every run of the
+/// process shares that hold. A second hold in the same process is refused, naming the root, while a
+/// runner on the held root runs a child, so the runner takes no hold of its own; once the first hold
+/// is dropped, the root is held again.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_second_hold_of_a_root_in_this_process_is_refused() {
+    // Gated: runs in a delegated scope, or skips naming what is missing.
+    support::delegated(
+        "a_second_hold_of_a_root_in_this_process_is_refused",
+        &[],
+        |runner, workspace| {
+            let root = runner.cgroup_root().expect("the harness names its root");
+            let hold = hold_cgroup_root(root).expect("the process holds its delegated root");
+            let second = hold_cgroup_root(root).expect_err("a second hold in this process");
+            assert_eq!(
+                second.reason,
+                ConfinementRefusal::CgroupUndelegated,
+                "{second}"
+            );
+            assert!(
+                second.detail.contains(&hold.root().display().to_string()),
+                "the refusal names the root: {second}"
+            );
+            let held = SubstrateRunner::new(Some(hold.root().to_owned()));
+            let result = held
+                .run_child(&shell("true", workspace, &[]))
+                .expect("a runner on the held root runs: it takes no hold");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            drop(hold);
+            let again = hold_cgroup_root(root).expect("a dropped hold frees the root");
+            assert_eq!(again.root(), root.canonicalize().unwrap());
+        },
+    );
+}
+
+/// `story:concurrent-confined-runs`: a cgroup beside the one this process runs in, under the same
+/// delegated scope, holds no process of it, so Substrate proves no `limits` there and a run on it
+/// is refused `CgroupUndelegated`. That is why each run of a process does not get a cgroup root of
+/// its own: every run shares the one root the process holds.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated() {
+    // Gated: runs in a delegated scope, or skips naming what is missing.
+    support::delegated(
+        "a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated",
+        &[],
+        |runner, workspace| {
+            let root = runner.cgroup_root().expect("the harness names its root");
+            let sibling = root.join(format!("loom-run-{}", std::process::id()));
+            std::fs::create_dir(&sibling).expect("a sibling cgroup of this process's own");
+            let error = {
+                let runner = EngineRunner::open(&EngineConfinement {
+                    adapter: ConfinementAdapter::Linux,
+                    local_reason: None,
+                    cgroup_root: Some(sibling.to_string_lossy().into_owned()),
+                })
+                .expect("building a linux runner opens nothing");
+                runner
+                    .run_child(&shell("true", workspace, &[]))
+                    .expect_err("a root that holds no process of this one runs nothing")
+            };
+            let _ = std::fs::remove_dir(&sibling);
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CgroupUndelegated,
+                "{error}"
+            );
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------------------------

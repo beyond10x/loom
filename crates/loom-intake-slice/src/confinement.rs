@@ -4554,7 +4554,7 @@ mod tests {
         let launch = Running::enter(&cgroup.canonicalize().unwrap());
         let spelled = cgroup.join("..").join("cgroup");
         let error = SubstrateRunner::new(Some(spelled))
-            .open(fixture.path(), &DriverEgress::NONE)
+            .driver(&fixture.path().join("workspace"), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
@@ -4573,10 +4573,12 @@ mod tests {
         std::fs::write(cgroup.join("cgroup.controllers"), "cpu memory pids\n").unwrap();
         std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
         let runner = SubstrateRunner::new(Some(cgroup.clone()));
+        // A runner and its clone keep one set of drivers, so they share every table entry either
+        // of them uses.
         assert!(Arc::ptr_eq(&runner.drivers, &runner.clone().drivers));
         let launch = Running::enter(&cgroup);
         let error = runner
-            .open(fixture.path(), &DriverEgress::NONE)
+            .driver(&fixture.path().join("workspace"), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
@@ -4588,6 +4590,375 @@ mod tests {
             !running().contains_key(&cgroup),
             "a finished launch is no longer counted"
         );
+    }
+
+    /// A driver the table's tests open: no Substrate driver, only the directory it was opened for.
+    #[derive(Debug)]
+    struct FakeDriver(PathBuf);
+
+    /// An opener that counts its calls in `calls` and opens a [`FakeDriver`].
+    fn counting(
+        calls: &std::cell::Cell<usize>,
+    ) -> impl FnOnce(&DriverKey) -> Result<FakeDriver, ConfinementError> + '_ {
+        move |key| {
+            calls.set(calls.get() + 1);
+            Ok(FakeDriver(key.directory.clone()))
+        }
+    }
+
+    /// The key of a driver for the workspaces in `directory` under the cgroup root `root`.
+    fn table_key(root: &Path, directory: &str, egress: DriverEgress) -> DriverKey {
+        DriverKey {
+            cgroup_root: root.to_owned(),
+            directory: root.join(directory),
+            egress,
+        }
+    }
+
+    /// The detail of the refusal of a driver open over a running launch, as it read before the
+    /// table (`story:concurrent-confined-runs` keeps it).
+    fn running_detail(root: &Path) -> String {
+        format!(
+            "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
+            root.display()
+        )
+    }
+
+    /// story:concurrent-confined-runs: two runners asking for one key get one driver, opened once,
+    /// and the second gets it while a launch on it runs, since sharing a driver opens nothing.
+    #[test]
+    fn driver_table_two_runners_share_one_driver_for_one_key() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let (first, second) = (Drivers::default(), Drivers::default());
+        let key = table_key(root.path(), "workspaces", DriverEgress::NONE);
+        let opened = table
+            .driver(&key, counting(&calls))
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let shared = table
+            .driver(&key, counting(&calls))
+            .expect("the second runner shares the driver while a launch runs on it");
+        second.keep(&shared);
+        assert!(Arc::ptr_eq(&opened, &shared), "one driver for one key");
+        assert_eq!(calls.get(), 1, "the opener ran once");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: a launch counted under one root refuses no driver under
+    /// another.
+    #[test]
+    fn driver_table_a_launch_under_one_root_does_not_refuse_another_root() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let launch = Running::enter(a.path());
+        let key = table_key(b.path(), "workspaces", DriverEgress::NONE);
+        let opened = table.driver(&key, counting(&calls));
+        assert!(opened.is_ok(), "{:?}", opened.err());
+        assert_eq!(calls.get(), 1, "root B's driver opened");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: while a launch runs under a root, a runner that needs a
+    /// driver for another directory under it is refused as before, and nothing opens.
+    #[test]
+    fn driver_table_another_directory_under_a_running_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let first = Drivers::default();
+        let opened = table
+            .driver(
+                &table_key(root.path(), "here", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let error = table
+            .driver(
+                &table_key(root.path(), "elsewhere", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .err()
+            .expect("another directory under a running root opens nothing");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(error.detail, running_detail(root.path()));
+        assert_eq!(calls.get(), 1, "the opener was not called again");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: while a launch runs under a root, a launch in the same
+    /// directory with another egress is refused in the same way, and nothing opens.
+    #[test]
+    fn driver_table_another_egress_under_a_running_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let first = Drivers::default();
+        let opened = table
+            .driver(
+                &table_key(root.path(), "here", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let bundle = DriverEgress {
+            apertures: Vec::new(),
+            ca_bundle: Some(CaBundle {
+                named: PathBuf::from("/etc/ssl/bundle.pem"),
+                bytes: b"bundle".to_vec(),
+            }),
+        };
+        let error = table
+            .driver(&table_key(root.path(), "here", bundle), counting(&calls))
+            .err()
+            .expect("another egress under a running root opens nothing");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(error.detail, running_detail(root.path()));
+        assert_eq!(calls.get(), 1, "the opener was not called again");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: the table holds a driver only while a runner that used it
+    /// lives; once the last one is dropped, the next request opens a new one.
+    #[test]
+    fn driver_table_a_driver_dropped_by_its_last_runner_leaves_the_table() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let key = table_key(root.path(), "workspaces", DriverEgress::NONE);
+        let (first, second) = (Drivers::default(), Drivers::default());
+        first.keep(&table.driver(&key, counting(&calls)).unwrap());
+        second.keep(&table.driver(&key, counting(&calls)).unwrap());
+        assert_eq!(calls.get(), 1);
+        drop(first);
+        assert!(table.holds(&key), "a runner that used the driver lives");
+        drop(second);
+        assert!(!table.holds(&key), "the last runner that used it is gone");
+        let third = Drivers::default();
+        third.keep(&table.driver(&key, counting(&calls)).unwrap());
+        assert_eq!(calls.get(), 2, "the next request opened the driver again");
+    }
+
+    /// The crates whose statics `every_static_of_the_runtime_crates_is_listed_harmless` reads: the
+    /// Loom crates `b10x-loom-tree` links, by their directory under `crates/`.
+    const RUNTIME_CRATES: [&str; 9] = [
+        "loom-intake-slice",
+        "loom-bindings",
+        "loom-governor",
+        "loom-commission",
+        "loom-executor",
+        "loom-protocols",
+        "loom-runlog",
+        "loom-tree",
+        "loom-intake-references",
+    ];
+
+    /// Every static of [`RUNTIME_CRATES`]: its file under `crates/`, its name, and why it lets no
+    /// run of the process change another run's result (`story:concurrent-confined-runs`).
+    const HARMLESS_STATICS: [(&str, &str, &str); 27] = [
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "RUNNING",
+            "counts launches per root; only refuses a driver open that would end one",
+        ),
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "DRIVERS",
+            "shares a driver only between launches with an equal key",
+        ),
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "NEXT_EXEC",
+            "makes names unique",
+        ),
+        (
+            "loom-bindings/src/program.rs",
+            "ISSUED",
+            "makes names unique",
+        ),
+        ("loom-bindings/src/open.rs", "ISSUED", "makes names unique"),
+        ("loom-bindings/src/copy.rs", "ISSUED", "makes names unique"),
+        (
+            "loom-intake-slice/src/executor.rs",
+            "ISSUED",
+            "makes names unique",
+        ),
+        (
+            "loom-governor/src/locked_dir.rs",
+            "NEXT_TEMPORARY",
+            "makes names unique",
+        ),
+        (
+            "loom-intake-slice/src/state_dir.rs",
+            "NEXT_TEMPORARY",
+            "makes names unique",
+        ),
+        (
+            "loom-intake-slice/src/results.rs",
+            "NEXT_SCOPE",
+            "makes names unique",
+        ),
+        ("loom-executor/src/lib.rs", "MADE", "makes names unique"),
+        ("loom-tree/src/suite/run.rs", "WRITES", "makes names unique"),
+        (
+            "loom-governor/src/lib.rs",
+            "ENGINEERING",
+            "the compiled-in catalog, immutable once made",
+        ),
+        ("loom-intake-references/src/lib.rs", "TOKEN", "immutable"),
+        ("loom-intake-references/src/lib.rs", "MARK", "immutable"),
+        ("loom-intake-references/src/lib.rs", "GITHUB", "immutable"),
+        ("loom-intake-references/src/lib.rs", "GITLAB", "immutable"),
+        ("loom-intake-references/src/lib.rs", "SLACK", "immutable"),
+        ("loom-intake-references/src/lib.rs", "JIRA", "immutable"),
+        (
+            "loom-intake-slice/src/git.rs",
+            "RECORDINGS",
+            "keyed by the canonical workspace, replaced only for the same workspace",
+        ),
+        (
+            "loom-executor/src/metering.rs",
+            "OPEN",
+            "thread-local; each run has its own thread",
+        ),
+        (
+            "loom-executor/src/metering.rs",
+            "TURNING",
+            "thread-local; each run has its own thread",
+        ),
+        (
+            "loom-intake-slice/src/clock.rs",
+            "OFFSET",
+            "feature `test-clock`, test builds only; it only moves forward",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "SYNCED",
+            "counts syncs for a report; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "SKIPPED",
+            "counts skipped syncs for a report, test builds only; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "ON_THIS_THREAD",
+            "thread-local counts for a report; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "MARKER",
+            "immutable bytes, test builds only",
+        ),
+    ];
+
+    /// The names of the statics `line` declares (`static NAME:` or `static mut NAME:`, never a
+    /// `'static` lifetime), the part after `//` left out.
+    fn declared_statics(line: &str) -> Vec<String> {
+        let code = line.split("//").next().unwrap_or_default();
+        let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut names = Vec::new();
+        for (at, _) in code.match_indices("static") {
+            let before = code[..at].chars().next_back();
+            if before.is_some_and(|c| ident(c) || c == '\'') {
+                continue;
+            }
+            let rest = &code[at + "static".len()..];
+            if !rest.starts_with(char::is_whitespace) {
+                continue;
+            }
+            let mut rest = rest.trim_start();
+            if let Some(after) = rest.strip_prefix("mut ") {
+                rest = after.trim_start();
+            }
+            let name: String = rest.chars().take_while(|c| ident(*c)).collect();
+            if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+                continue;
+            }
+            if rest[name.len()..].trim_start().starts_with(':') {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// Every `.rs` file under `directory`, recursively.
+    fn rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, files);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    /// story:concurrent-confined-runs: every static of the runtime crates, test modules and
+    /// feature-gated code included, is in [`HARMLESS_STATICS`], and every entry there is still a
+    /// static. A lazily made global (`OnceLock`, `LazyLock`, `lazy_static!`) that declares no listed
+    /// static fails too.
+    #[test]
+    fn every_static_of_the_runtime_crates_is_listed_harmless() {
+        // Spelled in two halves, so this file's own text holds none of them whole.
+        let lazy = [
+            concat!("Once", "Lock<"),
+            concat!("Once", "Lock::"),
+            concat!("Lazy", "Lock<"),
+            concat!("Lazy", "Lock::"),
+            concat!("lazy_", "static!"),
+        ];
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let listed: std::collections::BTreeSet<(&str, &str)> = HARMLESS_STATICS
+            .iter()
+            .map(|(file, name, _)| (*file, *name))
+            .collect();
+        let mut found = std::collections::BTreeSet::new();
+        let mut unlisted = Vec::new();
+        for name in RUNTIME_CRATES {
+            let mut files = Vec::new();
+            rust_files(&crates.join(name).join("src"), &mut files);
+            assert!(!files.is_empty(), "crates/{name}/src holds Rust files");
+            for path in files {
+                let file = path
+                    .strip_prefix(crates)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (number, line) in text.lines().enumerate() {
+                    let statics = declared_statics(line);
+                    for name in &statics {
+                        if listed.contains(&(file.as_str(), name.as_str())) {
+                            found.insert((file.clone(), name.clone()));
+                        } else {
+                            unlisted.push(format!("{file}:{}: static {name}", number + 1));
+                        }
+                    }
+                    let code = line.split("//").next().unwrap_or_default();
+                    if statics.is_empty() && lazy.iter().any(|needle| code.contains(needle)) {
+                        unlisted.push(format!("{file}:{}: {}", number + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "statics of the runtime crates not listed harmless:\n{}",
+            unlisted.join("\n")
+        );
+        let stale: Vec<_> = listed
+            .iter()
+            .filter(|(file, name)| !found.contains(&((*file).to_owned(), (*name).to_owned())))
+            .collect();
+        assert!(stale.is_empty(), "listed and no longer a static: {stale:?}");
     }
 
     /// The configuration of every driver Loom opens names no Git source
