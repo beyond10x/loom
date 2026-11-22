@@ -24,3 +24,4 @@ domains:
   - loom.bindings
   - loom.runlog
   - loom.decision
+  - loom.tree

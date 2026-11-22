@@ -472,6 +472,7 @@ dependencies = [
  "b10x-loom-protocols",
  "b10x-loom-resource",
  "b10x-loom-sdk",
+ "b10x-loom-tree",
  "chrono",
  "clap",
  "intake",
@@ -795,6 +796,23 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "url",
+]
+
+[[package]]
+name = "b10x-loom-tree"
+version = "0.58.0"
+dependencies = [
+ "b10x-canon",
+ "b10x-loom-bindings",
+ "b10x-loom-commission",
+ "b10x-loom-executor",
+ "b10x-loom-governor",
+ "b10x-loom-intake-slice",
+ "b10x-loom-protocols",
+ "b10x-loom-runlog",
+ "loom",
+ "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]
