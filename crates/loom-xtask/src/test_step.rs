@@ -13,7 +13,8 @@
 //! cold build does not count either; the doc tests' own compilation does. Beside that build it
 //! fills the schema cache the `crd` tests of `b10x-loom-resource` read ([`fill_schema_cache`]) and
 //! the syntheses the generator tests of `loom-xtask` and `loom-commission-xtask` read
-//! ([`fill_synthesis_stand_in`]), so no test of the step makes one or waits for it. `-p <package>` runs the
+//! ([`fill_synthesis_stand_in`]) and `b10x-loom-commission-testkit` reads
+//! ([`fill_plain_synthesis`]), so no test of the step makes one or waits for it. `-p <package>` runs the
 //! same over named packages, the doc tests over those of them with a library ([`with_library`]);
 //! in a build-pool job nextest runs `SLOT_TOKENS` tests at once.
 
@@ -62,6 +63,9 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     let mut fills: Vec<(&str, Fill<'_>)> = Vec::new();
     if runs(CRD_PACKAGE) {
         fills.push(("schema cache", Box::new(|| fill_schema_cache(root))));
+    }
+    if runs(PLAIN_SYNTHESIS_PACKAGE) {
+        fills.push(("plain synthesis", Box::new(|| fill_plain_synthesis(root))));
     }
     for (package, specification) in GENERATOR_PACKAGES {
         if runs(package) {
@@ -228,6 +232,9 @@ pub fn verdict(
 /// The package whose `crd` tests read the schema cache.
 const CRD_PACKAGE: &str = "b10x-loom-resource";
 
+/// The package whose tests read the plain synthesis of `ess/commission`.
+const PLAIN_SYNTHESIS_PACKAGE: &str = "b10x-loom-commission-testkit";
+
 /// A fixture filled beside the build: the entry it made and the seconds it took.
 type Fill<'a> = Box<dyn FnOnce() -> Result<(PathBuf, f64), String> + Send + 'a>;
 
@@ -253,6 +260,22 @@ fn fill_synthesis_stand_in(root: &Path, specification: &str) -> Result<(PathBuf,
         &target_dir(root)
             .join("tmp")
             .join(crate::ess_suite::STAND_IN_CACHE),
+    )?;
+    Ok((made, started.elapsed().as_secs_f64()))
+}
+
+/// Fills the plain synthesis of `ess/commission` that `b10x-loom-commission-testkit`'s tests read
+/// (`ess verify conform synthesize` with no other option, seconds each time) under the same
+/// directory and key, so no test of the step makes it or waits for it.
+fn fill_plain_synthesis(root: &Path) -> Result<(PathBuf, f64), String> {
+    let started = Instant::now();
+    let made = crate::ess_suite::plain_synthesis_once(
+        &crate::ess_suite::ess_program(root),
+        root,
+        &root.join(crate::ess_suite::PLAIN_SYNTHESIS_SPECIFICATION),
+        &target_dir(root)
+            .join("tmp")
+            .join(crate::ess_suite::PLAIN_SYNTHESIS_CACHE),
     )?;
     Ok((made, started.elapsed().as_secs_f64()))
 }
