@@ -41,6 +41,10 @@
 //!
 //! `linked-libraries <binary>` runs `ldd` on a built binary and fails, naming the library, when it
 //! links `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz` (see `linked_libraries`).
+//!
+//! `docs-stamp --check` (`task docs-check`) compares the working tree with the stamp of the
+//! generated documentation and builds nothing; `docs-stamp --slow-needed` decides whether CI runs
+//! `task docs-slow` (see `docs_stamp`).
 
 use b10x_loom_resource::crd;
 use clap::{Parser, Subcommand};
@@ -208,6 +212,33 @@ enum Command {
     /// pass without the test sync switch's feature, a release build of `b10x-loom-governor` with it
     /// fails to compile, and `b10x-loom-cli`'s normal dependencies do not hold it.
     DurableCheck,
+    /// The stamp of the generated documentation, `website/docs/reference/.generated.json`.
+    /// `--check` (`task docs-check`) fails, naming the first input, the `ess` version or the
+    /// generated file that differs from the stamp, or a raw admonition title under
+    /// `website/docs`; it builds nothing. `--slow-needed` prints `run` or `skip`: whether CI runs
+    /// `task docs-slow`.
+    DocsStamp {
+        /// Compare the working tree with the stamp.
+        #[arg(
+            long,
+            conflicts_with = "slow_needed",
+            required_unless_present = "slow_needed"
+        )]
+        check: bool,
+        /// Print `run` for a push to `refs/heads/main` or a stamp that differs from `--base`,
+        /// else `skip`.
+        #[arg(long, requires_all = ["base", "event", "git_ref"])]
+        slow_needed: bool,
+        /// The base branch's stamp; an empty or missing file is a base without one.
+        #[arg(long)]
+        base: Option<PathBuf>,
+        /// The event that started the run, as `github.event_name` gives it.
+        #[arg(long)]
+        event: Option<String>,
+        /// The ref the run is for, as `github.ref` gives it.
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -317,6 +348,20 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::LinkedLibraries { binary } => linked_libraries::linked_libraries(&binary),
         Command::UnsyncedStore { binary } => unsynced_store::unsynced_store(&binary),
         Command::DurableCheck => durable_check::durable_check(&root),
+        Command::DocsStamp { check: true, .. } => {
+            docs_stamp::check(&root, &ess_suite::Ess::new(&cli.ess, &root))
+        }
+        Command::DocsStamp {
+            base,
+            event,
+            git_ref,
+            ..
+        } => docs_stamp::print_slow_needed(
+            &root,
+            &base.unwrap_or_default(),
+            event.as_deref().unwrap_or_default(),
+            git_ref.as_deref().unwrap_or_default(),
+        ),
     }
 }
 
