@@ -1,8 +1,9 @@
 //! [`FileDecisionStore`] keeps a decision request, and the records kept beside it, a file each in
 //! a store directory, and they survive a restart (`story:decision-request-file-store`).
 //!
-//! Each test states one Acceptance line of the story; the last two hold the store's own refusals
-//! of a second decision and of a file whose bytes it did not write. The two restart tests are real:
+//! Each test states one Acceptance line of the story; the last four hold the store's own refusals
+//! of a second decision, of a file whose bytes it did not write and of a supersession that changes
+//! more than the supersession. The two restart tests are real:
 //! the test runs its own binary as a child process, twice, over one store directory, selected by
 //! the test's name alone so it still selects itself as a module of a crate's one test binary. The
 //! concurrent tests give each thread its own store over one directory and hold every thread at a
@@ -1099,4 +1100,132 @@ fn a_file_whose_bytes_were_changed_is_refused_naming_the_file() {
 
     std::fs::write(&path, &text).unwrap();
     assert_eq!(store.records(&id(DR1)).expect("reads").len(), 1);
+}
+
+/// The store's own refusal (security review of the w7 batch): a decision is an option letter and
+/// what it decided is that option's consequence, so a write that supersedes a decided request
+/// cannot turn the decided option's grant into a denial.
+#[test]
+fn a_superseding_write_cannot_turn_the_decided_grant_into_a_denial() {
+    let dir = store_dir("superseded-consequence");
+    let mut store = open_store(&dir);
+    let open = opened(approval(DR1, KEY, "operator"));
+    store.write(None, open.clone()).expect("stored");
+    let first = decided(&open, "A");
+    store.write(Some(&open), first).expect("decided on A");
+    let held = read(&store, DR1);
+    let grant_of_a = |snapshot: &DecisionRequestSnapshot| {
+        snapshot
+            .data
+            .options
+            .iter()
+            .find(|option| option.letter.0 == "A")
+            .and_then(|option| option.consequence.grant)
+    };
+    assert_eq!(grant_of_a(&held), Some(Grant::Granted), "A grants");
+    let path = dir.join(file_name(DR1));
+    let bytes = std::fs::read(&path).unwrap();
+
+    let mut rewritten = superseded_write(&held);
+    for option in &mut rewritten.data.options {
+        option.consequence.grant = Some(if option.letter.0 == "A" {
+            Grant::Denied
+        } else {
+            Grant::Granted
+        });
+    }
+    let answered = store.write(Some(&held), rewritten);
+    let after = read(&store, DR1);
+    assert!(
+        matches!(answered, Err(WriteError::Failure(_))) && std::fs::read(&path).unwrap() == bytes,
+        "a Superseded write that turns the decided option A from a grant into a denial was \
+         answered {answered:?}; the store now holds {:?} decided on {:?}, whose consequence is \
+         {:?}",
+        after.state,
+        after.data.decided_option,
+        grant_of_a(&after)
+    );
+}
+
+/// `held` superseded by `DR2`, as `supersede` writes it, and nothing else changed.
+fn superseded_write(held: &DecisionRequestSnapshot) -> DecisionRequestSnapshot {
+    let mut next = held.clone();
+    next.state = DecisionRequestState::Superseded;
+    next.data.superseded_by = Some(id(DR2));
+    next.data.superseded_reason = Some("Asked again.".to_owned());
+    next
+}
+
+/// The class of the refusal above: a write that supersedes a decided request changes its state,
+/// `superseded_by` and `superseded_reason`, and records a produced record it did not hold yet,
+/// and nothing else. Each change below rides on an otherwise well-formed supersession and is
+/// refused, writing nothing; the supersession alone, and with its first produced record, is kept.
+#[test]
+fn a_superseding_write_changes_nothing_but_the_supersession() {
+    type Change = fn(&mut DecisionRequestSnapshot);
+    let changes: [(&str, Change); 8] = [
+        ("options", |next| next.data.options.reverse()),
+        ("eligible", |next| next.data.eligible.push(principal("eve"))),
+        ("holder", |next| next.data.holder = Holder::Rule),
+        ("case_id", |next| {
+            next.data.case_id = CaseId("IDEA-2.other".to_owned());
+        }),
+        ("question", |next| {
+            next.data.question = "Deploy the change?".to_owned();
+        }),
+        ("record_key", |next| {
+            next.data.record_key = "change.merge@r10".to_owned();
+        }),
+        ("subject_revision", |next| {
+            next.data.subject_revision = Revision("t0r2".to_owned());
+        }),
+        ("unblocks", |next| {
+            next.data.unblocks.action = ActionId("change.deploy".to_owned());
+        }),
+    ];
+    for (field, change) in changes {
+        let dir = store_dir(&format!("superseded-changes-{field}"));
+        let mut store = open_store(&dir);
+        let open = opened(approval(DR1, KEY, "operator"));
+        store.write(None, open.clone()).expect("stored");
+        store
+            .write(Some(&open), decided(&open, "A"))
+            .expect("decided on A");
+        let held = read(&store, DR1);
+        let path = dir.join(file_name(DR1));
+        let bytes = std::fs::read(&path).unwrap();
+        let mut next = superseded_write(&held);
+        change(&mut next);
+        assert_ne!(next.data, superseded_write(&held).data, "{field} changed");
+        let answered = store.write(Some(&held), next);
+        assert!(
+            matches!(answered, Err(WriteError::Failure(_))),
+            "a Superseded write that also changes `{field}` was answered {answered:?}"
+        );
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "a refused write of `{field}` wrote nothing"
+        );
+    }
+
+    let dir = store_dir("superseded-with-its-record");
+    let mut store = open_store(&dir);
+    let open = opened(approval(DR1, KEY, "operator"));
+    store.write(None, open.clone()).expect("stored");
+    store
+        .write(Some(&open), decided(&open, "A"))
+        .expect("decided on A");
+    let held = read(&store, DR1);
+    let mut next = superseded_write(&held);
+    next.data.produced_record = Some(ProducedRecord {
+        document: ProducedDocument::CanonAuthority,
+        record: "change.merge@r9".to_owned(),
+        case_revision: Revision("r9".to_owned()),
+        aep_record: None,
+    });
+    store
+        .write(Some(&held), next.clone())
+        .expect("a supersession that records its first produced record is kept");
+    assert_eq!(read(&store, DR1), next);
 }
