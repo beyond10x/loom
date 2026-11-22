@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5
+// contract digest d734f0d1d18efed9c604461e149ede6e06b33483c97621fba1d53c6e6b556e21
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Semantic types synthesised from the `loom` specification, v1.
