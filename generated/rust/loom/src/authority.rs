@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 6a11f708ca50ab2e73836876ae5a92421f2c85ffa5f8f197194f2f98694a8e71
+// contract digest ddb5b0753eeceb84d23752172c722d5919e4c36ccc7327e4704a85122b69929d
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Authority — `loom.authority`.
