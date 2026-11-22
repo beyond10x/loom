@@ -1190,7 +1190,9 @@ pub(crate) fn artifact_revisions<S: loom_governor::FallibleCaseStore>(
 /// The moves of a step, as its `action finished` line names them: one per artifact whose revision
 /// differs between `before` and `after`, the case's artifact revisions read before and after the
 /// step, in artifact order. A step writes its moves in one store write, one move per artifact, so
-/// these are its moves whatever its end (`story:tree-replay-command`, D6 a).
+/// these are its moves whatever its end (`story:tree-replay-command`, D6 a); a cancelled, refused
+/// or failed step has no report to read them from. [`LogHistory`] dates each action by them, so
+/// they stay complete (`story:action-dated-by-revisions-its-step-left`).
 pub(crate) fn revision_moves(
     before: &BTreeMap<String, String>,
     after: &BTreeMap<String, String>,

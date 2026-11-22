@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use b10x_loom_commission::model::responsibility::CaseId;
 use b10x_loom_tree::model::{TreeRun, TreeStop};
+use b10x_loom_tree::runlog::RunLogEvent;
 use b10x_loom_tree::{
     ConfinementAdapter, EngineConfinement, EngineRunner, OpenRequest, RunSettings, TreeTime,
     UNCONFINED_FLAG_REASON, open_tree, read_protocols_directory, run_tree,
@@ -209,5 +211,54 @@ fn a_cancel_ends_its_own_run_and_no_other_in_the_process() {
     assert_eq!(run_b.stop, TreeStop::Terminal, "{run_b:?}");
     assert_eq!(run_b.detail.as_deref(), Some("finished"), "{run_b:?}");
     assert!(!flag_b.load(Ordering::SeqCst));
+    assert!(started.elapsed() < Duration::from_secs(30));
+}
+
+/// A step its cancel ended after it moved its artifact names the move on its `action finished`
+/// line (`story:action-dated-by-revisions-its-step-left`): the moves are the difference of the
+/// case's revisions before and after the step, whatever its end, never read from a report the
+/// cancelled step does not have.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_step_that_moved_an_artifact_names_its_move() {
+    let started = Instant::now();
+    let tree = Tree::open(
+        "rs-cancel-move",
+        "echo more >> work.txt\ntouch target/started\nsleep 30\n",
+        "",
+        "exit 1\n",
+    );
+    let flag = AtomicBool::new(false);
+    let run = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            wait_for(&tree.workspace.join("target/started"));
+            flag.store(true, Ordering::SeqCst);
+        });
+        tree.run(&flag)
+    });
+    assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+    let finished = super::replay::fixture::lines(&tree.store, "root")
+        .into_iter()
+        .rev()
+        .find_map(|line| match line.event {
+            RunLogEvent::ActionFinished(finished) => Some(finished),
+            _ => None,
+        })
+        .expect("an action finished line");
+    assert_eq!(finished.action, "work.do", "{finished:?}");
+    assert!(
+        finished
+            .refusal
+            .as_deref()
+            .is_some_and(|refusal| refusal.starts_with("Cancelled: ")),
+        "{finished:?}"
+    );
+    let held = super::replay::fixture::governor(&tree.store)
+        .revisions(&CaseId("root".to_owned()))
+        .unwrap()["work"]
+        .clone();
+    assert_eq!(finished.revisions.len(), 1, "{finished:?}");
+    assert_eq!(finished.revisions[0].artifact, "work", "{finished:?}");
+    assert_eq!(finished.revisions[0].to, held, "{finished:?}");
     assert!(started.elapsed() < Duration::from_secs(30));
 }
