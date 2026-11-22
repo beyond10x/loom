@@ -323,7 +323,8 @@ types:
   # answered a refusal or the blob could not be kept), whether it was killed at its timeout, and the
   # runner's refusal as text (absent when the runner answered a run). `class` (story
   # bound-program-contract) is the exit class the binding's `exits` gives the run's exit code,
-  # absent for any other exit and for a run killed at its timeout. The observations of one action
+  # absent for any other exit, for an exit in 129 to 192 (a signal ended the child, story
+  # bound-program-signal-exit-is-refused) and for a run killed at its timeout. The observations of one action
   # in one case from the port that hold no `class` are its run count. `retry_of` (story
   # bound-program-retry-records) holds the evidence ids of the retry records the run was given, in
   # the order the case received them; it is empty on a run that was given none. A retried run is a
@@ -440,8 +441,12 @@ types:
   # ends the run, its text names the exit code and the blob digest, never the program's output); the
   # port's cancel handle was set before a program started or ended the bound program or its
   # `arguments_from` program while it ran (`Cancelled`, story cancel-a-running-bound-program: the
-  # step ends the run, and a program it ended is a run that counts). A refused step records no
-  # evidence.
+  # step ends the run, and a program it ended is a run that counts); the run's exit is one
+  # Substrate gives a child a signal ended, 129 to 192 (`ProgramSignalled`, story
+  # bound-program-signal-exit-is-refused: the step ends the run, its text names the signal and the
+  # blob digest; the run counts). A run killed at its timeout is not `ProgramSignalled`, and
+  # neither an `exits` class nor a table row is read for an exit in 129 to 192. A refused step
+  # records no evidence.
   - name: loom.bindings.ProgramRefusalReason
     kind: enum
     variants:
@@ -453,6 +458,7 @@ types:
       - ArtifactUnreadable
       - ProgramError
       - Cancelled
+      - ProgramSignalled
 
   # A refused step: the reason, the action and what is wrong.
   - name: loom.bindings.ProgramRefusal
