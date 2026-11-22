@@ -428,3 +428,20 @@ fn a_seed_that_is_a_link_is_refused_before_any_cycle() {
     let _ = fs::remove_dir_all(&dir);
     within_bound(started);
 }
+
+/// `tree test --help` names the one file written outside `--scratch`: the `--report` file.
+#[test]
+fn the_help_names_the_report_as_the_one_write_outside_scratch() {
+    let started = Instant::now();
+    let help = command(&fresh_scratch("help"))
+        .args(["tree", "test", "--help"])
+        .output()
+        .unwrap();
+    let said = text(&help.stdout);
+    assert_eq!(help.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("nothing but the --report file is written outside --scratch"),
+        "{said}"
+    );
+    within_bound(started);
+}

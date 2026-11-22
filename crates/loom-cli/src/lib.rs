@@ -293,13 +293,13 @@ pub enum TreeCommand {
 }
 
 /// What `tree test --help` says about the cycles, the output and the exit status.
-pub const TREE_TEST_HELP: &str = "Cycle n works in <scratch>/<n>/ (store/, work/) and nothing is \
-written outside --scratch, which must be absent or empty. The protocols are read once, as tree \
-open --protocols reads them. Each step runs through the function of its tree command in this \
-process; no b10x-loom process is started. A cycle that uses a step kind, source or member that \
-waits for a later story is pending and not run; one whose `when` fails is not run. One line is \
-printed per cycle as it ends, then the two summary lines; a found value that is not a number, a \
-boolean or a name Loom declares is printed as its length and digest.
+pub const TREE_TEST_HELP: &str = "Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but \
+the --report file is written outside --scratch, which must be absent or empty. The protocols are \
+read once, as tree open --protocols reads them. Each step runs through the function of its tree \
+command in this process; no b10x-loom process is started. A cycle that uses a step kind, source \
+or member that waits for a later story is pending and not run; one whose `when` fails is not run. \
+One line is printed per cycle as it ends, then the two summary lines; a found value that is not a \
+number, a boolean or a name Loom declares is printed as its length and digest.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected

@@ -117,6 +117,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `loom::runlog::RunLogEvent` gains `HandoffChecked`, one line per check; an older reader refuses the kind (story:handoff-when-a-program-decides)
 - **Breaking:** `loom::tree::TreeRefusalReason` gains `HandoffCheckFailed`: a check that gave no exit status stops `tree run`, exit 1 (story:handoff-when-a-program-decides)
 - `tree test` under its default confinement, `substrate`, is refused with a text of its own that names `--confinement local`, no longer `tree run`'s, which advised `--cgroup-root`, a flag `tree test` rejects
+- `tree test --help` names the `--report` file as the one thing written outside `--scratch`; it said nothing was
 
 ### Removed
 

@@ -821,11 +821,11 @@ Usage: b10x-loom tree test [OPTIONS] --suite <FILE> --protocols <DIR> --scratch 
 | `--protocols <DIR>` | yes | none | The directory whose `.yaml` files are the protocols of every cycle's tree |
 | `--scratch <DIR>` | yes | none | The directory the cycles work in: absent or empty |
 | `--at <INSTANT>` | yes | none | The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ` |
-| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` needs a delegated cgroup root, which `tree test` does not take yet: it is refused before any cycle |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` needs a delegated cgroup root, which `tree test` does not take yet: it is refused before any cycle; pass `local` |
 | `--report <FILE>` | no | none | Also write the result as one loom.tree.SuiteReport JSON document to this file |
 
 ```text
-Cycle n works in <scratch>/<n>/ (store/, work/) and nothing is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle as it ends, then the two summary lines; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
+Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but the --report file is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle as it ends, then the two summary lines; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected
