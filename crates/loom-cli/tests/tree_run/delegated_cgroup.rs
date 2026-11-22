@@ -529,3 +529,64 @@ fn tree_run_help_and_refusal_name_the_confinement_precondition() {
         }
     }
 }
+
+/// story:person-action-runs-a-program: under `substrate`, the default, the program a person's
+/// approval runs is confined as a program step's: it writes only inside the workspace. `tree
+/// approve` starts itself again in a delegated scope of its own, as `tree run` does.
+#[test]
+fn a_person_program_runs_confined_under_substrate() {
+    use super::person_program::{OWNER, answer_bindings, answer_tree, program_failed, waiting};
+    if !delegation_present() {
+        return;
+    }
+    let outside = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "person-program-escaped-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let bindings = answer_bindings(
+        OWNER,
+        Some(&format!(
+            "[sh, stubs/escape.sh, {:?}]",
+            outside.display().to_string()
+        )),
+        None,
+        None,
+        "",
+        "",
+    );
+    let escape = "#!/bin/sh\nprintf 'escaped\\n' > \"$1\" || exit 7\n";
+    let tree = answer_tree(
+        "person-program-substrate",
+        &bindings,
+        &[("escape.sh", escape)],
+    );
+    waiting(&tree);
+    let home = tree.root.join("home");
+    let mut command = Command::new(BINARY);
+    command
+        .env("HOME", &home)
+        .env("XDG_DATA_HOME", &home)
+        .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
+        .env_remove("RUST_LOG");
+    let refused = super::with_the_switch(&mut command)
+        .args(["tree", "approve", "--at", AT, "--store"])
+        .arg(tree.store())
+        .args([
+            "--case",
+            "root",
+            "--capability",
+            "owner.answer",
+            "--principal",
+            OWNER,
+            "--action",
+            "answer.take",
+        ])
+        .output()
+        .unwrap();
+    program_failed(&refused, &["exit 7"]);
+    assert!(!outside.exists(), "the program wrote {}", outside.display());
+}

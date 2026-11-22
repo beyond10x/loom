@@ -64,7 +64,7 @@ pub use loom::runlog;
 pub use loom::tree as model;
 
 pub use approvals::{TreeAuthority, approvals_file_name, read_approvals};
-pub use approve::{ApproveRequest, MAX_NAME_BYTES, Reasons, approve};
+pub use approve::{ApproveRequest, MAX_NAME_BYTES, Reasons, approve, person_program};
 pub use close::{CaseClosed, CloseRequest, close};
 pub use context::derived_uuid;
 pub use encode::{decision_json, refusal_json, run_json, status_json, verify_json};
@@ -104,6 +104,7 @@ impl Refused {
             action: None,
             story: None,
             holder: None,
+            command: None,
         }))
     }
 

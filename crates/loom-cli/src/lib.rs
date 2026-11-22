@@ -591,6 +591,15 @@ pub struct TreeApproveArgs {
     /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
     #[arg(long, value_name = "INSTANT")]
     pub at: Option<String>,
+    /// The confinement the program of the person action starts under, when its binding names an
+    /// argv, as tree run's programs do; an action with no program starts nothing under it.
+    #[arg(long, value_enum, default_value = "substrate")]
+    pub confinement: TreeConfinement,
+    /// The delegated cgroup v2 directory the program runs under, as tree run --cgroup-root; without
+    /// it, tree approve of an action with a program starts itself again in a delegated scope of its
+    /// own.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
 }
 
 /// The arguments of `b10x-loom tree close`.

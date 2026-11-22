@@ -34,11 +34,12 @@ types:
     variants: [Program, Agent, Person, Open, Copy]
 
   # An executor and the members it takes. `kind` is the variant; each other member belongs to one
-  # variant (`argv`: Program; `adapter`, `model`, `inputs`, `outputs`: Agent; `principal`: Person;
-  # `name`, `each`, `bindings`: Open; `evidence`, `from`: Copy) and the load-time check refuses it
-  # on any other. A decoded Agent with no `model` holds `claude-haiku-5-5`. `inputs` and `outputs`
-  # are paths in the workspace. `name` or `each` (one of them) is the argument that names the
-  # child case; `bindings` is the child's bindings file. `evidence` is the kind of the copied
+  # variant (`adapter`, `model`, `inputs`, `outputs`: Agent; `principal`: Person; `name`, `each`,
+  # `bindings`: Open; `evidence`, `from`: Copy), but `argv`, which belongs to Program and Person
+  # (story person-action-runs-a-program: a person's approval runs it), and the load-time check
+  # refuses it on any other. A decoded Agent with no `model` holds `claude-haiku-5-5`. `inputs`
+  # and `outputs` are paths in the workspace. `name` or `each` (one of them) is the argument that
+  # names the child case; `bindings` is the child's bindings file. `evidence` is the kind of the copied
   # record and `from` the protocol id of the case it is copied from.
   - name: loom.bindings.ExecutorSpec
     kind: struct
@@ -255,12 +256,16 @@ types:
         type: List<loom.bindings.BoundAction>
 
   # Why a document is refused: at decoding (`Malformed`, `UndeclaredMember`, `MissingMember`,
-  # `UnsupportedFormat`, `InvalidArgv`, `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`,
+  # `UnsupportedFormat`, `InvalidArgv` (an argv that is empty or not a list of strings; and, story
+  # person-action-runs-a-program, the placeholder `{principal}` in any argv but a Person
+  # executor's `argv`, as that argv's first entry, or in an entry that is not exactly
+  # `{principal}`), `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`,
   # `InvalidToolName`, `InvalidEffectResult` (an `Effect` key other than `performed`, but a
   # Person executor's named value other than `*`)) and at load against the compiled protocol
   # (`ProtocolMismatch`, `UnknownAction`, `DuplicateAction`, `KindNotProducible`,
   # `UndeclaredArtifact`, `UndeclaredEvidenceKind` (a `retry_when` kind the protocol does not declare),
-  # `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace`,
+  # `MemberNotForExecutor` (a member another executor takes; `arguments`, `arguments_from` and
+  # `exits` on a Person executor among them), `TimeoutOutOfRange`, `PathNotInWorkspace`,
   # `UndeclaredDimension`, `ExitClassConflict` (an exit code in both `exits` lists, or in one and
   # as a key of a `from: exit` table of the same binding)), and by `resolve_programs` against the
   # directory of the bindings file (`ProgramNotBesideBindings`), and by the open effect port when
@@ -323,7 +328,9 @@ types:
   # run: it counts against `budget.max_runs` like any other run without a `class`. `cancelled`
   # (story cancel-a-running-bound-program) is true when the run's cancel handle ended it: the
   # runner answered the refusal `Cancelled`, `runner_refusal` names it, and the run holds no exit
-  # and no blob. A cancelled run counts against `budget.max_runs`.
+  # and no blob. A cancelled run counts against `budget.max_runs`. `principal` (story
+  # person-action-runs-a-program) is the principal whose approval started the run of a Person
+  # executor's `argv`; it is absent on a program step.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -345,6 +352,8 @@ types:
         type: Optional<loom.bindings.ExitClass>
       - name: cancelled
         type: Boolean
+      - name: principal
+        type: Optional<String>
 
   # The environment of a program the program effect port starts (story bound-program-case-id),
   # the bound program and its `arguments_from` program alike: `path`, the variable `PATH` at the

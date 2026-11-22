@@ -507,6 +507,7 @@ fn run_cancellable(
             revision,
             &history,
             &handoff_command(&store, settings),
+            &confinement_flags(settings),
             &checks,
             &mut emit,
         )? {
@@ -1224,13 +1225,22 @@ fn handoff_command(store: &Path, settings: &RunSettings) -> Vec<String> {
         "--store".to_owned(),
         store.display().to_string(),
     ];
+    command.extend(confinement_flags(settings));
+    command
+}
+
+/// The run's `--confinement` and `--cgroup-root` as `settings` name them, which a printed command
+/// that starts programs carries: a handoff's `tree run`, and the `tree approve` of a person action
+/// whose binding names an `argv` (`story:person-action-runs-a-program`).
+fn confinement_flags(settings: &RunSettings) -> Vec<String> {
+    let mut flags = Vec::new();
     if let Some(confinement) = &settings.confinement {
-        command.extend(["--confinement".to_owned(), confinement.clone()]);
+        flags.extend(["--confinement".to_owned(), confinement.clone()]);
     }
     if let Some(root) = &settings.cgroup_root {
-        command.extend(["--cgroup-root".to_owned(), root.display().to_string()]);
+        flags.extend(["--cgroup-root".to_owned(), root.display().to_string()]);
     }
-    command
+    flags
 }
 
 /// The `Handoff` decision of `action` of `case` when its binding is not a person's and names a
@@ -1328,6 +1338,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     revision: i64,
     history: &LogHistory,
     handoff: &[String],
+    confinement: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<Waits, Refused> {
@@ -1373,6 +1384,10 @@ fn waits<S: loom_governor::FallibleCaseStore>(
         let kind = if kind == Executor::Person {
             person = true;
             command.extend(["--action".to_owned(), action.clone()]);
+            // A person action whose approval runs a program starts it as this run starts its own.
+            if bound.is_some_and(|bound| bound.executor.argv.is_some()) {
+                command.extend(confinement.iter().cloned());
+            }
             DecisionKind::ApproveAction
         } else {
             DecisionKind::Approve
