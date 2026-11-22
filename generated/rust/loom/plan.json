@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "3b8ee1aa5c7b6161ac47ff2fbc12dd1c3331aa8f6235ccd532bcbef3b158bf5c",
-    "contract_digest": "6e2bc89db48cc13409a0639b368a75cba696741ba861d545ce73bc0d10e31fe6"
+    "source_digest": "afb7cbe93277fea548eebe4af33f885e7b4a6687af114c264f6ef5db21c590e3",
+    "contract_digest": "d8d7d39dbecbd81471f7e6f22a7ef0473ff3fc40b31db137f4535fc29e93e708"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -460,6 +460,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ExitClass",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ExitClasses",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.ProducerIndependence",
       "disposition": {
         "disposition": "generated"
@@ -482,6 +496,13 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.ProgramRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramRoot",
       "disposition": {
         "disposition": "generated"
       }

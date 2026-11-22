@@ -21,7 +21,7 @@ use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::responsibility::{CaseId, GovernorError};
 use b10x_loom_commission::ports::effect::EffectError;
 use b10x_loom_intake_slice::confinement::ChildCommand;
-use loom::bindings::{BoundAction, ProgramEnvironment, RetryFeedback, RetryLog, RetryRecord};
+use loom::bindings::{BoundAction, RetryFeedback, RetryLog, RetryRecord};
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 use sha2::{Digest as _, Sha256};
 
@@ -186,23 +186,26 @@ pub(crate) fn feedback<S: FallibleCaseStore, T: EvaluationTime>(
     }))
 }
 
-/// `child`, built by [`crate::bound_case_child`] for `case`, with the environment
-/// `ProgramEnvironment` describes built again: its `PATH`, `case` and [`RETRY_FEEDBACK_VARIABLE`]
-/// at the path of `feedback`, mounted read-only at that path when `local_reason` is `None` (a
-/// runner that is not `local`); with no feedback, no such variable.
+/// `child`, built by [`crate::bound_case_child`], with the environment `ProgramEnvironment`
+/// describes: the variables that function set (`PATH`, `LOOM_CASE`, `LOOM_TIMEOUT_SECONDS` and
+/// the opening names, story bound-program-contract) and [`RETRY_FEEDBACK_VARIABLE`] at the path of
+/// `feedback`, mounted read-only at that path when `local_reason` is `None` (a runner that is not
+/// `local`); with no feedback, no such variable. Every other variable is the port's, so a
+/// feedback document cannot change one.
 pub(crate) fn given(
     child: ChildCommand,
     feedback: Option<&Feedback>,
     local_reason: Option<&str>,
-    case: &CaseId,
 ) -> ChildCommand {
-    let described = ProgramEnvironment {
-        path: child.environment().set.get("PATH").cloned(),
-        loom_case: case.0.clone(),
-        loom_retry_feedback: feedback.map(|feedback| feedback.value.clone()),
+    let Some(feedback) = feedback else {
+        return child;
     };
-    let child = child.with_environment(crate::child::environment(&described));
-    match feedback {
+    let mut environment = child.environment().clone();
+    environment
+        .set
+        .insert(RETRY_FEEDBACK_VARIABLE.to_owned(), feedback.value.clone());
+    let child = child.with_environment(environment);
+    match Some(feedback) {
         Some(feedback) if local_reason.is_none() => child.at_host_path(&feedback.path),
         _ => child,
     }

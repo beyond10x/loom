@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 6e2bc89db48cc13409a0639b368a75cba696741ba861d545ce73bc0d10e31fe6
+  contract digest d8d7d39dbecbd81471f7e6f22a7ef0473ff3fc40b31db137f4535fc29e93e708
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-452 capabilities: **436 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+455 capabilities: **439 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -77,10 +77,13 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.EvidenceEntry` |
 | domain type | `loom.bindings.Executor` |
 | domain type | `loom.bindings.ExecutorSpec` |
+| domain type | `loom.bindings.ExitClass` |
+| domain type | `loom.bindings.ExitClasses` |
 | domain type | `loom.bindings.ProducerIndependence` |
 | domain type | `loom.bindings.ProgramEnvironment` |
 | domain type | `loom.bindings.ProgramRefusal` |
 | domain type | `loom.bindings.ProgramRefusalReason` |
+| domain type | `loom.bindings.ProgramRoot` |
 | domain type | `loom.bindings.ProgramRun` |
 | domain type | `loom.bindings.RecordedEvidence` |
 | domain type | `loom.bindings.ResultRule` |
