@@ -163,11 +163,13 @@ fn signalled_run(tree: &Tree, sent: i32) -> Ended {
     }
 }
 
-/// `tree run --help`: exit 5 is "the run was cancelled". A `tree run` stopped by SIGTERM ends
-/// through that status, its document naming the stop `Cancelled`, not killed by the signal.
+/// A `tree run` ended by SIGTERM (a supervisor's stop) while a bound program runs: `tree run
+/// --help`'s exit 5, its document naming the stop `Cancelled`, not killed by the signal; the
+/// program not running within 7 s of the run; and a store every log of which verifies. One test,
+/// since each start of a bound program costs seconds of the binary's summed budget.
 #[test]
-fn a_terminated_tree_run_ends_cancelled_with_exit_status_5() {
-    let tree = Tree::new("sigterm-status");
+fn a_terminated_tree_run_ends_cancelled_leaving_no_program_and_a_store_that_verifies() {
+    let tree = Tree::new("sigterm");
     let ended = signalled_run(&tree, libc::SIGTERM);
     assert_eq!(
         ended.status.code(),
@@ -179,14 +181,7 @@ fn a_terminated_tree_run_ends_cancelled_with_exit_status_5() {
     let document: serde_json::Value = serde_json::from_str(ended.stdout.trim())
         .unwrap_or_else(|error| panic!("{error}: {}{}", ended.stdout, ended.stderr));
     assert_eq!(document["stop"], "Cancelled", "{document}");
-}
 
-/// A `tree run` ended by SIGTERM (a supervisor's stop) while a bound program runs leaves that
-/// program not running: it ends within 7 s of the run.
-#[test]
-fn a_terminated_tree_run_leaves_no_bound_program_running() {
-    let tree = Tree::new("sigterm-orphan");
-    let ended = signalled_run(&tree, libc::SIGTERM);
     let until = Instant::now() + Duration::from_secs(7);
     while alive(ended.program.0) && Instant::now() < until {
         std::thread::sleep(Duration::from_millis(50));
@@ -197,6 +192,15 @@ fn a_terminated_tree_run_leaves_no_bound_program_running() {
         ended.program.0,
         ended.status,
         ended.stderr
+    );
+
+    let verified = tree.tree("verify");
+    assert_eq!(
+        verified.status.code(),
+        Some(0),
+        "tree verify after a terminated run: {}{}",
+        String::from_utf8_lossy(&verified.stdout),
+        String::from_utf8_lossy(&verified.stderr)
     );
 }
 
@@ -216,20 +220,5 @@ fn an_interrupted_tree_run_ends_cancelled_and_leaves_no_bound_program_running() 
         !alive(ended.program.0),
         "the bound program {} still runs after b10x-loom tree run ended on SIGINT",
         ended.program.0
-    );
-}
-
-/// A `tree run` stopped mid-step leaves a store every log of which verifies: `tree verify` exits 0.
-#[test]
-fn a_terminated_tree_run_leaves_a_store_that_verifies() {
-    let tree = Tree::new("sigterm-verify");
-    let _ended = signalled_run(&tree, libc::SIGTERM);
-    let verified = tree.tree("verify");
-    assert_eq!(
-        verified.status.code(),
-        Some(0),
-        "tree verify after a terminated run: {}{}",
-        String::from_utf8_lossy(&verified.stdout),
-        String::from_utf8_lossy(&verified.stderr)
     );
 }
