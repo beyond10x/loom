@@ -757,6 +757,7 @@ dependencies = [
  "b10x-loom-intake-slice",
  "b10x-loom-protocols",
  "b10x-loom-session-executor",
+ "b10x-loom-tree",
  "chrono",
  "libc",
  "loom",
@@ -811,6 +812,13 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "sha2 0.11.0",
+]
+
+[[package]]
+name = "b10x-loom-tree-embedder-fixture"
+version = "0.58.0"
+dependencies = [
+ "b10x-loom-tree",
 ]
 
 [[package]]

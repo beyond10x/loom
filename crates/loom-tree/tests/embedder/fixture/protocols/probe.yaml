@@ -1,0 +1,28 @@
+format: protocol/1
+protocol:
+  id: probe
+  revision: 1
+  description: >-
+    A cell a program looks into once, under the capability cell.look a person approves. Once the
+    look ended 0 the cell may be kept or left, both legitimate, and a person closes the case
+    through one of them.
+artifacts:
+  cell: {}
+evidence_kinds:
+  cell_look: {}
+claims:
+  cell.seen:
+    true_when:
+      evidence: {kind: cell_look, subject: cell, result: seen}
+actions:
+  cell.look:
+    effect: read
+    requires:
+      - capability: cell.look
+    may_produce:
+      - evidence: cell_look
+outcomes:
+  kept:
+    requires: {claim: cell.seen}
+  left:
+    requires: {claim: cell.seen}

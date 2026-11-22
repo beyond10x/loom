@@ -592,6 +592,40 @@ mod session {
     // session paths: end
 }
 
+/// The `loom_sdk::tree` paths the page's embedding table lists: what an engine that runs case
+/// trees in-process needs beside `b10x-loom-tree`'s own functions.
+///
+/// [`every_tree_path_on_the_page_resolves`] reads these lines out of this file, between the two
+/// marker comments, so keep one path per `use` and nothing else between them.
+#[allow(unused_imports)]
+mod tree {
+    // tree paths: begin
+    use loom_sdk::tree::Cancel;
+    use loom_sdk::tree::ConfinementError;
+    use loom_sdk::tree::DEFAULT_PRINCIPAL;
+    use loom_sdk::tree::ProtocolCatalog;
+    use loom_sdk::tree::TreeRunner;
+    use loom_sdk::tree::encode_line;
+    use loom_sdk::tree::host_catalog;
+    // tree paths: end
+
+    /// The runner's constructors and its runner as a host calls them: compilation is the witness.
+    #[allow(dead_code)]
+    fn tree_runner_signatures() {
+        let _on_root: fn(&std::path::Path) -> Result<TreeRunner, _> = TreeRunner::on_root;
+        let _in_own_scope: fn() -> Result<TreeRunner, _> = TreeRunner::in_own_scope;
+        let _local: fn() -> Result<TreeRunner, _> = TreeRunner::local;
+        let _runner: fn(&TreeRunner) -> std::sync::Arc<dyn loom_sdk::TestRunner> =
+            TreeRunner::runner;
+        let _catalog: fn() -> Result<ProtocolCatalog, _> = host_catalog;
+        let _same: fn(ProtocolCatalog) -> loom_sdk::ProtocolCatalog = |catalog| catalog;
+        let _same_error: fn(ConfinementError) -> loom_sdk::ConfinementError = |error| error;
+        let _encode: fn(&_) -> String = encode_line;
+        let _cancel: fn() -> Cancel = Cancel::new;
+        let _principal: &str = DEFAULT_PRINCIPAL;
+    }
+}
+
 /// The stability page, read at run time.
 fn page() -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(PAGE);
@@ -915,6 +949,82 @@ fn every_session_path_on_the_page_resolves() {
     assert!(
         listed.contains("loom_sdk::session::SessionExecutor"),
         "the page lists the session executor"
+    );
+}
+
+/// The page's embedding table lists exactly the `loom_sdk::tree` paths that resolve here, and
+/// those are every public item of `b10x_loom_tree::embed` (`crates/loom-tree/src/embed.rs`): a new
+/// export of the module is a new row. The `TreeRunner` row names each public method of the runner.
+#[test]
+fn every_tree_path_on_the_page_resolves() {
+    let imported = unique(used_paths("tree paths"), "the tree block");
+    assert!(!imported.is_empty(), "the tree block holds the imports");
+
+    let page = page();
+    let rows = table_column(&page, EMBEDDING_HEADING, 0);
+    let listed = unique(
+        rows.iter()
+            .flat_map(|cell| cell.split(','))
+            .map(|path| path.trim().trim_matches('`').to_owned())
+            .filter(|path| path.starts_with("loom_sdk::tree::"))
+            .collect(),
+        "the embedding table",
+    );
+    assert_eq!(
+        listed, imported,
+        "the page's embedding table lists exactly the `loom_sdk::tree` paths that resolve here"
+    );
+
+    let module = include_str!("../../loom-tree/src/embed.rs");
+    let exported: BTreeSet<String> = module
+        .lines()
+        .filter_map(|line| {
+            let rest = line
+                .strip_prefix("pub use ")
+                .or_else(|| line.strip_prefix("pub struct "))
+                .or_else(|| line.strip_prefix("pub fn "))
+                .or_else(|| line.strip_prefix("pub const "))?;
+            let item = match rest.split_once(" as ") {
+                Some((_, name)) => name,
+                None => rest.rsplit("::").next().unwrap_or(rest),
+            };
+            let name: String = item
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            Some(format!("loom_sdk::tree::{name}"))
+        })
+        .collect();
+    assert_eq!(
+        exported, listed,
+        "the page lists every public item of b10x_loom_tree::embed"
+    );
+
+    let methods: Vec<String> = module
+        .lines()
+        .filter_map(|line| line.strip_prefix("    pub fn "))
+        .map(|rest| rest.chars().take_while(|c| *c != '(').collect())
+        .collect();
+    let row = page
+        .lines()
+        .find(|line| line.starts_with("| `loom_sdk::tree::TreeRunner`"))
+        .expect("a row of loom_sdk::tree::TreeRunner");
+    for method in &methods {
+        assert!(
+            row.contains(&format!("`{method}`")),
+            "the TreeRunner row names `{method}`: {row}"
+        );
+    }
+    for method in ["on_root", "in_own_scope", "local", "runner"] {
+        assert!(methods.iter().any(|m| m == method), "TreeRunner::{method}");
+    }
+    assert!(
+        listed.contains("loom_sdk::tree::ProtocolCatalog")
+            && rows
+                .iter()
+                .any(|row| row.contains("loom_sdk::ProtocolCatalog")
+                    && row.contains("loom_sdk::tree::ProtocolCatalog")),
+        "one row lists both paths of ProtocolCatalog"
     );
 }
 

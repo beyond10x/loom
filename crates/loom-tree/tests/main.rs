@@ -555,3 +555,111 @@ fn an_old_status_without_log_and_budget_reads() {
     let old: serde_json::Value = serde_json::from_str(OLD_STATUS).unwrap();
     assert_eq!(printed, old);
 }
+
+// ---------------------------------------------------------------------------------------------
+// What an engine embeds (`story:tree-library-exports-what-an-engine-needs`): the delegated-root
+// runs are the fixture package `tests/embedder/`.
+
+mod embed {
+    use std::fs;
+    use std::path::Path;
+
+    use b10x_loom_tree::embed::{ProtocolCatalog, TreeRunner, encode_line};
+    use b10x_loom_tree::model::TreeRefusalReason;
+    use b10x_loom_tree::runlog::RunLogLine;
+    use b10x_loom_tree::{
+        OpenRequest, RunSettings, TreeTime, UNCONFINED_FLAG_REASON, log_file_name, open_tree,
+        run_tree,
+    };
+
+    /// The lines an observer got, each encoded and followed by a line feed, are the bytes the run
+    /// appended to the case's log.
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn encode_line_gives_the_bytes_of_the_log() {
+        let dir = super::scratch("encode-line");
+        let fixture = Path::new(super::FIXTURE);
+        let workspace = dir.join("workspace");
+        fs::create_dir_all(workspace.join("stubs")).unwrap();
+        for file in ["road.txt", "sign.bindings.yaml", "stubs/post-stamp.sh"] {
+            fs::copy(fixture.join(file), workspace.join(file)).unwrap();
+        }
+        let installed = loom_protocols::InstallStore::new(dir.join("protocols"));
+        installed
+            .install_file("sign@1", &fixture.join("extra/sign.yaml"), false)
+            .unwrap();
+        let catalog: ProtocolCatalog = installed.catalog().unwrap();
+        let store = dir.join("store");
+        let at = TreeTime::At("2026-11-22T08:00:00Z".into());
+        open_tree(&OpenRequest {
+            store: store.clone(),
+            workspace,
+            protocol: "sign@1".into(),
+            bindings: dir.join("workspace/sign.bindings.yaml"),
+            revisions: Vec::new(),
+            case: "root".into(),
+            time: at.clone(),
+            catalog: &catalog,
+            protocols: Vec::new(),
+        })
+        .unwrap();
+        let log = store.join(log_file_name("root"));
+        let before = fs::read(&log).unwrap();
+
+        let runner = TreeRunner::local().unwrap();
+        let settings = RunSettings {
+            max_steps: None,
+            max_wall_seconds: None,
+            time: at,
+            runner: runner.runner(),
+            confinement: Some("local".into()),
+        };
+        let mut observed = Vec::new();
+        let mut observer = |case: &str, line: &RunLogLine| {
+            assert_eq!(case, "root");
+            observed.push(line.clone());
+        };
+        run_tree(&store, &catalog, &settings, Some(&mut observer), None).unwrap();
+        assert!(!observed.is_empty(), "the run wrote lines");
+
+        let mut expected = before;
+        for line in &observed {
+            let encoded = encode_line(line);
+            assert!(!encoded.contains('\n'), "{encoded}");
+            expected.extend_from_slice(encoded.as_bytes());
+            expected.push(b'\n');
+        }
+        assert_eq!(
+            String::from_utf8(fs::read(&log).unwrap()).unwrap(),
+            String::from_utf8(expected).unwrap()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A root that is no cgroup is refused before any runner exists, naming it: the runner never
+    /// falls back to discovering one.
+    #[test]
+    fn on_root_refuses_a_path_that_is_no_cgroup_root() {
+        let dir = super::scratch("no-cgroup");
+        let canonical = fs::canonicalize(&dir).unwrap();
+        for (root, named) in [(dir.join("absent"), dir.join("absent")), (dir, canonical)] {
+            let refused = TreeRunner::on_root(&root).unwrap_err();
+            assert_eq!(refused.reason(), TreeRefusalReason::ConfinementRefused);
+            assert!(
+                refused.0.detail.starts_with("CgroupUndelegated: "),
+                "{refused}"
+            );
+            assert!(
+                refused.0.detail.contains(&named.display().to_string()),
+                "{refused}"
+            );
+        }
+    }
+
+    /// `local` supplies the reason the bound-program port admits, and its runner answers it.
+    #[test]
+    fn local_answers_the_unconfined_flag_reason() {
+        let runner = TreeRunner::local().unwrap();
+        assert_eq!(runner.runner().local_reason(), Some(UNCONFINED_FLAG_REASON));
+    }
+}

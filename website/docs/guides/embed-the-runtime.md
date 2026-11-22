@@ -3,7 +3,7 @@ title: Embed the runtime
 sidebar_position: 2
 description: Depend on b10x-loom-sdk, supply the selector, argument generator, authority provider and loop context, and run a governed case until it is blocked.
 lede: An application embeds a governed agent through one crate, b10x-loom-sdk. It supplies the parts that decide and the parts that act; Loom, Commission's runtime and the governor do the rest.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs, crates/loom-sdk/tests/example_runs.rs, crates/loom-mandate/src/lib.rs, crates/loom-executor/src/metering.rs
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/examples/software_change.rs, crates/loom-sdk/tests/example_runs.rs, crates/loom-mandate/src/lib.rs, crates/loom-executor/src/metering.rs, crates/loom-tree/src/embed.rs, crates/loom-tree/tests/embedder/src/main.rs
 ---
 
 # Embed the runtime
@@ -66,7 +66,10 @@ adapter as the command line's flag does, by passing an `EngineRunner` opened on 
 `CommandUnconfined`.
 
 An embedded host supplies an already delegated cgroup root to `SubstrateRunner::new`, or allows
-discovery of the current delegated root. Automatic systemd re-exec belongs to the CLI.
+discovery of the current delegated root. A tree runner from `b10x_loom_tree::embed`
+(`loom_sdk::tree`, [Run a case tree](#run-a-case-tree)) never discovers one: it holds the root it
+is given, or the delegated scope the process runs in. Automatic systemd re-exec belongs to the
+CLI.
 The scripted SDK example explicitly uses `UnconfinedRunner` for its fixed local fixture;
 its output and test observations say `confinement: none`.
 
@@ -169,6 +172,78 @@ and per step.
   record holds the segment's effects.
 
 `crates/loom-executor/tests/run_metering.rs` drives these over scripted llm models.
+
+## Run a case tree
+
+An engine that runs case trees in-process, as `b10x-loom tree` does, depends on `b10x-loom-tree`
+alone. Its module `embed` (also `loom_sdk::tree`) holds what the tree functions do not:
+
+- `TreeRunner`, the runner `RunSettings::runner` takes. `TreeRunner::on_root(root)` holds a
+  delegated cgroup root for the process and builds Substrate's `linux` adapter on it; a root
+  another process, or another runner of this process, holds, or one that does not qualify
+  (empty, writable, delegated, this process in a child of it) is refused `ConfinementRefused`
+  naming it. `TreeRunner::in_own_scope()`, in a process an operator started under `systemd-run
+  --user --scope -p Delegate=yes`, moves the process, every thread of it, into a leaf of that
+  scope and holds the scope. `TreeRunner::local()` opens Substrate's `local` adapter, unconfined,
+  for the one reason the bound-program port admits. None of them discovers a root.
+- `runner()` hands out the runner, which holds the root: it is released when the `TreeRunner`
+  and every clone of that runner are dropped. Keep one `TreeRunner` per root for the process;
+  threads share its runner.
+- `host_catalog()`, the catalog `b10x-loom` reads; `ProtocolCatalog`; `encode_line`, the bytes of
+  a run-log line your `RunObserver` gets, without the line feed the log adds; `Cancel`, the handle
+  a run sets from your flag; and `DEFAULT_PRINCIPAL`, `operator`, the principal an `Approve`
+  decision names.
+
+`crates/loom-tree/tests/embedder/` is such an engine, and its tests run it on a delegated root,
+in a scope of its own and under `local`. This is its code: the runner, the settings, a run with an
+observer and a flag another thread sets, and the approval the first run waits on. It then runs
+again, closes the case with `close` and reads it with `tree_status`.
+
+```rust
+use b10x_loom_tree::embed::{self, DEFAULT_PRINCIPAL, ProtocolCatalog, TreeRunner, encode_line};
+// …
+let (runner, confinement) = match &arguments.mode {
+    Mode::Root(root) => (TreeRunner::on_root(root)?, "substrate"),
+    // …
+    Mode::Local => (TreeRunner::local()?, "local"),
+};
+// …
+let settings = RunSettings {
+    max_steps: None,
+    max_wall_seconds: None,
+    time: time.clone(),
+    runner: runner.runner(),
+    confinement: Some(confinement.into()),
+};
+// …
+let mut observer =
+    |case: &str, line: &RunLogLine| say(&format!("line {case} {}", encode_line(line)));
+let flag = &AtomicBool::new(false);
+let (ran, set) = std::thread::scope(|scope| {
+    let setter = cancel_after.map(|after| {
+        scope.spawn(move || {
+            std::thread::sleep(after);
+            flag.store(true, Ordering::SeqCst);
+            Instant::now()
+        })
+    });
+    let ran = run_tree(store, catalog, settings, Some(&mut observer), Some(flag));
+    (ran, setter.and_then(|setter| setter.join().ok()))
+});
+// …
+approve(&ApproveRequest {
+    store,
+    case: &waits.case,
+    capability: waits.capability.as_deref(),
+    principal: DEFAULT_PRINCIPAL,
+    decision: ApprovalDecision::Allow,
+    action: None,
+    result: None,
+    reasons: None,
+    time: time.clone(),
+    catalog: &catalog,
+})?;
+```
 
 ## What holds whatever you supply
 

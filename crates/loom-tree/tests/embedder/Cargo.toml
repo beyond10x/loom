@@ -1,0 +1,15 @@
+[package]
+name = "b10x-loom-tree-embedder-fixture"
+description = "A program that embeds b10x-loom-tree and nothing else: it opens a one-case tree, runs it on a cgroup root it holds, in a delegated scope of its own or unconfined, and approves, closes and reads it. Its tests hold what an engine needs from that crate."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "embedder"
+path = "src/main.rs"
+
+[dependencies]
+b10x-loom-tree = { path = "../.." }

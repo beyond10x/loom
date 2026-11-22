@@ -638,6 +638,12 @@ A host that wants to watch a run returns its own `loom_sdk::EventSink` from
 `LoopContext::events` and receives every step of it as it happens (step started, action selected,
 proposed, authority decided, effect invoked, session closed, stopped); the default, `NoEvents`,
 receives nothing. An event is never evidence and never changes the run.
+An engine that runs case trees in-process uses `loom_sdk::tree` (`b10x_loom_tree::embed`; it may
+depend on `b10x-loom-tree` alone): `TreeRunner::on_root` holds a delegated cgroup root for the
+process and never discovers one, `TreeRunner::in_own_scope` moves the process into a leaf of the
+delegated scope it was started in, and the runner `runner()` hands out keeps the root held until it
+and every clone are dropped; the host catalog, the run-log line encoder, the cancel handle and the
+default principal sit beside it.
 
 An agent can be written as data: a `loom.agent/1` document, YAML or JSON, which
 `loom_sdk::agent::parse` decodes into an `AgentSpec` (identity, models, session and tool policy,

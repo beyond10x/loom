@@ -20,6 +20,10 @@
 //!
 //! Every instant a command writes is the host clock's, or the one `--at` gives ([`TreeTime`]), so
 //! two runs from the same inputs and the same `--at` write the same bytes.
+//!
+//! An engine that runs trees in-process depends on this crate alone: [`embed`] holds the runner on
+//! a cgroup root it holds, the host's catalog, the run-log line encoder, the cancel handle and the
+//! default principal, and `b10x-loom tree` builds its runner and catalog through it.
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
@@ -42,6 +46,7 @@ mod store;
 mod time;
 mod verify;
 
+pub mod embed;
 pub mod suite;
 
 use std::fmt;

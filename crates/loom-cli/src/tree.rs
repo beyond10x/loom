@@ -11,12 +11,9 @@ use std::sync::Arc;
 
 use clap::ValueEnum as _;
 
-use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
-use b10x_loom_intake_slice::confinement::{
-    CgroupRootHold, ConfinementAdapter, EngineConfinement, EngineRunner, SubstrateRunner,
-    TestRunner, hold_cgroup_root, prepare_delegated_cgroup,
-};
+use b10x_loom_intake_slice::confinement::TestRunner;
 use b10x_loom_intake_slice::run::printable;
+use b10x_loom_tree::embed::{ProtocolCatalog, TreeRunner, host_catalog};
 use b10x_loom_tree::model::{ApprovalDecision, CycleResult, TreeRefusalReason};
 use b10x_loom_tree::suite::{SuiteSettings, cycle_line, report_json, run_suite, summary_lines};
 use b10x_loom_tree::{
@@ -24,7 +21,6 @@ use b10x_loom_tree::{
     approve as record, open_tree, read_protocols_directory, refusal_json, run_json, run_tree,
     status_json, stored_catalog, tree_status, verify_json, verify_tree,
 };
-use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
 
 use crate::{
@@ -78,19 +74,7 @@ fn resolved(path: &Path) -> Result<PathBuf, Refused> {
         })
 }
 
-/// The host's catalog: the bundled protocols and the user's installed ones.
-fn host_catalog() -> Result<ProtocolCatalog, Refused> {
-    InstallStore::user()
-        .and_then(|store| store.catalog())
-        .map_err(|error| {
-            Refused::new(
-                b10x_loom_tree::model::TreeRefusalReason::UnknownProtocol,
-                format!("the host's protocol catalog cannot be read: {error}"),
-            )
-        })
-}
-
-/// The catalog of the tree in `store`: the one it keeps, else the host's.
+/// The catalog of the tree in `store`: the one it keeps, else the host's ([`host_catalog`]).
 fn tree_catalog(store: &Path) -> Result<ProtocolCatalog, Refused> {
     match stored_catalog(store)? {
         Some(catalog) => Ok(catalog),
@@ -133,32 +117,23 @@ fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
     Ok(0)
 }
 
-/// The runner of `confinement`: `local` opened for the reason the `--unconfined-bindings` flag
-/// gives, the one reason the bound-program port admits; `substrate` its linux adapter on
-/// `cgroup_root`, the root this run holds ([`substrate_runner`]).
+/// The runner of `confinement`, built by `b10x_loom_tree::embed` as an embedder builds it: `local`
+/// opened for the reason the `--unconfined-bindings` flag gives, the one reason the bound-program
+/// port admits; `substrate` the runner on the root this run holds, `held` ([`substrate_runner`]).
 fn tree_runner(
     confinement: TreeConfinement,
-    cgroup_root: Option<&Path>,
+    held: Option<&TreeRunner>,
 ) -> Result<Arc<dyn TestRunner>, Refused> {
     match confinement {
-        TreeConfinement::Substrate => {
-            substrate_runner(cgroup_root).map(|runner| Arc::new(runner) as Arc<dyn TestRunner>)
-        }
-        TreeConfinement::Local => EngineRunner::open(&EngineConfinement {
-            adapter: ConfinementAdapter::Local,
-            local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
-            cgroup_root: None,
-        })
-        .map(|runner| Arc::new(runner) as Arc<dyn TestRunner>)
-        .map_err(|error| Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())),
+        TreeConfinement::Substrate => substrate_runner(held),
+        TreeConfinement::Local => TreeRunner::local().map(|local| local.runner()),
     }
 }
 
-/// Substrate's linux adapter on `cgroup_root`, refused without one: `tree run` never lets a
-/// driver discover an ancestor, which another run may use too.
-fn substrate_runner(cgroup_root: Option<&Path>) -> Result<SubstrateRunner, Refused> {
-    cgroup_root
-        .map(|root| SubstrateRunner::new(Some(root.to_owned())))
+/// Substrate's linux adapter on the root `held` holds, refused without one: `tree run` never lets
+/// a driver discover an ancestor, which another run may use too.
+fn substrate_runner(held: Option<&TreeRunner>) -> Result<Arc<dyn TestRunner>, Refused> {
+    held.map(TreeRunner::runner)
         .ok_or_else(|| confinement_refused("CgroupUndelegated: tree run holds no cgroup root"))
 }
 
@@ -172,8 +147,8 @@ fn confinement_refused(detail: impl std::fmt::Display) -> Refused {
 
 /// Where a `tree run` under `substrate` runs its confined programs.
 enum Placement {
-    /// Under the root this process holds.
-    Held(CgroupRootHold),
+    /// Under the root this process holds, through the runner that holds it.
+    Held(TreeRunner),
     /// Nowhere here: the run was started again in a delegated scope of its own and ended with
     /// this exit status.
     StartedAgain(u8),
@@ -192,17 +167,16 @@ fn place(arguments: &TreeRunArgs) -> Result<Option<Placement>, Refused> {
         }
         return Ok(None);
     }
-    let root = match &arguments.cgroup_root {
-        Some(root) => resolved(root)?,
+    let held = match &arguments.cgroup_root {
+        Some(root) => TreeRunner::on_root(&resolved(root)?),
         None if std::env::var_os(REEXEC_MARKER).is_some() => {
             started_again()?;
-            prepare_delegated_cgroup().map_err(confinement_refused)?
+            TreeRunner::in_own_scope()
         }
         None => return start_again().map(|status| Some(Placement::StartedAgain(status))),
     };
-    hold_cgroup_root(&root)
-        .map(|hold| Some(Placement::Held(hold)))
-        .map_err(confinement_refused)
+    held.map(|runner| Some(Placement::Held(runner)))
+        .map_err(|refused| confinement_refused(refused.0.detail))
 }
 
 /// Starts this `tree run` again in a delegated scope of its own and answers the exit status it
@@ -275,7 +249,7 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
     // Held until the run ends: no other tree run uses this root meanwhile.
     let held = match place(arguments)? {
         Some(Placement::StartedAgain(status)) => return Ok(status),
-        Some(Placement::Held(hold)) => Some(hold),
+        Some(Placement::Held(runner)) => Some(runner),
         None => None,
     };
     let catalog = tree_catalog(&resolved(&arguments.store)?)?;
@@ -283,10 +257,7 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         max_steps: arguments.max_steps,
         max_wall_seconds: arguments.max_wall_seconds,
         time,
-        runner: tree_runner(
-            arguments.confinement,
-            held.as_ref().map(CgroupRootHold::root),
-        )?,
+        runner: tree_runner(arguments.confinement, held.as_ref())?,
         confinement: arguments
             .confinement
             .to_possible_value()
@@ -531,11 +502,14 @@ fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
 mod tests {
     use super::*;
 
-    /// `tree run` never discovers an ancestor: the substrate runner it builds holds the root it
-    /// was handed, and without one it builds none.
+    /// `tree run` never discovers an ancestor: the substrate runner it builds is the one that
+    /// holds the root it was handed, and without one it builds none; a root it cannot hold is
+    /// refused, not replaced by one discovered.
     #[test]
     fn the_tree_runner_never_discovers_an_ancestor() {
-        let refused = substrate_runner(None).unwrap_err();
+        let Err(refused) = substrate_runner(None) else {
+            panic!("a substrate runner without a held root");
+        };
         assert_eq!(
             refused.0.reason,
             b10x_loom_tree::model::TreeRefusalReason::ConfinementRefused
@@ -548,8 +522,15 @@ mod tests {
         assert!(tree_runner(TreeConfinement::Substrate, None).is_err());
 
         let root = Path::new("/sys/fs/cgroup/loom-held-root");
-        let runner = substrate_runner(Some(root)).unwrap();
-        assert_eq!(runner.cgroup_root(), Some(root));
-        assert!(tree_runner(TreeConfinement::Substrate, Some(root)).is_ok());
+        let refused = TreeRunner::on_root(root).unwrap_err();
+        assert_eq!(
+            refused.0.reason,
+            b10x_loom_tree::model::TreeRefusalReason::ConfinementRefused
+        );
+        assert!(
+            refused.0.detail.contains("/sys/fs/cgroup/loom-held-root"),
+            "{}",
+            refused.0.detail
+        );
     }
 }
