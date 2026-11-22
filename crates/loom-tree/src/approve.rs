@@ -30,8 +30,9 @@ pub struct ApproveRequest<'a> {
     pub store: &'a Path,
     /// The case of the tree the decision is for.
     pub case: &'a str,
-    /// The capability decided.
-    pub capability: &'a str,
+    /// The capability decided; `None` only with a person action whose protocol action needs no
+    /// capability, which then records no authority.
+    pub capability: Option<&'a str>,
     /// The principal who decided.
     pub principal: &'a str,
     /// The decision.
@@ -44,18 +45,30 @@ pub struct ApproveRequest<'a> {
     pub catalog: &'a ProtocolCatalog,
 }
 
-/// Records the decision `request` names (see the module documentation) and returns it.
+/// Records the decision `request` names (see the module documentation) and returns it; `None`
+/// for a person action taken with no capability, which records no authority.
 ///
 /// # Errors
 /// `StoreInUse` when another writer holds the store; `NotATree`; `CaseNotInTree` when the case is
 /// not a case of the tree; `NotAPersonAction` for a principal or capability that is empty, longer
-/// than [`MAX_NAME_BYTES`] or holds a control character; `LogRefused` when the case's run log does
-/// not verify; `StoreUnreadable`. Nothing is written on a refusal.
-pub fn approve(request: &ApproveRequest<'_>) -> Result<CaseApproval, Refused> {
+/// than [`MAX_NAME_BYTES`] or holds a control character, for no capability without a person
+/// action to allow, and for a person action whose protocol action needs a capability none was
+/// given for; `LogRefused` when the case's run log does not verify; `StoreUnreadable`. Nothing is
+/// written on a refusal.
+pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Refused> {
+    if request.capability.is_none()
+        && (request.action.is_none() || request.decision != ApprovalDecision::Allow)
+    {
+        return Err(Refused::new(
+            TreeRefusalReason::NotAPersonAction,
+            "a decision names a capability; only a person action that needs none is taken without one",
+        ));
+    }
     for (what, name) in [
-        ("principal", request.principal),
+        ("principal", Some(request.principal)),
         ("capability", request.capability),
     ] {
+        let Some(name) = name else { continue };
         if name.is_empty() || name.len() > MAX_NAME_BYTES || name.chars().any(char::is_control) {
             return Err(Refused::new(
                 TreeRefusalReason::NotAPersonAction,
@@ -99,25 +112,31 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<CaseApproval, Refused> {
     if let Some(action) = request.action {
         person_action(&governor, &manifest, request, action)?;
     }
-    let approval = CaseApproval {
-        case: request.case.to_owned(),
-        capability: request.capability.to_owned(),
-        decision: request.decision,
-        principal: request.principal.to_owned(),
-        case_revision: revision,
-        at,
+    let approval = match request.capability {
+        Some(capability) => {
+            let approval = CaseApproval {
+                case: request.case.to_owned(),
+                capability: capability.to_owned(),
+                decision: request.decision,
+                principal: request.principal.to_owned(),
+                case_revision: revision,
+                at,
+            };
+            record_approval(&store, &approval)?;
+            logs.append(
+                request.case,
+                RunLogEvent::AuthorityRecorded(AuthorityRecorded {
+                    capability: approval.capability.clone(),
+                    decision: format!("{:?}", approval.decision),
+                    principal: approval.principal.clone(),
+                }),
+            )?;
+            Some(approval)
+        }
+        None => None,
     };
-    record_approval(&store, &approval)?;
-    logs.append(
-        request.case,
-        RunLogEvent::AuthorityRecorded(AuthorityRecorded {
-            capability: approval.capability.clone(),
-            decision: format!("{:?}", approval.decision),
-            principal: approval.principal.clone(),
-        }),
-    )?;
     if let Some(action) = request.action
-        && approval.decision == ApprovalDecision::Allow
+        && request.decision == ApprovalDecision::Allow
     {
         take_person_action(&governor, &store, &manifest, request, action, &logs)?;
     }
@@ -125,8 +144,8 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<CaseApproval, Refused> {
 }
 
 /// The bindings document of `request`'s case, and why `action` cannot be taken as its principal
-/// now, if it cannot: it must be bound to `person` in the case, its principal the one named, and
-/// admissible.
+/// now, if it cannot: it must be bound to `person` in the case, its principal the one named,
+/// admissible, and given a capability when its protocol action needs one.
 fn person_action<S: FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     manifest: &TreeManifest,
@@ -156,15 +175,21 @@ fn person_action<S: FallibleCaseStore>(
     let frontier = governor
         .frontier(&case)
         .map_err(|error| unreadable(format!("case {}", request.case), format!("{error:?}")))?;
-    let admissible = frontier
+    let Some(listed) = frontier
         .data()
         .actions
         .iter()
-        .any(|listed| listed.action == action && listed.status != ActionStatus::Blocked);
-    if !admissible {
+        .find(|listed| listed.action == action && listed.status != ActionStatus::Blocked)
+    else {
         return Err(refused(
             "the action is not admissible in the case now".into(),
         ));
+    };
+    // Only an action that needs no capability is taken without one: authority is never skipped.
+    if let (Some(needed), None) = (&listed.capability, request.capability) {
+        return Err(refused(format!(
+            "the action needs the capability {needed}; name it with --capability"
+        )));
     }
     Ok(bindings)
 }
@@ -185,9 +210,12 @@ fn take_person_action<S: FallibleCaseStore>(
     let revision = governor
         .current_revision(&case)
         .map_err(|error| unreadable(format!("case {}", request.case), format!("{error:?}")))?;
+    // The log's length too: a person action taken with no approval is taken again at one revision
+    // with records of their own.
     let seed = format!(
-        "{}-{revision}",
-        crate::approvals::read_approvals(store, request.case)?.len()
+        "{}-{revision}-{}",
+        crate::approvals::read_approvals(store, request.case)?.len(),
+        crate::run::read_lines(store, request.case)?.len()
     );
     let effects = PersonEffects {
         governor,

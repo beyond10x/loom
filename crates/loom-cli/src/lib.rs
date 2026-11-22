@@ -304,11 +304,13 @@ Exit status:
 pub const TREE_APPROVE_HELP: &str = "The decision is kept beside the case file and allows that \
 capability for that case while the case is at the revision it was recorded at, and nothing else: \
 another case, another capability or a moved case reads no approval. A denial wins over an \
-approval of the same capability for the same case and revision.
+approval of the same capability for the same case and revision. A person action whose protocol \
+action needs no capability is taken with --action and no --capability, and records no authority; \
+one that needs a capability is refused without it.
 
 Exit status:
   0  the decision is recorded; it is printed
-  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, or the store cannot be read";
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, NotAPersonAction, or the store cannot be read";
 
 /// What `tree status --help` says about the output and the exit status.
 pub const TREE_STATUS_HELP: &str = "The store is read and never held, so a live view can read it \
@@ -333,7 +335,8 @@ pub const TREE_RUN_HELP: &str = "Every open child takes its steps before its par
 each step is selected by the deterministic selector and performed through the action's bound \
 executor. A case is terminated when its completion gives exactly one legitimate outcome and no \
 action in it is useful. When the tree waits, each decision is printed with the exact command that \
-records it. A person action is never taken by tree run.
+records it; a handoff's command is the next tree run, under this run's --confinement. A person \
+action is never taken by tree run.
 
 Exit status:
   0  the root is terminated through its one legitimate outcome
@@ -426,9 +429,10 @@ pub struct TreeApproveArgs {
     /// The case of the tree the decision is for.
     #[arg(long, value_name = "ID")]
     pub case: String,
-    /// The capability decided.
-    #[arg(long, value_name = "CAPABILITY")]
-    pub capability: String,
+    /// The capability decided. With --action it may be left out when the protocol action needs
+    /// none: the action is taken and no authority is recorded.
+    #[arg(long, value_name = "CAPABILITY", required_unless_present = "action")]
+    pub capability: Option<String>,
     /// The principal who decided.
     #[arg(long, value_name = "PRINCIPAL")]
     pub principal: String,

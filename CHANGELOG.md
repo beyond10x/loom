@@ -42,6 +42,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
+- Every decision a waiting `tree run` prints runs unchanged: `tree approve --action` without `--capability` takes a person action whose protocol action needs none and records no authority, and one that needs a capability is refused `NotAPersonAction` naming it, with nothing written; a handoff's `tree run` carries the run's own `--confinement`, set through `RunSettings::confinement` (story:every-printed-decision-command-runs)
 
 ### Changed
 

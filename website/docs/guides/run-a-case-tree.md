@@ -176,9 +176,60 @@ $ b10x-loom tree open --protocol tour-leg@1 --store handoff-store --bindings tou
 $ b10x-loom tree run --confinement local --store handoff-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, detail, decisions: [.decisions[] | {kind, decides}]}'
 {"stop":"AwaitingPerson","steps":2,"detail":null,"decisions":[{"kind":"Handoff","decides":"Add a second stop to route.txt, then run the tree again."}]}
 b10x-loom: tree waits: case root: Add a second stop to route.txt, then run the tree again.
-  run: b10x-loom tree run --store ~/tour/handoff-store
+  run: b10x-loom tree run --store ~/tour/handoff-store --confinement local
 (exit 3)
 ```
+
+The printed `tree run` carries this run's `--confinement`, so run unchanged it starts its programs
+as this run did.
+
+## A person action without a capability
+
+A person action whose protocol action needs no capability is taken by `tree approve --action`
+without `--capability`, and no authority is recorded. In the fixture protocol `sign`, the walker
+signs a post with no capability, the clerk seals it under `clerk.seal`, and a stamp program needs
+`clerk.stamp`; all three wait at once:
+
+```console
+$ b10x-loom protocols add sign@1 --file crates/loom-cli/tests/fixtures/tree-two-level/protocols/sign.yaml
+installed sign@1
+(exit 0)
+```
+
+```console
+$ b10x-loom tree open --protocol sign@1 --store sign-store --bindings sign.bindings.yaml --workspace . --at 2026-11-22T08:00:00Z
+{"protocol":"sign@1","root":"root","store":"~/tour/sign-store","workspace":"~/tour"}
+(exit 0)
+```
+
+```console
+$ b10x-loom tree run --confinement local --store sign-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, detail, decisions: [.decisions[] | {kind, action, capability}]}'
+{"stop":"AwaitingPerson","steps":0,"detail":null,"decisions":[{"kind":"ApproveAction","action":"post.seal","capability":"clerk.seal"},{"kind":"ApproveAction","action":"post.sign","capability":null},{"kind":"Approve","action":"post.stamp","capability":"clerk.stamp"}]}
+b10x-loom: tree waits: case root: post.seal of case root at revision 1
+  run: b10x-loom tree approve --store ~/tour/sign-store --case root --capability clerk.seal --principal clerk --action post.seal
+b10x-loom: tree waits: case root: post.sign of case root at revision 1
+  run: b10x-loom tree approve --store ~/tour/sign-store --case root --principal walker --action post.sign
+b10x-loom: tree waits: case root: post.stamp of case root at revision 1
+  run: b10x-loom tree approve --store ~/tour/sign-store --case root --capability clerk.stamp --principal operator
+(exit 3)
+```
+
+```console
+$ b10x-loom tree approve --store sign-store --case root --principal walker --action post.sign --at 2026-11-22T08:01:00Z
+{"action":"post.sign","case":"root","principal":"walker"}
+(exit 0)
+```
+
+An action that needs a capability is refused without one, and nothing is written:
+
+```console
+$ b10x-loom tree approve --store sign-store --case root --principal clerk --action post.seal --at 2026-11-22T08:01:00Z
+b10x-loom: tree refused: NotAPersonAction: case "root": action "post.seal": the action needs the capability clerk.seal; name it with --capability
+{"action":"post.seal","case":"root","detail":"the action needs the capability clerk.seal; name it with --capability","reason":"NotAPersonAction"}
+(exit 1)
+```
+
+Without `--action`, `--capability` is required.
 
 ## Verify the run logs
 

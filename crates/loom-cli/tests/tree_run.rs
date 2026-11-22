@@ -533,6 +533,7 @@ fn settings(max_steps: Option<i64>) -> RunSettings {
         max_wall_seconds: None,
         time: TreeTime::At(AT.to_owned()),
         runner: Arc::new(runner),
+        confinement: Some("local".to_owned()),
     }
 }
 
@@ -1158,7 +1159,15 @@ fn every_command_a_leg_prints_runs_as_printed_to_its_outcome() {
 fn open_with(tree: &Tree, protocol: &str, bindings: &str) {
     let opened = tree
         .command()
-        .args(["tree", "open", "--protocol", protocol, "--at", AT, "--store"])
+        .args([
+            "tree",
+            "open",
+            "--protocol",
+            protocol,
+            "--at",
+            AT,
+            "--store",
+        ])
         .arg(tree.store())
         .arg("--bindings")
         .arg(tree.workspace().join(bindings))
@@ -1176,7 +1185,13 @@ fn signpost(label: &str) -> (Tree, Vec<Value>) {
     let tree = Tree::new(label);
     open_with(&tree, "sign@1", "sign.bindings.yaml");
     let ran = tree.run();
-    assert_eq!(ran.status.code(), Some(3), "{}{}", stdout(&ran), stderr(&ran));
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
     let waited = json(&ran);
     assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
     let decisions = waited["decisions"].as_array().unwrap().clone();
@@ -1236,10 +1251,18 @@ fn the_printed_approve_command_runs() {
     // The next run takes the action the grant allowed.
     let before = log_lines(&tree, "root").len();
     let ran = tree.run();
-    assert_eq!(ran.status.code(), Some(3), "{}{}", stdout(&ran), stderr(&ran));
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
     let written = lines_since(&tree, "root", before);
     assert!(
-        written.iter().any(|line| finished(line) == Some("post.stamp")),
+        written
+            .iter()
+            .any(|line| finished(line) == Some("post.stamp")),
         "{written:?}"
     );
     let stamped = records_of(&tree, "root", "post_stamped");
@@ -1316,14 +1339,25 @@ fn a_person_action_that_needs_a_capability_is_refused_without_one() {
         .command()
         .args(["tree", "approve", "--store"])
         .arg(tree.store())
-        .args(["--case", "root", "--principal", "clerk", "--action", "post.seal"])
+        .args([
+            "--case",
+            "root",
+            "--principal",
+            "clerk",
+            "--action",
+            "post.seal",
+        ])
         .output()
         .unwrap();
     let said = stderr(&refused);
     assert_eq!(refused.status.code(), Some(1), "{said}");
     assert!(said.contains("NotAPersonAction"), "{said}");
     assert!(said.contains("clerk.seal"), "{said}");
-    assert_eq!(tree.snapshot(), before, "a refused action wrote into the store");
+    assert_eq!(
+        tree.snapshot(),
+        before,
+        "a refused action wrote into the store"
+    );
 }
 
 #[test]
@@ -1389,7 +1423,9 @@ fn the_printed_handoff_command_runs() {
     assert_eq!(&words[..3], ["b10x-loom", "tree", "run"], "{handoff}");
     // Run unchanged, it starts its programs as this run did, not under the default confinement.
     assert!(
-        words.windows(2).any(|pair| pair == ["--confinement", "local"]),
+        words
+            .windows(2)
+            .any(|pair| pair == ["--confinement", "local"]),
         "{handoff}"
     );
     let before = log_lines(&tree, "root").len();
