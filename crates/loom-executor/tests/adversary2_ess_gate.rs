@@ -289,7 +289,7 @@ fn slow_mutant_spec_requiring_an_older_ess_is_killed() {
         |tree| {
             replace(
                 &tree.join("ess/ess-inputs.yaml"),
-                "requires: ess 0.96.0",
+                "requires: ess 0.97.3",
                 "requires: ess 0.51.0",
             );
         },
