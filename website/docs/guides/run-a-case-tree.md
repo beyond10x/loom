@@ -211,8 +211,8 @@ $ b10x-loom tree open --protocol sign@1 --store sign-store --bindings sign.bindi
 ```
 
 ```console
-$ b10x-loom tree run --confinement local --store sign-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, detail, decisions: [.decisions[] | {kind, action, capability}]}'
-{"stop":"AwaitingPerson","steps":0,"detail":null,"decisions":[{"kind":"ApproveAction","action":"post.seal","capability":"clerk.seal"},{"kind":"ApproveAction","action":"post.sign","capability":null},{"kind":"Approve","action":"post.stamp","capability":"clerk.stamp"}]}
+$ b10x-loom tree run --confinement local --store sign-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, detail, decisions: [.decisions[] | {kind, action, capability, principal}]}'
+{"stop":"AwaitingPerson","steps":0,"detail":null,"decisions":[{"kind":"ApproveAction","action":"post.seal","capability":"clerk.seal","principal":"clerk"},{"kind":"ApproveAction","action":"post.sign","capability":null,"principal":"walker"},{"kind":"Approve","action":"post.stamp","capability":"clerk.stamp","principal":"operator"}]}
 b10x-loom: tree waits: case root: post.seal of case root at revision 1
   run: b10x-loom tree approve --store ~/tour/sign-store --case root --capability clerk.seal --principal clerk --action post.seal
 b10x-loom: tree waits: case root: post.sign of case root at revision 1
@@ -221,6 +221,11 @@ b10x-loom: tree waits: case root: post.stamp of case root at revision 1
   run: b10x-loom tree approve --store ~/tour/sign-store --case root --capability clerk.stamp --principal operator
 (exit 3)
 ```
+
+Each `tree approve` decision names the principal its command records as `principal`. For a person
+action it is the person the binding names, the only principal `tree approve --action` accepts.
+For a capability it is `operator`, a default that restricts nothing. A close and a handoff name
+none.
 
 ```console
 $ b10x-loom tree approve --store sign-store --case root --principal walker --action post.sign --at 2026-11-22T08:01:00Z
