@@ -382,9 +382,9 @@ refused `StoreInUse`, names the process that holds the store and writes nothing.
 ## Test a tree with a suite of cycles
 
 A suite of scripted tree cycles is a `loom.tree-suite/1` document. `b10x-loom tree test` runs its
-cycles one after another, each in its own directory `<scratch>/<n>/` (`store/` and `work/`), each
-step through the function of its `tree` command in the same process, and prints one line per
-cycle and two summary lines. The suite below is
+cycles one after another, or up to `--workers` of them at once, each in its own directory
+`<scratch>/<n>/` (`store/` and `work/`), each step through the function of its `tree` command in
+the same process, and prints one line per cycle and two summary lines. The suite below is
 `crates/loom-cli/tests/fixtures/tree-suite/suite.yaml`; its paths (`bindings`, the `from` of a
 seed) are below the suite's directory, and a seed's `to` is below the cycle's workspace.
 
@@ -434,6 +434,44 @@ as `tree open --protocols` reads them, and every cycle's tree keeps them. The ex
 when every cycle that ran and is not pending ended as expected, 1 when one did not, and 2 when the
 command line, the suite, the protocols, a seed or the scratch directory is refused before any
 cycle; the refusal names its reason and the member of the suite (`cycles[2].steps[0].do`).
+
+`--workers <n>` (1 to 64, default 1) runs up to `n` cycles at once, each thread taking the next
+cycle in suite order. `<n>` stays the cycle's position in the suite, the lines and the report stay
+in suite order whatever order the cycles end in, and a cycle's seconds are its own wall time. A
+failing cycle ends only itself. The cycles share only what they read; under `--confinement local`
+a program can read any path the user can, the other cycles' workspaces included. More than one
+worker under `--confinement substrate` is refused `SubstrateWorkersUnserved` (exit 2) before any
+cycle: it waits for `story:suite-runs-cycles-under-one-cgroup-root`.
+
+`--only <name>` runs the named cycles alone; the flag repeats, and a comma separates names, so
+`--only b --only d` and `--only b,d` are one selection. A selected cycle keeps its position in the
+suite as its directory number. The first summary line then says how many were selected, and the
+report holds `only` (the selected names in suite order) beside `suite_cycles`. A name that is no
+cycle of the suite is refused `CycleUnknown` (exit 2) and nothing is written. The suite below is
+`crates/loom-cli/tests/fixtures/tree-suite/only.suite.yaml`: five cycles whose one step is `open`.
+
+```console
+$ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch \
+    --at 2026-11-22T08:00:00Z --confinement local --only b,d
+b: as expected (0.2 s)
+d: as expected (0.2 s)
+cycles: selected 2 of 5, 2 expected, 2 as expected, 0 failed: none
+pending: 0 (0 still failing: none; passing, move to expected: none; 0 waiting: none)
+(exit 0)
+$ ls scratch
+2
+4
+$ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch2 \
+    --at 2026-11-22T08:00:00Z --confinement local --only b,x
+b10x-loom: tree test refused: CycleUnknown: --only names x, which is no cycle of the suite
+{"detail":"--only names x, which is no cycle of the suite","member":null,"reason":"CycleUnknown"}
+(exit 2)
+$ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch3 \
+    --at 2026-11-22T08:00:00Z --workers 2
+b10x-loom: tree test refused: SubstrateWorkersUnserved: --workers above 1 under --confinement substrate waits for story:suite-runs-cycles-under-one-cgroup-root
+{"detail":"--workers above 1 under --confinement substrate waits for story:suite-runs-cycles-under-one-cgroup-root","member":null,"reason":"SubstrateWorkersUnserved"}
+(exit 2)
+```
 
 At an exit 3 of `tree run`, every printed wait is answered by the first `decide` entry, in list
 order, that matches it and has a use left: `approve` by `case` (an id, or its last part),
@@ -534,6 +572,8 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 `read_suite(path)` decode a suite, `evaluate_checks(checks, place, view, captured)` tests checks
 over what a cycle left, and `run_suite(suite, &SuiteSettings, observer, cancel)` runs one and
 answers a `SuiteReport`. It prints nothing and reads no environment variable and no current
-directory: every path of `SuiteSettings` is absolute. The observer, a `SuiteObserver` or a
-closure over `&CycleResult`, is given each cycle's result as the cycle ends; a set cancel flag
-ends the running cycle before its next step and runs no further one.
+directory: every path of `SuiteSettings` is absolute. `SuiteSettings::new` sets `workers` to 1
+and `only` to every cycle. The observer, a `SuiteObserver` or a closure over `&CycleResult`, is
+given each cycle's result in suite order on the caller's thread, as soon as every result before it
+has ended. A set cancel flag starts no further cycle and ends each running one before its next
+step; a running `tree run` stops `Cancelled`, and its step ends "the suite was cancelled".

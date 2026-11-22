@@ -6,6 +6,7 @@
 //! [`printable`](b10x_loom_intake_slice::run::printable), so no text a file or a program wrote can
 //! move the cursor or start a line.
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +17,9 @@ use b10x_loom_intake_slice::confinement::TestRunner;
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::embed::{ProtocolCatalog, TreeRunner, host_catalog};
 use b10x_loom_tree::model::{ApprovalDecision, CycleResult, TreeRefusalReason};
-use b10x_loom_tree::suite::{SuiteSettings, cycle_line, report_json, run_suite, summary_lines};
+use b10x_loom_tree::suite::{
+    SuiteRefused, SuiteSettings, cycle_line, report_json, run_suite, summary_lines, workers_served,
+};
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
     approve as record, open_tree, person_program, read_protocols_directory, refusal_json, run_json,
@@ -566,6 +569,16 @@ fn test(arguments: &TreeTestArgs) -> u8 {
     };
     let tree_refused =
         |refused: Refused| refuse_test(refused.to_string(), refusal_json(&refused.0));
+    let suite_refused = |refused: SuiteRefused| {
+        refuse_test(
+            refused.to_string(),
+            json!({
+                "reason": format!("{:?}", refused.reason()),
+                "member": refused.member(),
+                "detail": refused.0.detail,
+            }),
+        )
+    };
     let time = match TreeTime::from_flag(Some(&arguments.at)) {
         Ok(time) => time,
         Err(refused) => return tree_refused(refused),
@@ -574,33 +587,25 @@ fn test(arguments: &TreeTestArgs) -> u8 {
         Ok(paths) => paths,
         Err(refused) => return tree_refused(refused),
     };
+    let confinement = arguments
+        .confinement
+        .to_possible_value()
+        .map(|value| value.get_name().to_owned());
+    let workers = NonZeroUsize::new(usize::from(arguments.workers)).unwrap_or(NonZeroUsize::MIN);
+    if let Err(refused) = workers_served(confinement.as_deref(), workers) {
+        return suite_refused(refused);
+    }
     let runner = match test_runner(arguments.confinement) {
         Ok(runner) => runner,
         Err(refused) => return tree_refused(refused),
     };
-    let settings = SuiteSettings::new(
-        protocols,
-        scratch,
-        time,
-        runner,
-        arguments
-            .confinement
-            .to_possible_value()
-            .map(|value| value.get_name().to_owned()),
-    );
+    let mut settings = SuiteSettings::new(protocols, scratch, time, runner, confinement);
+    settings.workers = workers;
+    settings.only = arguments.only.clone();
     let mut print = |result: &CycleResult| println!("{}", printable(&cycle_line(result)));
     let report_of = match run_suite(&suite, &settings, Some(&mut print), None) {
         Ok(report) => report,
-        Err(refused) => {
-            return refuse_test(
-                refused.to_string(),
-                json!({
-                    "reason": format!("{:?}", refused.reason()),
-                    "member": refused.member(),
-                    "detail": refused.0.detail,
-                }),
-            );
-        }
+        Err(refused) => return suite_refused(refused),
     };
     for line in summary_lines(&report_of) {
         println!("{}", printable(&line));

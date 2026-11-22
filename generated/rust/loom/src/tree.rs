@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 39f896f350990bc2c002f53adccf0532024c1eddaa93ef457b01284c2ace1f73
+// contract digest 6ee02dfab1864fb764b3c0d2532fdede9331d64c1c925750255190d9355cf07c
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -968,6 +968,10 @@ pub enum SuiteRefusalReason {
     ScratchNotEmpty,
     /// `SeedUnusable`.
     SeedUnusable,
+    /// `CycleUnknown`.
+    CycleUnknown,
+    /// `SubstrateWorkersUnserved`.
+    SubstrateWorkersUnserved,
 }
 
 /// SuiteReport — `loom.tree.SuiteReport`.
@@ -989,6 +993,10 @@ pub struct SuiteReport {
     pub waiting: Vec<WaitingCycle>,
     /// `not_run` — `List<String>`.
     pub not_run: Vec<String>,
+    /// `only` — `Optional<List<String>>`.
+    pub only: Option<Vec<String>>,
+    /// `suite_cycles` — `Integer`.
+    pub suite_cycles: i64,
 }
 
 /// TreeBudget — `loom.tree.TreeBudget`.

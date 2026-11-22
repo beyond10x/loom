@@ -68,6 +68,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - A `person` binding may name an `argv`: `tree approve --action` runs that program once inside the admitted effect, each entry that is exactly `{principal}` replaced by the approving principal as one argument; only exit 0 records, any other end keeps the approval and is refused `PersonProgramFailed` with the call's own argv as `command`; `tree approve --confinement` and `--cgroup-root`, `b10x_loom_tree::person_program`, `b10x_loom_bindings::prepare`, `start`, `RunPlace`, `ChildInputs`, `NotPrepared`, `Prepared`, `Started` and `PRINCIPAL_PLACEHOLDER` (story:person-action-runs-a-program)
 - **Breaking:** `ApproveRequest` gains `runner`, `TreeRefusal` gains `command`, `ProgramRun` gains `principal` and `TreeRefusalReason` gains `PersonProgramFailed`: a struct literal names the fields and an exhaustive `match` needs the arm (story:person-action-runs-a-program)
 - **Breaking:** `loom_sdk::tree` joins the SDK's stable surface, and its witness `crates/loom-sdk/tests/host_ports.rs` names each of its paths; nothing a consumer already calls changes (story:tree-library-exports-what-an-engine-needs)
+- `tree test --workers N` (1 to 64) and `SuiteSettings::workers` run up to N cycles at once, results and observer calls in suite order (story:suite-runs-cycles-in-parallel)
+- `tree test --only NAME[,NAME]` and `SuiteSettings::only` run the named cycles alone; the summary says `cycles: selected <S> of <C>, …` (story:suite-runs-cycles-in-parallel)
+- `run_suite` and `tree test` refuse `CycleUnknown` and `SubstrateWorkersUnserved` before any cycle; `suite::workers_served` (story:suite-runs-cycles-in-parallel)
+- **Breaking:** `SuiteReport` gains `only` and `suite_cycles`, `SuiteSettings` gains `workers` and `only`, `SuiteRefusalReason` gains two variants (story:suite-runs-cycles-in-parallel)
 
 ### Changed
 
@@ -129,6 +133,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `task slow` and `task suite-generate` name 30 minutes of pool time (`SLOT_TIMEOUT`), and `task slow` builds its tests in a job of their own
 - Substrate 0.24.0 (`b10x-substrate-host`, `-wire`); its executable deny-list is not yet reachable from Loom (story:substrate-0-24-0-pin)
 - `MAX_EGRESS_APERTURES` and `ChildCommand::MAX_READ_ONLY_ROOTS` rise from 4 to 8, Substrate 0.22.0's bounds (story:substrate-0-24-0-pin)
+- A suite cycle whose `run` step the suite's cancel ended has the difference `StepFailed`, found "the suite was cancelled", not `ExitDiffers` (story:suite-runs-cycles-in-parallel)
 
 ### Removed
 

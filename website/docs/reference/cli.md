@@ -46,7 +46,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom tree close`](#b10x-loom-tree-close) | Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is |
 | [`b10x-loom tree status`](#b10x-loom-tree-status) | Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log |
 | [`b10x-loom tree verify`](#b10x-loom-tree-verify) | Verify the run log of every case of the tree and name the first line that fails |
-| [`b10x-loom tree test`](#b10x-loom-tree-test) | Run a loom.tree-suite/1 suite of scripted tree cycles one after another, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects |
+| [`b10x-loom tree test`](#b10x-loom-tree-test) | Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers at once, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects |
 
 ## `b10x-loom run`
 
@@ -811,7 +811,7 @@ Exit status:
 
 ## `b10x-loom tree test`
 
-Run a loom.tree-suite/1 suite of scripted tree cycles one after another, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects
+Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers at once, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects
 
 ```text
 Usage: b10x-loom tree test [OPTIONS] --suite <FILE> --protocols <DIR> --scratch <DIR> --at <INSTANT>
@@ -824,13 +824,17 @@ Usage: b10x-loom tree test [OPTIONS] --suite <FILE> --protocols <DIR> --scratch 
 | `--scratch <DIR>` | yes | none | The directory the cycles work in: absent or empty |
 | `--at <INSTANT>` | yes | none | The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ` |
 | `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` needs a delegated cgroup root, which `tree test` does not take yet: it is refused before any cycle; pass `local` |
+| `--workers <N>` | no | `1` | How many cycles run at once, 1 to 64. More than 1 under `--confinement substrate` is refused SubstrateWorkersUnserved before any cycle |
+| `--only <NAME>` | no | none | Run only the named cycles; the flag repeats and a comma separates names. A name that is no cycle of the suite is refused CycleUnknown before any cycle |
 | `--report <FILE>` | no | none | Also write the result as one loom.tree.SuiteReport JSON document to this file |
 
 ```text
-Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but the --report file is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle as it ends, then the two summary lines; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
+Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but the --report file is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle in suite order, as soon as it and every cycle before it ended, then the two summary lines; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
+
+--workers N runs up to N cycles at once, each in its own <scratch>/<n>/, n its position in the suite; under --confinement local nothing is confined, so a program can read the other cycles' workspaces. More than one worker under --confinement substrate is refused SubstrateWorkersUnserved. --only NAME runs the named cycles alone (repeat the flag, or separate names with commas); a name that is no cycle of the suite is refused CycleUnknown, and with --only the first summary line reads `cycles: selected <S> of <C>, <N> expected, ...`.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected
   1  a cycle that ran and is not pending did not, or the report could not be written
-  2  refused before any cycle: the command line, the suite, the protocols, a seed or the scratch directory
+  2  refused before any cycle: the command line, the suite, an --only name (CycleUnknown), --workers above 1 under substrate (SubstrateWorkersUnserved), the protocols, a seed or the scratch directory
 ```

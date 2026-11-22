@@ -1,0 +1,10 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: step@1
+  bindings: bindings/step.bindings.yaml
+  steps: [{do: open}, {do: run}, {do: status}]
+cycles:
+  - name: slow
+    seed: [{from: stubs/slow.sh, to: stubs/program.sh}, {from: barrier, to: barrier}, {from: names/slow.txt, to: name.txt}]
+  - name: fast
+    seed: [{from: stubs/fast.sh, to: stubs/program.sh}, {from: barrier, to: barrier}, {from: names/fast.txt, to: name.txt}]

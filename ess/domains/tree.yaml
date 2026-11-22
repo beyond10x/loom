@@ -1017,7 +1017,9 @@ types:
   # `tree test --report`: every cycle's result in suite order, the number of cycles expected (run
   # and not pending), of those as expected, the names of those that failed, the number pending
   # (marked so, or waiting), the names of the pending cycles that pass, the cycles waiting for a
-  # story and the names of those not run.
+  # story and the names of those not run. `cycles` and every list of names are in suite order with
+  # any worker count, whatever order the cycles end in. `only`: the cycles `--only` selected, in
+  # suite order, absent in a full run. `suite_cycles`: the number of cycles in the suite.
   - name: loom.tree.SuiteReport
     kind: struct
     fields:
@@ -1037,6 +1039,10 @@ types:
         type: List<loom.tree.WaitingCycle>
       - name: not_run
         type: List<String>
+      - name: only
+        type: Optional<List<String>>
+      - name: suite_cycles
+        type: Integer
 
   # Why `tree test` refused before any cycle ran (exit 2). `SuiteUnreadable`: the suite is no
   # regular file within 1 MiB of YAML, or names another format. `MemberUndeclared`: a member the
@@ -1051,6 +1057,9 @@ types:
   # than one key. `StepKindUnknown`, `SourceUnknown`, `EventKindUnknown`: a name the format does not
   # know. `ProtocolsUnreadable`: a file of `--protocols` that Canon refuses. `ScratchNotEmpty`:
   # `--scratch` holds anything. `SeedUnusable`: a seed entry that is a link or is absent.
+  # `CycleUnknown`: an `--only` name that is no cycle of the suite. `SubstrateWorkersUnserved`:
+  # more than one worker under `--confinement substrate`, which waits for
+  # story:suite-runs-cycles-under-one-cgroup-root.
   - name: loom.tree.SuiteRefusalReason
     kind: enum
     variants:
@@ -1072,6 +1081,8 @@ types:
       - ProtocolsUnreadable
       - ScratchNotEmpty
       - SeedUnusable
+      - CycleUnknown
+      - SubstrateWorkersUnserved
 
   # A refused suite: the reason, the member path it names (`cycles[2].steps[0].do`), and what is
   # wrong.
