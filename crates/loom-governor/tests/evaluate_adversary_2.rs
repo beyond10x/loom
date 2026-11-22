@@ -368,7 +368,11 @@ fn adversary2_set_aside_and_reordered_records_report_what_the_governor_reports()
 /// The set-aside path judges each record once against the snapshot: at 2000 records with one set
 /// aside it costs a bounded multiple of deciding the 2000 records. A governor-style cumulative
 /// filter (each record judged with every earlier applying record) is quadratic and breaks the
-/// bound by orders of magnitude; nothing else in the suite measures this path.
+/// bound by orders of magnitude; nothing else in the suite measures this path. Each path counts
+/// with its least time over [`ROUNDS`] rounds back to back in one process: one wall-time sample
+/// under a loaded build pool broke the bound once (6.64 s against 5.89 s, 5.68 s alone) with
+/// nothing quadratic in it. Canon evaluates on a thread of its own, so the caller's CPU time does
+/// not count the work.
 #[test]
 fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
     let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
@@ -394,14 +398,21 @@ fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
         record("stray", "undeclared_kind", "observed", "intent", "query-1"),
     );
     let set_aside = request("system-query@1", &case, &records);
-    let start = Instant::now();
-    let fast = evaluate(&catalog, &decided).expect("decided");
-    let decide = start.elapsed().as_secs_f64();
-    let start = Instant::now();
-    let slow = evaluate(&catalog, &set_aside).expect("decided with one set aside");
-    let filter = start.elapsed().as_secs_f64();
+    // Each path's least time over three rounds, taken back to back: a round another process
+    // preempted counts only when every round was.
+    let (mut decide, mut filter) = (f64::INFINITY, f64::INFINITY);
+    let (mut fast, mut slow) = (None, None);
+    for _ in 0..ROUNDS {
+        let start = Instant::now();
+        fast = Some(evaluate(&catalog, &decided).expect("decided"));
+        decide = decide.min(start.elapsed().as_secs_f64());
+        let start = Instant::now();
+        slow = Some(evaluate(&catalog, &set_aside).expect("decided with one set aside"));
+        filter = filter.min(start.elapsed().as_secs_f64());
+    }
+    let (fast, slow) = (fast.expect("a round"), slow.expect("a round"));
     eprintln!(
-        "n={n}: decide {decide:.4}s, set aside {filter:.4}s, ratio {:.1}",
+        "n={n}: decide {decide:.4}s, set aside {filter:.4}s (least of {ROUNDS}), ratio {:.1}",
         filter / decide
     );
     assert_eq!(slow.outcome, fast.outcome);
@@ -414,6 +425,9 @@ fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
         "setting one record aside among {n} took {filter:.3}s against {decide:.3}s to decide them"
     );
 }
+
+/// How often `adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding` times each path.
+const ROUNDS: usize = 3;
 
 /// The case inputs a `software-change@1` case opens with here: Loom's run defaults.
 fn software_change_inputs() -> loom_governor::CaseInputs {

@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "31bd16688ec1b81c03dde4d3836bb26ad9230531e27bc77678a89642643790fc",
-    "contract_digest": "be5bd719f4616e0ba8ec944c2d7572a791ae9de98442c12a8aa2975ae0bca753"
+    "source_digest": "dd8bf5819d33c39898041db57e3141fbd26dfc25708d11271bc73485cca3be0f",
+    "contract_digest": "1fb11d718d41b3b86db8fa52530d281fc046d57feb88f0d9c838da9bdb843394"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -362,6 +362,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ArtifactPlacement",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.ArtifactRevision",
       "disposition": {
         "disposition": "generated"
@@ -397,6 +404,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.BoundStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.CopiedRecord",
       "disposition": {
         "disposition": "generated"
@@ -412,6 +426,13 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.CopyRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.DiscardReason",
       "disposition": {
         "disposition": "generated"
       }
@@ -440,6 +461,13 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.ProducerIndependence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramEnvironment",
       "disposition": {
         "disposition": "generated"
       }
@@ -489,6 +517,55 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.RetryCondition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryFeedback",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryLog",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RetryRecord",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionMove",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.StepOutcome",
       "disposition": {
         "disposition": "generated"
       }

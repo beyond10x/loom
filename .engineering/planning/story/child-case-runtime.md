@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:child-case-runtime
 kind: story
-status: proposed
+status: active
 title: Performing a case_open action opens the child case and its outcome is written into the parent as case_outcome
 summary: Parent-child link and termination in the case store; subject_revision is the revision the outcome was computed against
 tags:
@@ -13,8 +13,6 @@ relations:
 - depends_on: story:canon-0-9-0-pin
 - depends_on: story:bindings-document
 - depends_on: story:deterministic-default-selector
-- depends_on: story:bound-artifact-revisions
-- depends_on: story:bound-agent-node
 scope:
 - confidence: inferred
   path: crates/loom-bindings
@@ -40,9 +38,10 @@ scope:
   path: ess/domains/governor.yaml
 - confidence: inferred
   path: website/docs/concepts/governor-and-intake.md
-revision: 12
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
+- {from: "proposed", to: "active", at: "2026-11-21T21:13:21Z", actor: "agent:sdc", revision: 13, decided_on: {"recorded":{"review_outcome":3}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
 ---
 ## Outcome
 
@@ -68,6 +67,9 @@ into the parent as the one `case_outcome` evidence record Canon reads for that c
 - The child's id is `<parent id>.<name>`; opening for the same name again gives `<id>.2`, `<id>.3`.
   A child whose subject was revised is never reopened or rewritten: the parent opens a new one.
 - The child is opened with the `independence` map of its own bindings file.
+- An artifact the child's bindings file places at no path is opened at revision `none`
+  (added 2026-11-21 while the unit ran: the governor refuses an open that gives no revision,
+  `OpenError::MissingRevision`).
 - After the children are opened, the opening action's own `evidence` entries with `from: effect`
   are recorded in the parent like any step's evidence.
 - A case is terminated by one governor operation, `terminate(case, outcome, instant)`, which
@@ -146,6 +148,8 @@ claim with `children: {in: [passed]}`) and `child/1`, stub programs and no model
   sub/child.yaml` opens the child with the `independence` map of `<dir>/sub/child.yaml`, with the
   process's working directory elsewhere and a file of the same name in the workspace holding
   another map.
+- With `child/1` declaring an artifact its bindings file places at no path, the child opens
+  with it at `none` (test `a_path_less_child_artifact_opens_at_none`).
 - A file a child's program writes at a placed path moves the parent's revision of the artifact
   placed at the same path at the parent's next evaluation.
 - A terminated case refuses a further action without a new error variant: its frontier lists no

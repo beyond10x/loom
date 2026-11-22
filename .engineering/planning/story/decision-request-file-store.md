@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:decision-request-file-store
 kind: story
-status: proposed
+status: active
 title: Decision requests are kept a file each in a store directory and survive a restart
 summary: FileDecisionStore in the governor beside the case and suspension stores, with the three views and the records kept beside each request
 tags:
@@ -22,9 +22,10 @@ scope:
   path: crates/loom-governor/tests/decision_store.rs
 - confidence: cited
   path: ess/domains/governor.yaml
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-22T00:22:59Z", actor: "agent:sdc", revision: 10, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
 ---
 ## Outcome
 
@@ -87,6 +88,13 @@ domain declares no conflict type of its own. On that commit `task drift` fails, 
   first.
 - Two threads that each write a new request with the same id from an empty read leave one request;
   the second is refused `StoreConflict`.
+- Two threads that each write a new Open request with a different id and the same `record_key`
+  from an empty read leave one request; the second is refused `StoreConflict` naming the holder
+  in `record_key_held_by`, and `Request` over the file store answers `RecordKeyOpen` naming it.
+  The check for an Open or Escalated request under the record key and the write are one
+  `locked(...)` operation: the rule is an obligation of `DecisionStore::write`
+  (`story:decision-request-entity`, "As built"; security pass 1, F3,
+  `review-result:decision-request-entity-security-1`).
 - Two `EscalationSuppressedRecord`s appended beside a request, the process ended, and the store
   opened again in a second process read back both records in order, with the request unchanged.
 - Two threads that each append one record beside the same request, while a third writes a

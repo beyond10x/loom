@@ -1,7 +1,8 @@
 //! `task check` holds Loom's ESS specification to its synthesized conformance suite.
 //!
-//! [`ess_conformance_report`] synthesizes the suite from `ess/` with `ess verify conform
-//! synthesize --suite-format 5`, runs it against `b10x-loom-executor` through [`LoomTarget`], and reads the verdict
+//! [`ess_conformance_report`] reads the suite `ess verify conform synthesize --suite-format 5`
+//! synthesized from `ess/`, committed under `generated/ess/loom/` once its input digest matched
+//! the tree, runs it against `b10x-loom-executor` through [`LoomTarget`], and reads the verdict
 //! from the `ess-conformance-report/2` document, never from an exit code:
 //!
 //! 1. the report records at least one executed scenario (passed or failed);
@@ -45,8 +46,10 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
 
 /// The report format the verdict is read from.
 const REPORT_FORMAT: &str = "ess-conformance-report/2";
@@ -170,15 +173,14 @@ fn scratch() -> PathBuf {
     dir
 }
 
-/// Runs `ess` with `args` in the repository root and returns what it printed, refusing a failed
+/// Runs `ess` with `args` in the repository root, asking for the release `ess/ess-inputs.yaml`
+/// requires unless the caller set `ESS_TOOLCHAIN`, and returns what it printed, refusing a failed
 /// run.
-fn ess(args: &[&str], out: Option<&Path>) -> String {
-    let mut command = Command::new("ess");
-    command.current_dir(root()).args(args);
-    if let Some(out) = out {
-        command.arg(out);
-    }
-    let output = command
+fn ess(args: &[&str]) -> String {
+    let output = ess_suite::ess_program(&root())
+        .command()
+        .current_dir(root())
+        .args(args)
         .output()
         .unwrap_or_else(|error| panic!("`ess` must be on PATH: {error}"));
     assert!(
@@ -192,34 +194,29 @@ fn ess(args: &[&str], out: Option<&Path>) -> String {
     String::from_utf8(output.stdout).expect("`ess` prints UTF-8")
 }
 
-/// The suite `ess/` obliges, synthesized fresh with declared coverage (`--suite-format 5`), so the
+/// The suite `ess/` obliges, synthesized with declared coverage (`--suite-format 5`), so the
 /// report can qualify the run `passed` rather than `inconclusive`, and with the authored scenarios
-/// `ess/ess-inputs.yaml` lists (`--scenarios ess`) beside the generated ones.
-fn synthesize(out: &Path) -> String {
-    ess(
-        &[
-            "verify",
-            "conform",
-            "synthesize",
-            "--path",
-            "ess",
-            "--scenarios",
-            "ess",
-            "--suite-format",
-            "5",
-            "--out",
-        ],
-        Some(out),
+/// `ess/ess-inputs.yaml` lists (`--scenarios ess`) beside the generated ones. Synthesizing `ess/`
+/// takes minutes, so this reads the suite `task suite-generate` committed under
+/// `generated/ess/loom/`, after the digest of its inputs matched this tree's `ess/`
+/// (`crates/loom-executor/tests/support/ess_suite.rs`); `task slow` synthesizes again and compares
+/// bytes.
+fn committed_suite() -> String {
+    let (record, suite) = ess_suite::committed(&root(), &ess_suite::ess_program(&root()))
+        .unwrap_or_else(|detail| panic!("{detail}"));
+    assert!(
+        record.success(),
+        "the committed synthesis of ess/ failed: {}",
+        record.describe()
     );
-    fs::read_to_string(out).unwrap_or_else(|error| panic!("read {}: {error}", out.display()))
+    suite.unwrap_or_else(|| panic!("{} records no suite", ess_suite::RECORD))
 }
 
 /// The qualified name of every command the compiled specification declares.
 fn compiled_commands() -> BTreeSet<String> {
-    let compiled: Value = serde_json::from_str(&ess(
-        &["specify", "compile", "--path", "ess", "--format", "json"],
-        None,
-    ))
+    let compiled: Value = serde_json::from_str(&ess(&[
+        "specify", "compile", "--path", "ess", "--format", "json",
+    ]))
     .expect("`ess specify compile --format json` prints JSON");
     compiled["commands"]
         .as_object()
@@ -606,7 +603,7 @@ fn added_violations(report: &Value, copy: &Value, named: &BTreeSet<String>) -> V
 #[test]
 fn ess_conformance_report() {
     let dir = scratch();
-    let suite_text = synthesize(&dir.join("suite.json"));
+    let suite_text = committed_suite();
     let suite: Value = serde_json::from_str(&suite_text).expect("the suite is JSON");
     let scenarios: Vec<String> = suite["scenarios"]
         .as_object()

@@ -212,6 +212,19 @@ conditions fails `task check`:
    that file in both directions, so a new cover is a change of that file, which a reviewer reads;
 4. no file under `ess/` contains `UNMAPPED:`, so the specification carries no open question.
 
+Synthesizing `ess/` takes minutes since the decision domain joined it (218 to 277 s with ess
+0.96.0, 0.9 s before), so it runs once per change of `ess/`, never per test. `task suite-generate`
+writes the suite to `generated/ess/loom/suite.json` and `generated/ess/loom/synthesis.txt`, which
+records synthesize's exit status and output, the suite's SHA-256 and the SHA-256 of its inputs
+(every file under `ess/` by sorted path, and the version line of the `ess` that ran). Step 3 and
+`task conform` read the committed files once that input digest equals this tree's, and fail naming
+`task suite-generate` otherwise. `task slow` synthesizes again and fails unless both files are
+equal byte for byte (§ Gate). A change under `ess/` runs `task suite-generate`, commits both files
+and runs `task slow`. A test that synthesizes a changed copy of `ess/` leaves out the decision
+domain unless it is about it (`drop_decision` in `crates/loom-executor/tests/support/ess_suite.rs`)
+and goes through `synthesize_once`, which keeps one result per distinct input for every test
+process.
+
 A refusal is removed by a change of the specification that keeps its behaviour, where one exists.
 It is covered by an authored scenario only where none exists, and that scenario's `summary` (the
 suite's `purpose`) says why: the refusal code and the cause, with the reasoning in the comment
@@ -267,6 +280,10 @@ moved without its digest fails the install step of every job in under 30 s.
 ## Gate
 
 Needs Rust, Task, `ess`, Helm 3 (`task chart-check`) and bubblewrap (`/usr/bin/bwrap`).
+The `ess` release every step runs comes from the line `requires: ess X.Y.Z` of
+`ess/ess-inputs.yaml` alone: both Taskfiles set `ESS_TOOLCHAIN` from it, and the tests and
+`loom-xtask` set it on each `ess` they start (`Ess` in `crates/loom-executor/tests/support/ess_suite.rs`),
+unless the caller set it, so an `ess` dispatcher newer than the pin runs the pinned release.
 CI installs the backend before
 running the delegation-refusal tests. Every workflow installs Rust 1.99.1, the toolchain the local
 gate runs on, and the pin moves by a story that also fixes the tests that depend on Cargo's layout
@@ -279,8 +296,16 @@ Before a change is reported done, in this order:
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
    Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   `cargo test --workspace --locked`, `task consumer-check`, then `task docs-check` and
-   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`).
+   the test step (`task test-step`), `task consumer-check`, then `task docs-check` and
+   `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`, which
+   installs cargo-nextest by a pinned version and digest). The test step holds the budget of
+   `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
+   `cargo nextest run --workspace --locked` (`.config/nextest.toml`: a test is killed and fails at
+   60 s; `slow_` tests are left out, and so are the test binaries `task check` runs as their own
+   steps: `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`, `conform` of the three
+   conformance crates) and `cargo test --doc --workspace --locked`, prints the ten
+   slowest tests on every run and fails over 120 s
+   (`crates/loom-xtask/src/test_step.rs`).
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
@@ -293,6 +318,36 @@ Before a change is reported done, in this order:
 3. `task website` when anything under `website/` changed, or a generated page did. CI's
    `Documentation validation` (`pages.yml`) builds the site and runs the `loom-docs` and
    `loom-commission-docs` tests.
+
+The slow lane is `task slow`, started on its own and never by `task check`: it synthesizes `ess/`
+again and fails unless `generated/ess/loom/` is equal byte for byte (§ ESS), then runs every test
+named `slow_` (`cargo nextest run --profile slow`, `.config/nextest.toml`). Run it after every
+change under `ess/`, with `task suite-generate` before it, and after a change to the code a
+`slow_` test covers. A test that cannot meet the budget of `~/beyond10x/AGENTS.md` § Tests stay
+fast is renamed `slow_…` and runs there, never deleted; so is a test that starts a nested `cargo`
+build or test (the gate's replicas in `adversary_ess_gate.rs` and `adversary2_ess_gate.rs`).
+
+nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
+not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
+keyed by the digest of its inputs and made once for every process (`made_once` in
+`crates/loom-executor/tests/support/ess_suite.rs`).
+
+`.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
+builds inherit; the config file wins over one in the home directory, the manifest holds where no
+config sets it. The workspace has about 500 test binaries: with debug info `target/` grew to 34 GB
+and every one took longer to link. A panic still prints its file and line; a backtrace names
+functions without lines. `.cargo/config.toml` also builds every dependency (not the workspace's
+own crates) at `opt-level = 2`: the tests of `b10x-loom-cli` and `b10x-loom-governor` took 420 s
+of test time on 4 threads with unoptimized dependencies and 115 s with them optimized; a cold
+build of their dependencies takes about twice as long, an incremental one no longer.
+`b10x-loom-governor` is built at `opt-level = 2` too: its cost tests
+(`…_costs_a_bounded_multiple_of_deciding`) compare a path in its own code with deciding in
+Canon, a dependency, and with only Canon optimized the ratio rose from about 14 to 40 to 70
+against a bound of 40; with both optimized it is about 18.
+
+`task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
+public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
+run the same thread count.
 
 There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchain`), and a local
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
@@ -309,9 +364,9 @@ candidate for dogfooding.
 Every work tree builds into its own `target/`. The Taskfiles set no `CARGO_TARGET_DIR`; do not set
 one. Two trees that share a build directory can run each other's test binaries: cargo judges the
 other tree's binary fresh, and the gate exits 0 on code it did not build
-(`gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory` in
+(`slow_gate_checks_the_tree_it_runs_in_when_worktrees_share_a_build_directory` in
 `crates/loom-executor/tests/adversary_ess_gate.rs`). Before a gate's result counts as evidence,
-check with `cargo test --workspace --locked -- --list` in the gated tree that the tests the run
+check with `cargo nextest list --workspace --locked` in the gated tree that the tests the run
 printed exist there. Check `df -h /` before a full gate and run one full gate at a time. End a
 managed worktree with `worktree finish --discard-cache --archive <tree>`, which removes its build
 cache; never delete a `target/` by hand. `worktree discard-cache` and `finish --discard-cache`
@@ -335,6 +390,7 @@ Where a test puts its scratch depends on what it needs from the directories abov
 | Path | Generator | Regenerate | Drift check |
 |---|---|---|---|
 | `generated/rust/loom/` | `ess generate synthesize` over `ess/`, via `loom-xtask` | `task generate` | `task drift` |
+| `generated/ess/loom/suite.json`, `generated/ess/loom/synthesis.txt` | `ess verify conform synthesize --suite-format 5` over `ess/`, via `loom-xtask suite-generate`, with the digest of its inputs (§ ESS) | `task suite-generate` | `task ess-gate` and `task conform` (the input digest); `task slow` (bytes) |
 | `generated/rust/commission/` | the same over `ess/commission/`, via `loom-commission-xtask` | `task commission:generate` | `task commission:drift` |
 | `generated/rust/intake/` | synthesis over `ess/intake/`, via `loom-xtask` | `task intake-generate` | `task intake-drift` |
 | `deploy/crd/loomagents.loom.beyond10x.dev.yaml` | `loom-xtask crd-generate`, projecting the JSON Schemas `ess generate --kind schema` writes for `ess/` through `b10x_loom_resource::crd` | `task crd-generate` | `task crd-drift` |
@@ -577,14 +633,23 @@ refuses such a case of a built-in protocol naming the case and the input
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
 Canon is named by the `b10x-canon` line of each of `crates/loom-governor/Cargo.toml`,
-`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.9.0"`), pinned
+`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.10.0"`), pinned
 by `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
 with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
 adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
 register and are decided like any other construct. A catalog or a registration whose openings form
 a cycle is refused `InvalidProtocol` with Canon's `check_openings` text (`case-open-cycle: ... a ->
-b -> a`).
+b -> a`). Canon
+0.10.0 adds a `scope` on a capability requirement, `supplied_by` on an evidence kind, `author`,
+`revises` and `decided_by`, and a `children` form's `subject` and `revision: current`; such a
+protocol registers and Canon decides it, but Loom does not read all of it: the frontier carries the
+capability id alone, the scope only inside Canon's reason, and `action_facts` reads a `children`
+form's `case_outcome` records about any artifact at any revision, not its `subject` and `revision`.
+A protocol with `imports` is refused at registration (`MissingImport`): Loom hands Canon no imported
+document. Every decision document is Canon 0.10.0's (`missing_evidence`, `pending_decisions`), and a
+frontier id hashes it, so it changes with each Canon move; no store holds one
+(`crates/loom-governor/tests/canon_0_10_0.rs`).
 
 Child cases (`story:child-case-runtime`, `crates/loom-governor/src/children.rs`,
 `crates/loom-governor/tests/child_cases.rs`). `CanonGovernor::open_children(parent, action,
@@ -1270,8 +1335,15 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   naming no flag and no file member; `local` only with `UNCONFINED_FLAG_REASON`, else
   `CommandUnconfined`), then `preflight_child` on the workspace root, its refusal passed on. Every
   program, the `arguments_from` argv included, starts through that runner's `run_child`, as
-  `bound_program_child` builds the child (the one definition the intake slice's `CommandRunner`
-  also uses). A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
+  `bound_case_child` (`src/child.rs`, `story:bound-program-case-id`) builds the child: it calls
+  `bound_program_child` (the one definition the intake slice's `CommandRunner` also uses) and
+  replaces the environment with the one `loom.bindings.ProgramEnvironment` describes, `PATH` at
+  the host's value and `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
+  and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
+  anything starts. It is the only caller of `bound_program_child` in `crates/loom-bindings/src`
+  (`every_child_of_the_crate_is_built_by_bound_case_child`), so a port of the crate that starts a
+  program gives the case id; the intake slice's commands keep `PATH` alone. Held by
+  `crates/loom-bindings/tests/bound_case_id.rs`. A step: the case held under the document's protocol (else `CaseOfAnotherProtocol`,
   naming both, nothing started or recorded), the run count (observations of source
   `PROGRAM_SOURCE`, `loom/bound-program`, naming the case and the action; `RunsSpent` at
   `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
@@ -1291,8 +1363,35 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   program prints names a result, revision, producer or instant. The cap holds for one port that
   drives the case; two hosts that drive one case store at the same time can each start the action
   once more (`story:bound-program-run-cap-holds-across-ports`). Held by
-  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`;
-  `crates/loom-governor` is not changed by it.
+  `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`.
+- A placed artifact's revision is Loom's (`revision.rs`, `story:bound-artifact-revisions`):
+  `content_revision` is `t` and 16 hex digits of the SHA-256 over a file's bytes, a link's target
+  string (never followed) or a tree's entries in path order, `none` while absent. It opens each
+  segment from the workspace root with `O_NOFOLLOW` (rustix), so a link among the directories,
+  an absolute path and `..` are `OutsideWorkspace` and read by nothing; past `MAX_ARTIFACT_BYTES`,
+  `MAX_TREE_ENTRIES` or `MAX_TREE_DEPTH` is `TooLarge`; a change during the read is
+  `ChangedWhileRead`; a pipe, socket or device is `Unreadable`, never opened. `ProgramEffects`
+  digests before the run (one that fails is `ArtifactUnreadable`, nothing started) and after it,
+  and writes the moves with the records through `CanonGovernor::record_step`, one store write
+  that checks every record is about the moved revisions before it changes anything;
+  a non-`write` action whose program changed a placed artifact is `Discarded`
+  (`ChangedByNonWriter`): moves, no records. `PlacedRevisions` is the `Governor` that writes the
+  moves before every `frontier` and `completion`. Held by `crates/loom-bindings/tests/bound_revisions.rs`
+  and `crates/loom-governor/tests/step_write.rs` (a crash at each `WriteStep` of
+  `FileCaseStore::update_until` leaves neither or both).
+- `retry_records(governor, case, binding)` (`retry.rs`, `story:bound-program-retry-records`) is
+  each held record of the case whose facts name, once each, a `kind` (the record's own) and a
+  `result` the binding's `retry_when` lists, about the revision the case holds for the facts'
+  `subject`, never `none`, in the order received; its `action`, `exit` and `blob_sha256` only
+  from the first cited `PROGRAM_SOURCE` observation of that case (the blob only when it names 64
+  lowercase hex digits), none of them otherwise. After the run count and the placements and before
+  the arguments, a step with records keeps the `loom.retry-feedback/1` document through
+  `keep_blob`; `retry::given` rebuilds the bound child's environment through `child::environment`
+  from `ProgramEnvironment` (`PATH`, `LOOM_RETRY_FEEDBACK` = `RETRY_FEEDBACK_VARIABLE` at its
+  canonical path, `LOOM_CASE` last), mounted `at_host_path` unless the runner is `local`; with none
+  the variable is absent and nothing is written. A log is the last 60 lines, at most 65536 bytes of
+  text, of a blob that is a regular file hashing to its name, one per distinct blob. The run's
+  `ProgramRun.retry_of` names the records. Held by `crates/loom-bindings/tests/bound_retry.rs`.
 - `check_case_open` (`open.rs`, beside `check` at load) refuses an `open` executor on an action
   with no `case_open`, a `case_open` action bound to another executor (`MemberNotForExecutor`,
   `executor.kind`) and an evidence entry of kind `case_outcome` (`KindNotProducible`). It is not in

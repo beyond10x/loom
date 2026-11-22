@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest be5bd719f4616e0ba8ec944c2d7572a791ae9de98442c12a8aa2975ae0bca753
+  contract digest 1fb11d718d41b3b86db8fa52530d281fc046d57feb88f0d9c838da9bdb843394
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-420 capabilities: **404 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+431 capabilities: **415 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -63,18 +63,22 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.authority.Outcome` |
 | domain type | `loom.bindings.ActionBudget` |
 | domain type | `loom.bindings.ArtifactPath` |
+| domain type | `loom.bindings.ArtifactPlacement` |
 | domain type | `loom.bindings.ArtifactRevision` |
 | domain type | `loom.bindings.BindingsDocument` |
 | domain type | `loom.bindings.BindingsRefusal` |
 | domain type | `loom.bindings.BindingsRefusalReason` |
 | domain type | `loom.bindings.BoundAction` |
+| domain type | `loom.bindings.BoundStep` |
 | domain type | `loom.bindings.CopiedRecord` |
 | domain type | `loom.bindings.CopyRefusal` |
 | domain type | `loom.bindings.CopyRefusalReason` |
+| domain type | `loom.bindings.DiscardReason` |
 | domain type | `loom.bindings.EvidenceEntry` |
 | domain type | `loom.bindings.Executor` |
 | domain type | `loom.bindings.ExecutorSpec` |
 | domain type | `loom.bindings.ProducerIndependence` |
+| domain type | `loom.bindings.ProgramEnvironment` |
 | domain type | `loom.bindings.ProgramRefusal` |
 | domain type | `loom.bindings.ProgramRefusalReason` |
 | domain type | `loom.bindings.ProgramRun` |
@@ -82,6 +86,13 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.ResultRule` |
 | domain type | `loom.bindings.ResultSource` |
 | domain type | `loom.bindings.RetryCondition` |
+| domain type | `loom.bindings.RetryFeedback` |
+| domain type | `loom.bindings.RetryLog` |
+| domain type | `loom.bindings.RetryRecord` |
+| domain type | `loom.bindings.RevisionMove` |
+| domain type | `loom.bindings.RevisionRefusal` |
+| domain type | `loom.bindings.RevisionRefusalReason` |
+| domain type | `loom.bindings.StepOutcome` |
 | domain type | `loom.bindings.ToolAllowList` |
 | domain type | `loom.datasource.AdapterAlias` |
 | domain type | `loom.datasource.ConnectionId` |

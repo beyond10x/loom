@@ -41,7 +41,7 @@ scope:
   path: website/docs/guides/move-to-loom.md
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 12
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T02:18:31Z", actor: "human:timo", revision: 9}
 - {from: "proposed", to: "active", at: "2026-11-21T13:30:58Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w7"}
@@ -197,41 +197,89 @@ compares the engineering-protocols tag the docs name with `Cargo.lock`, which af
 holds no engineering-protocols package, so it cannot hold as written and must be revised (compare
 with `protocols/engineering/lock.json`) or retired. This story does not edit it.
 
+## As built, wave 2026-11-21-w7
+
+Where the unit's commit (`2a4779ae`) differs from the text above, the commit is what holds:
+
+- 13 packages left `Cargo.lock`, not four (`name = ` lines 552 before, 539 after). The four are
+  `b10x-assertion-providers`, `b10x-canon-engineering`, `b10x-canon-engineering-assertions` and
+  `b10x-canon-expr`; the lock holds no `b10x-canon-expr` now, which "Out of scope" left open. Nine
+  more had no other dependant and went with them: `fancy-regex` 0.16.2, `fluent-uri` 0.3.2,
+  `fraction` 0.15.4, `jsonschema` 0.33.0, `lazy_static`, `logos`, `logos-codegen`, `logos-derive`
+  and `referencing` 0.33.0. No manifest named any of the nine. The coordinator accepted the lock
+  as cargo wrote it (merge `855279a6`).
+- Kept blocks of `Cargo.lock` also changed: references to `jsonschema`, `referencing`,
+  `fancy-regex`, `fraction` and `fluent-uri` lose their version suffix because one copy of each
+  remains, and `uuid-simd` loses its `uuid` edge. No package is added and no version, source or
+  checksum changes (commit body of `2a4779ae`).
+- The `awk` command over `protocols/engineering/` in Acceptance prints three lines on `2a4779ae`:
+  `## Boundary` once and `## Protocol composition and system queries` twice (the lines of
+  `story:engineering-protocols-vendor-command`). Two headings print, not one; the check is that
+  `## Boundary` is among them.
+- Two of the three one-copy tests failed on the base lock, as the red step says: the lock test of
+  `adversary_w8_pin.rs` and `lock_resolves_one_path_copy_of_each_absorbed_crate`.
+  `crates/loom-xtask/tests/pinned_consumer.rs` cannot go red by this change: it loses one name
+  from a duplicate filter, which cannot fail while one copy of each name is locked. It passed
+  (5 passed) with the tests changed and the manifests and lock at base.
+- The test count did not move: 664 before and after (lanes 69 + 4 + 5 + 139 + 15 + 432). Three
+  tests were rewritten and none was added or removed.
+- `crates/loom-protocols/tests/engineering_lock.rs` changed (one doc-comment line). Scope lists
+  it as inferred and the commit confirms it; the Files section does not name it.
+- `task check`, the last line of Acceptance, was not run by the unit; the integration branch runs
+  it. `cargo tree --locked -i b10x-canon-engineering` exits 101, "did not match any packages".
+
 ## Scope
 
-Derived 2026-11-21 by `story-scoper` at `aa943153`. Every line is **cited** (read from the story or
-the tree) or **inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w7 from the unit's commits (`git diff --stat
+c1a1f443 2a4779ae`: 15 files, 102 insertions, 242 deletions). Every line is cited from that diff.
 
-- **Primary surface:** the four manifest lines naming `b10x-canon-engineering`, with `Cargo.lock`
-  and the three one-copy tests: cited (`crates/loom-protocols/Cargo.toml:15`,
-  `crates/loom-governor/Cargo.toml:19`, `crates/loom-intake-slice/Cargo.toml:18`,
-  `crates/loom-intake-router/Cargo.toml:15`; `git grep -n 'b10x-canon-engineering' -- '*.toml'`)
-- **Files (tests):** `crates/loom-protocols/tests/adversary_w8_pin.rs:79-113` and `:115-131`;
-  `crates/loom-executor/tests/intake_import.rs:9-12`, `:26-32` (`SINGLE_COPY`), `:166`, `:190`;
-  `crates/loom-xtask/tests/pinned_consumer.rs:145`: cited
-- **Files (test doc comments):** `crates/loom-governor/tests/governed_case.rs:9`,
-  `crates/loom-governor/tests/incident_response_slice.rs:23`: cited
-- **Files (lock):** `Cargo.lock`: cited. Packages `b10x-assertion-providers` `:188`,
-  `b10x-canon-engineering` `:214`, `b10x-canon-engineering-assertions` `:226`, `b10x-canon-expr`
-  `:242` (only `:232` names it). Dependency lists `:615`, `:648`, `:660`, `:758`
-- **Symbols:** `SINGLE_COPY`, `manifest_tags`, `one_tag`, `locked_sources`,
-  `every_engineering_entry_carries_the_tag_the_manifest_pins`,
-  `the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags`,
-  `lock_resolves_one_path_copy_of_each_absorbed_crate`: cited
-- **Documents:** `AGENTS.md` § Boundary `:35`, § Governor `:556-559`, § Connectors `:567-569`;
-  `website/docs/reference/sdk-stability.md:60-72`; `website/docs/guides/move-to-loom.md:49-58`;
-  `CHANGELOG.md` `### Removed` (new heading under `[Unreleased]`): cited
-- **Also likely:** `crates/loom-protocols/tests/engineering_lock.rs:5`, a doc comment that says the
-  files equal "the registry of the pinned `b10x-canon-engineering`": inferred, false after removal
-- **Confidence:** high: the story names every file, and the tree gave every line above
-- **Would collide with:** `Cargo.lock` (`story:decision-request-entity` adds a package;
-  `story:bound-program-result-table` edits the `b10x-loom-bindings` block; different hunks);
-  `AGENTS.md`, `sdk-stability.md`, `move-to-loom.md` (`co-pinned-consumer-check`,
-  `consumer-sdk-paths`, `breaks-between-releases`, `doc-dependency-tags-match-lock`; all draft,
-  unordered, other sections; the last compares docs with `Cargo.lock` and breaks semantically)
-  In wave 7: `story:bound-program-result-table` edits `AGENTS.md` § Bindings document and adds
-  `CHANGELOG.md` bullets, and `story:decision-request-entity` adds `CHANGELOG.md` bullets; this
-  story edits § Boundary, § Governor and § Connectors and adds `### Removed`. Other sections,
-  merged by keeping both sides: inferred
-- **Safety fact:** no Rust source names the crate: `git grep -n -e canon_engineering -e
-  assertion_providers` outside `.engineering/` prints nothing; step 2 is unproven (no `cargo tree`)
+- **Primary surface:** the four manifest lines naming `b10x-canon-engineering` and `Cargo.lock` —
+  cited, 5 of the 15 changed files (`crates/loom-governor/Cargo.toml`,
+  `crates/loom-intake-router/Cargo.toml`, `crates/loom-intake-slice/Cargo.toml`,
+  `crates/loom-protocols/Cargo.toml`, `Cargo.lock`); the three one-copy tests, two test doc comments
+  and the documents make up the other 10
+- **Files (manifests):** `crates/loom-governor/Cargo.toml`, `crates/loom-intake-router/Cargo.toml`,
+  `crates/loom-intake-slice/Cargo.toml`, `crates/loom-protocols/Cargo.toml` (1 line each, all
+  deletions: the `b10x-canon-engineering` line at tag `0.16.0`) — cited
+- **Files (generated output):** `Cargo.lock` — cited, 7 insertions and 175 deletions, rewritten by
+  cargo after the four lines went: 13 packages leave (`b10x-assertion-providers`,
+  `b10x-canon-engineering`, `b10x-canon-engineering-assertions`, `b10x-canon-expr`, `fancy-regex`,
+  `fluent-uri`, `fraction`, `jsonschema`, `lazy_static`, `logos`, `logos-codegen`, `logos-derive`,
+  `referencing`), and the 7 inserted lines are dependency entries that lose their version suffix
+  because one copy of `jsonschema`, `fancy-regex`, `fraction`, `referencing` and `fluent-uri`
+  remains
+- **Files (existing tests):** `crates/loom-protocols/tests/adversary_w8_pin.rs` (80 lines: the
+  module doc names the two places Canon's pin is written;
+  `every_engineering_entry_carries_the_tag_the_manifest_pins` is renamed
+  `every_engineering_entry_carries_the_tag_the_vendored_lock_names` and drops the
+  `one_tag("b10x-canon-engineering")` comparison;
+  `the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags` becomes
+  `the_lockfile_holds_one_canon_and_no_engineering_package`, with the new helper `locked_packages`;
+  no `#[test]` added or removed), `crates/loom-executor/tests/intake_import.rs` (20 lines:
+  `SINGLE_COPY` shrinks from 5 to 4 packages, the new `ABSENT` list holds `b10x-canon-engineering`,
+  `lock_resolves_one_path_copy_of_each_absorbed_crate` fails when the lock holds it, the module doc
+  says so), `crates/loom-xtask/tests/pinned_consumer.rs` (5 lines: the duplicate filter drops the
+  name), `crates/loom-protocols/tests/engineering_lock.rs` (2 lines, a doc comment: "the registry
+  engineering-protocols' tag holds"), `crates/loom-governor/tests/governed_case.rs` and
+  `crates/loom-governor/tests/incident_response_slice.rs` (4 lines each, doc comments: the fixture's
+  tag is the one `protocols/engineering/lock.json` names) — cited
+- **Files (new tests):** none — cited
+- **Files (documents):** `AGENTS.md` (18 lines: § Boundary names the engineering definitions as
+  vendored under `protocols/engineering/`, § Governor names Canon by the three manifest lines and
+  moves it with `cargo update -p b10x-canon` alone, § Connectors drops `b10x-canon-expr` and
+  `b10x-assertion-providers`), `CHANGELOG.md` (4 lines: a `### Removed` heading and one bullet),
+  `website/docs/guides/move-to-loom.md` (10 lines: the engineering protocols are vendored files,
+  Canon is the reference Loom's manifests name), `website/docs/reference/sdk-stability.md` (11
+  lines: the Canon section and the pin table's third column, now headed `engineering-protocols`) —
+  cited
+- **Symbols:** no public item added, changed or removed; no file under a crate's `src/` is in the
+  diff — cited. Test-local items only: const `ABSENT` and `SINGLE_COPY`'s length in
+  `intake_import.rs`, fn `locked_packages` in `adversary_w8_pin.rs`, and the two renamed or
+  rewritten test functions named above
+- **Not predicted and touched:** none; `CHANGELOG.md` is named by the stored Scope section but is
+  not a row of the typed scope (a house-rule file, not added);
+  `crates/loom-protocols/tests/engineering_lock.rs` was inferred and is touched
+- **Predicted and not touched:** none; every row of the typed scope is in the diff.
+  `b10x-canon-expr`, which the story left open as an out-of-scope question, left `Cargo.lock` with
+  the other 12 packages
+- **Review:** none planned; the coordinator read the commit
