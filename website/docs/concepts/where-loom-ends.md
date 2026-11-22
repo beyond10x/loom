@@ -7,10 +7,9 @@ lede: Loom proposes an action; the Commission runtime rechecks it and invokes it
 source: Atlas ADR 0082, decided 2026-10-04, which amends ADRs 0070 and 0071; crates/loom-commission/src/ports/effect.rs, crates/loom-commission/src/runtime.rs, crates/loom-commission/src/ports/connector.rs, crates/loom-connectors/src/lib.rs
 ---
 
-**Loom proposes. Commission invokes.** Every executor, Loom included, ends a step by returning a
-`ProposedAction`: an action id and its arguments. Loom's side ends there. It makes no connector
-call, holds no handle to connectors, and receives no provider credential just because a connection
-exists.
+Loom, like any executor, ends a step by returning a `ProposedAction`: an action id and its
+arguments. Loom's side ends there. It makes no connector call and holds no handle to connectors,
+and a connection existing gives it no provider credential.
 
 ```rust
 pub enum ExecutorOutcome {
@@ -44,22 +43,28 @@ executor, such as a human tool or a workflow, would need its own effect path.
 ## What holds today
 
 - The executor returns a `ProposedAction` and invokes nothing.
-- An action that needs authority is proposed too. Loom never suspends for authority: the runtime
+
+- An action that needs authority is proposed too. Loom does not suspend for authority. The runtime
   rechecks the proposal and asks its authority provider.
+
 - `run_until_blocked` invokes each admitted request once, and moves the case to a new revision only
   after an effect the port reports as `Performed`. A request the port answers `Pending` is invoked
   again at the next iteration, revalidated first, until the port answers otherwise.
-- The slice's `LocalEffects` performs `software.change/1` actions in a git work tree. It never
-  merges, pushes or deploys.
+
+- The slice's `LocalEffects` performs `software.change/1` actions in a git work tree. It does not
+  merge, push or deploy.
+
 - Commission's `ConnectorEffects` performs the actions a commission binds to Connector operations,
-  through a `ConnectorInvoker`. `b10x-loom-connectors` (`loom_sdk::connectors`) fills that port
-  over a Connectors service, pinned at Connectors `v0.35.0`. The host declares one
-  `ConnectorEndpoint` per Connector instance (`ess/commission/domains/responsibility.yaml`): its URL,
-  a credential reference its own resolver turns into the service credential, and whether plain
-  `http` is admitted. Each binding declares its operation's effect: `Write` for an operation the
-  service describes with the `mutation` profile, `Read` otherwise. `ConnectorsInvoker` describes
-  the endpoint, invokes the bound operation once on `POST /v1alpha2/invoke`, never falls back and
-  never resends.
+  through a `ConnectorInvoker`.
+
+`b10x-loom-connectors` (`loom_sdk::connectors`) fills that port over a Connectors service, pinned
+at Connectors `v0.35.0`. The host declares one `ConnectorEndpoint` per Connector instance
+(`ess/commission/domains/responsibility.yaml`): its URL, a credential reference its own resolver
+turns into the service credential, and whether plain `http` is admitted.
+
+A binding declares its operation's effect: `Write` for an operation the service describes with
+the `mutation` profile, `Read` otherwise. `ConnectorsInvoker` describes the endpoint and invokes
+the bound operation once on `POST /v1alpha2/invoke`. It does not fall back and does not resend.
 
 | Connectors answers | The invoker answers |
 |---|---|
