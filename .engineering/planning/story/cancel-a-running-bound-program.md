@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cancel-a-running-bound-program
 kind: story
-status: proposed
+status: active
 title: A cancel handle ends a running bound program before its timeout, and the step ends cancelled with no evidence record
 summary: Cancel type in the intake slice, ChildCommand::with_cancel, ProgramEffects::with_cancel; Kill at the next read step; Cancelled refusal; no result-table row, no retry
 tags:
@@ -49,9 +49,10 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/guides/embed-the-runtime.md
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T02:06:16Z", actor: "agent:loom", revision: 6}
+- {from: "proposed", to: "active", at: "2026-11-22T10:25:38Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "runbook-cancel-2026-11-22"}
 ---
 ## Outcome
 
