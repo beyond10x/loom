@@ -152,6 +152,41 @@ actions:
   argument and the child's `bindings` file, a path relative to the directory of the bindings file that names it, naming a
   file (not `.`, not ending in `/`). A `copy` names the evidence
   kind it copies as `evidence` and the protocol id of the case it copies from as `from`.
+- A `person` may also name an `argv`: the program `tree approve --action` runs once when the
+  principal takes the action. Each entry that is exactly `{principal}` is replaced by the
+  approving principal, as one argument whatever it holds (a space, a `;` or `$(…)` adds no
+  argument and no command); nothing else is replaced. The placeholder is refused `InvalidArgv`
+  as `argv[0]`, inside a longer entry (`--by={principal}`), and in a `program`'s `argv`, an
+  `arguments_from` or a `handoff_when`. Quote it in YAML (`"{principal}"`): unquoted in a flow
+  list it is a mapping, and the argv is refused. A person takes no `arguments`, `arguments_from`
+  or `exits` (`MemberNotForExecutor`). The program reads `{}` on standard input and the
+  environment of a `program` step (`PATH`, `LOOM_CASE`, `LOOM_TIMEOUT_SECONDS` and, for a child
+  case, the opening names); the principal is never in it. It starts through the runner
+  `--confinement` names, as `tree run` starts its programs: `substrate` by default, `tree approve`
+  then starting itself again in a delegated scope unless `--cgroup-root` names one; `local` for
+  `--confinement local`. It runs under the binding's `timeout_seconds`, and every run counts
+  against `budget.max_runs`.
+  - The order: the runner is admitted (`ConfinementRefused`, `NoRunner` without one), the run
+    count is below `max_runs`, and the placed artifacts are digested, all before anything is
+    written; a refusal there is `PersonProgramFailed`, its detail naming `RunsSpent` or
+    `ArtifactUnreadable`. Then the decision is recorded, and the program runs inside the effect
+    the decision admitted.
+  - Only an exit of 0 records the person's evidence, with the placed artifacts' new revisions,
+    in one store write. Any other end (another exit, killed at its timeout, refused by its
+    runner, a placed artifact changed by an action whose effect is not `write`
+    (`ChangedByNonWriter`), a placed artifact that cannot be digested after the run) records
+    nothing, keeps the approval and the run, and refuses `PersonProgramFailed`, naming the end
+    and the blob of the program's output by its digest, never what it printed.
+  - The refusal's `command` is the argv of the refused call, its paths resolved, in this word
+    order: `b10x-loom tree approve --store <dir> --case <id> [--capability <c>] --principal <p>
+    --action <a> [--result <r>] [--reasons <text> | --reasons-file <file>] [--at <instant>]
+    --confinement <c> [--cgroup-root <dir>]`, each as the call named it. Once the cause is fixed,
+    running it takes the action again with the same result, within `max_runs`. The
+    `ApproveAction` decision `tree run` prints for such an action carries the run's own
+    `--confinement` and `--cgroup-root`.
+  - The program, and any program it starts, is found on the `PATH` of the `tree approve`
+    process, which may differ from the `PATH` of `tree run`: start both with one `PATH`, or a
+    bare name may resolve to another file, or to none.
 - `arguments` is a literal object; `arguments_from` is an argv whose standard output is the
   object. They are alternatives.
 - Each `evidence` entry says what the action records: the `kind` (one the action `may_produce`),

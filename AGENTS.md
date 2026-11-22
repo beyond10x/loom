@@ -1421,6 +1421,8 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   dependency on that crate; keep the two together. `check` also refuses a `retry_when` kind the
   protocol does not declare, an `open` `bindings` path outside the workspace, and an evidence `from`
   the executor does not take (`effect` on a program; anything but `effect` on a person or an open).
+  `argv` belongs to a `program` and a `person`; `{principal}` (`PRINCIPAL_PLACEHOLDER`) is
+  decoded only in a person's argv, as a whole entry other than `argv[0]`, else `InvalidArgv`.
 - A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no
   `budget.max_runs` holds 8.
 - Every `BindingsRefusalReason` is reachable from a document: `every_refusal_reason_is_reachable_from_a_document`
@@ -1726,6 +1728,19 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   `--reasons`/`--reasons-file` (only with `--result`) are bounded to a retry log (`reasons_fit`,
   `read_reasons_file` in `loom-bindings`), kept as `blobs/<sha256>` and named by the person
   observation's `blob_sha256`, so `retry_records` gives them to a writer as that record's log.
+- A person binding with an `argv` (`story:person-action-runs-a-program`) runs one program per
+  approval through the program port's own two halves, `prepare` and `start` (`program.rs`), never
+  a second start path: `approve` admits `ApproveRequest::runner` and calls `prepare` before the
+  first write, so a refusal there (`ConfinementRefused`, or `PersonProgramFailed` naming
+  `RunsSpent`, `ArtifactUnreadable` or a program not started) writes nothing; `PersonEffects`
+  calls `start` inside the admitted effect. Only exit 0 records, in one `record_step` with the
+  moves; any other end writes the moves alone (none when an artifact cannot be digested after the
+  run), the run's `action finished` line, and refuses `PersonProgramFailed` naming the end and the
+  blob digest, never the output. `{principal}` is replaced only as a whole argv entry, never in
+  `argv[0]`, never in the environment. The CLI places the program as `tree run` does (`place`,
+  `tree_runner`) only when `person_program` answers true, and sets the refusal's `command` to the
+  call's own argv; the `ApproveAction` decision carries the run's `--confinement` and
+  `--cgroup-root` for such an action alone.
 - `tree open --protocols <dir>` (`protocols.rs`) reads the `.yaml` files directly in `<dir>` into a
   catalog of those alone (`SourceKind::Directory`, registration from `registration_for`), keeps
   each as `blobs/<sha256>` with `tree-protocols.json`, and marks the manifest's catalog
