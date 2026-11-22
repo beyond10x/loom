@@ -198,8 +198,6 @@ Decision requests: every approval or decision the SDC asks of a person or a deci
 - `question_id` — `Optional<String>`, which may be absent
 - `outcome` — `Optional<loom.decision.OutcomeId>`, which may be absent
 
-One of the types above is reached by nothing else in this system: `loom.decision.EscalationSuppressedRecord`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
-
 ## Entities
 
 An entity is what this context is about: something with an identity that outlives any one request, a shape, and a lifecycle. The lifecycle is exhaustive — a move that is not drawn below is a move this specification does not permit, and that is the only way it says so. Every move is labelled with the command that takes it, because a move nothing can trigger is refused rather than drawn.
