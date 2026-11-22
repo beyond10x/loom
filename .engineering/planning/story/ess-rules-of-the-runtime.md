@@ -61,7 +61,7 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T03:31:15Z", actor: "agent:loom", revision: 6}
 ---
@@ -189,7 +189,7 @@ F31 B17 bindings  the receiving case judges a copy by its own independence map
 F32 B18 bindings  "a result is never empty": no result is the empty string, [] is allowed
     c  website/docs/guides/bindings.md:186 rewritten  A32
 F33 C1  confinement  a local adapter carries a non-blank reason
-    a  c:EngineConfinement invariant; CheckEngineConfinement  i:confinement/local-without-reason 
+    a  c:EngineConfinement invariant; CheckEngineConfinement  i:confinement/local-without-reason
     A33
 F34 C2  confinement  adapter local means backend None, no network and a reason
     a  c:AppliedConfinement invariant; CheckAppliedConfinement  i:confinement/local-record  A34
