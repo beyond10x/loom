@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-library-exports-what-an-engine-needs
 kind: story
-status: proposed
+status: active
 title: 'b10x-loom-tree exports what an in-process engine needs: catalog, line encoder, and a runner on a held cgroup root'
 summary: 'embed module: TreeRunner on a held root (never discovery), in own scope, local; ProtocolCatalog, host_catalog, encode_line, ConfinementError re-exported; fixture consumer on b10x-loom-tree only; SDK stability rows'
 tags:
@@ -13,9 +13,10 @@ relations:
 - depends_on: story:tree-run-command
 - depends_on: story:tree-run-takes-a-delegated-cgroup
 - depends_on: story:cancel-a-running-bound-program
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:29:42Z", actor: "agent:loom", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-22T10:41:24Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "runbook-engine-gaps-2026-11-22"}
 ---
 ## Outcome
 
