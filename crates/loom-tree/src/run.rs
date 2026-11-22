@@ -8,7 +8,8 @@
 //! loop against the case revision, the frontier and authority before its effect.
 //!
 //! Before each step the run asks the cancel handle, the step budget and the wall-time budget, in
-//! that order; any of them ends the run `BudgetSpent` before the step. A case whose completion
+//! that order; any of them ends the run `BudgetSpent` before the step, and the `stopped` line names
+//! it as `budget` (`Cancel`, `MaxSteps`, `MaxWallSeconds`). A case whose completion
 //! gives exactly one legitimate outcome and in which no action is useful is terminated through it.
 //! A case in which nothing is useful waits: on authority (an admissible action whose capability no
 //! approval allows), on a person (an admissible action bound to `person`, or two legitimate
@@ -39,15 +40,15 @@ use b10x_loom_commission::runtime::{LoopEnd, run_until_blocked};
 use b10x_loom_executor::selection::StepHistory as _;
 use b10x_loom_executor::{DeterministicSelector, EmptyObjectArguments, Loom};
 use b10x_loom_intake_slice::confinement::TestRunner;
-use b10x_loom_runlog::log_file_name;
+use b10x_loom_runlog::{BUDGET_SPENT, budget_name, log_file_name};
 use loom::bindings::{BindingsDocument, Executor};
 use loom::runlog::{
     ActionFinished, CaseOpened, ChildClosed, ChildOpened, Evaluated, RunLogEvent, RunLogLine,
     Stopped, Terminated,
 };
 use loom::tree::{
-    ApprovalDecision, DecisionKind, NextDecision, TreeManifest, TreeRefusalReason, TreeRun,
-    TreeStop,
+    ApprovalDecision, DecisionKind, NextDecision, SpentBudget, TreeManifest, TreeRefusalReason,
+    TreeRun, TreeStop,
 };
 use loom_governor::{CanonGovernor, FileCaseStore};
 use loom_protocols::ProtocolCatalog;
@@ -164,13 +165,19 @@ pub fn run_tree(
         }
         close_terminated(&governor, &logs, &store, &held, &mut emit)?;
         let stop_before = if cancel.is_some_and(|cancel| cancel.load(Ordering::SeqCst)) {
-            Some("the run was cancelled".to_owned())
+            Some((SpentBudget::Cancel, "the run was cancelled".to_owned()))
         } else if settings.max_steps.is_some_and(|max| steps >= max) {
-            Some(format!("the run took its {steps} steps"))
+            Some((
+                SpentBudget::MaxSteps,
+                format!("the run took its {steps} steps"),
+            ))
         } else if wall.is_some_and(|(started, seconds)| started.elapsed().as_secs() >= seconds) {
-            Some(format!(
-                "the run's {} s of wall time are spent",
-                settings.max_wall_seconds.unwrap_or_default()
+            Some((
+                SpentBudget::MaxWallSeconds,
+                format!(
+                    "the run's {} s of wall time are spent",
+                    settings.max_wall_seconds.unwrap_or_default()
+                ),
             ))
         } else {
             None
@@ -189,13 +196,13 @@ pub fn run_tree(
                 detail: None,
             });
         };
-        if let Some(detail) = stop_before {
+        if let Some((budget, detail)) = stop_before {
             let line = logs.append(
                 &case.case,
                 RunLogEvent::Stopped(Stopped {
-                    stop: "BudgetSpent".to_owned(),
+                    stop: BUDGET_SPENT.to_owned(),
                     next: Vec::new(),
-                    budget: None,
+                    budget: Some(budget_name(budget).to_owned()),
                 }),
             )?;
             emit(&case.case, line);
