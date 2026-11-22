@@ -139,6 +139,7 @@ fn run_settings_are_built_from_items_of_this_crate_alone() {
         max_wall_seconds: None,
         time: TreeTime::At("2026-11-22T08:00:00Z".into()),
         runner,
+        confinement: None,
     };
     assert_eq!(settings.max_steps, Some(1));
 }

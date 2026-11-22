@@ -271,7 +271,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         Some(Value::Sequence(entries)) => entries
             .iter()
             .enumerate()
-            .map(|(i, entry)| evidence_entry(entry, action, i))
+            .map(|(i, entry)| evidence_entry(entry, action, i, executor.kind == Executor::Person))
             .collect::<Decoded<Vec<_>>>()?,
         Some(other) => {
             return Err(refuse(
@@ -552,7 +552,14 @@ fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String
     Ok(out)
 }
 
-fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<EvidenceEntry> {
+/// One evidence entry of `action`; `person`: the action is bound to a person, whose `effect` table
+/// may name results other than `performed`.
+fn evidence_entry(
+    value: &Value,
+    action: Option<&str>,
+    index: usize,
+    person: bool,
+) -> Decoded<EvidenceEntry> {
     let slot = format!("evidence[{index}]");
     let map = object(value, action, &slot)?;
     known(map, &ENTRY, action, &format!("{slot}."))?;
@@ -626,7 +633,11 @@ fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<
                         ));
                     }
                 };
-                if from == ResultSource::Effect && value != "performed" {
+                // A person names the result of the action taking it; any other effect is performed.
+                if from == ResultSource::Effect
+                    && value != "performed"
+                    && (!person || value == crate::ANY_KEY)
+                {
                     return Err(refuse(
                         Reason::InvalidEffectResult,
                         action,

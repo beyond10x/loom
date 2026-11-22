@@ -70,8 +70,11 @@ types:
 
   # Where the value of an evidence entry comes from: `Exit` the program's exit code; `Effect`
   # Loom's own report that it performed the action (it opened the children, applied the agent's
-  # outputs, took the person's action), whose one value is `performed`, and an effect that was
-  # refused or failed records nothing; `Report` a JSON pointer into the program's report. A
+  # outputs, took the person's action), whose value is `performed`, and an effect that was
+  # refused or failed records nothing. A Person executor's `Effect` table may also list other
+  # named values, never `*`: the result a person names when taking the action, `performed`
+  # when it names none; a value its table does not list is refused and records nothing.
+  # `Report` is a JSON pointer into the program's report. A
   # Program executor's entries read `Exit` or `Report`, never `Effect`; a Person or Open
   # executor's entries read `Effect` alone; an Agent's and a Copy's are not restricted.
   - name: loom.bindings.ResultSource
@@ -244,7 +247,8 @@ types:
 
   # Why a document is refused: at decoding (`Malformed`, `UndeclaredMember`, `MissingMember`,
   # `UnsupportedFormat`, `InvalidArgv`, `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`,
-  # `InvalidToolName`, `InvalidEffectResult`) and at load against the compiled protocol
+  # `InvalidToolName`, `InvalidEffectResult` (an `Effect` key other than `performed`, but a
+  # Person executor's named value other than `*`)) and at load against the compiled protocol
   # (`ProtocolMismatch`, `UnknownAction`, `DuplicateAction`, `KindNotProducible`,
   # `UndeclaredArtifact`, `UndeclaredEvidenceKind` (a `retry_when` kind the protocol does not declare),
   # `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace`,

@@ -157,7 +157,9 @@ actions:
 - Each `evidence` entry says what the action records: the `kind` (one the action `may_produce`),
   the `subject` and `upstream` artifacts, the `producer`, and where the value comes from. `from:
   exit` reads the program's exit code; `from: effect` is Loom's own report that it performed the
-  action, whose one value is `performed`, and an effect that was refused or failed records nothing;
+  action, whose value is `performed`, and an effect that was refused or failed records nothing (a
+  `person` executor's table may also list named values, never `*`: the result `tree approve
+  --result` names);
   a JSON pointer such as `/summary/state` reads the program's report. A `program` executor's
   entries read `exit` or a pointer and never `effect`; a `person` or `open` executor's entries read
   `effect` alone; an `agent` or `copy` executor's are not restricted. `results` maps each value, or
@@ -208,7 +210,8 @@ actions:
 
 Decoding refuses an undeclared member at any level, a `format` that is missing or is not
 `loom.bindings/1`, a `protocol` that is not a registration, an empty `argv` or one that is not a
-list of strings, an `effect` entry whose `results` has a key other than `performed`, a key named
+list of strings, an `effect` entry whose `results` has a key other than `performed` (but a `person` executor's
+named value other than `*`), a key named
 twice, a tag, a merge key, text nested or expanded past the bounds above, and a tool name that is
 empty or holds a comma or white space. Loading against the protocol refuses an action the protocol does not declare, a duplicate
 action, an evidence `kind` outside the action's `may_produce`, a `subject`, `upstream` entry or
