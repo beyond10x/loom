@@ -245,6 +245,7 @@ pub fn prepare_intent(
         &model,
         request.threshold,
         Some(catalog),
+        options.model_retry,
     ));
     drop(runtime);
     let pick = match result {
@@ -745,6 +746,7 @@ fn resume_prepared<S: FallibleCaseStore, T: EvaluationTime>(
     let options = RunOptions {
         context_policy: context.route.context_policy,
         context_report: None,
+        ..RunOptions::default()
     };
     let metrics = ContextMetrics::new(options.context_policy);
     let prepared = PreparedIntent::restore_route(&context.route, request, catalog, &options)?;
@@ -805,7 +807,8 @@ fn resume_prepared<S: FallibleCaseStore, T: EvaluationTime>(
         references(&request.intent),
         options.context_policy,
         metrics.clone(),
-    );
+    )
+    .with_retry(options.model_retry);
     let agent = MeasuredModel::new(agent, metrics);
     drive(
         &request.intent,
@@ -908,7 +911,8 @@ fn run_prepared<S: FallibleCaseStore, T: EvaluationTime>(
         references(&request.intent),
         options.context_policy,
         metrics.clone(),
-    );
+    )
+    .with_retry(options.model_retry);
     let agent = MeasuredModel::new(agent, metrics.clone());
     if prepared.protocol == LOCAL_PROTOCOL {
         let workspace = request.workspace.as_deref().ok_or_else(|| SliceError::Case(case::CaseError::Workspace {problem:"software-change@1 requires --workspace with an existing Git worktree and commit".into()}))?;
@@ -1232,6 +1236,7 @@ mod tests {
         let options = RunOptions {
             context_policy: ContextPolicy::Bounded,
             context_report: None,
+            ..RunOptions::default()
         };
         let prepared = PreparedIntent {
             protocol: "system-query@1".into(),

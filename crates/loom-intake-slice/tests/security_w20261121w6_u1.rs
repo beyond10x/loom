@@ -352,6 +352,7 @@ impl Case {
             &RunOptions {
                 context_policy: ContextPolicy::Legacy,
                 context_report: None,
+                ..RunOptions::default()
             },
         );
         (result, String::from_utf8_lossy(&output).into_owned())

@@ -187,6 +187,7 @@ impl Case {
             &RunOptions {
                 context_policy: ContextPolicy::Legacy,
                 context_report: Some(self.dir.path().join("metrics.json")),
+                ..RunOptions::default()
             },
         );
         let output = String::from_utf8_lossy(&output).into_owned();

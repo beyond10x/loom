@@ -208,6 +208,7 @@ fn bound_run(test: &str, timeout_seconds: i64) -> (String, bool) {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: Some(root.join("metrics.json")),
+            ..RunOptions::default()
         },
     );
     let output = String::from_utf8_lossy(&output).into_owned();

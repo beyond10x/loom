@@ -66,6 +66,9 @@ use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 /// The intent names a tracker key and a GitHub issue in mixed case, so the issue's canonical value
 /// is not a substring of the intent: printing the intent back is not printing its references.
 const INTENT: &str = "Make the failing check pass (OPS-42), tracked in HTTPS://GitHub.com/Beyond10x/Intake/issues/7.";
@@ -514,7 +517,7 @@ fn the_slice_runs_on_commissions_runtime() {
 /// `b10x-loom run --help` lists every flag the story names, the intent, and the default model.
 #[test]
 fn the_run_command_lists_its_flags() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let output = loom_bin::loom()
         .args(["run", "--help"])
         .output()
         .expect("run b10x-loom");
@@ -556,7 +559,7 @@ fn the_run_command_lists_its_flags() {
 /// Explicit unconfined mode lets this login fixture reach that failure without host delegation.
 #[test]
 fn the_exit_status_says_how_the_run_ended() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let output = loom_bin::loom()
         .args(["run", "--help"])
         .output()
         .expect("run b10x-loom");
@@ -585,7 +588,7 @@ fn the_exit_status_says_how_the_run_ended() {
     let fixture = Fixture::new("exit-status");
     let home = fixture.root.join("home");
     std::fs::create_dir_all(&home).expect("create an empty home");
-    let failed = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let failed = loom_bin::loom()
         .arg("run")
         .args(["--confinement", "none"])
         .arg("--workspace")
@@ -606,7 +609,7 @@ fn the_exit_status_says_how_the_run_ended() {
         "the failure says to log in: {stderr}"
     );
 
-    let usage = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let usage = loom_bin::loom()
         .args(["run"])
         .env("HOME", &home)
         .env("CODEX_HOME", &home)

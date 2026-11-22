@@ -146,6 +146,7 @@ use b10x_loom_executor::{ActionSelector, ArgumentContext, ArgumentGenerator, Loo
 use b10x_loom_intake_references::references;
 use b10x_loom_intake_router::{ProtocolPick, RouterError};
 use llm_core::Model;
+pub use llm_routing::RetryPolicy;
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore, OpenError};
 use loom_protocols::ProtocolCatalog;
 
@@ -204,18 +205,48 @@ pub struct SliceRequest {
 }
 
 /// Optional context policy and measurement destination for one run. Existing callers stay legacy.
+/// Build one from [`RunOptions::default`] with its `with_` methods, or as a literal ending in
+/// `..RunOptions::default()`.
 #[derive(Debug, Clone)]
 pub struct RunOptions {
     pub context_policy: ContextPolicy,
     pub context_report: Option<PathBuf>,
+    /// The caller retries of every model request of the run; [`MODEL_RETRY`] by default.
+    pub model_retry: RetryPolicy,
 }
+
+pub use crate::model_retry::MODEL_RETRY;
 
 impl Default for RunOptions {
     fn default() -> Self {
         Self {
             context_policy: ContextPolicy::Legacy,
             context_report: None,
+            model_retry: MODEL_RETRY,
         }
+    }
+}
+
+impl RunOptions {
+    /// These options with `policy` as the context policy.
+    #[must_use]
+    pub fn with_context_policy(mut self, policy: ContextPolicy) -> Self {
+        self.context_policy = policy;
+        self
+    }
+
+    /// These options writing the context measurements to `report`.
+    #[must_use]
+    pub fn with_context_report(mut self, report: impl Into<PathBuf>) -> Self {
+        self.context_report = Some(report.into());
+        self
+    }
+
+    /// These options retrying model requests by `policy`.
+    #[must_use]
+    pub fn with_model_retry(mut self, policy: RetryPolicy) -> Self {
+        self.model_retry = policy;
+        self
     }
 }
 
@@ -472,7 +503,7 @@ fn run_measured<S: FallibleCaseStore, T: EvaluationTime>(
     }
 
     writeln!(out, "confinement: {}", request.runner.label())?;
-    let pick = match pick(request, classifier)? {
+    let pick = match pick(request, classifier, options.model_retry)? {
         Ok(pick) => pick,
         Err((protocol, detail, why)) => {
             writeln!(out, "refused: {}", printable(&why))?;
@@ -503,7 +534,8 @@ fn run_measured<S: FallibleCaseStore, T: EvaluationTime>(
         found,
         options.context_policy,
         metrics.clone(),
-    );
+    )
+    .with_retry(options.model_retry);
     drive(
         &request.intent,
         &pick.protocol,
@@ -1226,7 +1258,11 @@ impl ArgumentGenerator for Arguments<'_> {
 type Pick = Result<ProtocolPick, (String, String, String)>;
 
 /// Classifies the intent on a runtime made for the call and dropped with it.
-fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceError> {
+fn pick(
+    request: &SliceRequest,
+    classifier: &dyn Model,
+    retry: RetryPolicy,
+) -> Result<Pick, SliceError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -1236,6 +1272,7 @@ fn pick(request: &SliceRequest, classifier: &dyn Model) -> Result<Pick, SliceErr
         classifier,
         request.threshold,
         None,
+        retry,
     ));
     drop(runtime);
     let error = match classified {

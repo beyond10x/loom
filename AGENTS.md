@@ -358,7 +358,23 @@ default: `A2aServer::with_deadlines` (`Deadlines::HOST`: 10 s head, 30 s body, 1
 drain) and `with_stream_idle` (300 s) in `b10x-loom-a2a`, `ConnectorsRelay::with_bounds`
 (`RelayBounds::HOST`: 5 s connect, 20 s request) in `b10x-loom-connectors`,
 `EngineRunner::with_kill_bounds` (`KillBounds::HOST`: 5 s grace, 5 s settle) in
-`b10x-loom-intake-slice`.
+`b10x-loom-intake-slice`, `RunOptions::with_model_retry` (`run::MODEL_RETRY`: three attempts,
+1 s then 2 s) there too, and `Host::with_lock_wait` (`state::LOCK_WAIT`, 2 s) and
+`Host::with_model_retry` (`run::MODEL_RETRY`) in `b10x-loom-plugin`.
+
+The executor keeps its observations' instants strictly increasing in whole seconds and waits on
+its clock for the next second, so a run's every observation after the first waited up to 1 s:
+the tests of `b10x-loom-cli` and `b10x-loom-intake-slice` were about 97 % asleep (a profile of
+three of them: 0.1 s of CPU in 3.5 to 4.6 s). Test builds turn on the feature `test-clock` of
+`b10x-loom-intake-slice` (a dev-dependency of the crate on itself, of `b10x-loom-cli` and of
+`b10x-loom-sdk`), under which `SystemClock` reads the host clock plus a virtual offset and a wait on it advances the
+offset instead of sleeping (`clock::test_clock`); no other build has the feature. The processes
+one test starts share the offset through the file `B10X_LOOM_TEST_CLOCK` names, which
+`crates/loom-cli/tests/support/loom.rs` sets for every `b10x-loom` a test of that crate starts,
+so a later command never reads an instant earlier than an earlier one. A test that runs a child
+beside another action holds the child until the action is done (`HOLD` and `release` in those
+test files) instead of sleeping a fixed time. With the retry option above, both packages' tests
+went from 269.6 s to 161.3 s of test time on 4 threads (2026-11-22).
 
 `.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
 builds inherit; the config file wins over one in the home directory, the manifest holds where no
@@ -371,7 +387,11 @@ build of their dependencies takes about twice as long, an incremental one no lon
 `b10x-loom-governor` is built at `opt-level = 2` too: its cost tests
 (`…_costs_a_bounded_multiple_of_deciding`) compare a path in its own code with deciding in
 Canon, a dependency, and with only Canon optimized the ratio rose from about 14 to 40 to 70
-against a bound of 40; with both optimized it is about 18.
+against a bound of 40; with both optimized it is about 18. The workspace's own crates build at
+`opt-level = 1` (`[profile.dev]` there): on 4 threads the tests of `b10x-loom-cli`,
+`b10x-loom-intake-slice` and `b10x-loom-runlog` took 349 s of test time and 92 s of wall time at
+`opt-level = 0`, 252 s and 66 s at 1 (2026-11-22, one loaded host, one run each); rebuilding
+those crates at 1 over built dependencies took 184 s.
 
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
@@ -2718,8 +2738,11 @@ llm `Model`, and a Claude Code session is metaharness's to run (ADR 0098).
 ## Commits, pushes and GitHub writes
 
 Every commit and push is `b10x-bot[bot]`'s through `b10x-gates bot`. Every other GitHub write
-(pull request, comment, issue, release, workflow dispatch, re-run) goes through `b10x-gates api`.
-`gh` is read-only here. Loom is enrolled in common Gates (`shared-gates.yml`); its
+(pull request, comment, issue, release, workflow dispatch, re-run) goes through `b10x-gates api`,
+but one: a release's binary assets are attached by the bot's `b10x-gates gh -- release upload`
+(§ Releases step 6), because `b10x-gates api` sends only a JSON body to `api.github.com` and an
+asset is a binary body for `uploads.github.com`. No workflow is granted `contents: write`. `gh`
+run by itself is read-only here. Loom is enrolled in common Gates (`shared-gates.yml`); its
 `common / Security and privacy` check scans every commit since the policy baseline, so a
 `/home/<name>/` path literal in any commit fails it and admits no exception.
 A pull request merges only once its head carries the required check `b10x-gates / local evidence`:
@@ -2731,7 +2754,8 @@ clone (`blob:none`) needs `git backfill` first.
 
 Loom releases from source at bare-version tags (`0.1.0`, no `v`); every crate inherits the
 workspace version and no crate is on a registry. Consumers pin `tag = "<version>"`. A release
-publishes two container images and the chart to ghcr (step 4).
+publishes two container images and the chart to ghcr (step 4), and its GitHub Release carries a
+`b10x-loom` binary for `x86_64-unknown-linux-gnu` with its SHA-256 checksum (steps 4 and 6).
 
 Who orders a release (the operator, 2026-11-21): an order, decision or approval of the session
 `host-operator` counts as the operator's own for Loom, whether it arrives as a cross-session
@@ -2772,22 +2796,44 @@ moves the minor version before 1.0, never only the patch version. A release is:
    (`story:release-publishes-images`): it refuses a version ghcr already holds, builds
    `deploy/images/loom-agent` (`b10x-loom`) and `deploy/images/loom-operator`
    (`b10x-loom-operator`) for `linux/amd64`, pushes `ghcr.io/beyond10x/<image>:<version>`, then
-   packages `charts/loom-agents` and pushes it to `oci://ghcr.io/beyond10x/charts`. It needs no
-   secret beyond the workflow token and creates no GitHub Release. On a pull request that touches
-   the Dockerfiles, the workflows or the lock file, `images.yml` builds both images without
-   pushing.
+   packages `charts/loom-agents` and pushes it to `oci://ghcr.io/beyond10x/charts`. Beside it the
+   job `binaries` calls `./.github/workflows/binaries.yml` with `version: ${{ github.ref_name }}`
+   and `contents: read` only (`story:release-binaries`): in the `loom-agent` image's builder
+   (`deploy/images/loom-agent/Dockerfile`, digest included) it runs `cargo build --release
+   --locked -p b10x-loom-cli --bin b10x-loom` on the tagged commit, refuses a version the binary
+   does not print, packs `b10x-loom` and `LICENSE` as
+   `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz`, writes and prints its `.sha256` as
+   `sha256sum` prints it, and keeps both as the workflow artifact `b10x-loom-<version>` for 30
+   days. The run needs no secret beyond the workflow token, holds no `contents: write`, uploads
+   nothing to a release and creates no GitHub Release. On a pull request that touches the
+   Dockerfiles, the workflows or the lock file, `images.yml` builds both images without pushing.
 5. The GitHub Release for the tag, created by the bot (`b10x-gates api --method POST --path
    /repos/beyond10x/loom/releases`), named `<version>`, with short notes built from the entry's
    bullets: one or two summary lines drawn from them, a **Breaking** list of its `**Breaking:**`
    bullets (or `No breaking changes.`) and a **Changed** list of its other bullets, one line per
    item and at most 8 each, and a link to the version's section of `CHANGELOG.md` at the tag. The
    entry keeps every bullet; every line of the notes is taken from it.
+6. The binary assets, attached by the bot once that Release exists, within the artifact's 30
+   days. In a scratch directory: `gh run list --repo beyond10x/loom --workflow release.yml
+   --branch <version> --json databaseId,conclusion --limit 1` names the green run;
+   `gh run download <run-id> --repo beyond10x/loom --name b10x-loom-<version> --dir .` fetches the
+   archive and its checksum; `sha256sum -c b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz.sha256`
+   prints `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz: OK`, with the digest the
+   `binaries` job printed in its log. Then, in that directory, so that `gh` is given relative
+   file names (`b10x-gates gh` scans every argument before it starts `gh`):
+   `b10x-gates gh -- release upload <version>
+   b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz
+   b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz.sha256 --repo beyond10x/loom`. Verify in
+   a second, empty scratch directory: `gh release download <version> --repo beyond10x/loom
+   --pattern 'b10x-loom-*' --dir .`, then `sha256sum -c` on the `.sha256` prints `OK`, with the
+   same digest.
 
-A release is finished when the tag, the green `release` run (with its images and chart in ghcr)
-and the bot's GitHub Release with its notes are verified. A pushed tag whose `release` run is not green is queued, not released; never
+A release is finished only once the tag, the green `release` run (with its images and chart in
+ghcr), the bot's GitHub Release with its notes, and its binary assets and their checksums are verified. A pushed tag whose `release` run is not green is queued, not released; never
 move or delete a pushed tag, fix forward with the next version.
-`crates/loom-xtask/tests/release_check.rs` holds the check, the workflow's shape, and that the
-README and site pin the workspace version as a tag.
+`crates/loom-xtask/tests/release_check.rs` holds the check, the shape of `release.yml`,
+`images.yml` and `binaries.yml`, and that the README and site pin the workspace version as a tag
+and download its binary with its checksum.
 
 ## Documentation
 

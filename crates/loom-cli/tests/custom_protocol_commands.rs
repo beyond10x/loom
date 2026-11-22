@@ -25,6 +25,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
 const INTENT: &str = "record a note that the deploy finished and publish the summary";
 
@@ -414,7 +417,7 @@ impl Scratch {
 
     fn command(&self) -> Command {
         let home = self.root.join("home");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+        let mut command = loom_bin::loom();
         command
             .env("HOME", &home)
             .env("CODEX_HOME", &home)
