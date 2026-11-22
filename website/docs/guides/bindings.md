@@ -3,14 +3,15 @@ title: Bind a protocol's actions
 sidebar_position: 6
 description: Write a loom.bindings/1 document that says, per action of a protocol, who performs it, how its result becomes evidence, and what it may spend; Loom refuses a file that does not fit the protocol when it loads it.
 lede: A bindings file is the one place an operator declares how each action of one protocol is performed. Loom decodes it, holds it against the compiled protocol and names the action and the member of every defect.
-source: crates/loom-bindings/src/lib.rs, crates/loom-bindings/src/decode.rs, crates/loom-bindings/src/load.rs, crates/loom-bindings/src/program.rs, crates/loom-bindings/tests/bindings_document.rs, crates/loom-bindings/tests/bound_program.rs, ess/domains/bindings.yaml
+source: crates/loom-bindings/src/lib.rs, crates/loom-bindings/src/decode.rs, crates/loom-bindings/src/load.rs, crates/loom-bindings/src/program.rs, crates/loom-bindings/src/copy.rs, crates/loom-bindings/tests/bindings_document.rs, crates/loom-bindings/tests/bound_program.rs, crates/loom-bindings/tests/bound_copy.rs, ess/domains/bindings.yaml
 ---
 
 # Bind a protocol's actions
 
 Unreleased. `b10x-loom-bindings` decodes and checks a `loom.bindings/1` document, and its program
 effect port, `ProgramEffects`, performs an action bound to a `program` executor (see
-[Running a program binding](#running-a-program-binding)). Decoding and checking start no process,
+[Running a program binding](#running-a-program-binding)), and `CopyEffects` performs one bound to
+`copy` (see [Copying a record from another case](#copying-a-record-from-another-case)). Decoding and checking start no process,
 and the crate opens no network connection. The commands that run the other executors take the
 checked document in later releases, and `b10x-loom run --action-bindings` still reads the older
 `intake.bindings` format.
@@ -354,3 +355,36 @@ ended:
 `completion` it digests every placement and writes the moves, so a person's edit in the workspace
 or another case's write reaches the case as a new revision before the frontier is read. A placed
 path that cannot be digested makes that evaluation `GovernorUnavailable`.
+
+## Copying a record from another case
+
+A host builds `CopyEffects` per case, from the governor that holds the case, the document and the
+host's protocol catalog. It performs the actions bound to `copy` and no other. Loom makes the copy:
+no program runs.
+
+- `from` is a registration of the catalog, or the protocol id of registrations in it. One that
+  is neither is refused `ProtocolMismatch` at `executor.from` when the port is built.
+- The source is a case of the receiving case's tree (`CanonGovernor::tree`), other than the
+  receiving case, held under a registration `from` names. A case of another tree in the same store
+  directory is never a source. With no such case the step is refused `NoSourceCase`.
+- The port copies one record: of the binding's `evidence` kind, one that applies in its case,
+  about the revision its case holds now of its subject. Of several, it takes the one with the latest
+  `observed_at`. A record with none counts as the earliest. With no such record the step is refused
+  `NoSourceRecord`. A record about an artifact the receiving protocol does not declare is refused
+  `SubjectUndeclared`.
+- The source and the kind come from the bindings file alone. The request's arguments select
+  nothing.
+- The copy keeps the record's kind, subject, subject revision, result, instant and producer. It
+  keeps the `upstream_revisions` entries of artifacts the receiving protocol declares and drops the
+  others. The receiving case judges the copy by its own `independence` map: a producer that map
+  does not list satisfies no match that demands independence, whatever the source case's map says.
+- The copy cites one observation of source `loom/copy` (`loom.bindings.CopiedRecord`). It names
+  the receiving case, the action, the source case, the source record's evidence id and the dropped
+  artifacts. Its instant is the source record's. A restart after that observation and before the
+  record leaves the observation, and the next step uses it and writes one record.
+- `copy_due(action)` says whether a step would write a copy. It is false once the receiving case
+  holds the copy of the record the step would take. A step while it is false is performed and
+  writes nothing. A refused step writes nothing.
+
+The step refusals are the members of `loom.bindings.CopyRefusalReason` in the
+[reference](../reference/ess/loom-bindings.md).

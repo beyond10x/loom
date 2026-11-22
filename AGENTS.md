@@ -1315,8 +1315,9 @@ only crate that does.
 `protocol-tree-on-bindings`) decodes the `loom.bindings/1` document and checks it against a compiled
 protocol. Its types are `loom.bindings` (`ess/domains/bindings.yaml`); the generated model is the
 document, and the crate holds the decoder (`decode.rs`, YAML or JSON into the generated types), the
-load-time check (`load.rs`, `check` and `unbound`) and the program effect port (`program.rs`,
-`ProgramEffects`, `story:bound-program-result-table`). Decoding and the check start no process; the
+load-time check (`load.rs`, `check` and `unbound`), the program effect port (`program.rs`,
+`ProgramEffects`, `story:bound-program-result-table`), the open effect port (`open.rs`) and the
+copy effect port (`copy.rs`, `CopyEffects`). Decoding and the check start no process; the
 crate opens no network connection. It depends on `b10x-canon` by the reference
 `crates/loom-governor/Cargo.toml` names, so a Canon pin moves both manifests, and on
 `b10x-loom-intake-slice` for the runner rules below.
@@ -1427,6 +1428,26 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   literal, or each string of the argument `each` names), keeps one observation (`OPEN_SOURCE`,
   `loom/open`), builds the `from: effect` records citing it and calls `open_children`. Held by
   `crates/loom-bindings/tests/bound_open.rs`.
+- `CopyEffects::new(governor, case, document, catalog)` (`copy.rs`,
+  `story:record-copy-between-cases`) checks the document and resolves each `copy` binding's `from`
+  to the catalog registration of that name, else every registration whose protocol id it is
+  (neither: `ProtocolMismatch` at `executor.from`; an `evidence` of `case_outcome`:
+  `KindNotProducible`). A step reads the tree (`CanonGovernor::tree`) and each source case's held
+  records with their `applies` flag (`CanonGovernor::case_state`; the governor gains no read): the
+  sources are the tree's cases other than the receiving one under those registrations (none:
+  `NoSourceCase`); the record is the latest by `observed_at` (none earliest; a tie goes to the later
+  in tree order, then in the order received) of those that apply, are of the kind and are about the
+  subject revision their case holds now (none: `NoSourceRecord`), its subject declared by the
+  receiving case (else `SubjectUndeclared`). A refused step writes nothing. When the receiving
+  case holds a record citing a `COPY_SOURCE` (`loom/copy`) observation naming the receiving case,
+  the source case and the source evidence id, the step is performed and writes nothing, and
+  `copy_due` is false. Otherwise it keeps one such observation (`loom.bindings.CopiedRecord`) at
+  the source record's instant, or takes the one a restart left, and submits the copy through
+  `submit_evidence` with the source record's producer: kind, subject, subject revision, result
+  and `observed_at` as they are, `upstream_revisions` cut to the receiving case's artifacts (the
+  dropped ones named in `CopiedRecord`). Only this port writes `COPY_SOURCE`, and no argument,
+  report or program output selects the source. It starts no process. Held by
+  `crates/loom-bindings/tests/bound_copy.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 
