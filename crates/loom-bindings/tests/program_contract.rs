@@ -1381,11 +1381,14 @@ fn bytes_of(directory: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     found
 }
 
+/// A change to the store directory and the parent's case file that leaves the parent unreadable.
+type Break = fn(&Path, &Path);
+
 #[test]
 fn a_parent_that_cannot_be_read_refuses_the_step_before_anything() {
     let epic_file =
         |store: &Path| store.join(format!("{}.json", loom_governor::case_file_stem("P.epic")));
-    let breaks: [(&str, fn(&Path, &Path)); 3] = [
+    let breaks: [(&str, Break); 3] = [
         ("removed", |_store, file| {
             std::fs::remove_file(file).unwrap()
         }),
