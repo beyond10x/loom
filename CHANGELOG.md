@@ -14,6 +14,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- `tree test`: the suite step `write` copies a regular file of the suite's directory, at most `suite::MAX_WRITE_BYTES` (1 MiB), to a path of plain names in the cycle's workspace between two steps, never following a link (story:suite-cycle-writes-a-workspace-file)
+- **Breaking:** `loom::tree::CycleStep` gains `from` and `to`, a literal names them; `StepKind` gains `Write`, an exhaustive `match` needs the arm (story:suite-cycle-writes-a-workspace-file)
 - `from: runs` (`ResultSource::Runs`, `RUNS_SPENT`): a program entry records `spent` on the run reaching `budget.max_runs` (story:outcome-when-reads-the-run-count)
 - `tree run` holds a writer idle while its only open evidence is its own `from: runs` kinds (story:outcome-when-reads-the-run-count)
 - `loom_governor::durable`: every sync of the tree path's stores through one counted door; its test-only feature `test-unsynced-store` (story:tree-run-tests-fit-the-budget)

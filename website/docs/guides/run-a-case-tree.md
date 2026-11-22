@@ -495,9 +495,36 @@ default ones.
 | `approve` | `tree approve` (`case`, `capability` or `action`, `principal`) |
 | `close` | `tree close` (`case`, `outcome`) |
 | `status`, `verify` | `tree status`, `tree verify`; a named one gives its JSON output to `{step: <name>}` |
+| `write` | no tree command: copies the file `from` of the suite's directory to `to` in the cycle's workspace |
 
 A step states `exit` (a status, or `{not: <status>}`), `refusal`, `at` (minutes after `--at`) and
 `checks`, evaluated right after it.
+
+A `write` step states `from`, `to`, `name` and `checks` alone, and both paths are required. It
+writes a file between two steps, a person's decision for the next `run` to read:
+
+```yaml
+steps:
+  - {do: open}
+  - {do: run, rounds: 1, exit: 3}
+  - {do: write, name: owner-decides, from: seeds/findings-decided.yaml, to: findings.yaml}
+  - {do: run}
+```
+
+- `from` stays in the suite's directory, as a seed's does. Before any cycle it must be a regular
+  file of at most 1 MiB, with no link at it or at any directory between the suite's directory and
+  it; otherwise the suite is refused `SeedUnusable`, naming `cycles[<i>].steps[<j>].from`.
+- `to` is a path in the workspace, never the store, whose every component is a plain name: an
+  absolute or empty path, a NUL, a backslash, and any `.` or `..` component are refused
+  `PathOutsideCycle` before any cycle.
+- At the step, `from` is read again. Missing directories of `to` are made; the bytes go to a new
+  file with mode `0644` beside `to`, renamed over it, so a link is never followed and a partial
+  file is never left at `to`. A link at any component of `to` is the difference
+  `PathOutsideCycle`; a directory, a fifo or another entry at `to`, an I/O error, and a `from` that
+  is now over 1 MiB or no regular file are `StepFailed`, found as their kind and never as the
+  content.
+- A `write` runs after the step before it has returned, adds no minute to `at`, gives no output to
+  `{step: <name>}`, and writes nothing to the run log or the store.
 
 ### Sources
 
@@ -524,6 +551,10 @@ A case is a path below the root (`.` is the root, `billing.invoices` is `<root>.
 | `path` | `{path: "findings[id=q2].status"}`, `{path: "retry_of[*]"}` |
 | `follow` | `{follow: blob}`, `{follow: evidence}`, `{follow: file}`, `{follow: {file: notes.txt}}` |
 | `as` | `{as: lines}` |
+
+An `as` right after a `doc` or `suite` source reads the whole file that way in place of its
+extension, so `[{doc: {in: store, path: runlog-….jsonl}}, {as: text}]` is one text, not one value
+per line.
 
 A condition maps a path to a scalar it equals, or to one of `equals`, `not_equals`, `in`,
 `not_in`, `contains`, `lacks`, `matches`, `not_matches`, `min`, `max`, `type`, `length`,
@@ -558,7 +589,7 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 
 | Part | Waits for |
 |---|---|
-| steps `open`, `run`, `approve`, `close`, `status`, `verify`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when` | available |
+| steps `open`, `run`, `approve`, `close`, `status`, `verify`, `write`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when` | available |
 | `stop`, `resume`, `allow`, `reopen`; `approve` with `result`, `reasons` or `deny`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
 | `replay` | `story:tree-replay-command` |
 | `calls` | `story:agent-node-run-records` |

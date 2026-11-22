@@ -21,7 +21,6 @@ claims:
 actions:
   findings.write:
     effect: write
-    precondition: {claim: findings.written, is: false}
     may_produce:
       - evidence: findings_written
   decision.apply:
