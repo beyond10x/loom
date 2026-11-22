@@ -9,20 +9,27 @@
 //! runner. Each test asserts its own time under 5 s, the shared run apart, which asserts the
 //! 60 s bound of one test: the story's 10 s for it is measured, not asserted, because each tree
 //! command fsyncs every write and on a loaded host that alone takes most of 10 s.
+//!
+//! Acceptance for `story:suite-runs-cycles-in-parallel` follows: workers, the order of results,
+//! cancel and `--only`. Its suites are `fixtures/tree-suite/parallel/` (one protocol, `step`, whose
+//! one action runs the program seeded as `stubs/program.sh`) and `fixtures/tree-suite/only.suite.yaml`
+//! (five cycles whose one step is `open`). A test that needs the barrier copies `parallel/` beside
+//! its own directory and writes the barrier directory's path into the copy (see [`Parallel`]).
 
 mod substrate;
 
 use std::fs;
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
-use b10x_loom_tree::model::CycleResult;
-use b10x_loom_tree::suite::{SuiteSettings, run_suite};
+use b10x_loom_tree::model::{CycleResult, DifferenceReason, SuiteReport};
+use b10x_loom_tree::suite::{SuiteSettings, report_json, run_suite};
 use b10x_loom_tree::{TreeTime, read_protocols_directory, verify_tree};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -443,5 +450,512 @@ fn the_help_names_the_report_as_the_one_write_outside_scratch() {
         said.contains("nothing but the --report file is written outside --scratch"),
         "{said}"
     );
+    within_bound(started);
+}
+
+const PARALLEL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/tree-suite/parallel"
+);
+
+/// The text of the difference a cancelled cycle ends with.
+const CANCELLED: &str = "the suite was cancelled";
+
+/// Copies the directory `from` to `to`, file by file.
+fn copy_dir(from: &Path, to: &Path) {
+    for file in files(from) {
+        let target = to.join(file.strip_prefix(from).unwrap());
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::copy(&file, &target).unwrap();
+    }
+}
+
+/// A workers test's directories: `dir`, which holds `scratch/` (the `--scratch`) and `barrier/`
+/// (the markers) alone, and `suite`, a copy of `fixtures/tree-suite/parallel` whose seeded
+/// `barrier/dir.txt` names `dir/barrier`. Both are removed when it is dropped.
+struct Parallel {
+    dir: PathBuf,
+    suite: PathBuf,
+}
+
+impl Parallel {
+    fn new(label: &str) -> Self {
+        let dir = fresh_scratch(label);
+        let suite = fresh_scratch(&format!("{label}-suite"));
+        copy_dir(Path::new(PARALLEL), &suite);
+        fs::create_dir_all(dir.join("barrier")).unwrap();
+        fs::write(
+            suite.join("barrier/dir.txt"),
+            dir.join("barrier").as_os_str().as_encoded_bytes(),
+        )
+        .unwrap();
+        Self { dir, suite }
+    }
+
+    fn scratch(&self) -> PathBuf {
+        self.dir.join("scratch")
+    }
+
+    fn barrier(&self) -> PathBuf {
+        self.dir.join("barrier")
+    }
+
+    /// [`local_settings`] over the copy's protocols with `workers`.
+    fn settings(&self, workers: usize) -> SuiteSettings {
+        let mut settings = local_settings(self.scratch());
+        settings.protocols = self.suite.join("protocols");
+        settings.workers = NonZeroUsize::new(workers).unwrap();
+        settings
+    }
+
+    /// The suite file `name` of the copy, run with `workers`.
+    fn run(&self, name: &str, workers: usize) -> SuiteReport {
+        run_suite(&self.suite.join(name), &self.settings(workers), None, None).unwrap()
+    }
+
+    /// The file `name` of cycle `n`'s workspace.
+    fn work(&self, n: usize, name: &str) -> String {
+        let path = self.scratch().join(n.to_string()).join("work").join(name);
+        fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    }
+}
+
+impl Drop for Parallel {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+        let _ = fs::remove_dir_all(&self.suite);
+    }
+}
+
+fn cycle_names(report: &SuiteReport) -> Vec<&str> {
+    report
+        .cycles
+        .iter()
+        .map(|cycle| cycle.name.as_str())
+        .collect()
+}
+
+/// The `--report` document of `report` without any cycle's `seconds`.
+fn without_seconds(report: &SuiteReport) -> Value {
+    let mut document = report_json(report);
+    for cycle in document["cycles"].as_array_mut().unwrap() {
+        cycle.as_object_mut().unwrap().remove("seconds");
+    }
+    document
+}
+
+/// Test 1: three barrier cycles with three workers each see the others' markers.
+#[test]
+fn workers_run_cycles_at_the_same_time() {
+    let started = Instant::now();
+    let run = Parallel::new("workers");
+    let report = run.run("barrier.suite.yaml", 3);
+    assert_eq!(cycle_names(&report), ["one", "two", "three"], "{report:?}");
+    for n in 1..=3 {
+        assert_eq!(
+            run.work(n, "barrier.txt").trim(),
+            "met",
+            "cycle {n}: {report:?}"
+        );
+    }
+    assert!(report.failed.is_empty(), "{report:?}");
+    within_bound(started);
+}
+
+/// Test 2: with one worker, cycle 1 waits out its barrier alone. It waits 2 s by design, so it
+/// asserts the 60 s bound of one test and prints its time.
+#[test]
+fn one_worker_runs_cycles_one_at_a_time() {
+    let started = Instant::now();
+    let run = Parallel::new("one-worker");
+    let report = run.run("barrier.suite.yaml", 1);
+    assert_eq!(run.work(1, "barrier.txt").trim(), "timed out", "{report:?}");
+    assert_eq!(cycle_names(&report), ["one", "two", "three"], "{report:?}");
+    assert!(report.failed.is_empty(), "{report:?}");
+    let spent = started.elapsed();
+    eprintln!("one_worker_runs_cycles_one_at_a_time took {spent:?}");
+    assert!(spent < RUN_BOUND, "the test took {spent:?}");
+}
+
+/// Test 3: `slow` ends after `fast`, and the observer still gets `slow` first; the report is the
+/// one of a single worker but for `seconds`. The single worker's run, in directories of its own,
+/// runs beside the two workers' run.
+#[test]
+fn results_reach_the_observer_in_suite_order() {
+    let started = Instant::now();
+    let run = Parallel::new("observer");
+    // One worker: `fast`'s marker is there before `slow` starts, so `slow` does not wait for it.
+    let serial = Parallel::new("observer-serial");
+    fs::write(serial.barrier().join("fast"), "").unwrap();
+    let mut seen: Vec<String> = Vec::new();
+    let mut observe = |result: &CycleResult| seen.push(result.name.clone());
+    let (report, one) = std::thread::scope(|scope| {
+        let one = scope.spawn(|| serial.run("order.suite.yaml", 1));
+        let report = run_suite(
+            &run.suite.join("order.suite.yaml"),
+            &run.settings(2),
+            Some(&mut observe),
+            None,
+        )
+        .unwrap();
+        (report, one.join().unwrap())
+    });
+    assert_eq!(seen, ["slow", "fast"], "{report:?}");
+    // The two ran at once: `slow`'s program saw the marker `fast`'s program wrote as its last act.
+    assert_eq!(run.work(1, "waited.txt").trim(), "met", "{report:?}");
+    assert_eq!(without_seconds(&report), without_seconds(&one));
+    within_bound(started);
+}
+
+/// Test 4: cycle 1 fails at its first step; cycles 3 and 4 start after that and still run. One run
+/// of `tree test --workers 2`, read from its output, its exit status and its `--report`.
+#[test]
+fn a_failing_cycle_does_not_stop_the_others_at_once() {
+    let started = Instant::now();
+    let dir = fresh_scratch("failing");
+    let tested = tree_test_in(
+        &dir,
+        "scratch",
+        &Path::new(PARALLEL).join("failing.suite.yaml"),
+        &Path::new(PARALLEL).join("protocols"),
+        &["--workers", "2"],
+    );
+    let said = format!("{}{}", text(&tested.stdout), text(&tested.stderr));
+    assert_eq!(tested.status.code(), Some(1), "{said}");
+    let report = read_report(&dir.join("scratch.json"));
+    let names: Vec<&str> = report["cycles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|cycle| cycle["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["broken", "second", "third", "fourth"], "{report}");
+    assert_eq!(report["failed"], json!(["broken"]), "{report}");
+    assert_eq!(
+        report["cycles"][0]["difference"]["reason"],
+        format!("{:?}", DifferenceReason::ExitDiffers),
+        "{report}"
+    );
+    for cycle in &report["cycles"].as_array().unwrap()[1..] {
+        assert_eq!(cycle["as_expected"], true, "{cycle}");
+        assert_eq!(cycle["exit"], 0, "{cycle}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 5: three cycles started together end in reverse suite order, and each leaves its own
+/// name in its own `<n>/`.
+#[test]
+fn each_cycle_keeps_to_its_own_directory_at_once() {
+    let started = Instant::now();
+    let run = Parallel::new("own");
+    let report = run.run("own.suite.yaml", 3);
+    assert!(report.failed.is_empty(), "{report:?}");
+    // The cycles did not end in suite order: a later cycle's marker was there when `late` ended.
+    // (The sleeps make the order 3, 2, 1 when all three start together; on a loaded host `middle`
+    // can start late enough to end after `late`.)
+    let seen = run.work(1, "seen.txt");
+    assert!(
+        seen.lines().any(|line| line == "middle" || line == "early"),
+        "{seen}"
+    );
+    for (n, name) in [(1, "late"), (2, "middle"), (3, "early")] {
+        assert_eq!(run.work(n, "own.txt").trim(), name, "cycle {n}");
+    }
+    let mut top: Vec<String> = fs::read_dir(run.scratch())
+        .unwrap()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            assert!(entry.file_type().unwrap().is_dir(), "{entry:?}");
+            entry.file_name().to_string_lossy().into_owned()
+        })
+        .collect();
+    top.sort();
+    assert_eq!(top, ["1", "2", "3"]);
+    let mut left: Vec<String> = fs::read_dir(&run.dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["barrier", "scratch"]);
+    within_bound(started);
+}
+
+/// Test 6: the flag is set while both workers hold a cycle at its gate; no third cycle starts.
+#[test]
+fn cancel_starts_no_further_cycle() {
+    let started = Instant::now();
+    let run = Parallel::new("cancel-workers");
+    let settings = run.settings(2);
+    let cancel = AtomicBool::new(false);
+    let barrier = run.barrier();
+    let markers = || fs::read_dir(&barrier).unwrap().count();
+    let (held, report) = std::thread::scope(|scope| {
+        let running = scope.spawn(|| {
+            run_suite(
+                &run.suite.join("cancel.suite.yaml"),
+                &settings,
+                None,
+                Some(&cancel),
+            )
+        });
+        let waited = Instant::now();
+        while markers() < 2 && waited.elapsed() < Duration::from_secs(4) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let held = markers();
+        cancel.store(true, Ordering::SeqCst);
+        fs::write(barrier.join("release"), "").unwrap();
+        (held, running.join().unwrap().unwrap())
+    });
+    assert_eq!(held, 2, "{report:?}");
+    assert_eq!(cycle_names(&report), ["c1", "c2"], "{report:?}");
+    for cycle in &report.cycles {
+        let difference = cycle.difference.as_ref().expect("a difference");
+        assert_eq!(difference.found.as_deref(), Some(CANCELLED), "{cycle:?}");
+        assert_eq!(difference.reason, DifferenceReason::StepFailed, "{cycle:?}");
+    }
+    assert!(!run.scratch().join("3").exists());
+    within_bound(started);
+}
+
+/// `b10x-loom tree test --confinement local` of `suite` over `protocols` in `dir` (home
+/// `dir/home`), scratch `dir/<label>` and report `dir/<label>.json`, with `extra` added.
+fn tree_test_in(dir: &Path, label: &str, suite: &Path, protocols: &Path, extra: &[&str]) -> Output {
+    fs::create_dir_all(dir.join("home")).unwrap();
+    command(&dir.join("home"))
+        .args(["tree", "test", "--confinement", "local", "--at", AT])
+        .arg("--suite")
+        .arg(suite)
+        .arg("--protocols")
+        .arg(protocols)
+        .arg("--scratch")
+        .arg(dir.join(label))
+        .arg("--report")
+        .arg(dir.join(format!("{label}.json")))
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+/// `tree test` of `only.suite.yaml` in `dir`, with `extra` added.
+fn only_test(dir: &Path, label: &str, extra: &[&str]) -> Output {
+    tree_test_in(
+        dir,
+        label,
+        &Path::new(FIXTURE).join("only.suite.yaml"),
+        Path::new(PROTOCOLS),
+        extra,
+    )
+}
+
+fn read_report(path: &Path) -> Value {
+    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+}
+
+/// Test 7: `--only b,d` runs cycles 2 and 4 alone and says it selected them.
+#[test]
+fn only_runs_the_named_cycles() {
+    let started = Instant::now();
+    let dir = fresh_scratch("only");
+    let tested = only_test(&dir, "scratch", &["--only", "b,d"]);
+    let stdout = text(&tested.stdout);
+    assert_eq!(
+        tested.status.code(),
+        Some(0),
+        "{stdout}{}",
+        text(&tested.stderr)
+    );
+    let mut made: Vec<String> = fs::read_dir(dir.join("scratch"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    made.sort();
+    assert_eq!(made, ["2", "4"]);
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 4, "{stdout}");
+    assert!(lines[2].starts_with("cycles: selected 2 of 5,"), "{stdout}");
+    let report = read_report(&dir.join("scratch.json"));
+    assert_eq!(report["only"], json!(["b", "d"]), "{report}");
+    assert_eq!(report["suite_cycles"], 5, "{report}");
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 8: `--only b --only d` is the selection `--only b,d` is.
+#[test]
+fn only_repeated_equals_only_with_a_comma() {
+    let started = Instant::now();
+    let dir = fresh_scratch("only-repeated");
+    let comma = only_test(&dir, "comma", &["--only", "b,d"]);
+    let repeated = only_test(&dir, "repeated", &["--only", "b", "--only", "d"]);
+    assert_eq!(comma.status.code(), Some(0), "{}", text(&comma.stderr));
+    assert_eq!(
+        repeated.status.code(),
+        Some(0),
+        "{}",
+        text(&repeated.stderr)
+    );
+    // The output, each cycle's wall time apart.
+    let lines = |output: &Output| -> Vec<String> {
+        text(&output.stdout)
+            .lines()
+            .map(|line| match line.rfind(" (") {
+                Some(at) if line.ends_with(" s)") => line[..at].to_owned(),
+                _ => line.to_owned(),
+            })
+            .collect()
+    };
+    assert_eq!(lines(&comma), lines(&repeated));
+    let report = |label: &str| {
+        let mut document = read_report(&dir.join(format!("{label}.json")));
+        for cycle in document["cycles"].as_array_mut().unwrap() {
+            cycle.as_object_mut().unwrap().remove("seconds");
+        }
+        document
+    };
+    assert_eq!(report("comma"), report("repeated"));
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 9: a full run's report names no selection and counts the suite's cycles.
+#[test]
+fn a_full_run_reports_no_only() {
+    let ran = ran();
+    let started = Instant::now();
+    let report = ran.report();
+    assert!(report.get("only").is_none(), "{report}");
+    assert_eq!(report["suite_cycles"], 5, "{report}");
+    within_bound(started);
+}
+
+/// Test 10: an `--only` name that is no cycle of the suite is refused before any cycle.
+#[test]
+fn only_naming_no_cycle_is_refused() {
+    let started = Instant::now();
+    let dir = fresh_scratch("only-unknown");
+    let tested = only_test(&dir, "scratch", &["--only", "nope"]);
+    let stderr = text(&tested.stderr);
+    assert_eq!(tested.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("CycleUnknown"), "{stderr}");
+    assert!(stderr.contains("nope"), "{stderr}");
+    assert!(tested.stdout.is_empty(), "{}", text(&tested.stdout));
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 11: `--workers` outside 1..=64 is clap's usage error, before anything is read: the suite
+/// and protocols named do not exist.
+#[test]
+fn workers_out_of_range_is_a_usage_error() {
+    let started = Instant::now();
+    let dir = fresh_scratch("workers-range");
+    for workers in ["0", "65"] {
+        let tested = tree_test_in(
+            &dir,
+            "scratch",
+            &dir.join("no-suite.yaml"),
+            &dir.join("no-protocols"),
+            &["--workers", workers],
+        );
+        let stderr = text(&tested.stderr);
+        assert_eq!(tested.status.code(), Some(2), "{stderr}");
+        assert!(
+            stderr.contains(&format!("invalid value '{workers}' for '--workers")),
+            "{stderr}"
+        );
+        assert!(!stderr.contains("refused"), "{stderr}");
+        assert!(!dir.join("scratch").exists());
+    }
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 12: more than one worker under `substrate` is refused before any cycle, by the command
+/// and by `run_suite`; one worker keeps the refusal of the missing root.
+#[test]
+fn workers_above_one_under_substrate_is_refused() {
+    let started = Instant::now();
+    let dir = fresh_scratch("substrate-workers");
+    fs::create_dir_all(dir.join("home")).unwrap();
+    let substrate = |workers: &str| {
+        command(&dir.join("home"))
+            .args(["tree", "test", "--confinement", "substrate"])
+            .args(["--workers", workers, "--at", AT])
+            .arg("--suite")
+            .arg(Path::new(FIXTURE).join("one.suite.yaml"))
+            .arg("--protocols")
+            .arg(PROTOCOLS)
+            .arg("--scratch")
+            .arg(dir.join("scratch"))
+            .output()
+            .unwrap()
+    };
+    let two = substrate("2");
+    let said = text(&two.stderr);
+    assert_eq!(two.status.code(), Some(2), "{said}");
+    assert!(said.contains("SubstrateWorkersUnserved"), "{said}");
+    assert!(
+        said.contains("story:suite-runs-cycles-under-one-cgroup-root"),
+        "{said}"
+    );
+    assert!(two.stdout.is_empty());
+    assert!(!dir.join("scratch").exists());
+
+    let mut settings = local_settings(dir.join("scratch"));
+    settings.confinement = Some("substrate".to_owned());
+    settings.workers = NonZeroUsize::new(2).unwrap();
+    let refused = run_suite(
+        &Path::new(FIXTURE).join("one.suite.yaml"),
+        &settings,
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        format!("{:?}", refused.reason()),
+        "SubstrateWorkersUnserved",
+        "{refused}"
+    );
+    assert!(
+        refused
+            .to_string()
+            .contains("story:suite-runs-cycles-under-one-cgroup-root"),
+        "{refused}"
+    );
+    assert!(!dir.join("scratch").exists());
+
+    let one = substrate("1");
+    let said = text(&one.stderr);
+    assert_eq!(one.status.code(), Some(2), "{said}");
+    assert!(said.contains("ConfinementRefused"), "{said}");
+    assert!(!said.contains("SubstrateWorkersUnserved"), "{said}");
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// `tree test --help` shows the two flags, the selection line and the two refusals.
+#[test]
+fn the_help_names_the_workers_the_selection_and_the_refusals() {
+    let started = Instant::now();
+    let help = command(&fresh_scratch("help-workers"))
+        .args(["tree", "test", "--help"])
+        .output()
+        .unwrap();
+    let said = text(&help.stdout);
+    assert_eq!(help.status.code(), Some(0), "{said}");
+    for part in [
+        "--workers <N>",
+        "--only <NAME>",
+        "cycles: selected <S> of <C>,",
+        "CycleUnknown",
+        "SubstrateWorkersUnserved",
+    ] {
+        assert!(said.contains(part), "{part}: {said}");
+    }
     within_bound(started);
 }
