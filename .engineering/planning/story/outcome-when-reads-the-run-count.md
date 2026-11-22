@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:outcome-when-reads-the-run-count
 kind: story
-status: draft
+status: proposed
 title: An action's spent run allowance becomes an evidence record a protocol claim reads in an outcome's requires
 summary: 'binding evidence entry from: runs (Program only) writes result spent with the run that reaches budget.max_runs; the protocol names the kind and claim; run.rs step_inputs keeps the kind from making the writer useful; works on Canon 0.10.0; when is split out (D131)'
 tags:
@@ -32,7 +32,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 19
+revision: 20
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T13:10:38Z", actor: "agent:loom", revision: 20}
 ---
 ## Outcome
 
