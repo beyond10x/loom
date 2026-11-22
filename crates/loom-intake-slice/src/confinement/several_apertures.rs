@@ -422,5 +422,11 @@ fn the_applied_confinement_lists_every_aperture() {
         aperture_listen(3, &model()),
         Some("127.0.0.4:443".parse().unwrap())
     );
-    assert_eq!(aperture_listen(4, &model()), None);
+    // story:substrate-0-24-0-pin: the eighth aperture listens on `127.0.0.8`, the bound of
+    // Substrate 0.22.0, and none listens past it.
+    assert_eq!(
+        aperture_listen(7, &model()),
+        Some("127.0.0.8:443".parse().unwrap())
+    );
+    assert_eq!(aperture_listen(8, &model()), None);
 }
