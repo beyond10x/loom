@@ -247,7 +247,9 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     }
     let mut command = cargo_command(root);
     if require {
-        command.env(REQUIRE_DELEGATION, "1");
+        // [`REQUIRE_DELEGATION`] spelled out: this file names the test switch, and
+        // `loom_governor::durable` clears a variable set here only when its name is a literal.
+        command.env("LOOM_REQUIRE_DELEGATION", "1");
     }
     let nextest = command
         .args(&nextest)
