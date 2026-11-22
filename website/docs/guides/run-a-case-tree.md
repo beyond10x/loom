@@ -538,7 +538,7 @@ default ones.
 |---|---|
 | `open` | `tree open` of the cycle's protocol and bindings into its store |
 | `run` | rounds of `tree run`, each exit 3 answered from `decide`; `rounds: 1` runs one |
-| `approve` | `tree approve` (`case`, `capability` or `action`, `principal`) |
+| `approve` | `tree approve` (`case`, `capability` or `action`, `principal`, `result`, `reasons`, `deny`) |
 | `close` | `tree close` (`case`, `outcome`) |
 | `stop` | `tree hold` (`principal`, `reason`, by default `suite step <label>`) |
 | `resume` | one `tree run`, answering no wait; a held tree gives exit 1, refusal `TreeStopped` |
@@ -547,6 +547,12 @@ default ones.
 
 A step states `exit` (a status, or `{not: <status>}`), `refusal`, `at` (minutes after `--at`) and
 `checks`, evaluated right after it.
+
+An `approve` step or entry passes `result` as `tree approve --result` and `reasons`, a list joined
+by line feeds, as `--reasons`, so the 60-line bound counts the entries and the lines inside them;
+`deny: true` records a `Deny`, and the wait on that capability stays. An entry takes the action of
+a printed `ApproveAction`; a `result` on a wait for a capability alone is refused
+`NotAPersonAction`, which ends the cycle `StepFailed`.
 
 ### Sources
 
@@ -607,8 +613,8 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 
 | Part | Waits for |
 |---|---|
-| steps `open`, `run`, `approve`, `close`, `status`, `verify`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when` | available |
-| `stop`, `resume`, `allow`, `reopen`; `approve` with `result`, `reasons` or `deny`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
+| steps `open`, `run`, `approve`, `close`, `status`, `verify`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when`; `approve` with `result`, `reasons` or `deny` | available |
+| `stop`, `resume`, `allow`, `reopen`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
 | `replay` | `story:tree-replay-command` |
 | `calls` | `story:agent-node-run-records` |
 | `engine` | `story:engine-configuration-document` |

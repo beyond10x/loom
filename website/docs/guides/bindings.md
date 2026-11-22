@@ -212,7 +212,9 @@ actions:
 - `exits`, on a `program` alone, holds `error` and `not_called`, each a list of exit codes from 0
   to 255 (a list left out is empty). An exit `error` lists is a program error and one
   `not_called` lists a run that did nothing; neither goes through the `results` tables. Loom
-  ships no default list: a binding with no `exits` puts every exit through its tables. A code in
+  ships no default list: a binding with no `exits` puts every exit through its tables, but an
+  exit from 129 to 192, which Substrate gives a program a signal ended, is refused
+  `ProgramSignalled` before either is read (below). A code in
   both lists, or in a list and as a key of a `from: exit` table of the same binding, is refused
   `ExitClassConflict`.
 - `program_root`, at the top of the document, is `workspace` (the default) or `bindings`. With
@@ -383,6 +385,15 @@ The port is a Commission effect port: it performs the actions bound to `program`
   reads `timeout`, whatever the lists hold. Each step starts the bound program once, so what
   bounds repeated not-called runs is the loop that drives the port, its step budget and idle
   bound.
+- A program a signal ended never answers through its tables. Under Substrate such a run reports
+  exit 128 plus the signal (137 for SIGKILL, as an out-of-memory or cgroup kill ends it), so a
+  run that ends with an exit from 129 to 192 (`SIGNAL_EXITS`) and was not killed at its timeout
+  records nothing and refuses the step `ProgramSignalled: action <action>: …`, naming the exit,
+  the signal and the blob's SHA-256 and never what the program printed; the refusal ends the run.
+  The check comes before `exits` and the tables, so an `exits` list or a `from: exit` row keyed
+  by a code from 129 to 192 is accepted at load and never read under Substrate, and the run holds
+  no `class` and counts against `budget.max_runs`. Under `local` a signal leaves no exit status
+  and the runner refuses the run, as above.
 - A port built `with_cancel(cancel)` (`confinement::Cancel`) reads the handle after the run count:
   set then, the step is refused `Cancelled: action <action>: …`, nothing starts and nothing is
   observed. Every program the step starts, the `arguments_from` program included, holds it. A

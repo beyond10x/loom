@@ -49,6 +49,8 @@ mod person_program;
 
 #[path = "tree_run/principal.rs"]
 mod principal;
+#[path = "tree_run/signal_exit.rs"]
+mod signal_exit;
 #[path = "tree_run/signals.rs"]
 mod signals;
 #[path = "tree_run/stop.rs"]

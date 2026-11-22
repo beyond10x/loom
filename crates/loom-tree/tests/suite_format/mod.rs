@@ -1223,6 +1223,34 @@ fn the_selection_line_names_the_selected_cycles() {
     assert!(started.elapsed() < BOUND);
 }
 
+/// `story:tree-suite-approve-result-and-reasons`, test 6: the `approve` members `result`,
+/// `reasons` and `deny` run, in a step and in a scripted entry alike.
+#[test]
+fn the_approve_members_are_available() {
+    let started = Instant::now();
+    for member in ["approve.result", "approve.reasons", "approve.deny"] {
+        let held: Vec<Availability> = SUITE_AVAILABILITY
+            .iter()
+            .filter(|entry| entry.used == KindUse::Member && entry.name == member)
+            .map(|entry| entry.availability)
+            .collect();
+        assert_eq!(held, [Availability::Available], "{member}");
+    }
+    let suite = decode_suite(
+        "format: loom.tree-suite/1\ndefaults: {protocol: review@1, bindings: b.yaml}\ncycles:\n  - name: step\n    steps: [{do: open}, {do: approve, action: draft.review, result: rejected, reasons: [a, b]}, {do: approve, capability: c, deny: true}]\n  - name: entry\n    decide: [{take: approve, action: draft.review, result: rejected, reasons: [a]}, {take: approve, capability: c, deny: true}]\n",
+    )
+    .unwrap();
+    for cycle in &suite.cycles {
+        assert_eq!(
+            first_waiting(cycle, SUITE_AVAILABILITY),
+            None,
+            "{}",
+            cycle.name
+        );
+    }
+    assert!(started.elapsed() < BOUND);
+}
+
 /// Thirteen of Runbook's cycles, written in this format by Loom (`crates/loom-cli/tests/fixtures/
 /// tree-suite/runbook/`), decode; the ones that use a part waiting for a story name it.
 #[test]

@@ -18,6 +18,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree run` on a held tree is refused `TreeStopped`, exit 1, naming the hold and the `tree reopen` command, and writes nothing (story:tree-suite-stop-resume-reopen-steps)
 - Suite steps `stop` (member `reason`, default `suite step <label>`), `resume` and `reopen`, and the `log` events `StopRecorded` and `StopLifted`, run; the three steps take no `case` (story:tree-suite-stop-resume-reopen-steps)
 - **Breaking:** `loom::runlog::RunLogEvent` gains `StopRecorded` and `StopLifted`, `TreeRefusalReason` gains `TreeStopped`, `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable`, and `CycleStep` gains `reason`: an exhaustive `match` needs the arms and a struct literal names the field; an older reader refuses the two kinds; a `stop`, `resume` or `reopen` step naming `case` is refused `MemberUndeclared` (story:tree-suite-stop-resume-reopen-steps)
+- `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
 
 ### Changed
 
@@ -94,6 +95,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
+- **Breaking:** `ProgramRefusalReason` gains `ProgramSignalled`: a bound program whose exit is 129 to 192 under Substrate (a signal ended it) and that did not time out records nothing and is refused naming the signal, ending the run, before `exits` and the result table are read; the run counts against `budget.max_runs` (story:bound-program-signal-exit-is-refused)
 - `task docs-check` is `loom-xtask docs-stamp --check` against the committed stamp `website/docs/reference/.generated.json` and builds no `loom-docs`; `task docs-slow` regenerates (story:docs-check-builds-once-per-fresh-tree)
 - The test step fails when the `tree_run` tests start `b10x-loom` more than 66 times (`START_BUDGETS`, `LOOM_TREE_RUN_STARTS`; 317 before) and holds their 60 s sum and 20 s kill in their own binary and in `b10x-loom-cli::main` alike; they run the library in process where the binary is not their subject (story:tree-run-tests-fit-the-test-budget)
 - **Breaking:** a `run_tree` whose cancel flag is set before a step stops `Cancelled` (`TreeStop::Cancelled`, new), its `stopped` line naming the action that was to be taken next, no longer `BudgetSpent` with no `next`; a step its cancel ended stops `Cancelled` naming its action; `b10x-loom tree run` still exits 5 (story:cancel-a-running-bound-program)
