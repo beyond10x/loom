@@ -65,8 +65,28 @@ adapter as the command line's flag does, by passing an `EngineRunner` opened on 
 `bindings::UNCONFINED_FLAG_REASON`; a `local` runner opened with any other reason is refused
 `CommandUnconfined`.
 
-An embedded host supplies an already delegated cgroup root to `SubstrateRunner::new`, or allows
-discovery of the current delegated root. A tree runner from `b10x_loom_tree::embed`
+An embedded host supplies an already delegated cgroup root to `SubstrateRunner::new`, or as
+`cgroup_root` in `EngineConfinement`. Every runner of the process shares one Substrate driver per
+cgroup root, workspace directory and egress, so several case trees in one process, each run from
+its own thread through its own `EngineRunner`, run their confined programs at the same time. To
+run them:
+
+1. Run the process in a delegated cgroup v2 subtree, the process in a leaf below the root:
+   `prepare_delegated_cgroup` does this inside a scope that
+   `systemd-run --user --scope -p Delegate=yes` started.
+2. Hold the root once with `hold_cgroup_root`, give every run the held root, `hold.root()`, as
+   `cgroup_root`, and keep the hold until the last run ends. A second hold of the root, in this
+   process or another, is refused `CgroupUndelegated`; a runner takes no hold of its own.
+3. Give each run its own workspace directory, and make all of them children of
+   one shared directory, for example `<state>/workspaces/<run>`.
+4. Open one `EngineRunner` per run, or share one: both work.
+
+A launch that needs a driver no runner of the process holds, while another launch runs under the
+same root, is still refused `CapabilityUnserved`: a workspace in another directory, or an egress
+set or certificate bundle that no running driver has. Bound programs name no egress, so for them
+the directory rule is the only one. A driver closes once the last runner that used it is dropped.
+A cgroup root that holds no process of this one, such as one made per run beside the process's
+leaf, is refused `CgroupUndelegated`. A tree runner from `b10x_loom_tree::embed`
 (`loom_sdk::tree`, [Run a case tree](#run-a-case-tree)) never discovers one: it holds the root it
 is given, or the delegated scope the process runs in. Automatic systemd re-exec belongs to the
 CLI.

@@ -25,6 +25,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - ESS 0.97.4 (format unchanged)
+- `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)
 
 ### Fixed
 

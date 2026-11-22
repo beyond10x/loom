@@ -315,29 +315,119 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
 /// The Substrate runner: tests ([`TestRunner`]) and children the host names
 /// ([`SubstrateRunner::run_child`]) run through it confined.
 ///
-/// A runner and its clones share one Substrate driver per directory that holds their workspaces,
-/// egress apertures and certificate bundle they name (Substrate fixes a driver's apertures and
-/// bundle when it opens), opened at the first launch that needs it, so their launches in
-/// workspaces of one directory run side by side; each launch releases its execution from the
-/// driver once it ended. Opening a driver ends every confined run under its cgroup root (Substrate
-/// reconciles them as orphans), so no driver is opened on a root, however its path is spelled,
-/// while a launch of this process runs under it: a launch that needs a driver for another
-/// directory, set of egress apertures or certificate bundle then is refused with
+/// Every runner of the process shares one Substrate driver per cgroup root, directory that holds
+/// the workspaces, and egress apertures and certificate bundle a launch names (Substrate fixes a
+/// driver's apertures and bundle when it opens; [`DriverKey`]), opened at the first launch that
+/// needs it, so launches in workspaces of one directory run side by side, whichever runner started
+/// them; each launch releases its execution from the driver once it ended. A runner and its clones
+/// keep the drivers they used, and a driver is closed once the last runner that used it is
+/// dropped. Opening a driver ends every confined run under its cgroup root (Substrate reconciles
+/// them as orphans), so no driver is opened on a root, however its path is spelled, while a launch
+/// of this process runs under it: a launch that needs a driver for another directory, set of
+/// egress apertures or certificate bundle then is refused with
 /// [`ConfinementRefusal::CapabilityUnserved`] instead.
+///
+/// A runner takes no hold of its cgroup root: a process that runs several trees holds the root
+/// once ([`hold_cgroup_root`]) and gives every runner the held root ([`CgroupRootHold::root`]).
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
     cgroup_root: Option<PathBuf>,
     drivers: Arc<Drivers>,
 }
 
-/// The drivers a runner and its clones opened, by the directory holding their workspaces, each
-/// with the [`DriverEgress`] it was opened for.
-#[derive(Default)]
-struct Drivers(Mutex<BTreeMap<PathBuf, Vec<Arc<OpenDriver>>>>);
-impl fmt::Debug for Drivers {
+/// The drivers a runner and its clones used, kept open for as long as one of them lives: the
+/// process's table ([`DRIVERS`]) holds each driver only weakly.
+struct Drivers<D = OpenDriver>(Mutex<Vec<Arc<D>>>);
+impl<D> Default for Drivers<D> {
+    fn default() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+}
+impl<D> fmt::Debug for Drivers<D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let drivers = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        f.debug_list().entries(drivers.keys()).finish()
+        let kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        f.debug_struct("Drivers")
+            .field("kept", &kept.len())
+            .finish()
+    }
+}
+impl<D> Drivers<D> {
+    /// Keep `driver` open for as long as this runner or a clone lives, once.
+    fn keep(&self, driver: &Arc<D>) {
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if !kept.iter().any(|open| Arc::ptr_eq(open, driver)) {
+            kept.push(Arc::clone(driver));
+        }
+    }
+}
+
+/// What a shared driver was opened for: the canonical cgroup root it reconciles, the directory
+/// holding the workspaces it adopts, and its [`DriverEgress`]. Two launches share a driver only
+/// when their keys are equal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DriverKey {
+    cgroup_root: PathBuf,
+    directory: PathBuf,
+    egress: DriverEgress,
+}
+
+/// The drivers the runners of a process opened, by [`DriverKey`], each held weakly: the runners
+/// that used a driver keep it open ([`Drivers`]), and an entry whose driver closed is dropped.
+struct DriverTable<D>(Mutex<Vec<(DriverKey, std::sync::Weak<D>)>>);
+
+/// The one driver table of the process, shared by every [`SubstrateRunner`].
+static DRIVERS: DriverTable<OpenDriver> = DriverTable::new();
+
+impl<D> DriverTable<D> {
+    const fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+
+    /// The driver for `key`: the one a runner of this process opened for an equal key and still
+    /// keeps, or a new one `open` opens. Opening ends every confined run under the key's root, so
+    /// while a launch of this process runs there it is refused
+    /// [`ConfinementRefusal::CapabilityUnserved`] and `open` is not called; the count is held while
+    /// `open` runs, so no launch starts there meanwhile.
+    fn driver(
+        &self,
+        key: &DriverKey,
+        open: impl FnOnce(&DriverKey) -> Result<D, ConfinementError>,
+    ) -> Result<Arc<D>, ConfinementError> {
+        let mut table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        table.retain(|(_, driver)| driver.strong_count() > 0);
+        let shared = table
+            .iter()
+            .find(|(held, _)| held == key)
+            .and_then(|(_, driver)| driver.upgrade());
+        if let Some(driver) = shared {
+            return Ok(driver);
+        }
+        let running = running();
+        if running
+            .get(&key.cgroup_root)
+            .is_some_and(|count| *count > 0)
+        {
+            return Err(refuse(
+                ConfinementRefusal::CapabilityUnserved,
+                format!(
+                    "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
+                    key.cgroup_root.display()
+                ),
+            ));
+        }
+        let driver = Arc::new(open(key)?);
+        drop(running);
+        table.push((key.clone(), Arc::downgrade(&driver)));
+        Ok(driver)
+    }
+
+    /// Whether the table holds an open driver for `key`.
+    #[cfg(test)]
+    fn holds(&self, key: &DriverKey) -> bool {
+        let table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        table
+            .iter()
+            .any(|(held, driver)| held == key && driver.strong_count() > 0)
     }
 }
 
@@ -523,9 +613,10 @@ impl SubstrateRunner {
         Ok(())
     }
 
-    /// The driver for the workspace `root` opened for `egress`: the one this runner or a clone
-    /// opened for its directory and an equal [`DriverEgress`], or a new one. The workspace is
-    /// adopted on it either way.
+    /// The driver for the workspace `root` opened for `egress`: the one a runner of this process
+    /// opened for this runner's cgroup root, the workspace's directory and an equal
+    /// [`DriverEgress`], or a new one ([`DRIVERS`]). This runner and its clones keep it, and the
+    /// workspace is adopted on it either way.
     fn driver(
         &self,
         root: &Path,
@@ -534,27 +625,13 @@ impl SubstrateRunner {
         let parent = root
             .parent()
             .ok_or_else(|| scope_error("workspace has no parent"))?;
-        let mut drivers = self
-            .drivers
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let opened = drivers
-            .get(parent)
-            .and_then(|opened| opened.iter().find(|open| open.egress == *egress))
-            .map(Arc::clone);
-        let open = match opened {
-            Some(open) => open,
-            None => {
-                let open = Arc::new(self.open(parent, egress)?);
-                drivers
-                    .entry(parent.to_owned())
-                    .or_default()
-                    .push(Arc::clone(&open));
-                open
-            }
+        let key = DriverKey {
+            cgroup_root: self.delegated_root()?,
+            directory: parent.to_owned(),
+            egress: egress.clone(),
         };
-        drop(drivers);
+        let open = DRIVERS.driver(&key, open_driver)?;
+        self.drivers.keep(&open);
         open.driver
             .workspace_root_identity(workspace_name(root)?)
             .map_err(|e| {
@@ -566,16 +643,12 @@ impl SubstrateRunner {
         Ok(open)
     }
 
-    fn open(&self, parent: &Path, egress: &DriverEgress) -> Result<OpenDriver, ConfinementError> {
-        let state = tempfile::Builder::new()
-            .prefix("loom-substrate-")
-            .tempdir()
-            .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        let mut config = driver_config(parent, state.path(), egress)?;
-        // One root has one name: the count of running launches is keyed by it, however the host
-        // spelled the root.
-        let cgroup_root = self
-            .cgroup_root
+    /// The canonical cgroup root this runner's drivers open on: the one the host named, or the
+    /// one discovery finds, refused `CgroupUndelegated` unless it is an empty cgroup v2 directory
+    /// whose `cgroup.procs` opens for writing. One root has one name: the table and the count of
+    /// running launches are keyed by it, however the host spelled the root.
+    fn delegated_root(&self) -> Result<PathBuf, ConfinementError> {
+        self.cgroup_root
             .clone()
             .or_else(discover_cgroup_root)
             .and_then(|path| path.canonicalize().ok())
@@ -587,77 +660,81 @@ impl SubstrateRunner {
                         .write(true)
                         .open(path.join("cgroup.procs"))
                         .is_ok()
-            });
-        let Some(cgroup_root) = cgroup_root else {
-            return Err(refuse(
-                ConfinementRefusal::CgroupUndelegated,
-                "Substrate requires an empty delegated cgroup v2 subtree containing this process in a child; use systemd-run --user -p Delegate=yes --scope or --cgroup-root",
-            ));
-        };
-        config.cgroup_root = Some(cgroup_root.clone());
-        // Opening kills every exec cgroup under the root; hold the count so no launch starts
-        // there meanwhile, and open nothing over a launch already running there.
-        let running = running();
-        if running.get(&cgroup_root).is_some_and(|count| *count > 0) {
+            })
+            .ok_or_else(|| {
+                refuse(
+                    ConfinementRefusal::CgroupUndelegated,
+                    "Substrate requires an empty delegated cgroup v2 subtree containing this process in a child; use systemd-run --user -p Delegate=yes --scope or --cgroup-root",
+                )
+            })
+    }
+}
+
+/// Open a Substrate driver for `key`, as [`DriverTable::driver`] calls it: no launch of this
+/// process runs under the key's root meanwhile.
+fn open_driver(key: &DriverKey) -> Result<OpenDriver, ConfinementError> {
+    let DriverKey {
+        cgroup_root,
+        directory,
+        egress,
+    } = key;
+    let state = tempfile::Builder::new()
+        .prefix("loom-substrate-")
+        .tempdir()
+        .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
+    let mut config = driver_config(directory, state.path(), egress)?;
+    config.cgroup_root = Some(cgroup_root.clone());
+    let driver = HostDriver::open(config).map_err(|e| {
+        refuse(
+            ConfinementRefusal::BackendMissing,
+            format!("Substrate open: {e:?}"),
+        )
+    })?;
+    let machine = driver.machine();
+    let adapter_facts = admitted_facts(&machine)?;
+    let facts = machine.facts;
+    if facts.exec_no_egress != Some(true) || facts.exec_workspace_scoped_write != Some(true) {
+        return Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate does not serve no-network execution with scoped workspace writes",
+        ));
+    }
+    // Substrate publishes the declared apertures only once its mechanism worked in a
+    // throwaway sandbox; a declared one it does not publish is never served.
+    for aperture in &egress.apertures {
+        let Some(served) = facts.exec_egress_apertures.as_ref() else {
             return Err(refuse(
                 ConfinementRefusal::CapabilityUnserved,
                 format!(
-                    "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
-                    cgroup_root.display()
+                    "Substrate does not serve the egress aperture `{}` on this machine: its mechanism did not prove itself when the driver opened",
+                    aperture.name
+                ),
+            ));
+        };
+        if !served.iter().any(|fact| {
+            fact.name == aperture.name
+                && fact.destination == aperture.pinned.to_string()
+                && fact.max_bytes == aperture.max_bytes
+        }) {
+            return Err(refuse(
+                ConfinementRefusal::CapabilityUnserved,
+                format!(
+                    "Substrate published no egress aperture `{}` as it was declared",
+                    aperture.name
                 ),
             ));
         }
-        let driver = HostDriver::open(config).map_err(|e| {
-            refuse(
-                ConfinementRefusal::BackendMissing,
-                format!("Substrate open: {e:?}"),
-            )
-        })?;
-        drop(running);
-        let machine = driver.machine();
-        let adapter_facts = admitted_facts(&machine)?;
-        let facts = machine.facts;
-        if facts.exec_no_egress != Some(true) || facts.exec_workspace_scoped_write != Some(true) {
-            return Err(refuse(
-                ConfinementRefusal::CapabilityUnserved,
-                "Substrate does not serve no-network execution with scoped workspace writes",
-            ));
-        }
-        // Substrate publishes the declared apertures only once its mechanism worked in a
-        // throwaway sandbox; a declared one it does not publish is never served.
-        for aperture in &egress.apertures {
-            let Some(served) = facts.exec_egress_apertures.as_ref() else {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!(
-                        "Substrate does not serve the egress aperture `{}` on this machine: its mechanism did not prove itself when the driver opened",
-                        aperture.name
-                    ),
-                ));
-            };
-            if !served.iter().any(|fact| {
-                fact.name == aperture.name
-                    && fact.destination == aperture.pinned.to_string()
-                    && fact.max_bytes == aperture.max_bytes
-            }) {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!(
-                        "Substrate published no egress aperture `{}` as it was declared",
-                        aperture.name
-                    ),
-                ));
-            }
-        }
-        Ok(OpenDriver {
-            driver,
-            adapter_facts,
-            cgroup_root,
-            egress: egress.clone(),
-            state,
-        })
     }
+    Ok(OpenDriver {
+        driver,
+        adapter_facts,
+        cgroup_root: cgroup_root.clone(),
+        egress: egress.clone(),
+        state,
+    })
+}
 
+impl SubstrateRunner {
     /// Run a child process the host names, confined through Substrate with the guarantees a test
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
@@ -4554,7 +4631,7 @@ mod tests {
         let launch = Running::enter(&cgroup.canonicalize().unwrap());
         let spelled = cgroup.join("..").join("cgroup");
         let error = SubstrateRunner::new(Some(spelled))
-            .open(fixture.path(), &DriverEgress::NONE)
+            .driver(&fixture.path().join("workspace"), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
@@ -4573,10 +4650,12 @@ mod tests {
         std::fs::write(cgroup.join("cgroup.controllers"), "cpu memory pids\n").unwrap();
         std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
         let runner = SubstrateRunner::new(Some(cgroup.clone()));
+        // A runner and its clone keep one set of drivers, so they share every table entry either
+        // of them uses.
         assert!(Arc::ptr_eq(&runner.drivers, &runner.clone().drivers));
         let launch = Running::enter(&cgroup);
         let error = runner
-            .open(fixture.path(), &DriverEgress::NONE)
+            .driver(&fixture.path().join("workspace"), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
@@ -4588,6 +4667,373 @@ mod tests {
             !running().contains_key(&cgroup),
             "a finished launch is no longer counted"
         );
+    }
+
+    /// A driver the table's tests open: no Substrate driver.
+    #[derive(Debug)]
+    struct FakeDriver;
+
+    /// An opener that counts its calls in `calls` and opens a [`FakeDriver`].
+    fn counting(
+        calls: &std::cell::Cell<usize>,
+    ) -> impl FnOnce(&DriverKey) -> Result<FakeDriver, ConfinementError> + '_ {
+        move |_| {
+            calls.set(calls.get() + 1);
+            Ok(FakeDriver)
+        }
+    }
+
+    /// The key of a driver for the workspaces in `directory` under the cgroup root `root`.
+    fn table_key(root: &Path, directory: &str, egress: DriverEgress) -> DriverKey {
+        DriverKey {
+            cgroup_root: root.to_owned(),
+            directory: root.join(directory),
+            egress,
+        }
+    }
+
+    /// The detail of the refusal of a driver open over a running launch, as it read before the
+    /// table (`story:concurrent-confined-runs` keeps it).
+    fn running_detail(root: &Path) -> String {
+        format!(
+            "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
+            root.display()
+        )
+    }
+
+    /// story:concurrent-confined-runs: two runners asking for one key get one driver, opened once,
+    /// and the second gets it while a launch on it runs, since sharing a driver opens nothing.
+    #[test]
+    fn driver_table_two_runners_share_one_driver_for_one_key() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let (first, second) = (Drivers::default(), Drivers::default());
+        let key = table_key(root.path(), "workspaces", DriverEgress::NONE);
+        let opened = table
+            .driver(&key, counting(&calls))
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let shared = table
+            .driver(&key, counting(&calls))
+            .expect("the second runner shares the driver while a launch runs on it");
+        second.keep(&shared);
+        assert!(Arc::ptr_eq(&opened, &shared), "one driver for one key");
+        assert_eq!(calls.get(), 1, "the opener ran once");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: a launch counted under one root refuses no driver under
+    /// another.
+    #[test]
+    fn driver_table_a_launch_under_one_root_does_not_refuse_another_root() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let launch = Running::enter(a.path());
+        let key = table_key(b.path(), "workspaces", DriverEgress::NONE);
+        let opened = table.driver(&key, counting(&calls));
+        assert!(opened.is_ok(), "{:?}", opened.err());
+        assert_eq!(calls.get(), 1, "root B's driver opened");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: while a launch runs under a root, a runner that needs a
+    /// driver for another directory under it is refused as before, and nothing opens.
+    #[test]
+    fn driver_table_another_directory_under_a_running_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let first = Drivers::default();
+        let opened = table
+            .driver(
+                &table_key(root.path(), "here", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let error = table
+            .driver(
+                &table_key(root.path(), "elsewhere", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect_err("another directory under a running root opens nothing");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(error.detail, running_detail(root.path()));
+        assert_eq!(calls.get(), 1, "the opener was not called again");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: while a launch runs under a root, a launch in the same
+    /// directory with another egress is refused in the same way, and nothing opens.
+    #[test]
+    fn driver_table_another_egress_under_a_running_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let first = Drivers::default();
+        let opened = table
+            .driver(
+                &table_key(root.path(), "here", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let bundle = DriverEgress {
+            apertures: Vec::new(),
+            ca_bundle: Some(CaBundle {
+                named: PathBuf::from("/etc/ssl/bundle.pem"),
+                bytes: b"bundle".to_vec(),
+            }),
+        };
+        let error = table
+            .driver(&table_key(root.path(), "here", bundle), counting(&calls))
+            .expect_err("another egress under a running root opens nothing");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(error.detail, running_detail(root.path()));
+        assert_eq!(calls.get(), 1, "the opener was not called again");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: the table holds a driver only while a runner that used it
+    /// lives; once the last one is dropped, the next request opens a new one.
+    #[test]
+    fn driver_table_a_driver_dropped_by_its_last_runner_leaves_the_table() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let key = table_key(root.path(), "workspaces", DriverEgress::NONE);
+        let (first, second) = (Drivers::default(), Drivers::default());
+        first.keep(&table.driver(&key, counting(&calls)).unwrap());
+        second.keep(&table.driver(&key, counting(&calls)).unwrap());
+        assert_eq!(calls.get(), 1);
+        drop(first);
+        assert!(table.holds(&key), "a runner that used the driver lives");
+        drop(second);
+        assert!(!table.holds(&key), "the last runner that used it is gone");
+        let third = Drivers::default();
+        third.keep(&table.driver(&key, counting(&calls)).unwrap());
+        assert_eq!(calls.get(), 2, "the next request opened the driver again");
+    }
+
+    /// The crates whose statics `every_static_of_the_runtime_crates_is_listed_harmless` reads: the
+    /// Loom crates `b10x-loom-tree` links, by their directory under `crates/`.
+    const RUNTIME_CRATES: [&str; 9] = [
+        "loom-intake-slice",
+        "loom-bindings",
+        "loom-governor",
+        "loom-commission",
+        "loom-executor",
+        "loom-protocols",
+        "loom-runlog",
+        "loom-tree",
+        "loom-intake-references",
+    ];
+
+    /// Every static of [`RUNTIME_CRATES`]: its file under `crates/`, its name, and why it lets no
+    /// run of the process change another run's result (`story:concurrent-confined-runs`).
+    const HARMLESS_STATICS: [(&str, &str, &str); 27] = [
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "RUNNING",
+            "counts launches per root; only refuses a driver open that would end one",
+        ),
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "DRIVERS",
+            "shares a driver only between launches with an equal key",
+        ),
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "NEXT_EXEC",
+            "makes names unique",
+        ),
+        (
+            "loom-bindings/src/program.rs",
+            "ISSUED",
+            "makes names unique",
+        ),
+        ("loom-bindings/src/open.rs", "ISSUED", "makes names unique"),
+        ("loom-bindings/src/copy.rs", "ISSUED", "makes names unique"),
+        (
+            "loom-intake-slice/src/executor.rs",
+            "ISSUED",
+            "makes names unique",
+        ),
+        (
+            "loom-governor/src/locked_dir.rs",
+            "NEXT_TEMPORARY",
+            "makes names unique",
+        ),
+        (
+            "loom-intake-slice/src/state_dir.rs",
+            "NEXT_TEMPORARY",
+            "makes names unique",
+        ),
+        (
+            "loom-intake-slice/src/results.rs",
+            "NEXT_SCOPE",
+            "makes names unique",
+        ),
+        ("loom-executor/src/lib.rs", "MADE", "makes names unique"),
+        ("loom-tree/src/suite/run.rs", "WRITES", "makes names unique"),
+        (
+            "loom-governor/src/lib.rs",
+            "ENGINEERING",
+            "the compiled-in catalog, immutable once made",
+        ),
+        ("loom-intake-references/src/lib.rs", "TOKEN", "immutable"),
+        ("loom-intake-references/src/lib.rs", "MARK", "immutable"),
+        ("loom-intake-references/src/lib.rs", "GITHUB", "immutable"),
+        ("loom-intake-references/src/lib.rs", "GITLAB", "immutable"),
+        ("loom-intake-references/src/lib.rs", "SLACK", "immutable"),
+        ("loom-intake-references/src/lib.rs", "JIRA", "immutable"),
+        (
+            "loom-intake-slice/src/git.rs",
+            "RECORDINGS",
+            "keyed by the canonical workspace, replaced only for the same workspace",
+        ),
+        (
+            "loom-executor/src/metering.rs",
+            "OPEN",
+            "thread-local; each run has its own thread",
+        ),
+        (
+            "loom-executor/src/metering.rs",
+            "TURNING",
+            "thread-local; each run has its own thread",
+        ),
+        (
+            "loom-intake-slice/src/clock.rs",
+            "OFFSET",
+            "feature `test-clock`, test builds only; it only moves forward",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "SYNCED",
+            "counts syncs for a report; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "SKIPPED",
+            "counts skipped syncs for a report, test builds only; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "ON_THIS_THREAD",
+            "thread-local counts for a report; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "MARKER",
+            "immutable bytes, test builds only",
+        ),
+    ];
+
+    /// The names of the statics `line` declares (`static NAME:` or `static mut NAME:`, never a
+    /// `'static` lifetime), the part after `//` left out.
+    fn declared_statics(line: &str) -> Vec<String> {
+        let code = line.split("//").next().unwrap_or_default();
+        let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut names = Vec::new();
+        for (at, _) in code.match_indices("static") {
+            let before = code[..at].chars().next_back();
+            if before.is_some_and(|c| ident(c) || c == '\'') {
+                continue;
+            }
+            let rest = &code[at + "static".len()..];
+            if !rest.starts_with(char::is_whitespace) {
+                continue;
+            }
+            let mut rest = rest.trim_start();
+            if let Some(after) = rest.strip_prefix("mut ") {
+                rest = after.trim_start();
+            }
+            let name: String = rest.chars().take_while(|c| ident(*c)).collect();
+            if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+                continue;
+            }
+            if rest[name.len()..].trim_start().starts_with(':') {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// Every `.rs` file under `directory`, recursively.
+    fn rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, files);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    /// story:concurrent-confined-runs: every static of the runtime crates, test modules and
+    /// feature-gated code included, is in [`HARMLESS_STATICS`], and every entry there is still a
+    /// static. A lazily made global (`OnceLock`, `LazyLock`, `lazy_static!`) that declares no listed
+    /// static fails too.
+    #[test]
+    fn every_static_of_the_runtime_crates_is_listed_harmless() {
+        // Spelled in two halves, so this file's own text holds none of them whole.
+        let lazy = [
+            concat!("Once", "Lock<"),
+            concat!("Once", "Lock::"),
+            concat!("Lazy", "Lock<"),
+            concat!("Lazy", "Lock::"),
+            concat!("lazy_", "static!"),
+        ];
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let listed: std::collections::BTreeSet<(&str, &str)> = HARMLESS_STATICS
+            .iter()
+            .map(|(file, name, _)| (*file, *name))
+            .collect();
+        let mut found = std::collections::BTreeSet::new();
+        let mut unlisted = Vec::new();
+        for name in RUNTIME_CRATES {
+            let mut files = Vec::new();
+            rust_files(&crates.join(name).join("src"), &mut files);
+            assert!(!files.is_empty(), "crates/{name}/src holds Rust files");
+            for path in files {
+                let file = path
+                    .strip_prefix(crates)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (number, line) in text.lines().enumerate() {
+                    let statics = declared_statics(line);
+                    for name in &statics {
+                        if listed.contains(&(file.as_str(), name.as_str())) {
+                            found.insert((file.clone(), name.clone()));
+                        } else {
+                            unlisted.push(format!("{file}:{}: static {name}", number + 1));
+                        }
+                    }
+                    let code = line.split("//").next().unwrap_or_default();
+                    if statics.is_empty() && lazy.iter().any(|needle| code.contains(needle)) {
+                        unlisted.push(format!("{file}:{}: {}", number + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "statics of the runtime crates not listed harmless:\n{}",
+            unlisted.join("\n")
+        );
+        let stale: Vec<_> = listed
+            .iter()
+            .filter(|(file, name)| !found.contains(&((*file).to_owned(), (*name).to_owned())))
+            .collect();
+        assert!(stale.is_empty(), "listed and no longer a static: {stale:?}");
     }
 
     /// The configuration of every driver Loom opens names no Git source
