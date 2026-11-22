@@ -125,6 +125,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree test --help` names the `--report` file as the one thing written outside `--scratch`; it said nothing was
 - The test step names each test that skipped for a missing prerequisite and counts them in its summary line, sets `LOOM_REQUIRE_DELEGATION=1` where a delegated user scope starts, so such a skip fails, and makes the trees the `tree_run` tests share before its timed run; CI's `task check` job sets the variable when its probe of a delegated user scope passes
 - `task slow` and `task suite-generate` name 30 minutes of pool time (`SLOT_TIMEOUT`), and `task slow` builds its tests in a job of their own
+- Substrate 0.24.0 (`b10x-substrate-host`, `-wire`); its executable deny-list is not yet reachable from Loom (story:substrate-0-24-0-pin)
+- `MAX_EGRESS_APERTURES` and `ChildCommand::MAX_READ_ONLY_ROOTS` rise from 4 to 8, Substrate 0.22.0's bounds (story:substrate-0-24-0-pin)
 
 ### Removed
 
@@ -144,6 +146,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Two `tree run`s never share a cgroup root: each holds its root by a `flock` on the root's directory, so one run's driver no longer ends another run's confined launches (story:tree-run-takes-a-delegated-cgroup)
 - `FileDecisionStore` refuses a write superseding a decided request that changes more than the supersession: its options, holder, eligible principals, case or question
 - `tree run` cancels on SIGTERM or SIGINT: the running bound program is stopped with every process it started and the run ends `Cancelled`, exit 5, instead of dying by the signal with its program still running
+- A confined child gets `EACCES` for `EXT4_IOC_MOVE_EXT`, `XFS_IOC_SWAPEXT` and `F2FS_IOC_SEC_TRIM_FILE`, Substrate 0.24.0's floor (story:substrate-0-24-0-pin)
+- `url` 2.5.9, for RUSTSEC-2026-0592 (story:substrate-0-24-0-pin)
 
 ## [0.58.0] - 2026-11-21
 

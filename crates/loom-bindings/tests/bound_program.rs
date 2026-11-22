@@ -8,7 +8,12 @@
 //! artifacts and stub programs; no model, no network. A case that starts a process gives the port
 //! an `EngineRunner` on `local` opened with `UNCONFINED_FLAG_REASON`; a case that reads the
 //! `ChildCommand` the port builds gives it a recording runner that starts nothing. Scratch goes
-//! under `CARGO_TARGET_TMPDIR`, outside every mount Substrate owns.
+//! under `CARGO_TARGET_TMPDIR`, outside every mount Substrate owns. The one `linux` case runs in a
+//! delegated scope through the harness of `b10x-loom-intake-slice`'s tests, or skips naming what is
+//! missing.
+
+#[path = "../../loom-intake-slice/tests/support/mod.rs"]
+mod support;
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt as _;
@@ -2491,4 +2496,70 @@ fn a_cancel_set_at_the_hand_over_starts_nothing_and_keeps_a_counted_observation(
             "{path} does not say what a handle set {HANDED_OVER} the program does"
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Under `linux` (`story:substrate-0-24-0-pin`)
+
+/// A Runbook-style confined step: a bound program runs through [`ProgramEffects`] on a Substrate
+/// runner in a delegated scope, reads the host path Loom mounts read-only for it (its own program
+/// file, at its own path), writes its workspace and exits 0, and the step is performed and recorded
+/// as its table says. It skips naming what is missing, through the delegated harness of
+/// `b10x-loom-intake-slice`.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_runbook_style_confined_step_runs_through_bound_program_on_the_new_pin() {
+    support::delegated(
+        "a_runbook_style_confined_step_runs_through_bound_program_on_the_new_pin",
+        &[],
+        |runner, workspace| {
+            let scratch = Scratch::new();
+            let program = scratch.script(
+                "program.sh",
+                "/usr/bin/head -n 1 \"$0\" > /workspace/target/read || exit 3\n\
+                 if { echo x >> \"$0\"; } 2>/dev/null; then exit 4; fi\n\
+                 printf written > /workspace/target/written || exit 5\n\
+                 exit 0\n",
+            );
+            let document = document(&bound(
+                CHECK,
+                &[&program],
+                "",
+                &[entry("gate", "exit", VALID_TABLE)],
+            ));
+            let governor = governor();
+            let runner: Arc<dyn TestRunner> = Arc::new(runner.clone());
+            let end = {
+                let effects = ProgramEffects::new(
+                    &governor,
+                    CaseId(CASE.to_owned()),
+                    &document,
+                    workspace,
+                    &scratch.store,
+                    Some(runner),
+                )
+                .expect("the port admits the Substrate runner");
+                drive(&governor, &effects, CASE, CHECK, args("{}"))
+            };
+            assert_performed(&end);
+            assert_eq!(result_of(&record(&governor)), json!("valid"));
+            assert_eq!(
+                std::fs::read_to_string(workspace.join("target/read")).unwrap(),
+                "#!/bin/sh\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(workspace.join("target/written")).unwrap(),
+                "written"
+            );
+            assert!(
+                std::fs::read_to_string(&program)
+                    .unwrap()
+                    .ends_with("exit 0\n"),
+                "the program file was not written"
+            );
+        },
+    );
 }
