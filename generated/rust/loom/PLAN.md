@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest ebc9d11ceaee6c0cdfda5635d3aa5e2bbf27b6d2cf06c94d23b72ed7fa7e8eeb
+  contract digest 37453704565c94aa7cfe18cd316f7df45e113ce53847f43614129aacb2640ee5
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-440 capabilities: **424 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+443 capabilities: **427 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -83,6 +83,9 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.ResultRule` |
 | domain type | `loom.bindings.ResultSource` |
 | domain type | `loom.bindings.RetryCondition` |
+| domain type | `loom.bindings.RetryFeedback` |
+| domain type | `loom.bindings.RetryLog` |
+| domain type | `loom.bindings.RetryRecord` |
 | domain type | `loom.bindings.RevisionMove` |
 | domain type | `loom.bindings.RevisionRefusal` |
 | domain type | `loom.bindings.RevisionRefusalReason` |
