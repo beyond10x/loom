@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T14:31:56Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-program-result-table",
+  "kind": "story",
+  "revision": 20,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "F1, F2 and F4 fixed by 18840b6d and 3a016448 on impl/bound-program-result-table (every run_child call leaves one observation; a case of another protocol is refused CaseOfAnotherProtocol); the reviewer's 12 cases committed as 6281de92; F3 left open by session sdc's decision, see story:bound-program-run-cap-holds-across-ports",
+    "review": "review-result:bound-program-result-table-security-1",
+    "outcome": "fixed"
+  }
+}

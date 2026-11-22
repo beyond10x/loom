@@ -4,14 +4,15 @@ id: story:decided-records-carry-grounds-to-canon
 kind: story
 status: draft
 title: An explicit decision carries its grounds to Canon, and one Canon sets aside supersedes its request
-summary: ground_revisions and ground_evidence on canon-decisions/1; blocked until Canon releases
+summary: ground_revisions and ground_evidence on canon-decisions/1, on Canon 0.10.0
 tags:
 - sdc
 relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 - depends_on: story:requests-from-canon-pending-decisions
-revision: 4
+- depends_on: story:canon-0-10-0-pin
+revision: 6
 ---
 ## Outcome
 
@@ -56,10 +57,11 @@ the same for approvals, which Loom starts handing Canon in
 
 ## Waits on
 
-- `upstream-blocker:canon-decision-side-unreleased`: no Canon release carries
-  `story:decision-grounds`.
-- `story:requests-from-canon-pending-decisions`: it moves the Canon pin to the release this
-  needs, and both change `crates/loom-governor/src/lib.rs` and `ess/domains/governor.yaml`.
+- `story:canon-0-10-0-pin`: it moves the Canon pin to tag `0.10.0`, which carries
+  `story:decision-grounds` (`ground_revisions` and `ground_evidence` on `canon-decisions/1`,
+  `stale_grounds`; `crates/canon/src/model/explicit.rs` at `0.10.0`).
+- `story:requests-from-canon-pending-decisions`: both change `crates/loom-governor/src/lib.rs`
+  and `ess/domains/governor.yaml`.
 
 ## ESS first
 

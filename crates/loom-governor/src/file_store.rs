@@ -55,6 +55,8 @@
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write as _;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json as commission_json;
@@ -318,6 +320,109 @@ impl FallibleCaseStore for FileCaseStore {
 
     fn observations(&self) -> Result<Vec<ObservationData>, Self::Error> {
         self.locked(|| self.read_observations())
+    }
+}
+
+/// A step of one case write, in the order they happen; [`FileCaseStore::update_until`] hands each
+/// to its caller once it is done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteStep {
+    /// The temporary file was created, empty.
+    Created,
+    /// The first half of the case document was written to the temporary file.
+    HalfWritten,
+    /// Every byte was written to the temporary file.
+    Written,
+    /// The temporary file was synced.
+    Synced,
+    /// The temporary file was renamed over the case file: the case is the changed one.
+    Renamed,
+    /// The directory was synced.
+    DirectorySynced,
+}
+
+impl WriteStep {
+    /// Every step, in order.
+    pub const ALL: [Self; 6] = [
+        Self::Created,
+        Self::HalfWritten,
+        Self::Written,
+        Self::Synced,
+        Self::Renamed,
+        Self::DirectorySynced,
+    ];
+
+    /// Whether the case file holds the changed case once this step is done.
+    pub fn renamed(self) -> bool {
+        matches!(self, Self::Renamed | Self::DirectorySynced)
+    }
+}
+
+impl FileCaseStore {
+    /// [`FallibleCaseStore::update`], making the write as [`FallibleCaseStore::update`] does
+    /// (the same document, a temporary file in the directory, synced and renamed over the case
+    /// file) and handing `stop` each [`WriteStep`] once it is done. When `stop` answers
+    /// [`ControlFlow::Break`] the write ends right there, as a crash would end it: it releases the
+    /// lock and does nothing else (its temporary file stays until a store opens the directory
+    /// again), and answers `Ok(None)`. Otherwise it answers what `change` answered, `None` inside
+    /// when the case is not held. For a crash test of a write that holds both a step's revision
+    /// moves and its records (`CanonGovernor::record_step`).
+    ///
+    /// # Errors
+    /// As [`FallibleCaseStore::update`].
+    pub fn update_until<T>(
+        &self,
+        case: &CaseId,
+        change: impl FnOnce(&mut CaseState) -> T,
+        stop: &mut dyn FnMut(WriteStep) -> ControlFlow<()>,
+    ) -> Result<Option<Option<T>>, FileStoreError> {
+        self.locked(|| {
+            let Some(mut state) = self.read_case(case)? else {
+                return Ok(Some(None));
+            };
+            let result = change(&mut state);
+            let path = self.case_path(&state.id);
+            let stored = stored_case(&state);
+            let mut text = String::new();
+            encode_case(&mut text, &stored);
+            let reread = json::parse(&text)
+                .ok()
+                .and_then(|value| decode_case(&value).ok());
+            if reread.as_ref() != Some(&stored) {
+                return Err(failed(
+                    &path,
+                    "the case would not read back as it is held; nothing was written",
+                ));
+            }
+            let (temporary, mut file) = self.dir.temporary()?;
+            macro_rules! step {
+                ($step:expr) => {
+                    if stop($step).is_break() {
+                        return Ok(None);
+                    }
+                };
+            }
+            let abandon = |error: io::Error| {
+                let _ = fs::remove_file(&temporary);
+                failed(&temporary, error)
+            };
+            step!(WriteStep::Created);
+            let (first, second) = text.as_bytes().split_at(text.len() / 2);
+            file.write_all(first).map_err(abandon)?;
+            step!(WriteStep::HalfWritten);
+            file.write_all(second).map_err(abandon)?;
+            step!(WriteStep::Written);
+            file.sync_all().map_err(abandon)?;
+            step!(WriteStep::Synced);
+            drop(file);
+            fs::rename(&temporary, &path).map_err(abandon)?;
+            step!(WriteStep::Renamed);
+            if let Ok(dir) = fs::File::open(self.dir.path()) {
+                let _ = dir.sync_all();
+            }
+            step!(WriteStep::DirectorySynced);
+            Ok(Some(Some(result)))
+        })
     }
 }
 

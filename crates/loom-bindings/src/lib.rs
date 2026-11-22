@@ -11,8 +11,11 @@
 //! [`ProgramEffects`] is the effect port that performs an action bound to a `program` executor,
 //! for any registered protocol: it starts each program through the host's runner alone, as
 //! `b10x_loom_intake_slice::bindings` admits the runner and builds the child, keeps its output as
-//! one content-addressed blob, and records evidence by the binding's result table alone. Decoding
-//! and the load-time check start no process; the crate opens no network connection.
+//! one content-addressed blob, and records evidence by the binding's result table alone. Once the
+//! program ended, every artifact the document places at a path takes the content digest of what is
+//! there as its revision ([`content_revision`]), written with the step's records in one store
+//! write; [`PlacedRevisions`] computes them again before every evaluation. Decoding and the
+//! load-time check start no process; the crate opens no network connection.
 //!
 //! [`check_case_open`] holds an `open` executor to the protocol's `case_open` at load, and
 //! [`OpenEffects`] performs an action bound to `open`: it opens the child cases through
@@ -21,16 +24,23 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod child;
 mod decode;
 mod load;
 mod open;
 mod program;
+mod revision;
 mod tree;
 
+pub use child::{CASE_VARIABLE, MAX_CASE_VARIABLE_BYTES, bound_case_child};
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use revision::{
+    ABSENT, MAX_ARTIFACT_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PlacedRevisions, RefreshError,
+    TREE_HEADER, content_revision, placements, revisions_of,
+};
 
 use loom::bindings::BindingsRefusal;
 use std::fmt;

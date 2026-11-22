@@ -1,5 +1,10 @@
 version: '3'
 
+env:
+  ESS_TOOLCHAIN:
+    sh: |-
+      echo "${ESS_TOOLCHAIN:-$(sed -n 's/^requires: ess //p' ess/ess-inputs.yaml)}"
+
 includes:
   commission: ./Taskfile.commission.yml
 
@@ -33,7 +38,7 @@ tasks:
       - task: commission:deps-guard
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
-      - cargo test --workspace --locked
+      - task: test-step
       - task: consumer-check
       - task: docs-check
       - task: commission:docs-drift
@@ -59,9 +64,27 @@ tasks:
       - cargo run -q --locked -p loom-xtask -- intake-drift
 
   ess-gate:
-    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize (--suite-format 5) with 0 refusals not covered by authored scenarios, no open question.
+    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, the committed synthesis (--suite-format 5) of this ess/ with 0 refusals not covered by authored scenarios, no open question.
     cmds:
-      - cargo test -p b10x-loom-executor --test ess_gate --locked
+      - cargo test -p b10x-loom-executor --test ess_gate --locked -- --skip slow_
+
+  suite-generate:
+    desc: Rewrite generated/ess/loom/, the conformance suite synthesized from ess/ (--suite-format 5) and the digest of its inputs; takes minutes, run it after every change under ess/.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- suite-generate
+
+  test-step:
+    desc: Every test but the slow lane's, on 4 threads as on CI's runner (and 4 slots of the build pool), failing a test over 60 s or the step over 120 s.
+    env:
+      SLOT_TOKENS: '4'
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- test-step
+
+  slow:
+    desc: The slow lane, not part of check; run it after every change under ess/. Synthesizes ess/ again and fails unless generated/ess/loom/ is equal byte for byte, then runs every slow_ test.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- suite-check
+      - cargo nextest run --workspace --locked --profile slow
 
   generate:
     desc: Rewrite generated/rust/loom/ from a fresh synthesis of ess/.

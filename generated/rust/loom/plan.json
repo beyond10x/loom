@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "7bb40103e3a9e3840dd29ec8acb0ffccd6954d9145e564d5b714099bf360332d",
-    "contract_digest": "01d5df5383358208a9b5a2a9c54f415efd85e2a66caf0c4f6eb535dbea0e94c0"
+    "source_digest": "f967d7ea24f10081d298a77079b1968b625a19735e9362848ef960ca5136496a",
+    "contract_digest": "ed57f266bafe921b6405d69d41673634378055d9c3aa2cc216d78f1caabfd819"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -362,6 +362,13 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.ArtifactPlacement",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.ArtifactRevision",
       "disposition": {
         "disposition": "generated"
@@ -397,6 +404,20 @@
     },
     {
       "kind": "domain_type",
+      "source": "loom.bindings.BoundStep",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.DiscardReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
       "source": "loom.bindings.EvidenceEntry",
       "disposition": {
         "disposition": "generated"
@@ -419,6 +440,13 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.ProducerIndependence",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.ProgramEnvironment",
       "disposition": {
         "disposition": "generated"
       }
@@ -468,6 +496,34 @@
     {
       "kind": "domain_type",
       "source": "loom.bindings.RetryCondition",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionMove",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionRefusal",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.RevisionRefusalReason",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.bindings.StepOutcome",
       "disposition": {
         "disposition": "generated"
       }

@@ -428,6 +428,7 @@ dependencies = [
  "b10x-loom-intake-slice",
  "b10x-loom-protocols",
  "loom",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml_ng",

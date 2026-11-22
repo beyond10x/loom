@@ -683,7 +683,7 @@ fn a_bound_program_receives_the_arguments_as_one_json_object_on_standard_input()
 
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
-fn a_bound_program_starts_with_path_alone_in_its_environment() {
+fn a_bound_program_starts_with_path_and_loom_case_alone_in_its_environment() {
     let scratch = Scratch::new();
     let document = document(&bound(
         CHECK,
@@ -700,7 +700,7 @@ fn a_bound_program_starts_with_path_alone_in_its_environment() {
     let path = std::env::var("PATH").expect("the host has a UTF-8 PATH");
     assert_eq!(
         String::from_utf8(blob(&governor, &scratch)).unwrap(),
-        format!("PATH={path}\n")
+        format!("LOOM_CASE={CASE}\nPATH={path}\n")
     );
 }
 
@@ -816,7 +816,10 @@ fn the_records_subject_revision_is_the_revision_the_case_holds() {
     assert_performed(&end);
     let facts = plain(&record(&governor).facts);
     assert_eq!(facts["subject"], json!("spec"));
-    assert_eq!(facts["subject_revision"], json!(SPEC_REVISION));
+    // story:bound-artifact-revisions: the case holds the digest of `docs/spec` once the step is
+    // written, `none` while the workspace holds nothing there; the case opened with `s1`.
+    assert_ne!(SPEC_REVISION, b10x_loom_bindings::ABSENT);
+    assert_eq!(facts["subject_revision"], json!(b10x_loom_bindings::ABSENT));
 }
 
 #[test]
@@ -844,7 +847,13 @@ fn the_records_facts_carry_the_revision_of_each_upstream_artifact() {
     let (governor, _scratch, end) = exit_case("exit 0\n", "", VALID_TABLE);
     assert_performed(&end);
     let facts = plain(&record(&governor).facts);
-    assert_eq!(facts["upstream_revisions"], json!({"impl": IMPL_REVISION}));
+    // story:bound-artifact-revisions: `impl` is placed at `src`, which the workspace does not
+    // hold, so the case holds `none` for it once the step is written; it opened with `i1`.
+    assert_ne!(IMPL_REVISION, b10x_loom_bindings::ABSENT);
+    assert_eq!(
+        facts["upstream_revisions"],
+        json!({"impl": b10x_loom_bindings::ABSENT})
+    );
 }
 
 #[test]

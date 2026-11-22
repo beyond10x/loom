@@ -4,70 +4,38 @@ id: story:requests-from-canon-pending-decisions
 kind: story
 status: draft
 title: Loom builds on the Canon release with pending_decisions and builds every decision stop from it
-summary: Canon pin move and stop_from_pending; blocked until Canon releases
+summary: stop_from_pending builds every decision stop from Canon 0.10.0's pending_decisions
 tags:
 - sdc
 relations:
 - decomposes: epic:decision-requests-in-the-runtime
 - serves: vision:O1
 - depends_on: story:tree-waits-open-decision-requests
-- depends_on: story:canon-0-9-0-pin
 - depends_on: story:approvals-supplied-to-canon-evaluation
+- depends_on: story:canon-0-10-0-pin
 scope:
-- confidence: cited
-  path: crates/loom-bindings/Cargo.toml
-- confidence: inferred
-  path: crates/loom-executor/tests/intake_import.rs
-- confidence: cited
-  path: crates/loom-governor/Cargo.toml
 - confidence: cited
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
   path: crates/loom-governor/src/pending.rs
-- confidence: inferred
-  path: crates/loom-governor/tests/canon_decision_bytes.rs
-- confidence: inferred
-  path: crates/loom-governor/tests/case_composition.rs
-- confidence: inferred
-  path: crates/loom-governor/tests/governed_case.rs
-- confidence: inferred
-  path: crates/loom-governor/tests/incident_response_slice.rs
 - confidence: cited
   path: crates/loom-governor/tests/pending_decisions.rs
-- confidence: cited
-  path: crates/loom-intake-router/Cargo.toml
-- confidence: cited
-  path: crates/loom-intake-slice/Cargo.toml
 - confidence: inferred
   path: crates/loom-intake-slice/src/decision.rs
 - confidence: cited
   path: crates/loom-intake-slice/tests/decision_authority_rule.rs
-- confidence: cited
-  path: crates/loom-protocols/Cargo.toml
-- confidence: cited
-  path: crates/loom-protocols/tests/adversary_w8_pin.rs
 - confidence: inferred
   path: crates/loom-tree
 - confidence: cited
   path: crates/loom-tree/tests/tree_decisions.rs
-- confidence: inferred
-  path: crates/loom-xtask/tests/pinned_consumer.rs
-- confidence: inferred
-  path: docs/contracts/loom-action-selection.md
 - confidence: cited
   path: ess/domains/governor.yaml
-- confidence: inferred
-  path: protocols/engineering/lock.json
-- confidence: inferred
-  path: website/docs/guides/move-to-loom.md
-- confidence: inferred
-  path: website/docs/reference/sdk-stability.md
-revision: 30
+revision: 33
 ---
 ## Outcome
 
-Loom builds on the Canon release that carries `story:pending-decisions`, one copy of it, with the
-engineering-protocols tag built on that release, and builds every decision stop from Canon's
+On Canon 0.10.0, the release that carries `story:pending-decisions` and that
+`story:canon-0-10-0-pin` moves Loom to, Loom builds every decision stop from Canon's
 `pending_decisions` section of `canon-decision/1`.
 
 The shape below was read at Canon `49ff2ce` (branch `wave/2026-11-20`), which no tag contains; it
@@ -200,22 +168,20 @@ those stories add is removed.
 stops from Loom's own stop and the decision document. This story replaces that derivation with
 Canon's, so Loom and Canon cannot disagree about what is pending.
 
-Loom pins Canon `0.9.0` (`crates/loom-governor/Cargo.toml:15`; `story:canon-0-9-0-pin` is
-delivered). `pending_decisions` is in no tag yet, so this story moves the pin to the release that
-carries it.
+Loom pins Canon 0.10.0 (`story:canon-0-10-0-pin`), which carries `pending_decisions`
+(`crates/canon/src/model/decision.rs:70` at `0.10.0`).
 
 ## Waits on
 
-- `upstream-blocker:canon-decision-side-unreleased`: no Canon release carries
-  `pending_decisions`.
-  - The shape this story states was read at Canon `49ff2ce`, which is pushed, unreleased and in no
-    tag.
-  - Before this story is implemented, the shape is read again at the release tag: the files and
-    lines cited above, `crates/canon/src/eval/pending.rs`, `crates/canon/src/eval/actions.rs` and
-    `website/docs/reference/documents.md` (`pending_decisions`). The body is corrected where the
-    tag differs.
-- `story:canon-0-9-0-pin` (delivered): it moved every manifest naming `b10x-canon` to `0.9.0`.
-  This story moves the same manifests again.
+- `story:canon-0-10-0-pin`: it moves every manifest naming `b10x-canon` to tag `0.10.0`, which
+  carries `pending_decisions`. This story moves no manifest.
+  - The shape this story states was read at Canon `49ff2ce`, an ancestor of tag `0.10.0`.
+  - Read again at `0.10.0` (`git -C ~/beyond10x/canon diff 49ff2ce 0.10.0`): the `authority`
+    entries are unchanged; a `decisions` entry is also written for a reason that carries
+    `stale_grounds` beside `decision` and `present: false`, and the entry does not copy it
+    (`crates/canon/src/eval/pending.rs:111-128` at `0.10.0`). Lines of `pending.rs` after `:107`
+    move by three and lines of `crates/canon/src/eval/actions.rs` move; the body's line numbers
+    are those of `49ff2ce`, and the implementor cites `0.10.0`.
 - `story:tree-waits-open-decision-requests`: one of the three callers, and both change
   `crates/loom-tree`. The slice callers come before it in the epic's order.
 - `story:approvals-supplied-to-canon-evaluation`: both change `crates/loom-governor/src/lib.rs`
@@ -242,11 +208,6 @@ The bullets about requests run in `crates/loom-governor/tests/pending_decisions.
 stops with `route_stop` over the in-memory store at a level whose holder is `person`. Each uses a
 fixture protocol and case at `r3`, unless the bullet names another fixture, and no model call.
 
-- `Cargo.lock` holds one copy of `b10x-canon` at the new tag
-  (`the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags`,
-  `crates/loom-protocols/tests/adversary_w8_pin.rs:116`, passes).
-- Every manifest that names `b10x-canon` names it by `tag =`, the release tag, and none names it by
-  a commit or a branch: `rg -n 'b10x-canon = .*(rev|branch) =' crates consumers` finds nothing.
 - For a case with one approval-required action and one outcome blocked on a missing decision,
   `pending_decisions` has one entry in each list, and `stop_from_pending` gives:
   - an approval stop with options `granted` and `denied`, both producing a record;
@@ -314,25 +275,24 @@ line is **cited** (read from the story or the tree) or **inferred** (a reading t
 - **Files (governor, new module):** `crates/loom-governor/src/pending.rs`, the home of `stop_from_pending` - cited (Outcome)
 - **Files (ESS):** `ess/domains/governor.yaml` (gains `PendingCurrent`, `PendingAuthority`, `PendingExplicitDecision`, `PendingDecisions`, `PendingStopRefusal`) - cited
 - **Files (generated):** `generated/rust/loom/src/governor.rs`, `website/docs/reference/ess/loom-governor.md`, `website/data/ess/loom-governor.domain-graph.json` - inferred, regenerated from `ess/domains/governor.yaml` (`AGENTS.md` § Generated files)
-- **Files (pin, manifests):** `crates/loom-governor/Cargo.toml:15`, `crates/loom-protocols/Cargo.toml:14`, `crates/loom-bindings/Cargo.toml:14` (`b10x-canon`, tag `0.9.0`) - cited, "every manifest that names `b10x-canon`"
-- **Files (pin, engineering tag):** `crates/loom-governor/Cargo.toml:19`, `crates/loom-protocols/Cargo.toml:15`, `crates/loom-intake-slice/Cargo.toml:18`, `crates/loom-intake-router/Cargo.toml:15` (`b10x-canon-engineering`, tag `0.16.0`) - cited (Outcome "engineering-protocols tag built on that release"; the four are what `story:canon-0-9-0-pin` moved)
-- **Files (pin, vendored lock):** `protocols/engineering/lock.json` (`tag` 0.16.0, `commit`) and the vendored `protocols/engineering/**` - inferred, `crates/loom-protocols/src/lock.rs` checks them against the tag; only if the new tag changes the files
-- **Files (pin, tests):** `crates/loom-protocols/tests/adversary_w8_pin.rs:116` (`the_lockfile_holds_one_canon_and_one_registry_from_the_pinned_tags`, named in Acceptance) - cited. `crates/loom-executor/tests/intake_import.rs`, `crates/loom-xtask/tests/pinned_consumer.rs`, `crates/loom-governor/tests/{governed_case,incident_response_slice,canon_decision_bytes,case_composition}.rs` - inferred, `story:canon-0-9-0-pin` edited them for the same kind of move
-- **Files (pin, docs):** `website/docs/guides/move-to-loom.md`, `website/docs/reference/sdk-stability.md` (pin table), `docs/contracts/loom-action-selection.md` - inferred, `story:canon-0-9-0-pin` edited them; the `# Dependencies` doc of `crates/loom-governor/src/lib.rs` names the versions (cited by that story)
+- **Files (pin):** none. `story:canon-0-10-0-pin` moves the manifests, `Cargo.lock` and
+  the pin documents - cited (§ Waits on)
 - **Files (callers):** the slice's decision module (`DecisionAuthority`, `GrantRecordWriter`; `crates/loom-intake-slice/src/decision.rs`, named by `story:approval-decisions-resume-held-runs`) and the hold module of `DecisionHoldingExecutor` (name unknown, `story:question-and-outcome-decisions-hold-runs`); the decision module of `crates/loom-tree` (`CaseApprovalWriter`, `story:tree-waits-open-decision-requests`) - cited that all three change, location inferred, none exists in the tree (`crates/loom-tree` is absent at `8f70f7b2`)
 - **Files (caller tests):** `crates/loom-intake-slice/tests/decision_authority_rule.rs`, `crates/loom-tree/tests/tree_decisions.rs` (the scoped `WriterFailed` bullets); `crates/loom-cli/tests/{approval_decisions,question_outcome_decisions,tree_decisions}.rs` and `crates/loom-intake-slice/tests/decision_hold.rs` (run, unchanged in their request assertions) - cited (Acceptance), none exists at `8f70f7b2`
 - **Stop type:** `DecisionStop` of `ess/domains/decision.yaml` (`story:decision-routing-by-holder`), generated into the `loom` crate that `crates/loom-governor/Cargo.toml:18` names; no manifest line for it. The governor's `b10x-loom-decision` path dependency is `story:decision-request-file-store`'s - cited (Outcome)
 - **Symbols:** `CanonGovernor::pending_decisions`, `stop_from_pending`, `PendingCurrent`, `PendingAuthority`, `PendingExplicitDecision`, `PendingDecisions`, `PendingStopRefusal::NoCaseRevision`, `DecisionHoldingExecutor`, `DecisionAuthority`, `GrantRecordWriter`, `CaseApprovalWriter` - cited; none exists in the tree
 - **Canon type Loom reads through:** none typed. `Decision.pending_decisions: Option<Json>` (`crates/canon/src/model/decision.rs:70` at `49ff2ce`); Loom parses `decision_document`'s text - cited
 - **Documents:** `AGENTS.md` § Governor (house rule, not listed in paths) - cited
-- **Confidence:** medium - the governor files, the ESS file, the test file and the manifests are named or follow `story:canon-0-9-0-pin`; every caller module is planned by an undelivered story
+- **Confidence:** medium - the governor files, the ESS file and the test file are named; every caller module is planned by an undelivered story
 - **Would collide with** (by file; `T` = this story; ordered = a `depends_on` path exists, from `aep plan artifact graph --format json`):
   - `crates/loom-governor/src/lib.rs` and `ess/domains/governor.yaml`: `story:approvals-supplied-to-canon-evaluation` (direct `depends_on`), `story:grounds-resolve-against-held-cases`, `story:decision-request-file-store`, `story:bound-artifact-revisions`, `story:child-case-runtime`, `story:record-copy-between-cases` (all ordered before T by path); `story:decided-record-written-then-recorded`, `story:silence-and-expiry-at-a-host-tick`, `story:decision-inbox-commands`, `story:question-and-outcome-decisions-hold-runs`, `story:bound-program-result-table` (lib.rs only; ordered before T). `story:hash-chained-run-log` is delivered and is not a collision (ordered).
   - `crates/loom-governor/src/lib.rs` or `ess/domains/governor.yaml`, NO path either way: `story:child-case-own-workspace`, `story:goals-entries-from-a-resolved-document`, `story:run-caps-per-arrival`, `story:standing-tree-rests-quiescent`, `story:standing-tree-wakes-at-a-host-instant`, `story:gates-document-evaluated-in-the-governor`, `story:gate-run-collects-a-gates-document`, `story:frontier-names-movers`, `story:engineering-registry-calls-replaced`, `story:engineering-protocols-dependency-removed` (the last two also the engineering manifests and `crates/loom-protocols/Cargo.toml`). A coordinator decision.
-  - Manifests (`crates/loom-governor/Cargo.toml`, `crates/loom-protocols/Cargo.toml`, `crates/loom-bindings/Cargo.toml`): `story:decider-port-and-grounding-check`, `story:decision-request-file-store`, `story:grounds-resolve-against-held-cases` (ordered before T); `story:gates-document-evaluated-in-the-governor`, `story:engineering-protocols-dependency-removed`, `story:gate-run-collects-a-gates-document`, `story:observe-reads-documents` and 5 other bindings stories (NO path).
   - Slice caller files (`crates/loom-intake-slice/src/run.rs` and the new decision module): `story:approval-decisions-resume-held-runs`, `story:question-and-outcome-decisions-hold-runs`, `story:tree-run-command`, `story:bound-commands-run-confined` (ordered before T); `story:protocol-argument-schema` (NO path).
   - `crates/loom-tree`: `story:tree-run-command`, `story:agent-node-run-records`, `story:tree-waits-open-decision-requests` (ordered before T); `story:capacity-given-to-an-admission-program`, `story:concurrent-cases-in-the-tree-daemon`, `story:daemon-continues-a-decided-request`, `story:flow-limits-recorded-as-events`, `story:non-independent-review-becomes-decision-request`, `story:tree-usage-and-model-budget`, `story:run-caps-per-arrival` (NO path).
   - After T: `story:decided-records-carry-grounds-to-canon` (direct `depends_on` T); `story:authority-records-bound-and-grounded-in-canon` (through it).
   - `story:decision-suspension-reason` (active, other tree): `crates/loom-governor/src/file_suspension.rs`, not a file T edits; no collision.
-- **Safety fact:** moving `b10x-canon` changes no caller's parse because Canon writes `pending_decisions` only when something is pending (`crates/canon/src/eval/pending.rs:62` at `49ff2ce`), so a `decision_document` consumer that ignores it sees the old shape - step 2 at Canon `49ff2ce`, unproven for Loom's own tests (`canon_decision_bytes.rs` compares decision bytes and may change)
-- **Contradicted by the code:** nothing; the pin sentence now reads `0.9.0`
+- **Safety fact:** `story:canon-0-10-0-pin`'s move changes no caller's parse because
+  Canon writes `pending_decisions` only when something is pending (`pending.rs:62`,
+  unchanged from `49ff2ce` to `0.10.0`), so a `decision_document` consumer that ignores
+  it sees the old shape - inferred, not run
+- **Contradicted by the code:** nothing; the pin is `story:canon-0-10-0-pin`'s

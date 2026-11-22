@@ -214,11 +214,20 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `CommandUnconfined` for any other. The runner then checks it can start a child in the workspace
   root, and its refusal is passed on: a runner that runs test commands only is refused `NoRunner`.
 - Every program starts through that runner alone, the `arguments_from` argv included, with its
-  `argv` (no shell), the arguments as one JSON object on standard input, `PATH` alone in its
-  environment, the binding's `timeout_seconds` (60 when absent), and the workspace root as its start
-  directory. Under a runner that is not `local`, a program at an absolute path outside `/usr`,
-  `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH` that is not UTF-8
-  refuses the step, `<program> was not started: the host's PATH is not UTF-8`, and starts nothing.
+  `argv` (no shell), the arguments as one JSON object on standard input, `PATH` and `LOOM_CASE`
+  alone in its environment, the binding's `timeout_seconds` (60 when absent), and the workspace
+  root as its start directory. Under a runner that is not `local`, a program at an absolute path
+  outside `/usr`, `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH`
+  that is not UTF-8 refuses the step, `<program> was not started: the host's PATH is not UTF-8`,
+  and starts nothing.
+- `PATH` has the host process's value. `LOOM_CASE` is the id of the case the port was built for,
+  as the governor holds it (a child case as `<parent id>.<name>`), so a program reads the case it
+  runs for from it. The port alone sets it: no member of the request's arguments, of the
+  `arguments_from` output, of a program's report or of the bindings document, and no variable of
+  the host process, changes it; a document cannot name an environment. A case id longer than 4096
+  bytes refuses the step, `<program> was not started: the case id is longer than 4096 bytes`, and
+  nothing starts or is recorded. The commands of `b10x-loom run --action-bindings` keep `PATH`
+  alone.
 - The arguments are the request's, else the binding's `arguments`, else the object the
   `arguments_from` argv prints, else `{}`. A request has no arguments when they are the empty object
   `{}`; any other value, `null` included, reaches the program as written. An `arguments_from` argv
@@ -253,9 +262,49 @@ The port is a Commission effect port: it performs the actions bound to `program`
   evidence.
 - Otherwise the port records one record per entry (`loom.bindings.RecordedEvidence`), of the
   entry's `kind` about its `subject`, with the entry's `producer`, the observation's instant, the
-  revision the case holds for the subject and, as `upstream_revisions`, for each `upstream`
-  artifact. The record cites the observation. A program never names a result, a revision, a
-  producer or an instant: members of its report with those names change nothing.
+  revision the case holds for the subject once the step is written and, as `upstream_revisions`,
+  for each `upstream` artifact. The record cites the observation. A program never names a result,
+  a revision, a producer or an instant: members of its report with those names change nothing.
 
 The step refusals are the members of `loom.bindings.ProgramRefusalReason` in the
 [reference](../reference/ess/loom-bindings.md).
+
+## Revisions of placed artifacts
+
+Loom computes the revision of every artifact the document places in `artifacts`; no program, report,
+argument or bindings document names one. The revision is `t` and the first 16 hex digits of a
+SHA-256, or `none` while nothing is at the path:
+
+- a file: over its bytes, so a file holding `abc` is `tba7816bf8f01cfea`;
+- a symbolic link: over its target string; the link is never followed;
+- a directory: over the header `loom.bindings tree/1` and a line feed, then, for each entry below it
+  in path order (each directory's names in byte order), the entry's kind (`d`, `f` or `l`), its
+  path relative to the placed one, a NUL byte, the length of its bytes as eight big-endian bytes,
+  and the bytes. Listing order changes nothing; one byte or one name changes the revision.
+
+A placed path is read from the workspace root one segment at a time, never following a link. A link
+among the path's directories, wherever it points, an absolute path and a `..` segment are refused
+`OutsideWorkspace` and nothing is read. More than 64 MiB, 10,000 entries or 64 levels under one
+placed path is `TooLarge`; a file or directory that changes while it is read is
+`ChangedWhileRead`; a pipe, a socket or a device is `Unreadable` and is never opened
+(`loom.bindings.RevisionRefusalReason`).
+
+The program effect port digests every placed artifact before the program starts and again once it
+ended:
+
+- A placed path that cannot be digested refuses the step `ArtifactUnreadable`: before the run
+  nothing starts, after it no revision moves and nothing is recorded.
+- Otherwise each placed artifact whose digest differs from the revision the case holds moves to it,
+  and the case revision rises by one per artifact moved, in the same store write as the step's
+  records (`CanonGovernor::record_step`): a crash leaves the case as before the step or with all
+  of it. An artifact the document does not place keeps its revision. A runner refusal, a blob
+  failure, `ReportUnreadable` and `ResultNotInTable` write the moves alone.
+- An action whose effect class is not `write` (`read` or none) whose program changed a placed
+  artifact records nothing: the step is `Discarded` with `ChangedByNonWriter`, and the moves are
+  still written. The report of a performed step names the outcome, the placements and the moves
+  (`loom.bindings.BoundStep`).
+
+`PlacedRevisions` wraps the governor a host hands Commission's loop: before every `frontier` and
+`completion` it digests every placement and writes the moves, so a person's edit in the workspace
+or another case's write reaches the case as a new revision before the frontier is read. A placed
+path that cannot be digested makes that evaluation `GovernorUnavailable`.
