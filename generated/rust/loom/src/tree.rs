@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 1271015cb720b9de4809ce310319899b9ca2b434e25af7f3f78560a14db9f08e
+// contract digest 9c3ea9185784d1164c6e047c29b4caa574b85bb96d2bd9e617e1d8915bd12782
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -322,6 +322,10 @@ pub struct CycleStep {
     pub deny: Option<bool>,
     /// `option` — `Optional<String>`.
     pub option: Option<String>,
+    /// `from` — `Optional<String>`.
+    pub from: Option<String>,
+    /// `to` — `Optional<String>`.
+    pub to: Option<String>,
 }
 
 /// DecisionKind — `loom.tree.DecisionKind`: one of a closed set of names.
@@ -810,6 +814,8 @@ pub enum StepKind {
     Status,
     /// `verify`.
     Verify,
+    /// `write`.
+    Write,
 }
 
 /// StopExpectation — `loom.tree.StopExpectation`.

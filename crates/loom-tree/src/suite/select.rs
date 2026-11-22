@@ -106,10 +106,22 @@ pub(crate) fn select_values(
     items: &[SelectItem],
     view: &CycleView<'_>,
 ) -> Result<Vec<Selected>, SelectFailure> {
-    let Some((first, operations)) = items.split_first() else {
+    let Some((first, mut operations)) = items.split_first() else {
         return Ok(Vec::new());
     };
-    let mut values = source(first, view)?;
+    // An `as` right after a `doc` or `suite` source names how the whole file reads, in place of
+    // its extension: a `.jsonl` file read by its extension gives one value per line, and no `as`
+    // after it could read the file whole again.
+    let read_as = match operations.split_first() {
+        Some((next, rest))
+            if next.r#as.is_some() && (first.doc.is_some() || first.suite.is_some()) =>
+        {
+            operations = rest;
+            next.r#as
+        }
+        _ => None,
+    };
+    let mut values = source(first, view, read_as)?;
     for operation in operations {
         values = apply(operation, values, view)?;
     }
@@ -211,14 +223,22 @@ fn read_bytes(bytes: Arc<Vec<u8>>, how: ReadAs) -> Vec<Selected> {
     }
 }
 
-fn read_file(root: &Path, relative: &str) -> Result<Vec<Selected>, SelectFailure> {
+/// The values the file `relative` of `root` gives, read as `read_as`, else by its extension.
+fn read_file(
+    root: &Path,
+    relative: &str,
+    read_as: Option<ReadAs>,
+) -> Result<Vec<Selected>, SelectFailure> {
     if !stays_below(relative) {
         return Err(outside(
             "a path is absolute or leaves the cycle's directory",
         ));
     }
     Ok(match read_inside(root, &root.join(relative))? {
-        Some(bytes) => read_bytes(Arc::new(bytes), read_as_of(relative)),
+        Some(bytes) => read_bytes(
+            Arc::new(bytes),
+            read_as.unwrap_or_else(|| read_as_of(relative)),
+        ),
         None => Vec::new(),
     })
 }
@@ -444,7 +464,12 @@ fn glob(root: &Path, glob: &str) -> Result<Vec<Selected>, SelectFailure> {
         .collect())
 }
 
-fn source(item: &SelectItem, view: &CycleView<'_>) -> Result<Vec<Selected>, SelectFailure> {
+/// The values the source `item` gives; a `doc` or `suite` file reads as `read_as` when it is given.
+fn source(
+    item: &SelectItem,
+    view: &CycleView<'_>,
+    read_as: Option<ReadAs>,
+) -> Result<Vec<Selected>, SelectFailure> {
     if let Some(log) = &item.log {
         let (cases, several) = cases_of(&log.case, view.store)?;
         let mut values = Vec::new();
@@ -500,7 +525,7 @@ fn source(item: &SelectItem, view: &CycleView<'_>) -> Result<Vec<Selected>, Sele
             .collect());
     }
     if let Some(doc) = &item.doc {
-        return read_file(&root_of(doc.r#in, view), &doc.path);
+        return read_file(&root_of(doc.r#in, view), &doc.path, read_as);
     }
     if let Some(files) = &item.files {
         return glob(&root_of(files.r#in, view), &files.glob);
@@ -515,7 +540,7 @@ fn source(item: &SelectItem, view: &CycleView<'_>) -> Result<Vec<Selected>, Sele
             .collect());
     }
     if let Some(file) = &item.suite {
-        return read_file(view.suite, file).map_err(|failure| SelectFailure {
+        return read_file(view.suite, file, read_as).map_err(|failure| SelectFailure {
             detail: failure
                 .detail
                 .replace("cycle's directory", "suite's directory"),
@@ -650,7 +675,7 @@ fn apply(
                         Some(below) => format!("{}/{below}", named.trim_end_matches('/')),
                         None => named.clone(),
                     };
-                    followed.extend(read_file(view.work, &relative)?);
+                    followed.extend(read_file(view.work, &relative, None)?);
                 }
             }
         }

@@ -212,6 +212,16 @@ pub(crate) fn stays_below(path: &str) -> bool {
     true
 }
 
+/// Whether `path` is a relative path of plain names: it [stays below](stays_below) its root, and
+/// each of its components, split at `/`, is a name that is neither empty, `.` nor `..`, so no
+/// `..` stands in it even where it would stay below.
+pub(crate) fn plain_names(path: &str) -> bool {
+    stays_below(path)
+        && path
+            .split('/')
+            .all(|component| !matches!(component, "" | "." | ".."))
+}
+
 /// Whether the relative path `path` (segments joined by `/`) matches `pattern`: `*` within one
 /// segment, `**` across any number of segments.
 pub(crate) fn glob_matches(pattern: &[&str], path: &[&str]) -> bool {
@@ -272,5 +282,16 @@ mod tests {
         assert!(!stays_below("a/../../w"));
         assert!(!stays_below("/etc/passwd"));
         assert!(!stays_below(""));
+    }
+
+    #[test]
+    fn a_path_of_plain_names_holds_no_dot_component_at_all() {
+        assert!(plain_names("findings.yaml"));
+        assert!(plain_names("a/b/.hidden"));
+        for path in [
+            "", "/etc/x", "../x", "a/../b", "./a", "a/./b", "a//b", "a/", "a\\b",
+        ] {
+            assert!(!plain_names(path), "{path:?}");
+        }
     }
 }
