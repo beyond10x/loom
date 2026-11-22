@@ -226,8 +226,8 @@ fn the_first_runner_reports_each_cycle() {
         ran.stdout
     );
     assert_eq!(
-        ran.line("replays"),
-        "replays: pending, waits for story:tree-replay-command (replay)"
+        ran.line("allows"),
+        "allows: pending, waits for story:tree-stop-record-and-labels (allow)"
     );
     assert!(
         ran.line("later").starts_with(
@@ -251,7 +251,7 @@ fn the_summary_counts_expected_pending_and_waiting() {
     );
     assert_eq!(
         lines[6],
-        "pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: replays on story:tree-replay-command)"
+        "pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: allows on story:tree-stop-record-and-labels)"
     );
     assert_eq!(ran.code, Some(1), "{}", ran.stderr);
     let report = ran.report();
@@ -262,7 +262,7 @@ fn the_summary_counts_expected_pending_and_waiting() {
     assert_eq!(report["pending_passing"], json!([]), "{report}");
     assert_eq!(
         report["waiting"],
-        json!([{"name": "replays", "story": "story:tree-replay-command", "kind": "replay"}]),
+        json!([{"name": "allows", "story": "story:tree-stop-record-and-labels", "kind": "allow"}]),
         "{report}"
     );
     assert_eq!(report["cycles"].as_array().unwrap().len(), 5, "{report}");
@@ -287,7 +287,7 @@ fn the_first_runner_stays_in_scratch() {
         );
         stores += 1;
     }
-    // Four cycles ran (`replays` waits); each left its store.
+    // Four cycles ran (`allows` waits); each left its store.
     assert_eq!(stores, 4);
     // Nothing beside the scratch directory, the report and the test's own record; nothing in HOME.
     let mut left: Vec<String> = fs::read_dir(&ran.root)

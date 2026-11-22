@@ -1696,8 +1696,9 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   (`TreeLogHead`: the `seq` and SHA-256 of the last line the tree appended), `tree.lock` and,
   while a writer holds the store, `tree.holder` with its process id. A writer takes `tree.lock`
   (`StoreLock`, an exclusive lock held for the whole command) before it opens any governor store,
-  so a second writer is refused `StoreInUse` naming the holder and writes nothing. `tree status`
-  and `tree verify` read and never take the lock, so a live view reads the tree during a run.
+  so a second writer is refused `StoreInUse` naming the holder and writes nothing. `tree status`,
+  `tree verify` and `tree replay` read and never take the lock, so a live view reads the tree
+  during a run.
 - `tree open` checks everything it reads before it writes: the store (absent or empty), the
   workspace, `--at`, and the root's bindings file and, through the `bindings` member of every
   `open` executor (relative to the directory of the file that names it), every bindings file of
@@ -1844,6 +1845,20 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   cutting the last line of a log verifies. The suite's `stop`, `resume` (one `run_tree`, no wait
   answered) and `reopen` steps call the same functions (`tests/tree_run/stop.rs`,
   `tests/tree_test/mod.rs`, `the_stop_steps_run_as_runbooks_cycle`).
+- `tree replay` (`replay.rs`, `story:tree-replay-command`) reads only and takes no lock. Per case
+  (the tree, or `--case` and its descendants, in `tree status` order) it rebuilds the state as of
+  the last `evaluated` line by undoing, newest first, the lines after it (`rebuild_case`):
+  `action finished` removes its records and moves each of its `revisions` back, `child opened`
+  removes the link and the child's outcome record, `child closed` needs its `child opened` after
+  that line, `terminated` clears the termination. A line whose undo does not apply is
+  `unmatched_line` and the state differs. The rebuilt cases are decided by `decided` (`run.rs`),
+  the function `tree run` writes `evaluated` with, over a memory governor, and compared with the
+  line (`state_matches_log`, `decision_matches_log`); a case with no such line is `evaluated:
+  false`, no difference. Exit 0, 3 (`TREE_REPLAY_DIFFERS`, the first differing case on stderr), 1
+  refused (`NotATree`, `CaseNotInTree`, `LogRefused`). Every `action finished` line names the
+  moves of its step, whatever its end (`revision_moves`), so the undo is exact. The suite step
+  `replay` (member `case` only) runs it. Held by `crates/loom-tree/tests/replay/` and
+  `crates/loom-cli/tests/tree_replay/`.
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.

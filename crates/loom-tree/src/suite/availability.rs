@@ -53,7 +53,6 @@ use Availability::{Available, Waits};
 use KindUse::{Entry, Event, Member, Source, Step};
 
 const STOP_AND_LABELS: &str = "story:tree-stop-record-and-labels";
-const REPLAY: &str = "story:tree-replay-command";
 const TEST_COMMAND: &str = "story:tree-test-command";
 const CALLS: &str = "story:agent-node-run-records";
 const ENGINE: &str = "story:engine-configuration-document";
@@ -74,7 +73,7 @@ pub const SUITE_AVAILABILITY: &[AvailabilityEntry] = &[
     entry(Step, "resume", Available),
     entry(Step, "allow", Waits(STOP_AND_LABELS)),
     entry(Step, "reopen", Available),
-    entry(Step, "replay", Waits(REPLAY)),
+    entry(Step, "replay", Available),
     entry(Step, "decide", Waits(TEST_COMMAND)),
     entry(Entry, "approve", Available),
     entry(Entry, "close", Available),

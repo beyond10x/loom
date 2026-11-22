@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest cc7165376ac84a9ebb44ad12b76a3c40167d2c97fa90305804bbccdfa8a2a588
+// contract digest a55f7e2f8174e246d1ab7c71a2ef66292381add233272e035ec5d203c65c45a8
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -41,6 +41,33 @@ pub struct CaseApproval {
     pub case_revision: i64,
     /// `at` — `Timestamp`.
     pub at: crate::primitives::Timestamp,
+}
+
+/// CaseReplay — `loom.tree.CaseReplay`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaseReplay {
+    /// `case` — `String`.
+    pub case: String,
+    /// `evaluated` — `Boolean`.
+    pub evaluated: bool,
+    /// `seq` — `Optional<Integer>`.
+    pub seq: Option<i64>,
+    /// `at` — `Optional<String>`.
+    pub at: Option<String>,
+    /// `case_revision` — `Optional<Integer>`.
+    pub case_revision: Option<i64>,
+    /// `logged_case_revision` — `Optional<Integer>`.
+    pub logged_case_revision: Option<i64>,
+    /// `unmatched_line` — `Optional<Integer>`.
+    pub unmatched_line: Option<i64>,
+    /// `state_matches_log` — `Optional<Boolean>`.
+    pub state_matches_log: Option<bool>,
+    /// `decision_digest` — `Optional<String>`.
+    pub decision_digest: Option<String>,
+    /// `logged_decision_digest` — `Optional<String>`.
+    pub logged_decision_digest: Option<String>,
+    /// `decision_matches_log` — `Optional<Boolean>`.
+    pub decision_matches_log: Option<bool>,
 }
 
 /// CaseSelector — `loom.tree.CaseSelector`.
@@ -1148,6 +1175,13 @@ pub enum TreeRefusalReason {
     TreeNotStopped,
     /// `StopUnusable`.
     StopUnusable,
+}
+
+/// TreeReplay — `loom.tree.TreeReplay`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeReplay {
+    /// `cases` — `List<loom.tree.CaseReplay>`.
+    pub cases: Vec<CaseReplay>,
 }
 
 /// TreeRun — `loom.tree.TreeRun`.

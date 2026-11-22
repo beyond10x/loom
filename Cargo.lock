@@ -462,6 +462,7 @@ dependencies = [
  "b10x-loom-plugin-slack",
  "b10x-loom-protocols",
  "b10x-loom-resource",
+ "b10x-loom-runlog",
  "b10x-loom-sdk",
  "b10x-loom-tree",
  "chrono",

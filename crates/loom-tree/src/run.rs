@@ -315,6 +315,7 @@ fn run_cancellable(
         }
         let legitimate = legitimate_outcomes(&governor, &id)?;
         let before: BTreeSet<String> = evidence_ids(&governor, &id)?;
+        let revisions_before = artifact_revisions(&governor, &id)?;
         let (lines, revision, effects, history) = step_inputs(
             &governor,
             case,
@@ -404,7 +405,7 @@ fn run_cancellable(
                 refusal,
                 blob_digest,
                 evidence: after.difference(&before).cloned().collect(),
-                revisions: Vec::new(),
+                revisions: revision_moves(&revisions_before, &artifact_revisions(&governor, &id)?),
             };
             let cancelled_step = crate::history::cancelled(&finished);
             let line = logs.append(&case.case, RunLogEvent::ActionFinished(finished))?;
@@ -461,7 +462,10 @@ fn run_cancellable(
                     refusal,
                     blob_digest,
                     evidence: after.difference(&before).cloned().collect(),
-                    revisions: Vec::new(),
+                    revisions: revision_moves(
+                        &revisions_before,
+                        &artifact_revisions(&governor, &id)?,
+                    ),
                 };
                 let cancelled_step = crate::history::cancelled(&finished);
                 let line = logs.append(&case.case, RunLogEvent::ActionFinished(finished))?;
@@ -878,6 +882,31 @@ fn evaluated<S: loom_governor::FallibleCaseStore>(
     store: &Path,
     case: &str,
 ) -> Result<Option<RunLogLine>, Refused> {
+    let decided = decided(governor, case)?;
+    let last = read_lines(store, case)?
+        .into_iter()
+        .rev()
+        .find_map(|line| match line.event {
+            RunLogEvent::Evaluated(evaluated) => Some(evaluated),
+            _ => None,
+        });
+    if last.as_ref().is_some_and(|last| {
+        last.case_revision == decided.case_revision
+            && last.decision_digest == decided.decision_digest
+    }) {
+        return Ok(None);
+    }
+    logs.append(case, RunLogEvent::Evaluated(decided)).map(Some)
+}
+
+/// Canon's decision for `case` as `governor` holds it, as an `evaluated` line names it: the case
+/// revision, the frontier id and the SHA-256 of the decision document (`serde_json::to_vec` of the
+/// plain document, empty when the governor keeps none). `tree run` writes it and `tree replay`
+/// compares with it, so the same case gives the same digest in either.
+pub(crate) fn decided<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+) -> Result<Evaluated, Refused> {
     let id = CaseId(case.to_owned());
     let frontier = governor
         .frontier(&id)
@@ -890,27 +919,11 @@ fn evaluated<S: loom_governor::FallibleCaseStore>(
         let bytes = serde_json::to_vec(&plain(document)).unwrap_or_default();
         hex(&Sha256::digest(&bytes))
     });
-    let last = read_lines(store, case)?
-        .into_iter()
-        .rev()
-        .find_map(|line| match line.event {
-            RunLogEvent::Evaluated(evaluated) => Some(evaluated),
-            _ => None,
-        });
-    if last.as_ref().is_some_and(|last| {
-        last.case_revision == data.case_revision && last.decision_digest == digest
-    }) {
-        return Ok(None);
-    }
-    logs.append(
-        case,
-        RunLogEvent::Evaluated(Evaluated {
-            case_revision: data.case_revision,
-            frontier: data.frontier_id.0.0.clone(),
-            decision_digest: digest,
-        }),
-    )
-    .map(Some)
+    Ok(Evaluated {
+        case_revision: data.case_revision,
+        frontier: data.frontier_id.0.0.clone(),
+        decision_digest: digest,
+    })
 }
 
 /// The outcomes Canon reports `legitimate` for `case` now, in the decision's order.
@@ -1162,6 +1175,35 @@ fn evidence_ids<S: loom_governor::FallibleCaseStore>(
         .filter(|record| record.kind != "case_outcome")
         .map(|record| record.evidence_id.0.0)
         .collect())
+}
+
+/// The revision of every artifact `case` holds now.
+pub(crate) fn artifact_revisions<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+) -> Result<BTreeMap<String, String>, Refused> {
+    governor
+        .revisions(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))
+}
+
+/// The moves of a step, as its `action finished` line names them: one per artifact whose revision
+/// differs between `before` and `after`, the case's artifact revisions read before and after the
+/// step, in artifact order. A step writes its moves in one store write, one move per artifact, so
+/// these are its moves whatever its end (`story:tree-replay-command`, D6 a).
+pub(crate) fn revision_moves(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+) -> Vec<loom::runlog::RevisionMove> {
+    after
+        .iter()
+        .filter(|(artifact, to)| before.get(*artifact) != Some(*to))
+        .map(|(artifact, to)| loom::runlog::RevisionMove {
+            artifact: artifact.clone(),
+            from: before.get(artifact).cloned(),
+            to: to.clone(),
+        })
+        .collect()
 }
 
 /// The `case_outcome` record `parent` holds now for its child `child`: its evidence id, the
@@ -1783,6 +1825,7 @@ where
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
     let ordinal = i64::try_from(read_lines(store, &case.0)?.len()).unwrap_or(i64::MAX);
     let before = evidence_ids(governor, case)?;
+    let revisions_before = artifact_revisions(governor, case)?;
     let end = drive(
         governor,
         store,
@@ -1804,7 +1847,7 @@ where
                 refusal,
                 blob_digest,
                 evidence: after.difference(&before).cloned().collect(),
-                revisions: Vec::new(),
+                revisions: revision_moves(&revisions_before, &artifact_revisions(governor, case)?),
             })
         }
         Some(EffectOutcome::Refused(refused)) => Err(Refused::new(

@@ -43,5 +43,5 @@ cycles:
           name: check-log-says-hello
           select: [{doc: {in: work, path: check.log}}]
           is: hello
-  - name: replays
-    steps: [{do: open}, {do: run}, {do: replay, name: again}]
+  - name: allows
+    steps: [{do: open}, {do: run}, {do: allow, name: again}]

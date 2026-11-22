@@ -286,6 +286,10 @@ pub enum TreeCommand {
     /// Verify the run log of every case of the tree and name the first line that fails.
     #[command(after_help = TREE_VERIFY_HELP)]
     Verify(TreeStoreArgs),
+    /// Decide every case of the tree again as of its last evaluated line and print, per case,
+    /// whether its state and Canon's decision equal what that line recorded.
+    #[command(after_help = TREE_REPLAY_HELP)]
+    Replay(TreeReplayArgs),
     /// Hold the tree: record in its root case's run log that a principal stopped it and why;
     /// tree run is refused until tree reopen lifts the hold.
     #[command(after_help = TREE_HOLD_HELP)]
@@ -412,6 +416,35 @@ Exit status:
   0  every log verifies
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error";
+
+/// What `tree replay --help` says about the comparison, the output and the exit status.
+pub const TREE_REPLAY_HELP: &str = "Each case is rebuilt as it was at the last evaluated line of \
+its run log, by undoing every later line of that log, and decided again through the same path \
+tree run decides with. state_matches_log says the rebuilt case revision equals the logged one and \
+every later line could be undone (unmatched_line names the first that could not); \
+decision_matches_log says the digest of Canon's decision equals the logged one. A case whose log \
+holds no evaluated line is listed as {case, evaluated: false} and is not compared. --case names \
+one case: it and the cases below it are replayed alone. The store is read and never held, and \
+nothing is written.
+
+Exit status:
+  0  every compared case matches its log; the cases are printed
+  1  refused: NotATree, CaseNotInTree for a --case the tree does not hold, LogRefused, or the store cannot be read
+  3  a case differs: the cases are printed, and the first that differs and whether its state or its decision on standard error";
+
+/// The exit status of `tree replay` when a case differs from its log.
+pub const TREE_REPLAY_DIFFERS: u8 = 3;
+
+/// The arguments of `b10x-loom tree replay`.
+#[derive(Debug, Args)]
+pub struct TreeReplayArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// Replay this case of the tree and the cases below it alone.
+    #[arg(long, value_name = "CASE")]
+    pub case: Option<String>,
+}
 
 /// What `tree hold --help` says about the hold and the exit status.
 pub const TREE_HOLD_HELP: &str = "The hold is one stop recorded line, the principal and the \

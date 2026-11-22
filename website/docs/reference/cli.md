@@ -46,6 +46,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom tree close`](#b10x-loom-tree-close) | Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is |
 | [`b10x-loom tree status`](#b10x-loom-tree-status) | Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log |
 | [`b10x-loom tree verify`](#b10x-loom-tree-verify) | Verify the run log of every case of the tree and name the first line that fails |
+| [`b10x-loom tree replay`](#b10x-loom-tree-replay) | Decide every case of the tree again as of its last evaluated line and print, per case, whether its state and Canon's decision equal what that line recorded |
 | [`b10x-loom tree hold`](#b10x-loom-tree-hold) | Hold the tree: record in its root case's run log that a principal stopped it and why; tree run is refused until tree reopen lifts the hold |
 | [`b10x-loom tree reopen`](#b10x-loom-tree-reopen) | Lift the hold tree hold recorded, so that tree run goes on |
 | [`b10x-loom tree test`](#b10x-loom-tree-test) | Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers at once, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects |
@@ -809,6 +810,28 @@ Exit status:
   0  every log verifies
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error
+```
+
+## `b10x-loom tree replay`
+
+Decide every case of the tree again as of its last evaluated line and print, per case, whether its state and Canon's decision equal what that line recorded
+
+```text
+Usage: b10x-loom tree replay [OPTIONS] --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <CASE>` | no | none | Replay this case of the tree and the cases below it alone |
+
+```text
+Each case is rebuilt as it was at the last evaluated line of its run log, by undoing every later line of that log, and decided again through the same path tree run decides with. state_matches_log says the rebuilt case revision equals the logged one and every later line could be undone (unmatched_line names the first that could not); decision_matches_log says the digest of Canon's decision equals the logged one. A case whose log holds no evaluated line is listed as {case, evaluated: false} and is not compared. --case names one case: it and the cases below it are replayed alone. The store is read and never held, and nothing is written.
+
+Exit status:
+  0  every compared case matches its log; the cases are printed
+  1  refused: NotATree, CaseNotInTree for a --case the tree does not hold, LogRefused, or the store cannot be read
+  3  a case differs: the cases are printed, and the first that differs and whether its state or its decision on standard error
 ```
 
 ## `b10x-loom tree hold`

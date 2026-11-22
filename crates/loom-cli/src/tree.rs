@@ -23,16 +23,17 @@ use b10x_loom_tree::suite::{
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, HoldRequest, OpenRequest, Reasons, Refused, ReopenRequest,
     RunSettings, TreeTime, approve as record, open_tree, person_program, read_protocols_directory,
-    refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status, verify_json,
-    verify_tree,
+    refusal_json, replay_difference, replay_json, replay_tree, run_json, run_tree, status_json,
+    stored_catalog, tree_status, verify_json, verify_tree,
 };
 use serde_json::json;
 
 use crate::{
     REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
-    TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs,
-    TreeCloseArgs, TreeCommand, TreeConfinement, TreeHoldArgs, TreeOpenArgs, TreeReopenArgs,
-    TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated, tree_run_exit_status,
+    TREE_REPLAY_DIFFERS, TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_FAILED, TREE_TEST_REFUSED,
+    TreeApproveArgs, TreeCloseArgs, TreeCommand, TreeConfinement, TreeHoldArgs, TreeOpenArgs,
+    TreeReopenArgs, TreeReplayArgs, TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated,
+    tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -44,6 +45,7 @@ pub fn command(command: &TreeCommand) -> u8 {
         TreeCommand::Close(arguments) => close(arguments),
         TreeCommand::Status(arguments) => status(arguments),
         TreeCommand::Verify(arguments) => verify(arguments),
+        TreeCommand::Replay(arguments) => replay(arguments),
         TreeCommand::Hold(arguments) => hold(arguments),
         TreeCommand::Reopen(arguments) => reopen(arguments),
         TreeCommand::Test(arguments) => return test(arguments),
@@ -698,6 +700,26 @@ fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
                 printable(&failure.detail)
             );
             TREE_LOG_FAILED
+        }
+    })
+}
+
+/// `tree replay`: the cases decided again, printed as one object; the first that differs, and
+/// whether its state or its decision, on standard error, with the line its undo stopped at.
+fn replay(arguments: &TreeReplayArgs) -> Result<u8, Refused> {
+    let store = resolved(&arguments.store)?;
+    let catalog = tree_catalog(&store)?;
+    let replayed = replay_tree(&store, &catalog, arguments.case.as_deref())?;
+    println!("{}", printable(&replay_json(&replayed).to_string()));
+    Ok(match replay_difference(&replayed) {
+        None => 0,
+        Some((case, what, line)) => {
+            let line = line.map_or_else(String::new, |seq| format!(" at line {seq}"));
+            eprintln!(
+                "b10x-loom: tree replay: case {} differs from its log: {what}{line}",
+                printable(case)
+            );
+            TREE_REPLAY_DIFFERS
         }
     })
 }
