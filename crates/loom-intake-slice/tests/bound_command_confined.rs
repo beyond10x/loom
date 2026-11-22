@@ -471,8 +471,11 @@ const E4DEFRAG: &str = "/usr/bin/e4defrag";
 /// bound program cannot move the blocks of a file in its ext4 workspace. The program writes a
 /// 1 MiB file in 16 pieces, interleaved with a second file and each synced, so the file holds
 /// several extents and `e4defrag` calls `EXT4_IOC_MOVE_EXT` (a file of one extent is left alone).
-/// The seccomp program answers it `EACCES`: `e4defrag` names `Permission denied`, and the file's
-/// SHA-256 is what it was.
+/// The seccomp program answers it `EACCES`: `e4defrag -v` names the failed
+/// `EXT4_IOC_MOVE_EXT` call on its standard error and exits 1, and the file's SHA-256 is what it
+/// was. e4defrag 1.47.4 prints the call's `errno` after it was overwritten (`ioctl:Success`), so
+/// the case reads the refusal, not `Permission denied`; on Substrate 0.21.0 the same program
+/// defragmented the file (`Success: [1/1]`).
 ///
 /// The child is the one `bindings::bound_program_child` builds for the program, with one
 /// read-only file beside it: `e4defrag` reads the mount table at `/etc/mtab`, which Substrate's
@@ -513,7 +516,7 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
                      /usr/bin/rm -f \"$s\"\n\
                      before=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
                      size=$(/usr/bin/stat -c %s \"$f\")\n\
-                     {E4DEFRAG} \"$f\" >/workspace/target/e4defrag.out\n\
+                     {E4DEFRAG} -v \"$f\" >/workspace/target/e4defrag.out\n\
                      status=$?\n\
                      after=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
                      printf 'status=%s\\nsize=%s\\nbefore=%s\\nafter=%s\\n' \"$status\" \"$size\" \"$before\" \"$after\"\n\
@@ -549,9 +552,10 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
             };
             assert_eq!(reported("size"), "1048576", "{kept}");
             assert!(
-                stderr.contains("Permission denied"),
-                "EXT4_IOC_MOVE_EXT is answered EACCES: {kept}"
+                stderr.contains("Failed to defrag with EXT4_IOC_MOVE_EXT ioctl"),
+                "EXT4_IOC_MOVE_EXT is refused: {kept}"
             );
+            assert_eq!(reported("status"), "1", "e4defrag fails: {kept}");
             assert_eq!(reported("before").len(), 64, "{kept}");
             assert_eq!(
                 reported("before"),
