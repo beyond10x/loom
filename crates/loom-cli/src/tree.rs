@@ -26,9 +26,9 @@ use serde_json::json;
 
 use crate::{
     REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
-    TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs, TreeCloseArgs, TreeCommand,
-    TreeConfinement, TreeOpenArgs, TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated,
-    tree_run_exit_status,
+    TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs,
+    TreeCloseArgs, TreeCommand, TreeConfinement, TreeOpenArgs, TreeRunArgs, TreeStoreArgs,
+    TreeTestArgs, start_delegated, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -136,6 +136,19 @@ fn tree_runner(
 fn substrate_runner(held: Option<&TreeRunner>) -> Result<Arc<dyn TestRunner>, Refused> {
     held.map(TreeRunner::runner)
         .ok_or_else(|| confinement_refused("CgroupUndelegated: tree run holds no cgroup root"))
+}
+
+/// The runner of `tree test`'s `confinement`: `local` as `tree run` opens it; `substrate` refused
+/// with `tree test`'s own precondition and remedy ([`TREE_TEST_CONFINEMENT_PRECONDITION`]), since
+/// `tree test` takes no cgroup root and never names `tree run`'s.
+fn test_runner(confinement: TreeConfinement) -> Result<Arc<dyn TestRunner>, Refused> {
+    match confinement {
+        TreeConfinement::Substrate => Err(Refused::new(
+            TreeRefusalReason::ConfinementRefused,
+            TREE_TEST_CONFINEMENT_PRECONDITION,
+        )),
+        TreeConfinement::Local => tree_runner(confinement, None),
+    }
 }
 
 /// A `ConfinementRefused` refusal saying `detail`, then the precondition and remedy of `tree run`.
@@ -479,7 +492,7 @@ fn test(arguments: &TreeTestArgs) -> u8 {
         Ok(paths) => paths,
         Err(refused) => return tree_refused(refused),
     };
-    let runner = match tree_runner(arguments.confinement, None) {
+    let runner = match test_runner(arguments.confinement) {
         Ok(runner) => runner,
         Err(refused) => return tree_refused(refused),
     };
@@ -571,6 +584,18 @@ mod tests {
             refused.0.detail
         );
         assert!(tree_runner(TreeConfinement::Substrate, None).is_err());
+
+        let Err(refused) = test_runner(TreeConfinement::Substrate) else {
+            panic!("a substrate runner for tree test");
+        };
+        assert_eq!(refused.0.reason, TreeRefusalReason::ConfinementRefused);
+        assert!(
+            refused.0.detail.contains("--confinement local")
+                && !refused.0.detail.contains("tree run")
+                && !refused.0.detail.contains("--cgroup-root"),
+            "{}",
+            refused.0.detail
+        );
 
         let root = Path::new("/sys/fs/cgroup/loom-held-root");
         let refused = TreeRunner::on_root(root).unwrap_err();

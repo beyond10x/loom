@@ -312,6 +312,12 @@ pub const TREE_TEST_FAILED: u8 = 1;
 /// The exit status of `tree test` when it was refused before any cycle.
 pub const TREE_TEST_REFUSED: u8 = 2;
 
+/// Why `tree test` refuses its default confinement, and the remedy it accepts: the detail of its
+/// `ConfinementRefused` refusal before any cycle.
+pub const TREE_TEST_CONFINEMENT_PRECONDITION: &str = "CgroupUndelegated: tree test takes no \
+cgroup root yet, so its default confinement, substrate, cannot confine a program; pass \
+--confinement local to run every program unconfined";
+
 /// The arguments of `b10x-loom tree test`.
 #[derive(Debug, Args)]
 pub struct TreeTestArgs {
@@ -329,7 +335,7 @@ pub struct TreeTestArgs {
     #[arg(long, value_name = "INSTANT")]
     pub at: String,
     /// The confinement every bound program starts under. `substrate` needs a delegated cgroup
-    /// root, which `tree test` does not take yet: it is refused before any cycle.
+    /// root, which `tree test` does not take yet: it is refused before any cycle; pass `local`.
     #[arg(long, value_enum, default_value = "substrate")]
     pub confinement: TreeConfinement,
     /// Also write the result as one loom.tree.SuiteReport JSON document to this file.
