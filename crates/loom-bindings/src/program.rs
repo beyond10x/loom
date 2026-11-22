@@ -193,9 +193,37 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         Ok(i64::try_from(count).unwrap_or(i64::MAX))
     }
 
-    /// The names the governor stored for the opening of this case and of its parent.
-    fn names(&self) -> Result<CaseNames, EffectError> {
-        Ok(CaseNames::default())
+    /// The names the governor stored for the opening of this case and of its parent: none for a
+    /// root case, the name of its link for a child, and the name of the parent's own link when the
+    /// parent was opened too. The inner error is a parent that cannot be read or does not list this
+    /// case among its children; it names the two cases and quotes nothing the store holds.
+    fn names(&self) -> Result<Result<CaseNames, String>, EffectError> {
+        let state = self.governor.case_state(&self.case).map_err(governor)?;
+        let Some(link) = state.parent else {
+            return Ok(Ok(CaseNames::default()));
+        };
+        let parent = CaseId(link.parent.0.clone());
+        // The governor's error is not quoted: it may hold text read from the parent's file.
+        let Ok(parent_state) = self.governor.case_state(&parent) else {
+            return Ok(Err(format!(
+                "case {} is a child of `{}`, which cannot be read",
+                self.case.0, parent.0
+            )));
+        };
+        if !parent_state
+            .children
+            .iter()
+            .any(|child| child.child.0 == self.case.0)
+        {
+            return Ok(Err(format!(
+                "case {} is a child of `{}`, which does not list it among its children",
+                self.case.0, parent.0
+            )));
+        }
+        Ok(Ok(CaseNames {
+            case_name: Some(link.name),
+            parent_case_name: parent_state.parent.map(|grand| grand.name),
+        }))
     }
 
     /// The member of `binding` that names a program beside the bindings file when the document's
@@ -284,7 +312,10 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         };
         // Read before anything starts and before anything is written: a name the governor holds
         // that is not a child name, or a parent that cannot be read, starts and writes nothing.
-        let names = self.names()?;
+        let names = match self.names()? {
+            Ok(names) => names,
+            Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
+        };
         // After the run count and before anything starts: the records that send the action back,
         // kept as one document, or an error with nothing started and nothing observed.
         let feedback = crate::retry::feedback(self.governor, &self.case, binding, &self.store)?;

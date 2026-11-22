@@ -10,6 +10,9 @@
 //! `local` runner opened with `UNCONFINED_FLAG_REASON`; a case that reads the `ChildCommand` the
 //! port builds gives it a recording runner that starts nothing. The bindings file sits in directory
 //! `A`, the workspace is directory `B`, and the process's working directory is a third one.
+//!
+//! The names a child case reads (`LOOM_CASE_NAME`, `LOOM_PARENT_CASE_NAME`) come from a tree of
+//! four fixture protocols, each level opening the next through `CanonGovernor::open_children`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt as _;
@@ -18,7 +21,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use b10x_loom_bindings::{
-    PROGRAM_SOURCE, ProgramEffects, TIMEOUT_VARIABLE, check, decode, resolve_programs,
+    PROGRAM_SOURCE, ProgramEffects, RETRY_FEEDBACK_VARIABLE, TIMEOUT_VARIABLE, check, decode,
+    resolve_programs,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
@@ -29,6 +33,7 @@ use b10x_loom_commission::model::responsibility::{
     ObservationData, ObservationId, PrincipalId, ProposedActionArguments, RunId, RunOutcome,
 };
 use b10x_loom_commission::outcome::RunStore;
+use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_commission::runtime::{LoopContext, LoopEnd, run_until_blocked};
 use b10x_loom_commission_testkit::fake_authority::StaticAuthorityProvider;
 use b10x_loom_commission_testkit::fake_executor::ScriptedExecutor;
@@ -39,7 +44,10 @@ use b10x_loom_intake_slice::confinement::{
 };
 use b10x_loom_intake_slice::executor::TestCommand;
 use loom::bindings::{BindingsDocument, BindingsRefusalReason as Reason};
-use loom_governor::{CanonGovernor, CaseInputs, FallibleCaseStore, MemoryCaseStore};
+use loom_governor::{
+    CanonGovernor, CaseIndependence, CaseInputs, ChildOpening, FallibleCaseStore, FileCaseStore,
+    MemoryCaseStore,
+};
 
 const REGISTRATION: &str = "fixture@1";
 /// The root case.
@@ -239,6 +247,7 @@ fn flag_runner() -> Arc<dyn TestRunner> {
 #[derive(Default)]
 struct Recording {
     answers: Mutex<Vec<Vec<u8>>>,
+    exits: Mutex<Vec<i32>>,
     children: Mutex<Vec<ChildCommand>>,
 }
 
@@ -246,6 +255,16 @@ impl Recording {
     fn new(answers: &[&[u8]]) -> Arc<Self> {
         Arc::new(Self {
             answers: Mutex::new(answers.iter().rev().map(|bytes| bytes.to_vec()).collect()),
+            exits: Mutex::default(),
+            children: Mutex::default(),
+        })
+    }
+
+    /// A runner whose runs end with `codes` in turn, then with 0, printing nothing.
+    fn exiting(codes: &[i32]) -> Arc<Self> {
+        Arc::new(Self {
+            answers: Mutex::default(),
+            exits: Mutex::new(codes.iter().rev().copied().collect()),
             children: Mutex::default(),
         })
     }
@@ -270,8 +289,9 @@ impl TestRunner for Recording {
     fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         self.children.lock().unwrap().push(child.clone());
         let stdout = self.answers.lock().unwrap().pop().unwrap_or_default();
+        let exit = self.exits.lock().unwrap().pop().unwrap_or(0);
         Ok(TestExecution {
-            exit_code: Some(0),
+            exit_code: Some(exit),
             timed_out: false,
             output: String::new(),
             applied: AppliedConfinement {
@@ -913,4 +933,554 @@ fn program_output_never_enters_a_refusal() {
     let runs = runs(&governor);
     assert_eq!(runs.len(), 1);
     assert!(!runs[0].to_string().contains(CANARY), "{}", runs[0]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The names the openings gave the case and its parent
+
+/// One level of the tree's protocols: `<id>@1`, the writer [`CHECK`] and, but for the last level,
+/// `next.open`, a `case_open` of the next level about `spec`.
+fn level(id: &str, next: Option<&str>) -> String {
+    let mut text = format!(
+        "format: protocol/1\nprotocol:\n  id: {id}\n  revision: 1\nartifacts:\n  spec: {{}}\n  impl: {{}}\nevidence_kinds:\n  gate: {{}}\n  case_outcome: {{}}\nactions:\n  spec.check:\n    effect: write\n    may_produce:\n      - evidence: gate\n"
+    );
+    if let Some(next) = next {
+        text.push_str(&format!(
+            "  next.open:\n    effect: write\n    case_open: {{protocol: {next}, subject: spec}}\n    may_produce:\n      - evidence: gate\n"
+        ));
+    }
+    text
+}
+
+/// The tree's protocols, root first: `root` opens `epic`, `epic` opens `story`, `story` opens
+/// `task`.
+const LEVELS: [(&str, Option<&str>); 4] = [
+    ("root", Some("epic")),
+    ("epic", Some("story")),
+    ("story", Some("task")),
+    ("task", None),
+];
+
+/// A governor over `store` holding every level and the root case [`ROOT`] of `root@1`.
+fn tree_governor<S: FallibleCaseStore>(store: S) -> CanonGovernor<S> {
+    let mut governor = CanonGovernor::new(store);
+    for (id, next) in LEVELS {
+        governor = governor
+            .with_protocol_yaml(&format!("{id}@1"), &level(id, next))
+            .unwrap_or_else(|error| panic!("{id}@1 registers: {error:?}"));
+    }
+    governor
+        .open_case(
+            CaseId(ROOT.to_owned()),
+            "root@1",
+            revisions(),
+            CaseInputs::none(),
+        )
+        .expect("the root opens");
+    governor
+}
+
+/// The registration of the protocol below `case`'s.
+fn below<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &str) -> String {
+    let held = governor.protocol(&CaseId(case.to_owned())).unwrap();
+    let id = held.trim_end_matches("@1");
+    let (_, next) = LEVELS.iter().find(|(level, _)| *level == id).unwrap();
+    format!("{}@1", next.expect("the level opens one below"))
+}
+
+/// Opens one child of `parent` per name, through `next.open`; their ids.
+fn open<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    parent: &str,
+    names: &[&str],
+) -> Vec<String> {
+    let protocol = below(governor, parent);
+    let openings: Vec<ChildOpening> = names
+        .iter()
+        .map(|name| ChildOpening {
+            name: (*name).to_owned(),
+            protocol: protocol.clone(),
+            independence: CaseIndependence::none(),
+        })
+        .collect();
+    let parent = CaseId(parent.to_owned());
+    governor
+        .open_children(
+            &parent,
+            "next.open",
+            governor.current_revision(&parent).unwrap(),
+            &openings,
+            Vec::new(),
+            "2026-11-22T12:00:00Z",
+        )
+        .unwrap_or_else(|error| panic!("the children open: {error:?}"))
+        .into_iter()
+        .map(|case| case.0)
+        .collect()
+}
+
+/// The document binding [`CHECK`] of the protocol `case` is held under, with the extra `members`.
+fn level_document<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+    argv: &[&str],
+    members: &str,
+) -> BindingsDocument {
+    let registration = governor.protocol(&CaseId(case.to_owned())).unwrap();
+    let id = registration.trim_end_matches("@1");
+    let (_, next) = LEVELS.iter().find(|(level, _)| *level == id).unwrap();
+    let text = format!(
+        "format: loom.bindings/1\nprotocol: {registration}\nartifacts:\n  spec: docs/spec\n  impl: src\nactions:\n{}",
+        bound(argv, members, VALID_TABLE)
+    );
+    let document = decode(&text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    let protocol = b10x_canon::model::parse(&level(id, *next)).unwrap();
+    check(&document, &registration, &protocol)
+        .unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    document
+}
+
+/// The children a recording runner received for one step of `case`, whose binding has the extra
+/// `members`, for a request with `arguments`, the runner answering `answers`; and the step.
+fn recorded_in<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+    members: &str,
+    arguments: &str,
+    answers: &[&[u8]],
+) -> (Vec<ChildCommand>, LoopEnd) {
+    let scratch = Scratch::new();
+    let document = level_document(governor, case, &["/opt/stub/program"], members);
+    let runner = Recording::new(answers);
+    let effects = port(
+        governor,
+        &document,
+        &scratch,
+        case,
+        Arc::clone(&runner) as Arc<dyn TestRunner>,
+    );
+    let end = drive(governor, &effects, case, arguments);
+    (runner.children(), end)
+}
+
+/// The environment the bound program of `case` is given, through a recording runner.
+fn names_of<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+) -> BTreeMap<String, String> {
+    let (children, end) = recorded_in(governor, case, "", "{}", &[]);
+    assert_performed(&end);
+    assert_eq!(children.len(), 1);
+    assert!(children[0].environment().allow.is_empty());
+    children[0].environment().set.clone()
+}
+
+const NAME: &str = "LOOM_CASE_NAME";
+const PARENT_NAME: &str = "LOOM_PARENT_CASE_NAME";
+
+/// A tree `P` -> `P.epic` -> `P.epic.story` over a memory store.
+fn three_levels() -> CanonGovernor<MemoryCaseStore> {
+    let governor = tree_governor(MemoryCaseStore::default());
+    assert_eq!(open(&governor, ROOT, &["epic"]), ["P.epic"]);
+    assert_eq!(open(&governor, "P.epic", &["story"]), ["P.epic.story"]);
+    governor
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_child_program_reads_the_name_its_opening_gave_it() {
+    let governor = tree_governor(MemoryCaseStore::default());
+    assert_eq!(open(&governor, ROOT, &["story"]), ["P.story"]);
+    // A real process: exactly these lines.
+    let scratch = Scratch::new();
+    let document = level_document(&governor, "P.story", &["/usr/bin/env"], "");
+    let effects = port(&governor, &document, &scratch, "P.story", flag_runner());
+    assert_performed(&drive(&governor, &effects, "P.story", "{}"));
+    let printed: BTreeSet<String> = String::from_utf8(last_blob(&governor, &scratch))
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        printed,
+        environment_lines("P.story", 60, &[(NAME, "story")])
+    );
+}
+
+#[test]
+fn a_repeated_child_reads_the_name_of_the_first() {
+    let governor = tree_governor(MemoryCaseStore::default());
+    assert_eq!(open(&governor, ROOT, &["story"]), ["P.story"]);
+    assert_eq!(open(&governor, ROOT, &["story"]), ["P.story.2"]);
+    assert_eq!(
+        names_of(&governor, "P.story.2"),
+        environment("P.story.2", 60, &[(NAME, "story")])
+    );
+}
+
+#[test]
+fn a_root_program_reads_neither_name() {
+    let governor = three_levels();
+    assert_eq!(names_of(&governor, ROOT), environment(ROOT, 60, &[]));
+}
+
+#[test]
+fn a_child_of_the_root_reads_its_name_and_no_parent_name() {
+    let governor = three_levels();
+    assert_eq!(
+        names_of(&governor, "P.epic"),
+        environment("P.epic", 60, &[(NAME, "epic")])
+    );
+}
+
+#[test]
+fn a_grandchild_reads_its_name_and_its_parents_name() {
+    let governor = three_levels();
+    assert_eq!(
+        names_of(&governor, "P.epic.story"),
+        environment(
+            "P.epic.story",
+            60,
+            &[(NAME, "story"), (PARENT_NAME, "epic")]
+        )
+    );
+}
+
+#[test]
+fn a_child_of_a_repeated_parent_reads_its_own_name_and_the_first_parents_name() {
+    let governor = three_levels();
+    assert_eq!(open(&governor, ROOT, &["epic"]), ["P.epic.2"]);
+    assert_eq!(open(&governor, "P.epic.2", &["story"]), ["P.epic.2.story"]);
+    assert_eq!(
+        names_of(&governor, "P.epic.2.story"),
+        environment(
+            "P.epic.2.story",
+            60,
+            &[(NAME, "story"), (PARENT_NAME, "epic")]
+        )
+    );
+}
+
+#[test]
+fn the_parent_name_is_one_level_up_and_no_further() {
+    let governor = three_levels();
+    assert_eq!(
+        open(&governor, "P.epic.story", &["task"]),
+        ["P.epic.story.task"]
+    );
+    assert_eq!(
+        names_of(&governor, "P.epic.story.task"),
+        environment(
+            "P.epic.story.task",
+            60,
+            &[(NAME, "task"), (PARENT_NAME, "story")]
+        )
+    );
+}
+
+#[test]
+fn a_repeat_at_the_third_level_reads_the_names_of_the_first() {
+    let governor = three_levels();
+    assert_eq!(open(&governor, "P.epic", &["story"]), ["P.epic.story.2"]);
+    assert_eq!(open(&governor, ROOT, &["epic"]), ["P.epic.2"]);
+    assert_eq!(open(&governor, "P.epic.2", &["story"]), ["P.epic.2.story"]);
+    for case in ["P.epic.story.2", "P.epic.2.story"] {
+        assert_eq!(
+            names_of(&governor, case),
+            environment(case, 60, &[(NAME, "story"), (PARENT_NAME, "epic")]),
+            "{case}"
+        );
+    }
+}
+
+#[test]
+fn an_arguments_program_reads_both_names() {
+    let governor = three_levels();
+    let (children, end) = recorded_in(
+        &governor,
+        "P.epic.story",
+        "    arguments_from: [/opt/stub/args]\n",
+        "{}",
+        &[b"{}"],
+    );
+    assert_performed(&end);
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].program(), "/opt/stub/args");
+    assert_eq!(
+        children[0].environment().set,
+        environment(
+            "P.epic.story",
+            60,
+            &[(NAME, "story"), (PARENT_NAME, "epic")]
+        )
+    );
+}
+
+#[test]
+fn each_child_of_an_each_opening_reads_its_entry() {
+    let governor = tree_governor(MemoryCaseStore::default());
+    assert_eq!(open(&governor, ROOT, &["a", "b"]), ["P.a", "P.b"]);
+    for (case, name) in [("P.a", "a"), ("P.b", "b")] {
+        assert_eq!(
+            names_of(&governor, case),
+            environment(case, 60, &[(NAME, name)])
+        );
+    }
+}
+
+#[test]
+fn an_arguments_program_reads_the_case_name() {
+    let governor = tree_governor(MemoryCaseStore::default());
+    open(&governor, ROOT, &["story"]);
+    let (children, end) = recorded_in(
+        &governor,
+        "P.story",
+        "    arguments_from: [/opt/stub/args]\n",
+        "{}",
+        &[b"{}"],
+    );
+    assert_performed(&end);
+    assert_eq!(
+        children[0].environment().set,
+        environment("P.story", 60, &[(NAME, "story")])
+    );
+}
+
+#[test]
+fn an_argument_named_loom_case_name_does_not_change_the_variable() {
+    let governor = tree_governor(MemoryCaseStore::default());
+    open(&governor, ROOT, &["story"]);
+    let arguments = r#"{"LOOM_CASE_NAME": "x"}"#;
+    let (children, end) = recorded_in(&governor, "P.story", "", arguments, &[]);
+    assert_performed(&end);
+    assert_eq!(children[0].environment().set[NAME], "story");
+    let stdin: serde_json::Value = serde_json::from_slice(children[0].stdin().unwrap()).unwrap();
+    assert_eq!(stdin, serde_json::json!({"LOOM_CASE_NAME": "x"}));
+    // An arguments program that prints the member changes nothing either.
+    let (children, end) = recorded_in(
+        &governor,
+        "P.story",
+        "    arguments_from: [/opt/stub/args]\n",
+        "{}",
+        &[br#"{"LOOM_CASE_NAME": "x"}"#],
+    );
+    assert_performed(&end);
+    assert_eq!(children[1].environment().set[NAME], "story");
+}
+
+#[test]
+fn an_argument_named_loom_parent_case_name_does_not_change_the_variable() {
+    let governor = three_levels();
+    let arguments = r#"{"LOOM_PARENT_CASE_NAME": "x"}"#;
+    let (children, end) = recorded_in(&governor, "P.epic.story", "", arguments, &[]);
+    assert_performed(&end);
+    assert_eq!(children[0].environment().set[PARENT_NAME], "epic");
+    let (children, end) = recorded_in(
+        &governor,
+        "P.epic.story",
+        "    arguments_from: [/opt/stub/args]\n",
+        "{}",
+        &[br#"{"LOOM_PARENT_CASE_NAME": "x"}"#],
+    );
+    assert_performed(&end);
+    assert_eq!(children[1].environment().set[PARENT_NAME], "epic");
+}
+
+/// The step of `case` refused before anything started: its reason, after checking the runner
+/// received no child and the port kept no run.
+fn refused_before_anything<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+) -> String {
+    let (children, end) = recorded_in(governor, case, "", "{}", &[]);
+    assert!(children.is_empty(), "{children:?}");
+    assert!(runs(governor).is_empty(), "{:?}", runs(governor));
+    assert!(records(governor, case).is_empty());
+    refusal(&end).0
+}
+
+#[test]
+fn a_stored_name_that_is_not_a_child_name_starts_nothing() {
+    for name in ["a b".to_owned(), "a".repeat(4097)] {
+        let governor = tree_governor(MemoryCaseStore::default());
+        open(&governor, ROOT, &["story"]);
+        governor
+            .store()
+            .update(&CaseId("P.story".to_owned()), |state| {
+                state.parent.as_mut().unwrap().name = name.clone();
+            })
+            .unwrap();
+        let reason = refused_before_anything(&governor, "P.story");
+        assert_eq!(
+            reason,
+            "/opt/stub/program was not started: the case name is not a child name"
+        );
+    }
+    // A file store refuses such a link when it reads the case: the step fails and starts nothing.
+    let scratch = Scratch::new();
+    let governor = tree_governor(FileCaseStore::open(&scratch.store).unwrap());
+    open(&governor, ROOT, &["story"]);
+    rewrite_case(&scratch.store, "P.story", |case| {
+        case["parent"]["name"] = serde_json::json!("a b");
+    });
+    let document = level_document(&governor, ROOT, &["/opt/stub/program"], "");
+    let runner = Recording::new(&[]);
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        ROOT,
+        Arc::clone(&runner) as Arc<dyn TestRunner>,
+    );
+    drop(effects);
+    assert!(governor.case_state(&CaseId("P.story".to_owned())).is_err());
+}
+
+#[test]
+fn a_stored_parent_name_that_is_not_a_child_name_starts_nothing() {
+    for name in ["a b".to_owned(), "a".repeat(4097)] {
+        let governor = three_levels();
+        governor
+            .store()
+            .update(&CaseId("P.epic".to_owned()), |state| {
+                state.parent.as_mut().unwrap().name = name.clone();
+            })
+            .unwrap();
+        let reason = refused_before_anything(&governor, "P.epic.story");
+        assert_eq!(
+            reason,
+            "/opt/stub/program was not started: the parent case name is not a child name"
+        );
+    }
+}
+
+/// Rewrites the case file of `case` under the file store `store` with `change`.
+fn rewrite_case(store: &Path, case: &str, change: impl FnOnce(&mut serde_json::Value)) {
+    let path = store.join(format!("{}.json", loom_governor::case_file_stem(case)));
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    change(&mut value);
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+}
+
+/// Every file of `directory` and its bytes.
+fn bytes_of(directory: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut found = BTreeMap::new();
+    let mut pending = vec![directory.to_owned()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else {
+                let bytes = std::fs::read(&path).unwrap_or_default();
+                found.insert(path, bytes);
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn a_parent_that_cannot_be_read_refuses_the_step_before_anything() {
+    let epic_file =
+        |store: &Path| store.join(format!("{}.json", loom_governor::case_file_stem("P.epic")));
+    let breaks: [(&str, fn(&Path, &Path)); 3] = [
+        ("removed", |_store, file| {
+            std::fs::remove_file(file).unwrap()
+        }),
+        ("unreadable", |_store, file| {
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }),
+        ("not listing the story", |store, _file| {
+            rewrite_case(store, "P.epic", |case| {
+                case["children"] = serde_json::json!([]);
+            });
+        }),
+    ];
+    for (what, broken) in breaks {
+        let scratch = Scratch::new();
+        let governor = tree_governor(FileCaseStore::open(&scratch.store).unwrap());
+        open(&governor, ROOT, &["epic"]);
+        open(&governor, "P.epic", &["story"]);
+        let file = epic_file(&scratch.store);
+        broken(&scratch.store, &file);
+        let before = bytes_of(&scratch.store);
+        let document = level_document(&governor, "P.epic.story", &["/opt/stub/program"], "");
+        let runner = Recording::new(&[]);
+        let effects = port(
+            &governor,
+            &document,
+            &scratch,
+            "P.epic.story",
+            Arc::clone(&runner) as Arc<dyn TestRunner>,
+        );
+        let end = drive(&governor, &effects, "P.epic.story", "{}");
+        let (reason, _) = refusal(&end);
+        assert!(runner.children().is_empty(), "{what}");
+        assert!(
+            reason.contains("P.epic.story") && reason.contains("`P.epic`"),
+            "{what}: {reason}"
+        );
+        assert!(
+            !reason.contains("story\"") && !reason.contains("next.open"),
+            "{what}: {reason}"
+        );
+        // Commission's loop logs the proposal and the refusal in `observations.json`; the port adds
+        // no run to it, writes no case file and keeps no blob.
+        assert!(runs(&governor).is_empty(), "{what}: {:?}", runs(&governor));
+        let without_log = |mut files: BTreeMap<PathBuf, Vec<u8>>| {
+            files.remove(&scratch.store.join("observations.json"));
+            files
+        };
+        assert_eq!(
+            without_log(bytes_of(&scratch.store)),
+            without_log(before),
+            "{what}: a byte of the store changed"
+        );
+        if what == "unreadable" {
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_retried_child_writer_reads_its_name_and_its_feedback() {
+    let governor = tree_governor(MemoryCaseStore::default());
+    open(&governor, ROOT, &["story"]);
+    let scratch = Scratch::new();
+    // A placed subject, so the record of the first run is about a revision the retry reads.
+    std::fs::create_dir_all(scratch.workspace.join("docs")).unwrap();
+    std::fs::write(scratch.workspace.join("docs/spec"), "spec\n").unwrap();
+    let document = level_document(
+        &governor,
+        "P.story",
+        &["/opt/stub/program"],
+        "    retry_when: {gate: [invalid]}\n",
+    );
+    // The first run records `invalid` about `spec`: the second is a retry.
+    let runner = Recording::exiting(&[1, 0]);
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        "P.story",
+        Arc::clone(&runner) as Arc<dyn TestRunner>,
+    );
+    assert_performed(&drive(&governor, &effects, "P.story", "{}"));
+    assert_performed(&drive(&governor, &effects, "P.story", "{}"));
+    let children = runner.children();
+    assert_eq!(children.len(), 2);
+    let set = &children[1].environment().set;
+    let feedback = set
+        .get(RETRY_FEEDBACK_VARIABLE)
+        .expect("the retry is given its feedback");
+    assert_eq!(
+        set,
+        &environment(
+            "P.story",
+            60,
+            &[(NAME, "story"), (RETRY_FEEDBACK_VARIABLE, feedback)]
+        )
+    );
 }
