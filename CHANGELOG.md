@@ -54,6 +54,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Every decision a waiting `tree run` prints runs unchanged: `tree approve --action` without `--capability` takes a person action whose protocol action needs none and records no authority, and one that needs a capability is refused `NotAPersonAction` naming it, with nothing written; a handoff's `tree run` carries the run's own `--confinement`, set through `RunSettings::confinement` (story:every-printed-decision-command-runs)
 - `tree approve --action A --result R` ends a person action with a named result: each `from: effect` entry of `A` records the result its table maps `R` to, and a result an entry does not list is refused `NotAPersonAction` naming the entry and its values, with nothing written; `--reasons TEXT` or `--reasons-file FILE` (with `--result`; at most 65536 bytes and 60 lines; a file inside the workspace, no link followed) are kept as `blobs/<sha256>` and reach a writer whose `retry_when` lists the result as the log of the person's record in `LOOM_RETRY_FEEDBACK`; a person binding's effect table may list named values besides `performed`, never `*`; `b10x_loom_bindings::PERSON_SOURCE`, `reasons_fit`, `read_reasons_file`, `keep_reasons` and `b10x_loom_tree::Reasons` (story:person-action-records-a-named-result)
 - `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
+- `b10x-loom tree run --cgroup-root DIR` runs confined programs under `DIR`, refused `ConfinementRefused` unless it is empty, writable, delegated and holds the run in a child; `confinement::hold_cgroup_root`, `check_cgroup_root`, `CgroupRootHold`, `SubstrateRunner::cgroup_root`; `b10x_loom_cli::start_delegated` (story:tree-run-takes-a-delegated-cgroup)
 
 ### Changed
 
@@ -98,10 +99,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** the generated `behaviour::Context` gains `generate_string`, `TryContext` `try_generate_string` (story:protocol-argument-schema)
 - **Breaking:** a plugin turn proposes only arguments its protocol's schema admits; an action declaring none takes only `{}`; a step whose arguments the schema refuses (a `source.read` without `kind`, or whose `input` is no object) ends the turn `stopped` and no longer reaches the effect port, whose refusal went back to the model (story:protocol-argument-schema)
 - **Breaking:** `inbound-answer@1` and `operator-reply@1` declare `arguments` for each action; their definition digests change (story:protocol-argument-schema)
+- `tree run --confinement substrate` without `--cgroup-root` starts itself again in a delegated scope of its own and never discovers an ancestor cgroup; its refusal names `tree run --cgroup-root` or `--confinement local` (story:tree-run-takes-a-delegated-cgroup)
 
 ### Removed
 
 - No Loom crate depends on `b10x-canon-engineering`; a host that linked it beside Loom chooses its tag itself (story:engineering-protocols-dependency-removed)
+
+### Security
+
+- Two `tree run`s never share a cgroup root: each holds its root by a `flock` on the root's directory, so one run's driver no longer ends another run's confined launches (story:tree-run-takes-a-delegated-cgroup)
 
 ## [0.58.0] - 2026-11-21
 
