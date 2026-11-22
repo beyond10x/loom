@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:person-action-runs-a-program
 kind: story
-status: draft
+status: proposed
 title: 'A person action''s approval can run a program: the binding''s argv runs confined, the approving principal as one whole argv entry, before the person''s records'
 summary: person binding may name argv; tree approve records the approval, runs the program through the program port's run path, writes the person records on exit 0 only; {principal} is a whole argv entry; failure refuses PersonProgramFailed and keeps the approval; runs count against max_runs
 tags:
@@ -69,7 +69,9 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 11
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T11:28:08Z", actor: "agent:loom", revision: 12}
 ---
 ## Outcome
 
