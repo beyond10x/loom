@@ -1222,6 +1222,10 @@ struct Recording {
     preflight: Option<ConfinementError>,
     /// What `run_child` answers instead of a run, when set.
     run_error: Option<ConfinementError>,
+    /// The exit status and whether the run was killed at its timeout, when set; else exit 0.
+    ending: Option<(Option<i32>, bool)>,
+    /// What the run printed on standard output, when set; else `{}`.
+    said: Option<&'static [u8]>,
     children: Mutex<Vec<ChildCommand>>,
     roots: Mutex<Vec<PathBuf>>,
 }
@@ -1260,9 +1264,10 @@ impl TestRunner for Recording {
         if let Some(error) = &self.run_error {
             return Err(error.clone());
         }
+        let (exit_code, timed_out) = self.ending.unwrap_or((Some(0), false));
         Ok(TestExecution {
-            exit_code: Some(0),
-            timed_out: false,
+            exit_code,
+            timed_out,
             output: String::new(),
             applied: AppliedConfinement {
                 backend: Backend::Substrate,
@@ -1282,7 +1287,7 @@ impl TestRunner for Recording {
             },
             driver_record: None,
             child_output: ChildOutput {
-                stdout: b"{}".to_vec(),
+                stdout: self.said.unwrap_or(b"{}").to_vec(),
                 stderr: Vec::new(),
                 stdout_truncated: false,
                 stderr_truncated: false,
@@ -2657,6 +2662,201 @@ fn a_cancelled_last_run_writes_no_spent_record() {
         "{:#?}",
         records(&step.governor)
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A run a signal ended (`story:bound-program-signal-exit-is-refused`)
+//
+// Substrate reports a child a signal ended as exit 128 plus the signal (137 for SIGKILL, as an
+// out-of-memory or cgroup kill ends it). The runner here answers the chosen status as Substrate
+// would, and starts nothing.
+
+/// What the runner of the signal cases says the program printed before it ended.
+const SAID_BEFORE_THE_SIGNAL: &[u8] = b"half of an answer\n";
+
+/// The table every signal case reads unless it names another.
+const OK_TABLE: &str = r#"{"0": ok, "*": failed}"#;
+
+/// The steps of [`CHECK`] one port drove, under a runner answering one status each time.
+struct SignalSteps {
+    governor: CanonGovernor<MemoryCaseStore>,
+    scratch: Scratch,
+    runner: Arc<Recording>,
+    ends: Vec<LoopEnd>,
+}
+
+/// Drives `steps` steps of [`CHECK`] bound to a stub with the action `members` and `table` read
+/// from its exit, under a runner that answers `exit` (killed at its timeout when `timed_out`)
+/// having printed [`SAID_BEFORE_THE_SIGNAL`].
+fn signal_steps(
+    exit: i32,
+    timed_out: bool,
+    members: &str,
+    table: &str,
+    steps: usize,
+) -> SignalSteps {
+    let scratch = Scratch::new();
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        members,
+        &[entry("gate", "exit", table)],
+    ));
+    let governor = governor();
+    let runner = Arc::new(Recording {
+        ending: Some((Some(exit), timed_out)),
+        said: Some(SAID_BEFORE_THE_SIGNAL),
+        ..Recording::default()
+    });
+    let ends = {
+        let effects = port(
+            &governor,
+            &document,
+            &scratch,
+            CASE,
+            Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        )
+        .unwrap();
+        (0..steps)
+            .map(|_| drive(&governor, &effects, CASE, CHECK, args("{}")))
+            .collect()
+    };
+    SignalSteps {
+        governor,
+        scratch,
+        runner,
+        ends,
+    }
+}
+
+/// The reason of the refused step `end` and whether it ends the run.
+fn refused_step(end: &LoopEnd) -> (String, bool) {
+    match only_effect(end) {
+        EffectOutcome::Refused(refused) => (refused.reason.clone(), refused.ends_run),
+        other => panic!("not refused: {other:?}"),
+    }
+}
+
+/// `end` refused `ProgramSignalled` for `exit`, ending the run, naming the exit, the signal and
+/// the blob of [`SAID_BEFORE_THE_SIGNAL`], and never what the program printed.
+fn assert_signalled(end: &LoopEnd, exit: i32) {
+    let (reason, ends_run) = refused_step(end);
+    assert!(
+        reason.starts_with(&format!("ProgramSignalled: action {CHECK}: ")),
+        "{exit}: {reason}"
+    );
+    assert!(ends_run, "{exit}: a signalled step ends the run: {reason}");
+    assert!(reason.contains(&format!("exit {exit},")), "{exit}: {reason}");
+    assert!(
+        reason.contains(&format!("signal {} ended", exit - 128)),
+        "{exit}: {reason}"
+    );
+    assert!(
+        reason.contains(&sha256(SAID_BEFORE_THE_SIGNAL)),
+        "{exit}: {reason}"
+    );
+    assert!(!reason.contains("half of an answer"), "{exit}: {reason}");
+}
+
+/// Exits 129 to 192 under Substrate: the step is refused `ProgramSignalled` and ends the run, the
+/// text naming the exit, the signal and the blob; nothing is recorded, and the blob keeps what the
+/// program printed.
+#[test]
+fn a_signal_exit_is_refused_naming_the_signal() {
+    for exit in [129, 130, 137, 143, 192] {
+        let steps = signal_steps(exit, false, "", OK_TABLE, 1);
+        assert_signalled(&steps.ends[0], exit);
+        assert!(
+            records(&steps.governor).is_empty(),
+            "{exit}: {:#?}",
+            records(&steps.governor)
+        );
+        let observations = port_observations(&steps.governor);
+        assert_eq!(observations.len(), 1, "{exit}: {observations:#?}");
+        assert_eq!(
+            plain(&observations[0].payload)["exit"],
+            json!(exit),
+            "{exit}"
+        );
+        assert_eq!(
+            blob(&steps.governor, &steps.scratch),
+            SAID_BEFORE_THE_SIGNAL,
+            "{exit}"
+        );
+    }
+}
+
+/// Neither a table row keyed by a signal code nor an `exits.error` list naming one is read: the
+/// signal refusal comes first.
+#[test]
+fn a_table_row_or_exit_class_for_a_signal_code_is_not_read() {
+    let row = signal_steps(137, false, "", r#"{"137": killed, "*": failed}"#, 1);
+    assert_signalled(&row.ends[0], 137);
+    assert!(
+        records(&row.governor).is_empty(),
+        "{:#?}",
+        records(&row.governor)
+    );
+
+    let class = signal_steps(143, false, "    exits: {error: [143]}\n", OK_TABLE, 1);
+    assert_signalled(&class.ends[0], 143);
+    let (reason, _) = refused_step(&class.ends[0]);
+    assert!(!reason.contains("ProgramError"), "{reason}");
+    assert!(
+        records(&class.governor).is_empty(),
+        "{:#?}",
+        records(&class.governor)
+    );
+}
+
+/// A signalled run counts against `budget.max_runs` even when an `exits` list names its code: its
+/// observation holds no `class`, and the next step at the cap is `RunsSpent`, nothing started.
+#[test]
+fn a_signalled_run_counts_even_when_exits_names_it() {
+    for exits in ["error", "not_called"] {
+        let members = format!("    budget: {{max_runs: 1}}\n    exits: {{{exits}: [137]}}\n");
+        let steps = signal_steps(137, false, &members, OK_TABLE, 2);
+        assert_signalled(&steps.ends[0], 137);
+        let observations = port_observations(&steps.governor);
+        assert_eq!(observations.len(), 1, "{exits}: {observations:#?}");
+        assert_eq!(
+            plain(&observations[0].payload)["class"],
+            serde_json::Value::Null,
+            "{exits}"
+        );
+        let (second, _) = refused_step(&steps.ends[1]);
+        assert!(second.starts_with("RunsSpent"), "{exits}: {second}");
+        assert_eq!(
+            steps.runner.children().len(),
+            1,
+            "{exits}: the capped action started again"
+        );
+    }
+}
+
+/// The codes beside the range read the table as before, and a run killed at its timeout reads
+/// `timeout` whatever status it reported.
+#[test]
+fn the_codes_beside_the_range_read_the_table() {
+    let table = r#"{"128": c128, "193": c193, "255": c255, "*": failed}"#;
+    for exit in [128, 193, 255] {
+        let steps = signal_steps(exit, false, "", table, 1);
+        assert_performed(&steps.ends[0]);
+        assert_eq!(
+            result_of(&record(&steps.governor)),
+            json!(format!("c{exit}")),
+            "{exit}"
+        );
+    }
+    let timed_out = signal_steps(
+        137,
+        true,
+        "",
+        r#"{"0": ok, "137": killed, "timeout": slow, "*": failed}"#,
+        1,
+    );
+    assert_performed(&timed_out.ends[0]);
+    assert_eq!(result_of(&record(&timed_out.governor)), json!("slow"));
 }
 
 // ---------------------------------------------------------------------------------------------

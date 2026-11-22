@@ -39,7 +39,7 @@ fn missing(what: &str) -> bool {
 }
 
 /// Whether bubblewrap is here and a delegated scope starts.
-fn delegation_present() -> bool {
+pub fn delegation_present() -> bool {
     if !Path::new("/usr/bin/bwrap").is_file() {
         return missing("executable /usr/bin/bwrap");
     }
@@ -191,7 +191,7 @@ fn started(tree: &Tree) -> PathBuf {
 
 /// `tree run` of `tree`, under `--cgroup-root root` when given, moved into the cgroup `cgroup`
 /// first when given.
-fn tree_run(tree: &Tree, cgroup: Option<&Path>, root: Option<&Path>) -> Command {
+pub fn tree_run(tree: &Tree, cgroup: Option<&Path>, root: Option<&Path>) -> Command {
     let home = tree.root.join("home");
     let mut command = match cgroup {
         Some(cgroup) => {
