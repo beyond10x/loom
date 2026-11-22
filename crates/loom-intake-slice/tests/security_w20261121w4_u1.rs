@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::{
     BaselineEnvironment, ChildCommand, ChildError, ChildSignal, ConfinementAdapter,
-    ConfinementRefusal, EngineConfinement, EngineRunner, ExecEnvironment, TestRunner as _,
+    ConfinementRefusal, EngineConfinement, EngineRunner, ExecEnvironment, KillBounds,
+    TestRunner as _,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::TestCommand;
@@ -37,6 +38,18 @@ fn local(reason: Option<&str>) -> EngineConfinement {
 
 fn runner_with(reason: &str) -> EngineRunner {
     EngineRunner::open(&local(Some(reason))).expect("local opens with a reason")
+}
+
+/// The bounds the cases that wait for a grace or a settle give their runner, in place of a host's
+/// [`KillBounds::HOST`] (5 s each), so that each waits 1 s.
+const SHORT_BOUNDS: KillBounds = KillBounds {
+    signal_grace: Duration::from_secs(1),
+    kill_settle: Duration::from_secs(1),
+};
+
+/// [`runner_with`] under [`SHORT_BOUNDS`].
+fn short_runner_with(reason: &str) -> EngineRunner {
+    runner_with(reason).with_kill_bounds(SHORT_BOUNDS)
 }
 
 struct Fixture {
@@ -325,6 +338,8 @@ fn group_is_gone(group: i32) -> bool {
     )
 }
 
+/// A group that ignores the host's terminate is killed once the grace ran out ([`SHORT_BOUNDS`]: 1 s
+/// here, 5 s on a host).
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn security_w20261121w4_u1_a_live_group_ignoring_term_is_killed_after_the_grace() {
@@ -335,7 +350,7 @@ fn security_w20261121w4_u1_a_live_group_ignoring_term_is_killed_after_the_grace(
         &[],
     )
     .with_timeout(Duration::from_secs(60));
-    let mut live = runner_with(REASON)
+    let mut live = short_runner_with(REASON)
         .spawn_child(&child)
         .expect("starts live");
     let mut read = Vec::new();
@@ -371,7 +386,8 @@ const ESCAPE_CASE: &str = "LOOM_SECURITY_W20261121W4_U1_ESCAPE";
 const ESCAPE_PIDFILE: &str = "LOOM_SECURITY_W20261121W4_U1_PIDFILE";
 
 /// A grandchild that leaves the run's process group (`setsid`) and keeps its output open: what
-/// Loom's deadline kill under `local` reaches, and what it reports.
+/// Loom's deadline kill under `local` reaches, and what it reports. The kill settle is 1 s here
+/// ([`SHORT_BOUNDS`]), 5 s on a host.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn security_w20261121w4_u1_a_process_that_left_the_group_is_refused_not_hidden() {
@@ -412,7 +428,7 @@ fn security_w20261121w4_u1_a_process_that_left_the_group_is_refused_not_hidden()
     })
     .with_timeout(Duration::from_secs(2));
     let started = Instant::now();
-    let outcome = runner_with(REASON).run_child(&child);
+    let outcome = short_runner_with(REASON).run_child(&child);
     let elapsed = started.elapsed();
     let escaped: Option<i32> = std::fs::read_to_string(&pidfile)
         .ok()

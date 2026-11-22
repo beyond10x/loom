@@ -16,7 +16,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use b10x_loom_a2a::{A2aServer, Answerer, Bearer, CARD_PATH};
+use b10x_loom_a2a::{A2aServer, Answerer, Bearer, CARD_PATH, Deadlines};
 use b10x_loom_plugin::datasource::{ReadKind, SourceName};
 use b10x_loom_plugin::{InboundItem, RecordLine, RecordOutcome, SourceRead};
 use loom::agent::{A2aCard, A2aExposure};
@@ -242,6 +242,59 @@ fn with_listener<A: Answerer + Sync>(agent: &A, case: impl FnOnce(SocketAddr)) {
     let server = A2aServer::new(exposure(), Bearer::new(TOKEN).expect("a bearer"))
         .expect("the exposure is served");
     with_server(server, agent, case);
+}
+
+/// The deadlines of the listeners the cases that wait for a cut set, in place of
+/// [`Deadlines::HOST`] (10 s for the head and for each write), so that each waits about 1 s.
+const SHORT_DEADLINES: Deadlines = Deadlines {
+    head: Duration::from_secs(1),
+    body: Duration::from_secs(3),
+    write: Duration::from_secs(1),
+    drain: Duration::from_secs(1),
+};
+
+/// A listener with [`SHORT_DEADLINES`].
+fn with_short_deadlines<A: Answerer + Sync>(agent: &A, case: impl FnOnce(SocketAddr)) {
+    let server = A2aServer::new(exposure(), Bearer::new(TOKEN).expect("a bearer"))
+        .expect("the exposure is served")
+        .with_deadlines(SHORT_DEADLINES);
+    with_server(server, agent, case);
+}
+
+/// A host's listener keeps the deadlines the crate names (the cases below that wait for a cut set
+/// shorter ones): 10 s for the head, 30 s for the body, 10 s for each write, 1 s to drain, and an
+/// idle bound of 300 s.
+#[test]
+fn a_hosts_listener_keeps_the_crates_deadlines() {
+    let host = A2aServer::new(exposure(), Bearer::new(TOKEN).expect("a bearer"))
+        .expect("the exposure is served");
+    assert_eq!(host.deadlines(), Deadlines::HOST);
+    assert_eq!(host.deadlines(), Deadlines::default());
+    assert_eq!(host.stream_idle(), b10x_loom_a2a::STREAM_IDLE);
+    assert_eq!(
+        Deadlines::HOST,
+        Deadlines {
+            head: Duration::from_secs(10),
+            body: Duration::from_secs(30),
+            write: Duration::from_secs(10),
+            drain: Duration::from_secs(1),
+        }
+    );
+    assert_eq!(
+        (
+            b10x_loom_a2a::HEAD_DEADLINE,
+            b10x_loom_a2a::BODY_DEADLINE,
+            b10x_loom_a2a::WRITE_DEADLINE,
+            b10x_loom_a2a::DRAIN_DEADLINE,
+        ),
+        (
+            Deadlines::HOST.head,
+            Deadlines::HOST.body,
+            Deadlines::HOST.write,
+            Deadlines::HOST.drain,
+        )
+    );
+    assert_eq!(b10x_loom_a2a::STREAM_IDLE, Duration::from_secs(300));
 }
 
 fn with_server<A: Answerer + Sync>(server: A2aServer, agent: &A, case: impl FnOnce(SocketAddr)) {
@@ -503,14 +556,15 @@ fn adversary_the_liveness_probe_is_answered_while_unauthenticated_peers_hold_eve
 
 /// A head trickled one byte at a time is cut off after a bounded time: the read timeout is per
 /// read, so without a deadline on the whole head one peer holds a connection slot for as long as
-/// it keeps sending a byte inside each timeout.
+/// it keeps sending a byte inside each timeout. The listener's head deadline is 1 s here
+/// ([`SHORT_DEADLINES`]); a host's is 10 s.
 #[test]
 fn adversary_a_head_trickled_one_byte_at_a_time_is_cut_off() {
     use std::io::ErrorKind;
     use std::time::Instant;
 
     let agent = Fake::new();
-    with_listener(&agent, |address| {
+    with_short_deadlines(&agent, |address| {
         let mut stream = TcpStream::connect(address).expect("the listener accepts");
         stream
             .set_read_timeout(Some(Duration::from_millis(400)))
@@ -841,7 +895,8 @@ impl Answerer for Flood {
 
 /// A stream whose caller takes nothing is cut once an event waited the answer's bound: the caller
 /// later reads what the buffers held and then the end, never the task's end; the turn went on
-/// regardless, and its task ended completed.
+/// regardless, and its task ended completed. The answer's bound is 1 s here
+/// ([`SHORT_DEADLINES`]); a host's is 10 s.
 #[test]
 fn an_idle_stream_is_cut_at_the_answer_bound() {
     use std::time::Instant;
@@ -852,7 +907,7 @@ fn an_idle_stream_is_cut_at_the_answer_bound() {
         size: 1024 * 1024,
         done: Mutex::new(done),
     };
-    with_listener(&agent, |address| {
+    with_short_deadlines(&agent, |address| {
         let mut idle = TcpStream::connect(address).expect("the listener accepts");
         let body = rpc("SendStreamingMessage", message("Is the deploy finished?")).to_string();
         idle.write_all(
@@ -868,19 +923,29 @@ fn an_idle_stream_is_cut_at_the_answer_bound() {
         let task_id = turned
             .recv_timeout(Duration::from_secs(30))
             .expect("the turn ran on while its stream was not read");
-        // Past the bound, with a margin for the event that was being written when it started.
+        // The caller takes nothing past the bound, with a margin for the event that was being
+        // written when it started: read earlier, the stream would drain and no write would wait
+        // out its bound. A cut that came later than this fails the case below, never passes it.
         std::thread::sleep(
-            b10x_loom_a2a::WRITE_DEADLINE.saturating_sub(started.elapsed())
-                + Duration::from_secs(5),
+            SHORT_DEADLINES.write.saturating_sub(started.elapsed()) + Duration::from_secs(3),
         );
-
-        let ended = request(
-            address,
-            "POST",
-            PATH,
-            Some(TOKEN),
-            Some(&rpc("GetTask", json!({"id": task_id}))),
-        );
+        // By then the turn has ended; it is asked again until it says so, 5 s at most.
+        let by = Instant::now() + Duration::from_secs(5);
+        let ended = loop {
+            let ended = request(
+                address,
+                "POST",
+                PATH,
+                Some(TOKEN),
+                Some(&rpc("GetTask", json!({"id": task_id}))),
+            );
+            if ended.json()["result"]["status"]["state"] == "TASK_STATE_COMPLETED"
+                || Instant::now() >= by
+            {
+                break ended;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
         assert_eq!(
             ended.json()["result"]["status"]["state"],
             "TASK_STATE_COMPLETED",
@@ -1051,14 +1116,15 @@ fn a_stream_idle_for_the_bound_is_cut_while_its_turn_goes_on() {
 
 /// A turn quiet between two events for longer than the answer's bound, as a model call is, keeps
 /// its stream on a host's listener: the idle bound is [`b10x_loom_a2a::STREAM_IDLE`], 300 s, and
-/// the stream ends with the task's end.
+/// the stream ends with the task's end. The answer's bound is 1 s here ([`SHORT_DEADLINES`]; a
+/// host's is 10 s) and the idle bound a host's.
 #[test]
 fn a_stream_quiet_past_the_answer_bound_keeps_its_stream_until_the_idle_bound() {
     assert_eq!(b10x_loom_a2a::STREAM_IDLE, Duration::from_secs(300));
     let (started_tx, started) = channel();
     let (go, go_rx) = channel();
     let agent = Fake::gated(started_tx, go_rx);
-    with_listener(&agent, |address| {
+    with_short_deadlines(&agent, |address| {
         let streaming = std::thread::spawn(move || {
             request(
                 address,
@@ -1074,7 +1140,7 @@ fn a_stream_quiet_past_the_answer_bound_keeps_its_stream_until_the_idle_bound() 
         started
             .recv_timeout(Duration::from_secs(30))
             .expect("the turn started");
-        std::thread::sleep(b10x_loom_a2a::WRITE_DEADLINE + Duration::from_secs(1));
+        std::thread::sleep(SHORT_DEADLINES.write + Duration::from_secs(1));
         go.send(()).expect("the turn listens");
         let answer = streaming.join().expect("the stream was read to its end");
         let sent = events(&answer.body);

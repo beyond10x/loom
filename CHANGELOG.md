@@ -14,6 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
 - `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
 - `bindings::admit_bound_program_runner` and `bindings::bound_program_child`: a bound program's runner admission and child (story:bound-program-result-table)
 - `b10x_loom_bindings::ProgramEffects` runs a `program` binding through the host's runner; its result table alone makes evidence, every call of the runner counts against `budget.max_runs`, and a case of another protocol is refused `CaseOfAnotherProtocol` (story:bound-program-result-table)
