@@ -706,7 +706,7 @@ Usage: b10x-loom tree run [OPTIONS] --store <DIR>
 | `--at <INSTANT>` | no | none | The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
 
 ```text
-Every open child takes its steps before its parent's next one; each step is selected by the deterministic selector and performed through the action's bound executor. A case is terminated when its completion gives exactly one legitimate outcome and no action in it is useful. When the tree waits, each decision is printed with the exact command that records it. A person action is never taken by tree run.
+Every open child takes its steps before its parent's next one; each step is selected by the deterministic selector and performed through the action's bound executor. A case is terminated when its completion gives exactly one legitimate outcome and no action in it is useful. When the tree waits, each decision is printed with the exact command that records it; a handoff's command is the next tree run, under this run's --confinement. A person action is never taken by tree run.
 
 Exit status:
   0  the root is terminated through its one legitimate outcome
@@ -721,25 +721,28 @@ Exit status:
 Record a principal's decision on one capability for one case of the tree, at the case's current revision
 
 ```text
-Usage: b10x-loom tree approve [OPTIONS] --store <DIR> --case <ID> --capability <CAPABILITY> --principal <PRINCIPAL>
+Usage: b10x-loom tree approve [OPTIONS] --store <DIR> --case <ID> --principal <PRINCIPAL>
 ```
 
 | Argument | Required | Default | Meaning |
 |---|---|---|---|
 | `--store <DIR>` | yes | none | The store directory `tree open` made |
 | `--case <ID>` | yes | none | The case of the tree the decision is for |
-| `--capability <CAPABILITY>` | yes | none | The capability decided |
+| `--capability <CAPABILITY>` | no | none | The capability decided. With --action it may be left out when the protocol action needs none: the action is taken and no authority is recorded |
 | `--principal <PRINCIPAL>` | yes | none | The principal who decided |
 | `--deny` | no | `false` | Deny the capability instead of approving it |
 | `--action <ACTION>` | no | none | Then take this `person` action of the case as the principal: the records its binding declares are produced by the principal about the subject's revision now |
+| `--result <RESULT>` | no | none | The result the person action ends with: a value every `from: effect` entry of its binding lists in its results, which maps it to each record's result; `performed` when absent |
+| `--reasons <TEXT>` | no | none | The person's reasons for the result, at most 65536 bytes and 60 lines: kept as a blob of the store, and the log of the record a writer this result sends back is given |
+| `--reasons-file <FILE>` | no | none | The reasons read from a regular file inside the tree's workspace, opened without following a symbolic link |
 | `--at <INSTANT>` | no | none | The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
 
 ```text
-The decision is kept beside the case file and allows that capability for that case while the case is at the revision it was recorded at, and nothing else: another case, another capability or a moved case reads no approval. A denial wins over an approval of the same capability for the same case and revision.
+The decision is kept beside the case file and allows that capability for that case while the case is at the revision it was recorded at, and nothing else: another case, another capability or a moved case reads no approval. A denial wins over an approval of the same capability for the same case and revision. A person action whose protocol action needs no capability is taken with --action and no --capability, and records no authority; one that needs a capability is refused without it. --result names the result the person action ends with, one its binding's results list, and --reasons or --reasons-file the person's reasons, which a writer the result sends back reads in its retry feedback; a result an entry does not list is refused and nothing is written.
 
 Exit status:
   0  the decision is recorded; it is printed
-  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, or the store cannot be read
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, NotAPersonAction, or the store cannot be read
 ```
 
 ## `b10x-loom tree close`
