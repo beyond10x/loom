@@ -1,6 +1,6 @@
 <!--
   generated from loom v1
-  contract digest 0a8f396010bef523ae4083a6baee49e33a2a211a1d6745538f2f3fa5629ca442
+  contract digest cbbf6ba72286f34e9fb813d08ca78110b2230415897631732a263660ca856b3e
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
@@ -312,7 +312,6 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.tree.NextDecision` |
 | domain type | `loom.tree.Operand` |
 | domain type | `loom.tree.OperandTake` |
-| domain type | `loom.tree.Pick` |
 | domain type | `loom.tree.PickPosition` |
 | domain type | `loom.tree.ReadAs` |
 | domain type | `loom.tree.RecordsSource` |
@@ -322,6 +321,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.tree.ScriptedDecision` |
 | domain type | `loom.tree.SeedEntry` |
 | domain type | `loom.tree.SelectItem` |
+| domain type | `loom.tree.SelectPick` |
 | domain type | `loom.tree.SourceKind` |
 | domain type | `loom.tree.StatusApproval` |
 | domain type | `loom.tree.StatusCopy` |

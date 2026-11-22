@@ -683,7 +683,7 @@ types:
       - name: where
         type: Optional<loom.tree.Conditions>
       - name: pick
-        type: Optional<loom.tree.Pick>
+        type: Optional<loom.tree.SelectPick>
       - name: path
         type: Optional<String>
       - name: follow
@@ -766,7 +766,7 @@ types:
     variants: [first, last, index]
 
   # A pick: the first item, the last, or the one at `index` (from 0; negative from the end).
-  - name: loom.tree.Pick
+  - name: loom.tree.SelectPick
     kind: struct
     fields:
       - name: position

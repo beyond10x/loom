@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 0a8f396010bef523ae4083a6baee49e33a2a211a1d6745538f2f3fa5629ca442
+// contract digest cbbf6ba72286f34e9fb813d08ca78110b2230415897631732a263660ca856b3e
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -508,15 +508,6 @@ pub enum OperandTake {
     Length,
 }
 
-/// Pick — `loom.tree.Pick`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pick {
-    /// `position` — `loom.tree.PickPosition`.
-    pub position: PickPosition,
-    /// `index` — `Optional<Integer>`.
-    pub index: Option<i64>,
-}
-
 /// PickPosition — `loom.tree.PickPosition`: one of a closed set of names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickPosition {
@@ -650,14 +641,23 @@ pub struct SelectItem {
     pub calls: Option<CaseSource>,
     /// `where` — `Optional<loom.tree.Conditions>`.
     pub r#where: Option<Conditions>,
-    /// `pick` — `Optional<loom.tree.Pick>`.
-    pub pick: Option<Pick>,
+    /// `pick` — `Optional<loom.tree.SelectPick>`.
+    pub pick: Option<SelectPick>,
     /// `path` — `Optional<String>`.
     pub path: Option<String>,
     /// `follow` — `Optional<loom.tree.Follow>`.
     pub follow: Option<Follow>,
     /// `as` — `Optional<loom.tree.ReadAs>`.
     pub r#as: Option<ReadAs>,
+}
+
+/// SelectPick — `loom.tree.SelectPick`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectPick {
+    /// `position` — `loom.tree.PickPosition`.
+    pub position: PickPosition,
+    /// `index` — `Optional<Integer>`.
+    pub index: Option<i64>,
 }
 
 /// SourceKind — `loom.tree.SourceKind`: one of a closed set of names.

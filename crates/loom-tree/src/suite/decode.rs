@@ -12,8 +12,8 @@ use loom::tree::{
     ArtifactRevision, CaseSelector, CaseSource, CasesSource, CheckKind, CompareOp, Condition,
     ConditionGroup, Conditions, CycleArea, CycleCondition, CycleExpectation, CycleStep,
     DeclaredName, DocSource, ExitExpectation, FilesSource, Follow, FollowTarget, LengthBound,
-    LogSource, Operand, OperandTake, Pick, PickPosition, ReadAs, RecordsSource, ScriptedApproval,
-    ScriptedChoice, ScriptedClose, ScriptedDecision, SeedEntry, SelectItem, StepKind,
+    LogSource, Operand, OperandTake, PickPosition, ReadAs, RecordsSource, ScriptedApproval,
+    ScriptedChoice, ScriptedClose, ScriptedDecision, SeedEntry, SelectItem, SelectPick, StepKind,
     StopExpectation, SuiteCheck, SuiteCycle, SuiteDefaults, SuiteRefusal, SuiteRefusalReason,
     TreeStop, TreeSuite, UseBound, ValueType,
 };
@@ -1427,16 +1427,16 @@ fn operation(key: &str, value: &Value, at: &str) -> Decoded<SelectItem> {
         "where" => item.r#where = Some(conditions(value, at, true)?),
         "pick" => {
             item.pick = Some(match value {
-                Value::String(text) if text == "first" => Pick {
+                Value::String(text) if text == "first" => SelectPick {
                     position: PickPosition::First,
                     index: None,
                 },
-                Value::String(text) if text == "last" => Pick {
+                Value::String(text) if text == "last" => SelectPick {
                     position: PickPosition::Last,
                     index: None,
                 },
                 other => match other.as_i64() {
-                    Some(index) => Pick {
+                    Some(index) => SelectPick {
                         position: PickPosition::Index,
                         index: Some(index),
                     },

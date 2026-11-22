@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "33b00c0d129e9f3d3c676993c422baeac359b4e9a9b8a8337011dcbbcc96b34c",
-    "contract_digest": "0a8f396010bef523ae4083a6baee49e33a2a211a1d6745538f2f3fa5629ca442"
+    "source_digest": "01fb8ac9510385fa104e14079171596918b0ec36c885e2f4b967db5fbd7f9feb",
+    "contract_digest": "cbbf6ba72286f34e9fb813d08ca78110b2230415897631732a263660ca856b3e"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -2105,13 +2105,6 @@
     },
     {
       "kind": "domain_type",
-      "source": "loom.tree.Pick",
-      "disposition": {
-        "disposition": "generated"
-      }
-    },
-    {
-      "kind": "domain_type",
       "source": "loom.tree.PickPosition",
       "disposition": {
         "disposition": "generated"
@@ -2169,6 +2162,13 @@
     {
       "kind": "domain_type",
       "source": "loom.tree.SelectItem",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.tree.SelectPick",
       "disposition": {
         "disposition": "generated"
       }
