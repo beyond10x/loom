@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:action-dated-by-revisions-its-step-left
 kind: story
-status: draft
+status: active
 title: An action is dated by the revisions its step left
 summary: tree run writes ActionFinished.revisions (the step's artifact moves, before/after difference shared with tree-replay-command) and LogHistory dates each action at the revision of its step and the revision its step left, not the next evaluated line; older logs with no moves read as before
 tags:
@@ -20,7 +20,10 @@ scope:
   path: crates/loom-tree/src/run.rs
 - confidence: cited
   path: crates/loom-tree/tests/cancel_sec/mod.rs
-revision: 11
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T22:20:05Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "runbook-dated-by-revisions-2026-11-22"}
+- {from: "proposed", to: "active", at: "2026-11-22T22:20:06Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "runbook-dated-by-revisions-2026-11-22"}
 ---
 ## Outcome
 
