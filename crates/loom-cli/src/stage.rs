@@ -182,7 +182,7 @@ pub fn stage(from: &Path, to: &Path) -> Result<usize, String> {
         file.set_permissions(fs::Permissions::from_mode(file_mode))
             .map_err(|why| named(&target, &why))?;
         file.write_all(&bytes)
-            .and_then(|()| file.sync_all())
+            .and_then(|()| loom_governor::durable::sync_file(&file))
             .map_err(|why| named(&target, &why))?;
         kept.insert(name.as_str());
     }

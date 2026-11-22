@@ -934,6 +934,7 @@ fn handoff_decision(
         kind: DecisionKind::Handoff,
         action: Some(action.to_owned()),
         capability: None,
+        principal: None,
         decides: bound.handoff.clone()?,
         subject: None,
         revision: None,
@@ -1039,7 +1040,8 @@ fn waits<S: loom_governor::FallibleCaseStore>(
         if let Some(capability) = &capability {
             command.extend(["--capability".to_owned(), capability.clone()]);
         }
-        command.extend(["--principal".to_owned(), principal]);
+        // One value for the command and the decision: the printed principal is the one recorded.
+        command.extend(["--principal".to_owned(), principal.clone()]);
         let kind = if kind == Executor::Person {
             person = true;
             command.extend(["--action".to_owned(), action.clone()]);
@@ -1052,6 +1054,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
             kind,
             action: Some(action.clone()),
             capability,
+            principal: Some(principal),
             decides: format!("{action} of case {} at revision {revision}", case.0),
             subject,
             revision: subject_revision,
@@ -1067,6 +1070,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
                 kind: DecisionKind::Close,
                 action: None,
                 capability: None,
+                principal: None,
                 decides: format!("close case {} through {outcome}", case.0),
                 subject: None,
                 revision: None,

@@ -13,7 +13,56 @@ relations:
 - depends_on: story:tree-run-command
 - depends_on: story:tree-run-takes-a-delegated-cgroup
 - depends_on: story:cancel-a-running-bound-program
-revision: 5
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: Cargo.toml
+- confidence: inferred
+  path: Taskfile.yml
+- confidence: cited
+  path: crates/loom-cli/src/tree.rs
+- confidence: cited
+  path: crates/loom-cli/tests/fixtures/tree-delegated
+- confidence: cited
+  path: crates/loom-cli/tests/tree_run/delegated_cgroup.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/confinement.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/confinement/engine.rs
+- confidence: cited
+  path: crates/loom-protocols/src/lib.rs
+- confidence: cited
+  path: crates/loom-protocols/src/store.rs
+- confidence: cited
+  path: crates/loom-runlog/src/lib.rs
+- confidence: inferred
+  path: crates/loom-sdk/Cargo.toml
+- confidence: cited
+  path: crates/loom-sdk/src/lib.rs
+- confidence: inferred
+  path: crates/loom-sdk/tests/host_ports.rs
+- confidence: inferred
+  path: crates/loom-tree/src/embed.rs
+- confidence: cited
+  path: crates/loom-tree/src/lib.rs
+- confidence: cited
+  path: crates/loom-tree/src/open.rs
+- confidence: cited
+  path: crates/loom-tree/src/run.rs
+- confidence: cited
+  path: crates/loom-tree/src/status.rs
+- confidence: inferred
+  path: crates/loom-tree/tests/embedder
+- confidence: inferred
+  path: crates/loom-tree/tests/main.rs
+- confidence: cited
+  path: crates/loom-xtask/src/release.rs
+- confidence: cited
+  path: website/docs/guides/embed-the-runtime.md
+- confidence: cited
+  path: website/docs/reference/sdk-stability.md
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:29:42Z", actor: "agent:loom", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-22T10:41:24Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "runbook-engine-gaps-2026-11-22"}
@@ -84,7 +133,11 @@ One public module of `b10x-loom-tree`, `embed`. This story owns it, and it holds
   - `encode_line`, which is `b10x_loom_runlog::encode`;
   - `ConfinementError`;
   - `Cancel` of `story:cancel-a-running-bound-program`. That story adds the type to the intake
-    slice, and `run_tree` keeps `cancel: Option<&AtomicBool>`; this story re-exports the type.
+    slice, and `run_tree` keeps `cancel: Option<&AtomicBool>`; this story re-exports the type;
+  - `DEFAULT_PRINCIPAL` (`"operator"`, `crates/loom-tree/src/run.rs:71`). It is the principal an
+    `Approve` decision names in `NextDecision.principal` (`waits`, `run.rs:937-939`, from
+    `story:next-decision-names-the-principal`, merged at `0198a5d1`). The crate root does not
+    re-export it (`crates/loom-tree/src/lib.rs:74`), so today an embedder repeats `operator`.
 
 `embed` narrows nothing. `RunSettings::runner` still takes any `TestRunner`, and
 `EngineRunner::open` and `loom_sdk::SubstrateRunner::new(None)` still discover a root. `embed` is
@@ -100,7 +153,8 @@ runner the same way.
     `website/docs/reference/sdk-stability.md:112`, held by `crates/loom-sdk/tests/host_ports.rs`.
     - Stable: `TreeRunner`, `on_root`, `in_own_scope` (it moves the calling process into a
       leaf), `local` (it supplies `UNCONFINED_FLAG_REASON`), `runner`, `host_catalog`,
-      `encode_line` and `Cancel`.
+      `encode_line`, `Cancel` and `DEFAULT_PRINCIPAL` (its value, `operator`, is part of the
+      promise).
     - `ProtocolCatalog` is one type with two paths: `loom_sdk::ProtocolCatalog`
       (`crates/loom-sdk/src/lib.rs:139`) and `loom_sdk::tree::ProtocolCatalog`. The page lists
       both in one row.
@@ -208,6 +262,14 @@ The tests:
 - **Cancel from another thread** (fixture). `embedder --cancel-after-ms 1000` on a stub that
   sleeps 30 s ends with `TreeRun.stop` `Cancelled` within the bound of
   `story:cancel-a-running-bound-program`. Test: `an_embedder_cancels_a_running_tree`.
+- **The default principal** (fixture). The fixture's one-case tree binds one program action that
+  needs a capability, so `embedder --local` first stops with one `Approve` decision.
+  - The binary prints that decision's `NextDecision.principal` and `embed::DEFAULT_PRINCIPAL`,
+    and the test finds both equal to `operator`.
+  - The binary then approves with `embed::DEFAULT_PRINCIPAL` as the principal, never a literal,
+    and the run goes on.
+
+  Test: `the_default_principal_is_the_approve_decisions_principal`.
 - **The encoder** (`crates/loom-tree/tests/main.rs`, module `embed`). `encode_line` returns a
   line without its line feed (`crates/loom-runlog/src/lib.rs:428`). The lines an observer got,
   each encoded and followed by `\n`, are exactly the bytes of the case's log file. Test:

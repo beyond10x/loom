@@ -781,7 +781,7 @@ pub(crate) fn keep_blob(store: &Path, digest: &str, bytes: &[u8]) -> std::io::Re
         .prefix(".partial-")
         .tempfile_in(&blobs)?;
     file.write_all(bytes)?;
-    file.as_file().sync_all()?;
+    loom_governor::durable::sync_file(file.as_file())?;
     file.persist(&path).map_err(|error| error.error)?;
     Ok(())
 }
@@ -994,6 +994,34 @@ mod tests {
             commission_text(&value),
             r#"{"a":10.50,"b":"x\"y","c":[null,true]}"#
         );
+    }
+
+    /// story:tree-run-tests-fit-the-budget: a kept blob is synced once, through the door of
+    /// `loom_governor::durable`, counted on this thread alone; the same bytes kept again write
+    /// nothing and sync nothing.
+    #[test]
+    fn a_kept_blob_is_synced() {
+        use loom_governor::durable::{counts, counts_on_this_thread};
+        let store = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp/kept-blob-sync")
+            .join(format!(
+                "{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(&store);
+        std::fs::create_dir_all(&store).unwrap();
+        let bytes = b"standard output\n";
+        let keep = || {
+            let before = counts_on_this_thread();
+            keep_blob(&store, &sha256(bytes), bytes).unwrap();
+            let after = counts_on_this_thread();
+            (after.synced - before.synced, after.skipped - before.skipped)
+        };
+        assert_eq!(keep(), (1, 0), "a new blob");
+        assert_eq!(keep(), (0, 0), "the same blob again");
+        assert_eq!(counts().skipped, 0);
+        let _ = std::fs::remove_dir_all(&store);
     }
 
     #[test]

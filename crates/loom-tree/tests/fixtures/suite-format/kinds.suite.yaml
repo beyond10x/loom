@@ -1,0 +1,130 @@
+format: loom.tree-suite/1
+defaults: {protocol: tour@1, bindings: tour.bindings.yaml}
+cycles:
+  - name: exists-holds
+    expect:
+      checks:
+        - {check: exists, name: route-written, select: [{log: {case: first, event: ActionFinished}}, {where: {action: route.write}}]}
+  - name: exists-fails
+    expect:
+      checks:
+        - {check: exists, name: leg-rested, select: [{log: {case: first, event: ActionFinished}}, {where: {action: leg.rest}}]}
+
+  - name: count-holds
+    expect:
+      checks:
+        - {check: count, name: three-cases, select: [{log: {case: "*", event: CaseOpened}}], is: 3}
+        - {check: count, name: some-lines, select: [{doc: {in: work, path: events.jsonl}}], min: 2, max: 3}
+  - name: count-fails
+    expect:
+      checks:
+        - {check: count, name: three-children, select: [{log: {case: ".", event: ChildOpened}}], is: 3}
+
+  - name: equals-holds
+    expect:
+      checks:
+        - {check: equals, name: q2-changed, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].status"}], is: changed}
+  - name: equals-fails
+    expect:
+      checks:
+        - {check: equals, name: q2-open, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].status"}], is: open}
+
+  - name: contains-holds
+    expect:
+      checks:
+        - {check: contains, name: second-line, select: [{doc: {in: work, path: notes.txt}}], is: second line}
+        - {check: contains, name: legs-listed, select: [{doc: {in: work, path: questions.yaml}}, {path: legs}], is: north}
+  - name: contains-fails
+    expect:
+      checks:
+        - {check: contains, name: third-line, select: [{doc: {in: work, path: notes.txt}}], is: third line}
+
+  - name: lacks-holds
+    expect:
+      checks:
+        - {check: lacks, name: no-offline-hosted, select: [{doc: {in: work, path: notes.txt}}], is: offline-hosted}
+  - name: lacks-fails
+    expect:
+      checks:
+        - {check: lacks, name: no-second-line, select: [{doc: {in: work, path: notes.txt}}], is: second line}
+
+  - name: matches-holds
+    expect:
+      checks:
+        - {check: matches, name: answer-the, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].answer"}], regex: "^the "}
+  - name: matches-fails
+    expect:
+      checks:
+        - {check: matches, name: answer-a, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].answer"}], regex: "^a "}
+
+  - name: not_matches-holds
+    expect:
+      checks:
+        - {check: not_matches, name: answer-no-customer, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].answer"}], regex: customer}
+  - name: not_matches-fails
+    expect:
+      checks:
+        - {check: not_matches, name: answer-no-clerk, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].answer"}], regex: clerk}
+
+  - name: all-holds
+    expect:
+      checks:
+        - {check: all, name: every-case-a-tour, select: [{log: {case: "*", event: CaseOpened}}], where: {protocol: {matches: "^tour"}}}
+  - name: all-fails
+    expect:
+      checks:
+        - {check: all, name: every-case-a-leg, select: [{log: {case: "*", event: CaseOpened}}], where: {protocol: tour-leg@1}}
+
+  - name: none-holds
+    expect:
+      checks:
+        - {check: none, name: no-run-timed-out, select: [{runs: {case: first}}], where: {timed_out: true}}
+  - name: none-fails
+    expect:
+      checks:
+        - {check: none, name: no-route-check, select: [{runs: {case: first}}], where: {action: route.check}}
+
+  - name: some-holds
+    expect:
+      checks:
+        - {check: some, name: a-run-passed, select: [{runs: {case: first}}], where: {exit: 0}}
+  - name: some-fails
+    expect:
+      checks:
+        - {check: some, name: a-run-exited-2, select: [{runs: {case: first}}], where: {exit: 2}}
+
+  - name: sequence-holds
+    expect:
+      checks:
+        - {check: sequence, name: root-order, select: [{log: {case: ".", event: [ActionStarted, ChildOpened, Terminated]}}, {path: kind}], within: [ActionStarted, ChildOpened, Terminated]}
+        - {check: sequence, name: root-ends, select: [{log: {case: "."}}, {path: kind}], ends: [Stopped, Terminated]}
+  - name: sequence-fails
+    expect:
+      checks:
+        - {check: sequence, name: root-starts-stopped, select: [{log: {case: "."}}, {path: kind}], starts: [Stopped]}
+
+  - name: before-holds
+    expect:
+      checks:
+        - {check: before, name: started-then-finished, select: [{log: {case: "."}}], first: {kind: ActionStarted}, then: {kind: ActionFinished}}
+  - name: before-fails
+    expect:
+      checks:
+        - {check: before, name: child-then-started, select: [{log: {case: "."}}], first: {kind: ChildOpened}, then: {kind: ActionStarted}}
+
+  - name: compare-holds
+    expect:
+      checks:
+        - check: compare
+          name: a-case-per-leg-and-root
+          left: {select: [{log: {case: "*", event: CaseOpened}}], take: count}
+          op: eq
+          right: {select: [{files: {in: work, glob: "legs/*.yaml"}}], take: count, plus: 1}
+  - name: compare-fails
+    expect:
+      checks:
+        - check: compare
+          name: fewer-cases-than-legs
+          left: {select: [{log: {case: "*", event: CaseOpened}}], take: count}
+          op: lt
+          right: {select: [{files: {in: work, glob: "legs/*.yaml"}}], take: count, plus: 1}

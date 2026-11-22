@@ -208,7 +208,8 @@ fn tree_run(tree: &Tree, cgroup: Option<&Path>, root: Option<&Path>) -> Command 
         .env("HOME", &home)
         .env("XDG_DATA_HOME", &home)
         .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
-        .env_remove("RUST_LOG")
+        .env_remove("RUST_LOG");
+    super::with_the_switch(&mut command)
         .args(["tree", "run", "--at", AT, "--store"])
         .arg(tree.store());
     if let Some(root) = root {
@@ -511,7 +512,7 @@ fn the_tree_refusal_names_tree_runs_own_remedy() {
 
 #[test]
 fn tree_run_help_and_refusal_name_the_confinement_precondition() {
-    let help = Command::new(BINARY)
+    let help = super::with_the_switch(&mut Command::new(BINARY))
         .args(["tree", "run", "--help"])
         .output()
         .unwrap();

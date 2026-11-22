@@ -14,6 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- `loom_governor::durable`: every sync of the tree path's stores through one counted door; its test-only feature `test-unsynced-store` (story:tree-run-tests-fit-the-budget)
 - Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
 - The model retry policy as a parameter, `run::MODEL_RETRY` its default (three attempts, 1 s then 2 s): `RunOptions::model_retry`, `RunOptions::with_context_policy`, `with_context_report` and `with_model_retry`, `Briefing::with_retry` and `selector::send_with_policy` (`b10x-loom-intake-slice`)
 - How long a host waits for a held state directory as a parameter, `state::LOCK_WAIT` (2 s) its default: `Host::with_lock_wait` and `StateDir::open_waiting`; a turn's model retry policy, `run::MODEL_RETRY` its default: `Host::with_model_retry` and `Host::model_retry` (`b10x-loom-plugin`); `run::RetryPolicy` (`b10x-loom-intake-slice`)
@@ -38,6 +39,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `intake.protocols.SourceKind` (`loom_protocols::SourceKind`) gains `Directory`, the source of a protocol a tree read from a `--protocols` directory: an exhaustive `match` on it needs the arm (story:tree-run-command)
 - `b10x-loom tree open --protocols <dir>` reads the tree's protocols from the `.yaml` files directly in `<dir>`, each under the registration it declares, keeps them in the store as blobs with `tree-protocols.json`, and every later tree command builds its catalog from those alone; refused: `DuplicateProtocol`, `ProtocolRefused`, `ProtocolLinkLeavesDirectory`, `ProtocolNotInDirectory`, `NoProtocolFiles`, and `StoredProtocolChanged` for a changed blob. `loom_protocols::registration_for` is public (story:tree-run-command)
 - `b10x-loom tree close --case <id> --outcome <name>` terminates a case through an outcome Canon reports legitimate for it now, the choice a waiting `tree run` prints when more than one is; another outcome is refused `OutcomeNotLegitimate` and writes nothing (story:tree-run-command)
+- `loom.tree.NextDecision.principal`: the `--principal` a printed `tree approve` records, the bound person for `ApproveAction`, `operator` for `Approve`; absent for `Close` and `Handoff` (story:next-decision-names-the-principal)
+- **Breaking:** `NextDecision` (`b10x_loom_tree::model`) gains the field `principal`: a struct literal of it names the field (story:next-decision-names-the-principal)
 - `tree status` prints `loom.tree-status/1`: per case its link name, protocol id and revision, the decisions it waits on, its records, program runs, approvals and copies; `b10x_loom_tree::read_status`, `stored_catalog` and `STATUS_FORMAT` (story:tree-run-command)
 - `b10x_loom_protocols::canon` re-exports the Canon crate Loom links; an embedder names one runtime dependency.
 - `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
@@ -58,6 +61,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - A `program` binding's `handoff_when` argv decides its `handoff`: `tree run` runs it before the writer's step and at a stuck stop, read-only; exit 0 hands off (story:handoff-when-a-program-decides)
 - `b10x_loom_bindings::run_handoff_check`, `HandoffCheck`, `handoff_check_of` and `LAUNCH_FAILURE_EXITS` (story:handoff-when-a-program-decides)
 - `ChildCommand::with_read_only_workspace`: a confined child that writes nothing in its workspace, `target/` included (story:handoff-when-a-program-decides)
+- `b10x-loom tree test --suite FILE --protocols DIR --scratch DIR --at INSTANT [--confinement substrate|local] [--report FILE]` runs a `loom.tree-suite/1` suite of scripted tree cycles one after another, each in `<scratch>/<n>/`, and prints per cycle `as expected`, `FAILED` with the first difference, `pending` or `not run`, then the two summary lines; exit 0, 1, or 2 when refused before any cycle. A check is data: a selection over the sources `log`, `records`, `runs`, `cases`, `doc`, `files`, `step` and `suite`, and one of thirteen check kinds; a found value that is not a number, a boolean or a name Loom declares prints as its length and digest. A cycle that uses a part `SUITE_AVAILABILITY` marks waiting is pending and names its story. `b10x_loom_tree::suite`: `decode_suite`, `read_suite`, `evaluate_checks`, `capture_after`, `select`, `run_suite` with `SuiteSettings`, a `SuiteObserver` and a cancel flag; the suite and report types in `ess/domains/tree.yaml` (story:tree-suite-format)
 
 ### Changed
 

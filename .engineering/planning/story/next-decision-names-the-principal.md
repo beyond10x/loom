@@ -11,7 +11,34 @@ relations:
 - serves: vision:O1
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:tree-run-command
-revision: 4
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: crates/loom-bindings/src/decode.rs
+- confidence: cited
+  path: crates/loom-bindings/src/load.rs
+- confidence: cited
+  path: crates/loom-cli/tests/tree_run.rs
+- confidence: cited
+  path: crates/loom-tree/src/approve.rs
+- confidence: cited
+  path: crates/loom-tree/src/encode.rs
+- confidence: cited
+  path: crates/loom-tree/src/person.rs
+- confidence: cited
+  path: crates/loom-tree/src/run.rs
+- confidence: cited
+  path: crates/loom-tree/tests/main.rs
+- confidence: cited
+  path: ess/domains/runlog.yaml
+- confidence: cited
+  path: ess/domains/tree.yaml
+- confidence: inferred
+  path: generated/ess/loom
+- confidence: cited
+  path: generated/rust/loom/src/tree.rs
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:29:39Z", actor: "agent:loom", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-22T10:41:24Z", actor: "agent:sdc", revision: 4, executor: "agent:loom", correlation: "runbook-engine-gaps-2026-11-22"}

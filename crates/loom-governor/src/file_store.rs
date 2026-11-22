@@ -412,14 +412,12 @@ impl FileCaseStore {
             step!(WriteStep::HalfWritten);
             file.write_all(second).map_err(abandon)?;
             step!(WriteStep::Written);
-            file.sync_all().map_err(abandon)?;
+            crate::durable::sync_file(&file).map_err(abandon)?;
             step!(WriteStep::Synced);
             drop(file);
             fs::rename(&temporary, &path).map_err(abandon)?;
             step!(WriteStep::Renamed);
-            if let Ok(dir) = fs::File::open(self.dir.path()) {
-                let _ = dir.sync_all();
-            }
+            crate::durable::sync_dir(self.dir.path());
             step!(WriteStep::DirectorySynced);
             Ok(Some(Some(result)))
         })

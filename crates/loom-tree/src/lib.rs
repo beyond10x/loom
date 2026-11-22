@@ -42,6 +42,8 @@ mod store;
 mod time;
 mod verify;
 
+pub mod suite;
+
 use std::fmt;
 
 /// The runners a [`RunSettings`] starts bound programs through, and the reason a `local` runner

@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 0465e7fb4efe20ffa0d868ecec387270fe18707d24f87f3392fce7a2b077ae18
+  contract digest db5b7a0997ec1e1191e91b74ef43f5711af898b990eccf5b39c8c9a6370efd8f
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-471 capabilities: **455 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+520 capabilities: **504 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -282,17 +282,62 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
 | domain type | `loom.tree.ApprovalDecision` |
+| domain type | `loom.tree.ArtifactRevision` |
 | domain type | `loom.tree.CaseApproval` |
+| domain type | `loom.tree.CaseSelector` |
+| domain type | `loom.tree.CaseSource` |
 | domain type | `loom.tree.CaseStatus` |
+| domain type | `loom.tree.CasesSource` |
+| domain type | `loom.tree.CheckDifference` |
+| domain type | `loom.tree.CheckKind` |
+| domain type | `loom.tree.CompareOp` |
+| domain type | `loom.tree.Condition` |
+| domain type | `loom.tree.ConditionGroup` |
+| domain type | `loom.tree.Conditions` |
+| domain type | `loom.tree.CycleArea` |
+| domain type | `loom.tree.CycleCondition` |
+| domain type | `loom.tree.CycleExpectation` |
+| domain type | `loom.tree.CycleResult` |
+| domain type | `loom.tree.CycleStep` |
 | domain type | `loom.tree.DecisionKind` |
+| domain type | `loom.tree.DeclaredName` |
+| domain type | `loom.tree.DifferenceReason` |
+| domain type | `loom.tree.DocSource` |
+| domain type | `loom.tree.ExitExpectation` |
+| domain type | `loom.tree.FilesSource` |
+| domain type | `loom.tree.Follow` |
+| domain type | `loom.tree.FollowTarget` |
+| domain type | `loom.tree.LengthBound` |
 | domain type | `loom.tree.LogFailure` |
+| domain type | `loom.tree.LogSource` |
 | domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.Operand` |
+| domain type | `loom.tree.OperandTake` |
+| domain type | `loom.tree.PickPosition` |
+| domain type | `loom.tree.ReadAs` |
+| domain type | `loom.tree.RecordsSource` |
+| domain type | `loom.tree.ScriptedApproval` |
+| domain type | `loom.tree.ScriptedChoice` |
+| domain type | `loom.tree.ScriptedClose` |
+| domain type | `loom.tree.ScriptedDecision` |
+| domain type | `loom.tree.SeedEntry` |
+| domain type | `loom.tree.SelectItem` |
+| domain type | `loom.tree.SelectPick` |
+| domain type | `loom.tree.SourceKind` |
 | domain type | `loom.tree.SpentBudget` |
 | domain type | `loom.tree.StatusApproval` |
 | domain type | `loom.tree.StatusCopy` |
 | domain type | `loom.tree.StatusEvidence` |
 | domain type | `loom.tree.StatusLog` |
 | domain type | `loom.tree.StatusRun` |
+| domain type | `loom.tree.StepKind` |
+| domain type | `loom.tree.StopExpectation` |
+| domain type | `loom.tree.SuiteCheck` |
+| domain type | `loom.tree.SuiteCycle` |
+| domain type | `loom.tree.SuiteDefaults` |
+| domain type | `loom.tree.SuiteRefusal` |
+| domain type | `loom.tree.SuiteRefusalReason` |
+| domain type | `loom.tree.SuiteReport` |
 | domain type | `loom.tree.TreeBudget` |
 | domain type | `loom.tree.TreeCatalog` |
 | domain type | `loom.tree.TreeLogHead` |
@@ -303,7 +348,11 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.tree.TreeRun` |
 | domain type | `loom.tree.TreeStatus` |
 | domain type | `loom.tree.TreeStop` |
+| domain type | `loom.tree.TreeSuite` |
 | domain type | `loom.tree.TreeVerify` |
+| domain type | `loom.tree.UseBound` |
+| domain type | `loom.tree.ValueType` |
+| domain type | `loom.tree.WaitingCycle` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |
