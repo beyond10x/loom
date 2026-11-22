@@ -502,6 +502,8 @@ fn closed(
             RunLogEvent::ChildClosed(ChildClosed {
                 child: case.case.clone(),
                 outcome: Some(outcome.to_owned()),
+                record: None,
+                record_digest: None,
             }),
         )?;
         emit(parent, line);
@@ -573,6 +575,8 @@ fn opened<S: loom_governor::FallibleCaseStore>(
             RunLogEvent::ChildOpened(ChildOpened {
                 child: child.to_owned(),
                 protocol,
+                record: None,
+                record_digest: None,
             }),
         )?;
         emit(parent, line);

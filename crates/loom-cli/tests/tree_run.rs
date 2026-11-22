@@ -8,6 +8,7 @@
 //! the binary with `HOME` and `XDG_DATA_HOME` at that scratch directory; no test reaches the
 //! network, a model or a credential, and each asserts it ended within 60 s.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -21,11 +22,12 @@ use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement,
 use b10x_loom_tree::model::{TreeRefusalReason, TreeStop};
 use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
 use b10x_loom_tree::{
-    RunSettings, STATUS_FORMAT, TreeTime, log_file_name, read_log, read_status, run_tree,
-    status_json, tree_status,
+    RunSettings, STATUS_FORMAT, TreeTime, decision_json, log_file_name, read_log, read_status,
+    run_tree, status_json, tree_status,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 
@@ -929,4 +931,259 @@ fn a_person_record_names_the_revisions_of_its_declared_upstream() {
     );
     let undeclared = approval_record("person-no-upstream", "tour-leg.bindings.yaml");
     assert_eq!(undeclared["upstream_revisions"], json!({}), "{undeclared}");
+}
+
+// Story `child-record-in-the-run-log`: each write of a child's `case_outcome` record in its parent
+// appears in one line of the parent's log, `child opened` or `child closed`, naming the record and
+// the SHA-256 of its facts.
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The case file of `case` in `store`, as JSON.
+fn case_file(store: &Path, case: &str) -> Value {
+    let path = store.join(format!("{}.json", loom_governor::case_file_stem(case)));
+    serde_json::from_slice(&fs::read(&path).unwrap()).unwrap()
+}
+
+/// The SHA-256 of the facts of each `case_outcome` record `case`'s case file holds now, by
+/// evidence id: the facts' JSON as `serde_json` writes it, members in name order.
+fn record_digests(store: &Path, case: &str) -> BTreeMap<String, String> {
+    case_file(store, case)["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|held| held["data"]["kind"] == "case_outcome")
+        .map(|held| {
+            (
+                held["data"]["evidence_id"].as_str().unwrap().to_owned(),
+                sha256_hex(&serde_json::to_vec(&held["data"]["facts"]).unwrap()),
+            )
+        })
+        .collect()
+}
+
+/// A `child opened` or `child closed` line an observer was given: the case whose log holds it,
+/// the line, and the digests of the `case_outcome` records that case's file held right then.
+struct ChildLine {
+    case: String,
+    line: RunLogLine,
+    held: BTreeMap<String, String>,
+}
+
+/// The `record` and `record_digest` of a child line; `None` for any other line.
+fn record_of(line: &RunLogLine) -> Option<(Option<&str>, Option<&str>)> {
+    match &line.event {
+        RunLogEvent::ChildOpened(opened) => {
+            Some((opened.record.as_deref(), opened.record_digest.as_deref()))
+        }
+        RunLogEvent::ChildClosed(closed) => {
+            Some((closed.record.as_deref(), closed.record_digest.as_deref()))
+        }
+        _ => None,
+    }
+}
+
+/// The two-level tree run in process to its end: `tree open`, then `run_tree` with an observer,
+/// each first decision taken through the command line, until a run ends `Terminal`. Each child
+/// line the observer was given, in order.
+fn child_lines_to_end(tree: &Tree) -> Vec<ChildLine> {
+    let opened = tree.open();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let catalog = tree.catalog();
+    let store = tree.store();
+    let mut seen: Vec<ChildLine> = Vec::new();
+    for _ in 0..8 {
+        let mut observer = |case: &str, line: &RunLogLine| {
+            if record_of(line).is_some() {
+                seen.push(ChildLine {
+                    case: case.to_owned(),
+                    line: line.clone(),
+                    held: record_digests(&store, case),
+                });
+            }
+        };
+        let ran = run_tree(&store, &catalog, &settings(None), Some(&mut observer), None).unwrap();
+        if ran.stop == TreeStop::Terminal {
+            return seen;
+        }
+        let decided = tree.decided(&decision_json(&ran.decisions[0]));
+        assert_eq!(decided.status.code(), Some(0), "{}", stderr(&decided));
+    }
+    panic!("the tree did not end within 8 runs");
+}
+
+#[test]
+fn each_write_of_a_childs_record_appears_in_exactly_one_parent_line() {
+    let tree = Tree::new("child-record-lines");
+    let seen = child_lines_to_end(&tree);
+    let store = tree.store();
+    let root = case_file(&store, "root");
+    let links = root["children"].as_array().unwrap();
+    assert_eq!(links.len(), 3, "the first leg and two legs: {root}");
+    let lines = log_lines(&tree, "root");
+    let names = |line: &RunLogLine, record: &str| match &line.event {
+        RunLogEvent::ActionFinished(finished) => finished.evidence.iter().any(|id| id == record),
+        _ => record_of(line).is_some_and(|(named, _)| named == Some(record)),
+    };
+    for link in links {
+        let child = link["child"].as_str().unwrap();
+        let record = link["outcome_evidence"].as_str().unwrap();
+        // The record is written at the opening and replaced at the termination: two lines.
+        let naming: Vec<&RunLogLine> = lines.iter().filter(|line| names(line, record)).collect();
+        assert_eq!(naming.len(), 2, "{child}: {naming:#?}");
+        assert!(
+            matches!(&naming[0].event, RunLogEvent::ChildOpened(opened) if opened.child == child),
+            "{child}: the opening's write is in `child opened`: {naming:#?}"
+        );
+        assert!(
+            matches!(&naming[1].event, RunLogEvent::ChildClosed(closed) if closed.child == child),
+            "{child}: the termination's write is in `child closed`: {naming:#?}"
+        );
+        for line in naming {
+            let given = seen
+                .iter()
+                .find(|given| given.case == "root" && given.line == *line)
+                .unwrap_or_else(|| panic!("{child}: the observer was not given {line:?}"));
+            let (_, digest) = record_of(line).unwrap();
+            assert_eq!(
+                digest,
+                given.held.get(record).map(String::as_str),
+                "{child}: the digest is that of the facts right after the write: {line:?}"
+            );
+        }
+        // The child's own log names no record of its parent.
+        let own = log_lines(&tree, child);
+        assert!(
+            !own.iter().any(|line| names(line, record)),
+            "{child}: {own:#?}"
+        );
+    }
+}
+
+#[test]
+fn the_closing_digest_differs_from_the_opening_digest() {
+    let tree = Tree::new("child-record-digests");
+    let (_, ended) = run_to_end(&tree);
+    assert_eq!(ended["stop"], "Terminal", "{ended}");
+    let mut opened: BTreeMap<String, String> = BTreeMap::new();
+    let mut closed: BTreeMap<String, String> = BTreeMap::new();
+    for line in log_lines(&tree, "root") {
+        let Some((Some(record), Some(digest))) = record_of(&line) else {
+            continue;
+        };
+        let into = match line.event {
+            RunLogEvent::ChildOpened(_) => &mut opened,
+            _ => &mut closed,
+        };
+        assert!(
+            into.insert(record.to_owned(), digest.to_owned()).is_none(),
+            "{record} named twice by one kind of line"
+        );
+    }
+    assert_eq!(opened.len(), 3, "{opened:?}");
+    assert_eq!(
+        opened.keys().collect::<Vec<_>>(),
+        closed.keys().collect::<Vec<_>>()
+    );
+    for (record, digest) in &opened {
+        let closing = &closed[record];
+        for held in [digest, closing] {
+            assert!(
+                held.len() == 64
+                    && held
+                        .bytes()
+                        .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')),
+                "{record}: {held} is no SHA-256"
+            );
+        }
+        assert_ne!(
+            digest, closing,
+            "{record}: the record is replaced, not repeated"
+        );
+    }
+}
+
+#[test]
+fn a_status_names_the_child_of_each_case_outcome_record() {
+    let tree = Tree::new("child-record-status");
+    let opened = tree.open();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    // The first run opens the first leg, which waits on its person.
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let root = case_file(&tree.store(), "root");
+    let names: BTreeMap<&str, &str> = root["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|link| {
+            (
+                link["outcome_evidence"].as_str().unwrap(),
+                link["name"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(names.values().collect::<Vec<_>>(), [&"first"], "{root}");
+    let mut named = 0;
+    for case in status["cases"].as_array().unwrap() {
+        for record in case["evidence"].as_array().unwrap() {
+            if record["kind"] == "case_outcome" {
+                let id = record["evidence_id"].as_str().unwrap();
+                assert_eq!(record["name"], names[id], "{record}");
+                named += 1;
+            } else {
+                assert!(record.get("name").is_none(), "{record}");
+            }
+        }
+    }
+    assert_eq!(named, 1, "{status}");
+    // The printed status reads back as the value it printed, `name` included.
+    let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
+    assert_eq!(read_status(&printed.stdout).unwrap(), value);
+    assert_eq!(status, status_json(&value));
+}
+
+#[test]
+fn an_observer_is_given_the_record_of_each_child_line() {
+    let tree = Tree::new("child-record-observer");
+    let seen = child_lines_to_end(&tree);
+    let written: Vec<RunLogLine> = log_lines(&tree, "root")
+        .into_iter()
+        .filter(|line| record_of(line).is_some())
+        .collect();
+    let observed: Vec<RunLogLine> = seen
+        .iter()
+        .filter(|given| given.case == "root")
+        .map(|given| given.line.clone())
+        .collect();
+    assert_eq!(
+        observed, written,
+        "the observer is given each child line as written"
+    );
+    assert_eq!(
+        observed.len(),
+        6,
+        "three opened, three closed: {observed:#?}"
+    );
+    for line in &observed {
+        let (record, digest) = record_of(line).unwrap();
+        assert!(
+            record.is_some() && digest.is_some(),
+            "the observer is given the record of {line:?}"
+        );
+    }
 }

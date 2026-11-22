@@ -15,7 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 use b10x_loom_commission::model::responsibility::CaseId;
-use b10x_loom_runlog::{AppendStep, RunLog, RunLogError, log_file_name, verify};
+use b10x_loom_runlog::{AppendStep, RunLog, RunLogError, encode, log_file_name, verify};
 use loom::primitives::Timestamp;
 use loom::runlog::{
     ActionFinished, ActionStarted, AuthorityRecorded, CaseOpened, ChildClosed, ChildOpened,
@@ -28,6 +28,9 @@ use loom_governor::{
 use sha2::{Digest as _, Sha256};
 
 const CASE: &str = "chg-1842";
+
+/// The evidence id of a child's `case_outcome` record in these tests' child lines.
+const RECORD: &str = "5842f400-803c-84aa-847f-3704886e183b";
 
 /// The environment variable that makes the two-process test's binary an appender over the
 /// directory it names.
@@ -107,10 +110,16 @@ fn event(index: usize) -> RunLogEvent {
         5 => RunLogEvent::ChildOpened(ChildOpened {
             child: format!("child-{marker}"),
             protocol: "review@1".to_owned(),
+            record: (index % 20 == 5).then(|| RECORD.to_owned()),
+            record_digest: (index % 20 == 5)
+                .then(|| sha256_hex(format!("open {marker}").as_bytes())),
         }),
         6 => RunLogEvent::ChildClosed(ChildClosed {
             child: format!("child-{marker}"),
             outcome: (index % 20 == 6).then(|| "approved".to_owned()),
+            record: (index % 20 == 6).then(|| RECORD.to_owned()),
+            record_digest: (index % 20 == 6)
+                .then(|| sha256_hex(format!("close {marker}").as_bytes())),
         }),
         7 => RunLogEvent::AuthorityRecorded(AuthorityRecorded {
             capability: "repository.merge".to_owned(),
@@ -771,4 +780,371 @@ fn two_unreadable_lines_in_a_row_are_named_by_the_second() {
         (RunLogRefusal::BrokenChain, 2),
         "line 2 does not read, so it names no line before it: the break is line 2"
     );
+}
+
+// Story `child-record-in-the-run-log`: a child line names the child's `case_outcome` record in the
+// parent, `record` and `record_digest`, both or neither.
+
+/// The members of a `child opened` line of these tests, beside its `kind`.
+const OPENED: &str = r#""kind":"ChildOpened","child":"chg-1842.review","protocol":"review@1""#;
+/// The members of a `child closed` line of these tests, beside its `kind`.
+const CLOSED: &str = r#""kind":"ChildClosed","child":"chg-1842.review","outcome":"approved""#;
+/// A line before the child line and one after it, so the child line is never the last.
+const FIRST: &str = r#""kind":"CaseOpened","case":"chg-1842","protocol":"software-change@1""#;
+const LAST: &str = r#""kind":"Stopped","stop":"AwaitingPerson","next":[]"#;
+
+/// A log of one line per body (`kind` and the event's members), each with its `seq`, `at` and the
+/// `prev` this test computes: the chain holds whatever the members are.
+fn chain(bodies: &[String]) -> Vec<u8> {
+    let mut lines: Vec<Vec<u8>> = Vec::new();
+    for (index, body) in bodies.iter().enumerate() {
+        let prev = lines
+            .last()
+            .map(|line| format!("\"prev\":\"{}\",", sha256_hex(line)))
+            .unwrap_or_default();
+        let line = format!(
+            "{{\"seq\":{index},{prev}\"at\":\"{}\",{body}}}",
+            at(index).0
+        );
+        lines.push(line.into_bytes());
+    }
+    joined(&lines)
+}
+
+/// The log `FIRST`, the child line `child` with `members` after its own, `LAST`.
+fn child_log(child: &str, members: &str) -> Vec<u8> {
+    chain(&[
+        FIRST.to_owned(),
+        format!("{child}{members}"),
+        LAST.to_owned(),
+    ])
+}
+
+fn refusal(bytes: &[u8]) -> RunLogRefused {
+    match verify(bytes) {
+        Ok(lines) => panic!("the log verified as {} lines: {lines:?}", lines.len()),
+        Err(refused) => refused,
+    }
+}
+
+/// The child line of `kind` (`ChildOpened` or `ChildClosed`) holding `record` and `record_digest`.
+fn child_event(kind: &str, record: Option<&str>, record_digest: Option<&str>) -> RunLogEvent {
+    let record = record.map(str::to_owned);
+    let record_digest = record_digest.map(str::to_owned);
+    if kind == "ChildOpened" {
+        RunLogEvent::ChildOpened(ChildOpened {
+            child: "chg-1842.review".to_owned(),
+            protocol: "review@1".to_owned(),
+            record,
+            record_digest,
+        })
+    } else {
+        RunLogEvent::ChildClosed(ChildClosed {
+            child: "chg-1842.review".to_owned(),
+            outcome: Some("approved".to_owned()),
+            record,
+            record_digest,
+        })
+    }
+}
+
+/// An append of `event` after one line is refused as a line that would not read back, and no
+/// byte of the log changes.
+fn append_is_refused(label: &str, event: RunLogEvent) {
+    let (log, path) = log_with(label, 1);
+    let before = fs::read(&path).expect("reads");
+    let result = log.append(CASE, at(1), event);
+    assert!(
+        matches!(result, Err(RunLogError::Store(_))),
+        "{label}: the append is refused: {result:?}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("reads"),
+        before,
+        "{label}: no byte changed"
+    );
+}
+
+#[test]
+fn a_child_line_with_record_but_no_record_digest_is_refused() {
+    let digest = sha256_hex(b"facts");
+    for (kind, child) in [("ChildOpened", OPENED), ("ChildClosed", CLOSED)] {
+        // With both members the line reads: the refusal below is the missing member's.
+        let whole = child_log(
+            child,
+            &format!(",\"record\":\"{RECORD}\",\"record_digest\":\"{digest}\""),
+        );
+        let lines = verify(&whole).unwrap_or_else(|refused| panic!("{kind}: {refused:?}"));
+        assert_eq!(
+            lines[1].event,
+            child_event(kind, Some(RECORD), Some(&digest))
+        );
+
+        let refused = refusal(&child_log(child, &format!(",\"record\":\"{RECORD}\"")));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (RunLogRefusal::BrokenChain, 1),
+            "{kind}: {refused:?}"
+        );
+        assert!(
+            refused.detail.contains("record_digest:"),
+            "{kind}: the detail names the missing member: {}",
+            refused.detail
+        );
+        append_is_refused(
+            &format!("record-alone-{kind}"),
+            child_event(kind, Some(RECORD), None),
+        );
+    }
+}
+
+#[test]
+fn a_child_line_with_record_digest_but_no_record_is_refused() {
+    let digest = sha256_hex(b"facts");
+    for (kind, child) in [("ChildOpened", OPENED), ("ChildClosed", CLOSED)] {
+        let refused = refusal(&child_log(
+            child,
+            &format!(",\"record_digest\":\"{digest}\""),
+        ));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (RunLogRefusal::BrokenChain, 1),
+            "{kind}: {refused:?}"
+        );
+        assert!(
+            refused.detail.contains("record:"),
+            "{kind}: the detail names the missing member: {}",
+            refused.detail
+        );
+        append_is_refused(
+            &format!("digest-alone-{kind}"),
+            child_event(kind, None, Some(&digest)),
+        );
+    }
+}
+
+#[test]
+fn a_record_digest_that_is_no_sha256_is_refused() {
+    let digest = sha256_hex(b"facts");
+    let not_sha256 = [
+        ("upper case", digest.to_uppercase()),
+        ("63 digits", digest[..63].to_owned()),
+        ("65 digits", format!("{digest}0")),
+        ("no hex digit", format!("g{}", &digest[1..])),
+        ("empty", String::new()),
+    ];
+    for (kind, child) in [("ChildOpened", OPENED), ("ChildClosed", CLOSED)] {
+        for (what, bad) in &not_sha256 {
+            let refused = refusal(&child_log(
+                child,
+                &format!(",\"record\":\"{RECORD}\",\"record_digest\":\"{bad}\""),
+            ));
+            assert_eq!(
+                (refused.refusal, refused.line),
+                (RunLogRefusal::BrokenChain, 1),
+                "{kind}, {what}: {refused:?}"
+            );
+            assert!(
+                refused.detail.contains("record_digest:"),
+                "{kind}, {what}: the detail names the member: {}",
+                refused.detail
+            );
+            append_is_refused(
+                &format!("bad-digest-{kind}-{}", what.replace(' ', "-")),
+                child_event(kind, Some(RECORD), Some(bad)),
+            );
+        }
+    }
+}
+
+/// The first six lines of a root case's log as Loom wrote it before this change (the stub cycle
+/// of 2026-11-22 under the tree commands at `2c0a6f48`): no child line names a record.
+const OLD_LOG: &str = concat!(
+    "{\"seq\":0,\"at\":\"2026-11-22T10:00:00Z\",\"kind\":\"CaseOpened\",\"case\":\"IDEA-1\",\"protocol\":\"sdc@8\"}\n",
+    "{\"seq\":1,\"prev\":\"894ae22a948ec27be07abe7c28116b52eaeb824dc6d0490b73876a139a1d114e\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"Evaluated\",\"case_revision\":1,\"frontier\":\"0eacfce8-16f1-8d0c-99c3-260dee165509\",\"decision_digest\":\"9142a67e29fab11e18bc167b7f6bd3556cfcd4f9cde7a3ff0d0eabcb295707d3\"}\n",
+    "{\"seq\":2,\"prev\":\"3267a9b8e964a514e88aac74ef38bb325e79d80e90bddab519c587eca2519720\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"ActionFinished\",\"action\":\"intake.open\",\"exit\":0,\"evidence\":[\"194fee46-1446-8629-9928-392f08baa58b\"],\"revisions\":[]}\n",
+    "{\"seq\":3,\"prev\":\"93b6b338daa67364967efbf2a02c10e6e8f01989ca441cccdfca19e0a7e7711c\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"ChildOpened\",\"child\":\"IDEA-1.intake\",\"protocol\":\"sdc-intake@9\"}\n",
+    "{\"seq\":4,\"prev\":\"12ec10b922354cb87a13d69c82436827a4659de798c2f8200fdd79c9948c2eeb\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"ChildClosed\",\"child\":\"IDEA-1.intake\",\"outcome\":\"passed\"}\n",
+    "{\"seq\":5,\"prev\":\"1a25c9b872567de9e230391b31fd61aee862a85f8a1d1e14a4eb3d209f0efaa5\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"Evaluated\",\"case_revision\":1,\"frontier\":\"9dacb14c-3f3e-8f49-9323-5ec83150bd94\",\"decision_digest\":\"8eee3bcc0b231fb214b8fd53070e999665ad05c52c461704671c25125c982b62\"}\n",
+);
+
+#[test]
+fn an_old_log_without_the_record_members_still_verifies() {
+    let read = verify(OLD_LOG.as_bytes()).expect("a log written before the change verifies");
+    assert_eq!(read.len(), 6);
+    assert_eq!(
+        read[3].event,
+        RunLogEvent::ChildOpened(ChildOpened {
+            child: "IDEA-1.intake".to_owned(),
+            protocol: "sdc-intake@9".to_owned(),
+            record: None,
+            record_digest: None,
+        })
+    );
+    assert_eq!(
+        read[4].event,
+        RunLogEvent::ChildClosed(ChildClosed {
+            child: "IDEA-1.intake".to_owned(),
+            outcome: Some("passed".to_owned()),
+            record: None,
+            record_digest: None,
+        })
+    );
+    // Each line reads back as the bytes it was read from.
+    for (line, raw) in read.iter().zip(lines(OLD_LOG.as_bytes())) {
+        assert_eq!(encode(line).as_bytes(), raw.as_slice());
+    }
+}
+
+/// A log of `CaseOpened`, a `child opened` and a `child closed` line naming [`RECORD`] with two
+/// digests, and a `stopped` line.
+fn log_with_records(label: &str) -> (RunLog, PathBuf, [String; 2]) {
+    let digests = [sha256_hex(b"opened facts"), sha256_hex(b"closed facts")];
+    let dir = store_dir(label);
+    let log = RunLog::open(&dir).expect("the store opens");
+    let events = [
+        RunLogEvent::CaseOpened(CaseOpened {
+            case: CASE.to_owned(),
+            protocol: "software-change@1".to_owned(),
+        }),
+        child_event("ChildOpened", Some(RECORD), Some(&digests[0])),
+        child_event("ChildClosed", Some(RECORD), Some(&digests[1])),
+        RunLogEvent::Stopped(Stopped {
+            stop: "AwaitingPerson".to_owned(),
+            next: Vec::new(),
+        }),
+    ];
+    for (index, event) in events.into_iter().enumerate() {
+        log.append(CASE, at(index), event)
+            .unwrap_or_else(|error| panic!("line {index} is taken: {error}"));
+    }
+    let path = log.path(CASE);
+    (log, path, digests)
+}
+
+#[test]
+fn the_hash_chain_verifies_over_child_lines_with_a_record() {
+    let (log, path, digests) = log_with_records("chain-records");
+    let read = log.read(CASE).expect("the log verifies");
+    assert_eq!(read.len(), 4);
+    assert_eq!(
+        read[1].event,
+        child_event("ChildOpened", Some(RECORD), Some(&digests[0]))
+    );
+    assert_eq!(
+        read[2].event,
+        child_event("ChildClosed", Some(RECORD), Some(&digests[1]))
+    );
+
+    let raw = lines(&fs::read(&path).expect("reads"));
+    for (index, digest) in [(1usize, &digests[0]), (2, &digests[1])] {
+        // One hex digit of the digest changed to another: the line still reads, the next line
+        // no longer names it.
+        let mut changed = raw.clone();
+        let text = String::from_utf8(changed[index].clone()).expect("utf-8");
+        let first = digest.as_bytes()[0];
+        let other = if first == b'0' { "1" } else { "0" };
+        let tampered = format!("{other}{}", &digest[1..]);
+        assert!(
+            text.contains(digest.as_str()),
+            "line {index} holds its digest"
+        );
+        changed[index] = text.replacen(digest.as_str(), &tampered, 1).into_bytes();
+        let refused = refusal(&joined(&changed));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (
+                RunLogRefusal::BrokenChain,
+                i64::try_from(index + 1).expect("small")
+            ),
+            "a changed byte in line {index}'s record_digest: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn a_child_line_with_a_record_round_trips_byte_for_byte() {
+    let (_log, path, digests) = log_with_records("round-trip-records");
+    let bytes = fs::read(&path).expect("reads");
+    let raw = lines(&bytes);
+    // The members after the line's own, in declaration order: `record`, then `record_digest`.
+    let expected = [
+        format!(
+            "{{\"seq\":1,\"prev\":\"{}\",\"at\":\"{}\",{OPENED},\"record\":\"{RECORD}\",\"record_digest\":\"{}\"}}",
+            sha256_hex(&raw[0]),
+            at(1).0,
+            digests[0]
+        ),
+        format!(
+            "{{\"seq\":2,\"prev\":\"{}\",\"at\":\"{}\",{CLOSED},\"record\":\"{RECORD}\",\"record_digest\":\"{}\"}}",
+            sha256_hex(&raw[1]),
+            at(2).0,
+            digests[1]
+        ),
+    ];
+    assert_eq!(String::from_utf8_lossy(&raw[1]), expected[0]);
+    assert_eq!(String::from_utf8_lossy(&raw[2]), expected[1]);
+    let read = verify(&bytes).expect("verifies");
+    for index in [1, 2] {
+        assert_eq!(
+            encode(&read[index]).as_bytes(),
+            raw[index].as_slice(),
+            "line {index} encodes to the bytes it was read from"
+        );
+    }
+}
+
+/// What a reader written against the shape of the child lines before this change reads from a
+/// line: the members it knows, by name, every other member ignored.
+fn old_shape(line: &[u8]) -> (String, String, Option<String>, Option<String>) {
+    let value: serde_json::Value = serde_json::from_slice(line).expect("a JSON line");
+    let text = |name: &str| {
+        value
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    (
+        text("kind").expect("a kind"),
+        text("child").expect("a child"),
+        text("protocol"),
+        text("outcome"),
+    )
+}
+
+#[test]
+fn a_reader_that_ignores_unknown_members_reads_the_new_child_lines() {
+    let (_log, path, _) = log_with_records("old-shape-reader");
+    let raw = lines(&fs::read(&path).expect("reads"));
+    assert_eq!(
+        old_shape(&raw[1]),
+        (
+            "ChildOpened".to_owned(),
+            "chg-1842.review".to_owned(),
+            Some("review@1".to_owned()),
+            None
+        )
+    );
+    assert_eq!(
+        old_shape(&raw[2]),
+        (
+            "ChildClosed".to_owned(),
+            "chg-1842.review".to_owned(),
+            None,
+            Some("approved".to_owned())
+        )
+    );
+    // The new lines hold the old members unchanged; only `record` and `record_digest` are new.
+    let old_members: [&[&str]; 2] = [&["child", "protocol"], &["child", "outcome"]];
+    for (line, old) in raw[1..3].iter().zip(old_members) {
+        let value: serde_json::Value = serde_json::from_slice(line).expect("a JSON line");
+        let added: Vec<&str> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .filter(|name| !["seq", "prev", "at", "kind"].contains(name) && !old.contains(name))
+            .collect();
+        assert_eq!(added, ["record", "record_digest"]);
+    }
 }

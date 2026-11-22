@@ -651,10 +651,14 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
         "ChildOpened" => RunLogEvent::ChildOpened(ChildOpened {
             child: text("child")?,
             protocol: text("protocol")?,
+            record: None,
+            record_digest: None,
         }),
         "ChildClosed" => RunLogEvent::ChildClosed(ChildClosed {
             child: text("child")?,
             outcome: optional_text(value, "", "outcome")?,
+            record: None,
+            record_digest: None,
         }),
         "AuthorityRecorded" => RunLogEvent::AuthorityRecorded(AuthorityRecorded {
             capability: text("capability")?,

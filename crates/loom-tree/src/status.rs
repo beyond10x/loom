@@ -229,6 +229,7 @@ fn evidence(
                 upstream_revisions: crate::encode::loom_json(&upstream),
                 producer: record.data.producer.clone(),
                 action,
+                name: None,
             })
         })
         .collect()
