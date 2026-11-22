@@ -9,9 +9,12 @@ types:
   - name: intake.confinement.Backend
     kind: enum
     variants: [Substrate, None]
+  # `Cancelled` (story cancel-a-running-bound-program): the child's cancel handle was set, either
+  # before the launch (nothing starts) or while the child ran (the child and every process it
+  # started were killed at the next read step, with no grace).
   - name: intake.confinement.ConfinementRefusal
     kind: enum
-    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined, LocalReasonMissing, NoRunner]
+    variants: [BackendMissing, CgroupUndelegated, ScopeInvalid, WorkspaceNameInvalid, CapabilityUnserved, CommandUnconfined, LocalReasonMissing, NoRunner, Cancelled]
   # The Substrate confinement adapter a host names for Loom's launches (ADR 0109): `linux`, which
   # confines, or `local`, which runs the child unconfined, declared insecure, as the operator.
   - name: intake.confinement.ConfinementAdapter

@@ -311,7 +311,10 @@ types:
   # in one case from the port that hold no `class` are its run count. `retry_of` (story
   # bound-program-retry-records) holds the evidence ids of the retry records the run was given, in
   # the order the case received them; it is empty on a run that was given none. A retried run is a
-  # run: it counts against `budget.max_runs` like any other run without a `class`.
+  # run: it counts against `budget.max_runs` like any other run without a `class`. `cancelled`
+  # (story cancel-a-running-bound-program) is true when the run's cancel handle ended it: the
+  # runner answered the refusal `Cancelled`, `runner_refusal` names it, and the run holds no exit
+  # and no blob. A cancelled run counts against `budget.max_runs`.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -331,6 +334,8 @@ types:
         type: List<String>
       - name: class
         type: Optional<loom.bindings.ExitClass>
+      - name: cancelled
+        type: Boolean
 
   # The environment of a program the program effect port starts (story bound-program-case-id),
   # the bound program and its `arguments_from` program alike: `path`, the variable `PATH` at the
@@ -412,8 +417,11 @@ types:
   # artifact cannot be digested (`ArtifactUnreadable`, story bound-artifact-revisions: before the
   # run nothing is started, after it no revision moves and nothing is recorded); the run's exit is
   # one the binding's `exits.error` lists (`ProgramError`, story bound-program-contract: the step
-  # ends the run, its text names the exit code and the blob digest, never the program's output). A
-  # refused step records no evidence.
+  # ends the run, its text names the exit code and the blob digest, never the program's output); the
+  # port's cancel handle was set before a program started or ended the bound program or its
+  # `arguments_from` program while it ran (`Cancelled`, story cancel-a-running-bound-program: the
+  # step ends the run, and a program it ended is a run that counts). A refused step records no
+  # evidence.
   - name: loom.bindings.ProgramRefusalReason
     kind: enum
     variants:
@@ -424,6 +432,7 @@ types:
       - CaseOfAnotherProtocol
       - ArtifactUnreadable
       - ProgramError
+      - Cancelled
 
   # A refused step: the reason, the action and what is wrong.
   - name: loom.bindings.ProgramRefusal

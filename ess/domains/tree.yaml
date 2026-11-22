@@ -25,10 +25,12 @@ types:
   # the choice between two legitimate outcomes or a writer's handoff (exit 3). `AwaitingAuthority`:
   # an admissible action needs an approval of its capability (exit 3). `Stuck`: a case has no
   # useful action, no legitimate outcome and nothing awaiting approval (exit 4). `BudgetSpent`: the
-  # step or the wall-time budget is spent before the next step (exit 5).
+  # step or the wall-time budget is spent before the next step (exit 5). `Cancelled` (story
+  # cancel-a-running-bound-program): the caller's cancel flag was set, before a step or while a
+  # step's program ran, which was then killed (exit 5).
   - name: loom.tree.TreeStop
     kind: enum
-    variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent]
+    variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent, Cancelled]
 
   # What a printed decision records. `Approve`: `tree approve` of the capability, with which the
   # next `tree run` takes the action itself. `ApproveAction`: `tree approve --action`, with which
@@ -206,6 +208,8 @@ types:
   # One run of a bound program of a case: the action, its exit (absent when it timed out or the
   # runner refused it), its attempt in the action's own chain from 1, whether the next run of the
   # action was a retry, and the evidence ids the run was given as the records that sent it back.
+  # `cancelled` (story cancel-a-running-bound-program) is true on a run its cancel handle ended, and
+  # absent on every other run.
   - name: loom.tree.StatusRun
     kind: struct
     fields:
@@ -219,6 +223,8 @@ types:
         type: Boolean
       - name: retry_of
         type: List<String>
+      - name: cancelled
+        type: Optional<Boolean>
 
   # One `tree approve` on a case, in the order recorded: the capability, the action `--action`
   # named (absent without it), the answer, the principal and the instant.
