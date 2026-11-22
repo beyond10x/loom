@@ -51,6 +51,20 @@ const EXECUTOR: [&str; 12] = [
     "from",
 ];
 const ENTRY: [&str; 6] = ["kind", "subject", "producer", "from", "results", "upstream"];
+
+/// The argv entry a person's approval replaces by its principal
+/// (`story:person-action-runs-a-program`): only in a `person` executor's `argv`, only as a whole
+/// entry, never the first.
+pub const PRINCIPAL_PLACEHOLDER: &str = "{principal}";
+
+/// Whether an argv may hold [`PRINCIPAL_PLACEHOLDER`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placeholder {
+    /// It may not: a program's `executor.argv`, `arguments_from`, `handoff_when`.
+    Refused,
+    /// It may, as a whole entry after the first: a person's `executor.argv`.
+    Principal,
+}
 const BUDGET: [&str; 4] = [
     "max_runs",
     "max_turns",
@@ -257,7 +271,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
     };
     let arguments_from = match map.get("arguments_from") {
         None => None,
-        Some(value) => Some(argv(value, action, "arguments_from")?),
+        Some(value) => Some(argv(value, action, "arguments_from", Placeholder::Refused)?),
     };
     if arguments.is_some() && arguments_from.is_some() {
         return Err(refuse(
@@ -309,7 +323,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         .transpose()?;
     let handoff_when = match map.get("handoff_when") {
         None => Vec::new(),
-        Some(value) => argv(value, action, "handoff_when")?,
+        Some(value) => argv(value, action, "handoff_when", Placeholder::Refused)?,
     };
     if !handoff_when.is_empty() && handoff.is_none() {
         return Err(refuse(
@@ -439,11 +453,17 @@ fn executor(value: &Value, action: Option<&str>) -> Decoded<ExecutorSpec> {
             })
             .transpose()
     };
+    // The kind is known before the argv: only a person's argv may name its principal.
+    let placeholder = if kind == Executor::Person {
+        Placeholder::Principal
+    } else {
+        Placeholder::Refused
+    };
     let mut spec = ExecutorSpec {
         kind,
         argv: map
             .get("argv")
-            .map(|value| argv(value, action, "executor.argv"))
+            .map(|value| argv(value, action, "executor.argv", placeholder))
             .transpose()?,
         adapter: text("adapter")?,
         model: text("model")?,
@@ -526,7 +546,15 @@ fn executor(value: &Value, action: Option<&str>) -> Decoded<ExecutorSpec> {
     Ok(spec)
 }
 
-fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String>> {
+/// The argv `member` holds: a list of strings, never a shell string, its first entry naming the
+/// program. [`PRINCIPAL_PLACEHOLDER`] stands only where `placeholder` allows it, as a whole entry
+/// after the first; anywhere else an entry holding it is refused.
+fn argv(
+    value: &Value,
+    action: Option<&str>,
+    member: &str,
+    placeholder: Placeholder,
+) -> Decoded<Vec<String>> {
     let Value::Sequence(items) = value else {
         return Err(refuse(
             Reason::InvalidArgv,
@@ -545,6 +573,22 @@ fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String
     for (index, item) in items.iter().enumerate() {
         match item {
             Value::String(text) => out.push(text.clone()),
+            // `{principal}` unquoted in a YAML flow list is a mapping: say how it is written.
+            Value::Mapping(entries)
+                if entries.keys().count() == 1
+                    && entries
+                        .get("principal")
+                        .is_some_and(|value| matches!(value, Value::Null)) =>
+            {
+                return Err(refuse(
+                    Reason::InvalidArgv,
+                    action,
+                    member,
+                    format!(
+                        "entry {index} is the mapping {PRINCIPAL_PLACEHOLDER}; the placeholder is the string \"{PRINCIPAL_PLACEHOLDER}\", quoted"
+                    ),
+                ));
+            }
             other => {
                 return Err(refuse(
                     Reason::InvalidArgv,
@@ -562,6 +606,25 @@ fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String
             member,
             "names no program: its first entry is empty",
         ));
+    }
+    for (index, entry) in out.iter().enumerate() {
+        if !entry.contains(PRINCIPAL_PLACEHOLDER) {
+            continue;
+        }
+        let why = if placeholder == Placeholder::Refused {
+            format!(
+                "entry {index} holds {PRINCIPAL_PLACEHOLDER}, which is replaced only in a person executor's argv"
+            )
+        } else if index == 0 {
+            format!("entry 0 is {PRINCIPAL_PLACEHOLDER}: the placeholder never names the program")
+        } else if entry != PRINCIPAL_PLACEHOLDER {
+            format!(
+                "entry {index} holds {PRINCIPAL_PLACEHOLDER} and more; the placeholder is a whole entry"
+            )
+        } else {
+            continue;
+        };
+        return Err(refuse(Reason::InvalidArgv, action, member, why));
     }
     Ok(out)
 }

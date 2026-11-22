@@ -1,5 +1,5 @@
 # generated from loom v1
-# contract digest 128d7cf7dfa9562a0c2dc4225132e8a37a44efa4a569353eb7c53ed0316f8c67
+# contract digest 39f896f350990bc2c002f53adccf0532024c1eddaa93ef457b01284c2ace1f73
 # do not edit: regenerate with `ess synthesize --layout crate`
 
 [package]

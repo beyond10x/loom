@@ -177,8 +177,8 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "b10x-canon"
-version = "0.10.0"
-source = "git+https://github.com/beyond10x/canon?tag=0.10.0#2c7a1ea6a9dc2e19633fb225290c826b1c9988ce"
+version = "0.11.0"
+source = "git+https://github.com/beyond10x/canon?tag=0.11.0#e81f970decf228931d984eddf97975030045b3be"
 dependencies = [
  "serde",
  "serde_json",

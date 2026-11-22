@@ -1197,3 +1197,132 @@ fn an_alias_used_within_the_node_bound_decodes() {
     ));
     assert!(decode(&once).is_ok());
 }
+
+// story:person-action-runs-a-program: a person binding may name an argv, run once its principal
+// approves the action; `{principal}` is replaced only there, and only as a whole entry.
+
+/// A person binding of `change.sign` whose executor holds `argv` and whose action holds `extra`.
+fn person_with(argv: &str, extra: &str) -> String {
+    document(&format!(
+        "  - action: change.sign\n    executor: {{kind: person, principal: owner, argv: {argv}}}\n    \
+         evidence:\n      - {{kind: signoff, subject: spec, producer: owner, from: effect, results: {{performed: signed}}}}\n{extra}"
+    ))
+}
+
+#[test]
+fn a_person_binding_takes_an_argv_and_no_other_program_member() {
+    let text = person_with(
+        "[sh, tools/answer.sh, \"{principal}\", --action, change.sign]",
+        "",
+    );
+    assert_eq!(refused(&text), None, "a person's argv loads:\n{text}");
+    let decoded = decode(&text).unwrap();
+    assert_eq!(
+        decoded.actions[0].executor.argv.as_deref(),
+        Some(
+            &[
+                "sh".to_owned(),
+                "tools/answer.sh".to_owned(),
+                "{principal}".to_owned(),
+                "--action".to_owned(),
+                "change.sign".to_owned(),
+            ][..]
+        )
+    );
+    // Without an argv a person binding is as before.
+    assert_eq!(
+        refused(&document(
+            "  - action: change.sign\n    executor: {kind: person, principal: owner}\n"
+        )),
+        None
+    );
+    for (member, extra) in [
+        ("arguments", "    arguments: {a: 1}\n"),
+        ("arguments_from", "    arguments_from: [tools/args.sh]\n"),
+        ("exits", "    exits: {error: [3]}\n"),
+    ] {
+        let text = person_with("[tools/answer.sh]", extra);
+        assert_refused(
+            &text,
+            Reason::MemberNotForExecutor,
+            Some("change.sign"),
+            member,
+        );
+    }
+}
+
+#[test]
+fn principal_is_never_argv_zero() {
+    let text = person_with("[\"{principal}\", x]", "");
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("change.sign"),
+        "executor.argv",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+#[test]
+fn principal_is_never_part_of_an_entry() {
+    for entry in [
+        "--by={principal}",
+        "{principal}x",
+        " {principal}",
+        "{principal}{principal}",
+    ] {
+        let text = person_with(&format!("[tools/answer.sh, \"{entry}\"]"), "");
+        let refusal = assert_refused(
+            &text,
+            Reason::InvalidArgv,
+            Some("change.sign"),
+            "executor.argv",
+        );
+        assert!(
+            refusal.0.detail.contains("{principal}"),
+            "{entry}: {refusal}"
+        );
+    }
+}
+
+#[test]
+fn principal_is_refused_in_a_program_argv() {
+    let text = document(
+        "  - action: spec.gate\n    executor: {kind: program, argv: [tools/gate.sh, \"{principal}\"]}\n",
+    );
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("spec.gate"),
+        "executor.argv",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+#[test]
+fn principal_is_refused_in_arguments_from() {
+    let text = document(&format!(
+        "{GATE}    arguments_from: [tools/args.sh, \"{{principal}}\"]\n"
+    ));
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("spec.gate"),
+        "arguments_from",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+#[test]
+fn principal_is_refused_in_handoff_when() {
+    let text = handoff_writer(
+        "    handoff: Go on.\n    handoff_when: [tools/check.sh, \"{principal}\"]\n",
+    );
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("change.implement"),
+        "handoff_when",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}

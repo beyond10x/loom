@@ -44,6 +44,8 @@ use sha2::{Digest as _, Sha256};
 mod delegated_cgroup;
 #[path = "tree_run/handoff_when.rs"]
 mod handoff_when;
+#[path = "tree_run/person_program.rs"]
+mod person_program;
 
 #[path = "tree_run/principal.rs"]
 mod principal;
@@ -125,11 +127,12 @@ fn unsynced_in_process() {
 }
 
 /// The protocols each test's user has installed: registration and file of the fixture.
-const INSTALLED: [(&str, &str); 5] = [
+const INSTALLED: [(&str, &str); 6] = [
     ("tour@1", "tour.yaml"),
     ("tour-leg@1", "tour-leg.yaml"),
     ("fork@1", "../extra/fork.yaml"),
     ("sign@1", "../extra/sign.yaml"),
+    ("answer@1", "../extra/answer.yaml"),
     ("review@1", "../extra/review.yaml"),
 ];
 
@@ -493,6 +496,7 @@ impl Tree {
                 reasons,
                 time: at(),
                 catalog: &catalog,
+                runner: Some(settings(None).runner),
             }),
             |approval| (0, approval_json(approval, case, action, principal)),
         )
@@ -813,6 +817,7 @@ fn an_approval_is_recorded_for_one_case_one_capability_and_its_revision() {
         reasons: None,
         time: at(),
         catalog: &tree.catalog(),
+        runner: None,
     })
     .unwrap();
     assert_eq!(approval, approval_json(library, "root", None, "guide"));

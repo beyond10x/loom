@@ -697,6 +697,7 @@ fn canon_record(
         upstream_revisions: Declarations::default(),
         producer: None,
         child_case: None,
+        item: None,
     }
 }
 
@@ -719,6 +720,7 @@ fn canon_claims(
                         ArtifactId::new(artifact.as_str()),
                         CaseArtifact {
                             revision: Revision::new(revision.as_str()),
+                            descends_from: None,
                         },
                     )
                 })
