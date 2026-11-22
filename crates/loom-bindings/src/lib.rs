@@ -16,12 +16,18 @@
 //! there as its revision ([`content_revision`]), written with the step's records in one store
 //! write; [`PlacedRevisions`] computes them again before every evaluation. Decoding and the
 //! load-time check start no process; the crate opens no network connection.
+//!
+//! [`check_case_open`] holds an `open` executor to the protocol's `case_open` at load, and
+//! [`OpenEffects`] performs an action bound to `open`: it opens the child cases through
+//! `CanonGovernor::open_children`, under the protocol `case_open` names, with the independence of
+//! the child's bindings file, read beside the parent's (story:child-case-runtime).
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 mod child;
 mod decode;
 mod load;
+mod open;
 mod program;
 mod retry;
 mod revision;
@@ -30,6 +36,7 @@ mod tree;
 pub use child::{CASE_VARIABLE, MAX_CASE_VARIABLE_BYTES, bound_case_child};
 pub use decode::decode;
 pub use load::{check, unbound};
+pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
 pub use retry::{
     RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, retry_records,

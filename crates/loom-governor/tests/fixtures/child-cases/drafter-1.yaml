@@ -1,0 +1,23 @@
+format: protocol/1
+protocol:
+  id: drafter
+  revision: 1
+  description: >-
+    A child that declares its parent's subject `idea` and revises it; it ends passed by its
+    verdict about the idea (story child-case-runtime, the subject revision rule).
+artifacts:
+  idea: {}
+evidence_kinds:
+  verdict: {}
+claims:
+  idea.passed:
+    true_when:
+      evidence: {kind: verdict, subject: idea, result: passed}
+actions:
+  idea.write:
+    effect: write
+    may_produce:
+      - evidence: verdict
+outcomes:
+  passed:
+    requires: {claim: idea.passed}
