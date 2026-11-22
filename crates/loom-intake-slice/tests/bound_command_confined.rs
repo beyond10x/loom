@@ -468,20 +468,26 @@ fn under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace() {
 const E4DEFRAG: &str = "/usr/bin/e4defrag";
 
 /// story:substrate-0-24-0-pin, the ioctl floor of Substrate 0.24.0 (its ADR 0050): a confined
-/// bound program cannot move the blocks of a file in its ext4 workspace. The program writes a
-/// 1 MiB file in 16 pieces, interleaved with a second file and each synced, so the file holds
-/// several extents and `e4defrag` calls `EXT4_IOC_MOVE_EXT` (a file of one extent is left alone).
-/// The seccomp program answers it `EACCES`: `e4defrag -v` names the failed
-/// `EXT4_IOC_MOVE_EXT` call on its standard error and exits 1, and the file's SHA-256 is what it
-/// was. e4defrag 1.47.4 prints the call's `errno` after it was overwritten (`ioctl:Success`), so
-/// the case reads the refusal, not `Permission denied`; on Substrate 0.21.0 the same program
-/// defragmented the file (`Success: [1/1]`).
+/// bound program cannot move the blocks of a file in its ext4 workspace, and the same call on the
+/// same file without confinement can.
 ///
-/// The child is the one `bindings::bound_program_child` builds for the program, with one
+/// The confined program writes a 1 MiB file in 16 pieces, interleaved with a second file and each
+/// synced, so the file holds several extents and `e4defrag` calls `EXT4_IOC_MOVE_EXT` (a file of
+/// one extent is left alone). The seccomp program answers it `EACCES`: `e4defrag -v` names the
+/// failed call and exits 1. e4defrag 1.47.4 prints the call's `errno` after it was overwritten
+/// (`ioctl:Success`), so the case reads the refusal, not `Permission denied`.
+///
+/// The control: the same program, without writing the file again, runs `e4defrag -v` on the same
+/// file through Substrate's `local` adapter, which installs no seccomp program. There it exits 0,
+/// `[ OK ]`, and moves the file from more extents to fewer, so the file system serves the call,
+/// the file was still fragmented after the confined call, and the confined refusal is the floor's.
+/// Both calls leave the file's SHA-256 as it was.
+///
+/// The confined child is the one `bindings::bound_program_child` builds for the program, with one
 /// read-only file beside it: `e4defrag` reads the mount table at `/etc/mtab`, which Substrate's
-/// view does not hold, so the case mounts one naming `/workspace` as ext4. The case skips naming
-/// what is missing without `e4defrag`, an ext4 workspace or delegation, and fails instead where
-/// `LOOM_REQUIRE_DELEGATION` is set.
+/// view does not hold, so the case mounts one naming `/workspace` as ext4; the control reads the
+/// host's. The case skips naming what is missing without `e4defrag`, an ext4 workspace or
+/// delegation, and fails instead where `LOOM_REQUIRE_DELEGATION` is set.
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
@@ -505,8 +511,9 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
             let script = case.script(
                 "move-blocks",
                 &format!(
-                    "f=/workspace/target/blob\n\
-                     s=/workspace/target/spacer\n\
+                    "f=target/blob\n\
+                     if [ \"$1\" = make ]; then\n\
+                     s=target/spacer\n\
                      i=0\n\
                      while [ \"$i\" -lt 16 ]; do\n\
                      /usr/bin/dd if=/dev/urandom of=\"$f\" bs=65536 count=1 seek=\"$i\" conv=notrunc,fsync status=none || exit 3\n\
@@ -514,17 +521,23 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
                      i=$((i + 1))\n\
                      done\n\
                      /usr/bin/rm -f \"$s\"\n\
+                     fi\n\
                      before=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
                      size=$(/usr/bin/stat -c %s \"$f\")\n\
-                     {E4DEFRAG} -v \"$f\" >/workspace/target/e4defrag.out\n\
+                     {E4DEFRAG} -v \"$f\" >target/e4defrag.out 2>target/e4defrag.err\n\
                      status=$?\n\
                      after=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
-                     printf 'status=%s\\nsize=%s\\nbefore=%s\\nafter=%s\\n' \"$status\" \"$size\" \"$before\" \"$after\"\n\
-                     /usr/bin/cat /workspace/target/e4defrag.out\n"
+                     printf 'dir=%s\\nstatus=%s\\nsize=%s\\nbefore=%s\\nafter=%s\\n' \"$(pwd)\" \"$status\" \"$size\" \"$before\" \"$after\"\n\
+                     /usr/bin/cat target/e4defrag.out\n\
+                     printf '\\nstderr:\\n'\n\
+                     /usr/bin/cat target/e4defrag.err\n"
                 ),
             );
+            let argv = |mode: &str| [script.display().to_string(), mode.to_owned()];
+
+            // Confined: Substrate's `linux` adapter, its seccomp floor installed.
             let child = bound_program_child(
-                &[script.display().to_string()],
+                &argv("make"),
                 "{}",
                 Duration::from_secs(30),
                 workspace,
@@ -533,37 +546,121 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
             .expect("the bound program's child")
             .with_read_only_file(&mtab, "/etc/mtab");
             assert_eq!(child.sandbox_path(&script), Some(script.clone()));
-            let result = runner.run_child(&child).expect("the program runs confined");
-            let stdout = String::from_utf8_lossy(&result.child_output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&result.child_output.stderr).into_owned();
-            let kept = format!(
-                "exit {:?}\n{stdout}e4defrag's stderr: {stderr}",
-                result.exit_code
-            );
+            let confined = runner.run_child(&child).expect("the program runs confined");
+            assert_eq!(confined.applied.backend, Backend::Substrate);
+            let confined = MoveBlocks::read("confined", &confined);
+
+            // The control: the same call on the same file, through `local`, which installs no
+            // seccomp program.
+            let control_runner = EngineRunner::open(&EngineConfinement {
+                adapter: ConfinementAdapter::Local,
+                local_reason: Some(FLAG_REASON.to_owned()),
+                cgroup_root: None,
+            })
+            .expect("local opens with a reason");
+            let child = bound_program_child(
+                &argv("again"),
+                "{}",
+                Duration::from_secs(30),
+                workspace,
+                control_runner.local_reason(),
+            )
+            .expect("the control's child");
+            let control = control_runner
+                .run_child(&child)
+                .expect("the control runs unconfined");
+            assert_eq!(control.applied.backend, Backend::None);
+            let control = MoveBlocks::read("control", &control);
+            let kept = format!("{}\n{}", confined.kept, control.kept);
             eprintln!("{kept}");
-            assert_eq!(result.exit_code, Some(0), "{kept}");
-            assert_eq!(result.applied.backend, Backend::Substrate, "{kept}");
-            let reported = |name: &str| -> String {
-                stdout
-                    .lines()
-                    .find_map(|line| line.strip_prefix(&format!("{name}=")))
-                    .unwrap_or_else(|| panic!("no {name}: {kept}"))
-                    .to_owned()
-            };
-            assert_eq!(reported("size"), "1048576", "{kept}");
+
+            assert_eq!(confined.status, "1", "the confined call fails: {kept}");
             assert!(
-                stderr.contains("Failed to defrag with EXT4_IOC_MOVE_EXT ioctl"),
-                "EXT4_IOC_MOVE_EXT is refused: {kept}"
+                confined
+                    .stderr
+                    .contains("Failed to defrag with EXT4_IOC_MOVE_EXT ioctl"),
+                "EXT4_IOC_MOVE_EXT is refused under confinement: {kept}"
             );
-            assert_eq!(reported("status"), "1", "e4defrag fails: {kept}");
-            assert_eq!(reported("before").len(), 64, "{kept}");
+            assert!(!confined.stdout.contains("[ OK ]"), "{kept}");
+            assert_eq!(confined.before, confined.after, "{kept}");
+
+            assert_eq!(control.status, "0", "the control succeeds: {kept}");
+            assert!(control.stdout.contains("[ OK ]"), "{kept}");
+            let (from, to) = control
+                .extents()
+                .unwrap_or_else(|| panic!("the control names its extents: {kept}"));
+            assert!(
+                from > to,
+                "the control moved the blocks of a fragmented file ({from} -> {to}): {kept}"
+            );
             assert_eq!(
-                reported("before"),
-                reported("after"),
-                "the file's content is unchanged: {kept}"
+                control.before, control.after,
+                "a move of blocks keeps the content: {kept}"
+            );
+
+            // Both calls ran on one file: the confined one in `/workspace`, the control in the
+            // same workspace at its host path, reading what the confined call left.
+            assert_eq!(confined.dir, "/workspace", "{kept}");
+            assert_eq!(
+                Path::new(&control.dir).canonicalize().ok(),
+                workspace.canonicalize().ok(),
+                "the control runs in the same workspace: {kept}"
+            );
+            assert_eq!(confined.size, "1048576", "{kept}");
+            assert_eq!(confined.before.len(), 64, "{kept}");
+            assert_eq!(
+                control.before, confined.after,
+                "the control reads the file the confined call left: {kept}"
             );
         },
     );
+}
+
+/// What one run of the `move-blocks` program reported.
+struct MoveBlocks {
+    dir: String,
+    status: String,
+    size: String,
+    before: String,
+    after: String,
+    stdout: String,
+    stderr: String,
+    kept: String,
+}
+
+impl MoveBlocks {
+    fn read(label: &str, result: &TestExecution) -> Self {
+        let output = String::from_utf8_lossy(&result.child_output.stdout).into_owned();
+        let kept = format!("{label}: exit {:?}\n{output}", result.exit_code);
+        assert_eq!(result.exit_code, Some(0), "{kept}");
+        let (head, stderr) = output
+            .split_once("\nstderr:\n")
+            .unwrap_or_else(|| panic!("no stderr: {kept}"));
+        let reported = |name: &str| -> String {
+            head.lines()
+                .find_map(|line| line.strip_prefix(&format!("{name}=")))
+                .unwrap_or_else(|| panic!("no {name}: {kept}"))
+                .to_owned()
+        };
+        Self {
+            dir: reported("dir"),
+            status: reported("status"),
+            size: reported("size"),
+            before: reported("before"),
+            after: reported("after"),
+            stdout: head.to_owned(),
+            stderr: stderr.to_owned(),
+            kept,
+        }
+    }
+
+    /// The `extents: <from> -> <to>` `e4defrag -v` prints for a file it moved.
+    fn extents(&self) -> Option<(u64, u64)> {
+        let rest = self.stdout.split("extents: ").nth(1)?;
+        let (from, rest) = rest.split_once(" -> ")?;
+        let to: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        Some((from.trim().parse().ok()?, to.parse().ok()?))
+    }
 }
 
 /// What this host lacks for the ioctl case, if anything: `e4defrag`, or an ext4 workspace.
