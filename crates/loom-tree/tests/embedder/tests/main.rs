@@ -423,6 +423,34 @@ fn an_embedded_tree_runs_under_the_root_it_holds() {
     );
 }
 
+/// The embedder two levels below the root it holds (`root/a/leaf`): the program runs under the
+/// root, never under `a`, the empty delegated ancestor nearest the process that a runner
+/// discovering its root takes.
+#[test]
+fn an_embedded_tree_two_levels_below_its_root_runs_under_the_root() {
+    let Some(scope) = Scope::start() else {
+        return;
+    };
+    let tree = Tree::new("held-deep", "probe.sh");
+    let root = scope.root.display().to_string();
+    let between = scope.root.join("a");
+    let ran = embedder(
+        Some(&between.join("leaf")),
+        &["--cgroup-root", &root],
+        Some(&tree),
+    )
+    .output()
+    .unwrap();
+    closed(&ran);
+    let cgroup = tree.stub_cgroup();
+    assert!(
+        cgroup.starts_with(&scope.root) && cgroup != scope.root && !cgroup.starts_with(&between),
+        "the stub ran in {}, not under {root} beside {}",
+        cgroup.display(),
+        between.display()
+    );
+}
+
 #[test]
 fn a_held_root_is_refused_to_a_second_embedder() {
     let Some(scope) = Scope::start() else {
