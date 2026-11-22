@@ -633,6 +633,9 @@ fn the_log_file_has_the_mode_of_the_case_file_beside_it() {
             independence: CaseIndependence::none(),
             evidence: Vec::new(),
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("opens");

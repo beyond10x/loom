@@ -325,6 +325,9 @@ fn an_awkward_case_and_its_observations_round_trip_exactly() {
                         case_revision: "r\\1".to_owned(),
                     }]
                 },
+                parent: None,
+                children: Vec::new(),
+                termination: None,
             };
             assert_eq!(
                 store.insert(state.clone()).map_err(|e| e.to_string()),
@@ -448,6 +451,9 @@ fn plain_state(case: &CaseId) -> CaseState {
         independence: loom_governor::CaseIndependence::none(),
         evidence: Vec::new(),
         decisions: Vec::new(),
+        parent: None,
+        children: Vec::new(),
+        termination: None,
     }
 }
 

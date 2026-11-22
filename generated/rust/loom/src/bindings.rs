@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 8c68eb9f9d600aec0de35057af0205203e30b03ee18d4541adb4b46f23f05478
+// contract digest f624562ca53f1579466de16d21745d29fe0b4e519dd86c162fcd8ad805c76a15
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -161,6 +161,43 @@ pub struct BoundStep {
     pub placements: Vec<ArtifactPlacement>,
     /// `moves` — `List<loom.bindings.RevisionMove>`.
     pub moves: Vec<RevisionMove>,
+}
+
+/// CopiedRecord — `loom.bindings.CopiedRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopiedRecord {
+    /// `case` — `String`.
+    pub case: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `source_case` — `String`.
+    pub source_case: String,
+    /// `source_evidence` — `String`.
+    pub source_evidence: String,
+    /// `dropped_upstream` — `List<String>`.
+    pub dropped_upstream: Vec<String>,
+}
+
+/// CopyRefusal — `loom.bindings.CopyRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyRefusal {
+    /// `reason` — `loom.bindings.CopyRefusalReason`.
+    pub reason: CopyRefusalReason,
+    /// `action` — `String`.
+    pub action: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// CopyRefusalReason — `loom.bindings.CopyRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyRefusalReason {
+    /// `NoSourceRecord`.
+    NoSourceRecord,
+    /// `NoSourceCase`.
+    NoSourceCase,
+    /// `SubjectUndeclared`.
+    SubjectUndeclared,
 }
 
 /// DiscardReason — `loom.bindings.DiscardReason`: one of a closed set of names.
