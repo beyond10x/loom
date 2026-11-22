@@ -187,6 +187,18 @@ impl Tree {
             .unwrap()
     }
 
+    /// Runs the command a waiting `tree run` printed exactly as printed: no flag added.
+    fn printed(&self, decision: &Value) -> Output {
+        let words: Vec<String> = decision["command"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|word| word.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(words[0], "b10x-loom", "{decision}");
+        self.command().args(&words[1..]).output().unwrap()
+    }
+
     fn tree(&self, verb: &str) -> Output {
         self.command()
             .args(["tree", verb, "--store"])
@@ -1007,7 +1019,7 @@ fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
     assert_eq!(tree.snapshot(), before);
 
     // The printed command closes the case through `left`; the tree is then terminal through it.
-    let closed = tree.decided(&decisions[1]);
+    let closed = tree.printed(&decisions[1]);
     assert_eq!(closed.status.code(), Some(0), "{}", stderr(&closed));
     assert_eq!(json(&closed)["outcome"], "left");
     let status = json(&tree.tree("status"));
@@ -1077,4 +1089,57 @@ fn a_writer_with_a_handoff_waits_on_a_person_with_its_text() {
         .filter(|line| matches!(&line.event, RunLogEvent::ActionFinished(finished) if finished.action == "route.write"))
         .count();
     assert_eq!(writes, 1, "the writer runs once at its revision");
+}
+
+/// The one decision a run that waits prints, of the kind `kind`.
+fn one_decision(ran: &Output, kind: &str) -> Value {
+    assert_eq!(ran.status.code(), Some(3), "{}{}", stdout(ran), stderr(ran));
+    let waited = json(ran);
+    let decisions = waited["decisions"].as_array().unwrap();
+    assert_eq!(decisions.len(), 1, "{waited}");
+    assert_eq!(decisions[0]["kind"], kind, "{waited}");
+    decisions[0].clone()
+}
+
+#[test]
+fn every_command_a_leg_prints_runs_as_printed_to_its_outcome() {
+    // A handoff, a person action under a capability and a capability alone, each answered by
+    // the command the run printed, with no flag added, until the case passes.
+    let tree = Tree::new("printed");
+    let opened = tree.open_leg_with("tour-leg-handoff.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let handoff = one_decision(&tree.run(), "Handoff");
+    // The person does what the handoff text asks.
+    fs::write(tree.workspace().join("route.txt"), "start\nend\n").unwrap();
+    let approve_action = one_decision(&tree.printed(&handoff), "ApproveAction");
+    assert_eq!(
+        approve_action["capability"], "guide.approve",
+        "{approve_action}"
+    );
+    let taken = tree.printed(&approve_action);
+    assert_eq!(
+        taken.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&taken),
+        stderr(&taken)
+    );
+    let approve = one_decision(&tree.run(), "Approve");
+    let granted = tree.printed(&approve);
+    assert_eq!(
+        granted.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&granted),
+        stderr(&granted)
+    );
+    let ended = tree.run();
+    assert_eq!(
+        ended.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&ended),
+        stderr(&ended)
+    );
+    assert_eq!(json(&ended)["detail"], "passed");
 }
