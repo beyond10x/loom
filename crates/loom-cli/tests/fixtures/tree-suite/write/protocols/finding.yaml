@@ -1,0 +1,35 @@
+format: protocol/1
+protocol:
+  id: finding
+  revision: 1
+  description: >-
+    A finding an owner decides. A program writes the findings; once the owner's capability is
+    granted, a second program applies the decision the findings hold. The case is done once the
+    decision was applied.
+artifacts:
+  ledger: {}
+evidence_kinds:
+  findings_written: {}
+  decision_applied: {}
+claims:
+  findings.written:
+    true_when:
+      evidence: {kind: findings_written, subject: ledger, result: written}
+  decision.applied:
+    true_when:
+      evidence: {kind: decision_applied, subject: ledger, result: applied}
+actions:
+  findings.write:
+    effect: write
+    may_produce:
+      - evidence: findings_written
+  decision.apply:
+    effect: write
+    precondition: {claim: findings.written}
+    requires:
+      - capability: owner.decide
+    may_produce:
+      - evidence: decision_applied
+outcomes:
+  done:
+    requires: {claim: decision.applied}

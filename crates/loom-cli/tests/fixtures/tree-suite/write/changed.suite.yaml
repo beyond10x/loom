@@ -1,0 +1,25 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+cycles:
+  - name: grown
+    seed:
+      - {from: stubs/grow.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+      - {from: paths/suite.txt, to: suite.txt}
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, name: from-grown, from: seeds/grows.yaml, to: findings.yaml}
+  - name: relinked
+    seed:
+      - {from: stubs/relink.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+      - {from: paths/suite.txt, to: suite.txt}
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, name: from-relinked, from: seeds/relinks.yaml, to: findings.yaml}

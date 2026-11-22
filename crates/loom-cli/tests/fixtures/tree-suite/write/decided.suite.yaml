@@ -1,0 +1,32 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+cycles:
+  - name: decided
+    seed:
+      - {from: stubs/open-finding.sh, to: stubs/first.sh}
+      - {from: stubs/apply.sh, to: stubs/apply.sh}
+      - {from: seeds/ledger.txt, to: ledger.txt}
+    decide:
+      - {take: approve, capability: owner.decide}
+    steps:
+      - do: open
+      - do: run
+        rounds: 1
+        exit: 3
+        checks:
+          - check: equals
+            name: the-finding-is-open
+            select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=f1].status"}]
+            is: open
+      - {do: write, name: owner-decides, from: seeds/findings-decided.yaml, to: findings.yaml}
+      - do: run
+    expect:
+      exit: 0
+      outcome: done
+      checks:
+        - check: equals
+          name: the-finding-is-decided
+          select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=f1].status"}]
+          is: decided

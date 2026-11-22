@@ -1,0 +1,5 @@
+# CANARY-w7rite
+findings:
+  - id: f1
+    status: decided
+    decision: keep the cache
