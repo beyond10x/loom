@@ -276,8 +276,10 @@ fn a_failed_harness_child_reports_its_exit_status_and_stderr_tail() {
 #[test]
 fn a_huge_stderr_is_cut_to_its_last_whole_lines_within_the_bound() {
     let scratch = Scratch::new("huge");
+    // 20,000 lines, about 420 KB: a hundred times the 4 KiB bound, as 200,000 were a thousand
+    // times; the cut and the line it starts at are the same.
     let mut stderr = String::new();
-    for n in 0..200_000 {
+    for n in 0..20_000 {
         stderr.push_str(&format!("progress line {n:06}\n"));
     }
     stderr.push_str(REFUSED);

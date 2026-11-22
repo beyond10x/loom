@@ -296,7 +296,7 @@ Before a change is reported done, in this order:
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
    Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   the test step (`loom-xtask test-step`), `task consumer-check`, then `task docs-check` and
+   the test step (`task test-step`), `task consumer-check`, then `task docs-check` and
    `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`, which
    installs cargo-nextest by a pinned version and digest). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
@@ -336,7 +336,18 @@ keyed by the digest of its inputs and made once for every process (`made_once` i
 builds inherit; the config file wins over one in the home directory, the manifest holds where no
 config sets it. The workspace has about 500 test binaries: with debug info `target/` grew to 34 GB
 and every one took longer to link. A panic still prints its file and line; a backtrace names
-functions without lines.
+functions without lines. `.cargo/config.toml` also builds every dependency (not the workspace's
+own crates) at `opt-level = 2`: the tests of `b10x-loom-cli` and `b10x-loom-governor` took 420 s
+of test time on 4 threads with unoptimized dependencies and 115 s with them optimized; a cold
+build of their dependencies takes about twice as long, an incremental one no longer.
+`b10x-loom-governor` is built at `opt-level = 2` too: its cost tests
+(`…_costs_a_bounded_multiple_of_deciding`) compare a path in its own code with deciding in
+Canon, a dependency, and with only Canon optimized the ratio rose from about 14 to 40 to 70
+against a bound of 40; with both optimized it is about 18.
+
+`task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
+public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
+run the same thread count.
 
 There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchain`), and a local
 toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's

@@ -73,8 +73,13 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     let _ = fs::remove_file(&report);
 
     let mut nextest = with(&["nextest", "run"], &["--locked", "--no-fail-fast"]);
-    if let Some(threads) = slot_tokens() {
-        nextest.push(format!("--test-threads={threads}"));
+    let cpus = std::thread::available_parallelism().map_or(0, |n| n.get());
+    match slot_tokens() {
+        Some(threads) => {
+            nextest.push(format!("--test-threads={threads}"));
+            println!("test step: {threads} test threads (SLOT_TOKENS) on {cpus} CPUs");
+        }
+        None => println!("test step: nextest's default test threads on {cpus} CPUs"),
     }
     let nextest = cargo(root, &nextest)?;
     let nextest_seconds = started.elapsed().as_secs_f64();
