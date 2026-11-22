@@ -16,6 +16,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - ESS 0.97.4 (format unchanged)
 
+### Fixed
+
+- `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
+
 ## [0.59.0] - 2026-11-22
 
 ### Added
