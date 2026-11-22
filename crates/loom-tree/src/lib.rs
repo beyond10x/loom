@@ -41,6 +41,12 @@ mod verify;
 
 use std::fmt;
 
+/// The runners a [`RunSettings`] starts bound programs through, and the reason a `local` runner
+/// is admitted for, so that an embedder builds the settings from this crate alone.
+pub use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
+pub use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner, TestRunner,
+};
 /// The name of a case's run log in the store, and the reading of a log's bytes into its lines.
 pub use b10x_loom_runlog::{log_file_name, verify as read_log};
 /// The run-log lines a [`RunObserver`] is given.
