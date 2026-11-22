@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:concurrent-confined-runs
 kind: story
-status: proposed
+status: active
 title: Two case trees in one process run confined programs at the same time, because every runner of the process shares one driver per cgroup root
 summary: one table of Substrate drivers for the whole process; two launches that share a driver run; a launch needing another directory or egress stays refused CapabilityUnserved; every static of the runtime crates listed and harmless
 tags:
@@ -27,9 +27,10 @@ scope:
   path: crates/loom-intake-slice/tests/support/mod.rs
 - confidence: cited
   path: website/docs/guides/embed-the-runtime.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T02:06:13Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "active", at: "2026-11-22T10:51:45Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "runbook-daemon-concurrent-runs-2026-11-22"}
 ---
 ## Outcome
 
