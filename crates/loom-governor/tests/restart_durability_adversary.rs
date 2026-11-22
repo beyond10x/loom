@@ -363,10 +363,22 @@ fn an_awkward_case_and_its_observations_round_trip_exactly() {
     );
 }
 
-/// Two stores over one directory, on two threads, lose no update and no observation.
+/// Two stores over one directory, on two threads, lose no update and no observation: 15 of each
+/// a thread in `task check`, 40 in the slow lane's twin. Each observation rewrites the whole
+/// list, so the cost grows with the square of the count.
 #[test]
 fn two_stores_over_one_directory_lose_nothing() {
-    let dir = store_dir("two-stores");
+    two_stores_over_one_directory("two-stores", 15);
+}
+
+/// [`two_stores_over_one_directory_lose_nothing`] with 40 updates and observations a thread.
+#[test]
+fn slow_two_stores_over_one_directory_lose_nothing() {
+    two_stores_over_one_directory("slow-two-stores", 40);
+}
+
+fn two_stores_over_one_directory(label: &str, per_thread: u64) {
+    let dir = store_dir(label);
     let case = CaseId("case-1".to_owned());
     FileCaseStore::open(&dir)
         .unwrap()
@@ -378,7 +390,7 @@ fn two_stores_over_one_directory_lose_nothing() {
             let case = case.clone();
             scope.spawn(move || {
                 let store = FileCaseStore::open(&dir).unwrap();
-                for n in 0..40 {
+                for n in 0..per_thread {
                     store
                         .update(&case, |state| state.revision += 1)
                         .unwrap()
@@ -391,8 +403,12 @@ fn two_stores_over_one_directory_lose_nothing() {
         }
     });
     let store = FileCaseStore::open(&dir).unwrap();
-    assert_eq!(store.get(&case).unwrap().unwrap().revision, 81);
-    assert_eq!(store.observations().unwrap().len(), 80);
+    let revision = i64::try_from(2 * per_thread).unwrap() + 1;
+    assert_eq!(store.get(&case).unwrap().unwrap().revision, revision);
+    assert_eq!(
+        store.observations().unwrap().len(),
+        usize::try_from(2 * per_thread).unwrap()
+    );
     let names: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())

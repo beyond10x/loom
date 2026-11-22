@@ -292,9 +292,43 @@ fn must_refuse(value: &str) -> bool {
             .any(|character| character.is_whitespace() || character.is_control())
 }
 
-/// Every (connector, instance) pair with one hostile part and the fixture's other part.
-fn cases(connector: &str, instance: &str) -> Vec<(String, String)> {
-    hostile()
+/// Of [`hostile`], the values `task check` takes, one or two of each kind its comment names:
+/// the slow lane's twins take all of them.
+fn check_values() -> Vec<String> {
+    const CHECK: [&str; 18] = [
+        "-x",
+        "--",
+        "--connection=conn-other",
+        "a=b",
+        "",
+        "a b",
+        "a\nb",
+        "a\0b",
+        "a\u{1b}b",
+        "a\u{85}b",
+        "\u{a0}a",
+        "/",
+        "../x",
+        "..",
+        "a\u{2215}b",
+        "\u{2212}x",
+        "\u{202e}x",
+        "\u{200b}x",
+    ];
+    let all = hostile();
+    let mut values: Vec<String> = CHECK.iter().map(|&value| value.to_owned()).collect();
+    assert!(
+        values.iter().all(|value| all.contains(value)),
+        "every value of check_values is one of hostile"
+    );
+    values.push("a".repeat(4096));
+    values.push("a".repeat(200_000));
+    values
+}
+
+/// Every (connector, instance) pair with one part of `values` and the fixture's other part.
+fn cases(values: Vec<String>, connector: &str, instance: &str) -> Vec<(String, String)> {
+    values
         .into_iter()
         .flat_map(|value| {
             [
@@ -452,14 +486,32 @@ fn write_input() -> json::Value {
 /// A read: every hostile `connector` or `instance` either starts no invoke (and a value the argv
 /// rule names is always refused so), or reaches the invoke as one half of the one target element,
 /// with argv exactly the declared command line, no approval flag, and only inherited variables.
+///
+/// Over [`check_values`]; the slow lane's twin takes every [`hostile`] value.
 #[test]
 fn no_describe_value_becomes_a_read_flag_or_positional() {
-    let fixture = Fixture::new("no_describe_value_becomes_a_read_flag_or_positional");
+    read_values(
+        "no_describe_value_becomes_a_read_flag_or_positional",
+        check_values(),
+    );
+}
+
+/// [`no_describe_value_becomes_a_read_flag_or_positional`] over every [`hostile`] value.
+#[test]
+fn slow_no_describe_value_becomes_a_read_flag_or_positional() {
+    read_values(
+        "slow_no_describe_value_becomes_a_read_flag_or_positional",
+        hostile(),
+    );
+}
+
+fn read_values(test: &str, values: Vec<String>) {
+    let fixture = Fixture::new(test);
     let described = fixture_text("describe-list.json");
     fixture.answer("invoke", LIST, &fixture_text("invoke-read.json"));
     let cli = fixture.cli();
 
-    for (connector, instance) in cases("chat", "team") {
+    for (connector, instance) in cases(values, "chat", "team") {
         let case = label(&connector, &instance);
         let answer = described
             .replace(
@@ -530,9 +582,27 @@ fn no_describe_value_becomes_a_read_flag_or_positional() {
 
 /// A governed write: the same hostile values either start no invoke, or reach it as one half of
 /// the target with the configured connection, the admitted proof path and key in their places.
+///
+/// Over [`check_values`]; the slow lane's twin takes every [`hostile`] value.
 #[test]
 fn no_describe_value_becomes_a_write_flag_or_positional() {
-    let fixture = Fixture::new("no_describe_value_becomes_a_write_flag_or_positional");
+    write_values(
+        "no_describe_value_becomes_a_write_flag_or_positional",
+        check_values(),
+    );
+}
+
+/// [`no_describe_value_becomes_a_write_flag_or_positional`] over every [`hostile`] value.
+#[test]
+fn slow_no_describe_value_becomes_a_write_flag_or_positional() {
+    write_values(
+        "slow_no_describe_value_becomes_a_write_flag_or_positional",
+        hostile(),
+    );
+}
+
+fn write_values(test: &str, values: Vec<String>) {
+    let fixture = Fixture::new(test);
     let described = fixture_text("describe-route.json");
     fixture.answer("invoke", ROUTE, &fixture_text("invoke-route-applied.json"));
     let cli = fixture.cli();
@@ -540,7 +610,7 @@ fn no_describe_value_becomes_a_write_flag_or_positional() {
     let key = idempotency_key(&request);
     let proof = fixture.proof();
 
-    for (connector, instance) in cases("desk", "support") {
+    for (connector, instance) in cases(values, "desk", "support") {
         let case = label(&connector, &instance);
         let answer = described
             .replace(
