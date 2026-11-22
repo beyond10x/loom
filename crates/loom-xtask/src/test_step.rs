@@ -331,7 +331,8 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     }
     let mut command = cargo_command(root);
     if require {
-        command.env(REQUIRE_DELEGATION, "1");
+        // A name in a literal, as for the start budgets below.
+        command.env("LOOM_REQUIRE_DELEGATION", "1");
     }
     let starts: Vec<(StartBudget, PathBuf)> = START_BUDGETS
         .iter()
