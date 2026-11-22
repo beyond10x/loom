@@ -123,6 +123,88 @@ fn a_relative_store_is_refused_and_never_resolved_against_the_current_directory(
     }
 }
 
+/// The fixture of the tree command tests: `sign@1` and its bindings, `road.txt` and the stubs.
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../loom-cli/tests/fixtures/tree-two-level"
+);
+
+#[test]
+fn run_tree_returns_the_principal_of_a_person_decision() {
+    use b10x_loom_tree::model::DecisionKind;
+    use b10x_loom_tree::{
+        ConfinementAdapter, EngineConfinement, EngineRunner, OpenRequest, RunSettings,
+        UNCONFINED_FLAG_REASON, open_tree, run_tree,
+    };
+    let dir = scratch("principal");
+    let fixture = std::path::Path::new(FIXTURE);
+    let workspace = dir.join("workspace");
+    fs::create_dir_all(workspace.join("stubs")).unwrap();
+    for file in ["road.txt", "sign.bindings.yaml", "stubs/post-stamp.sh"] {
+        fs::copy(fixture.join(file), workspace.join(file)).unwrap();
+    }
+    let installed = loom_protocols::InstallStore::new(dir.join("protocols"));
+    installed
+        .install_file("sign@1", &fixture.join("extra/sign.yaml"), false)
+        .unwrap();
+    let catalog = installed.catalog().unwrap();
+    let store = dir.join("store");
+    let at = TreeTime::At("2026-11-22T08:00:00Z".into());
+    open_tree(&OpenRequest {
+        store: store.clone(),
+        workspace: workspace.clone(),
+        protocol: "sign@1".into(),
+        bindings: workspace.join("sign.bindings.yaml"),
+        revisions: Vec::new(),
+        case: "root".into(),
+        time: at.clone(),
+        catalog: &catalog,
+        protocols: Vec::new(),
+    })
+    .unwrap();
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    let settings = RunSettings {
+        max_steps: None,
+        max_wall_seconds: None,
+        time: at,
+        runner: std::sync::Arc::new(runner),
+        confinement: Some("local".into()),
+    };
+    let ran = run_tree(&store, &catalog, &settings, None, None).unwrap();
+
+    let bindings = b10x_loom_bindings::decode(
+        &fs::read_to_string(fixture.join("sign.bindings.yaml")).unwrap(),
+    )
+    .unwrap();
+    for action in ["post.sign", "post.seal"] {
+        let decision = ran
+            .decisions
+            .iter()
+            .find(|decision| decision.action.as_deref() == Some(action))
+            .unwrap_or_else(|| panic!("no decision about {action}: {ran:?}"));
+        assert_eq!(decision.kind, DecisionKind::ApproveAction, "{decision:?}");
+        let bound = bindings
+            .actions
+            .iter()
+            .find(|bound| bound.action == action)
+            .and_then(|bound| bound.executor.principal.clone());
+        assert!(bound.is_some(), "{action}");
+        assert_eq!(decision.principal, bound, "{decision:?}");
+        let at = decision
+            .command
+            .iter()
+            .position(|word| word == "--principal")
+            .unwrap();
+        assert_eq!(Some(&decision.command[at + 1]), bound.as_ref());
+    }
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn run_settings_are_built_from_items_of_this_crate_alone() {
     use b10x_loom_tree::{

@@ -54,6 +54,8 @@ types:
   # close records, and the exact command that records the decision as its argv. Nothing a program
   # printed, no report and no bindings text selects the case, the action, the capability or the
   # principal of the command; a handoff text is printed as the decision and never as a command.
+  # `principal`: the principal the printed command records; for `ApproveAction` the bound person
+  # Loom checks, for `Approve` the default and no restriction; absent for `Close` and `Handoff`.
   - name: loom.tree.NextDecision
     kind: struct
     fields:
@@ -64,6 +66,8 @@ types:
       - name: action
         type: Optional<String>
       - name: capability
+        type: Optional<String>
+      - name: principal
         type: Optional<String>
       - name: decides
         type: String

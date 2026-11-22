@@ -38,6 +38,9 @@ use sha2::{Digest as _, Sha256};
 #[path = "tree_run/delegated_cgroup.rs"]
 mod delegated_cgroup;
 
+#[path = "tree_run/principal.rs"]
+mod principal;
+
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 
 /// The bound of every test of this file.

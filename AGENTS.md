@@ -1617,6 +1617,11 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
   `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
   `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+  A decision whose command carries `--principal` names that value as `principal`
+  (`story:next-decision-names-the-principal`): for `ApproveAction` the binding's
+  `executor.principal`, the one `person_action` and `PersonEffects` check; for `Approve` always
+  `DEFAULT_PRINCIPAL`, which restricts nothing. `Close` and `Handoff` name none. `waits` puts one
+  value into both, so the printed principal is the one recorded (`tests/tree_run/principal.rs`).
 - Under `--confinement substrate` (the default) `tree run` never lets a driver discover an ancestor
   cgroup (`substrate_runner` in `tree.rs` refuses without a root). `--cgroup-root DIR` names the
   root; without it `tree run` starts itself again under `systemd-run --user --scope -p
