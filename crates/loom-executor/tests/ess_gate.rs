@@ -6,13 +6,24 @@
 //! The gate is a function over a directory, so it runs on `ess/` and on temporary copies of it.
 //! Everything it writes lands under `CARGO_TARGET_TMPDIR`. It uses only the standard library and
 //! the `ess` binary on `PATH`. The repository is read from `CARGO_MANIFEST_DIR` at run time.
+//!
+//! Step 3 over `ess/` synthesizes nothing: it reads the suite `task suite-generate` committed under
+//! `generated/ess/loom/`, after the digest of its inputs matched the tree's
+//! (`tests/support/ess_suite.rs`). Synthesizing `ess/` takes minutes; `task slow` does it and
+//! compares bytes. The copies the probes change synthesize, once per distinct input for every
+//! process that shares the cache ([`synthesis_cache`]), and leave out the decision domain
+//! ([`drop_decision`]), which costs minutes and none of them is about; the one probe that needs
+//! it is `slow_`, run by `task slow`, not by `task ess-gate`.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
+
+#[path = "support/ess_suite.rs"]
+mod ess_suite;
 
 const MARKER: &str = "UNMAPPED:";
 
@@ -64,9 +75,28 @@ impl fmt::Display for Marker {
     }
 }
 
+/// Where step 3 takes its synthesis from.
+#[derive(Debug, Clone, Copy)]
+enum Synthesis<'a> {
+    /// The synthesis committed under the given repository root, whose `ess/` the gate checks:
+    /// read after its input digest matched that `ess/` (`ess_suite::committed`).
+    Committed(&'a Path),
+    /// A synthesis of the checked directory, made once per distinct input ([`synthesis_cache`]).
+    Fresh,
+}
+
+/// The directory every process of this tree's tests keeps its syntheses of copies in, keyed by
+/// input: `LOOM_ESS_SYNTHESIS_CACHE` when set (a replica's suite is handed its outer test's), else
+/// `ess-synthesis-cache` under `CARGO_TARGET_TMPDIR`.
+fn synthesis_cache() -> PathBuf {
+    std::env::var_os("LOOM_ESS_SYNTHESIS_CACHE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_TARGET_TMPDIR")).join("ess-synthesis-cache"))
+}
+
 /// Runs the four gate steps over `dir` in order and stops at the first that does not hold. On
 /// success returns the compiled specification.
-fn run_gate(dir: &Path, suite_out: &Path) -> Result<Json, GateFailure> {
+fn run_gate(dir: &Path, synthesis: Synthesis<'_>) -> Result<Json, GateFailure> {
     let fail = |step, detail: String| GateFailure {
         step,
         detail,
@@ -86,25 +116,20 @@ fn run_gate(dir: &Path, suite_out: &Path) -> Result<Json, GateFailure> {
 
     let compiled = compile(dir)?;
 
-    let synthesize = ess(&[
-        "verify",
-        "conform",
-        "synthesize",
-        "--path",
-        path_arg(dir),
-        "--scenarios",
-        path_arg(dir),
-        "--suite-format",
-        "5",
-        "--out",
-        path_arg(suite_out),
-    ]);
-    synthesize_holds(
-        synthesize.status.success(),
-        &String::from_utf8_lossy(&synthesize.stdout),
-        &describe(&synthesize),
-    )
-    .map_err(|detail| fail(Step::Synthesize, detail))?;
+    let (success, stdout, described) = match synthesis {
+        Synthesis::Committed(root) => {
+            let (record, _) = ess_suite::committed(root, &ess_program())
+                .map_err(|detail| fail(Step::Synthesize, detail))?;
+            (record.success(), record.stdout.clone(), record.describe())
+        }
+        Synthesis::Fresh => {
+            let run = ess_suite::synthesize_once(&ess_program(), dir, &synthesis_cache())
+                .map_err(|detail| fail(Step::Synthesize, detail))?;
+            (run.success(), run.stdout.clone(), run.describe())
+        }
+    };
+    synthesize_holds(success, &stdout, &described)
+        .map_err(|detail| fail(Step::Synthesize, detail))?;
 
     let markers = scan_markers(dir);
     if !markers.is_empty() {
@@ -236,8 +261,16 @@ fn synthesize_holds(success: bool, stdout: &str, described: &str) -> Result<(), 
     }
 }
 
+/// The `ess` on `PATH`, asked for the release this repository's `ess/ess-inputs.yaml` requires
+/// unless the caller set `ESS_TOOLCHAIN` (`ess_suite::Ess`). A copy's own `requires` line never
+/// chooses the release: step 1 holds it to this one.
+fn ess_program() -> ess_suite::Ess {
+    ess_suite::ess_program(&repo_root())
+}
+
 fn ess(args: &[&str]) -> Output {
-    Command::new("ess")
+    ess_program()
+        .command()
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("run `ess {}` (is ess on PATH?): {e}", args.join(" ")))
@@ -305,11 +338,32 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// A copy of `ess/` with `# UNMAPPED: probe` appended to `domains/run.yaml`. Returns the copy and
-/// the appended line's one-based number.
-fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
+/// `ess_suite::drop_decision`: the copy without the decision domain.
+fn drop_decision(spec: &Path) {
+    ess_suite::drop_decision(spec).unwrap_or_else(|detail| panic!("{detail}"));
+}
+
+/// A copy of `ess/` without the decision domain ([`drop_decision`]) in a fresh scratch directory.
+fn copy_spec(name: &str) -> PathBuf {
     let copy = scratch(name).join("ess");
     copy_dir(&spec_dir(), &copy);
+    drop_decision(&copy);
+    copy
+}
+
+/// Applies `edit` to the text of `file` under `spec`, asserting it changes it.
+fn edit_file(spec: &Path, file: &str, edit: impl FnOnce(String) -> String) {
+    let path = spec.join(file);
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {file} copy: {e}"));
+    let edited = edit(text.clone());
+    assert_ne!(edited, text, "the edit to {file} applies");
+    fs::write(&path, edited).unwrap_or_else(|e| panic!("write {file} copy: {e}"));
+}
+
+/// A copy of `ess/` ([`copy_spec`]) with `# UNMAPPED: probe` appended to `domains/run.yaml`.
+/// Returns the copy and the appended line's one-based number.
+fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
+    let copy = copy_spec(name);
     let run = copy.join("domains/run.yaml");
     let mut text = fs::read_to_string(&run).expect("read run.yaml copy");
     if !text.ends_with('\n') {
@@ -328,8 +382,7 @@ fn copy_with_probe_marker(name: &str) -> (PathBuf, usize) {
 // suite refused as `UnsupportedPrimitive`; 0.82.0 synthesizes `Binary64`.)
 #[test]
 fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
-    let copy = scratch("gate_refused_copy").join("ess");
-    copy_dir(&spec_dir(), &copy);
+    let copy = copy_spec("gate_refused_copy");
     let inputs = copy.join("ess-inputs.yaml");
     let listed = fs::read_to_string(&inputs).expect("read ess-inputs.yaml copy");
     let at = listed
@@ -337,8 +390,7 @@ fn gate_over_a_copy_synthesize_refuses_fails_at_synthesize() {
         .expect("ess-inputs.yaml has a top-level `scenarios:` list");
     fs::write(&inputs, format!("{}\nscenarios: []\n", &listed[..at]))
         .expect("write ess-inputs.yaml copy");
-    let suite = copy.parent().expect("scratch").join("loom-suite.json");
-    let Err(failure) = run_gate(&copy, &suite) else {
+    let Err(failure) = run_gate(&copy, Synthesis::Fresh) else {
         panic!("the gate passed a specification synthesize refuses");
     };
     assert_eq!(failure.step, Step::Synthesize, "{failure}");
@@ -390,15 +442,10 @@ events:
         type: loom.run.SelectionStrategy
 ";
 
-/// A copy of `ess/` in a fresh scratch directory, with `edit` applied to the text of `file`.
+/// A copy of `ess/` ([`copy_spec`]) with `edit` applied to the text of `file`.
 fn copy_with_edit(name: &str, file: &str, edit: impl FnOnce(String) -> String) -> PathBuf {
-    let copy = scratch(name).join("ess");
-    copy_dir(&spec_dir(), &copy);
-    let path = copy.join(file);
-    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {file} copy: {e}"));
-    let edited = edit(text.clone());
-    assert_ne!(edited, text, "the edit to {file} applies");
-    fs::write(&path, edited).unwrap_or_else(|e| panic!("write {file} copy: {e}"));
+    let copy = copy_spec(name);
+    edit_file(&copy, file, edit);
     copy
 }
 
@@ -414,8 +461,7 @@ fn gate_over_a_copy_with_an_uncovered_refusal_fails_at_synthesize() {
         )
     });
     fs::write(copy.join("domains/probe.yaml"), UNSATISFIABLE_COMMAND).expect("write probe.yaml");
-    let suite = copy.parent().expect("scratch").join("loom-suite.json");
-    let Err(failure) = run_gate(&copy, &suite) else {
+    let Err(failure) = run_gate(&copy, Synthesis::Fresh) else {
         panic!(
             "the gate passed a specification with a refusal no authored scenario covers \
              (ESS-SYNTH-003)"
@@ -429,18 +475,20 @@ fn gate_over_a_copy_with_an_uncovered_refusal_fails_at_synthesize() {
 }
 
 // Item 3, covered refusals: the tree's own `covers:` scenarios cover every refusal of `ess/`, and
-// removing one cover makes the gate fail at step 3.
+// removing one cover makes the gate fail at step 3. Every cover of `ess/` is the decision
+// domain's, so the copy keeps it and synthesizes for minutes: the slow lane (`task slow`) runs it.
 #[test]
-fn gate_over_a_copy_missing_one_cover_fails_at_synthesize() {
-    let copy = copy_with_edit("gate_cover_removed", "ess-inputs.yaml", |text| {
+fn slow_gate_over_a_copy_missing_one_cover_fails_at_synthesize() {
+    let copy = scratch("gate_cover_removed").join("ess");
+    copy_dir(&spec_dir(), &copy);
+    edit_file(&copy, "ess-inputs.yaml", |text| {
         text.replacen(
             "  - scenarios/decision/escalated-request-is-superseded.yaml\n",
             "",
             1,
         )
     });
-    let suite = copy.parent().expect("scratch").join("loom-suite.json");
-    let Err(failure) = run_gate(&copy, &suite) else {
+    let Err(failure) = run_gate(&copy, Synthesis::Fresh) else {
         panic!("the gate passed a specification whose supersede transition no scenario covers");
     };
     assert_eq!(failure.step, Step::Synthesize, "{failure}");
@@ -456,8 +504,7 @@ fn gate_over_a_copy_requiring_an_older_ess_fails_at_validate() {
     let copy = copy_with_edit("gate_requires_older", "ess-inputs.yaml", |text| {
         text.replacen("requires: ess 0.96.0", "requires: ess 0.51.0", 1)
     });
-    let suite = copy.parent().expect("scratch").join("loom-suite.json");
-    let Err(failure) = run_gate(&copy, &suite) else {
+    let Err(failure) = run_gate(&copy, Synthesis::Fresh) else {
         panic!(
             "the gate passed a specification requiring ess 0.51.0: validate does not run with \
              --strict-requires"
@@ -467,14 +514,63 @@ fn gate_over_a_copy_requiring_an_older_ess_fails_at_validate() {
     assert!(failure.detail.contains("--strict-requires"), "{failure}");
 }
 
-// Items 1, 3 and 4: the gate holds on the specification.
+// Items 1, 3 and 4: the gate holds on the specification. Step 3 reads the committed synthesis.
 #[test]
 fn gate_holds_on_the_specification() {
-    let suite = scratch("gate_holds").join("loom-suite.json");
-    if let Err(failure) = run_gate(&spec_dir(), &suite) {
+    if let Err(failure) = run_gate(&spec_dir(), Synthesis::Committed(&repo_root())) {
         panic!("{failure}");
     }
-    assert!(suite.is_file(), "suite written to {}", suite.display());
+    let (_, suite) = ess_suite::committed(&repo_root(), &ess_program())
+        .unwrap_or_else(|detail| panic!("{detail}"));
+    assert!(
+        suite.is_some_and(|suite| !suite.is_empty()),
+        "{} holds the suite",
+        ess_suite::SUITE
+    );
+}
+
+// Item 3 over the committed synthesis: the gate holds over a tree whose committed suite was
+// synthesized from its `ess/`, and fails at step 3 once a file of `ess/` changed after it, naming
+// the command that writes it again, or once the suite file was changed by hand.
+#[test]
+fn gate_over_a_tree_whose_committed_suite_is_stale_fails_at_synthesize() {
+    let root = scratch("committed_stale");
+    let spec = root.join("ess");
+    copy_dir(&spec_dir(), &spec);
+    drop_decision(&spec);
+    let ess = ess_program();
+    let run = ess_suite::synthesize_once(&ess, &spec, &synthesis_cache())
+        .unwrap_or_else(|detail| panic!("synthesize the copy: {detail}"));
+    ess_suite::write_generated(&root, &ess, None, &run)
+        .unwrap_or_else(|detail| panic!("write the copy's synthesis: {detail}"));
+    if let Err(failure) = run_gate(&spec, Synthesis::Committed(&root)) {
+        panic!("the gate fails over a tree whose suite was synthesized from it: {failure}");
+    }
+
+    let run_yaml = spec.join("domains/run.yaml");
+    let original = fs::read_to_string(&run_yaml).expect("read run.yaml copy");
+    fs::write(&run_yaml, format!("{original}# changed after the suite\n")).expect("write");
+    let Err(failure) = run_gate(&spec, Synthesis::Committed(&root)) else {
+        panic!("the gate passed a tree whose ess/ changed after its suite was synthesized");
+    };
+    assert_eq!(failure.step, Step::Synthesize, "{failure}");
+    assert!(
+        failure
+            .detail
+            .contains("regenerate it with `task suite-generate`"),
+        "{failure}"
+    );
+
+    fs::write(&run_yaml, original).expect("restore run.yaml copy");
+    let suite = root.join(ess_suite::SUITE);
+    let mut text = fs::read_to_string(&suite).expect("read the copy's suite");
+    text.push(' ');
+    fs::write(&suite, text).expect("write the copy's suite");
+    let Err(failure) = run_gate(&spec, Synthesis::Committed(&root)) else {
+        panic!("the gate passed a committed suite changed by hand");
+    };
+    assert_eq!(failure.step, Step::Synthesize, "{failure}");
+    assert!(failure.detail.contains("changed by hand"), "{failure}");
 }
 
 // Item 2: the compiled specification declares what this story settled.
@@ -565,8 +661,7 @@ fn marker_scan_names_file_and_line_of_an_appended_marker() {
 #[test]
 fn gate_over_a_marked_copy_fails_at_the_marker_scan() {
     let (copy, line) = copy_with_probe_marker("gate_marked_copy");
-    let suite = copy.parent().expect("scratch").join("loom-suite.json");
-    let Err(failure) = run_gate(&copy, &suite) else {
+    let Err(failure) = run_gate(&copy, Synthesis::Fresh) else {
         panic!("the gate passed a specification carrying `# UNMAPPED: probe`");
     };
     assert_eq!(failure.step, Step::MarkerScan, "{failure}");
@@ -630,6 +725,10 @@ fn taskfile_check_runs_the_ess_gate() {
     assert!(
         body("ess-gate").contains("cargo test -p b10x-loom-executor --test ess_gate --locked"),
         "task ess-gate runs the ess_gate test"
+    );
+    assert!(
+        body("ess-gate").contains("-- --skip slow_"),
+        "task ess-gate leaves the slow lane's cases to task slow"
     );
     assert!(
         body("check")

@@ -761,8 +761,10 @@ fn generate_keeps_the_committed_tree_when_synthesis_fails() {
 
 /// `task generate` from a checkout with no generated tree: cargo cannot load the workspace
 /// until the model crate's manifest exists, so the task must bootstrap it before the xtask runs.
+/// In the slow lane (`task slow`): the task builds the xtask from a fresh copy of every crate in
+/// a build directory of its own, past the 60 s a test of `task check` may take.
 #[test]
-fn task_generate_writes_the_tree_when_it_is_absent() {
+fn slow_task_generate_writes_the_tree_when_it_is_absent() {
     let case = case_dir("task_generate_writes_the_tree_when_it_is_absent");
     let root = repo_copy(&case, false);
     // `cargo --locked` loads the whole Loom workspace (`members = ["crates/*"]`), so every member
