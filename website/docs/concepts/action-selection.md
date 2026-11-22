@@ -14,7 +14,7 @@ source_url: https://github.com/beyond10x/loom/blob/main/docs/contracts/loom-acti
 **`ActionSelector` picks one action.** Given the run's context and the candidate actions, it returns
 one action id and, optionally, a confidence. Two strategies exist: the slice's `ModelSelector`, a
 model asked for one forced `select_action` tool call, and scripted rule selectors in tests and the
-SDK example. A fast typed selector and a hybrid are planned.
+SDK example. A fast typed selector is planned.
 
 **`ArgumentGenerator` fills in one action.** Given the selected action, it returns that action's
 arguments as JSON. It does not see the choice between actions and completes only the one already
