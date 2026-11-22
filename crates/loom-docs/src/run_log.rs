@@ -119,6 +119,7 @@ mod tests {
             "ActionStarted",
             "ActionFinished",
             "Discarded",
+            "HandoffChecked",
             "ChildOpened",
             "ChildClosed",
             "AuthorityRecorded",

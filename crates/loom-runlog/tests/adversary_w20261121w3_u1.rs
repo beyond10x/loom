@@ -174,7 +174,8 @@ fn one_line(line: &serde_json::Map<String, Value>) -> Vec<u8> {
 
 /// The contract document, read as the specification of a line: every kind it names reads with
 /// every field it states, writes back as exactly those members, loses a required field only by
-/// being refused, and takes no member the contract does not state. `ActionFinished` holds exactly
+/// being refused, and takes no member the contract does not state. `ActionFinished` (and
+/// `HandoffChecked`, story handoff-when-a-program-decides) holds exactly
 /// one of `exit` and `refusal` (the domain's "one of the two", which the contract cannot state):
 /// it is read twice, with every field and `exit` alone, and with every field and `refusal` alone;
 /// the line with both and the line with neither are refused.
@@ -182,14 +183,17 @@ fn one_line(line: &serde_json::Map<String, Value>) -> Vec<u8> {
 fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
     let contract = contract();
     let kinds = contract["kinds"].as_object().expect("kinds");
-    assert_eq!(kinds.len(), 10, "the story names ten events");
+    // Ten events of story run-log-hash-chain, and `HandoffChecked` of story
+    // handoff-when-a-program-decides, which holds exactly one of `exit` and `refusal` too.
+    assert_eq!(kinds.len(), 11, "eleven events");
     for (kind, body) in kinds {
         let full = contract_line(&contract, kind);
         let exclusive = ["exit", "refusal"];
+        let one_of = kind == "ActionFinished" || kind == "HandoffChecked";
         // A child line holds `record` and `record_digest` together or neither (story
         // child-record-in-the-run-log), which the contract cannot state either.
         let paired = ["record", "record_digest"];
-        let variants: Vec<serde_json::Map<String, Value>> = if kind == "ActionFinished" {
+        let variants: Vec<serde_json::Map<String, Value>> = if one_of {
             for member in exclusive {
                 assert!(full.contains_key(member), "the contract states `{member}`");
             }
@@ -237,7 +241,7 @@ fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
                 let mut without = line.clone();
                 without.remove(name);
                 let result = verify(&one_line(&without));
-                if kind == "ActionFinished" && exclusive.contains(&name.as_str()) {
+                if one_of && exclusive.contains(&name.as_str()) {
                     assert_eq!(
                         refusal(result),
                         (RunLogRefusal::CutLine, 0),

@@ -31,6 +31,8 @@
 //!
 //! An `ActionFinished` holds an `exit` or a `refusal`, exactly one: a line with both or neither
 //! does not read as a line, so `verify` refuses it and an append refuses to write it. A
+//! `HandoffChecked` (story `handoff-when-a-program-decides`) is held to the same rule; a reader
+//! from before it refuses the kind. A
 //! `ChildOpened` or `ChildClosed` holds `record` and `record_digest` together or neither, the
 //! digest 64 lower-case hex digits, under the same rule. A log written before those members
 //! existed reads with both absent; a reader from before them refuses a line that holds them.
@@ -62,8 +64,8 @@ use loom::json::{
 use loom::primitives::Timestamp;
 use loom::runlog::{
     ActionFinished, ActionStarted, AuthorityRecorded, CaseOpened, ChildClosed, ChildOpened,
-    Discarded, Evaluated, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal, RunLogRefused,
-    Stopped, Terminated,
+    Discarded, Evaluated, HandoffChecked, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal,
+    RunLogRefused, Stopped, Terminated,
 };
 use loom::tree::SpentBudget;
 use loom_governor::{FileStoreError, LockedDir, case_file_stem};
@@ -531,6 +533,15 @@ pub fn encode(line: &RunLogLine) -> String {
             text(&mut out, "action", &event.action);
             text(&mut out, "reason", &event.reason);
         }
+        RunLogEvent::HandoffChecked(event) => {
+            text(&mut out, "action", &event.action);
+            if let Some(exit) = event.exit {
+                member(&mut out, "exit");
+                push_integer(&mut out, exit);
+            }
+            optional(&mut out, "refusal", &event.refusal);
+            optional(&mut out, "blob_digest", &event.blob_digest);
+        }
         RunLogEvent::ChildOpened(event) => {
             text(&mut out, "child", &event.child);
             text(&mut out, "protocol", &event.protocol);
@@ -567,6 +578,7 @@ fn kind(event: &RunLogEvent) -> &'static str {
         RunLogEvent::ActionStarted(_) => "ActionStarted",
         RunLogEvent::ActionFinished(_) => "ActionFinished",
         RunLogEvent::Discarded(_) => "Discarded",
+        RunLogEvent::HandoffChecked(_) => "HandoffChecked",
         RunLogEvent::ChildOpened(_) => "ChildOpened",
         RunLogEvent::ChildClosed(_) => "ChildClosed",
         RunLogEvent::AuthorityRecorded(_) => "AuthorityRecorded",
@@ -590,6 +602,7 @@ fn event_members(kind: &str) -> Option<&'static [&'static str]> {
             "revisions",
         ],
         "Discarded" => &["action", "reason"],
+        "HandoffChecked" => &["action", "exit", "refusal", "blob_digest"],
         "ChildOpened" => &["child", "protocol", "record", "record_digest"],
         "ChildClosed" => &["child", "outcome", "record", "record_digest"],
         "AuthorityRecorded" => &["capability", "decision", "principal"],
@@ -659,7 +672,9 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
         "ActionStarted" => RunLogEvent::ActionStarted(ActionStarted {
             action: text("action")?,
         }),
-        "ActionFinished" if value.member("exit").is_some() == value.member("refusal").is_some() => {
+        "ActionFinished" | "HandoffChecked"
+            if value.member("exit").is_some() == value.member("refusal").is_some() =>
+        {
             return Err(DecodeError {
                 at: "exit".to_owned(),
                 expected: "an exit or a refusal, exactly one".to_owned(),
@@ -670,6 +685,15 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
                 },
             });
         }
+        "HandoffChecked" => RunLogEvent::HandoffChecked(HandoffChecked {
+            action: text("action")?,
+            exit: value
+                .member("exit")
+                .map(|exit| integer_at(exit, "exit", "an integer"))
+                .transpose()?,
+            refusal: optional_text(value, "", "refusal")?,
+            blob_digest: optional_text(value, "", "blob_digest")?,
+        }),
         "ActionFinished" => RunLogEvent::ActionFinished(ActionFinished {
             action: text("action")?,
             exit: value

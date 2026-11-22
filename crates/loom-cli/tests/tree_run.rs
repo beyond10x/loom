@@ -31,6 +31,8 @@ use sha2::{Digest as _, Sha256};
 
 #[path = "tree_run/delegated_cgroup.rs"]
 mod delegated_cgroup;
+#[path = "tree_run/handoff_when.rs"]
+mod handoff_when;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 

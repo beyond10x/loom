@@ -1361,8 +1361,8 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
 - A document names one protocol (`name@major`) and holds one `actions` list item per bound action.
   Each action has an `executor` (`program`, `agent`, `person`, `open`, `copy`), `evidence` entries
   (`from` is `exit`, `effect` or a JSON pointer into the program's report), `tools`, `budget`,
-  `timeout_seconds`, `retry_when` and `handoff`. An adapter, an aperture and a remote endpoint are
-  engine configuration and never binding data.
+  `timeout_seconds`, `retry_when`, `handoff` and, on a `program`, `handoff_when` (below). An
+  adapter, an aperture and a remote endpoint are engine configuration and never binding data.
 - `decode` refuses at the first defect, naming the action and the member: an undeclared member at any
   level, a `format` other than `loom.bindings/1`, an `argv` that is empty or not a list of strings, a
   tool name that is empty or holds a comma or white space (the session executor joins the names with
@@ -1548,6 +1548,11 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   (`story:tree-status-names-what-it-read`; ESS cannot state the rule). `tree run` writes it on
   every `BudgetSpent` stop. A `BudgetSpent` line without it, as Loom 0.58.0 wrote, still reads;
   Loom 0.58.0 and earlier refuse a line that holds it.
+- `HandoffChecked` (`story:handoff-when-a-program-decides`) names the action, the check's `exit` or
+  `refusal`, exactly one as on `ActionFinished`, and the `blob_digest` of its output. `tree run`
+  writes one per evaluation of a `handoff_when` check, before the stop or the step it decides;
+  nothing reads the check's answer from anywhere else, and no reader runs the check again. Loom
+  0.58.0 and earlier refuse the kind.
 - The crate declares the events and writes what it is given; emitting them is
   `story:tree-run-command`'s. It depends on the governor for the lock and the stem, so the executor
   and Canon reach it only through the governor.
@@ -1591,6 +1596,23 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
   `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
   `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+- A writer's `handoff_when` (`handoff.rs`, `story:handoff-when-a-program-decides`): `Checked`
+  wraps the step's executor, so once the deterministic selector picked an action whose binding
+  carries one, `b10x_loom_bindings::run_handoff_check` runs it before the loop performs the step,
+  as a `bound_case_child` through the run's runner, admitted as a bound program's is, with
+  `ChildCommand::with_read_only_workspace` (Substrate `WorkspaceAccess::ReadOnly`: nothing in the
+  workspace writable, `target/` included), `PATH` and `LOOM_*` alone, no retry feedback, no
+  aperture, empty standard input and the binding's timeout; its output is a blob of the store and
+  it records nothing in the case. Its `handoff checked` line comes before the step or the stop.
+  Exit 0 takes no step and stops `AwaitingPerson` with the writer's `Handoff`; another exit hands
+  the proposal on and the writer runs in that step; no exit status (a refusal of the runner, 126
+  or 127, a timeout, a signal, a blob not kept) refuses the run `HandoffCheckFailed` naming the
+  action, exit 1. At a stuck stop such a writer's handoff is offered only on its check's exit 0.
+  A `tree approve`d step is not checked. `crates/loom-cli/tests/tree_run/handoff_when.rs` holds
+  it; its confinement case skips without delegation unless `LOOM_REQUIRE_DELEGATION` is set. Under
+  `local` a missing program and a signal reach the check as a refusal of the runner, so the
+  126/127 and no-exit branches, and the timeout and the child's reach once more, are held by
+  `crates/loom-bindings/tests/bound_retry.rs` (`a_handoff_check_*`, a recording runner).
 - Under `--confinement substrate` (the default) `tree run` never lets a driver discover an ancestor
   cgroup (`substrate_runner` in `tree.rs` refuses without a root). `--cgroup-root DIR` names the
   root; without it `tree run` starts itself again under `systemd-run --user --scope -p

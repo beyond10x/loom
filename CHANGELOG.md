@@ -55,6 +55,9 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree approve --action A --result R` ends a person action with a named result: each `from: effect` entry of `A` records the result its table maps `R` to, and a result an entry does not list is refused `NotAPersonAction` naming the entry and its values, with nothing written; `--reasons TEXT` or `--reasons-file FILE` (with `--result`; at most 65536 bytes and 60 lines; a file inside the workspace, no link followed) are kept as `blobs/<sha256>` and reach a writer whose `retry_when` lists the result as the log of the person's record in `LOOM_RETRY_FEEDBACK`; a person binding's effect table may list named values besides `performed`, never `*`; `b10x_loom_bindings::PERSON_SOURCE`, `reasons_fit`, `read_reasons_file`, `keep_reasons` and `b10x_loom_tree::Reasons` (story:person-action-records-a-named-result)
 - `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
 - `b10x-loom tree run --cgroup-root DIR` runs confined programs under `DIR`, refused `ConfinementRefused` unless it is empty, writable, delegated and holds the run in a child; `confinement::hold_cgroup_root`, `check_cgroup_root`, `CgroupRootHold`, `SubstrateRunner::cgroup_root`; `b10x_loom_cli::start_delegated` (story:tree-run-takes-a-delegated-cgroup)
+- A `program` binding's `handoff_when` argv decides its `handoff`: `tree run` runs it before the writer's step and at a stuck stop, read-only; exit 0 hands off (story:handoff-when-a-program-decides)
+- `b10x_loom_bindings::run_handoff_check`, `HandoffCheck`, `handoff_check_of` and `LAUNCH_FAILURE_EXITS` (story:handoff-when-a-program-decides)
+- `ChildCommand::with_read_only_workspace`: a confined child that writes nothing in its workspace, `target/` included (story:handoff-when-a-program-decides)
 
 ### Changed
 
@@ -100,6 +103,9 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** a plugin turn proposes only arguments its protocol's schema admits; an action declaring none takes only `{}`; a step whose arguments the schema refuses (a `source.read` without `kind`, or whose `input` is no object) ends the turn `stopped` and no longer reaches the effect port, whose refusal went back to the model (story:protocol-argument-schema)
 - **Breaking:** `inbound-answer@1` and `operator-reply@1` declare `arguments` for each action; their definition digests change (story:protocol-argument-schema)
 - `tree run --confinement substrate` without `--cgroup-root` starts itself again in a delegated scope of its own and never discovers an ancestor cgroup; its refusal names `tree run --cgroup-root` or `--confinement local` (story:tree-run-takes-a-delegated-cgroup)
+- **Breaking:** `loom::bindings::BoundAction` gains `handoff_when`, empty when absent (story:handoff-when-a-program-decides)
+- **Breaking:** `loom::runlog::RunLogEvent` gains `HandoffChecked`, one line per check; an older reader refuses the kind (story:handoff-when-a-program-decides)
+- **Breaking:** `loom::tree::TreeRefusalReason` gains `HandoffCheckFailed`: a check that gave no exit status stops `tree run`, exit 1 (story:handoff-when-a-program-decides)
 
 ### Removed
 
