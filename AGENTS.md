@@ -1568,6 +1568,14 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
 - `tree approve --action` takes a `person` action as its principal through `PersonEffects`
   (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
   program's are. `tree run` never takes a person action.
+- `tree open --protocols <dir>` (`protocols.rs`) reads the `.yaml` files directly in `<dir>` into a
+  catalog of those alone (`SourceKind::Directory`, registration from `registration_for`), keeps
+  each as `blobs/<sha256>` with `tree-protocols.json`, and marks the manifest's catalog
+  `Directory`; every later command builds its catalog from those blobs (`stored_catalog`), so an
+  edit or removal of `<dir>` changes nothing in the open tree, and a changed blob is
+  `StoredProtocolChanged`. The fixture directory `tests/fixtures/tree-two-level/protocols/` holds
+  `tour` and `tour.leg` alone (and `old/`, which is not read); other fixture protocols live in
+  `extra/`.
 - `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
   runs, approvals and copies are read from the governor, the run logs and `observations.json`,
   never from `approvals-<stem>.json`.

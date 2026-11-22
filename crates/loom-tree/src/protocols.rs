@@ -159,7 +159,7 @@ pub fn read_protocols_directory(dir: &Path) -> Result<ProtocolDirectory, Refused
                     path: name.clone(),
                 },
             )
-            .map_err(&refused)?;
+            .map_err(refused)?;
         declared.insert(id.clone(), name.clone());
         kept.push(KeptProtocol {
             protocol: TreeProtocol {

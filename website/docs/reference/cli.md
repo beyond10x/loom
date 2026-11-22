@@ -43,6 +43,7 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom tree open`](#b10x-loom-tree-open) | Open the root case of a tree in an empty store directory, from a registered protocol, a loom.bindings/1 file and the initial artifact revisions |
 | [`b10x-loom tree run`](#b10x-loom-tree-run) | Drive the tree: one step of one case at a time on Commission's loop, until the root is terminated through its one legitimate outcome or the tree waits |
 | [`b10x-loom tree approve`](#b10x-loom-tree-approve) | Record a principal's decision on one capability for one case of the tree, at the case's current revision |
+| [`b10x-loom tree close`](#b10x-loom-tree-close) | Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is |
 | [`b10x-loom tree status`](#b10x-loom-tree-status) | Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log |
 | [`b10x-loom tree verify`](#b10x-loom-tree-verify) | Verify the run log of every case of the tree and name the first line that fails |
 
@@ -673,6 +674,7 @@ Usage: b10x-loom tree open [OPTIONS] --store <DIR> --protocol <NAME@MAJOR> --bin
 |---|---|---|---|
 | `--store <DIR>` | yes | none | The store directory: absent, or an empty directory |
 | `--protocol <NAME@MAJOR>` | yes | none | The registration of the root's protocol, `name@major` |
+| `--protocols <DIR>` | no | none | Read the tree's protocols from the files directly in this directory whose names end in `.yaml`, each under the registration it declares, and keep them in the store: the tree's catalog is those and no other. Without it the tree uses the installed and built-in protocols |
 | `--bindings <FILE>` | yes | none | The root's loom.bindings/1 file |
 | `--workspace <DIR>` | yes | none | The existing directory every case of the tree works in; every path of the bindings is relative to it |
 | `--revision <ARTIFACT=REVISION>` | no | none | The initial revision of one artifact, `ARTIFACT=REVISION`; repeat for each |
@@ -739,6 +741,21 @@ Exit status:
   0  the decision is recorded; it is printed
   1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, or the store cannot be read
 ```
+
+## `b10x-loom tree close`
+
+Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is
+
+```text
+Usage: b10x-loom tree close [OPTIONS] --store <DIR> --case <ID> --outcome <OUTCOME>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <ID>` | yes | none | The case of the tree to close |
+| `--outcome <OUTCOME>` | yes | none | The outcome the case ends through |
+| `--at <INSTANT>` | no | none | The instant the termination records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
 
 ## `b10x-loom tree status`
 
