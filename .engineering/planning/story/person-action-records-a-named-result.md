@@ -25,7 +25,7 @@ scope:
   path: crates/loom-tree/src/approve.rs
 - confidence: cited
   path: crates/loom-tree/src/person.rs
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:57Z", actor: "agent:loom", revision: 5}
 ---
@@ -39,8 +39,9 @@ back to work with those reasons as feedback.
   `PERFORMED` at `crates/loom-tree/src/person.rs:28` is looked up at `:102-106`.
 - If any `from: effect` entry of `A` lists no rule whose value is `R`, the approve is refused
   `NotAPersonAction`, naming `A` and `R` and the values the entry lists, and nothing is written:
-  no authority entry, no observation, no record, no log line. The binding's declared results are
-  the only accepted values.
+  no authority entry, no observation, no record, no log line. The check runs over every entry
+  before the first record is submitted, so there is never a half write. The binding's declared
+  results are the only accepted values.
 - Without `--result`, the result is `performed`, as today.
 - `--result` requires `--action` and conflicts with `--deny`. A `rejected` result is not a
   denial: `--deny` stays as it is, an authority `Deny` with no action taken
@@ -61,11 +62,13 @@ back to work with those reasons as feedback.
 The record counts for `retry_when` as a program's result does. `retry_records` already takes any
 record whose `kind` and `result` a binding's `retry_when` lists (`retry.rs:58-83`). It reads the
 cited run's `action`, `exit` and `blob_sha256` only from an observation of source
-`PROGRAM_SOURCE` (`retry.rs:88-97`).
+`PROGRAM_SOURCE` (`retry.rs:88-97`, the filter at `:94`).
 
-- The reasons fit that record without a new member: `retry_records` also reads a cited
-  observation of source `loom/person` (`PERSON_SOURCE`, `person.rs:26`). The record then names the
-  person's `action`, no `exit`, and the reasons blob as `blob_sha256`.
+- **This story changes `crates/loom-bindings/src/retry.rs`.** The filter at `:94` also admits a
+  cited observation of source `loom/person` (`PERSON_SOURCE`, `person.rs:26`), with the same check
+  that its `case` is the case.
+- The reasons then fit that record without a new member: the record names the person's `action`,
+  no `exit`, and the reasons blob as `blob_sha256`.
 - The writer's feedback document (`LOOM_RETRY_FEEDBACK`, set at `retry.rs:207-209`) then holds the
   reasons as that record's log.
 - Alternative: a member `reasons: Optional<String>` on `RetryRecord`. It is cleaner to read, and it
@@ -92,18 +95,28 @@ alternative is chosen, `ess/domains/bindings.yaml` gains `RetryRecord.reasons` f
 Bounds for every test below: no test over 60 s, the test step within 120 s, no network, no model
 call. The tests use the shared tree fixture and run no whole tree per test where a store copy does.
 
-- `tree approve --action A --result rejected` records `rejected` for each `from: effect` entry,
-  produced by the principal, and the run log names the step. Test:
-  `a_person_records_the_named_result`.
-- `--result R` for an `R` the entry does not list is refused `NotAPersonAction` naming the listed
-  values, and the store is byte for byte unchanged. Test:
+- **The named result.** `tree approve --action A --result rejected` records `rejected` for each
+  `from: effect` entry, produced by the principal. The case's run log gains one `ActionFinished`
+  line whose `action` is `A` and whose `evidence` names exactly the new records' ids
+  (`take_person_action`, `approve.rs:174-204`). Test: `a_person_records_the_named_result`.
+- **An undeclared result.** `--result R` for an `R` the entry does not list is refused
+  `NotAPersonAction` naming the listed values, and the store is byte for byte unchanged. Test:
   `an_undeclared_result_is_refused_and_writes_nothing`.
-- Without `--result`, the result is `performed`. Test: `without_a_result_the_person_performed`.
-- `--result` with `--deny` is refused by the command line (exit 2). Test:
-  `a_result_with_deny_is_refused`.
-- A writer whose `retry_when` lists `rejected` runs again after the person's `rejected` result.
-  Its `LOOM_RETRY_FEEDBACK` document holds the record with the person's action and the reasons
-  text whole. Test: `a_rejected_result_sends_the_writer_back_with_the_reasons`.
+- **Two entries, one listing `R`.** Action `A` has two `from: effect` entries, and only the first
+  lists `R`. `--result R` is refused `NotAPersonAction` naming the second entry, and the store is
+  byte for byte unchanged: no record for the first entry either. Test:
+  `a_result_one_entry_does_not_list_writes_no_record`.
+- **No result given.** The result is `performed`. Test: `without_a_result_the_person_performed`.
+- **Conflicting flags.** Each of these is refused by the command line with exit 2, and the store is
+  unchanged:
+  - `--result` with `--deny`, test `a_result_with_deny_is_refused`;
+  - `--result` without `--action`, test `a_result_without_an_action_is_refused`;
+  - `--reasons` with `--reasons-file`, test `reasons_and_a_reasons_file_together_are_refused`.
+- **Reasons as feedback.** A writer whose `retry_when` lists `rejected` runs again after the
+  person's `rejected` result with `--reasons`. Its `LOOM_RETRY_FEEDBACK` document holds the
+  record with the person's `action`, no `exit`, and a log whose tail is the reasons text whole.
+  The test is red before the `retry.rs:94` change: the record is there, with no action and no log.
+  Test: `a_rejected_result_sends_the_writer_back_with_the_reasons`.
 - Reasons over 65536 bytes or 60 lines, a `--reasons-file` outside the workspace, and a symbolic
   link are each refused, and nothing is written. Test:
   `reasons_out_of_bounds_or_outside_the_workspace_are_refused`.
@@ -121,11 +134,14 @@ call. The tests use the shared tree fixture and run no whole tree per test where
 - `crates/loom-tree/src/person.rs`: `:25-28`, `:55-150`. Cited.
 - `crates/loom-tree/src/approve.rs`: `:110-145`, `take_person_action` at `:174`. Cited.
 - `crates/loom-cli/src/lib.rs`: `TreeApproveArgs` at `:419-442`. Cited.
-- `crates/loom-bindings/src/retry.rs`: `:35-38`, `:58-110`, `:207-209`. Cited.
+- `crates/loom-bindings/src/retry.rs`: `:35-38`, `:58-110` (changed at `:94`), `:207-209`.
+  Cited.
 - `crates/loom-cli/tests/tree_run.rs`, for the new tests. Cited.
 - The help of `tree approve` and `CHANGELOG.md`. Inferred.
 
 Edges:
 
-- depends_on `story:tree-run-command`.
-- Collides with `story:every-printed-decision-command-runs` on `TreeApproveArgs` and `approve.rs`.
+- depends_on `story:tree-run-command` and `story:every-printed-decision-command-runs`, with which
+  it shares `TreeApproveArgs` and `approve.rs`.
+- Shares `tests/tree_run.rs` with `story:handoff-when-a-program-decides` and
+  `story:tree-run-takes-a-delegated-cgroup`. The later unit merges the earlier head.

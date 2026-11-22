@@ -31,7 +31,13 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: ess/domains/runlog.yaml
-revision: 5
+- confidence: cited
+  path: ess/domains/tree.yaml
+- confidence: cited
+  path: generated/ess/loom/
+- confidence: cited
+  path: generated/rust/loom/
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T06:37:59Z", actor: "agent:loom", revision: 5}
 ---
@@ -40,46 +46,42 @@ transitions:
 A writer's handoff can depend on a fact only a program can read. It is offered while that program
 says so, and the writer runs otherwise.
 
-- A program binding may carry `handoff_when`, an argv held to the same program contract as any
-  bound program: `program_root`, the argv rules and `InvalidArgv`.
-  - It requires `handoff`, the text; without it the binding is refused `MissingMember`, naming
-    `handoff`.
-  - On a `person` executor it is refused `MemberNotForExecutor`.
+- A program binding may carry `handoff_when`, an argv held to the program contract of any bound
+  program (`program_root`, the argv rules, `InvalidArgv`). It requires `handoff`, else
+  `MissingMember`; on a `person` executor it is `MemberNotForExecutor`.
 - **When it runs.** When the deterministic selector picks the action as the next step, the
-  `handoff_when` program runs first, as a child built by `bound_case_child`:
-  - confined like the binding's own program, under the same runner;
+  `handoff_when` program runs first, as a child built by `bound_case_child`
+  (`crates/loom-bindings/src/child.rs:60`). It runs under the same runner as the binding's own
+  program, with the binding's `timeout_seconds`.
+- **Its reach is never more than the writer's:**
   - read-only on the whole workspace, `target/` included;
-  - with `PATH` and the `LOOM_*` variables only, no retry feedback, and the binding's
-    `timeout_seconds`.
+  - `PATH` and the `LOOM_*` variables only, with no retry feedback. `PATH` is the run's program
+    path once `story:per-run-program-path` exists, otherwise the one every bound program of the run
+    gets;
+  - no aperture, no secret slot, no declared read-only root and no writable directory.
 - **Exit 0.** No step is taken. The run stops `AwaitingPerson` with a `Handoff` decision for the
   action: `decides` is the `handoff` text and `command` is `tree run --store <store>`. This is the
   decision of `impl/tree-run-command` `db7a3d8b` (`crates/loom-tree/src/run.rs:795-830` there).
 - **Any other exit.** The handoff is skipped, and the action's own program runs in the same step.
+  The case is not stuck.
 - **A launch error, a timeout or a signal** is never a skip. The run stops, refused
   `HandoffCheckFailed`, naming the action and the cause, with exit 1.
 - **Run log.** Each evaluation writes one line, `HandoffChecked {action, exit?, refusal?,
-  blob_digest?}`, before the stop or the step. It holds exactly one of `exit` and `refusal`. The
-  `blob_digest` is the kept output, as for a program run. Reading the log replays which way the
-  check went, without running it again.
-- **`handoff` without `handoff_when`** keeps the meaning it has in `db7a3d8b`: offered when the
-  case is otherwise stuck (`run.rs:934-941` there).
-- **A binding with `handoff_when`** gives its handoff only through the check. At a stuck stop the
-  check runs the same way: exit 0 gives the `Handoff`, any other exit leaves the stop `Stuck`.
-- **Format.** `loom.bindings/1` stays. The decoder's action members (`ACTION`,
-  `crates/loom-bindings/src/decode.rs:22-34`) gain `handoff_when`. Today it is refused
-  `UndeclaredMember` (`decode.rs:843-858`), which stays the rule: a Loom from before this change
-  refuses a document that uses it, and a document without it reads unchanged.
+  blob_digest?}`, before the stop or the step. It holds exactly one of `exit` and `refusal`;
+  `blob_digest` names the check's kept output. The log replays the check without running it.
+- **`handoff` without `handoff_when`** keeps the meaning it has in `db7a3d8b`: it is offered when
+  the case is otherwise stuck (`run.rs:934-941` there).
+- **A binding with `handoff_when` at a stuck stop.** Its handoff is given only through the check,
+  which runs the same way: exit 0 gives the `Handoff`, and any other exit leaves the stop `Stuck`.
+- **Format.** `loom.bindings/1` stays; `ACTION` (`decode.rs:22-34`) gains `handoff_when`. An older
+  Loom refuses it `UndeclaredMember` (`decode.rs:843-858`); other documents read as before.
 
-Alternative (b), cleaner in launches: `exits.handoff: [codes]` on the action's own program
-(beside `error` and `not_called`, `ess/domains/bindings.yaml:171-177`).
+Alternative (b), cleaner in launches: `exits.handoff: [codes]` on the writer's own program,
+beside `error` and `not_called` (`ess/domains/bindings.yaml:171-177`). It needs no second launch
+and no new log kind, but the writer's run is recorded and counts against `max_runs`. Runbook asked
+for the separate argv, so (a) is the default.
 
-- The writer checks first and exits with a listed code, which gives the `Handoff`. There is no
-  second launch and no new log kind.
-- The cost: the writer's own run is recorded and counts against `max_runs` unless that code is
-  also `not_called`, and the check lives inside the writer.
-- Runbook asked for the separate argv, so (a) is the default.
-
-Security-relevant: yes. This is a second confined launch per step, whose exit decides whether a
+Security-relevant: yes. This adds a second confined launch per step, whose exit decides whether a
 person is asked. The unit gets a security review.
 
 ## Why
@@ -92,58 +94,80 @@ waits. Today `handoff_when` is refused at load, so every such binding fails `tre
 ## ESS first
 
 `ess/` changes first, in its own commit, then `task drift` and `task docs-generate`:
+`bindings.yaml` (`BoundAction.handoff_when: List<String>`, empty when absent), `runlog.yaml`
+(`RunLogEvent.HandoffChecked`), `tree.yaml` (`TreeRefusalReason.HandoffCheckFailed`).
 
-- `bindings.yaml`: `BoundAction` gains `handoff_when: List<String>`, empty when absent.
-- `runlog.yaml`: `RunLogEvent` gains `HandoffChecked`.
-- `tree.yaml`: `TreeRefusalReason` gains `HandoffCheckFailed`.
-
-The run-log decoder is closed, so an older reader refuses the new line. This is handled as in
-`story:child-record-in-the-run-log`.
+An older run-log reader refuses the new line, as in `story:child-record-in-the-run-log`.
 
 ## Acceptance
 
 Bounds for every test below: no test over 60 s, the test step within 120 s, no network, no model
-call. The check programs are fixture scripts. The tests share one tree fixture and do not run a
-whole tree per test where a store copy does. A `linux` test runs in a delegated scope or skips,
-naming what is missing.
+call.
 
-- A check that exits 0: the run stops `AwaitingPerson` with the `Handoff` decision of the action,
-  the writer does not run, and the log holds one `HandoffChecked` line with `exit: 0`. Test:
+The check programs are fixture scripts in POSIX sh, not Python (§ No Python for permanent tools),
+and every brief of the unit names that rule. The tests share one tree fixture and copy its store,
+rather than run a whole tree per test.
+
+The tests that need a delegated cgroup skip without one only when `LOOM_REQUIRE_DELEGATION` is
+unset. The unit's gate sets it and runs them under `systemd-run --user -p Delegate=yes --scope`.
+The unit's report lists the tests run and the tests skipped, and a skip counts as red there.
+
+- **Exit 0 hands off.** The run stops `AwaitingPerson` with the action's `Handoff` decision, the
+  writer does not run, and the log holds one `HandoffChecked` line with `exit: 0`. Test:
   `a_check_that_exits_0_hands_the_action_off`.
-- A check that exits 1: the writer runs in that step, and the log holds `HandoffChecked` with
-  `exit: 1` before the writer's `ActionStarted`. Test: `a_check_that_exits_1_lets_the_writer_run`.
-- A check that times out, a missing check program, and a check killed by a signal each refuse the
-  run `HandoffCheckFailed`, naming the action, with exit 1. The log holds the line with its
-  `refusal`, and the writer does not run. Test: `a_failed_check_stops_the_run_never_skips`.
-- `handoff_when` without `handoff`, on a person, or with an invalid argv is refused at load. Test:
-  `handoff_when_is_refused_at_load_where_it_cannot_apply`.
-- Under `--confinement substrate`, a check that writes into the workspace fails with a read-only
-  error. Test: `the_check_cannot_write_the_workspace`.
-- `handoff` alone keeps its behaviour: the test of `db7a3d8b`,
-  `a_writer_with_a_handoff_waits_on_a_person_with_its_text`, passes unchanged.
-- A log with `HandoffChecked` lines verifies, and an old log without them verifies. Test:
-  `handoff_checked_lines_verify_in_the_chain`.
+- **Exit 1 lets the writer run.** The writer runs in that step, and the case is not stuck. The log
+  holds `HandoffChecked` with `exit: 1` before the writer's `ActionStarted`. Test:
+  `a_check_that_exits_1_lets_the_writer_run`.
+- **At a stuck stop.** A case is otherwise stuck, and the admissible writer carries `handoff` and
+  `handoff_when`. A check exiting 0 gives the `Handoff` (exit 3), and a check exiting 1 leaves the
+  stop `Stuck` (exit 4). Test: `at_a_stuck_stop_the_check_decides_the_handoff`.
+- **A failed check stops the run.** A check that times out, a missing check program, and a check
+  killed by a signal each refuse the run `HandoffCheckFailed`, naming the action, with exit 1. The
+  log holds the line with its `refusal`, and the writer does not run. Test:
+  `a_failed_check_stops_the_run_never_skips`.
+- **Load refusals, one test each, naming the action:** without `handoff`, `MissingMember`
+  (`handoff_when_without_handoff_is_refused`); on a person, `MemberNotForExecutor`
+  (`handoff_when_on_a_person_is_refused`); an empty argv, `InvalidArgv`
+  (`an_invalid_handoff_when_argv_is_refused`).
+- **The check's environment.** A check that prints its environment and exits 1 leaves a kept blob
+  that holds `PATH` and `LOOM_*` variables only. It holds no `LOOM_RETRY_FEEDBACK`, also on a step
+  the writer takes as a retry. Test: `the_check_gets_path_and_loom_variables_only`.
+- **The check cannot write the workspace.** Under `--confinement substrate`, a check tries to
+  create a file in the workspace and then exits 3. The log line holds `exit: 3`, not the 1 of "no
+  handoff". The kept blob named by `blob_digest` holds the write's read-only error, and the file
+  does not exist. Test: `the_check_cannot_write_the_workspace`.
+- **`handoff` alone** keeps its behaviour: `a_writer_with_a_handoff_waits_on_a_person_with_its_text`
+  (`db7a3d8b`) passes unchanged.
+- **The hash chain.** A log with `HandoffChecked` lines verifies, and an old log without them
+  verifies. Test: `handoff_checked_lines_verify_in_the_chain`.
 
 ## Not covered
 
-- What the check program may read beyond the workspace:
+- More reach for the check than above, or anything a program may read beyond the workspace:
   `story:bound-program-declares-its-environment`.
-- A person's result for the handed-off work: `story:person-action-records-a-named-result`.
-- `{work}` placeholders in `handoff` text (Runbook's D14).
+- A person's result for the handed-off work (`story:person-action-records-a-named-result`), and
+  `{work}` placeholders in `handoff` text (Runbook's D14).
 
 ## Scope
 
-- `crates/loom-bindings/src/decode.rs`: `:22-34`, `:300-310`, `:843-858`. Cited.
-- `crates/loom-bindings/src/child.rs`: `bound_case_child`. Inferred.
-- `crates/loom-tree/src/run.rs`: the step before `drive`, and `waits` at `:786-890`. Cited; the
-  `handoffs` site is from `db7a3d8b`.
-- `crates/loom-runlog/src/lib.rs` and `ess/domains/runlog.yaml`. Cited.
-- `ess/domains/bindings.yaml`: `:199-223`, `:171-177`. Cited.
-- `crates/loom-cli/tests/tree_run.rs`. Cited.
+- Cited: `crates/loom-bindings/src/decode.rs` (`:22-34`, `:300-310`, `:843-858`),
+  `crates/loom-bindings/src/child.rs:60`, `crates/loom-tree/src/run.rs` (the step before `drive`,
+  `waits` at `:786-890`; the `handoffs` site is from `db7a3d8b`), `crates/loom-runlog/src/lib.rs`,
+  `ess/domains/runlog.yaml`, `ess/domains/tree.yaml`, `ess/domains/bindings.yaml` (`:171-177`,
+  `:199-223`), `crates/loom-cli/tests/tree_run.rs`.
+- Inferred: `generated/rust/loom/` and `generated/ess/loom/`, regenerated.
 
 Edges:
 
-- depends_on `story:tree-run-command` and `story:bound-program-contract`.
-- Collides on `runlog.yaml` and `crates/loom-runlog` with `story:child-record-in-the-run-log`,
-  `story:tree-status-names-what-it-read` and `story:program-reports-its-cost`, and starts after
-  them.
+- depends_on `story:tree-run-command` and `story:bound-program-contract`. There is no depends_on
+  `story:person-action-records-a-named-result`.
+- **Order on `runlog.yaml`, `crates/loom-runlog`, `tree.yaml` and the generated model files:**
+  `story:child-record-in-the-run-log`, then `story:tree-status-names-what-it-read`, then this
+  story, then `story:program-reports-its-cost`, which depends_on this one.
+- Shares `waits` in `run.rs` and `tests/tree_run.rs` with
+  `story:every-printed-decision-command-runs`. It shares `tests/tree_run.rs` with
+  `story:person-action-records-a-named-result` and `story:tree-run-takes-a-delegated-cgroup`. The
+  later unit merges the earlier head.
+- Shares the `ACTION` member list (`decode.rs:22-34`) and `BoundAction` with
+  `story:program-reports-its-cost` and `story:bound-program-model-credential-through-a-secret-slot`.
+  Both come after this story.
