@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:handoff-check-holds-the-cancel
 kind: story
-status: draft
+status: proposed
 title: A handoff_when check child holds the run's Cancel and ends within 7 s of a cancel
 summary: run_handoff_check takes the run's cancel; both check sites pass it; a cancelled check writes its handoff checked line refused Cancelled and the run stops Cancelled; planted defect per claim
 tags:
@@ -31,7 +31,9 @@ scope:
   path: ess/domains/runlog.yaml
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 10
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T12:49:49Z", actor: "agent:loom", revision: 11}
 ---
 ## Outcome
 
