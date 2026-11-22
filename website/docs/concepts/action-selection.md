@@ -28,6 +28,14 @@ rest of the catalogue, and returns a JSON value that becomes the proposed action
 Before the generator is called, Loom records the argument request against the selection it serves.
 The candidate descriptors in the contract are the design the catalogue entries grow into.
 
+A host that hands Loom the argument schemas of the protocol it runs (`Loom::with_argument_schemas`,
+built from `ProtocolEntry::argument_schemas`) gets the generated arguments checked against the
+schema the protocol declares for the action, with Canon's `check_arguments`, before revalidation.
+An action whose protocol declares no schema takes only `{}`. Arguments that do not match are
+recorded `Mismatched` on their argument request, naming the action, the JSON pointer and the
+keyword, and the step proposes nothing. The schema comes from the loaded protocol alone, never from
+the model. The plugin host's turns check their arguments this way.
+
 ## Safety rules
 
 These hold for every selector, fast or slow, local or hosted, and are stated in the repository's

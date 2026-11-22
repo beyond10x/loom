@@ -39,6 +39,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
 - An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
+- `Loom::with_argument_schemas`, `arguments::check`, `check_value`, `ArgumentSchemas`, `ArgumentMismatch`; `ProtocolEntry::argument_schema(s)` (story:protocol-argument-schema)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
 - `tree run` names each write of a child's `case_outcome` record in its parent's log: `child opened` and `child closed` carry `record` and `record_digest` (story:child-record-in-the-run-log)
 - `tree status` gives a `case_outcome` entry `name`, the link name of the child it is about (story:child-record-in-the-run-log)
@@ -79,6 +80,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
 - **Breaking:** `loom::runlog::ChildOpened` and `ChildClosed` gain `record` and `record_digest`, both or neither; Loom 0.58.0 and earlier refuse a run log that holds them (story:child-record-in-the-run-log)
 - **Breaking:** `loom::tree::StatusEvidence` gains `name`; a literal names it (story:child-record-in-the-run-log)
+- **Breaking:** `ArgumentRequestState` gains `Matched` and `Mismatched`, set by the new `loom.run.CheckArguments` (story:protocol-argument-schema)
+- **Breaking:** the generated `behaviour::Context` gains `generate_string`, `TryContext` `try_generate_string` (story:protocol-argument-schema)
+- **Breaking:** a plugin turn proposes only arguments its protocol's schema admits; an action declaring none takes only `{}`; a step whose arguments the schema refuses (a `source.read` without `kind`, or whose `input` is no object) ends the turn `stopped` and no longer reaches the effect port, whose refusal went back to the model (story:protocol-argument-schema)
+- **Breaking:** `inbound-answer@1` and `operator-reply@1` declare `arguments` for each action; their definition digests change (story:protocol-argument-schema)
 
 ### Removed
 

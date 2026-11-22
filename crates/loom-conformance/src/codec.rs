@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use b10x_loom_executor::model::primitives::{Decimal, Uuid};
 use b10x_loom_executor::model::run::{
-    ActionCatalogueState, CatalogueEntry, CatalogueEntryStatus, SelectionRecordState,
-    SelectionState, SelectionStrategy,
+    ActionCatalogueState, ArgumentRequestState, CatalogueEntry, CatalogueEntryStatus,
+    SelectionRecordState, SelectionState, SelectionStrategy,
 };
 use b10x_loom_executor::model::session::{
     AgentSessionState, ChangedFile, ChildEnd, SessionFailure, SessionKind,
@@ -158,6 +158,15 @@ pub fn selection_state(state: SelectionState) -> Node {
 pub fn selection_record_state(state: SelectionRecordState) -> Node {
     name(match state {
         SelectionRecordState::Recorded => "Recorded",
+    })
+}
+
+/// The declared name of an argument request state.
+pub fn argument_request_state(state: ArgumentRequestState) -> Node {
+    name(match state {
+        ArgumentRequestState::Requested => "Requested",
+        ArgumentRequestState::Matched => "Matched",
+        ArgumentRequestState::Mismatched => "Mismatched",
     })
 }
 

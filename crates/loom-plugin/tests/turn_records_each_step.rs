@@ -15,8 +15,9 @@ use b10x_loom_plugin::{
 use serde_json::json;
 use support::{Fixture, Scripted, chat, classification, item};
 
-/// The refusal the effect port answers for a read whose `input` is no object.
-const REFUSAL: &str = "source.read of `chat` has an `input` that is not an object";
+/// The refusal the effect port answers for a read of a source outside the projection; a read
+/// whose `input` is no object never reaches it (story:protocol-argument-schema).
+const REFUSAL: &str = "the source `elsewhere` is outside this turn's projection";
 
 fn step(
     action: &str,
@@ -47,7 +48,7 @@ fn a_turn_records_each_step_with_its_outcome_and_the_budget_left() {
     let (model, _seen) = Scripted::new(vec![
         (
             "source_read",
-            json!({"source": "chat", "kind": "list", "input": "C0FIXTURE1"}),
+            json!({"source": "elsewhere", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
         ),
         (
             "source_read",

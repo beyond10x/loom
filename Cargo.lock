@@ -561,6 +561,7 @@ dependencies = [
 name = "b10x-loom-executor"
 version = "0.58.0"
 dependencies = [
+ "b10x-canon",
  "b10x-llm-core",
  "b10x-loom-commission",
  "b10x-loom-commission-testkit",

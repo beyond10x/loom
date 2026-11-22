@@ -187,3 +187,136 @@ fn turn_context_lists_sources() {
     );
     assert!(fixture.runs("invoke").is_empty(), "nothing was read");
 }
+
+/// `inbound-answer@1` declares `source.read {source, kind, input}`, all required: arguments
+/// without `kind` are refused by Loom's argument check, so the step proposes nothing (the run
+/// ends as on no useful action and the turn stops), the effect port is never handed it, no
+/// `source_read` is submitted and no Connectors command starts.
+#[test]
+fn a_source_read_without_kind_is_never_performed() {
+    let fixture = Fixture::new("turn", "no-kind");
+    let config = fixture.config(vec![chat()]);
+    let host = fixture.host(&config);
+    let item = item("item-1");
+    let classified = classification(Intent::Ask, &["chat"], "0.9");
+    let projection = project(&config, &classified);
+    let (model, _) = Scripted::new(vec![(
+        "source_read",
+        json!({"source": "chat", "input": {}}),
+    )]);
+
+    let ended = turn(
+        &host,
+        model.into_turn_model(),
+        &item,
+        &classified,
+        &projection,
+    )
+    .expect("the turn runs");
+
+    assert_eq!(ended.outcome, RecordOutcome::Stopped, "{ended:?}");
+    assert!(ended.proposal.is_none(), "{ended:?}");
+    assert!(ended.reads.is_empty(), "{ended:?}");
+    assert!(fixture.runs("invoke").is_empty(), "a command started");
+    assert!(
+        ended
+            .steps
+            .iter()
+            .all(|step| step.action.as_deref() != Some("source.read")),
+        "the read reached the effect port: {:?}",
+        ended.steps
+    );
+}
+
+/// For every action of `inbound-answer@1`, the `input_schema` a turn publishes to the model for
+/// its arguments names the members the protocol declares, and requires the ones it requires. The
+/// published schema may be narrower (an `enum` of the item's sources), never other members.
+#[test]
+fn each_published_argument_schema_names_the_declared_members() {
+    let catalog = loom_sdk::ProtocolCatalog::plugins().expect("the plugin catalog");
+    let entry = catalog.get("inbound-answer@1").expect("inbound-answer@1");
+    let fixture = Fixture::new("turn", "published");
+    let config = fixture.config(vec![chat()]);
+    let host = fixture.host(&config);
+    let item = item("item-1");
+    let classified = classification(Intent::Ask, &["chat"], "0.9");
+    let projection = project(&config, &classified);
+    let mut published = Vec::new();
+    for script in [
+        vec![
+            (
+                "source_read",
+                json!({"source": "chat", "kind": "list", "input": {"channel": "C0FIXTURE1"}}),
+            ),
+            ("reply_propose", json!({"text": "Yes."})),
+        ],
+        vec![("reply_decline", json!({"reason": "nothing to look up"}))],
+    ] {
+        let actions: Vec<String> = script
+            .iter()
+            .map(|(step, _)| step.replacen('_', ".", 1))
+            .collect();
+        let (model, seen) = Scripted::new(script);
+        turn(
+            &host,
+            model.into_turn_model(),
+            &item,
+            &classified,
+            &projection,
+        )
+        .expect("the turn runs");
+        let schemas: Vec<serde_json::Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| {
+                request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name.as_str() != "select_action")
+            })
+            .map(|request| request.tools[0].input_schema.clone())
+            .collect();
+        assert_eq!(
+            schemas.len(),
+            actions.len(),
+            "one arguments request per step"
+        );
+        published.extend(actions.into_iter().zip(schemas));
+    }
+
+    let names = |schema: &serde_json::Value, member: &str| {
+        let mut names: Vec<String> = match &schema[member] {
+            serde_json::Value::Object(properties) => properties.keys().cloned().collect(),
+            serde_json::Value::Array(required) => required
+                .iter()
+                .map(|name| name.as_str().unwrap_or_default().to_owned())
+                .collect(),
+            _ => Vec::new(),
+        };
+        names.sort();
+        names
+    };
+    let mut covered: Vec<String> = published.iter().map(|(action, _)| action.clone()).collect();
+    covered.sort();
+    let mut declared_actions = entry.actions();
+    declared_actions.sort();
+    assert_eq!(covered, declared_actions, "every action of the protocol");
+    for (action, schema) in &published {
+        let Some(loom_sdk::protocols::ArgumentSchema::Declared(declared)) =
+            entry.argument_schema(action)
+        else {
+            panic!("{action} declares no schema");
+        };
+        assert_eq!(
+            names(schema, "properties"),
+            names(&declared, "properties"),
+            "{action}: {schema}"
+        );
+        assert_eq!(
+            names(schema, "required"),
+            names(&declared, "required"),
+            "{action}: {schema}"
+        );
+    }
+}
