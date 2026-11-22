@@ -118,6 +118,34 @@ impl EngineRunner {
         Ok(Self { route })
     }
 
+    /// This runner with `bounds` for its `local` runs in place of [`KillBounds::HOST`]. A host
+    /// keeps [`KillBounds::HOST`]; a test sets short ones so that it does not wait 5 s for a
+    /// grace or a settle to run out. Under `linux` the driver holds its own grace
+    /// ([`SIGNAL_GRACE`]) and the runner is returned unchanged.
+    #[must_use]
+    pub fn with_kill_bounds(self, bounds: KillBounds) -> Self {
+        match self.route {
+            Route::Linux(_) => self,
+            Route::Local(local) => Self {
+                route: Route::Local(Arc::new(LocalRoute {
+                    adapter: Arc::clone(&local.adapter),
+                    reason: local.reason.clone(),
+                    facts: local.facts.clone(),
+                    bounds,
+                })),
+            },
+        }
+    }
+
+    /// The bounds this runner's `local` runs are given to end; [`KillBounds::HOST`] under
+    /// `linux`.
+    pub fn kill_bounds(&self) -> KillBounds {
+        match &self.route {
+            Route::Linux(_) => KillBounds::HOST,
+            Route::Local(local) => local.bounds,
+        }
+    }
+
     /// Check the workspace `root` before a model session opens. Under `linux`, the driver opens
     /// as [`SubstrateRunner::preflight`] opens it; under `local`, the workspace is a directory
     /// reached through no symbolic link. No child starts.
@@ -250,12 +278,13 @@ fn child_error(error: substrate_host::confinement::ConfinementError) -> ChildErr
     }
 }
 
-/// The `local` route: the adapter the constructor opened, the operator's reason and the facts
-/// the adapter proved, in `FACT_ORDER`'s spelling.
+/// The `local` route: the adapter the constructor opened, the operator's reason, the facts the
+/// adapter proved, in `FACT_ORDER`'s spelling, and how long a run is given to end.
 pub(super) struct LocalRoute {
     adapter: Arc<dyn Adapter>,
     reason: String,
     facts: Vec<String>,
+    bounds: KillBounds,
 }
 
 impl LocalRoute {
@@ -280,6 +309,7 @@ impl LocalRoute {
             adapter,
             reason,
             facts,
+            bounds: KillBounds::HOST,
         })
     }
 
@@ -556,7 +586,7 @@ impl LocalRoute {
 
     /// `Signal::Kill` to the run's process group, then its end.
     async fn kill(&self, run: &RunId) -> Result<RunObservation, ConfinementError> {
-        kill(&*self.adapter, run).await
+        kill(&*self.adapter, run, self.bounds.kill_settle).await
     }
 
     /// A run's result: refused when `local` reports no exit status and Loom did not end it at its
@@ -652,22 +682,52 @@ impl Ended {
 /// is reaped, every holder of its output closed it and its group is empty (or
 /// `LOCAL_GROUP_SETTLE`, 1 s, passed); a process that left the group and still holds the output
 /// would keep it running, and Loom does not wait on it past this bound.
-const KILL_SETTLE: Duration = Duration::from_secs(5);
+pub const KILL_SETTLE: Duration = Duration::from_secs(5);
+
+/// How long a `local` run is given to end: after the host's interrupt or terminate before it is
+/// killed (`signal_grace`), and after the kill before it is refused (`kill_settle`). A host's
+/// runner keeps [`KillBounds::HOST`] ([`SIGNAL_GRACE`], [`KILL_SETTLE`]); a test sets shorter
+/// ones ([`EngineRunner::with_kill_bounds`]) so that it does not wait 5 s for each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KillBounds {
+    /// From the host's interrupt or terminate to its kill ([`SIGNAL_GRACE`]).
+    pub signal_grace: Duration,
+    /// From a kill to the refusal of a run still not ended ([`KILL_SETTLE`]).
+    pub kill_settle: Duration,
+}
+
+impl KillBounds {
+    /// A host's bounds: [`SIGNAL_GRACE`] and [`KILL_SETTLE`].
+    pub const HOST: KillBounds = KillBounds {
+        signal_grace: SIGNAL_GRACE,
+        kill_settle: KILL_SETTLE,
+    };
+}
+
+impl Default for KillBounds {
+    fn default() -> Self {
+        Self::HOST
+    }
+}
 
 /// `Signal::Kill` to `run`'s process group on `adapter`, then its end, waited for at most
-/// [`KILL_SETTLE`]: a run still not ended then is refused
+/// `settle` ([`KILL_SETTLE`] on a host): a run still not ended then is refused
 /// [`ConfinementRefusal::CapabilityUnserved`], since a process outside its group holds its output.
-async fn kill(adapter: &dyn Adapter, run: &RunId) -> Result<RunObservation, ConfinementError> {
+async fn kill(
+    adapter: &dyn Adapter,
+    run: &RunId,
+    settle: Duration,
+) -> Result<RunObservation, ConfinementError> {
     adapter
         .signal(run, Signal::Kill)
         .await
         .map_err(contract_error)?;
-    match tokio::time::timeout(KILL_SETTLE, adapter.wait(run)).await {
+    match tokio::time::timeout(settle, adapter.wait(run)).await {
         Ok(observed) => observed.map_err(contract_error),
         Err(_) => Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
             format!(
-                "Loom killed the child's process group through Substrate's local adapter, yet it had not ended {KILL_SETTLE:?} later: a process that left the group still holds its output"
+                "Loom killed the child's process group through Substrate's local adapter, yet it had not ended {settle:?} later: a process that left the group still holds its output"
             ),
         )),
     }
@@ -852,16 +912,17 @@ impl LocalChild {
                 return Ok(false);
             }
             let wire = signal.wire();
+            let bounds = self.route.bounds;
             adapter.signal(run, wire).await?;
             if wire != Signal::Kill
-                && tokio::time::timeout(SIGNAL_GRACE, adapter.wait(run))
+                && tokio::time::timeout(bounds.signal_grace, adapter.wait(run))
                     .await
                     .is_err()
             {
                 adapter.signal(run, Signal::Kill).await?;
             }
             // A run a process outside its group keeps open is left to `wait`, which refuses it.
-            match tokio::time::timeout(KILL_SETTLE, adapter.wait(run)).await {
+            match tokio::time::timeout(bounds.kill_settle, adapter.wait(run)).await {
                 Ok(observed) => observed.map(|_| true),
                 Err(_) => Ok(true),
             }
@@ -874,6 +935,7 @@ impl LocalChild {
         let adapter = Arc::clone(&self.route.adapter);
         let run = self.run.clone();
         let deadline = self.deadline;
+        let settle = self.route.bounds.kill_settle;
         let timed_out = Arc::clone(&self.timed_out);
         let (observed, output) = self.block_on(async {
             // Already closed, or a child that ended, is no reason not to wait for it.
@@ -896,7 +958,7 @@ impl LocalChild {
                 Ok(observed) => observed.map_err(contract_error)?,
                 Err(_) => {
                     timed_out.store(true, Ordering::SeqCst);
-                    kill(&*adapter, &run).await?
+                    kill(&*adapter, &run, settle).await?
                 }
             };
             let output = adapter.output(&run).await.map_err(contract_error)?;
@@ -937,9 +999,10 @@ impl Drop for LocalChild {
         if let Some(runtime) = self.runtime.take() {
             if !self.ended {
                 let (adapter, run) = (Arc::clone(&self.route.adapter), self.run.clone());
+                let settle = self.route.bounds.kill_settle;
                 let (done, killed) = std::sync::mpsc::channel();
                 runtime.spawn(async move {
-                    let _ = kill(&*adapter, &run).await;
+                    let _ = kill(&*adapter, &run, settle).await;
                     let _ = done.send(());
                 });
                 let _ = killed.recv();
@@ -1246,9 +1309,17 @@ mod tests {
         );
     }
 
+    /// With a settle of 1 s in place of a host's [`KILL_SETTLE`] (5 s), which the refusal names.
     #[test]
     fn a_run_past_its_deadline_is_sent_one_kill_and_waited_for_one_settle() {
-        let (route, fake, workspace) = route(Wait::Never);
+        let (mut route, fake, workspace) = route(Wait::Never);
+        assert_eq!(
+            route.bounds,
+            KillBounds::HOST,
+            "a route keeps a host's bounds"
+        );
+        let settle = Duration::from_secs(1);
+        route.bounds.kill_settle = settle;
         let (error, took) = launch(&route, workspace.path(), None, Duration::from_millis(10));
         assert_eq!(
             error.reason,
@@ -1256,7 +1327,7 @@ mod tests {
             "{error}"
         );
         assert!(
-            error.detail.contains("had not ended 5s later"),
+            error.detail.contains("had not ended 1s later"),
             "the refusal names the settle that ran out: {error}"
         );
         assert_eq!(
@@ -1265,8 +1336,58 @@ mod tests {
             "the deadline sends one Kill, and the launch's error path sends none after it"
         );
         assert!(
-            took >= KILL_SETTLE && took < 2 * KILL_SETTLE,
-            "the launch waits one KILL_SETTLE ({KILL_SETTLE:?}) after its Kill, not two: {took:?}"
+            took >= settle && took < 2 * settle,
+            "the launch waits one settle ({settle:?}) after its Kill, not two: {took:?}"
+        );
+    }
+
+    /// A host's runner keeps the crate's bounds, 5 s of grace and 5 s of settle; a runner given
+    /// others keeps its adapter, reason and facts.
+    #[test]
+    fn a_hosts_runner_keeps_the_crates_kill_bounds() {
+        assert_eq!(
+            KillBounds::HOST,
+            KillBounds {
+                signal_grace: Duration::from_secs(5),
+                kill_settle: Duration::from_secs(5),
+            }
+        );
+        assert_eq!(KillBounds::default(), KillBounds::HOST);
+        let runner = EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Local,
+            local_reason: Some(REASON.to_owned()),
+            cgroup_root: None,
+        })
+        .expect("Substrate's local adapter opens on this host");
+        assert_eq!(runner.kill_bounds(), KillBounds::HOST);
+        let short = KillBounds {
+            signal_grace: Duration::from_millis(500),
+            kill_settle: Duration::from_secs(1),
+        };
+        let shortened = runner.clone().with_kill_bounds(short);
+        assert_eq!(shortened.kill_bounds(), short);
+        assert_eq!(
+            runner.kill_bounds(),
+            KillBounds::HOST,
+            "the original keeps its own"
+        );
+        let (Route::Local(before), Route::Local(after)) = (&runner.route, &shortened.route) else {
+            panic!("both take the local route");
+        };
+        assert!(Arc::ptr_eq(&before.adapter, &after.adapter));
+        assert_eq!(
+            (&before.reason, &before.facts),
+            (&after.reason, &after.facts)
+        );
+        let linux = EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Linux,
+            local_reason: None,
+            cgroup_root: None,
+        })
+        .expect("linux opens nothing");
+        assert_eq!(
+            linux.with_kill_bounds(short).kill_bounds(),
+            KillBounds::HOST
         );
     }
 

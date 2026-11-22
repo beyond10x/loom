@@ -10,7 +10,9 @@
 //! [`TEST_BUDGET`] or the step longer than [`STEP_BUDGET`]. The wall time is taken inside the
 //! step, so a wait for a build slot before it starts does not count, and it starts once the test
 //! binaries are built (`cargo test --workspace --locked --no-run`, which nextest reuses), so a
-//! cold build does not count either; the doc tests' own compilation does. `-p <package>` runs the
+//! cold build does not count either; the doc tests' own compilation does. Beside that build it
+//! fills the schema cache the `crd` tests of `b10x-loom-resource` read ([`fill_schema_cache`]), so
+//! no test of the step makes it or waits for it. `-p <package>` runs the
 //! same over named packages; in a build-pool job nextest runs `SLOT_TOKENS` tests at once.
 
 use std::fs;
@@ -54,8 +56,27 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     };
 
     let build_started = Instant::now();
-    let build = with(&["test"], &["--locked", "--no-run"]);
-    let built = cargo(root, &build)?;
+    let fixtures = std::thread::scope(|scope| {
+        let schemas = (packages.is_empty() || packages.iter().any(|p| p == CRD_PACKAGE))
+            .then(|| scope.spawn(|| fill_schema_cache(root)));
+        let build = with(&["test"], &["--locked", "--no-run"]);
+        let built = cargo(root, &build);
+        let schemas = schemas.map(|handle| {
+            handle
+                .join()
+                .unwrap_or_else(|_| Err("filling the schema cache panicked".to_owned()))
+        });
+        (build, built, schemas)
+    });
+    let (build, built, schemas) = fixtures;
+    if let Some(schemas) = schemas {
+        let (path, seconds) = schemas.map_err(|e| format!("test step: {e}"))?;
+        println!(
+            "test step: schema cache {} ready in {seconds:.1} s, beside the build",
+            path.display()
+        );
+    }
+    let built = built?;
     if built != Some(0) {
         return Err(format!(
             "test step: building the test binaries (cargo {}) exited {}",
@@ -167,6 +188,42 @@ pub fn verdict(
         ));
     }
     (text, failures)
+}
+
+/// The package whose `crd` tests read the schema cache.
+const CRD_PACKAGE: &str = "b10x-loom-resource";
+
+/// Fills the cache `crates/loom-resource/tests/crd.rs` reads (`ess generate --kind schema` over
+/// `ess/`, about 16 s) under the same directory and key, so that no test process of the step
+/// generates it or waits on another that does: the test finds it made. Returns the entry and the
+/// seconds it took (none to speak of when it was there).
+fn fill_schema_cache(root: &Path) -> Result<(PathBuf, f64), String> {
+    let started = Instant::now();
+    let program = crate::ess_suite::ess_program(root);
+    let version = crate::ess_suite::ess_version(&program, Some(root))?;
+    let inputs = crate::ess_suite::inputs_digest(&root.join("ess"), &version)?;
+    let key = format!("schema-{}", inputs.trim_start_matches("sha256:"));
+    let cache = target_dir(root).join("tmp/ess-schema-cache");
+    let made = crate::ess_suite::made_once(&cache, &key, |out| {
+        let output = program
+            .command()
+            .current_dir(root)
+            .args(["generate", "--path", "ess", "--kind", "schema", "--out"])
+            .arg(out)
+            .output()
+            .map_err(|e| format!("run `ess generate --kind schema` (is ess on PATH?): {e}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "`ess generate --kind schema` exited {}:\n{}{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ))
+        }
+    })?;
+    Ok((made, started.elapsed().as_secs_f64()))
 }
 
 fn describe(code: Option<i32>) -> String {

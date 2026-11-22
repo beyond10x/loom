@@ -160,7 +160,9 @@ never from the candidate list:
   `before`, `after`, `since`) read counts any record that applies and that an order form reads by
   kind and subject, whatever its revision, freshness or invalidation, as Canon's order forms read
   every record the evidence check accepted. A `children` form (Canon 0.9.0) reads `case_outcome`
-  the same way, about any artifact.
+  the same way, about any artifact: its `subject` and `revision` (Canon 0.10.0) are not read
+  here, though Canon reads only the records about that subject, and with `revision: current` at
+  its current revision (until `story:selector-stop-names-set-aside-record`).
 - `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
 
 An action is useful while `due` is true (`retry_when`, a pending copy). Otherwise it is not useful

@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 24b0c945bbc7b81f5c21edabea58612040f8dd11cd34684634358ca7d2ee0312
+// contract digest 8c68eb9f9d600aec0de35057af0205203e30b03ee18d4541adb4b46f23f05478
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! JSON at this system's boundary: a reader, a writer, and the base64 codec `Bytes` needs.

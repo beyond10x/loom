@@ -69,6 +69,7 @@ Canon release renders for the same case (`crates/loom-governor/tests/canon_decis
 |---|---|---|
 | 0.57.2 | 0.8.0 | 0.15.2 |
 | 0.58.0 | 0.9.0 | 0.16.0 |
+| unreleased | 0.10.0 | 0.16.0 |
 
 A release that moves either pin names it in its `CHANGELOG.md` entry.
 
