@@ -260,6 +260,8 @@ fn build_end_state(dir: &Path) {
             RunLogEvent::ChildOpened(ChildOpened {
                 child: child.into(),
                 protocol: "tour-leg@1".into(),
+                record: None,
+                record_digest: None,
             }),
         );
         append(
