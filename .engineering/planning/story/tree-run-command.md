@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-run-command
 kind: story
-status: proposed
+status: active
 title: b10x-loom tree runs a case tree from a store to a terminal outcome or the next approval and names the approval command
 summary: tree open, run, approve, close, verify and status on Commission's loop with the deterministic selector and bound executors
 tags:
@@ -52,9 +52,10 @@ scope:
   path: website/data/status.json
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 8, decided_on: {"recorded":{"review_outcome":4}}}
+- {from: "proposed", to: "active", at: "2026-11-22T00:22:55Z", actor: "agent:sdc", revision: 15, decided_on: {"recorded":{"review_outcome":4}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
 ---
 ## Outcome
 
