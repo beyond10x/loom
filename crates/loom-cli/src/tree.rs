@@ -6,6 +6,8 @@
 //! [`printable`](b10x_loom_intake_slice::run::printable), so no text a file or a program wrote can
 //! move the cursor or start a line.
 
+use std::path::{Path, PathBuf};
+
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
@@ -45,6 +47,21 @@ fn refuse(refused: &Refused) {
     eprintln!("{}", printable(&refusal_json(&refused.0).to_string()));
 }
 
+/// `path` resolved against the current directory: the library takes absolute paths only.
+fn resolved(path: &Path) -> Result<PathBuf, Refused> {
+    if path.is_absolute() {
+        return Ok(path.to_owned());
+    }
+    std::env::current_dir()
+        .map(|directory| directory.join(path))
+        .map_err(|error| {
+            Refused::new(
+                b10x_loom_tree::model::TreeRefusalReason::StoreUnreadable,
+                format!("the current directory cannot be read: {error}"),
+            )
+        })
+}
+
 /// The host's catalog: the bundled protocols and the user's installed ones.
 fn host_catalog() -> Result<ProtocolCatalog, Refused> {
     InstallStore::user()
@@ -61,10 +78,10 @@ fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     let catalog = host_catalog()?;
     let opened = open_tree(&OpenRequest {
-        store: arguments.store.clone(),
-        workspace: arguments.workspace.clone(),
+        store: resolved(&arguments.store)?,
+        workspace: resolved(&arguments.workspace)?,
         protocol: arguments.protocol.clone(),
-        bindings: arguments.bindings.clone(),
+        bindings: resolved(&arguments.bindings)?,
         revisions: arguments.revisions.clone(),
         case: arguments.case.clone(),
         time,
@@ -88,8 +105,9 @@ fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
 fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     let catalog = host_catalog()?;
+    let store = resolved(&arguments.store)?;
     let approval = record(&ApproveRequest {
-        store: &arguments.store,
+        store: &store,
         case: &arguments.case,
         capability: &arguments.capability,
         principal: &arguments.principal,
@@ -120,14 +138,14 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
 
 fn status(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
     let catalog = host_catalog()?;
-    let status = tree_status(&arguments.store, &catalog)?;
+    let status = tree_status(&resolved(&arguments.store)?, &catalog)?;
     println!("{}", printable(&status_json(&status).to_string()));
     Ok(0)
 }
 
 fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
     let catalog = host_catalog()?;
-    let verified = verify_tree(&arguments.store, &catalog)?;
+    let verified = verify_tree(&resolved(&arguments.store)?, &catalog)?;
     println!("{}", printable(&verify_json(&verified).to_string()));
     Ok(match &verified.failure {
         None => 0,

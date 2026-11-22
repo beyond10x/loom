@@ -105,3 +105,18 @@ fn a_log_the_tree_kept_no_head_for_fails_at_its_first_line() {
     assert_eq!((failure.case.as_str(), failure.line), ("root", 0));
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_relative_store_is_refused_and_never_resolved_against_the_current_directory() {
+    let catalog = loom_protocols::ProtocolCatalog::bundled().unwrap();
+    for refused in [
+        b10x_loom_tree::tree_status(std::path::Path::new("store"), &catalog).unwrap_err(),
+        b10x_loom_tree::verify_tree(std::path::Path::new("store"), &catalog).unwrap_err(),
+    ] {
+        assert_eq!(refused.reason(), TreeRefusalReason::NotATree, "{refused}");
+        assert!(
+            refused.0.detail.contains("not an absolute path"),
+            "{refused}"
+        );
+    }
+}

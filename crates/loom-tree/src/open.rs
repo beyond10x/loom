@@ -29,7 +29,7 @@ use loom_protocols::ProtocolCatalog;
 use crate::lock::{HOLDER_FILE, LOCK_FILE, StoreLock};
 use crate::log::Logs;
 use crate::store::{
-    MANIFEST, MAX_DOCUMENT_BYTES, document, manifest_json, read_regular, write_file,
+    MANIFEST, MAX_DOCUMENT_BYTES, absolute, document, manifest_json, read_regular, write_file,
 };
 use crate::{AGENT_STORY, Refused, TreeTime, unreadable};
 
@@ -182,6 +182,7 @@ pub fn open_tree(request: &OpenRequest<'_>) -> Result<OpenedTree, Refused> {
 
 /// A store `tree open` may make: absent, or an empty directory. Nothing is created here.
 fn vacant_store(store: &Path) -> Result<PathBuf, Refused> {
+    let store = absolute(store, "store", TreeRefusalReason::StoreUnreadable)?;
     match fs::symlink_metadata(store) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(store.to_owned()),
         Err(error) => Err(unreadable(store.display(), error)),
@@ -221,6 +222,7 @@ fn occupied(store: &Path) -> Result<Option<String>, Refused> {
 /// The workspace as an absolute path, which must be an existing directory.
 fn workspace(workspace: &Path) -> Result<PathBuf, Refused> {
     let unusable = |detail: String| Refused::new(TreeRefusalReason::WorkspaceUnusable, detail);
+    let workspace = absolute(workspace, "workspace", TreeRefusalReason::WorkspaceUnusable)?;
     let resolved = fs::canonicalize(workspace)
         .map_err(|error| unusable(format!("{}: {error}", workspace.display())))?;
     if !resolved.is_dir() {
@@ -234,6 +236,7 @@ fn workspace(workspace: &Path) -> Result<PathBuf, Refused> {
 
 /// `file` as an absolute path to an existing file.
 fn absolute_file(file: &Path) -> Result<PathBuf, Refused> {
+    let file = absolute(file, "bindings file", TreeRefusalReason::BindingsRefused)?;
     fs::canonicalize(file).map_err(|error| {
         Refused::new(
             TreeRefusalReason::BindingsRefused,
@@ -357,7 +360,9 @@ fn walk(
         // A link among the directories of the path may lead anywhere: the file read is the one
         // whose real path lies below the directory of the file that names it.
         let real = fs::canonicalize(&file).map_err(|error| {
-            refused(format!("the child bindings file {relative:?} cannot be read: {error}"))
+            refused(format!(
+                "the child bindings file {relative:?} cannot be read: {error}"
+            ))
         })?;
         if !real.starts_with(&directory) {
             return Err(refused(format!(
