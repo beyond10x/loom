@@ -24,6 +24,14 @@
 //! program once, so repeated not-called runs are bounded by the loop that drives the port (its
 //! step budget and idle bound), never by the port.
 //!
+//! A signalled run (`story:bound-program-signal-exit-is-refused`): Substrate reports a child a
+//! signal ended as exit 128 plus the signal. A run whose exit is in
+//! [`crate::SIGNAL_EXITS`] (129 to 192) and that was not killed at its timeout records nothing,
+//! writes the moves alone and refuses the step `ProgramSignalled`, ending the run, naming the
+//! exit, the signal and the blob digest. It comes before the exit classes and the tables: such a
+//! run has no class, so it counts against `budget.max_runs`, and no `exits` list or table row is
+//! read for it.
+//!
 //! A spent allowance (`story:outcome-when-reads-the-run-count`): an entry read `from: runs` takes
 //! its value from the run count, not the run. On the run that brings the count to
 //! `budget.max_runs` its value is [`RUNS_SPENT`] and its record is written in the step's one write
@@ -116,6 +124,7 @@ use crate::revision::{describe, placements, revisions_of};
 use sha2::{Digest as _, Sha256};
 
 use crate::arguments::{NotPrinted, case_names, one_object, run_arguments_from};
+use crate::handoff::SIGNAL_EXITS;
 use crate::resolve::beside;
 use crate::{CaseNames, bound_case_child};
 
@@ -345,6 +354,12 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         if let Some(failure) = blob_failure {
             self.write(&targets, Vec::new())?;
             return Err(EffectError::new(failure));
+        }
+        // A run a signal ended, as Substrate reports it, before the exit classes and the tables:
+        // it gave no answer, records nothing, counts (it holds no class) and ends the run.
+        if signalled(&execution) {
+            self.write(&targets, Vec::new())?;
+            return Ok(program_signalled(action, program, &run));
         }
         // A classed exit never reaches the tables: it records nothing, its run is not counted,
         // and a program error ends the run. The revisions still take what the workspace holds.
@@ -1253,9 +1268,10 @@ fn refusal(reason: ProgramRefusalReason, action: &str, detail: impl Into<String>
 }
 
 /// The class a binding's `exits` gives the exit of `execution`: none for a run killed at its
-/// timeout, whose status could not be read, or whose exit neither list holds.
+/// timeout, whose status could not be read, a signal ended ([`signalled`]), or whose exit neither
+/// list holds.
 fn class_of(exits: Option<&ExitClasses>, execution: &TestExecution) -> Option<ExitClass> {
-    if execution.timed_out {
+    if execution.timed_out || signalled(execution) {
         return None;
     }
     let code = i64::from(execution.exit_code?);
@@ -1280,6 +1296,38 @@ fn program_error(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome
             "{program} ended exit status {}, which exits.error lists; nothing was recorded, and its output is the blob {}",
             run.exit
                 .map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
+            run.blob_sha256.as_deref().unwrap_or("(none)")
+        ),
+    };
+    EffectOutcome::Refused(EffectOutcomeRefused {
+        reason: format!(
+            "{:?}: action {}: {}",
+            refusal.reason, refusal.action, refusal.detail
+        ),
+        ends_run: true,
+    })
+}
+
+/// Whether a signal ended the run of `execution`, as Substrate reports it: an exit in
+/// [`SIGNAL_EXITS`] (128 plus the signal) of a run not killed at its timeout. A run killed at its
+/// timeout reads `timeout`; under `local` a signal leaves no exit status.
+fn signalled(execution: &TestExecution) -> bool {
+    !execution.timed_out
+        && execution
+            .exit_code
+            .is_some_and(|code| SIGNAL_EXITS.contains(&i64::from(code)))
+}
+
+/// The step refused `ProgramSignalled`, ending the run: a signal ended `run`. The text names the
+/// program, the exit status, the signal and the blob digest, never what the program printed.
+fn program_signalled(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome {
+    let exit = run.exit.unwrap_or_default();
+    let refusal = ProgramRefusal {
+        reason: ProgramRefusalReason::ProgramSignalled,
+        action: action.to_owned(),
+        detail: format!(
+            "{program} was ended by a signal: exit {exit}, the status Substrate gives a child signal {} ended; nothing was recorded, and its output is the blob {}",
+            exit - 128,
             run.blob_sha256.as_deref().unwrap_or("(none)")
         ),
     };
