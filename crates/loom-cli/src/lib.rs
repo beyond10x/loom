@@ -328,7 +328,8 @@ pub struct TreeTestArgs {
     /// The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ`.
     #[arg(long, value_name = "INSTANT")]
     pub at: String,
-    /// The confinement every bound program starts under.
+    /// The confinement every bound program starts under. `substrate` needs a delegated cgroup
+    /// root, which `tree test` does not take yet: it is refused before any cycle.
     #[arg(long, value_enum, default_value = "substrate")]
     pub confinement: TreeConfinement,
     /// Also write the result as one loom.tree.SuiteReport JSON document to this file.

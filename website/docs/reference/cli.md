@@ -819,7 +819,7 @@ Usage: b10x-loom tree test [OPTIONS] --suite <FILE> --protocols <DIR> --scratch 
 | `--protocols <DIR>` | yes | none | The directory whose `.yaml` files are the protocols of every cycle's tree |
 | `--scratch <DIR>` | yes | none | The directory the cycles work in: absent or empty |
 | `--at <INSTANT>` | yes | none | The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ` |
-| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` needs a delegated cgroup root, which `tree test` does not take yet: it is refused before any cycle |
 | `--report <FILE>` | no | none | Also write the result as one loom.tree.SuiteReport JSON document to this file |
 
 ```text
