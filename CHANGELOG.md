@@ -14,6 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
 - `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
 - `bindings::admit_bound_program_runner` and `bindings::bound_program_child`: a bound program's runner admission and child (story:bound-program-result-table)
 - `b10x_loom_bindings::ProgramEffects` runs a `program` binding through the host's runner; its result table alone makes evidence, every call of the runner counts against `budget.max_runs`, and a case of another protocol is refused `CaseOfAnotherProtocol` (story:bound-program-result-table)
@@ -52,6 +53,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `loom.governor.StoredCase` gains `parent`, `children` and `termination`, with the new `CaseLink` and `CaseTermination` (story:child-case-runtime)
 - **Breaking:** `with_catalog` and `with_protocol` refuse protocols whose `case_open` openings form a cycle, `InvalidProtocol` (story:child-case-runtime)
 - **Breaking:** the evidence port refuses a `case_outcome` record for a case with a parent or child link, or naming a held case (story:child-case-runtime)
+- **Breaking:** the evidence port refuses a host `case_outcome` record for every case whose protocol declares `case_open`, and so does `CanonGovernor::record_step` for a step's records, which Loom 0.58.0 received; a host that composes cases itself opts back in with `CanonGovernor::with_host_case_outcomes` (story:child-case-runtime)
+- **Breaking:** `loom.governor.CaseLink` gains `name`, the name the opening gave the child (the same for a repeated child `<id>.2`); `FileCaseStore` refuses a link without it, with a name that is not one plain segment or not the one its child id was built from (story:child-case-runtime)
 
 ### Removed
 

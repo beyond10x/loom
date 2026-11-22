@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use b10x_loom_bindings::{OpenEffects, Refusal, check, check_case_open, decode};
+use b10x_loom_bindings::{
+    MAX_DOCUMENT_BYTES, OpenEffects, Refusal, check, check_case_open, decode,
+};
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
@@ -462,4 +464,78 @@ fn a_child_protocol_the_catalog_does_not_hold_is_refused_before_anything_is_writ
     assert_eq!(refused.0.reason, Reason::ProtocolMismatch, "{refused}");
     assert_eq!(listing(&scratch.store()), before);
     assert_eq!(kinds(&governor, &case), Vec::<String>::new());
+}
+
+/// The store directory's file names, sorted.
+fn store_listing(scratch: &Scratch) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(scratch.store())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+/// The child bindings document padded with a comment line to exactly `size` bytes.
+fn child_bindings_of_size(size: usize) -> String {
+    let document = child_bindings("reviewer");
+    let padding = size - document.len() - "# \n".len();
+    let text = format!("{document}# {}\n", "x".repeat(padding));
+    assert_eq!(text.len(), size);
+    text
+}
+
+#[test]
+fn a_child_bindings_file_at_the_size_bound_is_read_and_one_over_it_is_refused_before_any_write() {
+    let scratch = Scratch::new();
+    let text = parent_bindings("{kind: open, name: review, bindings: sub/child.yaml}");
+    let file = scratch.write("conf/parent.yaml", &text);
+    let document = loaded(&text);
+    let (governor, case) = governor(&scratch);
+    let before = store_listing(&scratch);
+
+    scratch.write(
+        "conf/sub/child.yaml",
+        &child_bindings_of_size(MAX_DOCUMENT_BYTES + 1),
+    );
+    let refused = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog())
+        .map(|_| ())
+        .expect_err("a child bindings file over the bound is refused");
+    assert_eq!(refused.0.reason, Reason::Malformed, "{refused}");
+    assert_eq!(refused.0.member, "executor.bindings", "{refused}");
+    assert!(refused.to_string().contains("larger than"), "{refused}");
+    assert_eq!(store_listing(&scratch), before);
+    assert_eq!(kinds(&governor, &case), Vec::<String>::new());
+
+    scratch.write(
+        "conf/sub/child.yaml",
+        &child_bindings_of_size(MAX_DOCUMENT_BYTES),
+    );
+    let effects = OpenEffects::new(&governor, case.clone(), &document, &file, &catalog())
+        .expect("a child bindings file at the bound is read");
+    performed(&drive(&governor, &effects, &case, json!({})));
+    assert_eq!(
+        governor.protocol(&CaseId("case-1.review".into())).unwrap(),
+        "child@1"
+    );
+}
+
+#[test]
+fn a_bindings_document_naming_host_case_outcomes_is_refused_as_an_undeclared_member() {
+    let top = format!(
+        "host_case_outcomes: true\n{}",
+        parent_bindings("{kind: open, name: review, bindings: sub/child.yaml}")
+    );
+    let executor = parent_bindings(
+        "{kind: open, name: review, bindings: sub/child.yaml, host_case_outcomes: true}",
+    );
+    let child = format!("host_case_outcomes: true\n{}", child_bindings("reviewer"));
+    for text in [top, executor, child] {
+        let refused = decode(&text).map(|_| ()).expect_err("refused");
+        assert_eq!(
+            refused.0.reason,
+            Reason::UndeclaredMember,
+            "{refused}\n{text}"
+        );
+    }
 }

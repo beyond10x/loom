@@ -32,6 +32,8 @@ const PARENT: &str = include_str!("fixtures/child-cases/parent-1.yaml");
 const CHILD: &str = include_str!("fixtures/child-cases/child-1.yaml");
 const HOLDER: &str = include_str!("fixtures/child-cases/holder-1.yaml");
 const DRAFTER: &str = include_str!("fixtures/child-cases/drafter-1.yaml");
+const TREE: &str = include_str!("fixtures/child-cases/tree-1.yaml");
+const EPIC: &str = include_str!("fixtures/child-cases/epic-1.yaml");
 
 const OPEN: &str = "child.open";
 const T1: &str = "2026-11-21T12:00:00Z";
@@ -53,6 +55,8 @@ fn catalog() -> ProtocolCatalog {
         ("child@1", CHILD),
         ("holder@1", HOLDER),
         ("drafter@1", DRAFTER),
+        ("tree@1", TREE),
+        ("epic@1", EPIC),
     ] {
         catalog
             .add_yaml(name, yaml, source())
@@ -117,8 +121,17 @@ static ISSUED: AtomicU64 = AtomicU64::new(1);
 
 /// The `child_opened` record the opening action's `from: effect` entry gives.
 fn opened_record<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &CaseId) -> EvidenceData {
+    opened_about(governor, case, "idea")
+}
+
+/// The `child_opened` record of an opening action about `subject`.
+fn opened_about<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    subject: &str,
+) -> EvidenceData {
     let n = ISSUED.fetch_add(1, Ordering::Relaxed);
-    let revision = governor.revisions(case).unwrap()["idea"].clone();
+    let revision = governor.revisions(case).unwrap()[subject].clone();
     EvidenceData {
         evidence_id: EvidenceId(uuid(n)),
         case_id: case.clone(),
@@ -131,7 +144,7 @@ fn opened_record<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &CaseI
                 "format": "canon-evidence/1",
                 "id": format!("opened-{n}"),
                 "kind": "child_opened",
-                "subject": "idea",
+                "subject": subject,
                 "subject_revision": revision,
                 "result": "opened",
                 "observed_at": T1,
@@ -828,4 +841,666 @@ fn a_catalog_in_which_two_protocols_open_each_other_is_refused_naming_the_cycle(
         matches!(&one, Err(OpenError::InvalidProtocol { problem, .. }) if problem.contains("ping -> pong -> ping")),
         "{one:?}"
     );
+}
+
+// ---- trees deeper than one level, children beside other claims, host records -------------------
+
+/// Opens `case` as a root under `protocol` with `artifacts`.
+fn open_root<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+    protocol: &str,
+    artifacts: &[(&str, &str)],
+) -> CaseId {
+    let case = CaseId(case.into());
+    governor
+        .open_case(
+            case.clone(),
+            protocol,
+            artifacts
+                .iter()
+                .map(|(artifact, revision)| ((*artifact).to_owned(), (*revision).to_owned()))
+                .collect(),
+            CaseInputs::none(),
+        )
+        .expect("the root opens");
+    case
+}
+
+/// Opens one `protocol` child per name through the `case_open` action `action` about `subject`.
+fn open_through<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    parent: &CaseId,
+    action: &str,
+    protocol: &str,
+    subject: &str,
+    names: &[&str],
+) -> Vec<CaseId> {
+    let openings: Vec<ChildOpening> = names
+        .iter()
+        .map(|name| ChildOpening {
+            name: (*name).to_owned(),
+            protocol: protocol.to_owned(),
+            independence: CaseIndependence::none(),
+        })
+        .collect();
+    governor
+        .open_children(
+            parent,
+            action,
+            governor.current_revision(parent).unwrap(),
+            &openings,
+            vec![opened_about(governor, parent, subject)],
+            T1,
+        )
+        .unwrap_or_else(|error| panic!("{action} opens: {error}"))
+}
+
+/// Submits, through the evidence port, a `case_outcome` record of `case` about `subject` naming
+/// `child` with `result`; whether it was received.
+fn submit_outcome<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    subject: &str,
+    child: &str,
+    result: &str,
+) -> bool {
+    let n = ISSUED.fetch_add(1, Ordering::Relaxed);
+    let revision = governor.revisions(case).unwrap()[subject].clone();
+    submit_evidence(
+        governor,
+        "host",
+        EvidenceData {
+            evidence_id: EvidenceId(uuid(n)),
+            case_id: case.clone(),
+            kind: "case_outcome".into(),
+            subject_revision: governor.current_revision(case).unwrap(),
+            producer: "host".into(),
+            observation_ids: vec![observed(governor)],
+            facts: commission_json::parse(
+                &json!({
+                    "format": "canon-evidence/1",
+                    "id": format!("host-outcome-{n}"),
+                    "kind": "case_outcome",
+                    "subject": subject,
+                    "subject_revision": revision,
+                    "result": result,
+                    "child_case": child,
+                })
+                .to_string(),
+            )
+            .unwrap(),
+            provenance: commission_json::Value::Null,
+        },
+    )
+    .is_ok()
+}
+
+/// Ends the `child/1` case `case` passed.
+fn pass<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &CaseId) {
+    verdict(governor, case, "passed");
+    governor
+        .terminate(case, "passed", T2)
+        .unwrap_or_else(|error| panic!("{} ends passed: {error}", case.0));
+}
+
+fn release<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    epic: &CaseId,
+) -> (ActionStatus, Vec<String>) {
+    let frontier = governor.frontier(epic).unwrap();
+    let action = frontier
+        .data()
+        .actions
+        .iter()
+        .find(|action| action.action == "release")
+        .expect("the frontier lists release")
+        .clone();
+    (action.status, action.reasons)
+}
+
+#[test]
+fn a_three_level_tree_resolves_from_the_leaves_up_and_refuses_early_and_forged_outcomes() {
+    let (governor, _dir) = governor();
+    let root = open_root(&governor, "case-1", "tree@1", &[("roadmap", "roadmap-1")]);
+    let epic = open_through(&governor, &root, "epic.open", "epic@1", "roadmap", &["e1"]).remove(0);
+    let stories = open_through(
+        &governor,
+        &epic,
+        "story.open",
+        "child@1",
+        "spec",
+        &["s1", "s2"],
+    );
+    let ids: Vec<&str> = stories.iter().map(|story| story.0.as_str()).collect();
+    assert_eq!(ids, ["case-1.e1.s1", "case-1.e1.s2"]);
+    assert_eq!(
+        governor.case_state(&epic).unwrap().artifacts,
+        BTreeMap::from([
+            ("roadmap".to_owned(), "roadmap-1".to_owned()),
+            ("spec".to_owned(), loom_governor::UNREVISED.to_owned()),
+        ])
+    );
+    let tree: Vec<(String, Option<String>)> = governor
+        .tree(&stories[1])
+        .unwrap()
+        .into_iter()
+        .map(|member| (member.case.0, member.parent.map(|link| link.parent.0)))
+        .collect();
+    assert_eq!(
+        tree,
+        [
+            ("case-1".to_owned(), None),
+            ("case-1.e1".to_owned(), Some("case-1".to_owned())),
+            ("case-1.e1.s1".to_owned(), Some("case-1.e1".to_owned())),
+            ("case-1.e1.s2".to_owned(), Some("case-1.e1".to_owned())),
+        ]
+    );
+    record(
+        &governor, &epic, "approval", "roadmap", "approved", "approver",
+    );
+    record(&governor, &epic, "gate", "spec", "passed", "gate");
+
+    // Neither the epic nor the root ends before its children did.
+    let early = governor.terminate(&epic, "passed", T2);
+    assert!(
+        matches!(early, Err(TerminateError::Refused { .. })),
+        "{early:?}"
+    );
+    let early = governor.terminate(&root, "delivered", T2);
+    assert!(
+        matches!(early, Err(TerminateError::Refused { .. })),
+        "{early:?}"
+    );
+    // A case_outcome submitted at either level is refused, naming a held case or not.
+    for (case, subject, child) in [
+        (&root, "roadmap", "case-1.e1"),
+        (&root, "roadmap", "case-1.e2"),
+        (&epic, "spec", "case-1.e1.s1"),
+        (&epic, "spec", "case-1.e1.s3"),
+        (&stories[0], "work", "case-1.e1.s1.x"),
+    ] {
+        assert!(
+            !submit_outcome(&governor, case, subject, child, "passed"),
+            "{} received a case_outcome naming {child}",
+            case.0
+        );
+    }
+
+    pass(&governor, &stories[0]);
+    assert_eq!(claim(&governor, &epic, "children.passed"), Truth::Unknown);
+    assert_eq!(claim(&governor, &root, "children.passed"), Truth::Unknown);
+    pass(&governor, &stories[1]);
+    assert_eq!(claim(&governor, &epic, "children.passed"), Truth::True);
+    assert_eq!(
+        claim(&governor, &root, "children.passed"),
+        Truth::Unknown,
+        "the epic has not ended"
+    );
+    assert!(matches!(
+        governor.terminate(&root, "delivered", T2),
+        Err(TerminateError::Refused { .. })
+    ));
+
+    governor.terminate(&epic, "passed", T2).unwrap();
+    assert_eq!(outcomes(&governor, &root)[0]["result"], "passed");
+    assert_eq!(outcomes(&governor, &root)[0]["child_case"], "case-1.e1");
+    assert_eq!(claim(&governor, &root, "children.passed"), Truth::True);
+    // The terminated epic opens no further story; its stories' records stay as they ended.
+    let again = governor.open_children(
+        &epic,
+        "story.open",
+        governor.current_revision(&epic).unwrap(),
+        &[ChildOpening {
+            name: "s3".into(),
+            protocol: "child@1".into(),
+            independence: CaseIndependence::none(),
+        }],
+        vec![opened_about(&governor, &epic, "spec")],
+        T2,
+    );
+    assert!(
+        matches!(again, Err(ChildError::Terminated { .. })),
+        "{again:?}"
+    );
+    let results: Vec<Value> = outcomes(&governor, &epic)
+        .into_iter()
+        .map(|facts| facts["result"].clone())
+        .collect();
+    assert_eq!(results, [json!("passed"), json!("passed")]);
+
+    governor.terminate(&root, "delivered", T2).unwrap();
+    assert_eq!(
+        governor.completion(&root).unwrap(),
+        CompletionDetermination::Complete(CompletionDeterminationComplete {
+            outcome: "delivered".into()
+        })
+    );
+}
+
+#[test]
+fn children_passed_beside_an_approval_and_a_gate_opens_the_release_and_the_outcome_only_with_all_three()
+ {
+    const CLAIMS: [&str; 3] = ["roadmap.approved", "gate.passed", "children.passed"];
+    for missing in CLAIMS.iter().copied().chain(["none"]) {
+        let (governor, _dir) = governor();
+        let epic = open_root(
+            &governor,
+            "case-1",
+            "epic@1",
+            &[("roadmap", "roadmap-1"), ("spec", "spec-1")],
+        );
+        let stories = open_through(
+            &governor,
+            &epic,
+            "story.open",
+            "child@1",
+            "spec",
+            &["s1", "s2"],
+        );
+        if missing != "roadmap.approved" {
+            record(
+                &governor, &epic, "approval", "roadmap", "approved", "approver",
+            );
+        }
+        if missing != "gate.passed" {
+            record(&governor, &epic, "gate", "spec", "passed", "gate");
+        }
+        pass(&governor, &stories[0]);
+        if missing != "children.passed" {
+            pass(&governor, &stories[1]);
+        }
+        let (status, reasons) = release(&governor, &epic);
+        let completion = governor.completion(&epic).unwrap();
+        if missing == "none" {
+            assert_eq!(status, ActionStatus::Admissible, "{reasons:?}");
+            assert_eq!(
+                completion,
+                CompletionDetermination::Complete(CompletionDeterminationComplete {
+                    outcome: "passed".into()
+                })
+            );
+            continue;
+        }
+        assert_eq!(status, ActionStatus::Blocked, "{missing}");
+        assert!(
+            !matches!(completion, CompletionDetermination::Complete(_)),
+            "{missing}: {completion:?}"
+        );
+        let named = reasons.join(" ");
+        for claim_id in CLAIMS {
+            assert_eq!(
+                named.contains(&format!("\"{claim_id}\"")),
+                claim_id == missing,
+                "{missing}: {reasons:?}"
+            );
+        }
+        assert_eq!(
+            claim(&governor, &epic, missing),
+            Truth::Unknown,
+            "{missing}"
+        );
+        assert!(
+            matches!(
+                governor.terminate(&epic, "passed", T2),
+                Err(TerminateError::Refused { .. })
+            ),
+            "{missing}"
+        );
+    }
+}
+
+#[test]
+fn by_default_a_host_case_outcome_for_a_case_open_protocol_is_refused_and_satisfies_no_claim() {
+    let (governor, _dir) = governor();
+    let lone = root(&governor, "parent@1");
+    let sibling = open_root(&governor, "case-2", "parent@1", &[("idea", "idea-1")]);
+    // Before the first opening: refused, so neither the case nor a sibling reads it.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.review",
+        "passed"
+    ));
+    assert!(outcomes(&governor, &lone).is_empty());
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    assert_eq!(
+        claim(&governor, &sibling, "children.passed"),
+        Truth::Unknown
+    );
+    // A later child of that name is opened under it, and its own record alone decides the claim.
+    let child = open_children(&governor, &lone, &["review"]).remove(0);
+    assert_eq!(child.0, "case-1.review");
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    // After an opening: refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.other",
+        "passed"
+    ));
+    verdict(&governor, &child, "failed");
+    governor.terminate(&child, "failed", T2).unwrap();
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::False);
+    // After termination of the child, and of a case that never opened one: refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.other",
+        "passed"
+    ));
+    let held = outcomes(&governor, &lone);
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0]["child_case"], "case-1.review");
+    assert_eq!(held[0]["result"], "failed");
+    let epic = open_root(
+        &governor,
+        "case-3",
+        "epic@1",
+        &[("roadmap", "roadmap-1"), ("spec", "spec-1")],
+    );
+    let story = open_through(&governor, &epic, "story.open", "child@1", "spec", &["s"]).remove(0);
+    pass(&governor, &story);
+    record(
+        &governor, &epic, "approval", "roadmap", "approved", "approver",
+    );
+    record(&governor, &epic, "gate", "spec", "passed", "gate");
+    governor.terminate(&epic, "passed", T2).unwrap();
+    assert!(!submit_outcome(
+        &governor,
+        &epic,
+        "spec",
+        "case-3.late",
+        "failed"
+    ));
+    assert_eq!(outcomes(&governor, &epic).len(), 1);
+}
+
+#[test]
+fn with_host_case_outcomes_a_lone_case_receives_the_record_as_before_until_it_holds_a_link() {
+    let dir = dir();
+    let governor = CanonGovernor::new(FileCaseStore::open(&dir).unwrap())
+        .with_host_case_outcomes()
+        .with_catalog(&catalog())
+        .unwrap();
+    let lone = root(&governor, "parent@1");
+    let sibling = open_root(&governor, "case-2", "parent@1", &[("idea", "idea-1")]);
+    // Received, no link and naming no held case, and read by that case alone.
+    assert!(submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.review",
+        "passed"
+    ));
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::True);
+    assert_eq!(
+        claim(&governor, &sibling, "children.passed"),
+        Truth::Unknown
+    );
+    let cousin = open_children(&governor, &sibling, &["review"]).remove(0);
+    // A record naming a held case is refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-2.review",
+        "passed"
+    ));
+    pass(&governor, &cousin);
+    assert_eq!(claim(&governor, &sibling, "children.passed"), Truth::True);
+    // A child the case opens later of the record's name gets the next id and its own record.
+    let child = open_children(&governor, &lone, &["review"]).remove(0);
+    assert_eq!(child.0, "case-1.review.2");
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::Unknown);
+    // Once the case holds a link: refused.
+    assert!(!submit_outcome(
+        &governor,
+        &lone,
+        "idea",
+        "case-1.other",
+        "passed"
+    ));
+    verdict(&governor, &child, "failed");
+    governor.terminate(&child, "failed", T2).unwrap();
+    assert_eq!(claim(&governor, &lone, "children.passed"), Truth::False);
+    let held = outcomes(&governor, &lone);
+    assert_eq!(held.len(), 2);
+    assert_eq!(held[1]["child_case"], "case-1.review.2");
+    // The setting is not stored: the same store reopened by a governor without it refuses.
+    let third = open_root(&governor, "case-3", "parent@1", &[("idea", "idea-1")]);
+    drop(governor);
+    let reopened = governor_over(FileCaseStore::open(&dir).unwrap());
+    assert!(!submit_outcome(
+        &reopened,
+        &third,
+        "idea",
+        "case-3.review",
+        "passed"
+    ));
+    assert!(outcomes(&reopened, &third).is_empty());
+}
+
+/// A protocol that reads `case_outcome` records and declares no `case_open` action.
+const COMPOSED: &str = "format: protocol/1\nprotocol: {id: composed, revision: 1}\n\
+                        artifacts: {idea: {}}\nevidence_kinds: {case_outcome: {}}\n\
+                        claims:\n  children.passed:\n    true_when:\n      children: {in: [passed]}\n\
+                        actions:\n  idea.note: {effect: write}\n\
+                        outcomes:\n  delivered:\n    requires: {claim: children.passed}\n";
+
+#[test]
+fn a_protocol_without_case_open_receives_a_host_case_outcome_under_either_setting() {
+    for allowed in [false, true] {
+        let governor = CanonGovernor::new(loom_governor::MemoryCaseStore::default());
+        let governor = if allowed {
+            governor.with_host_case_outcomes()
+        } else {
+            governor
+        };
+        let governor = governor
+            .with_protocol_yaml("composed@1", COMPOSED)
+            .expect("a protocol without case_open registers");
+        let case = open_root(&governor, "case-1", "composed@1", &[("idea", "idea-1")]);
+        assert!(
+            submit_outcome(&governor, &case, "idea", "case-1.part", "passed"),
+            "allowed {allowed}"
+        );
+        assert_eq!(
+            claim(&governor, &case, "children.passed"),
+            Truth::True,
+            "allowed {allowed}"
+        );
+    }
+}
+
+#[test]
+fn no_protocol_or_case_file_member_turns_host_case_outcomes_on() {
+    // A protocol naming the setting is refused by Canon's loader as an unknown member.
+    let named = PARENT.replacen("artifacts:", "host_case_outcomes: true\nartifacts:", 1);
+    let mut catalog = ProtocolCatalog::default();
+    let refused = catalog.add_yaml("parent@1", &named, source());
+    assert!(refused.is_err(), "the catalog took {named}");
+    let refused = CanonGovernor::new(loom_governor::MemoryCaseStore::default())
+        .with_protocol_yaml("parent@1", &named)
+        .map(|_| ());
+    assert!(refused.is_err(), "the governor took {named}");
+    // A case file naming it is refused on read.
+    let dir = dir();
+    let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+    let case = root(&governor, "parent@1");
+    let path = dir.join(format!("{}.json", loom_governor::case_file_stem(&case.0)));
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    document["host_case_outcomes"] = serde_json::Value::Bool(true);
+    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let read = FileCaseStore::open(&dir).unwrap().get(&case);
+    assert!(read.is_err(), "{read:?}");
+    assert!(governor.frontier(&case).is_err());
+}
+
+// ---- the name a link holds ----------------------------------------------------------------------
+
+/// The name of the link `case` holds to its parent.
+fn link_name<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &CaseId) -> String {
+    governor
+        .case_state(case)
+        .unwrap()
+        .parent
+        .expect("a child holds its parent link")
+        .name
+}
+
+#[test]
+fn a_first_and_a_repeated_child_hold_the_opening_name_and_keep_it_over_a_reopen() {
+    let dir = dir();
+    let (first, repeated, parent) = {
+        let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+        let parent = root(&governor, "parent@1");
+        let first = open_children(&governor, &parent, &["review"]).remove(0);
+        let repeated = open_children(&governor, &parent, &["review"]).remove(0);
+        assert_eq!(
+            (first.0.as_str(), repeated.0.as_str()),
+            ("case-1.review", "case-1.review.2")
+        );
+        assert_eq!(link_name(&governor, &first), "review");
+        assert_eq!(link_name(&governor, &repeated), "review");
+        (first, repeated, parent)
+    };
+    let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+    assert_eq!(link_name(&governor, &first), "review");
+    assert_eq!(link_name(&governor, &repeated), "review");
+    let names: Vec<(String, String)> = governor
+        .case_state(&parent)
+        .unwrap()
+        .children
+        .into_iter()
+        .map(|link| (link.child.0, link.name))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("case-1.review".to_owned(), "review".to_owned()),
+            ("case-1.review.2".to_owned(), "review".to_owned()),
+        ]
+    );
+    // A termination and its record replacement leave the name as the opening wrote it.
+    verdict(&governor, &repeated, "passed");
+    governor.terminate(&repeated, "passed", T2).unwrap();
+    assert_eq!(link_name(&governor, &repeated), "review");
+}
+
+#[test]
+fn a_case_file_whose_link_name_is_missing_not_one_segment_or_not_its_id_is_refused_on_read() {
+    for (label, holder_is_child, name) in [
+        ("missing", true, None),
+        ("not one segment", true, Some("re.view")),
+        ("empty", true, Some("")),
+        ("not the id's", true, Some("other")),
+        ("not the id's, in children", false, Some("other")),
+    ] {
+        let dir = dir();
+        let governor = governor_over(FileCaseStore::open(&dir).unwrap());
+        let parent = root(&governor, "parent@1");
+        let _ = open_children(&governor, &parent, &["review"]);
+        let repeated = open_children(&governor, &parent, &["review"]).remove(0);
+        let holder = if holder_is_child { &repeated } else { &parent };
+        let path = dir.join(format!("{}.json", loom_governor::case_file_stem(&holder.0)));
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let link = if holder_is_child {
+            &mut document["parent"]
+        } else {
+            &mut document["children"][1]
+        };
+        match name {
+            None => {
+                link.as_object_mut().unwrap().remove("name");
+            }
+            Some(name) => link["name"] = serde_json::Value::from(name),
+        }
+        std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+        let read = FileCaseStore::open(&dir).unwrap().get(holder);
+        assert!(read.is_err(), "{label}: {read:?}");
+        assert!(governor.case_state(holder).is_err(), "{label}");
+    }
+}
+
+// ---- a step writes no child outcome ---------------------------------------------------------------
+
+/// An evidence port that keeps what `submit_evidence` attributes, for `record_step`.
+#[derive(Default)]
+struct Attributing(
+    std::cell::RefCell<Vec<b10x_loom_commission::ports::evidence::AttributedEvidence>>,
+);
+
+impl b10x_loom_commission::ports::evidence::EvidencePort for Attributing {
+    fn receive(
+        &self,
+        evidence: b10x_loom_commission::ports::evidence::AttributedEvidence,
+    ) -> Result<(), b10x_loom_commission::model::responsibility::GovernorError> {
+        self.0.borrow_mut().push(evidence);
+        Ok(())
+    }
+}
+
+#[test]
+fn a_program_step_cannot_write_a_case_outcome_record_for_a_case_open_protocol() {
+    for allowed in [false, true] {
+        let dir = dir();
+        let governor = CanonGovernor::new(FileCaseStore::open(&dir).unwrap());
+        let governor = if allowed {
+            governor.with_host_case_outcomes()
+        } else {
+            governor
+        };
+        let governor = governor.with_catalog(&catalog()).unwrap();
+        let lone = root(&governor, "parent@1");
+        let parent = open_root(&governor, "case-2", "parent@1", &[("idea", "idea-1")]);
+        let _ = open_children(&governor, &parent, &["review"]);
+        for (case, child) in [(&lone, "case-1.review"), (&parent, "case-2.other")] {
+            let n = ISSUED.fetch_add(1, Ordering::Relaxed);
+            let attributing = Attributing::default();
+            submit_evidence(
+                &attributing,
+                "program",
+                EvidenceData {
+                    evidence_id: EvidenceId(uuid(n)),
+                    case_id: case.clone(),
+                    kind: "case_outcome".into(),
+                    subject_revision: governor.current_revision(case).unwrap(),
+                    producer: "program".into(),
+                    observation_ids: vec![observed(&governor)],
+                    facts: commission_json::parse(
+                        &json!({
+                            "format": "canon-evidence/1",
+                            "id": format!("step-outcome-{n}"),
+                            "kind": "case_outcome",
+                            "subject": "idea",
+                            "subject_revision": "idea-1",
+                            "result": "passed",
+                            "child_case": child,
+                        })
+                        .to_string(),
+                    )
+                    .unwrap(),
+                    provenance: commission_json::Value::Null,
+                },
+            )
+            .unwrap();
+            let before = outcomes(&governor, case).len();
+            let step = governor.record_step(case, &BTreeMap::new(), attributing.0.into_inner());
+            let lone_allowed = allowed && case == &lone;
+            assert_eq!(
+                step.is_ok(),
+                lone_allowed,
+                "{} allowed {allowed}: {step:?}",
+                case.0
+            );
+            let after = outcomes(&governor, case).len();
+            assert_eq!(after, before + usize::from(lone_allowed), "{}", case.0);
+        }
+    }
 }

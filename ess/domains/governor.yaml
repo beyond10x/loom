@@ -138,7 +138,9 @@ types:
         type: Optional<loom.governor.CaseTermination>
 
   # The link between a parent case and one child case it opened by performing a `case_open`
-  # action (story child-case-runtime): the parent, the child, the opening action, the id of the
+  # action (story child-case-runtime): the parent, the child, the name the opening gave the child
+  # (`<parent>.<name>` is its id, or `<parent>.<name>.<n>` for a repeated name, so a tool reads
+  # the name here and never parses the id), the opening action, the id of the
   # one `case_outcome` evidence record the parent holds for the child (result `open` while the
   # child runs, then the child's outcome), the artifact the action's `case_open.subject` names,
   # and the parent's revision of that artifact when the child was opened. The same link is the
@@ -152,6 +154,8 @@ types:
         type: loom.governor.StoredCaseId
       - name: child
         type: loom.governor.StoredCaseId
+      - name: name
+        type: String
       - name: action
         type: String
       - name: outcome_evidence

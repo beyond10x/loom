@@ -1,0 +1,25 @@
+format: protocol/1
+protocol:
+  id: tree
+  revision: 1
+  description: >-
+    The root of a three-level tree of story child-case-runtime: it opens epic cases about its
+    roadmap and is delivered once every epic ended passed.
+artifacts:
+  roadmap: {}
+evidence_kinds:
+  case_outcome: {}
+  child_opened: {}
+claims:
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  epic.open:
+    effect: write
+    case_open: {protocol: epic, subject: roadmap}
+    may_produce:
+      - evidence: child_opened
+outcomes:
+  delivered:
+    requires: {claim: children.passed}

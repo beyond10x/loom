@@ -27,6 +27,9 @@ The compatibility API opens a case on a protocol of the
   and writes one
   `case_outcome` record per child into the parent, `open` until the child is terminated, then its
   outcome. The parent's `children` claims read those records; `tree` lists the cases of one tree.
+  Only the governor writes a `case_outcome` record for a protocol that declares `case_open`; a
+  host that composes cases itself, with no child cases run by Loom, allows its own records by
+  building the governor `with_host_case_outcomes()`.
 - **It never invents authority.** An action that requires a capability is at best *approval
   required*; Commission asks its authority provider.
 - **It decides and never acts.** It reports the frontier and whether one outcome is legitimate. It
