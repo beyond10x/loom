@@ -5,7 +5,9 @@
 //! case whose facts name a `kind` and a `result` the binding's `retry_when` lists, about the
 //! revision the case holds for the facts' `subject`, never `none`, in the order the case received
 //! them. Every member of a `RetryRecord` is read from the held record and from the observation it
-//! cites; nothing a program prints or a request names is one.
+//! cites; nothing a program prints or a request names is one. The cited observation is a bound
+//! program's run ([`PROGRAM_SOURCE`]: its action, exit and output blob) or a person's action
+//! ([`PERSON_SOURCE`]: its action and the blob of the person's reasons, no exit), of the same case.
 //!
 //! On a step of [`crate::ProgramEffects`] with retry records, after the run count and before
 //! anything starts, the port keeps one `loom.retry-feedback/1` document as `blobs/<sha256>` of the
@@ -37,8 +39,127 @@ pub const RETRY_LOG_LINES: usize = 60;
 /// The most bytes of a `RetryLog`'s tail.
 pub const RETRY_LOG_BYTES: usize = 65536;
 
+/// The source of the observation a person action's effect records (`tree approve --action`): a
+/// record citing one names the person's action and, when the person gave reasons, their blob.
+pub const PERSON_SOURCE: &str = "loom/person";
+
 /// The revision of an artifact not written yet: a record about it sends nobody back.
 const NO_REVISION: &str = "none";
+
+/// Why `text` cannot be a person's reasons, if it cannot: it is empty, or holds more than
+/// [`RETRY_LOG_BYTES`] bytes or [`RETRY_LOG_LINES`] lines (a line break that ends the text starts
+/// no line), the bounds of a retry log, so the reasons reach a writer's feedback whole.
+///
+/// # Errors
+/// What is wrong with the text.
+pub fn reasons_fit(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("the reasons are empty".to_owned());
+    }
+    if text.len() > RETRY_LOG_BYTES {
+        return Err(format!(
+            "the reasons are {} bytes, more than {RETRY_LOG_BYTES}",
+            text.len()
+        ));
+    }
+    let lines = text
+        .strip_suffix('\n')
+        .unwrap_or(text)
+        .matches('\n')
+        .count()
+        + 1;
+    if lines > RETRY_LOG_LINES {
+        return Err(format!(
+            "the reasons are {lines} lines, more than {RETRY_LOG_LINES}"
+        ));
+    }
+    Ok(())
+}
+
+/// A person's reasons read from `path`, a regular file inside `workspace` named below it as
+/// written (no `.` or `..` segment): each directory below the workspace and the file itself are
+/// opened relative to the one before with `O_NOFOLLOW`, so a symbolic link anywhere below the
+/// workspace is refused wherever it points, and a file that is not regular is never read. At most
+/// one byte past [`RETRY_LOG_BYTES`] is read; the text must be UTF-8 and fit ([`reasons_fit`]).
+///
+/// # Errors
+/// Why the file is not read or its text not taken.
+pub fn read_reasons_file(workspace: &Path, path: &Path) -> Result<String, String> {
+    use rustix::fs::{FileType, Mode, OFlags};
+    let shown = path.display();
+    let relative = path.strip_prefix(workspace).map_err(|_| {
+        format!(
+            "{shown} is not inside the workspace {}",
+            workspace.display()
+        )
+    })?;
+    let mut segments = Vec::new();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(name) => segments.push(name),
+            _ => {
+                return Err(format!(
+                    "{shown} names a segment that is not a plain name below the workspace"
+                ));
+            }
+        }
+    }
+    let Some((leaf, ancestors)) = segments.split_last() else {
+        return Err(format!("{shown} is the workspace, not a file in it"));
+    };
+    let mut dir = rustix::fs::open(
+        workspace,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("the workspace cannot be opened: {error}"))?;
+    for segment in ancestors {
+        dir = rustix::fs::openat(
+            &dir,
+            *segment,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|error| {
+            format!(
+                "the directory {} of {shown} is not opened without following a link: {error}",
+                segment.to_string_lossy()
+            )
+        })?;
+    }
+    // Not blocking: a pipe in the file's place is opened, seen not to be a file and never read.
+    let file = rustix::fs::openat(
+        &dir,
+        *leaf,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("{shown} is not opened without following a link: {error}"))?;
+    let stat = rustix::fs::fstat(&file).map_err(|error| format!("{shown}: {error}"))?;
+    if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+        return Err(format!("{shown} is not a regular file"));
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::from(file)
+        .take(RETRY_LOG_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("{shown} cannot be read: {error}"))?;
+    let text = String::from_utf8(bytes).map_err(|_| format!("{shown} is not UTF-8"))?;
+    reasons_fit(&text)?;
+    Ok(text)
+}
+
+/// Keeps `text`, a person's reasons, as `blobs/<sha256>` of `store`, as a program's output is
+/// kept, and answers the digest the person's observation names as `blob_sha256`: a writer the
+/// person's record sends back is given the text as that record's log.
+///
+/// # Errors
+/// The blob cannot be written.
+pub fn keep_reasons(store: &Path, text: &str) -> std::io::Result<String> {
+    let digest = sha256(text.as_bytes());
+    keep_blob(store, &digest, text.as_bytes())?;
+    Ok(digest)
+}
 
 /// The records that send `binding` back to work in `case`, in the order the case received them
 /// (see the module documentation); none for a binding whose `retry_when` is empty.
@@ -86,13 +207,14 @@ pub fn retry_records<S: FallibleCaseStore, T: EvaluationTime>(
             Some(received) => received,
             None => observations.insert(governor.try_observations()?),
         };
-        // The first cited run of a bound program in this case: its action, exit and blob.
+        // The first cited run of a bound program, or person action, in this case: its action,
+        // exit and blob (a person's reasons, with no exit).
         let run = held.observation_ids.iter().find_map(|cited| {
             received
                 .iter()
                 .find(|observation| &observation.observation_id == cited)
                 .filter(|observation| {
-                    observation.source == PROGRAM_SOURCE
+                    (observation.source == PROGRAM_SOURCE || observation.source == PERSON_SOURCE)
                         && only_text(&observation.payload, "case") == Some(case.0.as_str())
                 })
         });

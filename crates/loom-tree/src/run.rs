@@ -92,6 +92,9 @@ pub struct RunSettings {
     pub time: TreeTime,
     /// The runner every bound program of the tree starts through.
     pub runner: Arc<dyn TestRunner>,
+    /// The `--confinement` value of the runner, which the `tree run` a handoff prints carries so
+    /// that, run unchanged, it starts its programs as this run does; `None` prints no flag.
+    pub confinement: Option<String>,
 }
 
 impl std::fmt::Debug for RunSettings {
@@ -101,6 +104,7 @@ impl std::fmt::Debug for RunSettings {
             .field("max_wall_seconds", &self.max_wall_seconds)
             .field("time", &self.time)
             .field("runner", &self.runner.label())
+            .field("confinement", &self.confinement)
             .finish()
     }
 }
@@ -376,6 +380,7 @@ pub fn run_tree(
             &workspace,
             revision,
             &history,
+            settings.confinement.as_deref(),
         )?;
         let line = logs.append(
             &case.case,
@@ -609,7 +614,7 @@ fn opened<S: loom_governor::FallibleCaseStore>(
 }
 
 /// The lines of `case`'s log in `store`.
-fn read_lines(store: &Path, case: &str) -> Result<Vec<RunLogLine>, Refused> {
+pub(crate) fn read_lines(store: &Path, case: &str) -> Result<Vec<RunLogLine>, Refused> {
     let bytes = read_regular(&store.join(log_file_name(case)))?.unwrap_or_default();
     b10x_loom_runlog::verify(&bytes).map_err(|refused| {
         Refused::new(
@@ -836,13 +841,25 @@ fn waiting_actions<S: loom_governor::FallibleCaseStore>(
 }
 
 /// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
-/// and names a `handoff`: the text is what is decided, and `tree run` again is the command.
+/// and names a `handoff`: the text is what is decided, and `tree run` again, under `confinement`
+/// when it is named, is the command.
 fn handoffs<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
     bindings: &BindingsDocument,
     store_text: &str,
+    confinement: Option<&str>,
 ) -> Result<Vec<NextDecision>, Refused> {
+    let mut command = vec![
+        "b10x-loom".to_owned(),
+        "tree".to_owned(),
+        "run".to_owned(),
+        "--store".to_owned(),
+        store_text.to_owned(),
+    ];
+    if let Some(confinement) = confinement {
+        command.extend(["--confinement".to_owned(), confinement.to_owned()]);
+    }
     let frontier = governor
         .frontier(case)
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
@@ -866,13 +883,7 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
                 revision: None,
                 path: None,
                 outcome: None,
-                command: vec![
-                    "b10x-loom".to_owned(),
-                    "tree".to_owned(),
-                    "run".to_owned(),
-                    "--store".to_owned(),
-                    store_text.to_owned(),
-                ],
+                command: command.clone(),
             })
         })
         .collect())
@@ -889,6 +900,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     workspace: &Path,
     revision: i64,
     history: &LogHistory,
+    confinement: Option<&str>,
 ) -> Result<(TreeStop, Vec<NextDecision>), Refused> {
     let store_text = store.display().to_string();
     let mut decisions = Vec::new();
@@ -978,7 +990,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     if decisions.is_empty() {
         // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
         // has done what it may, and a person continues from its text, then runs the tree again.
-        decisions = handoffs(governor, case, bindings, &store_text)?;
+        decisions = handoffs(governor, case, bindings, &store_text, confinement)?;
         if !decisions.is_empty() {
             return Ok((TreeStop::AwaitingPerson, decisions));
         }

@@ -650,6 +650,31 @@ fn an_effect_entry_takes_the_one_value_performed() {
 }
 
 #[test]
+fn a_person_effect_table_lists_the_results_a_person_names() {
+    let entry = |results: &str| {
+        document(&format!(
+            "  - action: change.sign\n    executor: {{kind: person, principal: alice}}\n    evidence:\n      \
+             - {{kind: signoff, subject: impl, producer: alice, from: effect, results: {results}}}\n"
+        ))
+    };
+    let named = entry("{performed: signed, rejected: rejected}");
+    assert!(refused(&named).is_none(), "{:?}", refused(&named));
+    let values: Vec<String> = decode(&named).unwrap().actions[0].evidence[0]
+        .results
+        .iter()
+        .map(|rule| rule.value.clone())
+        .collect();
+    assert_eq!(values, ["performed", "rejected"]);
+    // A person names one listed value: no `*` stands for any other.
+    assert_refused(
+        &entry("{performed: signed, \"*\": rejected}"),
+        Reason::InvalidEffectResult,
+        Some("change.sign"),
+        "evidence[0].results.*",
+    );
+}
+
+#[test]
 fn an_evidence_entry_needs_a_source_and_a_table() {
     let entry = |body: &str| {
         document(&format!(

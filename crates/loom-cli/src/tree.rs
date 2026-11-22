@@ -9,6 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use clap::ValueEnum as _;
+
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{
     ConfinementAdapter, EngineConfinement, EngineRunner, SubstrateRunner, TestRunner,
@@ -16,9 +18,9 @@ use b10x_loom_intake_slice::confinement::{
 use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
-    ApproveRequest, CloseRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record,
-    open_tree, read_protocols_directory, refusal_json, run_json, run_tree, status_json,
-    stored_catalog, tree_status, verify_json, verify_tree,
+    ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
+    approve as record, open_tree, read_protocols_directory, refusal_json, run_json, run_tree,
+    status_json, stored_catalog, tree_status, verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
@@ -154,6 +156,10 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         max_wall_seconds: arguments.max_wall_seconds,
         time,
         runner: tree_runner(arguments.confinement)?,
+        confinement: arguments
+            .confinement
+            .to_possible_value()
+            .map(|value| value.get_name().to_owned()),
     };
     let ran = run_tree(
         &resolved(&arguments.store)?,
@@ -209,10 +215,20 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     let store = resolved(&arguments.store)?;
     let catalog = tree_catalog(&store)?;
+    let reasons_file = arguments
+        .reasons_file
+        .as_deref()
+        .map(resolved)
+        .transpose()?;
+    let reasons = match (&arguments.reasons, &reasons_file) {
+        (Some(text), _) => Some(Reasons::Text(text)),
+        (None, Some(path)) => Some(Reasons::File(path)),
+        (None, None) => None,
+    };
     let approval = record(&ApproveRequest {
         store: &store,
         case: &arguments.case,
-        capability: &arguments.capability,
+        capability: arguments.capability.as_deref(),
         principal: &arguments.principal,
         decision: if arguments.deny {
             ApprovalDecision::Deny
@@ -220,23 +236,28 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
             ApprovalDecision::Allow
         },
         action: arguments.action.as_deref(),
+        result: arguments.result.as_deref(),
+        reasons,
         time,
         catalog: &catalog,
     })?;
-    println!(
-        "{}",
-        printable(
-            &json!({
-                "case": approval.case,
-                "capability": approval.capability,
-                "decision": format!("{:?}", approval.decision),
-                "principal": approval.principal,
-                "case_revision": approval.case_revision,
-                "at": approval.at.0,
-            })
-            .to_string()
-        )
-    );
+    // A person action that needs no capability records no authority: the action is printed.
+    let printed = match approval {
+        Some(approval) => json!({
+            "case": approval.case,
+            "capability": approval.capability,
+            "decision": format!("{:?}", approval.decision),
+            "principal": approval.principal,
+            "case_revision": approval.case_revision,
+            "at": approval.at.0,
+        }),
+        None => json!({
+            "case": arguments.case,
+            "action": arguments.action,
+            "principal": arguments.principal,
+        }),
+    };
+    println!("{}", printable(&printed.to_string()));
     Ok(0)
 }
 

@@ -1,0 +1,33 @@
+format: protocol/1
+protocol:
+  id: review
+  revision: 1
+  description: >-
+    A draft a writer writes and a reviewer reviews. The reviewer approves the draft or rejects it
+    with reasons, and a rejected draft is written again; a judge reviews the draft and notes it
+    in one step. The case is done once the draft is approved.
+artifacts:
+  draft: {}
+evidence_kinds:
+  draft_review: {}
+  draft_note: {}
+claims:
+  draft.approved:
+    true_when:
+      evidence: {kind: draft_review, subject: draft, result: approved}
+actions:
+  draft.write:
+    effect: write
+    precondition: {claim: draft.approved, is: false}
+  draft.review:
+    effect: write
+    may_produce:
+      - evidence: draft_review
+  draft.judge:
+    effect: write
+    may_produce:
+      - evidence: draft_review
+      - evidence: draft_note
+outcomes:
+  done:
+    requires: {claim: draft.approved}

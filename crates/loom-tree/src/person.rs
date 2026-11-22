@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use b10x_loom_bindings::PlacedRevisions;
+use b10x_loom_bindings::{PERSON_SOURCE, PlacedRevisions};
 use b10x_loom_commission::model::json::Value as CommissionJson;
 use b10x_loom_commission::model::primitives::Timestamp;
 use b10x_loom_commission::model::responsibility::{
@@ -22,11 +22,9 @@ use loom_governor::{CanonGovernor, FallibleCaseStore};
 
 use crate::context::derived_uuid;
 
-/// The source of the observation a person action's effect records.
-pub const PERSON_SOURCE: &str = "loom/person";
-
-/// The result a person action's evidence entry reads: its effect was performed.
-const PERFORMED: &str = "performed";
+/// The result a person action's evidence entry reads when the person names none: its effect was
+/// performed.
+pub(crate) const PERFORMED: &str = "performed";
 
 /// The person effect port of one case, for one principal.
 pub(crate) struct PersonEffects<'a, S> {
@@ -37,6 +35,10 @@ pub(crate) struct PersonEffects<'a, S> {
     pub(crate) principal: String,
     pub(crate) at: Timestamp,
     pub(crate) seed: String,
+    /// The value of the entries' result tables the person names: [`PERFORMED`] when none.
+    pub(crate) result: String,
+    /// The digest of the person's reasons kept as a blob of the store, if any.
+    pub(crate) reasons_blob: Option<String>,
 }
 
 fn refused(reason: String) -> EffectOutcome {
@@ -67,6 +69,18 @@ impl<S: FallibleCaseStore> PersonEffects<'_, S> {
                 self.principal
             )));
         }
+        // A named result every entry lists, checked before anything is written: no half write.
+        if self.result != PERFORMED
+            && let Some(entry) = bound.evidence.iter().find(|entry| {
+                entry.from == ResultSource::Effect
+                    && !entry.results.iter().any(|rule| rule.value == self.result)
+            })
+        {
+            return Ok(refused(format!(
+                "the {} entry of {action} lists no result {}",
+                entry.kind, self.result
+            )));
+        }
         // The subject's revision at this moment: what the workspace holds now.
         PlacedRevisions::new(self.governor, self.bindings, &self.workspace)
             .refresh(&self.case)
@@ -79,11 +93,15 @@ impl<S: FallibleCaseStore> PersonEffects<'_, S> {
             &self.case.0,
             action,
         ]));
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "case": self.case.0,
             "action": action,
             "principal": self.principal,
         });
+        // The reasons are named by digest only: their text is in the blob, never in a record.
+        if let Some(digest) = &self.reasons_blob {
+            payload["blob_sha256"] = serde_json::Value::String(digest.clone());
+        }
         self.governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
@@ -102,7 +120,7 @@ impl<S: FallibleCaseStore> PersonEffects<'_, S> {
             let result = entry
                 .results
                 .iter()
-                .find(|rule| rule.value == PERFORMED)
+                .find(|rule| rule.value == self.result)
                 .and_then(|rule| rule.result.clone());
             let subject_revision = revisions
                 .get(&entry.subject)

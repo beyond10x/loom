@@ -68,6 +68,8 @@ impl Tree {
             ("tour@1", "tour.yaml"),
             ("tour-leg@1", "tour-leg.yaml"),
             ("fork@1", "../extra/fork.yaml"),
+            ("sign@1", "../extra/sign.yaml"),
+            ("review@1", "../extra/review.yaml"),
         ] {
             installed
                 .install_file(
@@ -548,6 +550,7 @@ fn settings(max_steps: Option<i64>) -> RunSettings {
         max_wall_seconds: None,
         time: TreeTime::At(AT.to_owned()),
         runner: Arc::new(runner),
+        confinement: Some("local".to_owned()),
     }
 }
 
@@ -1513,10 +1516,19 @@ fn a_writer_with_a_handoff_waits_on_a_person_with_its_text() {
             decision["decides"],
             "Add a second stop to route.txt, then run the tree again."
         );
+        // The next run is started as this one was: under the same confinement.
         let store = tree.store().display().to_string();
         assert_eq!(
             decision["command"],
-            json!(["b10x-loom", "tree", "run", "--store", store])
+            json!([
+                "b10x-loom",
+                "tree",
+                "run",
+                "--store",
+                store,
+                "--confinement",
+                "local"
+            ])
         );
     }
     let writes = log_lines(&tree, "root")
@@ -1577,6 +1589,605 @@ fn every_command_a_leg_prints_runs_as_printed_to_its_outcome() {
         stderr(&ended)
     );
     assert_eq!(json(&ended)["detail"], "passed");
+}
+
+/// `tree open` of `protocol` with the bindings file `bindings` of the workspace.
+fn open_with(tree: &Tree, protocol: &str, bindings: &str) {
+    let opened = tree
+        .command()
+        .args([
+            "tree",
+            "open",
+            "--protocol",
+            protocol,
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .arg("--bindings")
+        .arg(tree.workspace().join(bindings))
+        .arg("--workspace")
+        .arg(tree.workspace())
+        .output()
+        .unwrap();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+}
+
+/// A `sign@1` case brought to its first wait, and the decisions the run printed: signing (a
+/// person, no capability), sealing (a person under `clerk.seal`) and stamping (a program under
+/// `clerk.stamp`) all wait at once.
+fn signpost(label: &str) -> (Tree, Vec<Value>) {
+    let tree = Tree::new(label);
+    open_with(&tree, "sign@1", "sign.bindings.yaml");
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let waited = json(&ran);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    let decisions = waited["decisions"].as_array().unwrap().clone();
+    assert_eq!(decisions.len(), 3, "{waited}");
+    (tree, decisions)
+}
+
+/// The decision of `decisions` about `action`.
+fn about(decisions: &[Value], action: &str) -> Value {
+    decisions
+        .iter()
+        .find(|decision| decision["action"] == action)
+        .cloned()
+        .unwrap_or_else(|| panic!("no decision about {action}: {decisions:?}"))
+}
+
+/// The lines of `case`'s log written since it held `before` lines.
+fn lines_since(tree: &Tree, case: &str, before: usize) -> Vec<RunLogLine> {
+    log_lines(tree, case)[before..].to_vec()
+}
+
+/// The records of `kind` in the status of `case`.
+fn records_of(tree: &Tree, case: &str, kind: &str) -> Vec<Value> {
+    let status = json(&tree.tree("status"));
+    entry(&status, case)["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|record| record["kind"] == kind)
+        .cloned()
+        .collect()
+}
+
+fn is_authority(line: &RunLogLine) -> bool {
+    matches!(line.event, RunLogEvent::AuthorityRecorded(_))
+}
+
+fn finished(line: &RunLogLine) -> Option<&str> {
+    match &line.event {
+        RunLogEvent::ActionFinished(finished) => Some(finished.action.as_str()),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_printed_approve_command_runs() {
+    let (tree, decisions) = signpost("printed-approve");
+    let decision = about(&decisions, "post.stamp");
+    assert_eq!(decision["kind"], "Approve", "{decision}");
+    let before = log_lines(&tree, "root").len();
+    let granted = tree.printed(&decision);
+    assert_eq!(granted.status.code(), Some(0), "{}", stderr(&granted));
+    let written = lines_since(&tree, "root", before);
+    assert_eq!(written.len(), 1, "{written:?}");
+    assert!(is_authority(&written[0]), "{written:?}");
+
+    // The next run takes the action the grant allowed.
+    let before = log_lines(&tree, "root").len();
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let written = lines_since(&tree, "root", before);
+    assert!(
+        written
+            .iter()
+            .any(|line| finished(line) == Some("post.stamp")),
+        "{written:?}"
+    );
+    let stamped = records_of(&tree, "root", "post_stamped");
+    assert_eq!(stamped.len(), 1, "{stamped:?}");
+    assert_eq!(stamped[0]["result"], "stamped", "{stamped:?}");
+}
+
+#[test]
+fn the_printed_approve_action_command_runs() {
+    let (tree, decisions) = signpost("printed-approve-action");
+    let decision = about(&decisions, "post.seal");
+    assert_eq!(decision["kind"], "ApproveAction", "{decision}");
+    assert_eq!(decision["capability"], "clerk.seal", "{decision}");
+    let before = log_lines(&tree, "root").len();
+    let taken = tree.printed(&decision);
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let written = lines_since(&tree, "root", before);
+    assert_eq!(written.len(), 2, "{written:?}");
+    assert!(is_authority(&written[0]), "{written:?}");
+    assert_eq!(finished(&written[1]), Some("post.seal"), "{written:?}");
+    let sealed = records_of(&tree, "root", "post_sealed");
+    assert_eq!(sealed.len(), 1, "{sealed:?}");
+    assert_eq!(sealed[0]["result"], "sealed", "{sealed:?}");
+    assert_eq!(sealed[0]["producer"], "clerk", "{sealed:?}");
+}
+
+#[test]
+fn the_printed_person_action_without_a_capability_runs() {
+    // `post.sign` needs no capability: the printed `tree approve --action` names none and runs.
+    let (tree, decisions) = signpost("printed-no-capability");
+    let decision = about(&decisions, "post.sign");
+    assert_eq!(decision["kind"], "ApproveAction", "{decision}");
+    assert!(decision["capability"].is_null(), "{decision}");
+    assert!(
+        !decision["command"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|word| word == "--capability"),
+        "{decision}"
+    );
+    let before = log_lines(&tree, "root").len();
+    let taken = tree.printed(&decision);
+    assert_eq!(
+        taken.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&taken),
+        stderr(&taken)
+    );
+    // One step, no authority: the action is taken and no approval is kept.
+    let written = lines_since(&tree, "root", before);
+    assert_eq!(written.len(), 1, "{written:?}");
+    assert_eq!(finished(&written[0]), Some("post.sign"), "{written:?}");
+    assert!(!written.iter().any(is_authority), "{written:?}");
+    assert!(
+        b10x_loom_tree::read_approvals(&tree.store(), "root")
+            .unwrap()
+            .is_empty()
+    );
+    let signed = records_of(&tree, "root", "post_signed");
+    assert_eq!(signed.len(), 1, "{signed:?}");
+    assert_eq!(signed[0]["result"], "signed", "{signed:?}");
+    assert_eq!(signed[0]["producer"], "walker", "{signed:?}");
+    let verified = tree.tree("verify");
+    assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
+}
+
+#[test]
+fn a_person_action_that_needs_a_capability_is_refused_without_one() {
+    let (tree, _) = signpost("needs-capability");
+    let before = tree.snapshot();
+    let refused = tree
+        .command()
+        .args(["tree", "approve", "--store"])
+        .arg(tree.store())
+        .args([
+            "--case",
+            "root",
+            "--principal",
+            "clerk",
+            "--action",
+            "post.seal",
+        ])
+        .output()
+        .unwrap();
+    let said = stderr(&refused);
+    assert_eq!(refused.status.code(), Some(1), "{said}");
+    assert!(said.contains("NotAPersonAction"), "{said}");
+    assert!(said.contains("clerk.seal"), "{said}");
+    assert_eq!(
+        tree.snapshot(),
+        before,
+        "a refused action wrote into the store"
+    );
+}
+
+#[test]
+fn approve_without_an_action_still_requires_a_capability() {
+    let tree = Tree::new("no-action-no-capability");
+    let refused = tree
+        .command()
+        .args(["tree", "approve", "--store"])
+        .arg(tree.store())
+        .args(["--case", "root", "--principal", "guide"])
+        .output()
+        .unwrap();
+    let said = stderr(&refused);
+    assert_eq!(refused.status.code(), Some(2), "{said}");
+    assert!(said.contains("--capability"), "{said}");
+    assert!(!tree.store().exists(), "the refused command made the store");
+}
+
+#[test]
+fn the_printed_close_command_runs() {
+    let tree = Tree::new("printed-close");
+    open_with(&tree, "fork@1", "fork.bindings.yaml");
+    let waited = tree.run();
+    assert_eq!(waited.status.code(), Some(3), "{}", stderr(&waited));
+    let waited = json(&waited);
+    let left = waited["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|decision| decision["outcome"] == "left")
+        .cloned()
+        .unwrap_or_else(|| panic!("no close through left: {waited}"));
+    assert_eq!(left["kind"], "Close", "{left}");
+    let closed = tree.printed(&left);
+    assert_eq!(closed.status.code(), Some(0), "{}", stderr(&closed));
+    assert_eq!(json(&closed)["outcome"], "left");
+    let lines = log_lines(&tree, "root");
+    assert!(
+        matches!(&lines.last().unwrap().event, RunLogEvent::Terminated(ended) if ended.reason == "left"),
+        "{lines:?}"
+    );
+    // The tree is terminal through `left`: the next run ends at once.
+    let ended = tree.run();
+    assert_eq!(ended.status.code(), Some(0), "{}", stderr(&ended));
+    assert_eq!(json(&ended)["stop"], "Terminal");
+    let status = json(&tree.tree("status"));
+    assert_eq!(entry(&status, "root")["outcome"], "left", "{status}");
+}
+
+#[test]
+fn the_printed_handoff_command_runs() {
+    // The writer writes nothing: run as printed, the next run waits on the same handoff.
+    let tree = Tree::new("printed-handoff");
+    let opened = tree.open_leg_with("tour-leg-handoff.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let handoff = one_decision(&tree.run(), "Handoff");
+    let words: Vec<&str> = handoff["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    assert_eq!(&words[..3], ["b10x-loom", "tree", "run"], "{handoff}");
+    // Run unchanged, it starts its programs as this run did, not under the default confinement.
+    assert!(
+        words
+            .windows(2)
+            .any(|pair| pair == ["--confinement", "local"]),
+        "{handoff}"
+    );
+    let before = log_lines(&tree, "root").len();
+    let again = tree.printed(&handoff);
+    assert_eq!(handoff, one_decision(&again, "Handoff"));
+    let written = lines_since(&tree, "root", before);
+    assert!(
+        matches!(&written.last().unwrap().event, RunLogEvent::Stopped(stopped) if stopped.stop == "AwaitingPerson"),
+        "{written:?}"
+    );
+}
+
+/// A `review@1` case brought to its first wait, `draft.txt` written: the review and the
+/// judgement, both a person's with no capability, wait; the writer waits for a rejection.
+fn reviewed(label: &str) -> Tree {
+    let tree = Tree::new(label);
+    // The draft is there before the review: a record about it names its revision.
+    fs::write(tree.workspace().join("draft.txt"), "draft\n").unwrap();
+    open_with(&tree, "review@1", "review.bindings.yaml");
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let waited = json(&ran);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    assert_eq!(waited["decisions"].as_array().unwrap().len(), 2, "{waited}");
+    tree
+}
+
+/// `tree approve` of the person action `action` of the root as `reviewer`, with `flags` after.
+fn review(tree: &Tree, action: &str, flags: &[&str]) -> Output {
+    tree.command()
+        .args(["tree", "approve", "--at", AT, "--store"])
+        .arg(tree.store())
+        .args([
+            "--case",
+            "root",
+            "--principal",
+            "reviewer",
+            "--action",
+            action,
+        ])
+        .args(flags)
+        .output()
+        .unwrap()
+}
+
+/// Every file below `store` and its bytes, by path.
+fn every_file(store: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files = Vec::new();
+    let mut directories = vec![store.to_owned()];
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(&directory).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                directories.push(entry.path());
+            } else {
+                files.push((entry.path(), fs::read(entry.path()).unwrap_or_default()));
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// `output` refused `NotAPersonAction` with exit 1, saying each of `named`.
+fn refused_naming(output: &Output, named: &[&str]) {
+    let said = stderr(output);
+    assert_eq!(output.status.code(), Some(1), "{said}");
+    assert!(said.contains("NotAPersonAction"), "{said}");
+    for name in named {
+        assert!(said.contains(name), "{name}: {said}");
+    }
+}
+
+#[test]
+fn a_person_records_the_named_result() {
+    let tree = reviewed("named-result");
+    let before = log_lines(&tree, "root").len();
+    let taken = review(&tree, "draft.review", &["--result", "rejected"]);
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let reviews = records_of(&tree, "root", "draft_review");
+    assert_eq!(reviews.len(), 1, "{reviews:?}");
+    assert_eq!(reviews[0]["result"], "rejected", "{reviews:?}");
+    assert_eq!(reviews[0]["producer"], "reviewer", "{reviews:?}");
+    let written = lines_since(&tree, "root", before);
+    assert_eq!(written.len(), 1, "{written:?}");
+    let RunLogEvent::ActionFinished(ended) = &written[0].event else {
+        panic!("{written:?}");
+    };
+    assert_eq!(ended.action, "draft.review");
+    assert_eq!(
+        ended.evidence,
+        [reviews[0]["evidence_id"].as_str().unwrap()]
+    );
+}
+
+#[test]
+fn an_undeclared_result_is_refused_and_writes_nothing() {
+    let tree = reviewed("undeclared-result");
+    let before = every_file(&tree.store());
+    let refused = review(&tree, "draft.review", &["--result", "lost"]);
+    refused_naming(&refused, &["draft.review", "lost", "performed", "rejected"]);
+    assert_eq!(every_file(&tree.store()), before);
+}
+
+#[test]
+fn a_result_one_entry_does_not_list_writes_no_record() {
+    // The judgement's first entry lists `rejected`, its second (`draft_note`) only `performed`.
+    let tree = reviewed("one-entry-unlisted");
+    let before = every_file(&tree.store());
+    let refused = review(&tree, "draft.judge", &["--result", "rejected"]);
+    refused_naming(
+        &refused,
+        &["draft.judge", "rejected", "draft_note", "performed"],
+    );
+    assert_eq!(every_file(&tree.store()), before);
+}
+
+#[test]
+fn without_a_result_the_person_performed() {
+    let tree = reviewed("performed");
+    let taken = review(&tree, "draft.review", &[]);
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let reviews = records_of(&tree, "root", "draft_review");
+    assert_eq!(reviews.len(), 1, "{reviews:?}");
+    assert_eq!(reviews[0]["result"], "approved", "{reviews:?}");
+}
+
+/// `tree approve` with `flags` on a tree opened in `label`: refused by the command line with exit
+/// 2, the store unchanged.
+fn refused_by_the_command_line(label: &str, flags: &[&str]) {
+    let tree = Tree::new(label);
+    open_with(&tree, "review@1", "review.bindings.yaml");
+    let before = every_file(&tree.store());
+    let refused = tree
+        .command()
+        .args(["tree", "approve", "--store"])
+        .arg(tree.store())
+        .args(["--case", "root", "--principal", "reviewer"])
+        .args(flags)
+        .output()
+        .unwrap();
+    assert_eq!(
+        refused.status.code(),
+        Some(2),
+        "{flags:?}: {}",
+        stderr(&refused)
+    );
+    assert_eq!(every_file(&tree.store()), before, "{flags:?}");
+}
+
+#[test]
+fn a_result_with_deny_is_refused() {
+    refused_by_the_command_line(
+        "result-deny",
+        &["--capability", "c", "--deny", "--result", "rejected"],
+    );
+}
+
+#[test]
+fn a_result_without_an_action_is_refused() {
+    refused_by_the_command_line(
+        "result-no-action",
+        &["--capability", "c", "--result", "rejected"],
+    );
+}
+
+#[test]
+fn reasons_and_a_reasons_file_together_are_refused() {
+    refused_by_the_command_line(
+        "reasons-both",
+        &[
+            "--action",
+            "draft.review",
+            "--result",
+            "rejected",
+            "--reasons",
+            "short",
+            "--reasons-file",
+            "reasons.txt",
+        ],
+    );
+}
+
+#[test]
+fn reasons_without_a_named_result_are_refused() {
+    refused_by_the_command_line(
+        "reasons-no-result",
+        &["--action", "draft.review", "--reasons", "short"],
+    );
+}
+
+#[test]
+fn a_rejected_result_sends_the_writer_back_with_the_reasons() {
+    let tree = reviewed("rejected-feedback");
+    let reasons = "The draft has one line.\nAdd a second, then ask again.\n";
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons", reasons],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    let ran = tree.run();
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    let writes = log_lines(&tree, "root")
+        .iter()
+        .filter(|line| finished(line) == Some("draft.write"))
+        .count();
+    assert_eq!(writes, 1, "the rejected draft is written again");
+    let feedback: Value =
+        serde_json::from_slice(&fs::read(tree.workspace().join("feedback.json")).unwrap()).unwrap();
+    let records = feedback["records"].as_array().unwrap();
+    assert_eq!(records.len(), 1, "{feedback}");
+    let record = &records[0];
+    assert_eq!(record["result"], "rejected", "{feedback}");
+    assert_eq!(record["action"], "draft.review", "{feedback}");
+    assert!(record["exit"].is_null(), "{feedback}");
+    let digest = record["blob_sha256"].as_str().unwrap();
+    let log = feedback["logs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|log| log["blob_sha256"] == digest)
+        .unwrap_or_else(|| panic!("no log of {digest}: {feedback}"));
+    assert!(
+        log["tail"].as_str().unwrap().ends_with(reasons),
+        "{feedback}"
+    );
+    assert_eq!(log["tail"], reasons, "{feedback}");
+}
+
+#[test]
+fn reasons_out_of_bounds_or_outside_the_workspace_are_refused() {
+    let tree = reviewed("reasons-bounds");
+    let workspace = tree.workspace();
+    fs::write(workspace.join("long.txt"), "x".repeat(65537)).unwrap();
+    fs::write(workspace.join("lines.txt"), "line\n".repeat(61)).unwrap();
+    fs::write(workspace.join("fits.txt"), "fits\n").unwrap();
+    std::os::unix::fs::symlink(workspace.join("fits.txt"), workspace.join("link.txt")).unwrap();
+    let outside = tree.root.join("outside.txt");
+    fs::write(&outside, "outside\n").unwrap();
+    let before = every_file(&tree.store());
+    for file in [
+        workspace.join("long.txt"),
+        workspace.join("lines.txt"),
+        workspace.join("link.txt"),
+        outside,
+        workspace.join("absent.txt"),
+        workspace.join("stubs"),
+    ] {
+        let path = file.display().to_string();
+        let refused = review(
+            &tree,
+            "draft.review",
+            &["--result", "rejected", "--reasons-file", &path],
+        );
+        refused_naming(&refused, &[]);
+        assert_eq!(every_file(&tree.store()), before, "{path}");
+    }
+    let refused = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons", &"y".repeat(65537)],
+    );
+    refused_naming(&refused, &[]);
+    assert_eq!(every_file(&tree.store()), before);
+    // At the bounds the reasons are kept whole.
+    fs::write(workspace.join("edge.txt"), "z\n".repeat(60)).unwrap();
+    let path = workspace.join("edge.txt").display().to_string();
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons-file", &path],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+}
+
+#[test]
+fn the_reasons_are_kept_as_a_blob_not_in_the_log() {
+    let tree = reviewed("reasons-blob");
+    let reasons = "Marker 7f3a: the second paragraph repeats the first.";
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "rejected", "--reasons", reasons],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    assert!(!stdout(&taken).contains("7f3a"), "{}", stdout(&taken));
+    let files = every_file(&tree.store());
+    let holding: Vec<&PathBuf> = files
+        .iter()
+        .filter(|(_, bytes)| String::from_utf8_lossy(bytes).contains("7f3a"))
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(holding.len(), 1, "{holding:?}");
+    assert_eq!(
+        holding[0].parent().unwrap().file_name().unwrap(),
+        "blobs",
+        "{holding:?}"
+    );
+    assert_eq!(fs::read(holding[0]).unwrap(), reasons.as_bytes());
+    // An approval with reasons keeps them too: `performed` is a named result like any other.
+    let tree = reviewed("reasons-performed");
+    let taken = review(
+        &tree,
+        "draft.review",
+        &["--result", "performed", "--reasons", reasons],
+    );
+    assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+    assert!(
+        every_file(&tree.store())
+            .iter()
+            .any(|(path, bytes)| bytes == reasons.as_bytes()
+                && path.parent().unwrap().ends_with("blobs"))
+    );
 }
 
 /// The fixture's protocols directory: `tour.yaml`, `tour-leg.yaml` and the subdirectory `old/`.
