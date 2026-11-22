@@ -1615,6 +1615,7 @@ fn handoff_checked_by(
         &scratch.workspace,
         &scratch.store,
         &(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        None,
     )
     .expect("the writer carries a check");
     let children = runner.children();

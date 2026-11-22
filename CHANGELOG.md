@@ -70,6 +70,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - **Breaking:** a `run_tree` whose cancel flag is set before a step stops `Cancelled` (`TreeStop::Cancelled`, new), its `stopped` line naming the action that was to be taken next, no longer `BudgetSpent` with no `next`; a step its cancel ended stops `Cancelled` naming its action; `b10x-loom tree run` still exits 5 (story:cancel-a-running-bound-program)
 - **Breaking:** `ConfinementRefusal` and `ProgramRefusalReason` gain `Cancelled`; `ProgramRun` gains `cancelled`, `StatusRun` gains `cancelled` (story:cancel-a-running-bound-program)
+- **Breaking:** `run_handoff_check` takes `cancel: Option<&Cancel>`, and `HandoffCheck` gains `cancelled` (story:handoff-check-holds-the-cancel)
 
 - **Breaking:** `RunOptions` gains the public field `model_retry`: a literal names it or ends in `..RunOptions::default()`
 - `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
@@ -127,6 +128,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Fixed
 
+- `run_tree`: a cancel ends a running `handoff_when` check within 7 s, its line refused `Cancelled:` and the run `Cancelled` (story:handoff-check-holds-the-cancel)
 - `SubstrateRunner::run_child`: a cancel ends a child that reads none of its input within 100 ms, refused `Cancelled`, never at its timeout or as a result (story:cancel-a-running-bound-program)
 - `run_handoff_check` refuses exit 129 to 192 (`SIGNAL_EXITS`, how Substrate reports a signal-ended check), never a skip (story:handoff-when-a-program-decides)
 - `run_tree` takes over a run stopped between a child's line and its parent's: a missing `case opened`, `child opened`, `terminated` or `child closed` line is written once
