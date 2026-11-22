@@ -464,8 +464,8 @@ fn under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace() {
     );
 }
 
-/// The program that moves a file's blocks (`EXT4_IOC_MOVE_EXT`).
-const E4DEFRAG: &str = "/usr/bin/e4defrag";
+/// The program that moves a file's blocks (`EXT4_IOC_MOVE_EXT`), found by [`e4defrag`].
+const E4DEFRAG: &str = "e4defrag";
 
 /// story:substrate-0-24-0-pin, the ioctl floor of Substrate 0.24.0 (its ADR 0050): a confined
 /// bound program cannot move the blocks of a file in its ext4 workspace, and the same call on the
@@ -486,8 +486,11 @@ const E4DEFRAG: &str = "/usr/bin/e4defrag";
 /// The confined child is the one `bindings::bound_program_child` builds for the program, with one
 /// read-only file beside it: `e4defrag` reads the mount table at `/etc/mtab`, which Substrate's
 /// view does not hold, so the case mounts one naming `/workspace` as ext4; the control reads the
-/// host's. The case skips naming what is missing without `e4defrag`, an ext4 workspace or
-/// delegation, and fails instead where `LOOM_REQUIRE_DELEGATION` is set.
+/// host's. `e4defrag` is located on `PATH` and in `/usr/sbin`, `/sbin`, `/usr/bin` and `/bin`
+/// ([`e4defrag`], links resolved; Ubuntu keeps it in `/usr/sbin`), and both calls run it at that
+/// path; one outside the directories Substrate binds is mounted read-only at its own path. The case
+/// skips naming what is missing without `e4defrag`, an ext4 workspace or delegation, and fails
+/// instead where `LOOM_REQUIRE_DELEGATION` is set.
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
@@ -498,13 +501,17 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
         "under_linux_a_bound_program_cannot_move_file_blocks",
         &[],
         |runner, workspace| {
-            if let Some(missing) = ioctl_prerequisite(workspace) {
-                assert!(
-                    std::env::var_os("LOOM_REQUIRE_DELEGATION").is_none(),
-                    "LOOM_REQUIRE_DELEGATION is set and a prerequisite is missing: {missing}"
-                );
-                return support::skip(&missing);
-            }
+            let tool = match ioctl_prerequisite(workspace) {
+                Ok(tool) => tool,
+                Err(missing) => {
+                    assert!(
+                        std::env::var_os("LOOM_REQUIRE_DELEGATION").is_none(),
+                        "LOOM_REQUIRE_DELEGATION is set and a prerequisite is missing: {missing}"
+                    );
+                    return support::skip(&missing);
+                }
+            };
+            let shown = tool.display().to_string();
             let case = Case::new("linux_move_ext");
             let mtab = case.root.join("mtab");
             std::fs::write(&mtab, "/dev/root /workspace ext4 rw 0 0\n").unwrap();
@@ -524,7 +531,7 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
                      fi\n\
                      before=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
                      size=$(/usr/bin/stat -c %s \"$f\")\n\
-                     {E4DEFRAG} -v \"$f\" >target/e4defrag.out 2>target/e4defrag.err\n\
+                     '{shown}' -v \"$f\" >target/e4defrag.out 2>target/e4defrag.err\n\
                      status=$?\n\
                      after=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
                      printf 'dir=%s\\nstatus=%s\\nsize=%s\\nbefore=%s\\nafter=%s\\n' \"$(pwd)\" \"$status\" \"$size\" \"$before\" \"$after\"\n\
@@ -545,6 +552,13 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
             )
             .expect("the bound program's child")
             .with_read_only_file(&mtab, "/etc/mtab");
+            // A tool outside the directories Substrate binds is given read-only at its own path;
+            // its libraries are then still the system view's.
+            let child = if SYSTEM_VIEW.iter().any(|system| tool.starts_with(system)) {
+                child
+            } else {
+                child.with_read_only_file(&tool, &shown)
+            };
             assert_eq!(child.sandbox_path(&script), Some(script.clone()));
             let confined = runner.run_child(&child).expect("the program runs confined");
             assert_eq!(confined.applied.backend, Backend::Substrate);
@@ -571,7 +585,7 @@ fn under_linux_a_bound_program_cannot_move_file_blocks() {
                 .expect("the control runs unconfined");
             assert_eq!(control.applied.backend, Backend::None);
             let control = MoveBlocks::read("control", &control);
-            let kept = format!("{}\n{}", confined.kept, control.kept);
+            let kept = format!("e4defrag: {shown}\n{}\n{}", confined.kept, control.kept);
             eprintln!("{kept}");
 
             assert_eq!(confined.status, "1", "the confined call fails: {kept}");
@@ -663,19 +677,37 @@ impl MoveBlocks {
     }
 }
 
-/// The directories a tool of the ioctl case is looked for in.
+/// The directories a tool of the ioctl case is looked for in: `PATH`, then `/usr/sbin`, `/sbin`,
+/// `/usr/bin` and `/bin`, which a test's `PATH` may leave out (Ubuntu's e2fsprogs puts
+/// `e4defrag` in `/usr/sbin`).
 fn program_search_path() -> Vec<PathBuf> {
-    std::env::var_os("PATH")
+    let mut search: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    search.extend(["/usr/sbin", "/sbin", "/usr/bin", "/bin"].map(PathBuf::from));
+    search
 }
 
-/// Where the tool `name` is.
+/// Where the tool `name` is: the first absolute directory of `search` holding an executable
+/// regular file of that name, answered with every link resolved.
 fn locate_program(name: &str, search: &[PathBuf]) -> Option<PathBuf> {
-    let _ = search;
-    let path = Path::new("/usr/bin").join(name);
-    path.is_file().then_some(path)
+    search
+        .iter()
+        .filter(|directory| directory.is_absolute())
+        .filter_map(|directory| directory.join(name).canonicalize().ok())
+        .find(|path| {
+            std::fs::metadata(path)
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
 }
+
+/// `e4defrag`, wherever this host keeps it.
+fn e4defrag() -> Option<PathBuf> {
+    locate_program(E4DEFRAG, &program_search_path())
+}
+
+/// The directories Substrate binds into every view at their host paths.
+const SYSTEM_VIEW: [&str; 4] = ["/usr", "/bin", "/lib", "/lib64"];
 
 /// The locator finds a tool that only a later directory of its search holds, past a relative
 /// entry and a non-executable file of the same name, and answers the file a link there names.
@@ -700,7 +732,7 @@ fn the_locator_finds_a_tool_only_in_a_second_directory() {
 
     let search = [PathBuf::from("relative"), first.clone(), second.clone()];
     assert_eq!(locate_program(name, &search), Some(tool.clone()));
-    assert_eq!(locate_program(name, &[first.clone()]), None);
+    assert_eq!(locate_program(name, std::slice::from_ref(&first)), None);
     assert_eq!(locate_program(name, &[]), None);
 
     let search = program_search_path();
@@ -712,11 +744,17 @@ fn the_locator_finds_a_tool_only_in_a_second_directory() {
     }
 }
 
-/// What this host lacks for the ioctl case, if anything: `e4defrag`, or an ext4 workspace.
-fn ioctl_prerequisite(workspace: &Path) -> Option<String> {
-    if !Path::new(E4DEFRAG).is_file() {
-        return Some(format!("executable {E4DEFRAG}"));
-    }
+/// The located `e4defrag`, or what this host lacks for the ioctl case: `e4defrag` in
+/// [`program_search_path`], or an ext4 workspace.
+fn ioctl_prerequisite(workspace: &Path) -> Result<PathBuf, String> {
+    let tool = e4defrag().ok_or_else(|| {
+        format!(
+            "executable {E4DEFRAG} in {}",
+            std::env::join_paths(program_search_path())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        )
+    })?;
     let kind = std::process::Command::new("/usr/bin/stat")
         .args(["-f", "-c", "%T"])
         .arg(workspace)
@@ -725,8 +763,8 @@ fn ioctl_prerequisite(workspace: &Path) -> Option<String> {
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
     match kind.as_deref() {
-        Some("ext2/ext3") => None,
-        other => Some(format!(
+        Some("ext2/ext3") => Ok(tool),
+        other => Err(format!(
             "an ext4 workspace ({} is on {other:?})",
             workspace.display()
         )),
