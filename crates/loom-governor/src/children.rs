@@ -649,16 +649,16 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// once more, which completes a termination a restart interrupted; through another outcome it
     /// is refused.
     ///
-    /// # Limitation
-    /// The termination is not kept as decided: Canon judges it again at every evaluation of the
-    /// case, with the records and the trusted time of that evaluation, and a case whose
-    /// termination it no longer judges legitimate answers `GovernorUnavailable` from `frontier`
-    /// and `completion` instead of the stored outcome. Two things make that happen: the trusted
-    /// time passing the `max_age` of a record the termination rests on, and a later write that
-    /// changes what Canon sees, since [`CanonGovernor::update_revision`],
-    /// [`CanonGovernor::record_step`], [`CanonGovernor::decide`] and evidence the port receives do
-    /// not refuse a terminated case. The callers in this repository (`b10x-loom-tree`'s `tree run`
-    /// and `tree close`) build the governor without a trusted time.
+    /// # After the termination
+    /// Canon judges the termination once, here, with the records and the trusted time of now, and
+    /// never again. From then on `completion` answers the stored outcome before any Canon call,
+    /// and `frontier` hands Canon the case without its termination and blocks every action with
+    /// the reason `{"terminated":"<outcome>"}`, so a trusted time past the `max_age` of a record
+    /// the termination rests on changes neither. Every public write to the case is refused and
+    /// writes nothing: [`CanonGovernor::update_revision`], [`CanonGovernor::record_step`] and
+    /// [`CanonGovernor::decide`] answer `Terminated { outcome }`, and a record the evidence port
+    /// receives `GovernorUnavailable`. The replacement of the parent's record above is the
+    /// governor's own write, through the store, and still completes once the child is terminated.
     ///
     /// # Errors
     /// [`TerminateError`]; a refused termination writes nothing.

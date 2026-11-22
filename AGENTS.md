@@ -778,7 +778,14 @@ parent's record (result, `observed_at`, `subject_revision`: the child's own revi
 subject when its protocol declares it, else the parent's at opening). Terminating again through
 the same outcome completes an interrupted replacement. A terminated case is evaluated with its
 termination, its frontier blocks every action (reason `{"terminated":"<outcome>"}`) and
-`completion` reports the stored outcome. A `case_outcome` record is written by the governor alone:
+`completion` reports the stored outcome. Canon judges the termination once, in `terminate`:
+`completion` answers the stored outcome before any Canon call, and `frontier` hands Canon the case
+without its termination and blocks every action Canon lists, so a trusted time past a record's
+`max_age` changes neither answer. A public write to a terminated case is refused and writes
+nothing: `update_revision`, `record_step` and `decide` with `Terminated { outcome }` ("the case is
+terminated through outcome `<outcome>` and takes no write"), `receive` with `GovernorUnavailable`;
+`terminate`'s own replacement of the parent's record is no public write
+(`crates/loom-governor/tests/child_cases.rs`). A `case_outcome` record is written by the governor alone:
 `receive` refuses one for a case whose protocol declares `case_open`, unless the host built the
 governor `with_host_case_outcomes()` because it composes cases itself (host code only, never
 stored or read from a document), and even then for a case with a link or naming a held case.

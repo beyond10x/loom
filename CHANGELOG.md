@@ -138,6 +138,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - `run_tree`: a cancel ends a running `handoff_when` check within 7 s, its line refused `Cancelled:` and the run `Cancelled` (story:handoff-check-holds-the-cancel)
+- `run_tree` takes a step its cancel ended again at the same revision, never `Stuck`; the run still counts against `budget.max_runs` (story:cancelled-step-may-run-again)
 - `SubstrateRunner::run_child`: a cancel ends a child that reads none of its input within 100 ms, refused `Cancelled`, never at its timeout or as a result (story:cancel-a-running-bound-program)
 - `run_handoff_check` refuses exit 129 to 192 (`SIGNAL_EXITS`, how Substrate reports a signal-ended check), never a skip (story:handoff-when-a-program-decides)
 - `run_tree` takes over a run stopped between a child's line and its parent's: a missing `case opened`, `child opened`, `terminated` or `child closed` line is written once
@@ -151,6 +152,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree run` cancels on SIGTERM or SIGINT: the running bound program is stopped with every process it started and the run ends `Cancelled`, exit 5, instead of dying by the signal with its program still running
 - A confined child gets `EACCES` for `EXT4_IOC_MOVE_EXT`, `XFS_IOC_SWAPEXT` and `F2FS_IOC_SEC_TRIM_FILE`, Substrate 0.24.0's floor (story:substrate-0-24-0-pin)
 - `url` 2.5.9, for RUSTSEC-2026-0592 (story:substrate-0-24-0-pin)
+- A terminated case answers its stored outcome from `completion` and a frontier blocking every action at any later trusted time: Canon judges the termination once, in `terminate`, and is handed no termination after it (story:governor-keeps-a-terminated-case-terminated)
+- **Breaking:** a write to a terminated case is refused and writes nothing: `UpdateError`, `StepError` and `DecisionError` gain `Terminated { outcome }`, which `update_revision`, `record_step` and `decide` answer; `receive` answers `GovernorUnavailable` (story:governor-keeps-a-terminated-case-terminated)
 
 ## [0.58.0] - 2026-11-21
 
