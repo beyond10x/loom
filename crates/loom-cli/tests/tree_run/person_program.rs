@@ -155,6 +155,20 @@ fn run_words(tree: &Tree, words: &[String]) -> Output {
     tree.command().args(&words[1..]).output().unwrap()
 }
 
+/// `tree approve` of `answer.take` of the root under `owner.answer` as [`OWNER`], in process
+/// (`story:tree-run-tests-fit-the-test-budget`): what a test of the approval reads, not of the
+/// command, whose own refusal names the command to run again.
+fn take(tree: &Tree) -> Output {
+    tree.approved(
+        "root",
+        Some("owner.answer"),
+        OWNER,
+        Some("answer.take"),
+        None,
+        None,
+    )
+}
+
 /// `output` refused `PersonProgramFailed` with exit 1, saying each of `named`; its refusal
 /// document.
 pub(super) fn program_failed(output: &Output, named: &[&str]) -> Value {
@@ -251,7 +265,7 @@ fn a_person_action_runs_its_program_with_the_principal() {
     let decision = about(&waiting(&tree), "answer.take");
     assert_eq!(decision["kind"], "ApproveAction", "{decision}");
     let before = log_lines(&tree, "root").len();
-    let taken = tree.printed(&decision);
+    let taken = tree.decided(&decision);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -313,7 +327,7 @@ fn a_person_program_beside_the_bindings_runs_with_the_principal() {
     fs::set_permissions(&tool, permissions).unwrap();
     open_with(&tree, "answer@1", "bindings/answer.bindings.yaml");
     let decision = about(&waiting(&tree), "answer.take");
-    let taken = tree.printed(&decision);
+    let taken = tree.decided(&decision);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -347,7 +361,7 @@ fn the_principal_is_one_argument_and_runs_nothing() {
         &[("count.sh", count)],
     );
     let decision = about(&waiting(&tree), "answer.take");
-    let taken = tree.printed(&decision);
+    let taken = tree.decided(&decision);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -376,7 +390,7 @@ fn the_principal_is_never_in_the_childs_environment() {
     let env = "#!/bin/sh\n/usr/bin/env > printed-env.txt\n";
     let tree = answer_tree("person-program-env", &bindings, &[("env.sh", env)]);
     let decision = about(&waiting(&tree), "answer.take");
-    let taken = tree.printed(&decision);
+    let taken = tree.decided(&decision);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -422,7 +436,7 @@ fn a_person_program_without_a_capability_runs_and_keeps_no_approval() {
     let decision = about(&waiting(&tree), "answer.free");
     assert!(decision["capability"].is_null(), "{decision}");
     let before = log_lines(&tree, "root").len();
-    let taken = tree.printed(&decision);
+    let taken = tree.decided(&decision);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -560,10 +574,7 @@ fn a_person_program_killed_at_its_timeout_records_nothing() {
     );
     waiting(&tree);
     let started = Instant::now();
-    let refused = run_words(
-        &tree,
-        &approve_words(&tree, "answer.take", Some("owner.answer"), OWNER, &[]),
-    );
+    let refused = take(&tree);
     let took = started.elapsed();
     program_failed(&refused, &["timed out"]);
     assert!(took < Duration::from_secs(20), "took {took:?}");
@@ -585,9 +596,13 @@ fn a_person_program_of_a_reader_that_writes_records_nothing() {
     let tree = answer_tree("person-program-reader", &bindings, &[("answer.sh", APPEND)]);
     waiting(&tree);
     let before = log_lines(&tree, "root").len();
-    let refused = run_words(
-        &tree,
-        &approve_words(&tree, "answer.look", Some("owner.look"), OWNER, &[]),
+    let refused = tree.approved(
+        "root",
+        Some("owner.look"),
+        OWNER,
+        Some("answer.look"),
+        None,
+        None,
     );
     program_failed(&refused, &["ChangedByNonWriter"]);
     let written = lines_since(&tree, "root", before);
@@ -735,10 +750,7 @@ fn an_unreadable_placed_artifact_refuses_the_person_program_before_any_write() {
     fs::write(tree.root.join("away/subject.txt"), "away\n").unwrap();
     std::os::unix::fs::symlink(tree.root.join("away"), workspace.join("answer")).unwrap();
     let before = every_file(&tree.store());
-    let refused = run_words(
-        &tree,
-        &approve_words(&tree, "answer.take", Some("owner.answer"), OWNER, &[]),
-    );
+    let refused = take(&tree);
     program_failed(&refused, &["ArtifactUnreadable", "OutsideWorkspace"]);
     assert_eq!(every_file(&tree.store()), before, "a refusal wrote");
     assert!(
@@ -760,11 +772,12 @@ fn a_person_program_is_retried_by_approving_again_within_max_runs() {
     let marked = "#!/bin/sh\ntest -f marker.txt || exit 4\n";
     let tree = answer_tree("person-program-retry", &bindings, &[("marked.sh", marked)]);
     waiting(&tree);
-    let words = approve_words(&tree, "answer.take", Some("owner.answer"), OWNER, &[]);
     for _ in 0..2 {
-        program_failed(&run_words(&tree, &words), &["exit 4"]);
+        program_failed(&take(&tree), &["exit 4"]);
     }
     let before = every_file(&tree.store());
+    // Through the binary: the command a spent refusal names is the command's own.
+    let words = approve_words(&tree, "answer.take", Some("owner.answer"), OWNER, &[]);
     let spent = run_words(&tree, &words);
     let refusal = program_failed(&spent, &["RunsSpent"]);
     assert_eq!(refusal["command"], json!(words), "{refusal}");
@@ -777,10 +790,9 @@ fn a_person_program_is_retried_by_approving_again_within_max_runs() {
         &[("marked.sh", marked)],
     );
     waiting(&tree);
-    let words = approve_words(&tree, "answer.take", Some("owner.answer"), OWNER, &[]);
-    program_failed(&run_words(&tree, &words), &["exit 4"]);
+    program_failed(&take(&tree), &["exit 4"]);
     fs::write(tree.workspace().join("marker.txt"), "").unwrap();
-    let taken = run_words(&tree, &words);
+    let taken = take(&tree);
     assert_eq!(
         taken.status.code(),
         Some(0),

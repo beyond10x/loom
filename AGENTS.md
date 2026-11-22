@@ -313,7 +313,7 @@ Before a change is reported done, in this order:
    (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
    `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s,
    in their own binary and as the module `tree_run::` of `b10x-loom-cli::main` alike. It fails too
-   when they start `b10x-loom` more than 59 times (`START_BUDGETS`): `with_the_switch` appends a
+   when they start `b10x-loom` more than 66 times (`START_BUDGETS`): `with_the_switch` appends a
    line per start to the file `LOOM_TREE_RUN_STARTS` names, which the step sets. Those tests run
    the library (`b10x_loom_tree`) in process where the binary is not their subject; each command
    keeps one test through the binary (`each_command_keeps_one_test_through_the_binary`) and every

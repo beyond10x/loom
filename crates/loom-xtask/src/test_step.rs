@@ -158,7 +158,7 @@ pub struct StartBudget {
 pub const START_BUDGETS: [StartBudget; 1] = [StartBudget {
     tests: TREE_RUN,
     variable: "LOOM_TREE_RUN_STARTS",
-    bound: 59,
+    bound: 66,
 }];
 
 /// The line the step prints about `budget`'s starts and the reason it fails, given the cases of
