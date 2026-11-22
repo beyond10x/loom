@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-suite-approve-result-and-reasons
 kind: story
-status: proposed
+status: active
 title: The suite's approve step and entry pass result, reasons and deny to tree approve
 summary: approve members result, reasons (joined by line feeds) and deny become available; a denial is AuthorityRecorded Deny and the wait stays; three Runbook cycles unblocked; split from the stop story (D130), merges before it
 tags:
@@ -27,9 +27,10 @@ scope:
   path: crates/loom-tree/tests/suite_format/mod.rs
 - confidence: cited
   path: website/docs/guides/run-a-case-tree.md
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T13:08:58Z", actor: "agent:loom", revision: 10}
+- {from: "proposed", to: "active", at: "2026-11-22T13:09:49Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "runbook-batch3a-2026-11-22"}
 ---
 ## Outcome
 
