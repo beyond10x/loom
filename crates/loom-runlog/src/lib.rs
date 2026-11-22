@@ -66,7 +66,7 @@ use loom::runlog::{
     Stopped, Terminated,
 };
 use loom::tree::SpentBudget;
-use loom_governor::{FileStoreError, LockedDir, case_file_stem};
+use loom_governor::{FileStoreError, LockedDir, case_file_stem, durable};
 use sha2::{Digest as _, Sha256};
 
 /// What every log file's name starts with.
@@ -325,17 +325,14 @@ impl RunLog {
         file.write_all(second)
             .map_err(|error| abandon(failed(&temporary, error)))?;
         step!(AppendStep::Written);
-        file.sync_all()
-            .map_err(|error| abandon(failed(&temporary, error)))?;
+        durable::sync_file(&file).map_err(|error| abandon(failed(&temporary, error)))?;
         step!(AppendStep::Synced);
         drop(file);
         fs::rename(&temporary, path).map_err(|error| abandon(failed(path, error)))?;
         step!(AppendStep::Renamed);
         // The rename has happened, so the new line is in the log; a failed directory sync only
         // weakens how soon it is durable and is not reported as a failed append.
-        if let Ok(dir) = fs::File::open(self.dir.path()) {
-            let _ = dir.sync_all();
-        }
+        durable::sync_dir(self.dir.path());
         step!(AppendStep::DirectorySynced);
         Ok(Some(line))
     }

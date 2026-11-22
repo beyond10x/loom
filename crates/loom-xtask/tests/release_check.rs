@@ -1275,6 +1275,16 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
         build < linked && linked < package,
         "binaries.yml must check the linked libraries after the build and before packing"
     );
+    // story:tree-run-tests-fit-the-budget: the built binary holds no test sync switch.
+    let unsynced = step_running(
+        steps,
+        "cargo run -q --locked -p loom-xtask -- unsynced-store target/release/b10x-loom",
+    );
+    assert!(
+        build < unsynced && unsynced < package,
+        "binaries.yml must refuse a binary holding the test sync switch after the build and \
+         before packing"
+    );
     let run = steps[package]["run"].as_str().unwrap();
     for fragment in [
         r#"[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]"#,
@@ -1317,6 +1327,48 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
     );
     assert_eq!(with["if-no-files-found"].as_str(), Some("error"));
     assert_eq!(with["retention-days"].as_i64(), Some(30));
+}
+
+/// story:tree-run-tests-fit-the-budget: `unsynced-store` refuses a file holding the marker a build
+/// with the test sync switch carries, and passes one without it, naming the file either way.
+#[test]
+fn a_binary_with_the_test_sync_switch_is_refused() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "unsynced-store-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let unsynced_store = |binary: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_loom-xtask"))
+            .arg("unsynced-store")
+            .arg(binary)
+            .output()
+            .unwrap()
+    };
+
+    let marked = dir.join("marked");
+    let mut bytes = vec![0x7f, b'E', b'L', b'F', 0, 1, 2];
+    bytes.extend_from_slice(b"b10x-loom-test-unsynced-store-marker");
+    bytes.extend_from_slice(&[3, 4, 5]);
+    fs::write(&marked, &bytes).unwrap();
+    let refused = unsynced_store(&marked);
+    let said = stderr(&refused);
+    assert_ne!(refused.status.code(), Some(0), "{said}");
+    assert!(said.contains(&marked.display().to_string()), "{said}");
+    assert!(said.contains("test sync switch"), "{said}");
+
+    let plain = dir.join("plain");
+    bytes.retain(|byte| *byte != b'k');
+    fs::write(&plain, &bytes).unwrap();
+    let passed = unsynced_store(&plain);
+    let said = String::from_utf8_lossy(&passed.stdout);
+    assert_eq!(passed.status.code(), Some(0), "{}", stderr(&passed));
+    assert!(said.contains(&plain.display().to_string()), "{said}");
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

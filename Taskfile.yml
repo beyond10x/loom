@@ -39,6 +39,7 @@ tasks:
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
       - task: test-step
+      - task: durable-check
       - task: consumer-check
       - task: docs-check
       - task: commission:docs-drift
@@ -79,6 +80,11 @@ tasks:
       SLOT_TOKENS: '4'
     cmds:
       - cargo run -q --locked -p loom-xtask -- test-step
+
+  durable-check:
+    desc: Outside the test step, the store syncs without the test sync switch; the count tests run without its feature, a release build with it fails to compile, b10x-loom-cli's normal dependencies do not hold it.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- durable-check
 
   slow:
     desc: The slow lane, not part of check; run it after every change under ess/. Synthesizes ess/ again and fails unless generated/ess/loom/ is equal byte for byte, then runs every slow_ test.

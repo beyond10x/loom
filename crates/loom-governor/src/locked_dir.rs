@@ -24,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::FileStoreError;
+use crate::durable;
 
 const LOCK: &str = ".lock";
 const TEMPORARY: &str = ".tmp-";
@@ -75,7 +76,7 @@ impl LockedDir {
         let (temporary, mut file) = self.temporary()?;
         let written = file
             .write_all(b"probe\n")
-            .and_then(|()| file.sync_all())
+            .and_then(|()| durable::sync_file(&file))
             .map_err(|error| failed(&temporary, error));
         drop(file);
         let removed = fs::remove_file(&temporary).map_err(|error| failed(&temporary, error));
@@ -128,7 +129,7 @@ impl LockedDir {
         let (temporary, mut file) = self.temporary()?;
         let written = (|| -> io::Result<()> {
             file.write_all(text.as_bytes())?;
-            file.sync_all()
+            durable::sync_file(&file)
         })()
         .map_err(|error| failed(&temporary, error))
         .and_then(|()| fs::rename(&temporary, path).map_err(|error| failed(path, error)));
@@ -182,9 +183,7 @@ impl LockedDir {
     }
 
     fn sync(&self) {
-        if let Ok(dir) = File::open(&self.dir) {
-            let _ = dir.sync_all();
-        }
+        durable::sync_dir(&self.dir);
     }
 }
 
