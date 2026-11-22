@@ -48,6 +48,8 @@ types:
       AuthorityRecorded: loom.runlog.AuthorityRecorded
       Stopped: loom.runlog.Stopped
       Terminated: loom.runlog.Terminated
+      StopRecorded: loom.runlog.StopRecorded
+      StopLifted: loom.runlog.StopLifted
 
   # The case was opened: its id and the registered protocol that governs it, `name@major`.
   - name: loom.runlog.CaseOpened
@@ -204,6 +206,30 @@ types:
     fields:
       - name: reason
         type: String
+
+  # The tree was held (story tree-suite-stop-resume-reopen-steps): written by `tree hold` to the
+  # root case's log, under the store lock, with the principal who held it and why, both from the
+  # command line. The tree is held while the root's log holds a `StopRecorded` line with no
+  # `StopLifted` line after it; `tree run` on a held tree is refused `TreeStopped` and writes
+  # nothing. The line records a decision and locks no one out: a person who can write the store
+  # can cut it while it is the last line.
+  - name: loom.runlog.StopRecorded
+    kind: struct
+    fields:
+      - name: principal
+        type: String
+      - name: reason
+        type: String
+
+  # The hold was lifted: written by `tree reopen` to the root case's log, under the store lock,
+  # with the principal who lifted it and `stop`, the `seq` of the `StopRecorded` line it lifts.
+  - name: loom.runlog.StopLifted
+    kind: struct
+    fields:
+      - name: principal
+        type: String
+      - name: stop
+        type: Integer
 
   # Why a reader refuses a log. `CutLine`: the last line does not end with a line feed, or does
   # not read as a line. `BrokenChain`: a line's `prev` is not the SHA-256 of the line before it
