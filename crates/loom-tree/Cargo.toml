@@ -19,6 +19,7 @@ b10x-loom-governor = { path = "../loom-governor" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-loom-runlog = { path = "../loom-runlog" }
+libc = "0.2"
 loom = { path = "../../generated/rust/loom" }
 serde_json = "1"
 serde_yaml_ng = "0.10"

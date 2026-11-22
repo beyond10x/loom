@@ -124,6 +124,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Fixed
 
 - `run_tree` takes over a run stopped between a child's line and its parent's: a missing `case opened`, `child opened`, `terminated` or `child closed` line is written once
+- A `tree test` selection refuses a named pipe or other non-regular file `StepFailed` and never waits on it; `b10x-loom-tree` links `libc`
 
 ### Security
 
