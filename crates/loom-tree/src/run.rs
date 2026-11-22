@@ -394,19 +394,18 @@ fn run_cancellable(
             steps += 1;
             let after = evidence_ids(&governor, &id)?;
             let (exit, refusal, blob_digest) = effect_summary(outcome);
-            let line = logs.append(
-                &case.case,
-                RunLogEvent::ActionFinished(ActionFinished {
-                    action: request.action.clone(),
-                    exit,
-                    refusal,
-                    blob_digest,
-                    evidence: after.difference(&before).cloned().collect(),
-                    revisions: Vec::new(),
-                }),
-            )?;
+            let finished = ActionFinished {
+                action: request.action.clone(),
+                exit,
+                refusal,
+                blob_digest,
+                evidence: after.difference(&before).cloned().collect(),
+                revisions: Vec::new(),
+            };
+            let cancelled_step = crate::history::cancelled(&finished);
+            let line = logs.append(&case.case, RunLogEvent::ActionFinished(finished))?;
             emit(&case.case, line);
-            if cancelled_step(outcome) {
+            if cancelled_step {
                 return cancelled_stop(
                     &logs,
                     &case.case,
@@ -452,19 +451,18 @@ fn run_cancellable(
                 steps += 1;
                 let after = evidence_ids(&governor, &id)?;
                 let (exit, refusal, blob_digest) = effect_summary(outcome);
-                let line = logs.append(
-                    &case.case,
-                    RunLogEvent::ActionFinished(ActionFinished {
-                        action: action.clone(),
-                        exit,
-                        refusal,
-                        blob_digest,
-                        evidence: after.difference(&before).cloned().collect(),
-                        revisions: Vec::new(),
-                    }),
-                )?;
+                let finished = ActionFinished {
+                    action: action.clone(),
+                    exit,
+                    refusal,
+                    blob_digest,
+                    evidence: after.difference(&before).cloned().collect(),
+                    revisions: Vec::new(),
+                };
+                let cancelled_step = crate::history::cancelled(&finished);
+                let line = logs.append(&case.case, RunLogEvent::ActionFinished(finished))?;
                 emit(&case.case, line);
-                if cancelled_step(outcome) {
+                if cancelled_step {
                     return cancelled_stop(&logs, &case.case, vec![action], steps, &mut emit);
                 }
                 opened(&governor, &logs, &case.case, outcome, &mut emit)?;
@@ -957,7 +955,7 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
 /// What a step of `case` is chosen from: the lines of its log, its revision, its effect port
 /// (every program of it holding `cancel`) and its history, with the actions due again (a writer
 /// with a retry record, a copy whose source holds something new) but those refused since the case
-/// was last evaluated, and the idle copies.
+/// was last evaluated (a cancel is no such refusal), and the idle copies.
 #[allow(clippy::type_complexity)]
 fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     governor: &'a CanonGovernor<S>,
@@ -972,13 +970,16 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     let lines = read_lines(store, &case.case)?;
     let mut due = due_actions(governor, &id, &case.bindings)?;
     // A step refused since the case was last evaluated is refused again until the case
-    // changes (a spent run budget): it is not due, whatever its retry records say.
+    // changes (a spent run budget): it is not due, whatever its retry records say. A step its
+    // cancel ended is no such refusal: it stays due.
     let refused_since: BTreeSet<String> = lines
         .iter()
         .rev()
         .take_while(|line| !matches!(line.event, RunLogEvent::Evaluated(_)))
         .filter_map(|line| match &line.event {
-            RunLogEvent::ActionFinished(finished) if finished.refusal.is_some() => {
+            RunLogEvent::ActionFinished(finished)
+                if finished.refusal.is_some() && !crate::history::cancelled(finished) =>
+            {
                 Some(finished.action.clone())
             }
             _ => None,
@@ -1064,11 +1065,6 @@ fn next_action<S: loom_governor::FallibleCaseStore>(
         .select(&context, &catalogue.data().entries)
         .map(|choice| vec![choice.action])
         .unwrap_or_default())
-}
-
-/// Whether `outcome` is a step its cancel ended: refused `Cancelled`.
-fn cancelled_step(outcome: &EffectOutcome) -> bool {
-    matches!(outcome, EffectOutcome::Refused(refused) if refused.reason.starts_with("Cancelled: "))
 }
 
 /// The run's end on its cancel: `case`'s `stopped` line, `stop` `Cancelled` and `next` the action

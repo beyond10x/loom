@@ -316,6 +316,16 @@ actions:
         /// A tree whose `do.sh` is `program` and, when `check` is given, whose `work.do` binding
         /// carries `handoff_when: [sh, check.sh, <marks>]` and a `handoff`, `check.sh` holding it.
         fn open_with(label: &str, program: &str, check: Option<&str>) -> Self {
+            Self::open_full(label, program, check, "")
+        }
+
+        /// A tree whose `do.sh` is `program` and whose `work.do` binding carries the members
+        /// `bound` (YAML lines indented by four spaces) after its `timeout_seconds`.
+        fn open_bound(label: &str, program: &str, bound: &str) -> Self {
+            Self::open_full(label, program, None, bound)
+        }
+
+        fn open_full(label: &str, program: &str, check: Option<&str>, bound: &str) -> Self {
             let dir = super::scratch(label);
             let protocols = dir.join("protocols");
             let workspace = dir.join("workspace");
@@ -327,7 +337,10 @@ actions:
             std::fs::write(workspace.join("work.txt"), "work\n").unwrap();
             std::fs::write(workspace.join("look.sh"), "exit 0\n").unwrap();
             std::fs::write(workspace.join("do.sh"), program).unwrap();
-            let mut document = BINDINGS.to_owned();
+            let mut document = BINDINGS.replace(
+                "    timeout_seconds: 60\n",
+                &format!("    timeout_seconds: 60\n{bound}"),
+            );
             if let Some(check) = check {
                 std::fs::write(workspace.join("check.sh"), check).unwrap();
                 document = document.replace(
@@ -718,6 +731,132 @@ actions:
             stopped(&lines),
             ("Cancelled".to_owned(), vec!["work.do".to_owned()])
         );
+    }
+
+    // A step a cancel ended is not performed for the step history
+    // (`story:cancelled-step-may-run-again`): the next run at the same case revision takes it
+    // again, and the run count still counts it.
+
+    /// The `action finished` lines of `lines` naming `action`, as (exit, refusal).
+    fn finished(lines: &[RunLogLine], action: &str) -> Vec<(Option<i64>, Option<String>)> {
+        lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                RunLogEvent::ActionFinished(finished) if finished.action == action => {
+                    Some((finished.exit, finished.refusal.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether `refusal` starts with `prefix`.
+    fn refused(line: &(Option<i64>, Option<String>), prefix: &str) -> bool {
+        line.0.is_none()
+            && line
+                .1
+                .as_deref()
+                .is_some_and(|refusal| refusal.starts_with(prefix))
+    }
+
+    /// `do.sh` counting its calls in `target/n`: the first exits 1, the second runs as [`DO`]
+    /// does, every later one writes `work.txt` and exits 0. The write moves `work`, so the failed
+    /// `done` record of the first call no longer makes `work.do` due.
+    const DO_COUNTING: &str = "n=$(cat target/n 2>/dev/null || echo 0)\nn=$((n + 1))\necho \"$n\" > target/n\nif [ \"$n\" -eq 1 ]; then exit 1; fi\nif [ \"$n\" -eq 2 ]; then\n  touch target/started\n  sleep 3 && touch target/late &\n  sleep 30\nfi\necho done > work.txt\nexit 0\n";
+
+    /// `RETRY` makes `work.do` due again on a failed `done` record.
+    const RETRY: &str = "    retry_when: {done: [failed]}\n";
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_cancelled_step_is_taken_again_at_the_same_revision() {
+        let began = Instant::now();
+        let tree = Halt::open("cancel-again");
+        let (run, lines, _, _) = tree.cancelled_after(Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        assert_eq!(
+            stopped(&lines),
+            ("Cancelled".to_owned(), vec!["work.do".to_owned()])
+        );
+        std::fs::write(tree.workspace.join("do.sh"), "exit 0\n").unwrap();
+        let (run, lines) = tree.run(&Halt::settings(None), &AtomicBool::new(false));
+        assert_eq!(finished(&lines, "work.do"), [(Some(0), None)], "{lines:#?}");
+        assert_eq!(run.stop, TreeStop::Terminal, "{run:?}");
+        assert_eq!(run.detail.as_deref(), Some("finished"), "{run:?}");
+        assert!(began.elapsed() < Duration::from_secs(60));
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_cancelled_due_writer_stays_due() {
+        let began = Instant::now();
+        let tree = Halt::open_bound("cancel-due", DO_COUNTING, RETRY);
+        let (run, lines, _, _) = tree.cancelled_after(Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        let first = finished(&lines, "work.do");
+        assert_eq!(first.len(), 2, "{lines:#?}");
+        assert_eq!(first[0], (Some(1), None), "{lines:#?}");
+        assert!(refused(&first[1], "Cancelled: "), "{lines:#?}");
+        let (run, lines) = tree.run(&Halt::settings(None), &AtomicBool::new(false));
+        assert_eq!(finished(&lines, "work.do"), [(Some(0), None)], "{lines:#?}");
+        assert_eq!(run.stop, TreeStop::Terminal, "{run:?}");
+        assert_eq!(
+            std::fs::read_to_string(tree.workspace.join("target/n")).unwrap(),
+            "3\n"
+        );
+        assert!(began.elapsed() < Duration::from_secs(60));
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_refused_step_that_is_no_cancel_still_counts() {
+        let began = Instant::now();
+        let tree = Halt::open_bound(
+            "cancel-refused-counts",
+            "exit 1\n",
+            &format!("{RETRY}    budget: {{max_runs: 1}}\n"),
+        );
+        // Bounded, so a history that takes the refused step again ends the run.
+        let mut settings = Halt::settings(None);
+        settings.max_steps = Some(8);
+        let (run, lines) = tree.run(&settings, &AtomicBool::new(false));
+        assert_eq!(run.stop, TreeStop::Stuck, "{run:?}");
+        let first = finished(&lines, "work.do");
+        assert_eq!(first.len(), 2, "{lines:#?}");
+        assert_eq!(first[0], (Some(1), None), "{lines:#?}");
+        assert!(refused(&first[1], "RunsSpent: "), "{lines:#?}");
+        let (run, lines) = tree.run(&settings, &AtomicBool::new(false));
+        assert!(
+            !lines
+                .iter()
+                .any(|line| matches!(line.event, RunLogEvent::ActionFinished(_))),
+            "{lines:#?}"
+        );
+        assert_eq!(run.stop, TreeStop::Stuck, "{run:?}");
+        assert!(began.elapsed() < Duration::from_secs(60));
+    }
+
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+    fn a_cancelled_run_still_spends_the_budget() {
+        let began = Instant::now();
+        let tree = Halt::open_bound("cancel-spends", DO, "    budget: {max_runs: 1}\n");
+        let (run, _, _, _) = tree.cancelled_after(Duration::ZERO);
+        assert_eq!(run.stop, TreeStop::Cancelled, "{run:?}");
+        std::fs::write(tree.workspace.join("do.sh"), "touch target/ran\n").unwrap();
+        let (_, lines) = tree.run(&Halt::settings(None), &AtomicBool::new(false));
+        let second = finished(&lines, "work.do");
+        assert_eq!(second.len(), 1, "{lines:#?}");
+        assert!(refused(&second[0], "RunsSpent: "), "{lines:#?}");
+        assert!(
+            second[0]
+                .1
+                .as_deref()
+                .is_some_and(|refusal| refusal.contains("has run 1 times")),
+            "{lines:#?}"
+        );
+        assert!(!tree.workspace.join("target/ran").exists());
+        assert!(began.elapsed() < Duration::from_secs(60));
     }
 }
 
