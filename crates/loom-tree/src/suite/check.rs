@@ -37,6 +37,7 @@ fn declared(view: &CycleView<'_>) -> BTreeSet<String> {
             "AwaitingAuthority",
             "Stuck",
             "BudgetSpent",
+            "Cancelled",
         ]
         .map(str::to_owned),
     );

@@ -65,6 +65,14 @@ at a terminal root (exit 0), when it waits on a person or on an approval (exit 3
 stuck (exit 4) or at `--max-steps` or `--max-wall-seconds` (exit 5). Each wait names the case,
 what is decided and the command that decides it.
 
+A host that runs the tree as a library (`run_tree`) can pass a cancel flag and set it from any
+thread. Set between steps, the run stops `Cancelled` before the next one, its `stopped` line
+naming the action that was to be taken next. Set during a step, the step's program is killed with
+every process it started, the step's `action finished` line holds the refusal `Cancelled: …` and
+no `exit` or `evidence`, and the run stops `Cancelled` naming that action, within 10 s of the
+flag. `tree status` shows the case's `stop` `Cancelled`, its `stop_next`, and `cancelled: true` on
+the cancelled run; a cancelled run counts against the action's `budget.max_runs`.
+
 ## Answer what it waits on
 
 `route.approve` is bound to the person `guide`: `tree approve --action` records the approval and
@@ -130,9 +138,9 @@ $ b10x-loom tree status --store store | jq -c '.cases[] | {case, protocol, outco
 records in the order received, its program runs with their attempts, its approvals and the records
 a `copy` binding copied into it, whether its run log verified (`log`; a log that does not is named
 with the refusal, the line and what is wrong, and nothing is read from it) and, after a
-`BudgetSpent` stop, the budget that ended the run (`budget`: `Cancel`, `MaxSteps` or
-`MaxWallSeconds`). `protocols` lists each protocol the cases use once, with the SHA-256 of its
-document. `tree status` and `tree verify` read the store and never hold it, so a live view can read
+`BudgetSpent` stop, the budget that ended the run (`budget`: `MaxSteps` or `MaxWallSeconds`; a
+cancelled run stops `Cancelled` and names none, and `Cancel` is read only from a log an earlier
+Loom wrote). `protocols` lists each protocol the cases use once, with the SHA-256 of its document. `tree status` and `tree verify` read the store and never hold it, so a live view can read
 the tree while a run holds it.
 
 ## Choose between two outcomes

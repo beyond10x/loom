@@ -8,9 +8,14 @@
 //! loop against the case revision, the frontier and authority before its effect.
 //!
 //! Before each step the run asks the cancel handle, the step budget and the wall-time budget, in
-//! that order; any of them ends the run `BudgetSpent` before the step, and the `stopped` line names
-//! it as `budget` (`Cancel`, `MaxSteps`, `MaxWallSeconds`). A case whose completion
-//! gives exactly one legitimate outcome and in which no action is useful is terminated through it.
+//! that order: the handle ends the run `Cancelled`, naming the action that was to be taken next;
+//! either budget ends it `BudgetSpent`, and the `stopped` line names it as `budget` (`MaxSteps`,
+//! `MaxWallSeconds`). A handle set during a step ends the program the step runs
+//! (`story:cancel-a-running-bound-program`): a thread of the run reads the caller's flag every
+//! [`CANCEL_WATCH`] and sets the [`Cancel`] every port of the run holds; the step is refused
+//! `Cancelled`, its `action finished` line written, and the run ends `Cancelled` naming its action.
+//! A case whose completion gives exactly one legitimate outcome and in which no action is useful
+//! is terminated through it.
 //! A case in which nothing is useful waits: on authority (an admissible action whose capability no
 //! approval allows), on a person (an admissible action bound to `person`, or two legitimate
 //! outcomes to close between), or is stuck.
@@ -19,7 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use b10x_loom_bindings::{
     CopyEffects, OpenEffects, OpenPortError, PlacedRevisions, ProgramEffects, retry_records,
@@ -37,9 +42,10 @@ use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPo
 use b10x_loom_commission::ports::executor::AgentExecutor;
 use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_commission::runtime::{LoopEnd, run_until_blocked};
-use b10x_loom_executor::selection::StepHistory as _;
+use b10x_loom_executor::projection::project;
+use b10x_loom_executor::selection::{ActionSelector as _, SelectionContext, StepHistory as _};
 use b10x_loom_executor::{DeterministicSelector, EmptyObjectArguments, Loom};
-use b10x_loom_intake_slice::confinement::TestRunner;
+use b10x_loom_intake_slice::confinement::{Cancel, TestRunner};
 use b10x_loom_runlog::{BUDGET_SPENT, budget_name, log_file_name};
 use loom::bindings::{BindingsDocument, Executor};
 use loom::runlog::{
@@ -119,8 +125,12 @@ pub(crate) struct Held {
     pub(crate) bindings: BindingsDocument,
 }
 
+/// How often a run reads the caller's cancel flag while a step runs.
+pub const CANCEL_WATCH: Duration = Duration::from_millis(100);
+
 /// Runs the tree in `store` with `catalog` (see the module documentation). `observer` is given
-/// each run-log line as it is written; `cancel`, when set, ends the run before its next step.
+/// each run-log line as it is written; `cancel`, set from any thread, ends the run `Cancelled`:
+/// before its next step, or during a step by ending the program it runs, within 10 s of being set.
 ///
 /// # Errors
 /// [`Refused`]: `StoreInUse` naming the holder, `NotATree`, `LogRefused`, `BindingsRefused`,
@@ -129,9 +139,52 @@ pub fn run_tree(
     store: &Path,
     catalog: &ProtocolCatalog,
     settings: &RunSettings,
-    mut observer: Option<&mut dyn RunObserver>,
+    observer: Option<&mut dyn RunObserver>,
     cancel: Option<&AtomicBool>,
 ) -> Result<TreeRun, Refused> {
+    let handle = Cancel::new();
+    let Some(flag) = cancel else {
+        return run_cancellable(store, catalog, settings, observer, &handle, None);
+    };
+    // The bridge from the caller's flag to the run's handle: a thread that reads the flag every
+    // `CANCEL_WATCH` and sets the handle, until the run returns.
+    let returned = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !returned.load(Ordering::SeqCst) {
+                if flag.load(Ordering::SeqCst) {
+                    handle.cancel();
+                    return;
+                }
+                std::thread::sleep(CANCEL_WATCH);
+            }
+        });
+        // Set however the run returns, a panic included, so the scope ends.
+        let _returned = SetOnDrop(&returned);
+        run_cancellable(store, catalog, settings, observer, &handle, Some(flag))
+    })
+}
+
+/// Sets its flag when dropped.
+struct SetOnDrop<'a>(&'a AtomicBool);
+
+impl Drop for SetOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// [`run_tree`] with `cancel`, the handle every port of the run holds, and `flag`, the caller's.
+fn run_cancellable(
+    store: &Path,
+    catalog: &ProtocolCatalog,
+    settings: &RunSettings,
+    mut observer: Option<&mut dyn RunObserver>,
+    cancel: &Cancel,
+    flag: Option<&AtomicBool>,
+) -> Result<TreeRun, Refused> {
+    let cancelled =
+        || cancel.is_cancelled() || flag.is_some_and(|flag| flag.load(Ordering::SeqCst));
     let store = existing_store(store)?;
     read_manifest(&store)?;
     let _held = StoreLock::acquire(&store)?;
@@ -165,8 +218,9 @@ pub fn run_tree(
             logs.reconcile(&case.case)?;
         }
         close_terminated(&governor, &logs, &store, &held, &mut emit)?;
-        let stop_before = if cancel.is_some_and(|cancel| cancel.load(Ordering::SeqCst)) {
-            Some((SpentBudget::Cancel, "the run was cancelled".to_owned()))
+        let cancelled_before = cancelled();
+        let stop_before = if cancelled_before {
+            None
         } else if settings.max_steps.is_some_and(|max| steps >= max) {
             Some((
                 SpentBudget::MaxSteps,
@@ -197,6 +251,18 @@ pub fn run_tree(
                 detail: None,
             });
         };
+        if cancelled_before {
+            let next = next_action(
+                &governor,
+                case,
+                catalog,
+                &workspace,
+                &store,
+                &settings.runner,
+                cancel,
+            )?;
+            return cancelled_stop(&logs, &case.case, next, steps, &mut emit);
+        }
         if let Some((budget, detail)) = stop_before {
             let line = logs.append(
                 &case.case,
@@ -228,46 +294,16 @@ pub fn run_tree(
             emit(&case.case, line);
         }
         let legitimate = legitimate_outcomes(&governor, &id)?;
-        let lines = read_lines(&store, &case.case)?;
-        let mut due = due_actions(&governor, &id, &case.bindings)?;
-        // A step refused since the case was last evaluated is refused again until the case
-        // changes (a spent run budget): it is not due, whatever its retry records say.
-        let refused_since: BTreeSet<String> = lines
-            .iter()
-            .rev()
-            .take_while(|line| !matches!(line.event, RunLogEvent::Evaluated(_)))
-            .filter_map(|line| match &line.event {
-                RunLogEvent::ActionFinished(finished) if finished.refusal.is_some() => {
-                    Some(finished.action.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        due.retain(|action| !refused_since.contains(action));
-        let revision = governor
-            .current_revision(&id)
-            .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
         let before: BTreeSet<String> = evidence_ids(&governor, &id)?;
-        let effects = TreeEffects::new(
+        let (lines, revision, effects, history) = step_inputs(
             &governor,
-            &id,
-            &case.bindings,
-            &case.file,
+            case,
             catalog,
             &workspace,
             &store,
             &settings.runner,
+            cancel,
         )?;
-        // A copy is taken when its source holds something new, and is idle otherwise.
-        let mut idle = BTreeSet::new();
-        for (action, copy_due) in effects.copies_due(&case.bindings)? {
-            if copy_due {
-                due.insert(action);
-            } else {
-                idle.insert(action);
-            }
-        }
-        let history = LogHistory::new(&lines, revision, due).with_idle(idle);
         let selector = DeterministicSelector::new(id.clone(), &governor, &history);
         let executor = Loom::new(selector, EmptyObjectArguments, "Run the tree's case.")
             .with_governor(&governor)
@@ -350,6 +386,15 @@ pub fn run_tree(
                 }),
             )?;
             emit(&case.case, line);
+            if cancelled_step(outcome) {
+                return cancelled_stop(
+                    &logs,
+                    &case.case,
+                    vec![request.action.clone()],
+                    steps,
+                    &mut emit,
+                );
+            }
             opened(&governor, &logs, &case.case, outcome, &mut emit)?;
             continue;
         }
@@ -390,7 +435,7 @@ pub fn run_tree(
                 let line = logs.append(
                     &case.case,
                     RunLogEvent::ActionFinished(ActionFinished {
-                        action,
+                        action: action.clone(),
                         exit,
                         refusal,
                         blob_digest,
@@ -399,6 +444,9 @@ pub fn run_tree(
                     }),
                 )?;
                 emit(&case.case, line);
+                if cancelled_step(outcome) {
+                    return cancelled_stop(&logs, &case.case, vec![action], steps, &mut emit);
+                }
                 opened(&governor, &logs, &case.case, outcome, &mut emit)?;
                 continue;
             }
@@ -784,6 +832,150 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
     Ok(due)
 }
 
+/// What a step of `case` is chosen from: the lines of its log, its revision, its effect port
+/// (every program of it holding `cancel`) and its history, with the actions due again (a writer
+/// with a retry record, a copy whose source holds something new) but those refused since the case
+/// was last evaluated, and the idle copies.
+#[allow(clippy::type_complexity)]
+fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
+    governor: &'a CanonGovernor<S>,
+    case: &'a Held,
+    catalog: &ProtocolCatalog,
+    workspace: &Path,
+    store: &Path,
+    runner: &Arc<dyn TestRunner>,
+    cancel: &Cancel,
+) -> Result<(Vec<RunLogLine>, i64, TreeEffects<'a, S>, LogHistory), Refused> {
+    let id = CaseId(case.case.clone());
+    let lines = read_lines(store, &case.case)?;
+    let mut due = due_actions(governor, &id, &case.bindings)?;
+    // A step refused since the case was last evaluated is refused again until the case
+    // changes (a spent run budget): it is not due, whatever its retry records say.
+    let refused_since: BTreeSet<String> = lines
+        .iter()
+        .rev()
+        .take_while(|line| !matches!(line.event, RunLogEvent::Evaluated(_)))
+        .filter_map(|line| match &line.event {
+            RunLogEvent::ActionFinished(finished) if finished.refusal.is_some() => {
+                Some(finished.action.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    due.retain(|action| !refused_since.contains(action));
+    let revision = governor
+        .current_revision(&id)
+        .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
+    let effects = TreeEffects::new(
+        governor,
+        &id,
+        &case.bindings,
+        &case.file,
+        catalog,
+        workspace,
+        store,
+        runner,
+        cancel,
+    )?;
+    // A copy is taken when its source holds something new, and is idle otherwise.
+    let mut idle = BTreeSet::new();
+    for (action, copy_due) in effects.copies_due(&case.bindings)? {
+        if copy_due {
+            due.insert(action);
+        } else {
+            idle.insert(action);
+        }
+    }
+    let history = LogHistory::new(&lines, revision, due).with_idle(idle);
+    Ok((lines, revision, effects, history))
+}
+
+/// The action the deterministic selector takes next in `case`, chosen as a step would choose it
+/// from the frontier Commission's loop offers; nothing is written and nothing is started. The
+/// placed artifacts are read as the case holds them: a file changed since the last step moves its
+/// artifact only when the next step starts. Empty when the selector takes none.
+fn next_action<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &Held,
+    catalog: &ProtocolCatalog,
+    workspace: &Path,
+    store: &Path,
+    runner: &Arc<dyn TestRunner>,
+    cancel: &Cancel,
+) -> Result<Vec<String>, Refused> {
+    let id = CaseId(case.case.clone());
+    let (_, _, effects, history) =
+        step_inputs(governor, case, catalog, workspace, store, runner, cancel)?;
+    let frontier = governor
+        .frontier(&id)
+        .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
+    // What Commission's loop hands the executor: the actions the case's effect port performs, and
+    // every action behind an authority gate.
+    let mut offered = frontier.data().clone();
+    let gated: BTreeSet<String> = offered
+        .actions
+        .iter()
+        .filter(|entry| {
+            entry.status == ActionStatus::ApprovalRequired
+                || entry.capability.as_deref().is_some_and(|c| !c.is_empty())
+        })
+        .map(|entry| entry.action.clone())
+        .collect();
+    offered
+        .actions
+        .retain(|entry| effects.performs(&entry.action) || gated.contains(&entry.action));
+    let frontier = Frontier::new(offered);
+    let catalogue = project(
+        &frontier,
+        loom::run::CatalogueId(loom::primitives::Uuid(
+            derived_uuid(&["catalogue", &case.case, "cancelled"]).0,
+        )),
+        loom::run::TurnId(loom::primitives::Uuid(
+            derived_uuid(&["turn", &case.case, "cancelled"]).0,
+        )),
+    );
+    let selector = DeterministicSelector::new(id, governor, &history);
+    let context = SelectionContext {
+        prompt: "Run the tree's case.".to_owned(),
+    };
+    Ok(selector
+        .select(&context, &catalogue.data().entries)
+        .map(|choice| vec![choice.action])
+        .unwrap_or_default())
+}
+
+/// Whether `outcome` is a step its cancel ended: refused `Cancelled`.
+fn cancelled_step(outcome: &EffectOutcome) -> bool {
+    matches!(outcome, EffectOutcome::Refused(refused) if refused.reason.starts_with("Cancelled: "))
+}
+
+/// The run's end on its cancel: `case`'s `stopped` line, `stop` `Cancelled` and `next` the action
+/// whose step was cancelled or was to be taken next, and the run `Cancelled`.
+fn cancelled_stop(
+    logs: &Logs,
+    case: &str,
+    next: Vec<String>,
+    steps: i64,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<TreeRun, Refused> {
+    let line = logs.append(
+        case,
+        RunLogEvent::Stopped(Stopped {
+            stop: format!("{:?}", TreeStop::Cancelled),
+            next,
+            budget: None,
+        }),
+    )?;
+    emit(case, line);
+    Ok(TreeRun {
+        stop: TreeStop::Cancelled,
+        case: case.to_owned(),
+        steps,
+        decisions: Vec::new(),
+        detail: Some("the run was cancelled".to_owned()),
+    })
+}
+
 /// The ids of the records `case` holds, but the `case_outcome` records the governor writes for
 /// its children, which no step of the case gives.
 fn evidence_ids<S: loom_governor::FallibleCaseStore>(
@@ -1128,6 +1320,7 @@ impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
         workspace: &Path,
         store: &Path,
         runner: &Arc<dyn TestRunner>,
+        cancel: &Cancel,
     ) -> Result<Self, Refused> {
         let refused = |error: String| {
             Refused::new(TreeRefusalReason::BindingsRefused, error)
@@ -1144,6 +1337,7 @@ impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
             store,
             Some(Arc::clone(runner)),
         )
+        .map(|opens| opens.with_cancel(cancel.clone()))
         .map_err(|error| match error {
             OpenPortError::Refused(refusal) => refused(refusal.to_string()),
             OpenPortError::Runner(error) => {
@@ -1161,6 +1355,7 @@ impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
             store,
             Some(Arc::clone(runner)),
         )
+        .map(|programs| programs.with_cancel(cancel.clone()))
         .map_err(|error| {
             Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())
                 .case(case.0.clone())

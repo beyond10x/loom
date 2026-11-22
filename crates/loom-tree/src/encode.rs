@@ -122,6 +122,7 @@ fn run_entry_json(run: &StatusRun) -> Value {
     object.insert("attempt".into(), json!(run.attempt));
     object.insert("retried".into(), json!(run.retried));
     object.insert("retry_of".into(), json!(run.retry_of));
+    put(&mut object, "cancelled", run.cancelled.map(Value::from));
     Value::Object(object)
 }
 

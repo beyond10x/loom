@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest db5b7a0997ec1e1191e91b74ef43f5711af898b990eccf5b39c8c9a6370efd8f
+// contract digest 128d7cf7dfa9562a0c2dc4225132e8a37a44efa4a569353eb7c53ed0316f8c67
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -414,6 +414,8 @@ pub enum ProgramRefusalReason {
     ArtifactUnreadable,
     /// `ProgramError`.
     ProgramError,
+    /// `Cancelled`.
+    Cancelled,
 }
 
 /// ProgramRoot — `loom.bindings.ProgramRoot`: one of a closed set of names.
@@ -444,6 +446,8 @@ pub struct ProgramRun {
     pub retry_of: Vec<String>,
     /// `class` — `Optional<loom.bindings.ExitClass>`.
     pub class: Option<ExitClass>,
+    /// `cancelled` — `Boolean`.
+    pub cancelled: bool,
 }
 
 /// RecordedEvidence — `loom.bindings.RecordedEvidence`.

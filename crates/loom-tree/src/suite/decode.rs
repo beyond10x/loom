@@ -815,6 +815,7 @@ fn tree_stop(name: &str) -> Option<TreeStop> {
         "AwaitingAuthority" => TreeStop::AwaitingAuthority,
         "Stuck" => TreeStop::Stuck,
         "BudgetSpent" => TreeStop::BudgetSpent,
+        "Cancelled" => TreeStop::Cancelled,
         _ => return None,
     })
 }

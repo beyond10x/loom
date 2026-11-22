@@ -14,7 +14,9 @@ use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::responsibility::CaseId;
 use b10x_loom_commission::ports::effect::EffectError;
 use b10x_loom_intake_slice::bindings::MAX_REPORT_BYTES;
-use b10x_loom_intake_slice::confinement::TestRunner;
+use b10x_loom_intake_slice::confinement::{
+    Cancel, ConfinementError, ConfinementRefusal, TestRunner,
+};
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 
 use crate::program::sha256;
@@ -36,11 +38,16 @@ pub(crate) enum NotPrinted {
     /// It was refused by its runner, killed at its timeout, ended with an exit other than 0, or
     /// printed anything but one JSON object of at most [`MAX_REPORT_BYTES`].
     Unreadable(String),
+    /// Its runner refused it [`ConfinementRefusal::Cancelled`]: its cancel was set before it
+    /// started, or killed it while it ran.
+    Cancelled(ConfinementError),
 }
 
 /// Runs `argv`, the `arguments_from` program of a binding, once for `case` (whose opening names
 /// are `names`) through `runner`, in `workspace`, with `input` on standard input and `timeout`;
-/// its printed object, or why not, naming `argv[0]` and never the text it printed.
+/// its printed object, or why not, naming `argv[0]` and never the text it printed. Given `cancel`,
+/// the child holds it (`ChildCommand::with_cancel`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_arguments_from(
     argv: &[String],
     input: &str,
@@ -49,6 +56,7 @@ pub(crate) fn run_arguments_from(
     runner: &dyn TestRunner,
     case: &CaseId,
     names: &CaseNames,
+    cancel: Option<&Cancel>,
 ) -> Result<Printed, NotPrinted> {
     let program = argv
         .first()
@@ -63,9 +71,16 @@ pub(crate) fn run_arguments_from(
         names,
     )
     .map_err(|why| NotPrinted::NotStarted(format!("{program} was not started: {why}")))?;
+    let child = match cancel {
+        Some(cancel) => child.with_cancel(cancel.clone()),
+        None => child,
+    };
     let unreadable = |detail: String| Err(NotPrinted::Unreadable(detail));
     let execution = match runner.run_child(&child) {
         Ok(execution) => execution,
+        Err(refusal) if refusal.reason == ConfinementRefusal::Cancelled => {
+            return Err(NotPrinted::Cancelled(refusal));
+        }
         Err(refusal) => {
             return unreadable(format!("{program} was refused by its runner: {refusal}"));
         }

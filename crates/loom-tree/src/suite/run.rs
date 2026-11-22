@@ -625,7 +625,7 @@ fn stop_exit(stop: TreeStop) -> i64 {
         TreeStop::Terminal => 0,
         TreeStop::AwaitingPerson | TreeStop::AwaitingAuthority => 3,
         TreeStop::Stuck => 4,
-        TreeStop::BudgetSpent => 5,
+        TreeStop::BudgetSpent | TreeStop::Cancelled => 5,
     }
 }
 

@@ -207,6 +207,74 @@ pub struct TestExecution {
     pub child_output: ChildOutput,
 }
 
+/// A cancel handle: a shared flag a host sets, from any thread, to end a child it handed the
+/// handle ([`ChildCommand::with_cancel`]) before its timeout. Clones share one flag, and setting it
+/// cannot be undone.
+///
+/// A child whose handle is set before it starts is refused [`ConfinementRefusal::Cancelled`] and
+/// nothing starts. One running when it is set is killed with every process it started, at the
+/// next read step under `linux` (at most 1 s) and within 100 ms under `local`, with no grace, and
+/// its run is refused [`ConfinementRefusal::Cancelled`]. A child that ended before the handle was
+/// read set keeps its result.
+#[derive(Clone, Default)]
+pub struct Cancel(Arc<std::sync::atomic::AtomicBool>);
+
+impl Cancel {
+    /// A handle not set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the handle: every child holding it, or a clone of it, is ended.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the handle is set.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+impl fmt::Debug for Cancel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Cancel").field(&self.is_cancelled()).finish()
+    }
+}
+
+/// Two handles are equal when they share one flag.
+impl PartialEq for Cancel {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Cancel {}
+
+/// The refusal of a child whose cancel handle was set before it started: nothing started.
+fn cancelled_before_launch() -> ConfinementError {
+    refuse(
+        ConfinementRefusal::Cancelled,
+        "the child's cancel was set before it started; nothing started",
+    )
+}
+
+/// The refusal of a child its cancel handle killed `ran` after it started.
+fn killed_by_cancel(ran: Duration) -> ConfinementError {
+    refuse(
+        ConfinementRefusal::Cancelled,
+        format!(
+            "the child was killed by its cancel after {:.1} s",
+            ran.as_secs_f64()
+        ),
+    )
+}
+
+/// Whether `cancel` is given and set.
+fn is_set(cancel: Option<&Cancel>) -> bool {
+    cancel.is_some_and(Cancel::is_cancelled)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfinementError {
     pub reason: ConfinementRefusal,
@@ -596,7 +664,16 @@ impl SubstrateRunner {
     /// raw-pipe session under the same checks; more than [`ChildCommand::MAX_INPUT_BYTES`] is
     /// refused before anything starts. Its result holds its standard output and standard error
     /// whole and apart ([`TestExecution::child_output`]) beside the tail of each in `output`.
+    ///
+    /// A child given a cancel handle ([`ChildCommand::with_cancel`]) runs as a raw-pipe session,
+    /// its standard input empty unless the host gave it bytes, so the read loop sees the handle:
+    /// one set before the start is refused [`ConfinementRefusal::Cancelled`] before any check or
+    /// driver open, and one set while the child runs kills it, with its whole cgroup, at the next
+    /// read step, its run refused [`ConfinementRefusal::Cancelled`].
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        if is_set(child.cancel.as_ref()) {
+            return Err(cancelled_before_launch());
+        }
         check_program(&child.program)?;
         check_stdin(child.stdin.as_deref())?;
         check_network(child.network, &child.egress)?;
@@ -617,7 +694,13 @@ impl SubstrateRunner {
         let machine = open.driver.machine();
         check_driver_mounts(&open, child, &machine.facts)?;
         check_workdir_served(child, &machine.facts)?;
-        let launched = match child.stdin.as_deref() {
+        // A child with a cancel handle runs through the read loop, which sees the handle, with
+        // empty standard input when the host gave it none.
+        let stdin = child
+            .stdin
+            .as_deref()
+            .or(child.cancel.is_some().then_some(&[][..]));
+        let launched = match stdin {
             None => Self::launch(&open, workspace, &child.input(workspace, machine.snapshot))?,
             Some(stdin) => {
                 check_pipe_sessions(&machine.facts)?;
@@ -627,6 +710,7 @@ impl SubstrateRunner {
                     &child.session_input(workspace, machine.snapshot),
                     stdin,
                     child.timeout,
+                    child.cancel.as_ref(),
                 )?
             }
         };
@@ -716,13 +800,16 @@ impl SubstrateRunner {
     /// observation, which records both streams whatever was read live. A write the child ended
     /// first is no failure: it read what it read. Every path ends the child before it returns,
     /// killing it when it ran past its timeout and a margin, which leaves it with no exit status
-    /// and so refused.
+    /// and so refused. A `cancel` set while the child runs ends the read loop at its next step,
+    /// and a child still running then is killed the same way, at once, and refused
+    /// [`ConfinementRefusal::Cancelled`]; one Substrate already observed ended keeps its result.
     fn launch_with_stdin(
         open: &OpenDriver,
         workspace: &str,
         session: &PipeSessionStartInput,
         stdin: &[u8],
         timeout: Duration,
+        cancel: Option<&Cancel>,
     ) -> Result<Launched, ConfinementError> {
         let input = &session.exec;
         let prepared = Prepared::new(open, workspace, input)?;
@@ -734,6 +821,9 @@ impl SubstrateRunner {
             .build()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
         let deadline = drain_deadline(timeout)?;
+        let started = std::time::Instant::now();
+        // Set when the loop's own kill ended a child its cancel was set for.
+        let mut killed_by_cancel_after = None;
         let observed = runtime.block_on(async {
             dispatched(
                 driver
@@ -753,6 +843,9 @@ impl SubstrateRunner {
             };
             let drain = async {
                 loop {
+                    if is_set(cancel) {
+                        return Ok(());
+                    }
                     let step = deadline
                         .saturating_duration_since(tokio::time::Instant::now())
                         .min(READ_STEP);
@@ -770,19 +863,29 @@ impl SubstrateRunner {
             let (written, drained) = tokio::join!(write, drain);
             let observed = match driver.observe_exec(id).await {
                 Ok(observed) if is_terminal(observed.resource.state) => observed,
-                // Still running past its deadline, or unobservable: it is ended here, and a child
-                // ended so has no exit status.
-                _ => driver
-                    .signal(
-                        id,
-                        &ExecSignalInput {
-                            signal: Signal::Kill,
-                            grace_ms: 0,
-                        },
-                    )
-                    .await
-                    .map_err(observation_error)?,
+                // Still running past its deadline or after its cancel, or unobservable: it is
+                // ended here, and a child ended so has no exit status.
+                _ => {
+                    let cancelled = is_set(cancel);
+                    let killed = driver
+                        .signal(
+                            id,
+                            &ExecSignalInput {
+                                signal: Signal::Kill,
+                                grace_ms: 0,
+                            },
+                        )
+                        .await
+                        .map_err(observation_error)?;
+                    if cancelled {
+                        killed_by_cancel_after = Some(started.elapsed());
+                    }
+                    killed
+                }
             };
+            if killed_by_cancel_after.is_some() {
+                return Ok(observed);
+            }
             if let Err(e) = drained {
                 return Err(refuse(
                     ConfinementRefusal::CapabilityUnserved,
@@ -802,6 +905,9 @@ impl SubstrateRunner {
                 _ => Ok(observed),
             }
         })?;
+        if let Some(ran) = killed_by_cancel_after {
+            return Err(killed_by_cancel(ran));
+        }
         settle(
             input,
             &open.egress.apertures,
@@ -1188,6 +1294,7 @@ pub struct ChildCommand {
     read_only_files: Vec<ReadOnlyMount>,
     host_paths: Vec<PathBuf>,
     workdir: Option<PathBuf>,
+    cancel: Option<Cancel>,
     read_only_workspace: bool,
 }
 
@@ -1235,6 +1342,7 @@ impl ChildCommand {
             read_only_files: Vec::new(),
             host_paths: Vec::new(),
             workdir: None,
+            cancel: None,
             read_only_workspace: false,
         }
     }
@@ -1487,6 +1595,25 @@ impl ChildCommand {
             stdin: Some(bytes.into()),
             ..self
         }
+    }
+
+    /// The same child holding `cancel`: set before the child starts, [`TestRunner::run_child`]
+    /// refuses it [`ConfinementRefusal::Cancelled`] and starts nothing; set while it runs, the
+    /// runner kills it with every process it started, with no grace, and refuses its run
+    /// [`ConfinementRefusal::Cancelled`] (see [`Cancel`] for the bounds). A cancel set after the
+    /// child ended changes nothing. A live child ([`SubstrateRunner::spawn_child`]) does not read
+    /// it: [`ConfinedChild::signal`] ends one.
+    #[must_use]
+    pub fn with_cancel(self, cancel: Cancel) -> Self {
+        Self {
+            cancel: Some(cancel),
+            ..self
+        }
+    }
+
+    /// The cancel handle the child holds, if the host gave it one.
+    pub fn cancel(&self) -> Option<&Cancel> {
+        self.cancel.as_ref()
     }
 
     /// The program the host named.

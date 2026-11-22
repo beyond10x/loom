@@ -1436,7 +1436,8 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `budget.max_runs`, nothing started), the arguments (the request's unless they are `{}`, else the literal, else the
   `arguments_from` object, `ArgumentsUnreadable` when it does not exit 0 or is not one JSON object
   within 1 MiB, the bound program not started; the `arguments_from` program starts on every step
-  that reaches it, leaves no observation and does not count against `budget.max_runs`), the run, the blob `blobs/<sha256>` of the store
+  that reaches it, leaves no observation and does not count against `budget.max_runs` unless its
+  cancel ends it), the run, the blob `blobs/<sha256>` of the store
   directory (stdout then stderr, temporary file and rename; a link at the name is replaced, a
   `blobs` link fails the step), one observation (`loom.bindings.ProgramRun`) for every call of
   `run_child`, kept before a runner refusal or a blob failure ends the step (then with no blob, and
@@ -1451,6 +1452,13 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   drives the case; two hosts that drive one case store at the same time can each start the action
   once more (`story:bound-program-run-cap-holds-across-ports`). Held by
   `crates/loom-bindings/tests/bound_program.rs` and `security_w20261121w7_u2.rs`.
+- `ProgramEffects::with_cancel` and `OpenEffects::with_cancel` (`story:cancel-a-running-bound-program`)
+  give every program a step starts a `confinement::Cancel` through `ChildCommand::with_cancel`.
+  Read after the run count, a set handle refuses the step `Cancelled` (`cancelled_step`, ends the
+  run), nothing started or observed. A runner refusal `ConfinementRefusal::Cancelled` of either
+  child keeps the run's observation with `cancelled: true` (it counts), writes the moves alone and
+  refuses the step `Cancelled`, ending the run; no table, blob or record, so no retry record. Held
+  by the cancel tests of `bound_program.rs` and `bound_retry.rs`.
 - A placed artifact's revision is Loom's (`revision.rs`, `story:bound-artifact-revisions`):
   `content_revision` is `t` and 16 hex digits of the SHA-256 over a file's bytes, a link's target
   string (never followed) or a tree's entries in path order, `none` while absent. It opens each
@@ -1572,7 +1580,8 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   `MaxWallSeconds`, `loom.tree.SpentBudget`'s variants, spelled by `budget_name`), and only on a
   `BudgetSpent` stop; a line holding it beside another stop, or another spelling, does not read
   (`story:tree-status-names-what-it-read`; ESS cannot state the rule). `tree run` writes it on
-  every `BudgetSpent` stop. A `BudgetSpent` line without it, as Loom 0.58.0 wrote, still reads;
+  every `BudgetSpent` stop; since `story:cancel-a-running-bound-program` a cancel stops the run
+  `Cancelled` instead, so `tree run` no longer writes `Cancel`, which still reads. A `BudgetSpent` line without it, as Loom 0.58.0 wrote, still reads;
   Loom 0.58.0 and earlier refuse a line that holds it.
 - `HandoffChecked` (`story:handoff-when-a-program-decides`) names the action, the check's `exit` or
   `refusal`, exactly one as on `ActionFinished`, and the `blob_digest` of its output. `tree run`
@@ -1627,6 +1636,14 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   `executor.principal`, the one `person_action` and `PersonEffects` check; for `Approve` always
   `DEFAULT_PRINCIPAL`, which restricts nothing. `Close` and `Handoff` name none. `waits` puts one
   value into both, so the printed principal is the one recorded (`tests/tree_run/principal.rs`).
+- `run_tree`'s cancel flag (`story:cancel-a-running-bound-program`) is bridged to one
+  `confinement::Cancel` per run by a watcher thread in a `std::thread::scope`, which reads the flag
+  every `CANCEL_WATCH` (100 ms) until the run returns; every `ProgramEffects` and `OpenEffects`
+  the run builds holds the handle. A flag set before a step stops the run `Cancelled` (exit 5)
+  with `next` the action the selector would take (`next_action`, nothing written); a step its
+  cancel ended (refusal `Cancelled: …`) writes its `action finished` line and stops the run
+  `Cancelled` naming its action. The run writes no `action started` line; the tests wait on the
+  program's own start marker (`crates/loom-tree/tests/main.rs`, `mod cancel`).
 - A writer's `handoff_when` (`handoff.rs`, `story:handoff-when-a-program-decides`): `Checked`
   wraps the step's executor, so once the deterministic selector picked an action whose binding
   carries one, `b10x_loom_bindings::run_handoff_check` runs it before the loop performs the step,
@@ -2741,7 +2758,12 @@ A `TestExecution` carries the child's two streams apart (`child_output`, `intake
 each whole up to Substrate's output limit and flagged cut past it; `output` stays the 8 KiB
 merged tail. `ChildCommand::with_stdin` (at most `MAX_INPUT_BYTES`, 16 MiB, refused before launch)
 runs the child as a Substrate raw-pipe session, writes the bytes once in 64 KiB frames and closes
-its input. `SubstrateRunner::spawn_child` (`story:live-confined-child`) makes every check
+its input. `ChildCommand::with_cancel` (`Cancel`) runs a child given no input the same way with
+empty input, so its read loop sees the handle: set before launch, `run_child` refuses `Cancelled`
+with nothing started; set while it runs, the loop ends at its next `READ_STEP` and sends the
+drain deadline's `Kill` (grace 0) at once, and a child Substrate did not yet observe ended is
+refused `Cancelled`; under `local`, `finish` polls the handle every 100 ms and sends the
+deadline's `kill`. `SubstrateRunner::spawn_child` (`story:live-confined-child`) makes every check
 `run_child` makes before launch and returns a `ConfinedChild` (`confinement/child.rs`) running
 in the same kind of session: the host writes and closes its input, reads `ChildFrame`s naming
 their stream (`intake.confinement.ChildStream`), signals it (`ChildSignal`: an interrupt or

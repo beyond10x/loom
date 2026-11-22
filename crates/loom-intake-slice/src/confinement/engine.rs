@@ -33,11 +33,12 @@ use substrate_wire::{BaselineEnvironment, Signal};
 
 use super::child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild, SIGNAL_GRACE};
 use super::{
-    AppliedConfinement, Backend, ChildCommand, ChildExit, ChildOutput, ChildStream,
+    AppliedConfinement, Backend, Cancel, ChildCommand, ChildExit, ChildOutput, ChildStream,
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement, NetworkMode,
     QUEUED_FRAMES, READ_STEP, SANDBOX_WORKSPACE, SubstrateRunner, TestExecution, TestRunner,
-    canonical_workspace, check_program, check_stdin, check_workdir, check_writable, enum_name,
-    escape_reason, local_label, refuse, scope_error, tail,
+    cancelled_before_launch, canonical_workspace, check_program, check_stdin, check_workdir,
+    check_writable, enum_name, escape_reason, is_set, killed_by_cancel, local_label, refuse,
+    scope_error, tail,
 };
 use crate::executor::TestCommand;
 
@@ -405,6 +406,9 @@ impl LocalRoute {
     }
 
     fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        if is_set(child.cancel.as_ref()) {
+            return Err(cancelled_before_launch());
+        }
         let (workspace, workdir) = Self::check(child)?;
         let stdin = match child.stdin {
             Some(_) => StdinMode::Piped {
@@ -418,6 +422,7 @@ impl LocalRoute {
             &Self::command(child),
             child.stdin.as_deref(),
             child.timeout,
+            child.cancel.as_ref(),
         )?;
         self.execution(ended)
     }
@@ -474,6 +479,7 @@ impl LocalRoute {
             &substrate_host::confinement::Command { argv, env },
             None,
             command.timeout(),
+            None,
         )?;
         let mut execution = self.execution(ended)?;
         if execution.exit_code != Some(0)
@@ -488,20 +494,25 @@ impl LocalRoute {
     /// Start `command` under `admitted`, write `stdin` to it and close it when given, and wait
     /// for its end, all inside one runtime this call owns. At `timeout` the run is sent
     /// `Signal::Kill`, which `local` sends to its whole process group, and waited for; every path
-    /// that returns once it started has ended it. A write still pending then is dropped.
+    /// that returns once it started has ended it. A write still pending then is dropped. A
+    /// `cancel` set while it runs sends the same `Kill` within [`CANCEL_POLL`], and the launch is
+    /// refused [`ConfinementRefusal::Cancelled`].
     fn launch(
         &self,
         admitted: &AdmittedProfile,
         command: &substrate_host::confinement::Command,
         stdin: Option<&[u8]>,
         timeout: Duration,
+        cancel: Option<&Cancel>,
     ) -> Result<Ended, ConfinementError> {
         let deadline = deadline(timeout)?;
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        runtime.block_on(async {
+        let started = std::time::Instant::now();
+        let by_cancel = AtomicBool::new(false);
+        let ended = runtime.block_on(async {
             let run = self
                 .adapter
                 .start(admitted, command)
@@ -509,10 +520,13 @@ impl LocalRoute {
                 .map_err(contract_error)?;
             let killed = AtomicBool::new(false);
             let ended = match stdin {
-                None => self.finish(&run, deadline, &killed).await,
+                None => {
+                    self.finish(&run, deadline, &killed, cancel, &by_cancel)
+                        .await
+                }
                 Some(bytes) => {
                     let write = self.write_all(&run, bytes);
-                    let finish = self.finish(&run, deadline, &killed);
+                    let finish = self.finish(&run, deadline, &killed, cancel, &by_cancel);
                     tokio::pin!(write, finish);
                     // A write that ended first, failed or not, is answered once the run ended.
                     // A write still pending when the run ended (or the deadline's `Kill` was
@@ -544,7 +558,16 @@ impl LocalRoute {
                 output,
                 timeout,
             })
-        })
+        });
+        if by_cancel.load(Ordering::SeqCst) {
+            let mut refused = killed_by_cancel(started.elapsed());
+            if let Err(error) = ended {
+                // The kill was sent; what kept the run from ending after it is told, not hidden.
+                refused.detail = format!("{}; {error}", refused.detail);
+            }
+            return Err(refused);
+        }
+        ended
     }
 
     /// Write `bytes` to the run's standard input, then close it. A child that stopped reading or
@@ -568,18 +591,37 @@ impl LocalRoute {
     }
 
     /// The run's end, and whether Loom ended it at `deadline`. `killed` is set once the deadline's
-    /// `Kill` is sent, whether or not the run then ended.
+    /// or the cancel's `Kill` is sent, whether or not the run then ended; `by_cancel` once
+    /// `cancel`, polled every [`CANCEL_POLL`], sent it. A run that ended first keeps its end.
     async fn finish(
         &self,
         run: &RunId,
         deadline: tokio::time::Instant,
         killed: &AtomicBool,
+        cancel: Option<&Cancel>,
+        by_cancel: &AtomicBool,
     ) -> Result<(RunObservation, bool), ConfinementError> {
-        match tokio::time::timeout_at(deadline, self.adapter.wait(run)).await {
-            Ok(observed) => Ok((observed.map_err(contract_error)?, false)),
-            Err(_) => {
+        let cancelled = async {
+            match cancel {
+                Some(cancel) => {
+                    while !cancel.is_cancelled() {
+                        tokio::time::sleep(CANCEL_POLL).await;
+                    }
+                }
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::select! {
+            biased;
+            observed = self.adapter.wait(run) => Ok((observed.map_err(contract_error)?, false)),
+            () = tokio::time::sleep_until(deadline) => {
                 killed.store(true, Ordering::SeqCst);
                 Ok((self.kill(run).await?, true))
+            }
+            () = cancelled => {
+                killed.store(true, Ordering::SeqCst);
+                by_cancel.store(true, Ordering::SeqCst);
+                Ok((self.kill(run).await?, false))
             }
         }
     }
@@ -683,6 +725,9 @@ impl Ended {
 /// `LOCAL_GROUP_SETTLE`, 1 s, passed); a process that left the group and still holds the output
 /// would keep it running, and Loom does not wait on it past this bound.
 pub const KILL_SETTLE: Duration = Duration::from_secs(5);
+
+/// How often a `local` run reads its cancel handle ([`ChildCommand::with_cancel`]).
+const CANCEL_POLL: Duration = Duration::from_millis(100);
 
 /// How long a `local` run is given to end: after the host's interrupt or terminate before it is
 /// killed (`signal_grace`), and after the kill before it is refused (`kill_settle`). A host's
@@ -1273,7 +1318,7 @@ mod tests {
             env: BTreeMap::new(),
         };
         let started = Instant::now();
-        let ended = route.launch(&admitted, &command, stdin, timeout);
+        let ended = route.launch(&admitted, &command, stdin, timeout, None);
         (ended, started.elapsed())
     }
 

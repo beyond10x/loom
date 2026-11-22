@@ -318,6 +318,8 @@ fn runs(case: &str, observations: &[ObservationData]) -> Vec<StatusRun> {
             attempt,
             retried: false,
             retry_of,
+            // A run its cancel handle ended, and no other, says so.
+            cancelled: (payload["cancelled"] == true).then_some(true),
         });
     }
     runs

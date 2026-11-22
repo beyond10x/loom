@@ -25,17 +25,19 @@ types:
   # the choice between two legitimate outcomes or a writer's handoff (exit 3). `AwaitingAuthority`:
   # an admissible action needs an approval of its capability (exit 3). `Stuck`: a case has no
   # useful action, no legitimate outcome and nothing awaiting approval (exit 4). `BudgetSpent`: the
-  # run was cancelled, or its step or wall-time budget is spent, before the next step
-  # (`loom.tree.SpentBudget`, exit 5).
+  # step or the wall-time budget is spent before the next step (`loom.tree.SpentBudget`, exit 5).
+  # `Cancelled` (story cancel-a-running-bound-program): the caller's cancel flag was set, before a
+  # step or while a step's program ran, which was then killed (exit 5).
   - name: loom.tree.TreeStop
     kind: enum
-    variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent]
+    variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent, Cancelled]
 
   # The budget that ended a `tree run` `BudgetSpent`, asked in this order before each step:
-  # `Cancel`, the run's cancel handle was set; `MaxSteps`, the run took its `max_steps` steps;
-  # `MaxWallSeconds`, its `max_wall_seconds` of wall time are spent. An action's own run limit
-  # (`budget.max_runs` of a binding) ends no run: it refuses that action's step. A tree run starts
-  # no model, so no model-call budget ends one.
+  # `MaxSteps`, the run took its `max_steps` steps; `MaxWallSeconds`, its `max_wall_seconds` of
+  # wall time are spent. `Cancel` is read from a `stopped` line a run wrote before a cancel stopped
+  # it `Cancelled` (story cancel-a-running-bound-program); no run writes it now. An action's own
+  # run limit (`budget.max_runs` of a binding) ends no run: it refuses that action's step. A tree
+  # run starts no model, so no model-call budget ends one.
   - name: loom.tree.SpentBudget
     kind: enum
     variants: [Cancel, MaxSteps, MaxWallSeconds]
@@ -221,6 +223,8 @@ types:
   # One run of a bound program of a case: the action, its exit (absent when it timed out or the
   # runner refused it), its attempt in the action's own chain from 1, whether the next run of the
   # action was a retry, and the evidence ids the run was given as the records that sent it back.
+  # `cancelled` (story cancel-a-running-bound-program) is true on a run its cancel handle ended, and
+  # absent on every other run.
   - name: loom.tree.StatusRun
     kind: struct
     fields:
@@ -234,6 +238,8 @@ types:
         type: Boolean
       - name: retry_of
         type: List<String>
+      - name: cancelled
+        type: Optional<Boolean>
 
   # One `tree approve` on a case, in the order recorded: the capability, the action `--action`
   # named (absent without it), the answer, the principal and the instant.

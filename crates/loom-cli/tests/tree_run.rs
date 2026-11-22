@@ -634,7 +634,7 @@ fn an_observer_is_given_each_run_log_line_right_after_it_is_written() {
 }
 
 #[test]
-fn a_cancelled_run_ends_budget_spent_before_its_next_step() {
+fn a_cancelled_run_ends_cancelled_before_its_next_step() {
     let tree = Tree::new("cancel");
     let opened = tree.open_leg();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
@@ -654,12 +654,12 @@ fn a_cancelled_run_ends_budget_spent_before_its_next_step() {
         Some(&cancel),
     )
     .unwrap();
-    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.stop, TreeStop::Cancelled, "{ran:?}");
     assert_eq!(ran.steps, 1, "{ran:?}");
     let written = log_lines(&tree, "root");
     let last = written.last().unwrap();
     assert!(
-        matches!(&last.event, RunLogEvent::Stopped(stopped) if stopped.stop == "BudgetSpent"),
+        matches!(&last.event, RunLogEvent::Stopped(stopped) if stopped.stop == "Cancelled" && stopped.budget.is_none()),
         "{last:?}"
     );
     let finished = written
@@ -1203,8 +1203,11 @@ fn a_step_budget_stop_names_max_steps_in_the_log_and_the_status() {
     assert_eq!(held.budget, Some(SpentBudget::MaxSteps));
 }
 
+/// A cancel is no budget (`story:cancel-a-running-bound-program`): a run cancelled before its
+/// first step stops `Cancelled`, its `stopped` line naming no budget and, as `next`, the action
+/// the next run takes first.
 #[test]
-fn a_cancelled_run_names_its_budget_in_the_stopped_line() {
+fn a_cancelled_run_stops_cancelled_naming_its_next_action() {
     let tree = Tree::new("cancel-first");
     let opened = tree.open_leg();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
@@ -1217,22 +1220,37 @@ fn a_cancelled_run_names_its_budget_in_the_stopped_line() {
         Some(&cancel),
     )
     .unwrap();
-    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.stop, TreeStop::Cancelled, "{ran:?}");
     assert_eq!(ran.steps, 0, "{ran:?}");
     assert_eq!(ran.detail.as_deref(), Some("the run was cancelled"));
     let lines = log_lines(&tree, "root");
     // The `case opened` line `tree open` wrote, then the stop: no step was taken.
     assert_eq!(lines.len(), 2, "{lines:?}");
-    assert_eq!(
-        lines[1].event,
-        RunLogEvent::Stopped(b10x_loom_tree::runlog::Stopped {
-            stop: "BudgetSpent".to_owned(),
-            next: Vec::new(),
-            budget: Some("Cancel".to_owned()),
-        })
-    );
+    let RunLogEvent::Stopped(stopped) = &lines[1].event else {
+        panic!("no stop: {lines:?}");
+    };
+    assert_eq!(stopped.stop, "Cancelled", "{stopped:?}");
+    assert_eq!(stopped.budget, None, "{stopped:?}");
+    assert_eq!(stopped.next.len(), 1, "{stopped:?}");
     let status = json(&tree.tree("status"));
-    assert_eq!(entry(&status, "root")["budget"], "Cancel", "{status}");
+    assert_eq!(entry(&status, "root")["stop"], "Cancelled", "{status}");
+    assert!(entry(&status, "root").get("budget").is_none(), "{status}");
+    // The next run, not cancelled, takes that action first.
+    run_tree(
+        &tree.store(),
+        &tree.catalog(),
+        &settings(Some(1)),
+        None,
+        None,
+    )
+    .unwrap();
+    let first = log_lines(&tree, "root")
+        .into_iter()
+        .find_map(|line| match line.event {
+            RunLogEvent::ActionFinished(finished) => Some(finished.action),
+            _ => None,
+        });
+    assert_eq!(first.as_ref(), stopped.next.first(), "{stopped:?}");
 }
 
 #[test]
