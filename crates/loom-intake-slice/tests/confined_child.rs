@@ -2022,16 +2022,19 @@ fn overlapping_mounts_are_refused_before_launch() {
     assert_eq!(error.reason, past_every_check(), "{error}");
 }
 
-/// More than 4 read-only roots, or 16 read-only files, Substrate's bounds, is refused
-/// `ScopeInvalid` before anything starts, naming the first one past the bound; 4 and 16 get past
+/// More than 8 read-only roots, or 16 read-only files, Substrate's bounds, is refused
+/// `ScopeInvalid` before anything starts, naming the first one past the bound; 8 and 16 get past
 /// every check, to the missing cgroup.
+///
+/// story:substrate-0-24-0-pin: Substrate 0.22.0 raised the bound on roots from 4 to 8, and Loom
+/// follows it (`ChildCommand::MAX_READ_ONLY_ROOTS`).
 #[test]
-fn a_fifth_root_is_refused_before_launch() {
+fn a_ninth_root_is_refused_before_launch() {
     let (_held, base) = host_directory();
     let workspace = base.join("workspace");
     std::fs::create_dir(&workspace).unwrap();
     let runner = SubstrateRunner::new(Some(base.clone()));
-    let roots: Vec<PathBuf> = (0..5)
+    let roots: Vec<PathBuf> = (0..9)
         .map(|n| {
             let root = base.join(format!("root{n}"));
             std::fs::create_dir(&root).unwrap();
@@ -2057,7 +2060,8 @@ fn a_fifth_root_is_refused_before_launch() {
             |child, (n, file)| child.with_read_only_file(file, format!("/opt/file{n}.toml")),
         )
     };
-    assert_refused(&runner, &workspace, &with_roots(5), &text(&roots[4]), "4");
+    assert_eq!(ChildCommand::MAX_READ_ONLY_ROOTS, 8);
+    assert_refused(&runner, &workspace, &with_roots(9), &text(&roots[8]), "8");
     assert_refused(
         &runner,
         &workspace,
@@ -2065,10 +2069,190 @@ fn a_fifth_root_is_refused_before_launch() {
         &text(&files[16]),
         "16",
     );
-    for within in [with_roots(4), with_files(16)] {
+    for within in [with_roots(8), with_files(16)] {
         let error = runner.run_child(&within).unwrap_err();
         assert_eq!(error.reason, past_every_check(), "{error}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// story:substrate-0-24-0-pin: the mounts a Runbook step needs are admitted on Substrate 0.24.0,
+// whose `linux` adapter proves its facts through `proof(machine, &ExecListProof)`. Each reads its
+// mount and cannot write it.
+
+/// The mount of the toolchain cache directory `relative` (`registry`, `git/db`, `git/checkouts`).
+fn cache_mount(relative: &str) -> String {
+    format!("/toolchain/cargo-cache/{relative}")
+}
+
+/// The toolchain the host's `rustup` resolves is mounted read-only at `/toolchain/rust` for a test,
+/// and its compiler runs there.
+#[test]
+fn the_toolchain_root_is_admitted_on_the_new_pin() {
+    delegated(
+        "the_toolchain_root_is_admitted_on_the_new_pin",
+        |runner, workspace| {
+            let script = "if test -x /toolchain/rust/bin/rustc; then echo compiler; fi; \
+                 if /toolchain/rust/bin/rustc --version >/dev/null 2>&1; then echo runs; fi; \
+                 if touch /toolchain/rust/written 2>/dev/null; then echo writable; else echo read-only; fi";
+            let result = runner
+                .run(&TestCommand::new("sh", ["-c", script]), workspace)
+                .expect("the test runs confined");
+            let Some(root) = result
+                .applied
+                .read_only_roots
+                .iter()
+                .find(|root| root.mount == "/toolchain/rust")
+            else {
+                return skip("rustup resolving an installed Rust toolchain");
+            };
+            assert!(
+                Path::new(&root.host_path).join("bin/rustc").is_file(),
+                "{root:?}"
+            );
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "compiler\nruns\nread-only\n");
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert!(
+                record
+                    .read_only_roots
+                    .iter()
+                    .any(|named| named.mount == "/toolchain/rust"
+                        && named.host_path == root.host_path),
+                "{:?}",
+                record.read_only_roots
+            );
+        },
+    );
+}
+
+/// The three Cargo cache directories of `CARGO_HOME` (`registry`, `git/db`, `git/checkouts`) are
+/// mounted read-only beneath `/toolchain/cargo-cache` for a test, each read there.
+#[test]
+fn the_three_cargo_caches_are_admitted_on_the_new_pin() {
+    let (_held, home) = host_directory();
+    for (relative, inner) in [
+        ("registry", "index"),
+        ("git/db", "db"),
+        ("git/checkouts", "checkout"),
+    ] {
+        let directory = home.join(relative).join(inner);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("marker"), format!("{relative}\n")).unwrap();
+    }
+    let home_text = text(&home);
+    support::delegated(
+        "the_three_cargo_caches_are_admitted_on_the_new_pin",
+        &[(UNNAMED, "leak"), ("CARGO_HOME", home_text.as_str())],
+        |runner, workspace| {
+            let home = PathBuf::from(std::env::var_os("CARGO_HOME").expect("the fixture's home"));
+            let registry = cache_mount("registry");
+            let db = cache_mount("git/db");
+            let checkouts = cache_mount("git/checkouts");
+            let script = format!(
+                "cat {registry}/index/marker {db}/db/marker {checkouts}/checkout/marker; \
+                 for mount in {registry} {db} {checkouts}; do \
+                 if touch \"$mount/written\" 2>/dev/null; then echo writable; else echo read-only; fi; done"
+            );
+            let result = runner
+                .run(&TestCommand::new("sh", ["-c", script.as_str()]), workspace)
+                .expect("the test runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(
+                result.output,
+                "registry\ngit/db\ngit/checkouts\nread-only\nread-only\nread-only\n"
+            );
+            let caches: Vec<ToolchainRoot> = result
+                .applied
+                .read_only_roots
+                .iter()
+                .filter(|root| root.mount.starts_with("/toolchain/cargo-cache/"))
+                .cloned()
+                .collect();
+            assert_eq!(
+                caches,
+                ["registry", "git/db", "git/checkouts"].map(|relative| ToolchainRoot {
+                    host_path: text(&home.join(relative)),
+                    mount: cache_mount(relative),
+                })
+            );
+            for relative in ["registry", "git/db", "git/checkouts"] {
+                assert!(!home.join(relative).join("written").exists(), "{relative}");
+            }
+        },
+    );
+}
+
+/// A bound program at a host path outside the system view is given that path read-only
+/// (`at_host_path`, as `bindings::bound_program_child` gives it) and runs from there.
+#[test]
+fn the_bound_program_binary_is_admitted_on_the_new_pin() {
+    delegated(
+        "the_bound_program_binary_is_admitted_on_the_new_pin",
+        |runner, workspace| {
+            let (_held, host) = host_directory();
+            let program = host.join("bound-program");
+            std::fs::write(
+                &program,
+                "#!/bin/sh\necho ran\nif { echo x >> \"$0\"; } 2>/dev/null; then echo changed; fi\n",
+            )
+            .unwrap();
+            std::fs::set_permissions(
+                &program,
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
+            let child = ChildCommand::new(text(&program), [] as [&str; 0], workspace)
+                .at_host_path(&program);
+            let result = runner.run_child(&child).expect("the program runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "ran\n");
+            assert_eq!(
+                result.applied.read_only_files,
+                [ReadOnlyFile {
+                    host_path: text(&program),
+                    mount: text(&program),
+                }]
+            );
+            assert!(result.applied.read_only_roots.is_empty());
+        },
+    );
+}
+
+/// A retried step's feedback file is given to its program read-only at its own host path
+/// (`at_host_path`, as `b10x_loom_bindings::retry` gives it), and the program reads it there.
+#[test]
+fn the_retry_feedback_file_is_admitted_on_the_new_pin() {
+    delegated(
+        "the_retry_feedback_file_is_admitted_on_the_new_pin",
+        |runner, workspace| {
+            let (_held, store) = host_directory();
+            let feedback = store.join("feedback.json");
+            std::fs::write(&feedback, "{\"attempt\":1}\n").unwrap();
+            let shown = text(&feedback);
+            let script = format!(
+                "cat '{shown}'; if {{ echo x >> '{shown}'; }} 2>/dev/null; then echo changed; fi"
+            );
+            let child =
+                ChildCommand::new("sh", ["-c", script.as_str()], workspace).at_host_path(&feedback);
+            let result = runner
+                .run_child(&child)
+                .expect("the program reads its feedback");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.output, "{\"attempt\":1}\n");
+            assert_eq!(
+                std::fs::read_to_string(&feedback).unwrap(),
+                "{\"attempt\":1}\n"
+            );
+            assert_eq!(
+                result.applied.read_only_files,
+                [ReadOnlyFile {
+                    host_path: shown.clone(),
+                    mount: shown,
+                }]
+            );
+        },
+    );
 }
 
 /// A host path the child could be led elsewhere through, or that names nothing it can be given, is

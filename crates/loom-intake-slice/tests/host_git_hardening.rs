@@ -567,6 +567,9 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         .collect();
     let mut seen = std::collections::BTreeSet::new();
     let mut host_walked = false;
+    // story:substrate-0-24-0-pin: each Substrate crate Loom reaches is one copy, at the tag
+    // `0.24.0`'s commit.
+    let mut substrate = std::collections::BTreeMap::<String, Vec<(String, String)>>::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id.clone()) {
             continue;
@@ -575,11 +578,12 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         let name = package["name"].as_str().unwrap();
         if name == "b10x-substrate-host" {
             host_walked = true;
-            assert_eq!(package["version"], "0.21.0");
-            assert_eq!(
-                package["source"],
-                "git+https://github.com/beyond10x/substrate?rev=adfde4020b14741b167532f46c7a0e9cebf2b3d3#adfde4020b14741b167532f46c7a0e9cebf2b3d3"
-            );
+        }
+        if name.starts_with("b10x-substrate-") {
+            substrate.entry(name.to_owned()).or_default().push((
+                package["version"].as_str().unwrap().to_owned(),
+                package["source"].as_str().unwrap().to_owned(),
+            ));
         }
         assert!(
             git_library(&format!("name = \"{name}\"")).is_none(),
@@ -598,6 +602,23 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         host_walked,
         "the dependency walk reaches `b10x-substrate-host` and descends into it"
     );
+    for name in [
+        "b10x-substrate-host",
+        "b10x-substrate-wire",
+        "b10x-substrate-guarded",
+    ] {
+        assert_eq!(
+            substrate.get(name).map(Vec::as_slice),
+            Some(
+                [(
+                    "0.24.0".to_owned(),
+                    "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774".to_owned()
+                )]
+                .as_slice()
+            ),
+            "one copy of {name}, at Substrate 0.24.0: {substrate:?}"
+        );
+    }
     let mut manifests = vec![root.join("Cargo.toml")];
     for entry in std::fs::read_dir(root.join("crates")).expect("read crates/") {
         let manifest = entry.expect("a crates/ entry").path().join("Cargo.toml");
