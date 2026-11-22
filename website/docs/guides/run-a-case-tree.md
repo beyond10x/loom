@@ -73,6 +73,11 @@ no `exit` or `evidence`, and the run stops `Cancelled` naming that action, withi
 flag. `tree status` shows the case's `stop` `Cancelled`, its `stop_next`, and `cancelled: true` on
 the cancelled run; a cancelled run counts against the action's `budget.max_runs`.
 
+`b10x-loom tree run` sets that flag on SIGTERM or SIGINT (a supervisor's stop, a terminal's
+Ctrl-C): the running program is stopped with every process it started and the run ends `Cancelled`
+with exit 5, so no bound program outlives it. A later signal changes nothing. A `tree run` that
+started itself again in a scope of its own handles no signal itself; the run inside the scope does.
+
 ## Answer what it waits on
 
 `route.approve` is bound to the person `guide`: `tree approve --action` records the approval and

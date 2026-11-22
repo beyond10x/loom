@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::ValueEnum as _;
 
@@ -252,6 +253,10 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         Some(Placement::Held(runner)) => Some(runner),
         None => None,
     };
+    // Taken by the process that runs the steps alone: one that started itself again above waits
+    // for that run and handles no signal of its own, as before.
+    let cancel = Arc::new(AtomicBool::new(false));
+    cancel_on_signals(Arc::clone(&cancel))?;
     let catalog = tree_catalog(&resolved(&arguments.store)?)?;
     let settings = RunSettings {
         max_steps: arguments.max_steps,
@@ -268,7 +273,7 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         &catalog,
         &settings,
         None,
-        None,
+        Some(&cancel),
     )
     .map_err(|mut refused| {
         // A refusal of the confinement names tree run's own remedy, never `run`'s.
@@ -305,6 +310,52 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         );
     }
     Ok(tree_run_exit_status(ran.stop))
+}
+
+/// Sets `cancel` on the first SIGTERM or SIGINT, so the run stops its program and ends
+/// `Cancelled` (exit 5) instead of dying with the program still running; a later signal changes
+/// nothing, since ending at once would leave the program running. The signals are taken before
+/// this returns, and a thread waits for them; one that cannot be taken refuses the run before it
+/// starts anything.
+fn cancel_on_signals(cancel: Arc<AtomicBool>) -> Result<(), Refused> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let refused = |why: String| {
+        Refused::new(
+            TreeRefusalReason::ConfinementRefused,
+            format!("{why}: a signal would end tree run with its program still running"),
+        )
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| refused(format!("no runtime for the stop signals: {e}")))?;
+    let (mut terminate, mut interrupt) = {
+        let _entered = runtime.enter();
+        let taken = |kind: SignalKind, name: &str| {
+            signal(kind).map_err(|e| refused(format!("{name} cannot be handled: {e}")))
+        };
+        (
+            taken(SignalKind::terminate(), "SIGTERM")?,
+            taken(SignalKind::interrupt(), "SIGINT")?,
+        )
+    };
+    std::thread::spawn(move || {
+        runtime.block_on(async {
+            tokio::select! {
+                _ = terminate.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+            cancel.store(true, Ordering::SeqCst);
+            eprintln!("b10x-loom: tree run: cancelling, stopping the running program first");
+            loop {
+                tokio::select! {
+                    _ = terminate.recv() => {}
+                    _ = interrupt.recv() => {}
+                }
+            }
+        });
+    });
+    Ok(())
 }
 
 /// `word` as one word of a POSIX shell: bare when it holds only safe characters, else quoted.

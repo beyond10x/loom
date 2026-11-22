@@ -1645,7 +1645,10 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   with `next` the action the selector would take (`next_action`, nothing written); a step its
   cancel ended (refusal `Cancelled: …`) writes its `action finished` line and stops the run
   `Cancelled` naming its action. The run writes no `action started` line; the tests wait on the
-  program's own start marker (`crates/loom-tree/tests/main.rs`, `mod cancel`).
+  program's own start marker (`crates/loom-tree/tests/main.rs`, `mod cancel`). `b10x-loom tree
+  run` sets the flag on SIGTERM or SIGINT (`cancel_on_signals` in `tree.rs`, taken only by the
+  process that runs the steps, never by one that started itself again), so it ends exit 5 and no
+  bound program outlives it; a later signal changes nothing (`tests/tree_run/signals.rs`).
 - A writer's `handoff_when` (`handoff.rs`, `story:handoff-when-a-program-decides`): `Checked`
   wraps the step's executor, so once the deterministic selector picked an action whose binding
   carries one, `b10x_loom_bindings::run_handoff_check` runs it before the loop performs the step,

@@ -712,12 +712,14 @@ Every open child takes its steps before its parent's next one; each step is sele
 
 Confinement: the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree run starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree run --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined. Started again, tree run moves into a leaf of its scope and the scope is its cgroup root. A root is held by one tree run at a time and released when that run ends, killed or not, so two runs never share a root; tree run never takes an ancestor cgroup it finds.
 
+SIGTERM or SIGINT cancels the run: a program it is running is stopped with every process it started and its step recorded cancelled, and the run ends Cancelled with exit status 5; a later signal changes nothing.
+
 Exit status:
   0  the root is terminated through its one legitimate outcome
   1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
-  5  the step or wall-time budget is spent, or the run was cancelled
+  5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run
 ```
 
 ## `b10x-loom tree approve`

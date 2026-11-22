@@ -124,6 +124,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Security
 
 - Two `tree run`s never share a cgroup root: each holds its root by a `flock` on the root's directory, so one run's driver no longer ends another run's confined launches (story:tree-run-takes-a-delegated-cgroup)
+- `tree run` cancels on SIGTERM or SIGINT: the running bound program is stopped with every process it started and the run ends `Cancelled`, exit 5, instead of dying by the signal with its program still running
 
 ## [0.58.0] - 2026-11-21
 
