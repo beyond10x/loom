@@ -29,6 +29,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `loom.bindings.CopiedRecord`, `CopyRefusalReason` and `CopyRefusal`, the copy's observation and its refusals (story:record-copy-between-cases)
 - `program_root: bindings` and `b10x_loom_bindings::resolve_programs`: a bound program named beside its bindings file (story:bound-program-contract)
 - A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
+- `b10x-loom tree open`, `tree approve`, `tree status` and `tree verify` in the new crate `b10x-loom-tree`: one writer per store, `StoreInUse` names it (story:tree-run-command)
+- `b10x-loom tree run` drives a tree of cases on Commission's loop until the root ends or the tree waits, printing each decision as the command that takes it; `b10x_loom_tree::run_tree` takes an observer of each run-log line and a cancel handle (story:tree-run-command)
+- `b10x-loom tree approve --action` takes a `person` action as the approving principal (story:tree-run-command)
+- `tree status` prints `loom.tree-status/1`: per case its link name, protocol id and revision, the decisions it waits on, its records, program runs, approvals and copies; `b10x_loom_tree::read_status`, `stored_catalog` and `STATUS_FORMAT` (story:tree-run-command)
+- `b10x_loom_protocols::canon` re-exports the Canon crate Loom links; an embedder names one runtime dependency.
 
 ### Changed
 
@@ -61,6 +66,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `bound_case_child` takes `CaseNames`; `ProgramEnvironment` gains `loom_timeout_seconds`, `loom_case_name`, `loom_parent_case_name` (story:bound-program-contract)
 - **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
 - **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
+- **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
 
 ### Removed
 

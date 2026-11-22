@@ -1,0 +1,12 @@
+format: loom.bindings/1
+protocol: tour-leg@1
+artifacts:
+  route: route.txt
+actions:
+  - action: route.write
+    executor:
+      kind: agent
+      adapter: claude-code
+      outputs: [route.txt]
+    retry_when:
+      route_check: [invalid]

@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 6a11f708ca50ab2e73836876ae5a92421f2c85ffa5f8f197194f2f98694a8e71
+  contract digest d8d7d39dbecbd81471f7e6f22a7ef0473ff3fc40b31db137f4535fc29e93e708
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-434 capabilities: **418 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+455 capabilities: **439 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -274,6 +274,27 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.session.ToolDecision` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
+| domain type | `loom.tree.ApprovalDecision` |
+| domain type | `loom.tree.CaseApproval` |
+| domain type | `loom.tree.CaseStatus` |
+| domain type | `loom.tree.DecisionKind` |
+| domain type | `loom.tree.LogFailure` |
+| domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.StatusApproval` |
+| domain type | `loom.tree.StatusCopy` |
+| domain type | `loom.tree.StatusEvidence` |
+| domain type | `loom.tree.StatusRun` |
+| domain type | `loom.tree.TreeBudget` |
+| domain type | `loom.tree.TreeCatalog` |
+| domain type | `loom.tree.TreeLogHead` |
+| domain type | `loom.tree.TreeManifest` |
+| domain type | `loom.tree.TreeProtocol` |
+| domain type | `loom.tree.TreeRefusal` |
+| domain type | `loom.tree.TreeRefusalReason` |
+| domain type | `loom.tree.TreeRun` |
+| domain type | `loom.tree.TreeStatus` |
+| domain type | `loom.tree.TreeStop` |
+| domain type | `loom.tree.TreeVerify` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |
