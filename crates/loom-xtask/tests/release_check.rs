@@ -1264,7 +1264,17 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
         steps,
         "cargo build --release --locked -p b10x-loom-cli --bin b10x-loom",
     );
+    // story:drop-the-substrate-git-feature: the built binary links no libgit2, libssh2, OpenSSL
+    // or zlib, checked before it is packed.
+    let linked = step_running(
+        steps,
+        "cargo run -q --locked -p loom-xtask -- linked-libraries target/release/b10x-loom",
+    );
     let package = step_running(steps, "sha256sum");
+    assert!(
+        build < linked && linked < package,
+        "binaries.yml must check the linked libraries after the build and before packing"
+    );
     let run = steps[package]["run"].as_str().unwrap();
     for fragment in [
         r#"[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]"#,

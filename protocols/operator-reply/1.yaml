@@ -51,6 +51,18 @@ actions:
     effect: read
     requires:
       - capability: datasource.read
+    arguments:
+      type: object
+      properties:
+        source:
+          type: string
+        kind:
+          type: string
+          enum: [list, search, get]
+        input:
+          type: object
+      required: [source, kind, input]
+      additionalProperties: false
     may_produce:
       - evidence: source_read
   reply.propose:
@@ -63,6 +75,13 @@ actions:
       is: unknown
     requires:
       - capability: reply.propose
+    arguments:
+      type: object
+      properties:
+        text:
+          type: string
+      required: [text]
+      additionalProperties: false
     may_produce:
       - evidence: reply_proposed
   reply.send:
@@ -75,6 +94,17 @@ actions:
       is: true
     requires:
       - capability: reply.send
+    arguments:
+      type: object
+      properties:
+        channel:
+          type: string
+        thread_ts:
+          type: string
+        text:
+          type: string
+      required: [channel, text]
+      additionalProperties: false
     may_produce:
       - evidence: reply_sent
   reply.decline:
@@ -85,6 +115,13 @@ actions:
     precondition:
       claim: reply.proposed
       is: unknown
+    arguments:
+      type: object
+      properties:
+        reason:
+          type: string
+      required: [reason]
+      additionalProperties: false
     may_produce:
       - evidence: reply_declined
 outcomes:

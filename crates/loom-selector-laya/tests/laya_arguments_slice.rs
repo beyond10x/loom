@@ -22,8 +22,10 @@
 //! the strategy of the selector that made it (`story:fallback-selection-recording`): Laya's is
 //! `FastTyped`, the reasoning model's `ReasoningModel`. In run 2 the record holds two selections,
 //! Laya's `Overruled` and naming the reasoning model's, which alone reaches argument generation and
-//! revalidation; in run 3 Laya's choice is not a candidate, so it is no selection. Schema validation of
-//! the arguments (`decision-blocker:action-argument-schema`) and selection telemetry are not here.
+//! revalidation; in run 3 Laya's choice is not a candidate, so it is no selection. Each run's Loom
+//! checks the arguments against a schema for each frontier action (`story:protocol-argument-schema`),
+//! and a fourth run whose arguments miss a required member proposes nothing. Selection telemetry is
+//! not here.
 //! No test makes a network call beyond 127.0.0.1.
 
 use std::collections::BTreeSet;
@@ -49,7 +51,9 @@ use b10x_loom_executor::model::run::{
     SelectionStrategy,
 };
 use b10x_loom_executor::model_selector::{Briefing, ModelSelector};
-use b10x_loom_executor::{ArgumentContext, ArgumentGenerator, HybridSelector, Loom};
+use b10x_loom_executor::{
+    ArgumentContext, ArgumentGenerator, ArgumentSchemas, HybridSelector, Loom,
+};
 use b10x_loom_selector_laya::{LayaSelector, QUESTION};
 use llm_core::{
     BoxFuture, CallId, Cancel, Capabilities, Error, Id, Item, Model, Protocol, Provenance,
@@ -320,10 +324,11 @@ fn arguments_for(action: &str) -> CommissionValue {
 }
 
 /// An argument generator that records every entry it is handed and answers with
-/// [`arguments_for`] it.
+/// [`arguments_for`] it, less the member `missing` names when it names one.
 #[derive(Clone, Default)]
 struct CountingArguments {
     handed: Arc<Mutex<Vec<CatalogueEntry>>>,
+    missing: Option<&'static str>,
 }
 
 impl CountingArguments {
@@ -349,8 +354,31 @@ impl ArgumentGenerator for CountingArguments {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(entry.clone());
-        Ok(arguments_for(&entry.action))
+        let mut arguments = arguments_for(&entry.action);
+        if let (Some(missing), CommissionValue::Object(members)) = (self.missing, &mut arguments) {
+            members.retain(|(name, _)| name != missing);
+        }
+        Ok(arguments)
     }
+}
+
+/// The argument schema each frontier action declares: the two members [`arguments_for`]
+/// writes, both required, and no other.
+fn schemas() -> ArgumentSchemas {
+    FRONTIER
+        .iter()
+        .map(|action| {
+            (
+                (*action).to_owned(),
+                Some(json!({
+                    "type": "object",
+                    "properties": {"service": {"type": "string"}, "for": {"type": "string"}},
+                    "required": ["service", "for"],
+                    "additionalProperties": false
+                })),
+            )
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -413,6 +441,22 @@ struct Observed {
 /// One run of Loom on the governor's frontier, with the stub answering `laya_choice` at
 /// `laya_probability` and the reasoning model, if asked, naming `model_choice`.
 fn run(laya_choice: &str, laya_probability: &str, model_choice: &'static str) -> Observed {
+    run_with(
+        laya_choice,
+        laya_probability,
+        model_choice,
+        CountingArguments::default(),
+    )
+}
+
+/// [`run`], with `arguments` as the argument generator. Loom checks the arguments against
+/// [`schemas`] (`story:protocol-argument-schema`).
+fn run_with(
+    laya_choice: &str,
+    laya_probability: &str,
+    model_choice: &'static str,
+    arguments: CountingArguments,
+) -> Observed {
     let stub = StubLaya::choosing(laya_choice, laya_probability);
     let model_requests = Arc::new(Mutex::new(Vec::new()));
     let model = ScriptedModel::new(model_choice, Arc::clone(&model_requests));
@@ -422,9 +466,10 @@ fn run(laya_choice: &str, laya_probability: &str, model_choice: &'static str) ->
         &Decimal(THRESHOLD.to_owned()),
     )
     .expect("the supplied threshold is a decimal in [0, 1]");
-    let arguments = CountingArguments::default();
     let governor = governor();
-    let loom = Loom::new(selector, arguments.clone(), PROMPT).with_governor(&governor);
+    let loom = Loom::new(selector, arguments.clone(), PROMPT)
+        .with_argument_schemas(schemas())
+        .with_governor(&governor);
 
     // Commission hands the executor the frontier its governor issues for the case.
     let frontier = governor
@@ -669,4 +714,35 @@ fn a_choice_outside_the_frontier_is_rejected_and_never_reaches_arguments_or_reva
         observed.selections[0].1, None,
         "the fallback carries no confidence"
     );
+}
+
+/// `story:protocol-argument-schema`: Laya's choice above the threshold is `release.inspect`, and
+/// the arguments written for it miss `for`, which its schema requires: nothing is proposed, the
+/// selection is never revalidated, and the governor serves only the run's frontier.
+#[test]
+fn generated_arguments_that_do_not_match_release_inspect_are_never_proposed() {
+    let arguments = CountingArguments {
+        missing: Some("for"),
+        ..CountingArguments::default()
+    };
+    let observed = run_with(RELEASE, "0.96", LOGS, arguments);
+
+    assert!(
+        !matches!(observed.outcome, ExecutorOutcome::ProposedAction(_)),
+        "{:?}",
+        observed.outcome
+    );
+    let handed: Vec<&str> = observed.handed.iter().map(|e| e.action.as_str()).collect();
+    assert_eq!(handed, [RELEASE], "arguments were generated once, for it");
+    assert!(
+        observed.revalidations.is_empty(),
+        "{:?}",
+        observed.revalidations
+    );
+    assert_eq!(
+        observed.governor_calls,
+        [GovernorCall::Frontier(case())],
+        "no frontier read for a revalidation"
+    );
+    assert_eq!(observed.argument_requests.len(), 1);
 }

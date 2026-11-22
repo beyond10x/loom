@@ -246,3 +246,43 @@ fn propose_and_decline_exclude_each_other() {
         "a proposed reply is not declined after: {actions}"
     );
 }
+
+/// The schema `source.read` declares is the shape the plugin's effect port reads
+/// (`crates/loom-plugin/src/effects.rs`, `source.read {source, kind, input}`): all three required,
+/// no other member; `kind` one of the three read kinds, `input` an object. `reply.propose` takes
+/// `{text}`, `reply.decline` `{reason}`, each required and closed.
+#[test]
+fn source_read_declares_the_arguments_the_plugin_effect_port_reads() {
+    let catalog = ProtocolCatalog::plugins().expect("the plugin catalog");
+    let entry = catalog.get(NAME).expect("inbound-answer@1");
+    let Some(loom_protocols::ArgumentSchema::Declared(schema)) =
+        entry.argument_schema("source.read")
+    else {
+        panic!("source.read declares no argument schema");
+    };
+    assert_eq!(
+        schema,
+        json!({
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "kind": {"type": "string", "enum": ["list", "search", "get"]},
+                "input": {"type": "object"}
+            },
+            "required": ["source", "kind", "input"],
+            "additionalProperties": false
+        })
+    );
+    for (action, member) in [("reply.propose", "text"), ("reply.decline", "reason")] {
+        assert_eq!(
+            entry.argument_schema(action),
+            Some(loom_protocols::ArgumentSchema::Declared(json!({
+                "type": "object",
+                "properties": {member: {"type": "string"}},
+                "required": [member],
+                "additionalProperties": false
+            }))),
+            "{action}"
+        );
+    }
+}
