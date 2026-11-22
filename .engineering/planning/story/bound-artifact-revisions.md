@@ -25,7 +25,7 @@ scope:
   path: crates/loom-governor/tests/step_write.rs
 - confidence: cited
   path: ess/domains/bindings.yaml
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:45Z", actor: "human:timo", revision: 7, decided_on: {"recorded":{"review_outcome":1}}}
 - {from: "proposed", to: "active", at: "2026-11-21T21:13:21Z", actor: "agent:sdc", revision: 8, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
@@ -105,3 +105,9 @@ Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the sto
 - **Safety fact:** `update_revision` and `receive` are infallible-closure writes, so a combined method that validates before it mutates inside one `update` closure leaves the case file either as it was or complete after the step — `file_store.rs:280-293` and `file_store.rs:180-195`, unproven
 - **Safety fact:** `applies` needs no change. It only asks whether Canon evaluates without refusal (`lib.rs:1779-1791`). A record bound to a superseded revision is kept, applies and is excluded by Canon's own binding (`tests/adversary_governor.rs:75-112`), so the order of moves and evidence does not change `applies` — unproven for a revision ahead of the case's, which no test covers.
 - **Safety fact:** `ess/domains/governor.yaml` is not touched. `StoredCase` and `StoredEvidenceData` hold the same fields before and after (`subject_revision` is an Integer at `governor.yaml`/`file_store.rs:607`), and the new method adds no stored member — inferred from the story naming no new stored field, unproven
+
+Edges:
+
+- Shares the sync sites of `crates/loom-governor/src/locked_dir.rs` and `file_store.rs` with
+  `story:tree-run-tests-fit-the-budget`. A sync this story adds goes through that story's
+  `durable` door of `b10x-loom-governor`, and its test `no_sync_outside_the_door` holds.
