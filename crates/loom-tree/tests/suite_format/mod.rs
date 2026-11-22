@@ -279,6 +279,7 @@ fn build_end_state(dir: &Path) {
         RunLogEvent::Stopped(Stopped {
             stop: "AwaitingPerson".into(),
             next: Vec::new(),
+            budget: None,
         }),
     );
     append(
