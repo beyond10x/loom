@@ -380,6 +380,51 @@ types:
       - name: failure
         type: Optional<loom.tree.LogFailure>
 
+  # One case of `tree replay` (story tree-replay-command): the case decided again from what the
+  # store holds, as of its last `evaluated` line, the case rebuilt by undoing every line of its run
+  # log after that one. `evaluated`: whether its log holds an `evaluated` line; every member after
+  # it is absent when it does not. `seq` and `at`: that line's. `case_revision`: the rebuilt case's
+  # revision, `logged_case_revision` the line's. `unmatched_line`: the `seq` of the first line,
+  # newest first, whose undo does not apply to the case as held (a record or a link it does not
+  # hold, a move whose `to` is not the artifact's revision, a `child closed` whose `child opened`
+  # is not after the `evaluated` line); absent when every line's applies. `state_matches_log`: the
+  # two revisions are equal and no line is unmatched. `decision_digest`: the SHA-256 of Canon's
+  # decision for the rebuilt case, encoded as the line's `decision_digest`, which is
+  # `logged_decision_digest`. `decision_matches_log`: the two digests are equal.
+  - name: loom.tree.CaseReplay
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: evaluated
+        type: Boolean
+      - name: seq
+        type: Optional<Integer>
+      - name: at
+        type: Optional<String>
+      - name: case_revision
+        type: Optional<Integer>
+      - name: logged_case_revision
+        type: Optional<Integer>
+      - name: unmatched_line
+        type: Optional<Integer>
+      - name: state_matches_log
+        type: Optional<Boolean>
+      - name: decision_digest
+        type: Optional<String>
+      - name: logged_decision_digest
+        type: Optional<String>
+      - name: decision_matches_log
+        type: Optional<Boolean>
+
+  # `tree replay`: one entry per case, in tree order, or for the case `--case` names and the cases
+  # below it. It reads the store and never holds it.
+  - name: loom.tree.TreeReplay
+    kind: struct
+    fields:
+      - name: cases
+        type: List<loom.tree.CaseReplay>
+
   # A suite of scripted tree cycles (story tree-suite-format), `loom.tree-suite/1`: the format,
   # the members every cycle takes unless it states its own, and the cycles, run one after another
   # by `b10x-loom tree test`. A check is data: a selection over what the cycle left and one test
