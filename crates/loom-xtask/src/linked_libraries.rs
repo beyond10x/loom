@@ -65,8 +65,15 @@ fn verdict(binary: &Path, ldd: &str) -> Result<(), String> {
 /// The libraries of [`REFUSED`] that `ldd`'s output names, each as `ldd` names it
 /// (`libgit2.so.1.9`), in its order.
 pub fn refused_libraries(ldd: &str) -> Vec<&str> {
-    let _ = ldd;
-    Vec::new()
+    ldd.lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .map(|first| first.rsplit('/').next().unwrap_or(first))
+        .filter(|library| {
+            library
+                .split_once(".so")
+                .is_some_and(|(stem, _)| REFUSED.contains(&stem))
+        })
+        .collect()
 }
 
 #[cfg(test)]
