@@ -75,12 +75,14 @@ types:
   # refused or failed records nothing. A Person executor's `Effect` table may also list other
   # named values, never `*`: the result a person names when taking the action, `performed`
   # when it names none; a value its table does not list is refused and records nothing.
-  # `Report` is a JSON pointer into the program's report. A
-  # Program executor's entries read `Exit` or `Report`, never `Effect`; a Person or Open
-  # executor's entries read `Effect` alone; an Agent's and a Copy's are not restricted.
+  # `Report` is a JSON pointer into the program's report. `Runs` Loom's count of the action's
+  # runs: `spent` on the run that reaches `budget.max_runs`; a Program executor's entry only
+  # (story outcome-when-reads-the-run-count). A Program executor's entries read `Exit`,
+  # `Report` or `Runs`, never `Effect`; a Person or Open executor's entries read `Effect` alone;
+  # an Agent's and a Copy's read anything but `Runs`.
   - name: loom.bindings.ResultSource
     kind: enum
-    variants: [Exit, Effect, Report]
+    variants: [Exit, Effect, Report, Runs]
 
   # One row of a result table: the value read (`*` for any other) and the evidence result it
   # becomes; absent, the record carries no result.
