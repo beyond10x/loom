@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- ESS 0.97.4 (format unchanged)
+
 ## [0.59.0] - 2026-11-22
 
 ### Added
