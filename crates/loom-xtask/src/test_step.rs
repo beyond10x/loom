@@ -7,8 +7,10 @@
 //! at 60 s and writes a JUnit report, then `cargo test --doc --workspace --locked` (nextest runs no
 //! doc tests). It reads every test's time from the JUnit report and prints the ten slowest on every
 //! run, green or red, then fails when either run failed, a test took longer than
-//! [`TEST_BUDGET`], a binary of [`BINARY_BUDGETS`] longer than its summed budget, or the step
-//! longer than [`STEP_BUDGET`]. Its summary line counts the tests that skipped for a missing
+//! [`TEST_BUDGET`], the tests of [`BINARY_BUDGETS`] longer than their summed budget, the tests of
+//! [`START_BUDGETS`] started `b10x-loom` more often than their bound (each start a line of the file
+//! the budget's variable names, which the step sets on its nextest run), or the step longer than
+//! [`STEP_BUDGET`]. Its summary line counts the tests that skipped for a missing
 //! prerequisite (a line `skipped:` in their output), and it names each; where a delegated user
 //! scope starts it sets [`REQUIRE_DELEGATION`] on its nextest run, so a delegated test that would
 //! skip fails instead ([`require_delegation`]). It refuses to start while the test sync switch
@@ -107,10 +109,92 @@ fn probe_delegation() -> Result<(), String> {
     }
 }
 
-/// Test binaries held to a summed time of their own, beside [`TEST_BUDGET`] and [`STEP_BUDGET`]:
-/// `b10x-loom-cli::tree_run` (`story:tree-run-tests-fit-the-budget`).
-pub const BINARY_BUDGETS: [(&str, Duration); 1] =
-    [("b10x-loom-cli::tree_run", Duration::from_secs(60))];
+/// The tests of one test module of a package, wherever they run: in a test binary of their own, or
+/// as a module of the package's one test binary `main` (`story:one-test-binary-per-crate`), their
+/// names then prefixed with the module's.
+#[derive(Debug, Clone, Copy)]
+pub struct Tests {
+    /// The name the step prints for them: `<package>::<module>`.
+    pub label: &'static str,
+    /// Each `(binary id, name prefix)` that selects them.
+    pub layouts: [(&'static str, &'static str); 2],
+}
+
+impl Tests {
+    /// Whether `case` is one of these tests.
+    pub fn holds(&self, case: &Case) -> bool {
+        self.layouts
+            .iter()
+            .any(|(binary, prefix)| case.binary == *binary && case.name.starts_with(prefix))
+    }
+}
+
+/// The tests of `crates/loom-cli/tests/tree_run.rs`, in either layout.
+pub const TREE_RUN: Tests = Tests {
+    label: "b10x-loom-cli::tree_run",
+    layouts: [
+        ("b10x-loom-cli::tree_run", ""),
+        ("b10x-loom-cli::main", "tree_run::"),
+    ],
+};
+
+/// Tests held to a summed time of their own, beside [`TEST_BUDGET`] and [`STEP_BUDGET`]: those of
+/// [`TREE_RUN`] (`story:tree-run-tests-fit-the-budget`).
+pub const BINARY_BUDGETS: [(Tests, Duration); 1] = [(TREE_RUN, Duration::from_secs(60))];
+
+/// How many processes of `b10x-loom` the tests of a module may start in one run of the step
+/// (`story:tree-run-tests-fit-the-test-budget`): a count that does not move with the host's load,
+/// as seconds do. Each start appends one line to the file `variable` names, which the step sets
+/// for its nextest run.
+#[derive(Debug, Clone, Copy)]
+pub struct StartBudget {
+    pub tests: Tests,
+    pub variable: &'static str,
+    pub bound: usize,
+}
+
+/// The start budgets: [`TREE_RUN`]'s starts, counted by `with_the_switch` in
+/// `crates/loom-cli/tests/tree_run.rs`, bounded at the count the story left them at.
+pub const START_BUDGETS: [StartBudget; 1] = [StartBudget {
+    tests: TREE_RUN,
+    variable: "LOOM_TREE_RUN_STARTS",
+    bound: 66,
+}];
+
+/// The line the step prints about `budget`'s starts and the reason it fails, given the cases of
+/// the run and the text of the starts file (`None` when the run wrote none). Nothing when none of
+/// the budget's tests ran; a failure when they ran and counted no start, since then the counting
+/// is broken.
+pub fn start_verdict(
+    budget: &StartBudget,
+    cases: &[Case],
+    starts: Option<&str>,
+) -> (String, Option<String>) {
+    let label = budget.tests.label;
+    if !cases.iter().any(|case| budget.tests.holds(case)) {
+        return (String::new(), None);
+    }
+    let count = starts.map_or(0, |text| text.lines().count());
+    let text = format!(
+        "{label}: {count} starts of b10x-loom, of {} ({})",
+        budget.bound, budget.variable
+    );
+    let failure = if count == 0 {
+        Some(format!(
+            "{label} ran and counted no start of b10x-loom in {}: the counting is broken",
+            budget.variable
+        ))
+    } else if count > budget.bound {
+        Some(format!(
+            "{label} made {count} starts of b10x-loom, over the {} they may make: run the \
+             library in process where a test is not about the binary",
+            budget.bound
+        ))
+    } else {
+        None
+    };
+    (text, failure)
+}
 
 /// One test case of nextest's JUnit report.
 #[derive(Debug, Clone, PartialEq)]
@@ -247,9 +331,28 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     }
     let mut command = cargo_command(root);
     if require {
-        // [`REQUIRE_DELEGATION`] spelled out: this file names the test switch, and
-        // `loom_governor::durable` clears a variable set here only when its name is a literal.
+        // A name in a literal, as for the start budgets below: `loom_governor::durable`
+        // clears a variable set here only when its name is a literal.
         command.env("LOOM_REQUIRE_DELEGATION", "1");
+    }
+    let starts: Vec<(StartBudget, PathBuf)> = START_BUDGETS
+        .iter()
+        .map(|budget| {
+            let file = starts_file(root, budget);
+            let _ = fs::remove_file(&file);
+            if let Some(directory) = file.parent() {
+                let _ = fs::create_dir_all(directory);
+            }
+            (*budget, file)
+        })
+        .collect();
+    for (budget, file) in &starts {
+        // A name in a literal, which `only_the_allowed_files_name_or_set_the_switch` (in
+        // `crates/loom-governor/src/durable.rs`) reads as not the test sync switch.
+        match budget.variable {
+            "LOOM_TREE_RUN_STARTS" => command.env("LOOM_TREE_RUN_STARTS", file),
+            other => return Err(format!("test step: no start budget counts in {other}")),
+        };
     }
     let nextest = command
         .args(&nextest)
@@ -287,7 +390,17 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
             ));
         }
     };
-    let (text, failures) = verdict(&cases, nextest, doc, wall, nextest_seconds, doc_seconds);
+    let (mut text, mut failures) =
+        verdict(&cases, nextest, doc, wall, nextest_seconds, doc_seconds);
+    for (budget, file) in &starts {
+        let (line, failure) =
+            start_verdict(budget, &cases, fs::read_to_string(file).ok().as_deref());
+        if !line.is_empty() {
+            text.push('\n');
+            text.push_str(&line);
+        }
+        failures.extend(failure);
+    }
     println!("{text}");
     if failures.is_empty() {
         Ok(())
@@ -340,20 +453,21 @@ pub fn verdict(
     }
 
     let mut failures = Vec::new();
-    for (binary, budget) in BINARY_BUDGETS {
-        let held: Vec<&Case> = cases.iter().filter(|case| case.binary == binary).collect();
+    for (tests, budget) in BINARY_BUDGETS {
+        let held: Vec<&Case> = cases.iter().filter(|case| tests.holds(case)).collect();
         if held.is_empty() {
             continue;
         }
+        let label = tests.label;
         let summed: f64 = held.iter().map(|case| case.seconds).sum();
         text.push_str(&format!(
-            "\n{binary}: {summed:.1} s summed over {} test(s), of {} s",
+            "\n{label}: {summed:.1} s summed over {} test(s), of {} s",
             held.len(),
             budget.as_secs()
         ));
         if summed > budget.as_secs_f64() {
             failures.push(format!(
-                "{binary} ran {summed:.1} s summed over its {} test(s), over the {} s they may \
+                "{label} ran {summed:.1} s summed over its {} test(s), over the {} s they may \
                  take together",
                 held.len(),
                 budget.as_secs()
@@ -477,6 +591,13 @@ fn fill_schema_cache(root: &Path) -> Result<(PathBuf, f64), String> {
         }
     })?;
     Ok((made, started.elapsed().as_secs_f64()))
+}
+
+/// The file `budget`'s starts are counted in, under the build directory beside nextest's report.
+fn starts_file(root: &Path, budget: &StartBudget) -> PathBuf {
+    target_dir(root)
+        .join("nextest")
+        .join(format!("{}.starts", budget.variable.to_lowercase()))
 }
 
 fn describe(code: Option<i32>) -> String {
@@ -748,15 +869,28 @@ mod tests {
 
     /// A report whose `tree_run` tests take `seconds` each, beside one test of another binary.
     fn tree_run_report(seconds: &[f64]) -> String {
-        let mut xml = String::from(
+        tree_run_report_in("b10x-loom-cli::tree_run", "", seconds)
+    }
+
+    /// A report whose `tree_run` tests take `seconds` each in the test binary `binary`, each named
+    /// `<prefix>case_<n>`, beside one test of another binary and, in `binary`, one test of another
+    /// module that takes 50 s.
+    fn tree_run_report_in(binary: &str, prefix: &str, seconds: &[f64]) -> String {
+        let mut xml = format!(
             r#"<testsuites name="nextest-run">
-    <testsuite name="b10x-loom-cli::tree_run" tests="2">
-"#,
+    <testsuite name="{binary}" tests="2">
+"#
         );
         for (n, time) in seconds.iter().enumerate() {
             xml.push_str(&format!(
-                "        <testcase name=\"case_{n}\" classname=\"b10x-loom-cli::tree_run\" \
+                "        <testcase name=\"{prefix}case_{n}\" classname=\"{binary}\" \
                  timestamp=\"t\" time=\"{time:.3}\"/>\n"
+            ));
+        }
+        if !prefix.is_empty() {
+            xml.push_str(&format!(
+                "        <testcase name=\"run_events::other\" classname=\"{binary}\" \
+                 timestamp=\"t\" time=\"50.000\"/>\n"
             ));
         }
         xml.push_str(
@@ -768,6 +902,109 @@ mod tests {
 "#,
         );
         xml
+    }
+
+    /// A starts file of one line over the bound fails the step, naming `tree_run`, the count and
+    /// the bound; one at the bound passes; and tests of the module that ran with no starts file
+    /// fail it, since then nothing was counted.
+    #[test]
+    fn a_module_over_its_start_budget_fails_the_step() {
+        let budget = &START_BUDGETS[0];
+        assert_eq!(budget.variable, "LOOM_TREE_RUN_STARTS");
+        let ran = parse_junit(&tree_run_report(&[1.0, 2.0]));
+        let lines =
+            |count: usize| -> String { (0..count).map(|n| format!("case_{}\n", n % 2)).collect() };
+        let over = budget.bound + 1;
+        let (text, failure) = start_verdict(budget, &ran, Some(&lines(over)));
+        let failure = failure.expect("a start over the bound fails the step");
+        assert!(
+            failure.contains("tree_run")
+                && failure.contains(&format!("{over} starts"))
+                && failure.contains(&format!("{} ", budget.bound)),
+            "{failure}"
+        );
+        assert!(
+            text.contains("tree_run") && text.contains(&format!("{over} starts")),
+            "{text}"
+        );
+
+        let (text, failure) = start_verdict(budget, &ran, Some(&lines(budget.bound)));
+        assert_eq!(failure, None, "{text}");
+        assert!(text.contains(&format!("{} starts", budget.bound)), "{text}");
+
+        let (_, failure) = start_verdict(budget, &ran, None);
+        assert!(
+            failure.is_some_and(|failure| failure.contains("no start")),
+            "tests that ran counting nothing pass"
+        );
+        let other = parse_junit(REPORT);
+        let (text, failure) = start_verdict(budget, &other, None);
+        assert_eq!((text.as_str(), failure), ("", None));
+    }
+
+    /// The `tree_run` tests are held to their summed budget in both layouts of
+    /// `story:one-test-binary-per-crate`: as the binary `b10x-loom-cli::tree_run`, and as the
+    /// module `tree_run` of `b10x-loom-cli::main`, its tests named `tree_run::…`. Another module of
+    /// `main` is not counted with them.
+    #[test]
+    fn the_budgets_select_tree_run_in_its_own_binary_and_in_main() {
+        for (binary, prefix) in [
+            ("b10x-loom-cli::tree_run", ""),
+            ("b10x-loom-cli::main", "tree_run::"),
+        ] {
+            let over = parse_junit(&tree_run_report_in(binary, prefix, &[30.5, 30.5]));
+            let (text, failures) =
+                verdict(&over, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
+            assert_eq!(failures.len(), 1, "{binary}: {failures:?}");
+            assert!(
+                failures[0].contains("tree_run")
+                    && failures[0].contains("61.0 s")
+                    && failures[0].contains("60 s"),
+                "{binary}: {failures:?}"
+            );
+            assert!(
+                text.contains("61.0 s summed over 2 test(s)"),
+                "{binary}: {text}"
+            );
+
+            let within = parse_junit(&tree_run_report_in(binary, prefix, &[30.0, 29.0]));
+            let (text, failures) =
+                verdict(&within, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
+            assert!(failures.is_empty(), "{binary}: {failures:?}");
+            assert!(
+                text.contains("59.0 s summed over 2 test(s)"),
+                "{binary}: {text}"
+            );
+        }
+    }
+
+    /// The filter of the override that kills a `tree_run` test at 20 s: the binary while it is its
+    /// own, or its module in `b10x-loom-cli::main`; never a `slow_` test, since the default
+    /// profile's overrides apply to the slow profile too.
+    const TREE_RUN_FILTER: &str = "(binary_id(b10x-loom-cli::tree_run) or \
+        (binary_id(b10x-loom-cli::main) and test(/^tree_run::/))) and not test(/(^|::)slow_/)";
+
+    #[test]
+    fn the_tree_run_override_holds_in_both_layouts() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let overrides = config["profile"]["default"]["overrides"]
+            .as_array()
+            .unwrap();
+        let held: Vec<&toml::Value> = overrides
+            .iter()
+            .filter(|table| table["filter"].as_str() == Some(TREE_RUN_FILTER))
+            .collect();
+        assert_eq!(
+            held.len(),
+            1,
+            "one override has the filter {TREE_RUN_FILTER:?}: {overrides:?}"
+        );
+        let limit = &held[0]["slow-timeout"];
+        assert_eq!(limit["period"].as_str(), Some("20s"), "{limit:?}");
+        assert_eq!(limit["terminate-after"].as_integer(), Some(1), "{limit:?}");
     }
 
     #[test]

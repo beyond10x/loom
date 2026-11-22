@@ -71,6 +71,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
+- The test step fails when the `tree_run` tests start `b10x-loom` more than 66 times (`START_BUDGETS`, `LOOM_TREE_RUN_STARTS`; 317 before) and holds their 60 s sum and 20 s kill in their own binary and in `b10x-loom-cli::main` alike; they run the library in process where the binary is not their subject (story:tree-run-tests-fit-the-test-budget)
 - **Breaking:** a `run_tree` whose cancel flag is set before a step stops `Cancelled` (`TreeStop::Cancelled`, new), its `stopped` line naming the action that was to be taken next, no longer `BudgetSpent` with no `next`; a step its cancel ended stops `Cancelled` naming its action; `b10x-loom tree run` still exits 5 (story:cancel-a-running-bound-program)
 - **Breaking:** `ConfinementRefusal` and `ProgramRefusalReason` gain `Cancelled`; `ProgramRun` gains `cancelled`, `StatusRun` gains `cancelled` (story:cancel-a-running-bound-program)
 - **Breaking:** `run_handoff_check` takes `cancel: Option<&Cancel>`, and `HandoffCheck` gains `cancelled` (story:handoff-check-holds-the-cancel)

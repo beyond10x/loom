@@ -130,10 +130,8 @@ fn a_check_that_exits_0_hands_the_action_off() {
     );
 
     // The log is the record of the check's answer: reading the tree runs no check.
-    for verb in ["status", "verify"] {
-        let read = tree.tree(verb);
-        ended(&read, 0);
-    }
+    tree.status();
+    ended(&tree.verified(), 0);
     let runs = fs::read_to_string(tree.workspace().join("check-runs.txt")).unwrap();
     assert_eq!(runs.lines().count(), 1, "the check ran {runs:?}");
 }
