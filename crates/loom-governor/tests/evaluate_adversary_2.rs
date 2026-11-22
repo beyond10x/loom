@@ -373,7 +373,8 @@ fn adversary2_set_aside_and_reordered_records_report_what_the_governor_reports()
 /// thread of its own, which the calling thread's CPU time would not count. Wall time is not the
 /// measure: every Canon call starts and joins that thread, and in the build pool's cgroup a new
 /// thread waits for the scheduler, so the wall time of the set-aside path's n calls followed the
-/// pool's load (ratio 18 to 151 on one build) while its CPU time did not (story:canon-0-10-0-pin).
+/// pool's load (wall-time ratio 19 to 74 in three runs of one build) while its CPU time did not
+/// (story:canon-0-10-0-pin).
 #[test]
 fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
     let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
