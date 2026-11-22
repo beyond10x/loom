@@ -12,6 +12,14 @@ Unreleased. `b10x-loom tree` keeps a tree of protocol cases in one store directo
 opens the root case, `tree run` drives every case of the tree, `tree approve` and `tree close`
 answer what a run waits on, and `tree status` and `tree verify` read the store.
 
+`tree run` confines every bound program by default (`--confinement substrate`), which needs
+**Linux, bubblewrap and a delegated cgroup v2**. Without `--cgroup-root`, `tree run` starts itself
+again in a scope of its own under `systemd-run --user --scope -p Delegate=yes`, so two runs never
+share a cgroup root. `tree run --cgroup-root DIR` names the root instead: an empty, writable,
+delegated cgroup v2 directory with the run in a child of it, held by one `tree run` at a time.
+Where neither is possible, `--confinement local` runs every program unconfined, as the examples
+below do.
+
 The example is the fixture of `crates/loom-cli/tests/tree_run.rs`: the protocol `tour.leg`
 (registered `tour-leg@1`), one leg of a walking tour, and the bindings files and stub programs of
 `crates/loom-cli/tests/fixtures/tree-two-level/`, copied into the directory `~/tour`, which is
@@ -120,8 +128,12 @@ $ b10x-loom tree status --store store | jq -c '.cases[] | {case, protocol, outco
 
 `tree status` prints `loom.tree-status/1`: per case its link, protocol, outcome or stop, its
 records in the order received, its program runs with their attempts, its approvals and the records
-a `copy` binding copied into it. `tree status` and `tree verify` read the store and never hold it,
-so a live view can read the tree while a run holds it.
+a `copy` binding copied into it, whether its run log verified (`log`; a log that does not is named
+with the refusal, the line and what is wrong, and nothing is read from it) and, after a
+`BudgetSpent` stop, the budget that ended the run (`budget`: `Cancel`, `MaxSteps` or
+`MaxWallSeconds`). `protocols` lists each protocol the cases use once, with the SHA-256 of its
+document. `tree status` and `tree verify` read the store and never hold it, so a live view can read
+the tree while a run holds it.
 
 ## Choose between two outcomes
 

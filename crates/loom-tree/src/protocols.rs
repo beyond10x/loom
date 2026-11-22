@@ -13,7 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use loom::tree::{TreeProtocol, TreeRefusalReason};
-use loom_protocols::{ProtocolCatalog, ProtocolSource, SourceKind, registration_for};
+use loom_protocols::{
+    ProtocolCatalog, ProtocolEntry, ProtocolSource, SourceKind, registration_for,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -63,6 +65,19 @@ fn cut_message(message: &str) -> String {
         end -= 1;
     }
     format!("{} [cut]", &message[..end])
+}
+
+/// The tree's entry for the catalog entry `entry`, in `tree-protocols.json` and in `tree status`:
+/// its registration, its protocol id and revision as the document declares them, the catalog's
+/// source path and the catalog's SHA-256 of the document's bytes as read.
+pub(crate) fn tree_protocol(entry: &ProtocolEntry) -> TreeProtocol {
+    TreeProtocol {
+        registration: entry.name().to_owned(),
+        protocol: entry.model.protocol.id.as_str().to_owned(),
+        revision: i64::try_from(entry.model.protocol.revision).unwrap_or(i64::MAX),
+        file: entry.definition.source.path.clone(),
+        sha256: entry.definition.sha256.clone(),
+    }
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -160,17 +175,12 @@ pub fn read_protocols_directory(dir: &Path) -> Result<ProtocolDirectory, Refused
                 },
             )
             .map_err(refused)?;
-        declared.insert(id.clone(), name.clone());
-        kept.push(KeptProtocol {
-            protocol: TreeProtocol {
-                registration,
-                protocol: id,
-                revision: i64::try_from(revision).unwrap_or(i64::MAX),
-                file: name.clone(),
-                sha256: sha256(yaml.as_bytes()),
-            },
-            yaml,
-        });
+        let protocol = catalog
+            .get(&registration)
+            .map(tree_protocol)
+            .ok_or_else(|| refused(format!("the catalog holds no {registration} once added")))?;
+        declared.insert(id, name.clone());
+        kept.push(KeptProtocol { protocol, yaml });
         models.push((name, model));
     }
     if kept.is_empty() {

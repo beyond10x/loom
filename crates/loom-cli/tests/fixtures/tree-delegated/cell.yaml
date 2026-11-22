@@ -1,0 +1,22 @@
+format: protocol/1
+protocol:
+  id: cell
+  revision: 1
+  description: >-
+    A cell a program looks into once. The case is done once the look ended 0.
+artifacts:
+  cell: {}
+evidence_kinds:
+  cell_look: {}
+claims:
+  cell.seen:
+    true_when:
+      evidence: {kind: cell_look, subject: cell, result: seen}
+actions:
+  cell.look:
+    effect: read
+    may_produce:
+      - evidence: cell_look
+outcomes:
+  done:
+    requires: {claim: cell.seen}

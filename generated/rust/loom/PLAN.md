@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 092ae05d201a03407e05e1b9a08708b83246b2741faca7c295cc9b29c8df9810
+  contract digest 9c277197e8ce1ef974b931ae3ce283c80f935dc7225a6e7d42b142c9e308fd51
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-468 capabilities: **452 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+470 capabilities: **454 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -286,9 +286,11 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.tree.DecisionKind` |
 | domain type | `loom.tree.LogFailure` |
 | domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.SpentBudget` |
 | domain type | `loom.tree.StatusApproval` |
 | domain type | `loom.tree.StatusCopy` |
 | domain type | `loom.tree.StatusEvidence` |
+| domain type | `loom.tree.StatusLog` |
 | domain type | `loom.tree.StatusRun` |
 | domain type | `loom.tree.TreeBudget` |
 | domain type | `loom.tree.TreeCatalog` |

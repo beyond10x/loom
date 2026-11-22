@@ -143,3 +143,31 @@ fn run_settings_are_built_from_items_of_this_crate_alone() {
     };
     assert_eq!(settings.max_steps, Some(1));
 }
+
+/// A `tree status` of the two-level tree after one run with `max_steps: 1`, as Loom printed it
+/// before its case entries held `log` and `budget`: the child stopped `BudgetSpent`.
+const OLD_STATUS: &str = r#"{"format":"loom.tree-status/1","version":"0.58.0","store":"/srv/tree/store","workspace":"/srv/tree/workspace","root":"root","cases":[{"case":"root","protocol":"tour@1","revision":2,"open_obligations":[],"case_file":"/srv/tree/store/case-726f6f74.json","run_log":"/srv/tree/store/runlog-case-726f6f74.jsonl","protocol_id":"tour","protocol_revision":"1","stop_next":[],"evidence":[{"index":0,"evidence_id":"5842f400-803c-84aa-847f-3704886e183b","kind":"case_outcome","subject":"root","subject_revision":"1","upstream_revisions":{},"producer":"loom-governor","name":"first"}],"runs":[],"approvals":[],"copies":[]},{"case":"root.first","parent":"root","protocol":"tour-leg@1","revision":1,"stop":"BudgetSpent","open_obligations":["route.approved"],"case_file":"/srv/tree/store/case-726f6f742e6669727374.json","run_log":"/srv/tree/store/runlog-case-726f6f742e6669727374.jsonl","name":"first","protocol_id":"tour-leg","protocol_revision":"1","stop_next":[],"evidence":[],"runs":[],"approvals":[],"copies":[]}],"protocols":[]}"#;
+
+#[test]
+fn an_old_status_without_log_and_budget_reads() {
+    let status = b10x_loom_tree::read_status(OLD_STATUS.as_bytes())
+        .unwrap_or_else(|refused| panic!("an old status reads: {refused}"));
+    assert_eq!(status.cases.len(), 2);
+    for case in &status.cases {
+        assert_eq!(case.log, None, "{}: no log member, none read", case.case);
+        assert_eq!(
+            case.budget, None,
+            "{}: no budget member, none read",
+            case.case
+        );
+    }
+    let child = &status.cases[1];
+    assert_eq!(child.stop.as_deref(), Some("BudgetSpent"));
+    assert_eq!(child.name.as_deref(), Some("first"));
+    assert_eq!(status.cases[0].evidence[0].name.as_deref(), Some("first"));
+    assert!(status.protocols.is_empty());
+    // Printed again it is the old document: an absent `log` and `budget` are left out.
+    let printed = b10x_loom_tree::status_json(&status);
+    let old: serde_json::Value = serde_json::from_str(OLD_STATUS).unwrap();
+    assert_eq!(printed, old);
+}

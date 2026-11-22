@@ -11,8 +11,8 @@ use loom::bindings::Executor;
 use loom::governor::CaseLink;
 use loom::runlog::{RunLogEvent, RunLogLine};
 use loom::tree::{
-    ApprovalDecision, CaseStatus, StatusApproval, StatusCopy, StatusEvidence, StatusRun,
-    TreeRefusalReason, TreeStatus,
+    ApprovalDecision, CaseStatus, SpentBudget, StatusApproval, StatusCopy, StatusEvidence,
+    StatusLog, StatusRun, TreeProtocol, TreeRefusalReason, TreeStatus,
 };
 use loom_governor::{CanonGovernor, FileCaseStore, case_file_stem};
 use loom_protocols::ProtocolCatalog;
@@ -58,8 +58,9 @@ pub(crate) fn members<S: loom_governor::FallibleCaseStore>(
 /// its id, its link name, its parent, its protocol (with its id and revision), its case revision,
 /// the outcome it ended through, the stop its last run recorded with the decisions it waits on,
 /// its open obligations, the paths of its case file and its run log, its records in the order
-/// received, the runs of its bound programs, its approvals in the order recorded and the records
-/// copied into it.
+/// received, the runs of its bound programs, its approvals in the order recorded, the records
+/// copied into it, whether its run log verified (nothing is read from one that does not) and the
+/// budget its last `stopped` line names. Then one entry per protocol the cases use, from `catalog`.
 ///
 /// # Errors
 /// `NotATree` when the store holds no tree; `StoreUnreadable` when it cannot be read, the governor
@@ -103,8 +104,8 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
             .case_state(&id)
             .map_err(|error| decide(format!("{error:?}")))?;
         let log = store.join(log_file_name(case));
-        let lines = log_lines(&log)?;
-        let (stop, stop_next) = last_stop(&lines);
+        let (lines, verified) = log_lines(&log)?;
+        let (stop, stop_next, budget) = last_stop(&lines);
         let (protocol_id, protocol_revision) = match protocol.rsplit_once('@') {
             Some((id, revision)) => (id.to_owned(), revision.to_owned()),
             None => (protocol.clone(), String::new()),
@@ -131,8 +132,11 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
             runs: runs(case, &observations),
             approvals: approvals(&lines, bindings),
             copies: copies(case, &observations, &state.evidence),
+            log: Some(verified),
+            budget,
         });
     }
+    let protocols = used_protocols(&statuses, catalog)?;
     Ok(TreeStatus {
         format: STATUS_FORMAT.to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -140,26 +144,77 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
         workspace: manifest.workspace,
         root: manifest.root,
         cases: statuses,
-        protocols: crate::protocols::kept_protocols(&store)?.unwrap_or_default(),
+        protocols,
     })
 }
 
-/// The lines of the log at `log`; none when it is missing or does not verify (`tree verify`
-/// names that).
-fn log_lines(log: &Path) -> Result<Vec<RunLogLine>, Refused> {
-    let bytes = read_regular(log)?.unwrap_or_default();
-    Ok(b10x_loom_runlog::verify(&bytes).unwrap_or_default())
+/// One entry per protocol `cases` are held under, from `catalog`: once however many cases use it,
+/// in the order of its first case.
+fn used_protocols(
+    cases: &[CaseStatus],
+    catalog: &ProtocolCatalog,
+) -> Result<Vec<TreeProtocol>, Refused> {
+    let mut used: Vec<TreeProtocol> = Vec::new();
+    for case in cases {
+        if used
+            .iter()
+            .any(|protocol| protocol.registration == case.protocol)
+        {
+            continue;
+        }
+        let entry = catalog.get(&case.protocol).ok_or_else(|| {
+            Refused::new(
+                TreeRefusalReason::UnknownProtocol,
+                format!("the tree's catalog holds no {}", case.protocol),
+            )
+            .case(case.case.clone())
+        })?;
+        used.push(crate::protocols::tree_protocol(entry));
+    }
+    Ok(used)
 }
 
-/// The stop and the decisions the last `stopped` line of `lines` names.
-fn last_stop(lines: &[RunLogLine]) -> (Option<String>, Vec<String>) {
+/// The lines of the log at `log` and whether it verified: every line of a log that verifies, none
+/// of a missing one (verified, as a log of no line), and none of a log that does not verify,
+/// named by the reader's refusal.
+fn log_lines(log: &Path) -> Result<(Vec<RunLogLine>, StatusLog), Refused> {
+    let bytes = read_regular(log)?.unwrap_or_default();
+    Ok(match b10x_loom_runlog::verify(&bytes) {
+        Ok(lines) => (
+            lines,
+            StatusLog {
+                verified: true,
+                refusal: None,
+                line: None,
+                detail: None,
+            },
+        ),
+        Err(refused) => (
+            Vec::new(),
+            StatusLog {
+                verified: false,
+                refusal: Some(refused.refusal),
+                line: Some(refused.line),
+                detail: Some(refused.detail),
+            },
+        ),
+    })
+}
+
+/// The stop, the decisions and the budget the last `stopped` line of `lines` names.
+fn last_stop(lines: &[RunLogLine]) -> (Option<String>, Vec<String>, Option<SpentBudget>) {
     lines
         .iter()
         .rev()
         .find_map(|line| match &line.event {
-            RunLogEvent::Stopped(stopped) => {
-                Some((Some(stopped.stop.clone()), stopped.next.clone()))
-            }
+            RunLogEvent::Stopped(stopped) => Some((
+                Some(stopped.stop.clone()),
+                stopped.next.clone(),
+                stopped
+                    .budget
+                    .as_deref()
+                    .and_then(b10x_loom_runlog::spent_budget),
+            )),
             _ => None,
         })
         .unwrap_or_default()

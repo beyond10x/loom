@@ -2,7 +2,7 @@
 
 use std::io::{Read as _, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command as Process, ExitCode};
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use b10x_llm_tool_call::codex_model;
@@ -18,7 +18,7 @@ use b10x_loom_cli::{
     Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
     ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
-use b10x_loom_cli::{a2a, agent};
+use b10x_loom_cli::{REEXEC_MARKER, REEXEC_READY, a2a, agent, start_delegated};
 use b10x_loom_intake_slice::bindings::{ActionBindings, UNCONFINED_FLAG_REASON};
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
@@ -55,8 +55,6 @@ use loom_sdk::models::{ModelRole, Models};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
-const REEXEC_MARKER: &str = "B10X_LOOM_CONFINEMENT_REEXEC";
-const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
 const REEXEC_HANDOFF: &str = "B10X_LOOM_CONFINEMENT_HANDOFF";
 
 /// Runs the command, then writes the store's sync counts (`loom_governor::durable::write_counts`,
@@ -1509,15 +1507,14 @@ fn reexec(prepared: &PreparedIntent, metrics: &ContextMetrics) -> Ending {
         )
         .map_err(|e| e.to_string())?;
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-        let status = Process::new("systemd-run")
-            .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
-            .arg(executable)
-            .args(std::env::args_os().skip(1))
-            .env(REEXEC_MARKER, "1")
-            .env(REEXEC_READY, &ready)
-            .env(REEXEC_HANDOFF, &handoff)
-            .status()
-            .map_err(|e| format!("systemd-run unavailable: {e}"))?;
+        let status = start_delegated(
+            &executable,
+            &[
+                (REEXEC_READY, ready.as_os_str()),
+                (REEXEC_HANDOFF, handoff.as_os_str()),
+            ],
+        )
+        .map_err(|e| format!("systemd-run unavailable: {e}"))?;
         // Consumption proves the child received the route, even if its later preflight failed.
         if !handoff.exists() {
             return Ok(Ending::Delegated(ExitCode::from(
