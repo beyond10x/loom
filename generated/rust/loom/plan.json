@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "4fb73bd9a3e929b4f366604f76e7c25f0820d3eee25a1084286d906e203f2002",
-    "contract_digest": "13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5"
+    "source_digest": "b9f31282a8baaa6009cd301b7d73a01b848099dedfc71203802573fce42b0726",
+    "contract_digest": "e83bb9ea29c0407345ba41fda81294f893f73bcc3f8a875ac10521475a84f560"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -2314,6 +2314,20 @@
     },
     {
       "kind": "command_contract",
+      "source": "loom.run.CheckArguments",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "loom.run.CheckArguments",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
       "source": "loom.run.OverruleSelection",
       "disposition": {
         "disposition": "generated"
@@ -2583,6 +2597,20 @@
     },
     {
       "kind": "event_type",
+      "source": "loom.run.ArgumentsMatched",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "loom.run.ArgumentsMismatched",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
       "source": "loom.run.ArgumentsRequested",
       "disposition": {
         "disposition": "generated"
@@ -2842,6 +2870,13 @@
     },
     {
       "kind": "error_type",
+      "source": "loom.run.ArgumentRequestStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
       "source": "loom.run.CatalogueExists",
       "disposition": {
         "disposition": "generated"
@@ -2955,6 +2990,20 @@
     {
       "kind": "view_query",
       "source": "loom.resource.LoomAgents",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "loom.run.ArgumentRequests",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "loom.run.ArgumentRequests",
       "disposition": {
         "disposition": "generated"
       }

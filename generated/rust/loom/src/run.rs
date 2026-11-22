@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5
+// contract digest e83bb9ea29c0407345ba41fda81294f893f73bcc3f8a875ac10521475a84f560
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run — `loom.run`.
@@ -37,6 +37,10 @@ pub struct ActionFacts {
 /// carried here — it is carried by `ArgumentRequest<S>`, where an undeclared move does not compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArgumentRequestState {
+    /// `Matched`.
+    Matched,
+    /// `Mismatched`.
+    Mismatched,
     /// `Requested`.
     Requested,
 }
@@ -308,6 +312,8 @@ pub mod argument_request_state {
     mod sealed {
         /// Implemented only by the marker types beside this module.
         pub trait Sealed {}
+        impl Sealed for super::Matched {}
+        impl Sealed for super::Mismatched {}
         impl Sealed for super::Requested {}
     }
 
@@ -315,6 +321,20 @@ pub mod argument_request_state {
     pub trait Marker: sealed::Sealed {
         /// The same state, as the runtime value.
         const STATE: super::ArgumentRequestState;
+    }
+
+    /// `Matched`. Terminal: an instance may rest here forever.
+    pub struct Matched;
+
+    impl Marker for Matched {
+        const STATE: super::ArgumentRequestState = super::ArgumentRequestState::Matched;
+    }
+
+    /// `Mismatched`. Terminal: an instance may rest here forever.
+    pub struct Mismatched;
+
+    impl Marker for Mismatched {
+        const STATE: super::ArgumentRequestState = super::ArgumentRequestState::Mismatched;
     }
 
     /// `Requested`. Where a new instance starts.
@@ -363,6 +383,24 @@ impl ArgumentRequest<argument_request_state::Requested> {
     }
 }
 
+impl ArgumentRequest<argument_request_state::Requested> {
+    /// `match` — `Requested` → `Matched`. Taken by the `matched` outcome of `loom.run.CheckArguments`.
+    pub fn r#match(self) -> ArgumentRequest<argument_request_state::Matched> {
+        ArgumentRequest {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+
+    /// `mismatch` — `Requested` → `Mismatched`. Taken by the `undeclared-not-empty` outcome of `loom.run.CheckArguments`, the `mismatched` outcome of `loom.run.CheckArguments`.
+    pub fn mismatch(self) -> ArgumentRequest<argument_request_state::Mismatched> {
+        ArgumentRequest {
+            data: self.data,
+            state: core::marker::PhantomData,
+        }
+    }
+}
+
 /// `loom.run.ArgumentRequest` as it crosses a boundary: the state as a value beside the data.
 ///
 /// Wire and storage know states only at runtime; [`ArgumentRequestSnapshot::refine`] is the one door back
@@ -377,6 +415,10 @@ pub struct ArgumentRequestSnapshot {
 
 /// An `ArgumentRequest` in whichever declared state it was found.
 pub enum AnyArgumentRequest {
+    /// Resting in `Matched`.
+    Matched(ArgumentRequest<argument_request_state::Matched>),
+    /// Resting in `Mismatched`.
+    Mismatched(ArgumentRequest<argument_request_state::Mismatched>),
     /// Resting in `Requested`.
     Requested(ArgumentRequest<argument_request_state::Requested>),
 }
@@ -388,6 +430,14 @@ impl ArgumentRequestSnapshot {
     /// `ArgumentRequestState` cannot spell one.
     pub fn refine(self) -> AnyArgumentRequest {
         match self.state {
+            ArgumentRequestState::Matched => AnyArgumentRequest::Matched(ArgumentRequest {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
+            ArgumentRequestState::Mismatched => AnyArgumentRequest::Mismatched(ArgumentRequest {
+                data: self.data,
+                state: core::marker::PhantomData,
+            }),
             ArgumentRequestState::Requested => AnyArgumentRequest::Requested(ArgumentRequest {
                 data: self.data,
                 state: core::marker::PhantomData,
@@ -400,6 +450,8 @@ impl AnyArgumentRequest {
     /// The state, as the runtime value.
     pub fn state(&self) -> ArgumentRequestState {
         match self {
+            Self::Matched(_) => ArgumentRequestState::Matched,
+            Self::Mismatched(_) => ArgumentRequestState::Mismatched,
             Self::Requested(_) => ArgumentRequestState::Requested,
         }
     }
@@ -407,6 +459,14 @@ impl AnyArgumentRequest {
     /// Back to the boundary shape.
     pub fn snapshot(self) -> ArgumentRequestSnapshot {
         match self {
+            Self::Matched(instance) => ArgumentRequestSnapshot {
+                state: ArgumentRequestState::Matched,
+                data: instance.into_data(),
+            },
+            Self::Mismatched(instance) => ArgumentRequestSnapshot {
+                state: ArgumentRequestState::Mismatched,
+                data: instance.into_data(),
+            },
             Self::Requested(instance) => ArgumentRequestSnapshot {
                 state: ArgumentRequestState::Requested,
                 data: instance.into_data(),
@@ -786,6 +846,51 @@ impl AnySelectionRecord {
     }
 }
 
+/// CheckArguments — the input of `loom.run.CheckArguments`.
+///
+/// Everything it can result in is [`CheckArgumentsOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckArguments {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+    /// `action` — `String`.
+    pub action: String,
+}
+
+/// Everything `loom.run.CheckArguments` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckArgumentsOutcome {
+    /// `undeclared-not-empty` — externally decided (the protocol declares no argument schema for the action and the arguments are not the empty object).
+    UndeclaredNotEmpty {
+        /// The `loom.run.ArgumentsMismatched` this outcome publishes.
+        arguments_mismatched: ArgumentsMismatched,
+    },
+    /// `mismatched` — externally decided (the arguments do not satisfy the argument schema the protocol declares for the action).
+    Mismatched {
+        /// The `loom.run.ArgumentsMismatched` this outcome publishes.
+        arguments_mismatched: ArgumentsMismatched,
+    },
+    /// `matched` — otherwise.
+    Matched {
+        /// The `loom.run.ArgumentsMatched` this outcome publishes.
+        arguments_matched: ArgumentsMatched,
+    },
+    /// `wrong-state` — from a state no declared move starts in.
+    WrongState {
+        /// Why it was refused: `loom.run.ArgumentRequestStateConflict`.
+        error: ArgumentRequestStateConflict,
+    },
+    /// `wrong-state` — for an instance no record carries.
+    ///
+    /// The same declared branch and error as [`Self::WrongState`], without the error's fields: an instance
+    /// that does not exist has nothing for them to describe (`docs/design/unknown-instance-seams.md`).
+    WrongStateUnknownInstance,
+}
+
 /// OverruleSelection — the input of `loom.run.OverruleSelection`.
 ///
 /// Everything it can result in is [`OverruleSelectionOutcome`].
@@ -1054,6 +1159,26 @@ pub struct ActionSelected {
     pub action: String,
 }
 
+/// ArgumentsMatched — the event `loom.run.ArgumentsMatched`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgumentsMatched {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+}
+
+/// ArgumentsMismatched — the event `loom.run.ArgumentsMismatched`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgumentsMismatched {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+    /// `action` — `String`.
+    pub action: String,
+    /// `declared` — `Boolean`.
+    pub declared: bool,
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// ArgumentsRequested — the event `loom.run.ArgumentsRequested`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArgumentsRequested {
@@ -1130,6 +1255,13 @@ pub struct ActionNotInCatalogue {
     pub action: String,
 }
 
+/// The declared error `loom.run.ArgumentRequestStateConflict`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgumentRequestStateConflict {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+}
+
 /// The declared error `loom.run.CatalogueExists`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogueExists {
@@ -1188,6 +1320,21 @@ pub struct SelectionRecordExists {
 pub struct SelectionStateConflict {
     /// `state` — `loom.run.Selection.State`.
     pub state: SelectionState,
+}
+
+/// ArgumentRequests — one row of the view `loom.run.ArgumentRequests`.
+///
+/// Projects `loom.run.ArgumentRequest` at `read_your_writes` consistency.
+/// The specification fully determines every row, so its query is generated over the storage port —
+/// see the plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArgumentRequests {
+    /// `argument_request_id` — `loom.run.ArgumentRequestId`.
+    pub argument_request_id: ArgumentRequestId,
+    /// `selection_id` — `loom.run.SelectionId`.
+    pub selection_id: SelectionId,
+    /// `state` — `loom.run.ArgumentRequest.State`.
+    pub state: ArgumentRequestState,
 }
 
 /// Catalogues — one row of the view `loom.run.Catalogues`.
@@ -1263,6 +1410,17 @@ pub struct Selections {
 /// per generated behaviour, which [`Generated`](crate::behaviour::Generated) implements.
 /// [`Unimplemented`](obligations::Unimplemented) satisfies every owed trait by refusing in the type system.
 pub mod obligations {
+    /// The behaviour `loom.run.CheckArguments` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait CheckArgumentsBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.run.CheckArguments`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn check_arguments(&mut self, input: super::CheckArguments) -> Result<super::CheckArgumentsOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.run.OverruleSelection` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -1329,6 +1487,17 @@ pub mod obligations {
         /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
         /// implementation never returns it.
         fn select_action(&mut self, input: super::SelectAction) -> Result<super::SelectActionOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `loom.run.ArgumentRequests` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage port. Implement it yourself to replace that query.
+    pub trait ArgumentRequestsQuery {
+        /// Serves `loom.run.ArgumentRequests` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of a row whose declared type cannot hold its value.
+        fn argument_requests(&self) -> Result<Vec<super::ArgumentRequests>, crate::obligation::UnmetObligation>;
     }
 
     /// The query `loom.run.Catalogues` — generated.
