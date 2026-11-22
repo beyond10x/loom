@@ -13,7 +13,56 @@ relations:
 - depends_on: story:tree-run-command
 - depends_on: story:tree-run-takes-a-delegated-cgroup
 - depends_on: story:cancel-a-running-bound-program
-revision: 5
+scope:
+- confidence: inferred
+  path: CHANGELOG.md
+- confidence: cited
+  path: Cargo.toml
+- confidence: inferred
+  path: Taskfile.yml
+- confidence: cited
+  path: crates/loom-cli/src/tree.rs
+- confidence: cited
+  path: crates/loom-cli/tests/fixtures/tree-delegated
+- confidence: cited
+  path: crates/loom-cli/tests/tree_run/delegated_cgroup.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/confinement.rs
+- confidence: cited
+  path: crates/loom-intake-slice/src/confinement/engine.rs
+- confidence: cited
+  path: crates/loom-protocols/src/lib.rs
+- confidence: cited
+  path: crates/loom-protocols/src/store.rs
+- confidence: cited
+  path: crates/loom-runlog/src/lib.rs
+- confidence: inferred
+  path: crates/loom-sdk/Cargo.toml
+- confidence: cited
+  path: crates/loom-sdk/src/lib.rs
+- confidence: inferred
+  path: crates/loom-sdk/tests/host_ports.rs
+- confidence: inferred
+  path: crates/loom-tree/src/embed.rs
+- confidence: cited
+  path: crates/loom-tree/src/lib.rs
+- confidence: cited
+  path: crates/loom-tree/src/open.rs
+- confidence: cited
+  path: crates/loom-tree/src/run.rs
+- confidence: cited
+  path: crates/loom-tree/src/status.rs
+- confidence: inferred
+  path: crates/loom-tree/tests/embedder
+- confidence: inferred
+  path: crates/loom-tree/tests/main.rs
+- confidence: cited
+  path: crates/loom-xtask/src/release.rs
+- confidence: cited
+  path: website/docs/guides/embed-the-runtime.md
+- confidence: cited
+  path: website/docs/reference/sdk-stability.md
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T10:29:42Z", actor: "agent:loom", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-22T10:41:24Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "runbook-engine-gaps-2026-11-22"}
