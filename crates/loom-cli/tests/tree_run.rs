@@ -58,6 +58,20 @@ thread_local! {
     static COUNTS_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
+/// Gives `command`, a start of `b10x-loom` by this binary, the test sync switch and the counts
+/// file of this thread. Every start of `b10x-loom` in the `tree_run` tests goes through here.
+fn with_the_switch(command: &mut Command) -> &mut Command {
+    match SWITCH_VALUE.with_borrow(Clone::clone) {
+        Some(value) => command.env("B10X_LOOM_TEST_UNSYNCED_STORE", value),
+        None => command.env_remove("B10X_LOOM_TEST_UNSYNCED_STORE"),
+    };
+    match COUNTS_FILE.with_borrow(Clone::clone) {
+        Some(file) => command.env(SYNC_COUNTS, file),
+        None => command.env_remove(SYNC_COUNTS),
+    };
+    command
+}
+
 /// One test's scratch directory: the user's home with the fixture protocols installed, the
 /// workspace with the stubs and the bindings files, and the path of the store.
 struct Tree {
@@ -146,14 +160,7 @@ impl Tree {
             .env("XDG_DATA_HOME", &home)
             .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
             .env_remove("RUST_LOG");
-        match SWITCH_VALUE.with_borrow(Clone::clone) {
-            Some(value) => command.env("B10X_LOOM_TEST_UNSYNCED_STORE", value),
-            None => command.env_remove("B10X_LOOM_TEST_UNSYNCED_STORE"),
-        };
-        match COUNTS_FILE.with_borrow(Clone::clone) {
-            Some(file) => command.env(SYNC_COUNTS, file),
-            None => command.env_remove(SYNC_COUNTS),
-        };
+        with_the_switch(&mut command);
         command
     }
 
