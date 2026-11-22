@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:run-cgroup-root-holds-the-root
 kind: story
-status: draft
+status: proposed
 title: b10x-loom run holds the cgroup root it is given, so run and tree run never share a root
 summary: run/resume --cgroup-root take hold_cgroup_root once before any model call; held root refused, never re-executed; tests in tree_run/ delegated style; security-relevant
 tags:
@@ -24,7 +24,9 @@ scope:
   path: crates/loom-cli/tests/tree_run/run_holds_the_root.rs
 - confidence: inferred
   path: crates/loom-intake-slice/src/confinement.rs
-revision: 8
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T15:08:35Z", actor: "agent:loom", revision: 9}
 ---
 ## Outcome
 

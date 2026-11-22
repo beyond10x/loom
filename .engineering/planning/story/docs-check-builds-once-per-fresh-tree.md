@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:docs-check-builds-once-per-fresh-tree
 kind: story
-status: draft
+status: proposed
 title: task docs-check compares a committed digest of the generator's inputs and builds nothing when they are unchanged
 summary: docs-check 421 s cold (CA); stamp of inputs and page hashes, loom-xtask docs-stamp --check, docs-generate the one build, docs-slow byte compare in CI when the stamp changed
 tags:
@@ -28,7 +28,9 @@ scope:
   path: crates/loom-xtask/src/main.rs
 - confidence: inferred
   path: website/docs/reference/.generated.json
-revision: 12
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T15:08:37Z", actor: "agent:loom", revision: 13}
 ---
 ## Outcome
 

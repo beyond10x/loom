@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bound-program-signal-exit-is-refused
 kind: story
-status: draft
+status: proposed
 title: A bound program a signal ended under Substrate is refused naming its signal, never read as an exit of the result table
 summary: exit 129..=192 (SIGNAL_EXITS) refused ProgramSignalled before the exit classes and the table, ends the run, counts; timeout still reads timeout; local unchanged; security-relevant
 tags:
@@ -32,7 +32,9 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: generated/rust/loom
-revision: 12
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T15:08:34Z", actor: "agent:loom", revision: 13}
 ---
 ## Outcome
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-0-24-0-pin
 kind: story
-status: draft
+status: proposed
 title: 'Loom pins Substrate 0.24.0: one compile break fixed, bounds 4 to 8, the ioctl floor shown for a bound program'
 summary: =0.21.0 adfde402 to =0.24.0 85da2e2b; proof(machine, &ExecListProof::default()); fifth-root test to ninth; e4defrag EACCES test; replaces substrate-pin-at-the-deny-list (D1 a)
 tags:
@@ -30,7 +30,9 @@ scope:
   path: crates/loom-intake-slice/tests/host_git_hardening.rs
 - confidence: cited
   path: website/docs/reference/sdk-stability.md
-revision: 12
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T15:08:36Z", actor: "agent:loom", revision: 13}
 ---
 ## Outcome
 
