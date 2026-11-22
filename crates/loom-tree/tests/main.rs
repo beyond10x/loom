@@ -4,6 +4,7 @@
 //! network, a model or a credential.
 
 mod suite_format;
+mod take_over;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -174,6 +175,7 @@ fn run_tree_returns_the_principal_of_a_person_decision() {
         time: at,
         runner: std::sync::Arc::new(runner),
         confinement: Some("local".into()),
+        cgroup_root: None,
     };
     let ran = run_tree(&store, &catalog, &settings, None, None).unwrap();
 
@@ -224,6 +226,7 @@ fn run_settings_are_built_from_items_of_this_crate_alone() {
         time: TreeTime::At("2026-11-22T08:00:00Z".into()),
         runner,
         confinement: None,
+        cgroup_root: None,
     };
     assert_eq!(settings.max_steps, Some(1));
 }
@@ -348,6 +351,7 @@ actions:
                 time: TreeTime::At("2026-11-22T08:00:00Z".into()),
                 runner: std::sync::Arc::new(runner),
                 confinement: None,
+                cgroup_root: None,
             }
         }
 
@@ -613,6 +617,7 @@ mod embed {
             time: at,
             runner: runner.runner(),
             confinement: Some("local".into()),
+            cgroup_root: None,
         };
         let mut observed = Vec::new();
         let mut observer = |case: &str, line: &RunLogLine| {
@@ -654,6 +659,25 @@ mod embed {
                 "{refused}"
             );
         }
+    }
+
+    /// `hold_cgroup_root` locks the root before it checks it: a root that does not qualify is
+    /// refused and not left held, so the next attempt names the same rule, never "held by another
+    /// process".
+    #[test]
+    fn a_refused_root_is_not_left_held() {
+        let dir = super::scratch("refused-not-held");
+        let first = TreeRunner::on_root(&dir).unwrap_err();
+        let second = TreeRunner::on_root(&dir).unwrap_err();
+        for refused in [&first, &second] {
+            assert_eq!(refused.reason(), TreeRefusalReason::ConfinementRefused);
+            assert!(
+                !refused.0.detail.contains("held by another process"),
+                "{refused}"
+            );
+        }
+        assert_eq!(first.0.detail, second.0.detail);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// `local` supplies the reason the bound-program port admits, and its runner answers it.

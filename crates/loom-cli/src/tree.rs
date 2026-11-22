@@ -280,6 +280,7 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
             .confinement
             .to_possible_value()
             .map(|value| value.get_name().to_owned()),
+        cgroup_root: arguments.cgroup_root.as_deref().map(resolved).transpose()?,
     };
     let ran = run_tree(
         &resolved(&arguments.store)?,
@@ -566,11 +567,12 @@ fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
 mod tests {
     use super::*;
 
-    /// `tree run` never discovers an ancestor: the substrate runner it builds is the one that
-    /// holds the root it was handed, and without one it builds none; a root it cannot hold is
-    /// refused, not replaced by one discovered.
+    /// Without a held root `tree run` builds no substrate runner, its refusal naming
+    /// `tree run --cgroup-root`, and a path it cannot hold as a root is refused naming it. That
+    /// the runner on a held root launches under that root and no other is held by the embedder
+    /// fixture (`an_embedded_tree_two_levels_below_its_root_runs_under_the_root`).
     #[test]
-    fn the_tree_runner_never_discovers_an_ancestor() {
+    fn a_substrate_runner_needs_a_held_root_and_an_unheld_path_is_refused() {
         let Err(refused) = substrate_runner(None) else {
             panic!("a substrate runner without a held root");
         };

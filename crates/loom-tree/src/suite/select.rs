@@ -117,8 +117,12 @@ pub(crate) fn select_values(
 }
 
 /// Reads at most [`MAX_SELECTED_FILE_BYTES`] of the regular file `path`, whose real path must lie
-/// in `root`; `None` when nothing is there.
+/// in `root`; `None` when nothing is there or it is a directory. Anything else that is no regular
+/// file (a named pipe a program left, a device, a socket) is `StepFailed` and never read: the path
+/// is checked before it is opened and the opened handle again, and on Unix the open itself does
+/// not wait for a writer (`O_NONBLOCK`, which has no effect on a regular file).
 fn read_inside(root: &Path, path: &Path) -> Result<Option<Vec<u8>>, SelectFailure> {
+    let not_regular = || step_failed("a selected path is not a regular file; it is not read");
     let Ok(root) = fs::canonicalize(root) else {
         return Ok(None);
     };
@@ -134,21 +138,31 @@ fn read_inside(root: &Path, path: &Path) -> Result<Option<Vec<u8>>, SelectFailur
     if metadata.is_dir() {
         return Ok(None);
     }
+    if !metadata.is_file() {
+        return Err(not_regular());
+    }
     if metadata.len() > MAX_SELECTED_FILE_BYTES {
         return Err(too_large(format!(
             "a file of {} bytes is over 16 MiB",
             metadata.len()
         )));
     }
+    let cannot = |error: io::Error| step_failed(format!("a file cannot be read: {error}"));
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options.open(&real).map_err(cannot)?;
+    if !file.metadata().map_err(cannot)?.is_file() {
+        return Err(not_regular());
+    }
     let mut bytes = Vec::new();
-    OpenOptions::new()
-        .read(true)
-        .open(&real)
-        .and_then(|file| {
-            file.take(MAX_SELECTED_FILE_BYTES + 1)
-                .read_to_end(&mut bytes)
-        })
-        .map_err(|error| step_failed(format!("a file cannot be read: {error}")))?;
+    file.take(MAX_SELECTED_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(cannot)?;
     if bytes.len() as u64 > MAX_SELECTED_FILE_BYTES {
         return Err(too_large("a file is over 16 MiB"));
     }

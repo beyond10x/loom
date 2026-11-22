@@ -854,6 +854,102 @@ fn follow_stays_in_the_cycle() {
     reading.within_bound();
 }
 
+/// A named pipe a program left in `work/`, the store or the suite's directory, named by any
+/// source that reads a file, is refused `StepFailed` as no regular file and never opened for a
+/// read that waits for a writer: no cycle wall time bounds the checks.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "makes a named pipe")]
+fn a_selection_never_blocks_on_a_named_pipe() {
+    use std::sync::mpsc;
+
+    let dir = super::scratch("suite-fifo");
+    let (work, store, suite) = (dir.join("work"), dir.join("store"), dir.join("suite"));
+    let digest = "a".repeat(64);
+    write(
+        &store.join("tree.json"),
+        r#"{"format":"loom.tree/1","root":"root","workspace":"/w","bindings":"/b","catalog":"Host"}"#,
+    );
+    write(&work.join("names.json"), r#"{"file": "pipe.txt"}"#);
+    write(
+        &work.join("digest.json"),
+        &format!(r#"{{"blob_digest": "{digest}"}}"#),
+    );
+    fs::create_dir_all(store.join("blobs")).unwrap();
+    fs::create_dir_all(&suite).unwrap();
+    let stem = loom_governor::case_file_stem("root");
+    // Each source that reads a file, and the file it reads.
+    let sources: [(&str, PathBuf); 8] = [
+        ("[{doc: {in: work, path: pipe.txt}}]", work.join("pipe.txt")),
+        (
+            "[{doc: {in: store, path: pipe.txt}}]",
+            store.join("pipe.txt"),
+        ),
+        ("[{suite: pipe.txt}]", suite.join("pipe.txt")),
+        (
+            "[{log: {case: \".\"}}]",
+            store.join(b10x_loom_tree::log_file_name("root")),
+        ),
+        (
+            "[{records: {case: \".\"}}]",
+            store.join(format!("{stem}.json")),
+        ),
+        ("[{runs: {case: \".\"}}]", store.join("observations.json")),
+        (
+            "[{doc: {in: work, path: names.json}}, {path: file}, {follow: file}]",
+            work.join("pipe.txt"),
+        ),
+        (
+            "[{doc: {in: work, path: digest.json}}, {follow: blob}]",
+            store.join("blobs").join(&digest),
+        ),
+    ];
+    let mut blocked = Vec::new();
+    for (items, pipe) in sources {
+        let made = std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap();
+        assert!(made.success(), "mkfifo {}", pipe.display());
+        let selected = selection(items);
+        let (sender, receiver) = mpsc::channel();
+        let (work_in, store_in, suite_in) = (work.clone(), store.clone(), suite.clone());
+        let reader = std::thread::spawn(move || {
+            let steps = BTreeMap::new();
+            let catalog = ProtocolCatalog::default();
+            let view = CycleView {
+                work: &work_in,
+                store: &store_in,
+                suite: &suite_in,
+                steps: &steps,
+                catalog: &catalog,
+            };
+            let _ = sender.send(select(&selected, &view));
+        });
+        match receiver.recv_timeout(Duration::from_secs(5)) {
+            Ok(answer) => {
+                let refused = answer.expect_err(items);
+                assert!(
+                    refused.starts_with("StepFailed: ") && refused.contains("not a regular file"),
+                    "{items}: {refused}"
+                );
+            }
+            Err(_) => {
+                // Release the reader: an open for writing pairs with its blocked open, and the
+                // close gives it its end of file.
+                drop(fs::OpenOptions::new().write(true).open(&pipe).unwrap());
+                blocked.push(items);
+            }
+        }
+        reader.join().unwrap();
+        fs::remove_file(&pipe).unwrap();
+    }
+    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        blocked.is_empty(),
+        "these selections blocked over 5 s on a named pipe: {blocked:#?}"
+    );
+}
+
 #[test]
 fn operands_read_the_state_after_a_step() {
     let reading = Reading::of(end_state());

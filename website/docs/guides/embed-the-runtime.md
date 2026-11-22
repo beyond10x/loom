@@ -197,15 +197,18 @@ alone. Its module `embed` (also `loom_sdk::tree`) holds what the tree functions 
 `crates/loom-tree/tests/embedder/` is such an engine, and its tests run it on a delegated root,
 in a scope of its own and under `local`. This is its code: the runner, the settings, a run with an
 observer and a flag another thread sets, and the approval the first run waits on. It then runs
-again, closes the case with `close` and reads it with `tree_status`.
+again, closes the case with `close` and reads it with `tree_status`. `RunSettings::confinement`
+and `cgroup_root` are what the `b10x-loom tree run` command a `Handoff` decision prints carries,
+`--confinement` and `--cgroup-root`, so that it runs as this run did; name no root for a run in a
+scope of its own, which the command starts again.
 
 ```rust
 use b10x_loom_tree::embed::{self, DEFAULT_PRINCIPAL, ProtocolCatalog, TreeRunner, encode_line};
 // …
-let (runner, confinement) = match &arguments.mode {
-    Mode::Root(root) => (TreeRunner::on_root(root)?, "substrate"),
+let (runner, confinement, cgroup_root) = match &arguments.mode {
+    Mode::Root(root) => (TreeRunner::on_root(root)?, "substrate", Some(root.clone())),
     // …
-    Mode::Local => (TreeRunner::local()?, "local"),
+    Mode::Local => (TreeRunner::local()?, "local", None),
 };
 // …
 let settings = RunSettings {
@@ -214,6 +217,7 @@ let settings = RunSettings {
     time: time.clone(),
     runner: runner.runner(),
     confinement: Some(confinement.into()),
+    cgroup_root,
 };
 // …
 let mut observer =

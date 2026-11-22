@@ -1635,7 +1635,12 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
 - Every event goes through `RunLog::append` and then the head is written. `tree verify` checks each
   log's chain and its last line against the head, so a changed byte anywhere, the last line
   included, is named with the case and the line. A restart between an append and its head leaves
-  one line past the head; the next writer takes it over when the line before it is the head.
+  one line past the head; the next writer takes it over when the line before it is the head. A
+  child event is two appends, the child's line and then the parent's (`case opened` and `child
+  opened`, `terminated` and `child closed`, in `tree run` and `tree close`); a stop between them
+  is taken over at the start of the next `tree run` (`take_over` in `run.rs`), which writes, for
+  every child the governor links and every case it holds terminated, each of those lines its log
+  does not hold yet, once (`crates/loom-tree/tests/take_over/`).
 - `tree run` (`run.rs`) drives Commission's `run_until_blocked` with the Loom executor and the
   deterministic selector, one step of one case at a time, every open child before its parent's
   next step. `LogHistory` (`history.rs`) reads the case's run log: an action counts as performed
@@ -1645,7 +1650,9 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   ends through its one legitimate outcome, or waits: a person action or a capability
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
   `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
-  `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+  `RunSettings::confinement`, and `--cgroup-root <the run's>` when `RunSettings::cgroup_root`
+  names the root the run was given). Every printed command runs unchanged (tests `the_printed_*`,
+  `a_handoff_command_carries_the_cgroup_root_the_run_had`).
   A decision whose command carries `--principal` names that value as `principal`
   (`story:next-decision-names-the-principal`): for `ApproveAction` the binding's
   `executor.principal`, the one `person_action` and `PersonEffects` check; for `Approve` always

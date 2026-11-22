@@ -807,6 +807,7 @@ dependencies = [
  "b10x-loom-intake-slice",
  "b10x-loom-protocols",
  "b10x-loom-runlog",
+ "libc",
  "loom",
  "regex",
  "serde_json",

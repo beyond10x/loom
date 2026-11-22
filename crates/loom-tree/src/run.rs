@@ -103,6 +103,10 @@ pub struct RunSettings {
     /// The `--confinement` value of the runner, which the `tree run` a handoff prints carries so
     /// that, run unchanged, it starts its programs as this run does; `None` prints no flag.
     pub confinement: Option<String>,
+    /// The cgroup root the run was named (`--cgroup-root`), which that `tree run` carries too, so
+    /// that it runs under the root this run did; `None` prints no flag, as for a run that started
+    /// itself again in a scope of its own.
+    pub cgroup_root: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for RunSettings {
@@ -113,6 +117,7 @@ impl std::fmt::Debug for RunSettings {
             .field("time", &self.time)
             .field("runner", &self.runner.label())
             .field("confinement", &self.confinement)
+            .field("cgroup_root", &self.cgroup_root)
             .finish()
     }
 }
@@ -212,12 +217,19 @@ fn run_cancellable(
         }
     };
 
+    // A child event's two lines are written one after the other in this process (`opened`,
+    // `closed`), so only a run stopped before this one leaves one of them out: taken over once.
+    let held = tree_cases(&governor, &manifest.root, &manifest.bindings, catalog)?;
+    for case in &held {
+        logs.reconcile(&case.case)?;
+    }
+    take_over(&governor, &logs, &store, &held, &mut emit)?;
+
     loop {
         let held = tree_cases(&governor, &manifest.root, &manifest.bindings, catalog)?;
         for case in &held {
             logs.reconcile(&case.case)?;
         }
-        close_terminated(&governor, &logs, &store, &held, &mut emit)?;
         let cancelled_before = cancelled();
         let stop_before = if cancelled_before {
             None
@@ -343,7 +355,7 @@ fn run_cancellable(
                     &id,
                     &case.bindings,
                     &action,
-                    &handoff_command(&store, settings.confinement.as_deref()),
+                    &handoff_command(&store, settings),
                 )
                 .into_iter()
                 .collect::<Vec<_>>();
@@ -486,7 +498,7 @@ fn run_cancellable(
             &workspace,
             revision,
             &history,
-            settings.confinement.as_deref(),
+            &handoff_command(&store, settings),
             &checks,
             &mut emit,
         )?;
@@ -625,6 +637,20 @@ pub(crate) fn closed_lines<S: loom_governor::FallibleCaseStore>(
     outcome: &str,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
+    terminated_line(logs, case, outcome, emit)?;
+    if let Some(parent) = parent {
+        child_closed_line(governor, logs, parent, case, outcome, emit)?;
+    }
+    Ok(())
+}
+
+/// Appends `terminated` through `outcome` to `case`'s log.
+fn terminated_line(
+    logs: &Logs,
+    case: &str,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
     let line = logs.append(
         case,
         RunLogEvent::Terminated(Terminated {
@@ -632,20 +658,82 @@ pub(crate) fn closed_lines<S: loom_governor::FallibleCaseStore>(
         }),
     )?;
     emit(case, line);
-    if let Some(parent) = parent {
-        let (record, record_digest) = child_record(governor, parent, case)?;
-        let line = logs.append(
-            parent,
-            RunLogEvent::ChildClosed(ChildClosed {
-                child: case.to_owned(),
-                outcome: Some(outcome.to_owned()),
-                record,
-                record_digest,
-            }),
-        )?;
-        emit(parent, line);
-    }
     Ok(())
+}
+
+/// Appends `child closed` of `child` through `outcome` to `parent`'s log, naming the child's
+/// record as the termination replaced it.
+fn child_closed_line<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    parent: &str,
+    child: &str,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let (record, record_digest) = child_record(governor, parent, child)?;
+    let line = logs.append(
+        parent,
+        RunLogEvent::ChildClosed(ChildClosed {
+            child: child.to_owned(),
+            outcome: Some(outcome.to_owned()),
+            record,
+            record_digest,
+        }),
+    )?;
+    emit(parent, line);
+    Ok(())
+}
+
+/// Appends `case opened` to `child`'s log, naming the protocol the governor holds it under.
+fn case_opened_line<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    child: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let line = logs.append(
+        child,
+        RunLogEvent::CaseOpened(CaseOpened {
+            case: child.to_owned(),
+            protocol: child_protocol(governor, child)?,
+        }),
+    )?;
+    emit(child, line);
+    Ok(())
+}
+
+/// Appends `child opened` of `child` to `parent`'s log, naming the child's record as the parent
+/// holds it now.
+fn child_opened_line<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    parent: &str,
+    child: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let (record, record_digest) = child_record(governor, parent, child)?;
+    let line = logs.append(
+        parent,
+        RunLogEvent::ChildOpened(ChildOpened {
+            child: child.to_owned(),
+            protocol: child_protocol(governor, child)?,
+            record,
+            record_digest,
+        }),
+    )?;
+    emit(parent, line);
+    Ok(())
+}
+
+/// The registration the governor holds `case` under.
+fn child_protocol<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+) -> Result<String, Refused> {
+    governor
+        .protocol(&CaseId(case.to_owned()))
+        .map_err(|error| unreadable(format!("case {case}"), format!("{error:?}")))
 }
 
 /// The outcome the governor terminated `case` through, when it did.
@@ -660,20 +748,60 @@ pub(crate) fn termination<S: loom_governor::FallibleCaseStore>(
         .map(|termination| termination.outcome))
 }
 
-/// Writes the lines of each case the governor holds terminated and whose log does not yet say
-/// so: a run stopped between the termination and its lines.
-fn close_terminated<S: loom_governor::FallibleCaseStore>(
+/// Writes the lines of a child event a run stopped between its two appends left out, each only
+/// when its log does not hold it yet, so a second writer writes none again. In the order of
+/// `held`, each case before its children: for every child the governor links, its `case opened`
+/// line and the parent's `child opened` line naming it; then for every case the governor holds
+/// terminated, its `terminated` line and, for a child, the parent's `child closed` line naming it.
+///
+/// Each log is read once, before anything is written: a line written here is of another kind, or
+/// names another child, than every line looked for after it in the same log.
+fn take_over<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     logs: &Logs,
     store: &Path,
     held: &[Held],
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
+    let mut read = BTreeMap::new();
     for case in held {
-        if let Some(outcome) = termination(governor, &case.case)?
-            && !terminated(store, &case.case)
+        read.insert(case.case.as_str(), read_lines(store, &case.case)?);
+    }
+    let holds = |case: &str, wanted: &dyn Fn(&RunLogEvent) -> bool| {
+        read.get(case)
+            .is_some_and(|lines| lines.iter().any(|line| wanted(&line.event)))
+    };
+    for case in held {
+        let Some(parent) = case.parent.as_deref() else {
+            continue;
+        };
+        let child = case.case.as_str();
+        if !holds(child, &|event| matches!(event, RunLogEvent::CaseOpened(_))) {
+            case_opened_line(governor, logs, child, emit)?;
+        }
+        if !holds(
+            parent,
+            &|event| matches!(event, RunLogEvent::ChildOpened(opened) if opened.child == child),
+        ) {
+            child_opened_line(governor, logs, parent, child, emit)?;
+        }
+    }
+    for case in held {
+        let Some(outcome) = termination(governor, &case.case)? else {
+            continue;
+        };
+        if !holds(&case.case, &|event| {
+            matches!(event, RunLogEvent::Terminated(_))
+        }) {
+            terminated_line(logs, &case.case, &outcome, emit)?;
+        }
+        if let Some(parent) = case.parent.as_deref()
+            && !holds(
+                parent,
+                &|event| matches!(event, RunLogEvent::ChildClosed(closed) if closed.child == case.case),
+            )
         {
-            closed(governor, logs, case, &outcome, emit)?;
+            child_closed_line(governor, logs, parent, &case.case, &outcome, emit)?;
         }
     }
     Ok(())
@@ -696,28 +824,8 @@ fn opened<S: loom_governor::FallibleCaseStore>(
         return Ok(());
     };
     for child in children.iter().filter_map(serde_json::Value::as_str) {
-        let protocol = governor
-            .protocol(&CaseId(child.to_owned()))
-            .map_err(|error| unreadable(format!("case {child}"), format!("{error:?}")))?;
-        let line = logs.append(
-            child,
-            RunLogEvent::CaseOpened(CaseOpened {
-                case: child.to_owned(),
-                protocol: protocol.clone(),
-            }),
-        )?;
-        emit(child, line);
-        let (record, record_digest) = child_record(governor, parent, child)?;
-        let line = logs.append(
-            parent,
-            RunLogEvent::ChildOpened(ChildOpened {
-                child: child.to_owned(),
-                protocol,
-                record,
-                record_digest,
-            }),
-        )?;
-        emit(parent, line);
+        case_opened_line(governor, logs, child, emit)?;
+        child_opened_line(governor, logs, parent, child, emit)?;
     }
     Ok(())
 }
@@ -1093,9 +1201,9 @@ fn waiting_actions<S: loom_governor::FallibleCaseStore>(
         .collect())
 }
 
-/// The command a `Handoff` decision prints: `tree run` of `store` again, under `confinement` when
-/// it is named.
-fn handoff_command(store: &Path, confinement: Option<&str>) -> Vec<String> {
+/// The command a `Handoff` decision prints: `tree run` of `store` again, under the run's
+/// `confinement` and on its `cgroup_root` when `settings` name them.
+fn handoff_command(store: &Path, settings: &RunSettings) -> Vec<String> {
     let mut command = vec![
         "b10x-loom".to_owned(),
         "tree".to_owned(),
@@ -1103,8 +1211,11 @@ fn handoff_command(store: &Path, confinement: Option<&str>) -> Vec<String> {
         "--store".to_owned(),
         store.display().to_string(),
     ];
-    if let Some(confinement) = confinement {
-        command.extend(["--confinement".to_owned(), confinement.to_owned()]);
+    if let Some(confinement) = &settings.confinement {
+        command.extend(["--confinement".to_owned(), confinement.clone()]);
+    }
+    if let Some(root) = &settings.cgroup_root {
+        command.extend(["--cgroup-root".to_owned(), root.display().to_string()]);
     }
     command
 }
@@ -1137,19 +1248,17 @@ fn handoff_decision(
 }
 
 /// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
-/// and names a `handoff` ([`handoff_decision`]), the command [`handoff_command`]. A binding with
-/// `handoff_when` gives its decision only when its check, run now with its line written, exits 0;
-/// a check that gives no exit status refuses the run `HandoffCheckFailed`.
+/// and names a `handoff` ([`handoff_decision`]), the command `command` ([`handoff_command`]). A
+/// binding with `handoff_when` gives its decision only when its check, run now with its line
+/// written, exits 0; a check that gives no exit status refuses the run `HandoffCheckFailed`.
 fn handoffs<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
     bindings: &BindingsDocument,
-    store: &Path,
-    confinement: Option<&str>,
+    command: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<Vec<NextDecision>, Refused> {
-    let command = handoff_command(store, confinement);
     let frontier = governor
         .frontier(case)
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
@@ -1160,7 +1269,7 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
         .iter()
         .filter(|action| action.status != ActionStatus::Blocked)
     {
-        let Some(decision) = handoff_decision(case, bindings, &action.action, &command) else {
+        let Some(decision) = handoff_decision(case, bindings, &action.action, command) else {
             continue;
         };
         if checks.has_check(&action.action) {
@@ -1191,7 +1300,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     workspace: &Path,
     revision: i64,
     history: &LogHistory,
-    confinement: Option<&str>,
+    handoff: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(TreeStop, Vec<NextDecision>), Refused> {
@@ -1286,7 +1395,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     if decisions.is_empty() {
         // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
         // has done what it may, and a person continues from its text, then runs the tree again.
-        decisions = handoffs(governor, case, bindings, store, confinement, checks, emit)?;
+        decisions = handoffs(governor, case, bindings, handoff, checks, emit)?;
         if !decisions.is_empty() {
             return Ok((TreeStop::AwaitingPerson, decisions));
         }
@@ -1616,5 +1725,76 @@ where
         )
         .case(case.0.clone())
         .action(action.to_owned())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
+    use b10x_loom_intake_slice::confinement::{
+        ConfinementAdapter, EngineConfinement, EngineRunner,
+    };
+
+    use super::{RunSettings, handoff_command};
+    use crate::TreeTime;
+
+    fn settings(confinement: Option<&str>, cgroup_root: Option<&str>) -> RunSettings {
+        let runner = EngineRunner::open(&EngineConfinement {
+            adapter: ConfinementAdapter::Local,
+            local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+            cgroup_root: None,
+        })
+        .unwrap();
+        RunSettings {
+            max_steps: None,
+            max_wall_seconds: None,
+            time: TreeTime::At("2026-11-22T08:00:00Z".into()),
+            runner: Arc::new(runner),
+            confinement: confinement.map(str::to_owned),
+            cgroup_root: cgroup_root.map(PathBuf::from),
+        }
+    }
+
+    /// A handoff's `tree run` carries the run's `--cgroup-root` when the run was named one, and
+    /// no such flag when it was not, so that, run unchanged, it runs where this run did.
+    #[test]
+    fn a_handoff_command_carries_the_cgroup_root_the_run_had() {
+        let store = Path::new("/srv/tree/store");
+        assert_eq!(
+            handoff_command(
+                store,
+                &settings(Some("substrate"), Some("/sys/fs/cgroup/held"))
+            ),
+            [
+                "b10x-loom",
+                "tree",
+                "run",
+                "--store",
+                "/srv/tree/store",
+                "--confinement",
+                "substrate",
+                "--cgroup-root",
+                "/sys/fs/cgroup/held",
+            ]
+        );
+        assert_eq!(
+            handoff_command(store, &settings(Some("substrate"), None)),
+            [
+                "b10x-loom",
+                "tree",
+                "run",
+                "--store",
+                "/srv/tree/store",
+                "--confinement",
+                "substrate",
+            ]
+        );
+        assert_eq!(
+            handoff_command(store, &settings(None, None)),
+            ["b10x-loom", "tree", "run", "--store", "/srv/tree/store"]
+        );
     }
 }

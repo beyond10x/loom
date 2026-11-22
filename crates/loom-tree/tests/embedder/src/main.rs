@@ -145,17 +145,17 @@ fn embed_tree(arguments: &Arguments) -> Result<(), Refused> {
             hold_twice(root)
         };
     }
-    let (runner, confinement) = match &arguments.mode {
-        Mode::Root(root) => (TreeRunner::on_root(root)?, "substrate"),
+    let (runner, confinement, cgroup_root) = match &arguments.mode {
+        Mode::Root(root) => (TreeRunner::on_root(root)?, "substrate", Some(root.clone())),
         Mode::OwnScope => {
             // A second thread lives while the process moves: every thread moves with it.
             let (_parked, parked) = std::sync::mpsc::channel::<()>();
             std::thread::spawn(move || parked.recv());
             let runner = TreeRunner::in_own_scope()?;
             say_task_cgroups();
-            (runner, "substrate")
+            (runner, "substrate", None)
         }
-        Mode::Local => (TreeRunner::local()?, "local"),
+        Mode::Local => (TreeRunner::local()?, "local", None),
     };
     say(&format!(
         "local-reason {}",
@@ -186,6 +186,7 @@ fn embed_tree(arguments: &Arguments) -> Result<(), Refused> {
         time: time.clone(),
         runner: runner.runner(),
         confinement: Some(confinement.into()),
+        cgroup_root,
     };
 
     // The first run waits on the capability the program action needs.
