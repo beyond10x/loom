@@ -47,6 +47,7 @@ pub(crate) enum NotPrinted {
 /// are `names`) through `runner`, in `workspace`, with `input` on standard input and `timeout`;
 /// its printed object, or why not, naming `argv[0]` and never the text it printed. Given `cancel`,
 /// the child holds it (`ChildCommand::with_cancel`).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_arguments_from(
     argv: &[String],
     input: &str,

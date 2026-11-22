@@ -2,8 +2,8 @@
 //! an absent optional member is left out, and an enum is its variant's name.
 
 use loom::tree::{
-    CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence, StatusRun,
-    TreeProtocol, TreeRefusal, TreeRun, TreeStatus, TreeVerify,
+    CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence, StatusLog,
+    StatusRun, TreeProtocol, TreeRefusal, TreeRun, TreeStatus, TreeVerify,
 };
 use serde_json::{Map, Value, json};
 
@@ -65,6 +65,27 @@ fn case_json(case: &CaseStatus) -> Value {
         "copies".into(),
         Value::Array(case.copies.iter().map(copy_json).collect()),
     );
+    put(&mut object, "log", case.log.as_ref().map(log_json));
+    put(
+        &mut object,
+        "budget",
+        case.budget
+            .map(|budget| Value::from(b10x_loom_runlog::budget_name(budget))),
+    );
+    Value::Object(object)
+}
+
+fn log_json(log: &StatusLog) -> Value {
+    let mut object = Map::new();
+    object.insert("verified".into(), json!(log.verified));
+    put(
+        &mut object,
+        "refusal",
+        log.refusal
+            .map(|refusal| Value::from(format!("{refusal:?}"))),
+    );
+    put(&mut object, "line", log.line.map(Value::from));
+    put(&mut object, "detail", log.detail.clone().map(Value::from));
     Value::Object(object)
 }
 
@@ -200,6 +221,11 @@ pub fn decision_json(decision: &NextDecision) -> Value {
         "capability",
         decision.capability.clone().map(Value::from),
     );
+    put(
+        &mut object,
+        "principal",
+        decision.principal.clone().map(Value::from),
+    );
     object.insert("decides".into(), json!(decision.decides));
     put(
         &mut object,
@@ -233,4 +259,74 @@ pub fn run_json(run: &TreeRun) -> Value {
     );
     put(&mut object, "detail", run.detail.clone().map(Value::from));
     Value::Object(object)
+}
+
+#[cfg(test)]
+mod tests {
+    use loom::tree::{DecisionKind, NextDecision};
+
+    use super::decision_json;
+
+    /// A decision of `kind` with the members every kind has.
+    fn decision(kind: DecisionKind) -> NextDecision {
+        NextDecision {
+            case: "root".into(),
+            kind,
+            action: None,
+            capability: None,
+            principal: None,
+            decides: "what is decided".into(),
+            subject: None,
+            revision: None,
+            path: None,
+            outcome: None,
+            command: vec!["b10x-loom".into(), "tree".into()],
+        }
+    }
+
+    #[test]
+    fn a_decision_without_a_principal_encodes_as_before() {
+        let approve_action = NextDecision {
+            action: Some("post.seal".into()),
+            capability: Some("clerk.seal".into()),
+            subject: Some("post".into()),
+            revision: Some("sha256:00".into()),
+            path: Some("/w/road.txt".into()),
+            ..decision(DecisionKind::ApproveAction)
+        };
+        let approve = NextDecision {
+            action: Some("post.stamp".into()),
+            capability: Some("clerk.stamp".into()),
+            ..decision(DecisionKind::Approve)
+        };
+        let close = NextDecision {
+            outcome: Some("left".into()),
+            ..decision(DecisionKind::Close)
+        };
+        let handoff = NextDecision {
+            action: Some("route.write".into()),
+            ..decision(DecisionKind::Handoff)
+        };
+        // Today's print of each value, before `principal` was declared.
+        for (value, bytes) in [
+            (
+                approve_action,
+                r#"{"action":"post.seal","capability":"clerk.seal","case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"ApproveAction","path":"/w/road.txt","revision":"sha256:00","subject":"post"}"#,
+            ),
+            (
+                approve,
+                r#"{"action":"post.stamp","capability":"clerk.stamp","case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"Approve"}"#,
+            ),
+            (
+                close,
+                r#"{"case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"Close","outcome":"left"}"#,
+            ),
+            (
+                handoff,
+                r#"{"action":"route.write","case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"Handoff"}"#,
+            ),
+        ] {
+            assert_eq!(decision_json(&value).to_string(), bytes);
+        }
+    }
 }

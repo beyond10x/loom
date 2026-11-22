@@ -10,6 +10,9 @@ publish = false
 [lib]
 name = "loom_governor"
 
+[features]
+test-unsynced-store = []
+
 [dependencies]
 b10x-loom-protocols = { path = "../loom-protocols" }
 b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.10.0" }

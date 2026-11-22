@@ -3,6 +3,8 @@
 //! `crates/loom-cli/tests/tree_run.rs`. Scratch is under `CARGO_TARGET_TMPDIR`; no test reaches the
 //! network, a model or a credential.
 
+mod suite_format;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
@@ -119,6 +121,88 @@ fn a_relative_store_is_refused_and_never_resolved_against_the_current_directory(
             "{refused}"
         );
     }
+}
+
+/// The fixture of the tree command tests: `sign@1` and its bindings, `road.txt` and the stubs.
+const FIXTURE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../loom-cli/tests/fixtures/tree-two-level"
+);
+
+#[test]
+fn run_tree_returns_the_principal_of_a_person_decision() {
+    use b10x_loom_tree::model::DecisionKind;
+    use b10x_loom_tree::{
+        ConfinementAdapter, EngineConfinement, EngineRunner, OpenRequest, RunSettings,
+        UNCONFINED_FLAG_REASON, open_tree, run_tree,
+    };
+    let dir = scratch("principal");
+    let fixture = std::path::Path::new(FIXTURE);
+    let workspace = dir.join("workspace");
+    fs::create_dir_all(workspace.join("stubs")).unwrap();
+    for file in ["road.txt", "sign.bindings.yaml", "stubs/post-stamp.sh"] {
+        fs::copy(fixture.join(file), workspace.join(file)).unwrap();
+    }
+    let installed = loom_protocols::InstallStore::new(dir.join("protocols"));
+    installed
+        .install_file("sign@1", &fixture.join("extra/sign.yaml"), false)
+        .unwrap();
+    let catalog = installed.catalog().unwrap();
+    let store = dir.join("store");
+    let at = TreeTime::At("2026-11-22T08:00:00Z".into());
+    open_tree(&OpenRequest {
+        store: store.clone(),
+        workspace: workspace.clone(),
+        protocol: "sign@1".into(),
+        bindings: workspace.join("sign.bindings.yaml"),
+        revisions: Vec::new(),
+        case: "root".into(),
+        time: at.clone(),
+        catalog: &catalog,
+        protocols: Vec::new(),
+    })
+    .unwrap();
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    let settings = RunSettings {
+        max_steps: None,
+        max_wall_seconds: None,
+        time: at,
+        runner: std::sync::Arc::new(runner),
+        confinement: Some("local".into()),
+    };
+    let ran = run_tree(&store, &catalog, &settings, None, None).unwrap();
+
+    let bindings = b10x_loom_bindings::decode(
+        &fs::read_to_string(fixture.join("sign.bindings.yaml")).unwrap(),
+    )
+    .unwrap();
+    for action in ["post.sign", "post.seal"] {
+        let decision = ran
+            .decisions
+            .iter()
+            .find(|decision| decision.action.as_deref() == Some(action))
+            .unwrap_or_else(|| panic!("no decision about {action}: {ran:?}"));
+        assert_eq!(decision.kind, DecisionKind::ApproveAction, "{decision:?}");
+        let bound = bindings
+            .actions
+            .iter()
+            .find(|bound| bound.action == action)
+            .and_then(|bound| bound.executor.principal.clone());
+        assert!(bound.is_some(), "{action}");
+        assert_eq!(decision.principal, bound, "{decision:?}");
+        let at = decision
+            .command
+            .iter()
+            .position(|word| word == "--principal")
+            .unwrap();
+        assert_eq!(Some(&decision.command[at + 1]), bound.as_ref());
+    }
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -442,4 +526,32 @@ actions:
         let read = b10x_loom_tree::read_status(printed.to_string().as_bytes()).unwrap();
         assert_eq!(read.cases[0].runs, status.cases[0].runs);
     }
+}
+
+/// A `tree status` of the two-level tree after one run with `max_steps: 1`, as Loom printed it
+/// before its case entries held `log` and `budget`: the child stopped `BudgetSpent`.
+const OLD_STATUS: &str = r#"{"format":"loom.tree-status/1","version":"0.58.0","store":"/srv/tree/store","workspace":"/srv/tree/workspace","root":"root","cases":[{"case":"root","protocol":"tour@1","revision":2,"open_obligations":[],"case_file":"/srv/tree/store/case-726f6f74.json","run_log":"/srv/tree/store/runlog-case-726f6f74.jsonl","protocol_id":"tour","protocol_revision":"1","stop_next":[],"evidence":[{"index":0,"evidence_id":"5842f400-803c-84aa-847f-3704886e183b","kind":"case_outcome","subject":"root","subject_revision":"1","upstream_revisions":{},"producer":"loom-governor","name":"first"}],"runs":[],"approvals":[],"copies":[]},{"case":"root.first","parent":"root","protocol":"tour-leg@1","revision":1,"stop":"BudgetSpent","open_obligations":["route.approved"],"case_file":"/srv/tree/store/case-726f6f742e6669727374.json","run_log":"/srv/tree/store/runlog-case-726f6f742e6669727374.jsonl","name":"first","protocol_id":"tour-leg","protocol_revision":"1","stop_next":[],"evidence":[],"runs":[],"approvals":[],"copies":[]}],"protocols":[]}"#;
+
+#[test]
+fn an_old_status_without_log_and_budget_reads() {
+    let status = b10x_loom_tree::read_status(OLD_STATUS.as_bytes())
+        .unwrap_or_else(|refused| panic!("an old status reads: {refused}"));
+    assert_eq!(status.cases.len(), 2);
+    for case in &status.cases {
+        assert_eq!(case.log, None, "{}: no log member, none read", case.case);
+        assert_eq!(
+            case.budget, None,
+            "{}: no budget member, none read",
+            case.case
+        );
+    }
+    let child = &status.cases[1];
+    assert_eq!(child.stop.as_deref(), Some("BudgetSpent"));
+    assert_eq!(child.name.as_deref(), Some("first"));
+    assert_eq!(status.cases[0].evidence[0].name.as_deref(), Some("first"));
+    assert!(status.protocols.is_empty());
+    // Printed again it is the old document: an absent `log` and `budget` are left out.
+    let printed = b10x_loom_tree::status_json(&status);
+    let old: serde_json::Value = serde_json::from_str(OLD_STATUS).unwrap();
+    assert_eq!(printed, old);
 }

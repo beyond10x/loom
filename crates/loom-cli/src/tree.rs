@@ -17,7 +17,8 @@ use b10x_loom_intake_slice::confinement::{
     TestRunner, hold_cgroup_root, prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::run::printable;
-use b10x_loom_tree::model::{ApprovalDecision, TreeRefusalReason};
+use b10x_loom_tree::model::{ApprovalDecision, CycleResult, TreeRefusalReason};
+use b10x_loom_tree::suite::{SuiteSettings, cycle_line, report_json, run_suite, summary_lines};
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, OpenRequest, Reasons, Refused, RunSettings, TreeTime,
     approve as record, open_tree, read_protocols_directory, refusal_json, run_json, run_tree,
@@ -28,8 +29,9 @@ use serde_json::json;
 
 use crate::{
     REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
-    TreeApproveArgs, TreeCloseArgs, TreeCommand, TreeConfinement, TreeOpenArgs, TreeRunArgs,
-    TreeStoreArgs, start_delegated, tree_run_exit_status,
+    TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs, TreeCloseArgs, TreeCommand,
+    TreeConfinement, TreeOpenArgs, TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated,
+    tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -41,6 +43,7 @@ pub fn command(command: &TreeCommand) -> u8 {
         TreeCommand::Close(arguments) => close(arguments),
         TreeCommand::Status(arguments) => status(arguments),
         TreeCommand::Verify(arguments) => verify(arguments),
+        TreeCommand::Test(arguments) => return test(arguments),
     };
     match ended {
         Ok(status) => status,
@@ -422,6 +425,87 @@ fn status(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
     let status = tree_status(&store, &catalog)?;
     println!("{}", printable(&status_json(&status).to_string()));
     Ok(0)
+}
+
+/// The suite, protocols, scratch and report paths of `tree test`, resolved.
+type TestPaths = (PathBuf, PathBuf, PathBuf, Option<PathBuf>);
+
+fn test_paths(arguments: &TreeTestArgs) -> Result<TestPaths, Refused> {
+    Ok((
+        resolved(&arguments.suite)?,
+        resolved(&arguments.protocols)?,
+        resolved(&arguments.scratch)?,
+        arguments.report.as_deref().map(resolved).transpose()?,
+    ))
+}
+
+/// `tree test`: parses nothing more than clap did, calls [`run_suite`], prints each cycle's line as
+/// it ends and the two summary lines, and writes `--report`.
+fn test(arguments: &TreeTestArgs) -> u8 {
+    let refuse_test = |detail: String, document: serde_json::Value| {
+        eprintln!("b10x-loom: tree test refused: {}", printable(&detail));
+        eprintln!("{}", printable(&document.to_string()));
+        TREE_TEST_REFUSED
+    };
+    let tree_refused =
+        |refused: Refused| refuse_test(refused.to_string(), refusal_json(&refused.0));
+    let time = match TreeTime::from_flag(Some(&arguments.at)) {
+        Ok(time) => time,
+        Err(refused) => return tree_refused(refused),
+    };
+    let (suite, protocols, scratch, report) = match test_paths(arguments) {
+        Ok(paths) => paths,
+        Err(refused) => return tree_refused(refused),
+    };
+    let runner = match tree_runner(arguments.confinement, None) {
+        Ok(runner) => runner,
+        Err(refused) => return tree_refused(refused),
+    };
+    let settings = SuiteSettings::new(
+        protocols,
+        scratch,
+        time,
+        runner,
+        arguments
+            .confinement
+            .to_possible_value()
+            .map(|value| value.get_name().to_owned()),
+    );
+    let mut print = |result: &CycleResult| println!("{}", printable(&cycle_line(result)));
+    let report_of = match run_suite(&suite, &settings, Some(&mut print), None) {
+        Ok(report) => report,
+        Err(refused) => {
+            return refuse_test(
+                refused.to_string(),
+                json!({
+                    "reason": format!("{:?}", refused.reason()),
+                    "member": refused.member(),
+                    "detail": refused.0.detail,
+                }),
+            );
+        }
+    };
+    for line in summary_lines(&report_of) {
+        println!("{}", printable(&line));
+    }
+    let mut status = if report_of.failed.is_empty() {
+        0
+    } else {
+        TREE_TEST_FAILED
+    };
+    if let Some(report) = report {
+        let mut document = report_json(&report_of).to_string();
+        document.push('\n');
+        if let Err(error) = std::fs::write(&report, document) {
+            eprintln!(
+                "b10x-loom: tree test: the report {} cannot be written: {}",
+                printable(&report.display().to_string()),
+                printable(&error.to_string())
+            );
+            status = TREE_TEST_FAILED;
+        }
+    }
+    status
 }
 
 fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {

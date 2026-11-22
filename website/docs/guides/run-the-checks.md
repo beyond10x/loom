@@ -30,7 +30,8 @@ CI performs the same setup. `task check` runs, in order:
 | `task no-hand-model`, `task commission:no-hand-model` | No hand-written type shadows one the specification declares |
 | `task conform`, `task commission:conform` | The executor and Commission each pass the ESS conformance suite synthesized from their specification |
 | `task commission:deps-guard` | Commission's contracts depend on no Loom executor, no Canon and no model-provider crate |
-| `cargo fmt --all --check`, `cargo clippy … -D warnings`, `loom-xtask test-step` | Format, lint and every test but the slow lane's: `cargo nextest run --workspace --locked` and the doc tests, failing a test over 60 s or the step over 120 s and printing the ten slowest tests. No test makes a model or network call |
+| `cargo fmt --all --check`, `cargo clippy … -D warnings`, `loom-xtask test-step` | Format, lint and every test but the slow lane's: `cargo nextest run --workspace --locked` and the doc tests, failing a test over 60 s, the `tree_run` tests of `b10x-loom-cli` over 60 s summed or the step over 120 s, and printing the ten slowest tests. No test makes a model or network call |
+| `task durable-check` | Without the test sync switch every store write syncs: the count tests pass in a build without the switch's feature, a release build with it fails to compile, and the command line's normal dependencies do not hold it |
 | `task docs-check`, `task commission:docs-drift` | The generated documentation pages are current |
 
 `task check` does not run the slow lane. After a change under `ess/`, write the synthesized suite

@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 6b2527fe99745029eca025e9d3d3f5c47942fb32e34b812bfd6d365b205a4e01
+// contract digest 4ab19374862c5969e0714b47a77bb948781fec4f0fab51be1d196f3c9e5e56a7
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run log — `loom.runlog`.
@@ -176,6 +176,8 @@ pub struct Stopped {
     pub stop: String,
     /// `next` — `List<String>`.
     pub next: Vec<String>,
+    /// `budget` — `Optional<String>`.
+    pub budget: Option<String>,
 }
 
 /// Terminated — `loom.runlog.Terminated`.

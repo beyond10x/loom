@@ -20,6 +20,13 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 
 `loom.tree.ApprovalDecision` is one of `Allow` and `Deny`.
 
+### `ArtifactRevision`
+
+`loom.tree.ArtifactRevision` is a record of two fields:
+
+- `artifact` — `String`
+- `revision` — `String`
+
 ### `CaseApproval`
 
 `loom.tree.CaseApproval` is a record of six fields:
@@ -31,9 +38,24 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 - `case_revision` — `Integer`
 - `at` — `Timestamp`
 
+### `CaseSelector`
+
+`loom.tree.CaseSelector` is a record of four fields:
+
+- `path` — `Optional<String>`, which may be absent
+- `protocol` — `Optional<String>`, which may be absent
+- `name` — `Optional<String>`, which may be absent
+- `every` — `Boolean`
+
+### `CaseSource`
+
+`loom.tree.CaseSource` is a record of one field:
+
+- `case` — `loom.tree.CaseSelector`
+
 ### `CaseStatus`
 
-`loom.tree.CaseStatus` is a record of 17 fields:
+`loom.tree.CaseStatus` is a record of 19 fields:
 
 - `case` — `String`
 - `parent` — `Optional<String>`, which may be absent
@@ -52,10 +74,177 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 - `runs` — `List<loom.tree.StatusRun>`
 - `approvals` — `List<loom.tree.StatusApproval>`
 - `copies` — `List<loom.tree.StatusCopy>`
+- `log` — `Optional<loom.tree.StatusLog>`, which may be absent
+- `budget` — `Optional<loom.tree.SpentBudget>`, which may be absent
+
+### `CasesSource`
+
+`loom.tree.CasesSource` is a record of one field:
+
+- `protocol` — `Optional<String>`, which may be absent
+
+### `CheckDifference`
+
+`loom.tree.CheckDifference` is a record of five fields:
+
+- `check` — `String`
+- `kind` — `String`
+- `reason` — `loom.tree.DifferenceReason`
+- `expected` — `String`
+- `found` — `Optional<String>`, which may be absent
+
+### `CheckKind`
+
+`loom.tree.CheckKind` is one of `exists`, `count`, `equals`, `contains`, `lacks`, `matches`, `not_matches`, `all`, `none`, `some`, `sequence`, `before` and `compare`.
+
+### `CompareOp`
+
+`loom.tree.CompareOp` is one of `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `subset`.
+
+### `Condition`
+
+`loom.tree.Condition` is a record of 14 fields:
+
+- `path` — `String`
+- `equals` — `Optional<Json>`, which may be absent
+- `not_equals` — `Optional<Json>`, which may be absent
+- `in` — `Optional<List<Json>>`, which may be absent
+- `not_in` — `Optional<List<Json>>`, which may be absent
+- `contains` — `Optional<Json>`, which may be absent
+- `lacks` — `Optional<Json>`, which may be absent
+- `matches` — `Optional<String>`, which may be absent
+- `not_matches` — `Optional<String>`, which may be absent
+- `min` — `Optional<Json>`, which may be absent
+- `max` — `Optional<Json>`, which may be absent
+- `type` — `Optional<loom.tree.ValueType>`, which may be absent
+- `length` — `Optional<loom.tree.LengthBound>`, which may be absent
+- `exists` — `Optional<Boolean>`, which may be absent
+
+### `ConditionGroup`
+
+`loom.tree.ConditionGroup` is a record of one field:
+
+- `all` — `List<loom.tree.Condition>`
+
+### `Conditions`
+
+`loom.tree.Conditions` is a record of two fields:
+
+- `all` — `List<loom.tree.Condition>`
+- `any_of` — `List<loom.tree.ConditionGroup>`
+
+### `CycleArea`
+
+`loom.tree.CycleArea` is one of `work` and `store`.
+
+### `CycleCondition`
+
+`loom.tree.CycleCondition` is a record of four fields:
+
+- `protocol` — `Optional<String>`, which may be absent
+- `declares` — `Optional<loom.tree.DeclaredName>`, which may be absent
+- `suite` — `Optional<String>`, which may be absent
+- `test` — `Optional<loom.tree.Condition>`, which may be absent
+
+### `CycleExpectation`
+
+`loom.tree.CycleExpectation` is a record of four fields:
+
+- `exit` — `Optional<Integer>`, which may be absent
+- `outcome` — `Optional<String>`, which may be absent
+- `stop` — `Optional<loom.tree.StopExpectation>`, which may be absent
+- `checks` — `List<loom.tree.SuiteCheck>`
+
+### `CycleResult`
+
+`loom.tree.CycleResult` is a record of nine fields:
+
+- `name` — `String`
+- `pending` — `Boolean`
+- `waits_for` — `Optional<loom.tree.WaitingCycle>`, which may be absent
+- `run` — `Boolean`
+- `not_run_when` — `Optional<Integer>`, which may be absent
+- `as_expected` — `Boolean`
+- `difference` — `Optional<loom.tree.CheckDifference>`, which may be absent
+- `exit` — `Optional<Integer>`, which may be absent
+- `seconds` — `Decimal`
+
+### `CycleStep`
+
+`loom.tree.CycleStep` is a record of 17 fields:
+
+- `do` — `loom.tree.StepKind`
+- `name` — `Optional<String>`, which may be absent
+- `at` — `Optional<Integer>`, which may be absent
+- `exit` — `Optional<loom.tree.ExitExpectation>`, which may be absent
+- `refusal` — `Optional<String>`, which may be absent
+- `engine` — `Optional<String>`, which may be absent
+- `rounds` — `Optional<Integer>`, which may be absent
+- `checks` — `List<loom.tree.SuiteCheck>`
+- `case` — `Optional<String>`, which may be absent
+- `capability` — `Optional<String>`, which may be absent
+- `action` — `Optional<String>`, which may be absent
+- `principal` — `Optional<String>`, which may be absent
+- `outcome` — `Optional<String>`, which may be absent
+- `result` — `Optional<String>`, which may be absent
+- `reasons` — `Optional<List<String>>`, which may be absent
+- `deny` — `Optional<Boolean>`, which may be absent
+- `option` — `Optional<String>`, which may be absent
 
 ### `DecisionKind`
 
 `loom.tree.DecisionKind` is one of `Approve`, `ApproveAction`, `Close` and `Handoff`.
+
+### `DeclaredName`
+
+`loom.tree.DeclaredName` is a record of two fields:
+
+- `action` — `Optional<String>`, which may be absent
+- `outcome` — `Optional<String>`, which may be absent
+
+### `DifferenceReason`
+
+`loom.tree.DifferenceReason` is one of `CheckFailed`, `ExitDiffers`, `RefusalDiffers`, `OutcomeDiffers`, `StopDiffers`, `VerifyFailed`, `ScriptUnused`, `RoundsSpent`, `OperandNotOne`, `BlobChanged`, `PathOutsideCycle`, `SelectionTooLarge`, `SeedUnusable` and `StepFailed`.
+
+### `DocSource`
+
+`loom.tree.DocSource` is a record of two fields:
+
+- `in` — `loom.tree.CycleArea`
+- `path` — `String`
+
+### `ExitExpectation`
+
+`loom.tree.ExitExpectation` is a record of two fields:
+
+- `status` — `Optional<Integer>`, which may be absent
+- `not` — `Optional<Integer>`, which may be absent
+
+### `FilesSource`
+
+`loom.tree.FilesSource` is a record of two fields:
+
+- `in` — `loom.tree.CycleArea`
+- `glob` — `String`
+
+### `Follow`
+
+`loom.tree.Follow` is a record of three fields:
+
+- `target` — `loom.tree.FollowTarget`
+- `member` — `Optional<String>`, which may be absent
+- `below` — `Optional<String>`, which may be absent
+
+### `FollowTarget`
+
+`loom.tree.FollowTarget` is one of `blob`, `evidence` and `file`.
+
+### `LengthBound`
+
+`loom.tree.LengthBound` is a record of two fields:
+
+- `min` — `Optional<Integer>`, which may be absent
+- `max` — `Optional<Integer>`, which may be absent
 
 ### `LogFailure`
 
@@ -65,20 +254,141 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 - `line` — `Integer`
 - `detail` — `String`
 
+### `LogSource`
+
+`loom.tree.LogSource` is a record of two fields:
+
+- `case` — `loom.tree.CaseSelector`
+- `event` — `List<String>`
+
 ### `NextDecision`
 
-`loom.tree.NextDecision` is a record of 10 fields:
+`loom.tree.NextDecision` is a record of 11 fields:
 
 - `case` — `String`
 - `kind` — `loom.tree.DecisionKind`
 - `action` — `Optional<String>`, which may be absent
 - `capability` — `Optional<String>`, which may be absent
+- `principal` — `Optional<String>`, which may be absent
 - `decides` — `String`
 - `subject` — `Optional<String>`, which may be absent
 - `revision` — `Optional<String>`, which may be absent
 - `path` — `Optional<String>`, which may be absent
 - `outcome` — `Optional<String>`, which may be absent
 - `command` — `List<String>`
+
+### `Operand`
+
+`loom.tree.Operand` is a record of five fields:
+
+- `value` — `Optional<Json>`, which may be absent
+- `select` — `Optional<List<loom.tree.SelectItem>>`, which may be absent
+- `take` — `Optional<loom.tree.OperandTake>`, which may be absent
+- `plus` — `Optional<Integer>`, which may be absent
+- `after` — `Optional<String>`, which may be absent
+
+### `OperandTake`
+
+`loom.tree.OperandTake` is one of `value`, `count`, `size`, `digest` and `length`.
+
+### `PickPosition`
+
+`loom.tree.PickPosition` is one of `first`, `last` and `index`.
+
+### `ReadAs`
+
+`loom.tree.ReadAs` is one of `text`, `lines`, `json`, `jsonl` and `yaml`.
+
+### `RecordsSource`
+
+`loom.tree.RecordsSource` is a record of two fields:
+
+- `case` — `loom.tree.CaseSelector`
+- `kind` — `List<String>`
+
+### `ScriptedApproval`
+
+`loom.tree.ScriptedApproval` is a record of nine fields:
+
+- `case` — `Optional<String>`, which may be absent
+- `capability` — `Optional<String>`, which may be absent
+- `action` — `Optional<String>`, which may be absent
+- `principal` — `Optional<String>`, which may be absent
+- `result` — `Optional<String>`, which may be absent
+- `reasons` — `Optional<List<String>>`, which may be absent
+- `deny` — `Optional<Boolean>`, which may be absent
+- `times` — `loom.tree.UseBound`
+- `optional` — `Boolean`
+
+### `ScriptedChoice`
+
+`loom.tree.ScriptedChoice` is a record of five fields:
+
+- `case` — `Optional<String>`, which may be absent
+- `option` — `Optional<String>`, which may be absent
+- `principal` — `Optional<String>`, which may be absent
+- `times` — `loom.tree.UseBound`
+- `optional` — `Boolean`
+
+### `ScriptedClose`
+
+`loom.tree.ScriptedClose` is a record of five fields:
+
+- `case` — `Optional<String>`, which may be absent
+- `outcome` — `String`
+- `principal` — `Optional<String>`, which may be absent
+- `times` — `loom.tree.UseBound`
+- `optional` — `Boolean`
+
+### `ScriptedDecision`
+
+`loom.tree.ScriptedDecision` is one of three shapes, told apart by a `take` field — tagged, so a decoder never has to guess which branch it is reading:
+
+- `approve` — `loom.tree.ScriptedApproval`
+- `close` — `loom.tree.ScriptedClose`
+- `decide` — `loom.tree.ScriptedChoice`
+
+### `SeedEntry`
+
+`loom.tree.SeedEntry` is a record of two fields:
+
+- `from` — `String`
+- `to` — `String`
+
+### `SelectItem`
+
+`loom.tree.SelectItem` is a record of 15 fields:
+
+- `log` — `Optional<loom.tree.LogSource>`, which may be absent
+- `records` — `Optional<loom.tree.RecordsSource>`, which may be absent
+- `runs` — `Optional<loom.tree.CaseSource>`, which may be absent
+- `cases` — `Optional<loom.tree.CasesSource>`, which may be absent
+- `doc` — `Optional<loom.tree.DocSource>`, which may be absent
+- `files` — `Optional<loom.tree.FilesSource>`, which may be absent
+- `step` — `Optional<String>`, which may be absent
+- `suite` — `Optional<String>`, which may be absent
+- `requests` — `Optional<loom.tree.CaseSource>`, which may be absent
+- `calls` — `Optional<loom.tree.CaseSource>`, which may be absent
+- `where` — `Optional<loom.tree.Conditions>`, which may be absent
+- `pick` — `Optional<loom.tree.SelectPick>`, which may be absent
+- `path` — `Optional<String>`, which may be absent
+- `follow` — `Optional<loom.tree.Follow>`, which may be absent
+- `as` — `Optional<loom.tree.ReadAs>`, which may be absent
+
+### `SelectPick`
+
+`loom.tree.SelectPick` is a record of two fields:
+
+- `position` — `loom.tree.PickPosition`
+- `index` — `Optional<Integer>`, which may be absent
+
+### `SourceKind`
+
+`loom.tree.SourceKind` is one of `log`, `records`, `runs`, `cases`, `doc`, `files`, `step`, `suite`, `requests` and `calls`.
+
+### `SpentBudget`
+
+`loom.tree.SpentBudget` is one of `Cancel`, `MaxSteps` and `MaxWallSeconds`.
 
 ### `StatusApproval`
 
@@ -113,15 +423,117 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 - `action` — `Optional<String>`, which may be absent
 - `name` — `Optional<String>`, which may be absent
 
+### `StatusLog`
+
+`loom.tree.StatusLog` is a record of four fields:
+
+- `verified` — `Boolean`
+- `refusal` — `Optional<loom.runlog.RunLogRefusal>`, which may be absent
+- `line` — `Optional<Integer>`, which may be absent
+- `detail` — `Optional<String>`, which may be absent
+
 ### `StatusRun`
 
-`loom.tree.StatusRun` is a record of five fields:
+`loom.tree.StatusRun` is a record of six fields:
 
 - `action` — `String`
 - `exit` — `Optional<Integer>`, which may be absent
 - `attempt` — `Integer`
 - `retried` — `Boolean`
 - `retry_of` — `List<String>`
+- `cancelled` — `Optional<Boolean>`, which may be absent
+
+### `StepKind`
+
+`loom.tree.StepKind` is one of `open`, `run`, `approve`, `close`, `decide`, `stop`, `resume`, `allow`, `reopen`, `replay`, `status` and `verify`.
+
+### `StopExpectation`
+
+`loom.tree.StopExpectation` is a record of two fields:
+
+- `stop` — `loom.tree.TreeStop`
+- `case` — `Optional<String>`, which may be absent
+
+### `SuiteCheck`
+
+`loom.tree.SuiteCheck` is a record of 17 fields:
+
+- `check` — `loom.tree.CheckKind`
+- `name` — `Optional<String>`, which may be absent
+- `select` — `List<loom.tree.SelectItem>`
+- `is` — `Optional<Json>`, which may be absent
+- `min` — `Optional<Integer>`, which may be absent
+- `max` — `Optional<Integer>`, which may be absent
+- `regex` — `Optional<String>`, which may be absent
+- `where` — `Optional<loom.tree.Conditions>`, which may be absent
+- `starts` — `Optional<List<Json>>`, which may be absent
+- `ends` — `Optional<List<Json>>`, which may be absent
+- `within` — `Optional<List<Json>>`, which may be absent
+- `first` — `Optional<loom.tree.Conditions>`, which may be absent
+- `then` — `Optional<loom.tree.Conditions>`, which may be absent
+- `between_none` — `Optional<loom.tree.Conditions>`, which may be absent
+- `left` — `Optional<loom.tree.Operand>`, which may be absent
+- `op` — `Optional<loom.tree.CompareOp>`, which may be absent
+- `right` — `Optional<loom.tree.Operand>`, which may be absent
+
+### `SuiteCycle`
+
+`loom.tree.SuiteCycle` is a record of 14 fields:
+
+- `name` — `String`
+- `pending` — `Boolean`
+- `when` — `List<loom.tree.CycleCondition>`
+- `protocol` — `Optional<String>`, which may be absent
+- `bindings` — `Optional<String>`, which may be absent
+- `engine` — `Optional<String>`, which may be absent
+- `fixtures` — `Optional<String>`, which may be absent
+- `revisions` — `List<loom.tree.ArtifactRevision>`
+- `seed` — `List<loom.tree.SeedEntry>`
+- `principal` — `Optional<String>`, which may be absent
+- `max_rounds` — `Integer`
+- `decide` — `List<loom.tree.ScriptedDecision>`
+- `steps` — `List<loom.tree.CycleStep>`
+- `expect` — `loom.tree.CycleExpectation`
+
+### `SuiteDefaults`
+
+`loom.tree.SuiteDefaults` is a record of 10 fields:
+
+- `protocol` — `Optional<String>`, which may be absent
+- `bindings` — `Optional<String>`, which may be absent
+- `engine` — `Optional<String>`, which may be absent
+- `fixtures` — `Optional<String>`, which may be absent
+- `revisions` — `Optional<List<loom.tree.ArtifactRevision>>`, which may be absent
+- `seed` — `Optional<List<loom.tree.SeedEntry>>`, which may be absent
+- `principal` — `Optional<String>`, which may be absent
+- `max_rounds` — `Optional<Integer>`, which may be absent
+- `decide` — `Optional<List<loom.tree.ScriptedDecision>>`, which may be absent
+- `steps` — `Optional<List<loom.tree.CycleStep>>`, which may be absent
+
+### `SuiteRefusal`
+
+`loom.tree.SuiteRefusal` is a record of three fields:
+
+- `reason` — `loom.tree.SuiteRefusalReason`
+- `member` — `Optional<String>`, which may be absent
+- `detail` — `String`
+
+### `SuiteRefusalReason`
+
+`loom.tree.SuiteRefusalReason` is one of `SuiteUnreadable`, `MemberUndeclared`, `MemberMissing`, `PathOutsideSuite`, `PathOutsideCycle`, `CycleNameUnusable`, `CycleTwice`, `StepNameTwice`, `AfterUnknownStep`, `PathUnusable`, `RegexUnusable`, `SelectUnusable`, `StepKindUnknown`, `SourceUnknown`, `EventKindUnknown`, `ProtocolsUnreadable`, `ScratchNotEmpty` and `SeedUnusable`.
+
+### `SuiteReport`
+
+`loom.tree.SuiteReport` is a record of eight fields:
+
+- `cycles` — `List<loom.tree.CycleResult>`
+- `expected` — `Integer`
+- `as_expected` — `Integer`
+- `failed` — `List<String>`
+- `pending` — `Integer`
+- `pending_passing` — `List<String>`
+- `waiting` — `List<loom.tree.WaitingCycle>`
+- `not_run` — `List<String>`
 
 ### `TreeBudget`
 
@@ -202,7 +614,15 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 
 ### `TreeStop`
 
-`loom.tree.TreeStop` is one of `Terminal`, `AwaitingPerson`, `AwaitingAuthority`, `Stuck` and `BudgetSpent`.
+`loom.tree.TreeStop` is one of `Terminal`, `AwaitingPerson`, `AwaitingAuthority`, `Stuck`, `BudgetSpent` and `Cancelled`.
+
+### `TreeSuite`
+
+`loom.tree.TreeSuite` is a record of three fields:
+
+- `format` — `String`
+- `defaults` — `Optional<loom.tree.SuiteDefaults>`, which may be absent
+- `cycles` — `List<loom.tree.SuiteCycle>`
 
 ### `TreeVerify`
 
@@ -211,9 +631,28 @@ A tree of protocol cases run from a case store: how a run of the tree stops, the
 - `cases` — `Integer`
 - `failure` — `Optional<loom.tree.LogFailure>`, which may be absent
 
-Eight of the types above are reached by nothing else in this system: `loom.tree.CaseApproval`, `loom.tree.TreeBudget`, `loom.tree.TreeLogHead`, `loom.tree.TreeManifest`, `loom.tree.TreeRefusal`, `loom.tree.TreeRun`, `loom.tree.TreeStatus` and `loom.tree.TreeVerify`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+### `UseBound`
+
+`loom.tree.UseBound` is a record of two fields:
+
+- `count` — `Optional<Integer>`, which may be absent
+- `any` — `Boolean`
+
+### `ValueType`
+
+`loom.tree.ValueType` is one of `string`, `number`, `bool`, `list`, `map` and `null`.
+
+### `WaitingCycle`
+
+`loom.tree.WaitingCycle` is a record of three fields:
+
+- `name` — `String`
+- `story` — `String`
+- `kind` — `String`
+
+12 of the types above are reached by nothing else in this system: `loom.tree.CaseApproval`, `loom.tree.SourceKind`, `loom.tree.SuiteRefusal`, `loom.tree.SuiteReport`, `loom.tree.TreeBudget`, `loom.tree.TreeLogHead`, `loom.tree.TreeManifest`, `loom.tree.TreeRefusal`, `loom.tree.TreeRun`, `loom.tree.TreeStatus`, `loom.tree.TreeSuite` and `loom.tree.TreeVerify`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:063c2efe4cb81a28e0ece72d28a665eb9935bc79a7526450f461ca5249648b70`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:03358fee3a74ec4941138ef598e2be4d9648515291ff98c57189214759f9eded`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

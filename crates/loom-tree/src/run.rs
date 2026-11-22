@@ -9,7 +9,8 @@
 //!
 //! Before each step the run asks the cancel handle, the step budget and the wall-time budget, in
 //! that order: the handle ends the run `Cancelled`, naming the action that was to be taken next;
-//! either budget ends it `BudgetSpent`. A handle set during a step ends the program the step runs
+//! either budget ends it `BudgetSpent`, and the `stopped` line names it as `budget` (`MaxSteps`,
+//! `MaxWallSeconds`). A handle set during a step ends the program the step runs
 //! (`story:cancel-a-running-bound-program`): a thread of the run reads the caller's flag every
 //! [`CANCEL_WATCH`] and sets the [`Cancel`] every port of the run holds; the step is refused
 //! `Cancelled`, its `action finished` line written, and the run ends `Cancelled` naming its action.
@@ -45,15 +46,15 @@ use b10x_loom_executor::projection::project;
 use b10x_loom_executor::selection::{ActionSelector as _, SelectionContext, StepHistory as _};
 use b10x_loom_executor::{DeterministicSelector, EmptyObjectArguments, Loom};
 use b10x_loom_intake_slice::confinement::{Cancel, TestRunner};
-use b10x_loom_runlog::log_file_name;
+use b10x_loom_runlog::{BUDGET_SPENT, budget_name, log_file_name};
 use loom::bindings::{BindingsDocument, Executor};
 use loom::runlog::{
     ActionFinished, CaseOpened, ChildClosed, ChildOpened, Evaluated, RunLogEvent, RunLogLine,
     Stopped, Terminated,
 };
 use loom::tree::{
-    ApprovalDecision, DecisionKind, NextDecision, TreeManifest, TreeRefusalReason, TreeRun,
-    TreeStop,
+    ApprovalDecision, DecisionKind, NextDecision, SpentBudget, TreeManifest, TreeRefusalReason,
+    TreeRun, TreeStop,
 };
 use loom_governor::{CanonGovernor, FileCaseStore};
 use loom_protocols::ProtocolCatalog;
@@ -220,11 +221,17 @@ fn run_cancellable(
         let stop_before = if cancelled_before {
             None
         } else if settings.max_steps.is_some_and(|max| steps >= max) {
-            Some(format!("the run took its {steps} steps"))
+            Some((
+                SpentBudget::MaxSteps,
+                format!("the run took its {steps} steps"),
+            ))
         } else if wall.is_some_and(|(started, seconds)| started.elapsed().as_secs() >= seconds) {
-            Some(format!(
-                "the run's {} s of wall time are spent",
-                settings.max_wall_seconds.unwrap_or_default()
+            Some((
+                SpentBudget::MaxWallSeconds,
+                format!(
+                    "the run's {} s of wall time are spent",
+                    settings.max_wall_seconds.unwrap_or_default()
+                ),
             ))
         } else {
             None
@@ -255,12 +262,13 @@ fn run_cancellable(
             )?;
             return cancelled_stop(&logs, &case.case, next, steps, &mut emit);
         }
-        if let Some(detail) = stop_before {
+        if let Some((budget, detail)) = stop_before {
             let line = logs.append(
                 &case.case,
                 RunLogEvent::Stopped(Stopped {
-                    stop: "BudgetSpent".to_owned(),
+                    stop: BUDGET_SPENT.to_owned(),
                     next: Vec::new(),
+                    budget: Some(budget_name(budget).to_owned()),
                 }),
             )?;
             emit(&case.case, line);
@@ -438,6 +446,7 @@ fn run_cancellable(
                     .iter()
                     .map(|decision| decision.decides.clone())
                     .collect(),
+                budget: None,
             }),
         )?;
         emit(&case.case, line);
@@ -830,7 +839,9 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
 }
 
 /// The action the deterministic selector takes next in `case`, chosen as a step would choose it
-/// from the frontier, with nothing written; empty when it takes none.
+/// from the frontier Commission's loop offers; nothing is written and nothing is started. The
+/// placed artifacts are read as the case holds them: a file changed since the last step moves its
+/// artifact only when the next step starts. Empty when the selector takes none.
 fn next_action<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &Held,
@@ -841,11 +852,27 @@ fn next_action<S: loom_governor::FallibleCaseStore>(
     cancel: &Cancel,
 ) -> Result<Vec<String>, Refused> {
     let id = CaseId(case.case.clone());
-    let (_, _, _, history) =
+    let (_, _, effects, history) =
         step_inputs(governor, case, catalog, workspace, store, runner, cancel)?;
     let frontier = governor
         .frontier(&id)
         .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
+    // What Commission's loop hands the executor: the actions the case's effect port performs, and
+    // every action behind an authority gate.
+    let mut offered = frontier.data().clone();
+    let gated: BTreeSet<String> = offered
+        .actions
+        .iter()
+        .filter(|entry| {
+            entry.status == ActionStatus::ApprovalRequired
+                || entry.capability.as_deref().is_some_and(|c| !c.is_empty())
+        })
+        .map(|entry| entry.action.clone())
+        .collect();
+    offered
+        .actions
+        .retain(|entry| effects.performs(&entry.action) || gated.contains(&entry.action));
+    let frontier = Frontier::new(offered);
     let catalogue = project(
         &frontier,
         loom::run::CatalogueId(loom::primitives::Uuid(
@@ -884,6 +911,7 @@ fn cancelled_stop(
         RunLogEvent::Stopped(Stopped {
             stop: format!("{:?}", TreeStop::Cancelled),
             next,
+            budget: None,
         }),
     )?;
     emit(case, line);
@@ -1051,6 +1079,7 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
                 kind: DecisionKind::Handoff,
                 action: Some(action.action.clone()),
                 capability: None,
+                principal: None,
                 decides: text,
                 subject: None,
                 revision: None,
@@ -1112,7 +1141,8 @@ fn waits<S: loom_governor::FallibleCaseStore>(
         if let Some(capability) = &capability {
             command.extend(["--capability".to_owned(), capability.clone()]);
         }
-        command.extend(["--principal".to_owned(), principal]);
+        // One value for the command and the decision: the printed principal is the one recorded.
+        command.extend(["--principal".to_owned(), principal.clone()]);
         let kind = if kind == Executor::Person {
             person = true;
             command.extend(["--action".to_owned(), action.clone()]);
@@ -1125,6 +1155,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
             kind,
             action: Some(action.clone()),
             capability,
+            principal: Some(principal),
             decides: format!("{action} of case {} at revision {revision}", case.0),
             subject,
             revision: subject_revision,
@@ -1140,6 +1171,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
                 kind: DecisionKind::Close,
                 action: None,
                 capability: None,
+                principal: None,
                 decides: format!("close case {} through {outcome}", case.0),
                 subject: None,
                 revision: None,

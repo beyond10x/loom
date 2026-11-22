@@ -3,7 +3,7 @@ title: Run a tree of cases
 sidebar_position: 7
 description: Open a tree of protocol cases with b10x-loom tree open, drive it with tree run, answer what it waits on with tree approve or tree close, and read and check it with tree status and tree verify.
 lede: A tree of cases lives in one store directory. tree run takes one step of one case at a time through the action's bound executor until the root ends or the tree waits on a person, and it prints the exact command that answers each wait.
-source: crates/loom-tree/src/lib.rs, crates/loom-tree/src/run.rs, crates/loom-tree/src/approve.rs, crates/loom-tree/src/close.rs, crates/loom-tree/src/status.rs, crates/loom-tree/src/log.rs, crates/loom-cli/src/tree.rs, crates/loom-cli/tests/tree_run.rs, ess/domains/tree.yaml
+source: crates/loom-tree/src/lib.rs, crates/loom-tree/src/run.rs, crates/loom-tree/src/approve.rs, crates/loom-tree/src/close.rs, crates/loom-tree/src/status.rs, crates/loom-tree/src/log.rs, crates/loom-cli/src/tree.rs, crates/loom-cli/tests/tree_run.rs, crates/loom-tree/src/suite/mod.rs, crates/loom-tree/src/suite/run.rs, crates/loom-cli/tests/tree_test/mod.rs, ess/domains/tree.yaml
 ---
 
 # Run a tree of cases
@@ -136,8 +136,12 @@ $ b10x-loom tree status --store store | jq -c '.cases[] | {case, protocol, outco
 
 `tree status` prints `loom.tree-status/1`: per case its link, protocol, outcome or stop, its
 records in the order received, its program runs with their attempts, its approvals and the records
-a `copy` binding copied into it. `tree status` and `tree verify` read the store and never hold it,
-so a live view can read the tree while a run holds it.
+a `copy` binding copied into it, whether its run log verified (`log`; a log that does not is named
+with the refusal, the line and what is wrong, and nothing is read from it) and, after a
+`BudgetSpent` stop, the budget that ended the run (`budget`: `MaxSteps` or `MaxWallSeconds`; a
+cancelled run stops `Cancelled` and names none, and `Cancel` is read only from a log an earlier
+Loom wrote). `protocols` lists each protocol the cases use once, with the SHA-256 of its document. `tree status` and `tree verify` read the store and never hold it, so a live view can read
+the tree while a run holds it.
 
 ## Choose between two outcomes
 
@@ -219,8 +223,8 @@ $ b10x-loom tree open --protocol sign@1 --store sign-store --bindings sign.bindi
 ```
 
 ```console
-$ b10x-loom tree run --confinement local --store sign-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, detail, decisions: [.decisions[] | {kind, action, capability}]}'
-{"stop":"AwaitingPerson","steps":0,"detail":null,"decisions":[{"kind":"ApproveAction","action":"post.seal","capability":"clerk.seal"},{"kind":"ApproveAction","action":"post.sign","capability":null},{"kind":"Approve","action":"post.stamp","capability":"clerk.stamp"}]}
+$ b10x-loom tree run --confinement local --store sign-store --at 2026-11-22T08:00:00Z | jq -c '{stop, steps, detail, decisions: [.decisions[] | {kind, action, capability, principal}]}'
+{"stop":"AwaitingPerson","steps":0,"detail":null,"decisions":[{"kind":"ApproveAction","action":"post.seal","capability":"clerk.seal","principal":"clerk"},{"kind":"ApproveAction","action":"post.sign","capability":null,"principal":"walker"},{"kind":"Approve","action":"post.stamp","capability":"clerk.stamp","principal":"operator"}]}
 b10x-loom: tree waits: case root: post.seal of case root at revision 1
   run: b10x-loom tree approve --store ~/tour/sign-store --case root --capability clerk.seal --principal clerk --action post.seal
 b10x-loom: tree waits: case root: post.sign of case root at revision 1
@@ -229,6 +233,11 @@ b10x-loom: tree waits: case root: post.stamp of case root at revision 1
   run: b10x-loom tree approve --store ~/tour/sign-store --case root --capability clerk.stamp --principal operator
 (exit 3)
 ```
+
+Each `tree approve` decision names the principal its command records as `principal`. For a person
+action it is the person the binding names, the only principal `tree approve --action` accepts.
+For a capability it is `operator`, a default that restricts nothing. A close and a handoff name
+none.
 
 ```console
 $ b10x-loom tree approve --store sign-store --case root --principal walker --action post.sign --at 2026-11-22T08:01:00Z
@@ -341,3 +350,162 @@ b10x-loom: tree verify: case root line 3: BrokenChain: prev is not the SHA-256 o
 
 A command that writes holds `tree.lock` in the store for the whole command. A second one is
 refused `StoreInUse`, names the process that holds the store and writes nothing.
+
+## Test a tree with a suite of cycles
+
+A suite of scripted tree cycles is a `loom.tree-suite/1` document. `b10x-loom tree test` runs its
+cycles one after another, each in its own directory `<scratch>/<n>/` (`store/` and `work/`), each
+step through the function of its `tree` command in the same process, and prints one line per
+cycle and two summary lines. The suite below is
+`crates/loom-cli/tests/fixtures/tree-suite/suite.yaml`; its paths (`bindings`, the `from` of a
+seed) are below the suite's directory, and a seed's `to` is below the cycle's workspace.
+
+```yaml
+format: loom.tree-suite/1
+defaults:
+  protocol: tour@1
+  bindings: bindings/tour.bindings.yaml
+  seed: [{from: stubs, to: stubs}, {from: seeds/route.txt, to: route.txt}]
+cycles:
+  - name: arrives
+    decide:
+      - {take: approve, capability: guide.approve, times: any}
+      - {take: approve, capability: guide.issue, times: any}
+    expect:
+      exit: 0
+      outcome: arrived
+      checks:
+        - check: count
+          name: two-tickets-run
+          select: [{runs: {case: "*"}}, {where: {action: ticket.issue}}]
+          is: 2
+  - name: waits
+    decide:
+      - {take: approve, capability: guide.approve}
+    expect:
+      exit: 3
+      stop: AwaitingAuthority
+```
+
+```console
+$ b10x-loom tree test --suite suite.yaml --protocols protocols --scratch scratch \
+    --at 2026-11-22T08:00:00Z --confinement local --report report.json
+arrives: as expected (9.0 s)
+waits: as expected (1.9 s)
+wrong: FAILED: expect.outcome (outcome, OutcomeDiffers): expected arrived, found turned_back (3.3 s)
+later: pending, still failing: check-log-says-hello (equals, CheckFailed): expected hello, found 26 bytes, sha256 a77f6b1ee3b7 (1.8 s)
+replays: pending, waits for story:tree-replay-command (replay)
+cycles: 3 expected, 2 as expected, 1 failed: wrong
+pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: replays on story:tree-replay-command)
+(exit 1)
+```
+
+`--scratch` must be absent or empty, and nothing is written outside it but `--report`, the same
+result as one `loom.tree.SuiteReport` JSON document. The protocols of `--protocols` are read once,
+as `tree open --protocols` reads them, and every cycle's tree keeps them. The exit status is 0
+when every cycle that ran and is not pending ended as expected, 1 when one did not, and 2 when the
+command line, the suite, the protocols, a seed or the scratch directory is refused before any
+cycle; the refusal names its reason and the member of the suite (`cycles[2].steps[0].do`).
+
+At an exit 3 of `tree run`, every printed wait is answered by the first `decide` entry, in list
+order, that matches it and has a use left: `approve` by `case` (an id, or its last part),
+`capability` and `action`, `close` by `case` and `outcome`; `times` is a count (default 1) or
+`any`. The rounds go on until another exit, a wait no entry answers, or `max_rounds`
+(`RoundsSpent`). An entry that is not `optional` and was never used is the difference
+`ScriptUnused`. Each cycle's `tree run` rounds share 60 s of wall time.
+
+A cycle states `name`, and any of `pending`, `when`, `protocol`, `bindings`, `engine`,
+`fixtures`, `revisions`, `seed`, `principal`, `max_rounds` (default 40), `decide`, `steps`
+(default `[{do: open}, {do: run}]`) and `expect`. `defaults` holds any of `protocol` to `steps`; a
+stated member replaces the default whole, and a cycle's own `decide` entries are tried before the
+default ones.
+
+### Steps
+
+| `do` | What it runs |
+|---|---|
+| `open` | `tree open` of the cycle's protocol and bindings into its store |
+| `run` | rounds of `tree run`, each exit 3 answered from `decide`; `rounds: 1` runs one |
+| `approve` | `tree approve` (`case`, `capability` or `action`, `principal`) |
+| `close` | `tree close` (`case`, `outcome`) |
+| `status`, `verify` | `tree status`, `tree verify`; a named one gives its JSON output to `{step: <name>}` |
+
+A step states `exit` (a status, or `{not: <status>}`), `refusal`, `at` (minutes after `--at`) and
+`checks`, evaluated right after it.
+
+### Sources
+
+| Source | Example | Gives |
+|---|---|---|
+| `log` | `{log: {case: first, event: ActionFinished}}` | a case's run log lines in `seq` order |
+| `records` | `{records: {case: ".", kind: test_run}}` | the `canon-evidence/1` records a case holds |
+| `runs` | `{runs: {case: first}}` | the program runs of a case (`exit`, `blob_sha256`, `retry_of`, …) |
+| `cases` | `{cases: {protocol: tour-leg}}` | the cases of `tree status` |
+| `doc` | `{doc: {in: work, path: findings.yaml}}` | one file, read by its extension |
+| `files` | `{files: {in: work, glob: "legs/*.yaml"}}` | the relative paths that exist, in byte order |
+| `step` | `{step: verified}` | the JSON output of a named `status` or `verify` step |
+| `suite` | `{suite: expected/lib.rs}` | a file of the suite's directory |
+
+A case is a path below the root (`.` is the root, `billing.invoices` is `<root>.billing.invoices`),
+`{protocol: <id>}`, `{name: <last segment>}` or `"*"`.
+
+### Operations
+
+| Operation | Example |
+|---|---|
+| `where` | `{where: {action: route.check, exit: {min: 1}}}` |
+| `pick` | `{pick: last}`, `{pick: 0}`, `{pick: -1}` |
+| `path` | `{path: "findings[id=q2].status"}`, `{path: "retry_of[*]"}` |
+| `follow` | `{follow: blob}`, `{follow: evidence}`, `{follow: file}`, `{follow: {file: notes.txt}}` |
+| `as` | `{as: lines}` |
+
+A condition maps a path to a scalar it equals, or to one of `equals`, `not_equals`, `in`,
+`not_in`, `contains`, `lacks`, `matches`, `not_matches`, `min`, `max`, `type`, `length`,
+`exists`; `any_of` holds when one of its groups does.
+
+### Check kinds
+
+| Kind | Example |
+|---|---|
+| `exists` | `{check: exists, select: [{doc: {in: work, path: ticket.txt}}]}` |
+| `count` | `{check: count, select: [{log: {case: ".", event: ChildOpened}}], is: 2}` |
+| `equals` | `{check: equals, select: [{doc: …}, {path: status}], is: changed}` |
+| `contains` | `{check: contains, select: [{doc: {in: work, path: notes.txt}}], is: second line}` |
+| `lacks` | `{check: lacks, select: [{doc: {in: work, path: notes.txt}}], is: offline-hosted}` |
+| `matches` | `{check: matches, select: […], regex: "^the "}` |
+| `not_matches` | `{check: not_matches, select: […], regex: customer}` |
+| `all` | `{check: all, select: [{log: {case: "*", event: CaseOpened}}], where: {protocol: {matches: "^tour"}}}` |
+| `none` | `{check: none, select: [{runs: {case: first}}], where: {timed_out: true}}` |
+| `some` | `{check: some, select: [{runs: {case: first}}], where: {exit: 0}}` |
+| `sequence` | `{check: sequence, select: [{log: {case: "."}}, {path: kind}], ends: [Stopped, Terminated]}` |
+| `before` | `{check: before, select: [{records: {case: "."}}], first: {kind: repro_run, result: red}, then: {kind: implementation_change}}` |
+| `compare` | `{check: compare, left: {select: […], take: count}, op: eq, right: {value: 2}}` |
+
+A difference names the check, its kind and the expected value. What was found is printed when it
+is a number, a boolean or a value Loom declares; any other text is printed as its length and the
+first 12 hex digits of its SHA-256, so a program's output never reaches a summary line.
+
+### Availability
+
+`SUITE_AVAILABILITY` marks what this binary runs. A cycle that uses a part that waits is printed
+`<name>: pending, waits for story:<id> (<kind>)` and counted under `pending`.
+
+| Part | Waits for |
+|---|---|
+| steps `open`, `run`, `approve`, `close`, `status`, `verify`; entries `approve`, `close`; every source but `requests` and `calls`; every check kind; `when` | available |
+| `stop`, `resume`, `allow`, `reopen`; `approve` with `result`, `reasons` or `deny`; events `StopRecorded`, `StopLifted`, `Labelled` | `story:tree-stop-record-and-labels` |
+| `replay` | `story:tree-replay-command` |
+| `calls` | `story:agent-node-run-records` |
+| `engine` | `story:engine-configuration-document` |
+| `fixtures`; event `RunSettings` | `story:engine-agents-section` |
+| `decide` (step and entry); `requests` | `story:tree-test-command` |
+
+### From Rust
+
+`b10x_loom_tree::suite` holds the same runner as a library: `decode_suite(text)` or
+`read_suite(path)` decode a suite, `evaluate_checks(checks, place, view, captured)` tests checks
+over what a cycle left, and `run_suite(suite, &SuiteSettings, observer, cancel)` runs one and
+answers a `SuiteReport`. It prints nothing and reads no environment variable and no current
+directory: every path of `SuiteSettings` is absolute. The observer, a `SuiteObserver` or a
+closure over `&CycleResult`, is given each cycle's result as the cycle ends; a set cancel flag
+ends the running cycle before its next step and runs no further one.

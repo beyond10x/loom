@@ -53,12 +53,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+mod durable_check;
 #[path = "../../loom-executor/tests/support/ess_suite.rs"]
 mod ess_suite;
 mod linked_libraries;
 mod protocols_vendor;
 mod release;
 mod test_step;
+mod unsynced_store;
 
 /// Where the generated crate is committed, relative to the repository root.
 const GENERATED: &str = "generated/rust/loom";
@@ -192,6 +194,17 @@ enum Command {
         /// The binary, e.g. `target/release/b10x-loom`.
         binary: PathBuf,
     },
+    /// Fail, naming the binary, when it holds the marker of the test sync switch (the feature
+    /// `test-unsynced-store` of `b10x-loom-governor`): a released binary syncs every durable
+    /// write. Needs no repository root.
+    UnsyncedStore {
+        /// The binary, e.g. `target/release/b10x-loom`.
+        binary: PathBuf,
+    },
+    /// The lane `task durable-check`: the count tests of the tree path's stores run once each and
+    /// pass without the test sync switch's feature, a release build of `b10x-loom-governor` with it
+    /// fails to compile, and `b10x-loom-cli`'s normal dependencies do not hold it.
+    DurableCheck,
 }
 
 #[derive(Debug, clap::Args)]
@@ -216,6 +229,9 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), String> {
     if let Command::LinkedLibraries { binary } = &cli.command {
         return linked_libraries::linked_libraries(binary);
+    }
+    if let Command::UnsyncedStore { binary } = &cli.command {
+        return unsynced_store::unsynced_store(binary);
     }
     let root = match cli.root {
         Some(root) => root,
@@ -296,6 +312,8 @@ fn run(cli: Cli) -> Result<(), String> {
             protocols_vendor::protocols_vendor(&root, &checkout, &tag)
         }
         Command::LinkedLibraries { binary } => linked_libraries::linked_libraries(&binary),
+        Command::UnsyncedStore { binary } => unsynced_store::unsynced_store(&binary),
+        Command::DurableCheck => durable_check::durable_check(&root),
     }
 }
 

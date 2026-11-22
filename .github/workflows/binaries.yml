@@ -40,6 +40,9 @@ jobs:
       - name: Refuse a binary that links libgit2, libssh2, OpenSSL or zlib
         run: cargo run -q --locked -p loom-xtask -- linked-libraries target/release/b10x-loom
 
+      - name: Refuse a binary that holds the test sync switch
+        run: cargo run -q --locked -p loom-xtask -- unsynced-store target/release/b10x-loom
+
       - name: Pack the binary with its license, and write the archive's SHA-256 checksum
         run: |
           set -euo pipefail
