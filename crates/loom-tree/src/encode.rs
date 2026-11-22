@@ -90,6 +90,7 @@ fn evidence_json(record: &StatusEvidence) -> Value {
         "action",
         record.action.clone().map(Value::from),
     );
+    put(&mut object, "name", record.name.clone().map(Value::from));
     Value::Object(object)
 }
 

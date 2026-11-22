@@ -107,6 +107,7 @@ pub fn close(request: &CloseRequest<'_>) -> Result<CaseClosed, Refused> {
             Refused::new(TreeRefusalReason::StoreUnreadable, error.to_string()).case(named.clone())
         })?;
     closed_lines(
+        &governor,
         &logs,
         request.case,
         member.parent.as_deref(),
