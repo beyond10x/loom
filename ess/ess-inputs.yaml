@@ -18,6 +18,7 @@ specification:
   - domains/bindings.yaml
   - domains/runlog.yaml
   - domains/decision.yaml
+  - domains/tree.yaml
 scenarios:
   - scenarios/agent-check/a-valid-spec-checks.yaml
   - scenarios/agent-check/a-malformed-document-is-refused.yaml
