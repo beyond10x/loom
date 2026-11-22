@@ -45,13 +45,16 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command as Process, ExitCode};
+use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
 mod protocols_vendor;
 mod release;
+mod test_step;
 
 /// Where the generated crate is committed, relative to the repository root.
 const GENERATED: &str = "generated/rust/loom";
@@ -106,6 +109,27 @@ enum Command {
         /// The committed tree to compare. Defaults to `<root>/generated/rust/loom`.
         #[arg(long)]
         generated: Option<PathBuf>,
+    },
+    /// Write `generated/ess/loom/suite.json`, the conformance suite `ess verify conform
+    /// synthesize --suite-format 5` synthesizes from `ess/`, and `generated/ess/loom/synthesis.txt`,
+    /// the digest of its inputs, the suite's digest and synthesize's output. Takes minutes.
+    SuiteGenerate {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
+    /// Fail when `generated/ess/loom/` differs by one byte from a fresh synthesis of `ess/`,
+    /// naming the file. The slow lane (`task slow`) runs it.
+    SuiteCheck {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
+    /// The test step of `task check`: `cargo nextest run --workspace --locked` and
+    /// `cargo test --doc --workspace --locked`, failing when a test runs past 60 s or the step
+    /// past 120 s, and printing the ten slowest tests, green or red.
+    TestStep {
+        /// Run the tests of these packages in place of `--workspace` (repeatable).
+        #[arg(short = 'p', long = "package")]
+        packages: Vec<String>,
     },
     /// Write `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
     /// `CustomResourceDefinition` projected from `ess generate --kind schema` of `ess/` by
@@ -209,6 +233,36 @@ fn run(cli: Cli) -> Result<(), String> {
             &generated.unwrap_or_else(|| root.join(GENERATED)),
             SPECIFICATION,
         ),
+        Command::SuiteGenerate { scratch } => {
+            let dir = suite_scratch(&root, &scratch);
+            let record = ess_suite::generate(&root, &ess_suite::Ess::new(&cli.ess, &root), &dir);
+            let _ = fs::remove_dir_all(&dir);
+            let record = record?;
+            println!(
+                "{}, {}: synthesized from ess/ with {} ({})",
+                ess_suite::SUITE,
+                ess_suite::RECORD,
+                record.ess,
+                record.inputs
+            );
+            Ok(())
+        }
+        Command::SuiteCheck { scratch } => {
+            let dir = suite_scratch(&root, &scratch);
+            let record =
+                ess_suite::compare_fresh(&root, &ess_suite::Ess::new(&cli.ess, &root), &dir);
+            let _ = fs::remove_dir_all(&dir);
+            let record = record?;
+            println!(
+                "{}, {}: equal to a fresh synthesis of ess/ with {} ({})",
+                ess_suite::SUITE,
+                ess_suite::RECORD,
+                record.ess,
+                record.inputs
+            );
+            Ok(())
+        }
+        Command::TestStep { packages } => test_step::run(&root, &packages),
         Command::CrdGenerate { scratch } => crd_generate(&root, &cli.ess, &scratch),
         Command::CrdDrift { scratch } => crd_drift(&root, &cli.ess, &scratch),
         Command::NoHandModel { src, generated } => no_hand_model(
@@ -407,7 +461,8 @@ impl Regeneration {
         let regeneration = Self {
             dir: scratch.join(format!("{prefix}-{}-{nanos}", std::process::id())),
         };
-        let output = Process::new(ess)
+        let output = ess_suite::Ess::new(ess, root)
+            .command()
             .args(verb)
             .arg("--path")
             .arg(root.join(specification))
@@ -483,6 +538,19 @@ impl Drop for Regeneration {
             let _ = fs::remove_dir_all(&self.dir);
         }
     }
+}
+
+/// A fresh directory for one synthesis of the conformance suite.
+fn suite_scratch(root: &Path, scratch: &Scratch) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    scratch
+        .scratch
+        .clone()
+        .unwrap_or_else(|| default_scratch(root))
+        .join(format!("suite-{}-{nanos}", std::process::id()))
 }
 
 fn default_scratch(root: &Path) -> PathBuf {
@@ -595,7 +663,8 @@ fn parse(path: &Path, text: &str) -> Result<syn::File, String> {
 
 /// The names `ess/` declares, read from `ess specify compile --format json`.
 fn specified_type_names(root: &Path, ess: &Path) -> Result<BTreeSet<String>, String> {
-    let output = Process::new(ess)
+    let output = ess_suite::Ess::new(ess, root)
+        .command()
         .args(["specify", "compile", "--path"])
         .arg(root.join(SPECIFICATION))
         .args(["--format", "json"])
@@ -980,6 +1049,40 @@ mod tests {
 
     fn names(list: &[&str]) -> BTreeSet<String> {
         list.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// The digest of the committed suite is SHA-256: the FIPS 180-4 examples, and a message that
+    /// spans two blocks with its length.
+    #[test]
+    fn the_suite_digest_is_sha_256() {
+        assert_eq!(
+            ess_suite::digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            ess_suite::digest(b"abc"),
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            ess_suite::digest(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+    }
+
+    /// A record reads back as written, its output verbatim.
+    #[test]
+    fn a_synthesis_record_reads_back_as_written() {
+        let record = ess_suite::Record {
+            ess: "ess 0.96.0".to_owned(),
+            inputs: ess_suite::digest(b"inputs"),
+            exit: "0".to_owned(),
+            suite: ess_suite::digest(b"suite"),
+            stdout: "refused[ESS-SYNTH-003]: x\nstdout: y\n1 refusal occurrence(s)\n".to_owned(),
+        };
+        assert_eq!(
+            ess_suite::Record::parse(&record.render()).as_ref(),
+            Ok(&record)
+        );
     }
 
     fn found(text: &str, list: &[&str]) -> Vec<(usize, String)> {
