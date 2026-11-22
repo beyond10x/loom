@@ -699,3 +699,45 @@ fn loom_protocols_re_exports_the_canon_it_links() {
     let parsed = loom_protocols::canon::model::parse(SYSTEM_QUERY_YAML).unwrap();
     assert_eq!(parsed.protocol.id, model.protocol.id);
 }
+
+/// `when` holds an evidence form and `finished` names an undeclared claim: Canon finds two
+/// problems.
+const TWO_PROBLEMS: &str = "format: protocol/1
+protocol:
+  id: halt
+  revision: 1
+artifacts:
+  work: {}
+evidence_kinds:
+  spent: {}
+claims:
+  work.spent:
+    true_when:
+      evidence: {kind: spent, subject: work, result: spent}
+actions:
+  work.do:
+    effect: write
+    may_produce:
+      - evidence: spent
+outcomes:
+  finished:
+    requires: {claim: work.done}
+  given_up:
+    requires: {decision: give_up, when: {evidence: {kind: spent, subject: work, result: spent}}}
+";
+
+/// A protocol Canon's validation refuses is refused naming Canon's code of every problem it found
+/// (`Problem::code`), the codes a protocol author reads in Canon's own refusals.
+#[test]
+fn a_refused_protocol_names_canons_code_of_every_problem() {
+    let mut catalog = ProtocolCatalog::default();
+    let refused = catalog
+        .add_yaml("halt@1", TWO_PROBLEMS, memory())
+        .expect_err("Canon refuses the protocol");
+    assert!(
+        refused.contains("evidence-in-decision-condition"),
+        "{refused}"
+    );
+    assert!(refused.contains("undeclared-claim"), "{refused}");
+    assert!(catalog.get("halt@1").is_none());
+}
