@@ -33,8 +33,12 @@ scope:
   path: crates/loom-intake-slice/tests/engine_confinement.rs
 - confidence: inferred
   path: crates/loom-tree
+- confidence: inferred
+  path: crates/loom-tree/src/status.rs
 - confidence: cited
   path: ess/domains/bindings.yaml
+- confidence: inferred
+  path: ess/domains/tree.yaml
 - confidence: cited
   path: ess/intake/domains/confinement.yaml
 - confidence: inferred
@@ -45,7 +49,7 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/guides/embed-the-runtime.md
-revision: 6
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T02:06:16Z", actor: "agent:loom", revision: 6}
 ---
@@ -115,6 +119,12 @@ Commission run then ends `EffectRefused` and invokes the action no second time. 
 the step's `action finished` line holds `refusal` `Cancelled: …`, no `exit` and no `evidence`
 (`loom.runlog.ActionFinished`, `ess/domains/runlog.yaml:93-108`). `run_tree` then asks the
 handle and stops as a cancelled run stops before a step (`story:tree-run-command`).
+That stop is `Cancelled`, a new member of `loom.tree.TreeStop`, and not `BudgetSpent`: the
+case's `stopped` line holds `stop` `Cancelled` and `next` the action whose step was
+cancelled (for a cancel before a step, the action that was to be taken next). `tree status`
+therefore shows, for that case, `stop` `Cancelled` and `stop_next` `[<action>]`, and the
+case's `runs` entry for the cancelled run gains `cancelled: true` (read from
+`ProgramRun.cancelled`; absent on every other run). `b10x-loom tree run` still exits 5.
 
 **Retries.** A cancelled step writes no evidence. So `retry_records`
 (`crates/loom-bindings/src/retry.rs:48-119`), which reads evidence only, gets nothing from it.
@@ -144,6 +154,9 @@ a run does not control it.
   `Cancelled`;
 - `ess/domains/bindings.yaml:345-353`: `loom.bindings.ProgramRefusalReason` gains `Cancelled`;
 - `ess/domains/bindings.yaml:264-280`: `loom.bindings.ProgramRun` gains `cancelled: Boolean`.
+- `ess/domains/tree.yaml` (from `story:tree-run-command`): `loom.tree.TreeStop` gains
+  `Cancelled`, and the per-case run entry of `loom.tree.CaseStatus` gains
+  `cancelled: Optional<Boolean>`.
 
 On that commit `slot task drift` and `slot task intake-drift` (`Taskfile.yml:61-62`) both fail.
 The new tests in `crates/loom-bindings/tests/bound_program.rs` and
@@ -192,6 +205,13 @@ files, which become modules of `tests/main.rs` under `story:one-test-binary-per-
   `action finished` line with `refusal` starting `Cancelled`, no `exit` and empty `evidence`,
   then stops as a run cancelled before a step does. Test (in `crates/loom-tree`):
   `a_tree_run_cancelled_during_a_step_stops_after_it`.
+- After that run, `tree_status` gives the cancelled case `stop` `Cancelled` and `stop_next`
+  `[<the cancelled action>]`, and the run's `TreeRun.stop` is `Cancelled`. A run whose
+  wall-time budget is spent still gives `BudgetSpent`. Test (in `crates/loom-tree`):
+  `a_status_names_a_cancelled_stop_and_its_action`.
+- In the same status, the case's `runs` entry for the cancelled run holds `cancelled: true`
+  and no `exit`, and the case's other runs hold no `cancelled`. Test (in
+  `crates/loom-tree`): `a_status_marks_the_cancelled_run`.
 - `run_child` under either adapter, given a handle that is already set, refuses `Cancelled`, and
   no marker file is written. Test: `a_child_whose_cancel_is_set_is_refused_before_launch`.
 - The timeout path is unchanged. These tests keep every line and pass:
