@@ -71,7 +71,7 @@ static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
 const RUST_MOUNT: &str = "/toolchain/rust";
 const CACHE_MOUNT: &str = "/toolchain/cargo-cache";
-// Four roots are admitted by the released driver: compiler, registry and two Git caches.
+// Four of the released driver's eight roots: compiler, registry and two Git caches.
 const CACHE_DIRS: [&str; 3] = ["registry", "git/db", "git/checkouts"];
 
 /// The trusted test execution port. Implementations supply observed isolation, not promises.
@@ -2599,7 +2599,7 @@ fn canonical_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
 ///    byte bounds; a mount on, under or containing one Substrate owns ([`OWNED_MOUNTS`]);
 /// 2. each host path on disk, every component read without following it: none a symbolic link,
 ///    the path there, a directory for a root, a regular file for a file;
-/// 3. at most 4 roots and 16 files, Substrate's bounds;
+/// 3. at most 8 roots and 16 files, Substrate's bounds;
 /// 4. no two mounts equal, and none under another;
 /// 5. no host path that holds the certificate bundle the child names ([`check_ca_bundle`]), as
 ///    named or as it resolves, or the directory the driver's private state is made in;
@@ -3652,7 +3652,12 @@ const NEEDED_FAMILIES: [ContractFamily; 6] = [
 fn admitted_facts(
     machine: &substrate_wire::CapabilitySnapshot,
 ) -> Result<Vec<String>, ConfinementError> {
-    let proved = substrate_host::confinement::linux::proof(machine);
+    // Loom names no `HostConfig::exec_gate`, so the driver's probe proves no executable list:
+    // the facts `exec_subpaths` and `exec_denied_paths` stay unproved.
+    let proved = substrate_host::confinement::linux::proof(
+        machine,
+        &substrate_host::confinement::linux::ExecListProof::default(),
+    );
     for family in NEEDED_FAMILIES {
         if !proved.serves(&family) {
             let (reason, hint) = if family == ContractFamily::Limits {
@@ -4020,14 +4025,16 @@ mod tests {
             "exec.cgroup-kill": true,
             "exec.output-limit-bytes": 1_048_576,
             "workspace.guarded-io": true,
-            "exec.read-only-roots": {"max_roots": 4},
+            "exec.read-only-roots": {"max_roots": 8},
             "exec.read-only-files": {"max_files": 16},
         });
         let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
         // story:substrate-0-21-pin: since Substrate 0.15.0 the `linux` adapter also proves
         // `stdin_pipe` and `output_live` whenever its floor (argv-only exec and namespaces) holds,
         // as it does here, and `FACT_ORDER` places them last; the three facts of 0.14.0 keep their
-        // place.
+        // place. story:substrate-0-24-0-pin: Substrate 0.22.0 publishes 8 roots, and the facts of
+        // 0.23.0 and 0.24.0 (`exec_subpaths`, `exec_denied_paths`) are proved only with an exec
+        // gate, which Loom does not name, so the list is the same on 0.24.0's `FACT_ORDER`.
         assert_eq!(
             facts,
             [
