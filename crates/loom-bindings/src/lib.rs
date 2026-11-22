@@ -29,6 +29,7 @@ mod decode;
 mod load;
 mod open;
 mod program;
+mod retry;
 mod revision;
 mod tree;
 
@@ -37,6 +38,9 @@ pub use decode::decode;
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use retry::{
+    RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, retry_records,
+};
 pub use revision::{
     ABSENT, MAX_ARTIFACT_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PlacedRevisions, RefreshError,
     TREE_HEADER, content_revision, placements, revisions_of,

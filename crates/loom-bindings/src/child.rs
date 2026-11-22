@@ -47,16 +47,20 @@ pub fn bound_case_child(
     let described = ProgramEnvironment {
         path: child.environment().set.get(PATH_VARIABLE).cloned(),
         loom_case: case.0.clone(),
+        loom_retry_feedback: None,
     };
     Ok(child.with_environment(environment(&described)))
 }
 
-/// The variables `described` names, and nothing else: `PATH` when the host has one, then
-/// [`CASE_VARIABLE`].
-fn environment(described: &ProgramEnvironment) -> ExecEnvironment {
+/// The variables `described` names, and nothing else: `PATH` when the host has one, the retry
+/// feedback variable when the port gives one (`crate::retry`), then [`CASE_VARIABLE`].
+pub(crate) fn environment(described: &ProgramEnvironment) -> ExecEnvironment {
     let mut set = BTreeMap::new();
     if let Some(path) = &described.path {
         set.insert(PATH_VARIABLE.to_owned(), path.clone());
+    }
+    if let Some(feedback) = &described.loom_retry_feedback {
+        set.insert(crate::RETRY_FEEDBACK_VARIABLE.to_owned(), feedback.clone());
     }
     set.insert(CASE_VARIABLE.to_owned(), described.loom_case.clone());
     ExecEnvironment {
