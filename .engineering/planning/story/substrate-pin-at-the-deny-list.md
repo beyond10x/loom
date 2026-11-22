@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-pin-at-the-deny-list
 kind: story
-status: proposed
+status: rejected
 title: Loom links the Substrate release that holds the executable deny-list, and every read-only mount it passes still works
 summary: pin move from 0.21.0 to the tag (or commit b280c4ca) with the executable deny-list; one compile break, a lock-file test, limits 4 to 8; passing a deny-list is a follow-up
 tags:
@@ -21,9 +21,10 @@ scope:
   path: crates/loom-intake-slice/Cargo.toml
 - confidence: cited
   path: crates/loom-intake-slice/src/confinement.rs
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T04:57:14Z", actor: "agent:loom", revision: 5}
+- {from: "proposed", to: "rejected", at: "2026-11-22T15:10:01Z", actor: "agent:sdc", revision: 7, correlation: "runbook-batch4-2026-11-22"}
 ---
 ## Outcome
 
