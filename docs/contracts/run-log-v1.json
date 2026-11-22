@@ -149,6 +149,26 @@
         }
       }
     },
+    "HandoffChecked": {
+      "fields": {
+        "action": {
+          "optional": false,
+          "type": "String"
+        },
+        "blob_digest": {
+          "optional": true,
+          "type": "String"
+        },
+        "exit": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "refusal": {
+          "optional": true,
+          "type": "String"
+        }
+      }
+    },
     "Stopped": {
       "fields": {
         "budget": {

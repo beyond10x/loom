@@ -37,6 +37,8 @@ use sha2::{Digest as _, Sha256};
 
 #[path = "tree_run/delegated_cgroup.rs"]
 mod delegated_cgroup;
+#[path = "tree_run/handoff_when.rs"]
+mod handoff_when;
 
 #[path = "tree_run/principal.rs"]
 mod principal;

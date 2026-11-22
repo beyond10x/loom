@@ -195,6 +195,19 @@ b10x-loom: tree waits: case root: Add a second stop to route.txt, then run the t
 The printed `tree run` carries this run's `--confinement`, so run unchanged it starts its programs
 as this run did.
 
+A writer whose handoff depends on a fact only a program can read names that program as
+`handoff_when` beside its `handoff` (`tour-leg-handoff-when.bindings.yaml` in the test fixtures).
+When the selector picks the writer, the check runs first, under the same runner, with the whole
+workspace read-only, `PATH` and the `LOOM_*` variables alone, no retry feedback and the binding's
+timeout. Exit 0 takes no step: the run stops `AwaitingPerson` with the writer's `Handoff` decision
+(exit 3). Any other exit lets the writer run in the same step. At a stuck stop the handoff of such
+a writer is offered only when its check, run the same way, exits 0; otherwise the stop stays
+`Stuck` (exit 4). A check that cannot be started, is killed at its timeout or by a signal refuses
+the run `HandoffCheckFailed`, naming the action (exit 1), and the writer does not run. Each
+evaluation writes one `HandoffChecked` line to the case's run log before the stop or the step,
+with the check's `exit` or `refusal` and the `blob_digest` of its output; `tree status` and
+`tree verify` read that line and never run the check.
+
 ## A person action without a capability
 
 A person action whose protocol action needs no capability is taken by `tree approve --action`

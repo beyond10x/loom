@@ -21,8 +21,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use b10x_loom_bindings::{
-    PROGRAM_SOURCE, ProgramEffects, RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE,
-    RETRY_LOG_BYTES, RETRY_LOG_LINES, check, decode, retry_records,
+    LAUNCH_FAILURE_EXITS, PROGRAM_SOURCE, ProgramEffects, RETRY_FEEDBACK_FORMAT,
+    RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, check, decode, retry_records,
+    run_handoff_check,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
@@ -303,6 +304,8 @@ struct Recording {
     reason: Option<&'static str>,
     answers: BTreeMap<String, (i32, Vec<u8>)>,
     watch: Option<PathBuf>,
+    /// When set, every child ends with this exit status (`None`: none) and timeout flag.
+    ending: Option<(Option<i32>, bool)>,
     children: Mutex<Vec<ChildCommand>>,
     seen: Mutex<Vec<Vec<String>>>,
 }
@@ -323,6 +326,12 @@ impl Recording {
     fn answering(mut self, program: &str, exit: i32, stdout: &[u8]) -> Self {
         self.answers
             .insert(program.to_owned(), (exit, stdout.to_vec()));
+        self
+    }
+
+    /// The same runner, every child ending with `exit` (`None`: no exit status) and `timed_out`.
+    fn ending(mut self, exit: Option<i32>, timed_out: bool) -> Self {
+        self.ending = Some((exit, timed_out));
         self
     }
 
@@ -378,9 +387,10 @@ impl TestRunner for Recording {
             .get(child.program())
             .cloned()
             .unwrap_or_else(|| (0, b"{}".to_vec()));
+        let (exit_code, timed_out) = self.ending.unwrap_or((Some(exit), false));
         Ok(TestExecution {
-            exit_code: Some(exit),
-            timed_out: false,
+            exit_code,
+            timed_out,
             output: String::new(),
             applied: AppliedConfinement {
                 backend: Backend::Substrate,
@@ -1477,4 +1487,105 @@ fn a_retried_writer_that_moves_the_draft_records_the_moved_revision_and_is_not_s
         runs_of(&governor, WRITE)[1]["retry_of"],
         serde_json::json!([])
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// handoff_when (story handoff-when-a-program-decides)
+
+/// The `handoff_when` check of the writer, a program the recording runner answers.
+const HANDOFF_STUB: &str = "/opt/stub/draft-handoff-when";
+
+/// A writer sent back by an `invalid` `draft_check`, whose check exits `exit`: what
+/// `run_handoff_check` answered and the one child the runner was given.
+fn handoff_checked(exit: i32) -> (b10x_loom_bindings::HandoffCheck, ChildCommand, Scratch) {
+    handoff_checked_by(Recording::new(), exit)
+}
+
+/// [`handoff_checked`] through `runner`.
+fn handoff_checked_by(
+    runner: Recording,
+    exit: i32,
+) -> (b10x_loom_bindings::HandoffCheck, ChildCommand, Scratch) {
+    let scratch = Scratch::new();
+    let members =
+        format!("{RETRY}    handoff: Answer the finding.\n    handoff_when: [{HANDOFF_STUB}]\n");
+    let document = recorded_document(&members);
+    let governor = governor();
+    hold(&governor, CASE, 1, "draft_check", DRAFT_REVISION, "invalid");
+    // The writer itself would be given its feedback now.
+    assert_eq!(retries(&governor, writer(&document)).len(), 1);
+    let runner = Arc::new(runner.answering(HANDOFF_STUB, exit, b"said\n"));
+    let check = run_handoff_check(
+        &governor,
+        &CaseId(CASE.to_owned()),
+        &document,
+        writer(&document),
+        &scratch.workspace,
+        &scratch.store,
+        &(Arc::clone(&runner) as Arc<dyn TestRunner>),
+    )
+    .expect("the writer carries a check");
+    let children = runner.children();
+    assert_eq!(children.len(), 1, "the check starts once");
+    (check, children[0].clone(), scratch)
+}
+
+/// Exit 126 and 127, the statuses a launcher gives a program it cannot find or execute (Substrate
+/// starts every program through `/usr/bin/env`), are no answer of the check: a refusal, its output
+/// still kept. Every other exit is the answer. The child gets no more than the writer: the whole
+/// workspace read-only, no writable directory, no aperture, no retry feedback although the writer
+/// is retried, empty standard input.
+#[test]
+fn a_handoff_check_launch_failure_is_a_refusal_and_its_child_no_more_than_the_writers() {
+    assert_eq!(LAUNCH_FAILURE_EXITS, [126, 127]);
+    for code in LAUNCH_FAILURE_EXITS {
+        let (check, _, scratch) = handoff_checked(i32::try_from(code).unwrap());
+        assert_eq!(check.exit, None, "{code}: {check:?}");
+        let refusal = check.refusal.as_deref().expect("a refusal");
+        assert!(refusal.contains(&format!("exit {code}")), "{refusal}");
+        assert!(!check.hands_off(), "{code}");
+        let kept = check.blob_digest.as_deref().expect("the output is kept");
+        assert_eq!(
+            std::fs::read(scratch.blobs().join(kept)).unwrap(),
+            b"said\n"
+        );
+    }
+    for code in [0, 1, 3, 125, 128] {
+        let (check, child, _) = handoff_checked(code);
+        assert_eq!(
+            (check.exit, check.refusal.as_deref()),
+            (Some(i64::from(code)), None),
+            "{code}"
+        );
+        assert_eq!(check.hands_off(), code == 0, "{code}");
+        assert_eq!(child.program(), HANDOFF_STUB);
+        assert!(child.read_only_workspace(), "{child:?}");
+        assert!(child.writable().is_empty(), "{child:?}");
+        assert!(child.egress().is_empty(), "{child:?}");
+        assert_eq!(variable(&child), None, "{child:?}");
+        assert!(child.stdin().unwrap_or_default().is_empty(), "{child:?}");
+    }
+}
+
+/// A check killed at its timeout, whatever status it reported, and a check a signal ended (no
+/// exit status) give no answer either: each a refusal naming why, its output kept.
+#[test]
+fn a_handoff_check_ended_by_its_timeout_or_a_signal_is_a_refusal() {
+    for (exit, timed_out, why) in [
+        (Some(0), true, "timeout"),
+        (Some(1), true, "timeout"),
+        (None, true, "timeout"),
+        (None, false, "signal"),
+    ] {
+        let (check, _, scratch) = handoff_checked_by(Recording::new().ending(exit, timed_out), 0);
+        let said = format!("{exit:?} {timed_out}: {check:?}");
+        assert_eq!(check.exit, None, "{said}");
+        assert!(!check.hands_off(), "{said}");
+        assert!(check.refusal.as_deref().unwrap().contains(why), "{said}");
+        let kept = check.blob_digest.as_deref().expect("the output is kept");
+        assert_eq!(
+            std::fs::read(scratch.blobs().join(kept)).unwrap(),
+            b"said\n"
+        );
+    }
 }

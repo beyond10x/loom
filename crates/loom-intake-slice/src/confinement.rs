@@ -603,6 +603,7 @@ impl SubstrateRunner {
         // Read once, here: the child trusts these bytes, whatever the path holds later.
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
+        check_read_only(child)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         check_workdir(child)?;
@@ -656,6 +657,7 @@ impl SubstrateRunner {
         check_network(child.network, &child.egress)?;
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
+        check_read_only(child)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         check_workdir(child)?;
@@ -1147,7 +1149,8 @@ impl TestRunner for SubstrateRunner {
 /// since Substrate's `/usr/bin/env` would read it as an assignment. Its directory is adopted as Substrate's
 /// workspace and is the child's working directory, `/workspace`; the child writes only under its
 /// `target/`, as a test does, and under the workspace directories the host names
-/// ([`ChildCommand::with_writable`]), `.git` only when named, and no toolchain or cache is
+/// ([`ChildCommand::with_writable`]), `.git` only when named, or nowhere in it, `target` included
+/// ([`ChildCommand::with_read_only_workspace`]), and no toolchain or cache is
 /// mounted. Its environment is exactly the one the host names as Substrate's
 /// [`ExecEnvironment`], empty unless it names one. It asks
 /// Substrate for [`SandboxProfile::Workspace`] with [`NetworkMode::None`] unless the host names
@@ -1185,6 +1188,7 @@ pub struct ChildCommand {
     read_only_files: Vec<ReadOnlyMount>,
     host_paths: Vec<PathBuf>,
     workdir: Option<PathBuf>,
+    read_only_workspace: bool,
 }
 
 /// A host directory or file a [`ChildCommand`] reads, and where the child sees it: its host path
@@ -1231,6 +1235,7 @@ impl ChildCommand {
             read_only_files: Vec::new(),
             host_paths: Vec::new(),
             workdir: None,
+            read_only_workspace: false,
         }
     }
 
@@ -1329,6 +1334,37 @@ impl ChildCommand {
     pub fn with_writable(mut self, path: impl Into<PathBuf>) -> Self {
         self.writable.push(path.into());
         self
+    }
+
+    /// The same child writing nothing in the workspace, `target` included: Substrate is asked for
+    /// a read-only workspace (`WorkspaceAccess::ReadOnly`), and a record reporting any writable
+    /// path is refused as a wider one is. Beside a path named writable
+    /// ([`ChildCommand::with_writable`]) the launch is refused
+    /// [`ConfinementRefusal::ScopeInvalid`] before anything starts. A `local` runner runs
+    /// unconfined and keeps nothing read-only.
+    #[must_use]
+    pub fn with_read_only_workspace(self) -> Self {
+        Self {
+            read_only_workspace: true,
+            ..self
+        }
+    }
+
+    /// Whether the child writes nothing in the workspace ([`ChildCommand::with_read_only_workspace`]).
+    pub fn read_only_workspace(&self) -> bool {
+        self.read_only_workspace
+    }
+
+    /// What the child asks Substrate to write in the workspace: nothing when it is read-only, else
+    /// `target` and the paths the host named.
+    fn workspace_access(&self) -> WorkspaceAccess {
+        if self.read_only_workspace {
+            WorkspaceAccess::ReadOnly
+        } else {
+            WorkspaceAccess::Scoped {
+                writable_subtrees: writable_request(&self.writable),
+            }
+        }
     }
 
     /// The same child with exactly `environment` and no other variable, except `SSL_CERT_FILE`
@@ -1673,9 +1709,7 @@ impl ChildCommand {
             },
             limits: limits(self.timeout),
             wait: true,
-            workspace_access: WorkspaceAccess::Scoped {
-                writable_subtrees: writable_request(&self.writable),
-            },
+            workspace_access: self.workspace_access(),
             scratch: None,
             measurements: Default::default(),
             // In the order named; `check_mounts` resolved every host path to a root or a file
@@ -1856,6 +1890,17 @@ fn writable_request(named: &[PathBuf]) -> Vec<String> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+/// Refuse a child that is read-only in its workspace ([`ChildCommand::with_read_only_workspace`])
+/// and names a writable path beside: it would be given neither.
+fn check_read_only(child: &ChildCommand) -> Result<(), ConfinementError> {
+    if child.read_only_workspace && !child.writable.is_empty() {
+        return Err(scope_error(
+            "a child read-only in its workspace names no writable path; name one or the other",
+        ));
+    }
+    Ok(())
 }
 
 /// Refuse, before anything is touched, a named writable path that cannot name a directory of the

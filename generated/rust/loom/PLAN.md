@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 1b38c8556b2b1608e93e2b9aa51a96e33bcab4b509b8eed67d8d0ed794ddbbd1
+  contract digest db5b7a0997ec1e1191e91b74ef43f5711af898b990eccf5b39c8c9a6370efd8f
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-519 capabilities: **503 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+520 capabilities: **504 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -259,6 +259,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.runlog.ChildOpened` |
 | domain type | `loom.runlog.Discarded` |
 | domain type | `loom.runlog.Evaluated` |
+| domain type | `loom.runlog.HandoffChecked` |
 | domain type | `loom.runlog.RevisionMove` |
 | domain type | `loom.runlog.RunLogEvent` |
 | domain type | `loom.runlog.RunLogLine` |

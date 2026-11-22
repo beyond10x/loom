@@ -1100,6 +1100,9 @@ types:
   # registration. `ProtocolLinkLeavesDirectory`: a link of the directory resolves outside it.
   # `ProtocolNotInDirectory`: the root registration, or a protocol a `case_open` names, is in no
   # file of the directory. `NoProtocolFiles`: the directory holds no protocol file.
+  # `HandoffCheckFailed`: the `handoff_when` check of the named action could not be started, was
+  # killed at its timeout or by a signal, or gave no exit status; the run stops, its `handoff
+  # checked` line written, and the action's program does not run.
   - name: loom.tree.TreeRefusalReason
     kind: enum
     variants:
@@ -1126,6 +1129,7 @@ types:
       - ProtocolNotInDirectory
       - NoProtocolFiles
       - UnknownStatusFormat
+      - HandoffCheckFailed
 
   # A refused tree command: the reason, what is wrong, and where the reason names one the case,
   # the file, the action, the story that lifts it and the process id of the store's holder.

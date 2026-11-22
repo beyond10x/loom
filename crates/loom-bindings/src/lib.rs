@@ -19,6 +19,10 @@
 //! write; [`PlacedRevisions`] computes them again before every evaluation. Decoding and the
 //! load-time check start no process; the crate opens no network connection.
 //!
+//! [`run_handoff_check`] runs the `handoff_when` check of a program binding once, through the
+//! same runner, with the whole workspace read-only and no retry feedback, and answers its exit or
+//! why it gave none (story:handoff-when-a-program-decides); a host decides the handoff from it.
+//!
 //! [`check_case_open`] holds an `open` executor to the protocol's `case_open` at load, and
 //! [`OpenEffects`] performs an action bound to `open`: it opens the child cases through
 //! `CanonGovernor::open_children`, under the protocol `case_open` names, with the independence of
@@ -35,6 +39,7 @@ mod arguments;
 mod child;
 mod copy;
 mod decode;
+mod handoff;
 mod load;
 mod open;
 mod program;
@@ -49,6 +54,7 @@ pub use child::{
 };
 pub use copy::{COPY_SOURCE, CopyEffects};
 pub use decode::decode;
+pub use handoff::{HandoffCheck, LAUNCH_FAILURE_EXITS, handoff_check_of, run_handoff_check};
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};

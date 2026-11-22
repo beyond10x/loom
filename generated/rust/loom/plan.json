@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "9b48c094ec5641c3aca6ffa9d2570d70e1cd73a6ce146d4a061b74dd253e5e12",
-    "contract_digest": "1b38c8556b2b1608e93e2b9aa51a96e33bcab4b509b8eed67d8d0ed794ddbbd1"
+    "source_digest": "4f76e8697830867f0c8685c83877d0130aa15326bbd53245fdc6c23a25d791cf",
+    "contract_digest": "db5b7a0997ec1e1191e91b74ef43f5711af898b990eccf5b39c8c9a6370efd8f"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1728,6 +1728,13 @@
     {
       "kind": "domain_type",
       "source": "loom.runlog.Evaluated",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.runlog.HandoffChecked",
       "disposition": {
         "disposition": "generated"
       }

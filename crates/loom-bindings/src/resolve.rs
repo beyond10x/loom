@@ -1,7 +1,7 @@
 //! Programs beside the bindings file (`story:bound-program-contract`): with `program_root:
-//! bindings`, every `argv[0]` and `arguments_from[0]` that is relative and holds a `/` names a
-//! file relative to the directory of the bindings file, and [`resolve_programs`] replaces it by
-//! the absolute real path of that file before anything runs.
+//! bindings`, every `argv[0]`, `arguments_from[0]` and `handoff_when[0]` that is relative and
+//! holds a `/` names a file relative to the directory of the bindings file, and
+//! [`resolve_programs`] replaces it by the absolute real path of that file before anything runs.
 
 use std::path::{Component, Path};
 
@@ -11,10 +11,10 @@ use crate::{Refusal, refuse};
 
 /// `document` with each program path it names beside its bindings file replaced by the absolute
 /// real path (links resolved) of that file under `directory`, the directory of the bindings file:
-/// with `program_root: bindings`, every `executor.argv[0]` and `arguments_from[0]`, of any
-/// executor, that is relative and holds a `/`. A bare name (found on `PATH`) and an absolute path
-/// (run as written) are left alone, and a document whose `program_root` is `workspace` or absent
-/// is answered unchanged. Nothing is started; only the file system is read.
+/// with `program_root: bindings`, every `executor.argv[0]`, `arguments_from[0]` and
+/// `handoff_when[0]`, of any executor, that is relative and holds a `/`. A bare name (found on
+/// `PATH`) and an absolute path (run as written) are left alone, and a document whose
+/// `program_root` is `workspace` or absent is answered unchanged. Nothing is started; only the file system is read.
 ///
 /// # Errors
 /// `ProgramNotBesideBindings`, naming the action and the member: an entry with a `..` segment, one
@@ -45,6 +45,7 @@ pub fn resolve_programs(
         for (member, argv) in [
             ("executor.argv[0]", bound.executor.argv.as_mut()),
             ("arguments_from[0]", bound.arguments_from.as_mut()),
+            ("handoff_when[0]", Some(&mut bound.handoff_when)),
         ] {
             if let Some(program) = argv.and_then(|argv| argv.first_mut()) {
                 resolve(&directory, program, &action, member)?;

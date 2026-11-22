@@ -1083,6 +1083,113 @@ fn nesting_at_the_cap_decodes_and_one_past_is_refused() {
     assert_eq!(refusal.0.member, "document");
 }
 
+/// A program writer of `change.implement` with a handoff text and the members `extra`.
+fn handoff_writer(extra: &str) -> String {
+    document(&format!(
+        "  - action: change.implement\n    executor: {{kind: program, argv: [tools/write.sh]}}\n{extra}"
+    ))
+}
+
+#[test]
+fn handoff_when_without_handoff_is_refused() {
+    let both = handoff_writer(
+        "    handoff: Answer the finding, then run the tree again.\n    handoff_when: [tools/sdc-tool.sh, findings-wait, --action, change.implement]\n",
+    );
+    assert_eq!(refused(&both), None, "a check beside its handoff is kept");
+    assert_eq!(
+        decode(&both).unwrap().actions[0].handoff_when,
+        [
+            "tools/sdc-tool.sh",
+            "findings-wait",
+            "--action",
+            "change.implement"
+        ]
+    );
+    assert!(
+        decode(&handoff_writer("    handoff: Go on.\n"))
+            .unwrap()
+            .actions[0]
+            .handoff_when
+            .is_empty(),
+        "no check is an empty argv"
+    );
+    let alone = handoff_writer("    handoff_when: [tools/sdc-tool.sh, findings-wait]\n");
+    assert_refused(
+        &alone,
+        Reason::MissingMember,
+        Some("change.implement"),
+        "handoff",
+    );
+}
+
+#[test]
+fn handoff_when_on_a_person_is_refused() {
+    let text = document(
+        "  - action: change.sign\n    executor: {kind: person, principal: p}\n    handoff: Sign it.\n    handoff_when: [tools/check.sh]\n",
+    );
+    assert_refused(
+        &text,
+        Reason::MemberNotForExecutor,
+        Some("change.sign"),
+        "handoff_when",
+    );
+}
+
+#[test]
+fn an_invalid_handoff_when_argv_is_refused() {
+    for argv in ["[]", "tools/check.sh", "[\"\"]", "[tools/check.sh, 3]"] {
+        let text = handoff_writer(&format!("    handoff: Go on.\n    handoff_when: {argv}\n"));
+        assert_refused(
+            &text,
+            Reason::InvalidArgv,
+            Some("change.implement"),
+            "handoff_when",
+        );
+    }
+    // Under `program_root: bindings` its program is read beside the bindings file, as any bound
+    // program's is.
+    let directory = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "handoff-when-beside-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(directory.join("tools")).unwrap();
+    std::fs::write(directory.join("tools/write.sh"), "exit 0\n").unwrap();
+    let beside = handoff_writer("    handoff: Go on.\n    handoff_when: [tools/check.sh, wait]\n")
+        .replacen(
+            "protocol: story@1\n",
+            "protocol: story@1\nprogram_root: bindings\n",
+            1,
+        );
+    let document = decode(&beside).unwrap();
+    let missing = b10x_loom_bindings::resolve_programs(&document, &directory)
+        .expect_err("a missing check is refused");
+    assert_eq!(
+        missing.0.reason,
+        Reason::ProgramNotBesideBindings,
+        "{missing}"
+    );
+    assert_eq!(missing.0.member, "handoff_when[0]", "{missing}");
+    std::fs::write(directory.join("tools/check.sh"), "exit 0\n").unwrap();
+    let resolved = b10x_loom_bindings::resolve_programs(&document, &directory).unwrap();
+    assert_eq!(
+        resolved.actions[0].handoff_when,
+        [
+            directory
+                .canonicalize()
+                .unwrap()
+                .join("tools/check.sh")
+                .display()
+                .to_string(),
+            "wait".to_owned()
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 #[test]
 fn an_alias_used_within_the_node_bound_decodes() {
     let once = document(&format!(
