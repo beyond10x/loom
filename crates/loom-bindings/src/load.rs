@@ -255,13 +255,18 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
             ));
         }
     }
-    if bound.exits.is_some() && kind != Executor::Program {
-        return Err(refuse(
-            Reason::MemberNotForExecutor,
-            id,
-            "exits",
-            format!("belongs to the Program executor, not {kind:?}"),
-        ));
+    for (member, present) in [
+        ("exits", bound.exits.is_some()),
+        ("handoff_when", !bound.handoff_when.is_empty()),
+    ] {
+        if present && kind != Executor::Program {
+            return Err(refuse(
+                Reason::MemberNotForExecutor,
+                id,
+                member,
+                format!("belongs to the Program executor, not {kind:?}"),
+            ));
+        }
     }
     if kind != Executor::Agent {
         if bound.tools.is_some() {

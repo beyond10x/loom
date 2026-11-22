@@ -175,19 +175,30 @@ actions:
   both lists, or in a list and as a key of a `from: exit` table of the same binding, is refused
   `ExitClassConflict`.
 - `program_root`, at the top of the document, is `workspace` (the default) or `bindings`. With
-  `bindings`, every `argv[0]` and `arguments_from[0]` that is relative and holds a `/`, such as
-  `tools/lint.sh`, names a file relative to the directory of the bindings file, as an `open`
-  executor's `bindings` does; a bare name such as `sh` is still found on `PATH`, and an absolute
+  `bindings`, every `argv[0]`, `arguments_from[0]` and `handoff_when[0]` that is relative and
+  holds a `/`, such as `tools/lint.sh`, names a file relative to the directory of the bindings
+  file, as an `open` executor's `bindings` does; a bare name such as `sh` is still found on `PATH`, and an absolute
   path runs as written. The host calls `resolve_programs(document, directory)` with that
   directory before it builds a port: it answers the document with each such entry replaced by the
   absolute real path of its file, and refuses `ProgramNotBesideBindings`, naming the action and
-  the member (`executor.argv[0]` or `arguments_from[0]`), an entry with a `..` segment, one that
-  names no regular file, and one whose real path, links resolved, lies outside the directory. A
+  the member (`executor.argv[0]`, `arguments_from[0]` or `handoff_when[0]`), an entry with a
+  `..` segment, one that names no regular file, and one whose real path, links resolved, lies outside the directory. A
   port given a document with `program_root: bindings` that was not resolved starts nothing.
 - `retry_when` maps an evidence kind of the protocol to the results that send the action back to
   work; a result is never empty. A retried `program` is given those records as
   `LOOM_RETRY_FEEDBACK` (below).
   `handoff` is the text a run shows when this writer has done what it may and a person continues.
+- `handoff_when`, on a `program` binding beside its `handoff`, is the argv of a check, held to the
+  rules of any bound program's argv. Before each step of the action, and when the case is otherwise
+  stuck, `tree run` runs it through the run's runner with the whole workspace read-only (`target/`
+  included), `PATH` and the `LOOM_*` variables alone, no retry feedback, empty standard input and
+  the binding's `timeout_seconds`. Exit 0 offers the handoff and takes no step; any other exit lets
+  the writer run in that step, or leaves a stuck case `Stuck`. A check that cannot be started
+  (exit 126 or 127 included), is killed at its timeout or by a signal is never a skip: the run
+  stops `HandoffCheckFailed`, naming the action, and the writer does not run. Each evaluation is
+  one `HandoffChecked` line of the case's run log, with the check's exit or refusal and the blob of
+  its output. Without `handoff` it is refused `MissingMember`, on another executor
+  `MemberNotForExecutor`.
 - `artifacts` maps an artifact id of the protocol to a path in the workspace; `independence` maps
   a producer to dimensions the protocol declares. The `artifacts`, `inputs` and `outputs`
   paths are relative to the workspace root, and an `open` executor's `bindings` is relative to the

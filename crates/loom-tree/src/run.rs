@@ -62,6 +62,7 @@ use sha2::{Digest as _, Sha256};
 
 use crate::approvals::read_approvals;
 use crate::context::{StepContext, derived_uuid};
+use crate::handoff::{CheckHeld, Checked, HandoffChecks};
 use crate::history::LogHistory;
 use crate::log::Logs;
 use crate::open::load;
@@ -308,17 +309,66 @@ fn run_cancellable(
             .with_governor(&governor)
             .with_instance(format!("tree-{}", case.case));
         let ordinal = i64::try_from(lines.len()).unwrap_or(i64::MAX);
+        let checks = HandoffChecks {
+            governor: &governor,
+            logs: &logs,
+            case: &id,
+            bindings: &case.bindings,
+            workspace: &workspace,
+            store: &store,
+            runner: &settings.runner,
+        };
+        // The `handoff_when` check of the action the selector picks runs before the loop
+        // performs it, and its line is written before the step or the stop.
+        let checked = Checked::new(&executor, &checks);
         let end = drive(
             &governor,
             &store,
             &id,
             revision,
             ordinal,
-            &executor,
+            &checked,
             &effects,
             &settings.time,
             wall,
         )?;
+        let (check_lines, held_by_check) = checked.finish();
+        for line in check_lines {
+            emit(&case.case, line);
+        }
+        match held_by_check {
+            Some(CheckHeld::Refused(refused)) => return Err(refused),
+            Some(CheckHeld::HandedOff(action)) => {
+                let decisions = handoff_decision(
+                    &id,
+                    &case.bindings,
+                    &action,
+                    &handoff_command(&store, settings.confinement.as_deref()),
+                )
+                .into_iter()
+                .collect::<Vec<_>>();
+                let line = logs.append(
+                    &case.case,
+                    RunLogEvent::Stopped(Stopped {
+                        stop: format!("{:?}", TreeStop::AwaitingPerson),
+                        next: decisions
+                            .iter()
+                            .map(|decision| decision.decides.clone())
+                            .collect(),
+                        budget: None,
+                    }),
+                )?;
+                emit(&case.case, line);
+                return Ok(TreeRun {
+                    stop: TreeStop::AwaitingPerson,
+                    case: case.case.clone(),
+                    steps,
+                    decisions,
+                    detail: None,
+                });
+            }
+            None => {}
+        }
 
         if let (Some(request), Some(outcome)) = (end.admitted.last(), end.effects.last()) {
             steps += 1;
@@ -437,6 +487,8 @@ fn run_cancellable(
             revision,
             &history,
             settings.confinement.as_deref(),
+            &checks,
+            &mut emit,
         )?;
         let line = logs.append(
             &case.case,
@@ -1041,54 +1093,91 @@ fn waiting_actions<S: loom_governor::FallibleCaseStore>(
         .collect())
 }
 
-/// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
-/// and names a `handoff`: the text is what is decided, and `tree run` again, under `confinement`
-/// when it is named, is the command.
-fn handoffs<S: loom_governor::FallibleCaseStore>(
-    governor: &CanonGovernor<S>,
-    case: &CaseId,
-    bindings: &BindingsDocument,
-    store_text: &str,
-    confinement: Option<&str>,
-) -> Result<Vec<NextDecision>, Refused> {
+/// The command a `Handoff` decision prints: `tree run` of `store` again, under `confinement` when
+/// it is named.
+fn handoff_command(store: &Path, confinement: Option<&str>) -> Vec<String> {
     let mut command = vec![
         "b10x-loom".to_owned(),
         "tree".to_owned(),
         "run".to_owned(),
         "--store".to_owned(),
-        store_text.to_owned(),
+        store.display().to_string(),
     ];
     if let Some(confinement) = confinement {
         command.extend(["--confinement".to_owned(), confinement.to_owned()]);
     }
+    command
+}
+
+/// The `Handoff` decision of `action` of `case` when its binding is not a person's and names a
+/// `handoff`: the text is what is decided, and `command` is the command.
+fn handoff_decision(
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    action: &str,
+    command: &[String],
+) -> Option<NextDecision> {
+    let bound = bindings
+        .actions
+        .iter()
+        .find(|bound| bound.action == action && bound.executor.kind != Executor::Person)?;
+    Some(NextDecision {
+        case: case.0.clone(),
+        kind: DecisionKind::Handoff,
+        action: Some(action.to_owned()),
+        capability: None,
+        principal: None,
+        decides: bound.handoff.clone()?,
+        subject: None,
+        revision: None,
+        path: None,
+        outcome: None,
+        command: command.to_vec(),
+    })
+}
+
+/// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
+/// and names a `handoff` ([`handoff_decision`]), the command [`handoff_command`]. A binding with
+/// `handoff_when` gives its decision only when its check, run now with its line written, exits 0;
+/// a check that gives no exit status refuses the run `HandoffCheckFailed`.
+fn handoffs<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    store: &Path,
+    confinement: Option<&str>,
+    checks: &HandoffChecks<'_, S>,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<Vec<NextDecision>, Refused> {
+    let command = handoff_command(store, confinement);
     let frontier = governor
         .frontier(case)
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
-    Ok(frontier
+    let mut decisions = Vec::new();
+    for action in frontier
         .data()
         .actions
         .iter()
         .filter(|action| action.status != ActionStatus::Blocked)
-        .filter_map(|action| {
-            let bound = bindings.actions.iter().find(|bound| {
-                bound.action == action.action && bound.executor.kind != Executor::Person
-            })?;
-            let text = bound.handoff.clone()?;
-            Some(NextDecision {
-                case: case.0.clone(),
-                kind: DecisionKind::Handoff,
-                action: Some(action.action.clone()),
-                capability: None,
-                principal: None,
-                decides: text,
-                subject: None,
-                revision: None,
-                path: None,
-                outcome: None,
-                command: command.clone(),
-            })
-        })
-        .collect())
+    {
+        let Some(decision) = handoff_decision(case, bindings, &action.action, &command) else {
+            continue;
+        };
+        if checks.has_check(&action.action) {
+            let Some((check, line)) = checks.check(&action.action)? else {
+                continue;
+            };
+            emit(&case.0, line);
+            if check.refusal.is_some() {
+                return Err(checks.failed(&action.action, &check));
+            }
+            if !check.hands_off() {
+                continue;
+            }
+        }
+        decisions.push(decision);
+    }
+    Ok(decisions)
 }
 
 /// Why `case`, in which no step was taken, waits, and the decisions that let it go on.
@@ -1103,6 +1192,8 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     revision: i64,
     history: &LogHistory,
     confinement: Option<&str>,
+    checks: &HandoffChecks<'_, S>,
+    emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(TreeStop, Vec<NextDecision>), Refused> {
     let store_text = store.display().to_string();
     let mut decisions = Vec::new();
@@ -1195,7 +1286,7 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     if decisions.is_empty() {
         // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
         // has done what it may, and a person continues from its text, then runs the tree again.
-        decisions = handoffs(governor, case, bindings, &store_text, confinement)?;
+        decisions = handoffs(governor, case, bindings, store, confinement, checks, emit)?;
         if !decisions.is_empty() {
             return Ok((TreeStop::AwaitingPerson, decisions));
         }

@@ -19,8 +19,8 @@ use b10x_loom_runlog::{AppendStep, RunLog, RunLogError, encode, log_file_name, v
 use loom::primitives::Timestamp;
 use loom::runlog::{
     ActionFinished, ActionStarted, AuthorityRecorded, CaseOpened, ChildClosed, ChildOpened,
-    Discarded, Evaluated, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal, RunLogRefused,
-    Stopped, Terminated,
+    Discarded, Evaluated, HandoffChecked, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal,
+    RunLogRefused, Stopped, Terminated,
 };
 use loom_governor::{
     CaseIndependence, CaseInputs, CaseState, FallibleCaseStore as _, FileCaseStore, LockedDir,
@@ -1318,4 +1318,87 @@ fn the_budget_spellings_are_the_three_of_the_story() {
         let written = log.read(CASE).expect("the log verifies");
         assert_eq!(written[1].event, stopped("BudgetSpent", Some(name)));
     }
+}
+
+/// A `handoff checked` line of `amend.upstream` with `exit` or `refusal`.
+fn handoff_checked(exit: Option<i64>, refusal: Option<&str>) -> RunLogEvent {
+    RunLogEvent::HandoffChecked(HandoffChecked {
+        action: "amend.upstream".to_owned(),
+        exit,
+        refusal: refusal.map(str::to_owned),
+        blob_digest: Some(sha256_hex(b"findings")),
+    })
+}
+
+#[test]
+fn handoff_checked_lines_verify_in_the_chain() {
+    // Appended between other lines, an exit and a refusal each read back as written, and the
+    // chain verifies.
+    let (log, path) = log_with("handoff-checked", 2);
+    let checks = [
+        handoff_checked(Some(0), None),
+        handoff_checked(Some(1), None),
+        handoff_checked(None, Some("the check was killed at its timeout of 1 s")),
+    ];
+    for (index, event) in checks.iter().enumerate() {
+        log.append(CASE, at(2 + index), event.clone())
+            .unwrap_or_else(|error| panic!("{event:?}: {error}"));
+    }
+    log.append(CASE, at(5), event(3))
+        .expect("a step after them");
+    let bytes = fs::read(&path).expect("reads");
+    let read = verify(&bytes).expect("a log with handoff checked lines verifies");
+    assert_eq!(read.len(), 6);
+    for (line, event) in read[2..5].iter().zip(&checks) {
+        assert_eq!(&line.event, event);
+    }
+    let raw = lines(&bytes);
+    assert!(
+        String::from_utf8_lossy(&raw[2]).contains(
+            r#""kind":"HandoffChecked","action":"amend.upstream","exit":0,"blob_digest":"#
+        ),
+        "{}",
+        String::from_utf8_lossy(&raw[2])
+    );
+    for (line, raw) in read.iter().zip(&raw) {
+        assert_eq!(encode(line).as_bytes(), raw.as_slice());
+    }
+
+    // A changed byte in one is named by the line after it, as in any line.
+    let mut changed = raw.clone();
+    changed[3] = String::from_utf8(changed[3].clone())
+        .unwrap()
+        .replace(r#""exit":1"#, r#""exit":0"#)
+        .into_bytes();
+    assert_eq!(
+        refused(verify(&joined(&changed))),
+        (RunLogRefusal::BrokenChain, 4)
+    );
+
+    // Exactly one of an exit and a refusal, as on `ActionFinished`.
+    for (what, members) in [
+        ("both", r#","exit":0,"refusal":"timed out""#),
+        ("neither", ""),
+    ] {
+        let refused = refusal(&chain(&[
+            FIRST.to_owned(),
+            format!(r#""kind":"HandoffChecked","action":"amend.upstream"{members}"#),
+            LAST.to_owned(),
+        ]));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (RunLogRefusal::BrokenChain, 1),
+            "{what}: {refused:?}"
+        );
+        assert!(
+            refused.detail.contains("exit:"),
+            "{what}: {}",
+            refused.detail
+        );
+    }
+    append_is_refused("handoff-checked-both", handoff_checked(Some(0), Some("x")));
+    append_is_refused("handoff-checked-neither", handoff_checked(None, None));
+
+    // An old log, written before the kind existed, verifies as it did.
+    assert_eq!(verify(OLD_LOG.as_bytes()).expect("verifies").len(), 6);
 }

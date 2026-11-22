@@ -19,7 +19,7 @@ const TOP: [&str; 6] = [
     "independence",
     "actions",
 ];
-const ACTION: [&str; 11] = [
+const ACTION: [&str; 12] = [
     "action",
     "executor",
     "arguments",
@@ -30,6 +30,7 @@ const ACTION: [&str; 11] = [
     "timeout_seconds",
     "retry_when",
     "handoff",
+    "handoff_when",
     "exits",
 ];
 const EXITS: [&str; 2] = ["error", "not_called"];
@@ -306,6 +307,18 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         .get("handoff")
         .map(|value| non_empty(value, action, "handoff"))
         .transpose()?;
+    let handoff_when = match map.get("handoff_when") {
+        None => Vec::new(),
+        Some(value) => argv(value, action, "handoff_when")?,
+    };
+    if !handoff_when.is_empty() && handoff.is_none() {
+        return Err(refuse(
+            Reason::MissingMember,
+            action,
+            "handoff",
+            "is missing; handoff_when decides when the handoff is offered, so it needs the handoff text",
+        ));
+    }
     let exits = map
         .get("exits")
         .map(|value| exits(value, action))
@@ -321,6 +334,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         timeout_seconds,
         retry_when,
         handoff,
+        handoff_when,
         exits,
     })
 }

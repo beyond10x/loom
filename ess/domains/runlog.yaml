@@ -42,6 +42,7 @@ types:
       ActionStarted: loom.runlog.ActionStarted
       ActionFinished: loom.runlog.ActionFinished
       Discarded: loom.runlog.Discarded
+      HandoffChecked: loom.runlog.HandoffChecked
       ChildOpened: loom.runlog.ChildOpened
       ChildClosed: loom.runlog.ChildClosed
       AuthorityRecorded: loom.runlog.AuthorityRecorded
@@ -114,6 +115,24 @@ types:
         type: String
       - name: reason
         type: String
+
+  # The `handoff_when` check of an action was run (story handoff-when-a-program-decides), before
+  # the stop or the step it decides: the action, the check's exit status or why it gave none (a
+  # launch error, a timeout or a signal; one of the two, as on `ActionFinished`), and the digest of
+  # the blob holding its output. Exit 0 offered the action's handoff; any other exit skipped it; a
+  # refusal stopped the run. The line is what a reader of the log takes the check's answer from:
+  # nothing runs the check again to read it.
+  - name: loom.runlog.HandoffChecked
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: refusal
+        type: Optional<String>
+      - name: blob_digest
+        type: Optional<String>
 
   # A child case was opened: its id and the registered protocol that governs it, and the child's
   # `case_outcome` record in the parent as the opening wrote it: `record` its evidence id (the

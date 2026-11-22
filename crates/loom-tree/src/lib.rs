@@ -28,6 +28,7 @@ mod approve;
 mod close;
 mod context;
 mod encode;
+mod handoff;
 mod history;
 mod lock;
 mod log;

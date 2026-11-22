@@ -198,7 +198,14 @@ types:
   # JSON object, or `arguments_from`, an argv whose standard output is the object), the records it
   # writes, the tools an Agent may be offered, budget and timeout (1 to 3600 seconds), the retry
   # conditions, the handoff text a run shows when this writer has done what it may and a person
-  # continues, and a Program executor's exit classes.
+  # continues, and a Program executor's exit classes. `handoff_when` (story
+  # handoff-when-a-program-decides) is the argv of a Program executor's check, held to the
+  # contract of any bound program and empty when the document leaves it out; it requires
+  # `handoff` (`MissingMember`) and belongs to the Program executor (`MemberNotForExecutor`).
+  # Before a step of the action, and at a stuck stop, `tree run` runs it with read-only access
+  # to the whole workspace, `PATH` and the `LOOM_*` variables alone and no retry feedback: exit 0
+  # offers the handoff, any other exit skips it, and a launch error, a timeout or a signal refuses
+  # the run.
   - name: loom.bindings.BoundAction
     kind: struct
     fields:
@@ -222,6 +229,8 @@ types:
         type: List<loom.bindings.RetryCondition>
       - name: handoff
         type: Optional<String>
+      - name: handoff_when
+        type: List<String>
       - name: exits
         type: Optional<loom.bindings.ExitClasses>
 
