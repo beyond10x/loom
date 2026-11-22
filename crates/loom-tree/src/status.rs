@@ -131,6 +131,8 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
             runs: runs(case, &observations),
             approvals: approvals(&lines, bindings),
             copies: copies(case, &observations, &state.evidence),
+            log: None,
+            budget: None,
         });
     }
     Ok(TreeStatus {

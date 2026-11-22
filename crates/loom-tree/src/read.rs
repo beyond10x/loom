@@ -147,6 +147,8 @@ fn case(value: &Value, at: &str) -> Read<CaseStatus> {
         runs: list(value, at, "runs", run)?,
         approvals: list(value, at, "approvals", approval)?,
         copies: list(value, at, "copies", copy)?,
+        log: None,
+        budget: None,
     })
 }
 

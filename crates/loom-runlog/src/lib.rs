@@ -681,6 +681,7 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
         "Stopped" => RunLogEvent::Stopped(Stopped {
             stop: text("stop")?,
             next: texts("next")?,
+            budget: None,
         }),
         _ => RunLogEvent::Terminated(Terminated {
             reason: text("reason")?,

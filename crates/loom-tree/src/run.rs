@@ -195,6 +195,7 @@ pub fn run_tree(
                 RunLogEvent::Stopped(Stopped {
                     stop: "BudgetSpent".to_owned(),
                     next: Vec::new(),
+                    budget: None,
                 }),
             )?;
             emit(&case.case, line);
@@ -390,6 +391,7 @@ pub fn run_tree(
                     .iter()
                     .map(|decision| decision.decides.clone())
                     .collect(),
+                budget: None,
             }),
         )?;
         emit(&case.case, line);
