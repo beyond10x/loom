@@ -36,6 +36,8 @@ scope:
 - confidence: inferred
   path: crates/loom-tree/src/status.rs
 - confidence: cited
+  path: crates/loom-tree/src/suite/run.rs
+- confidence: cited
   path: ess/domains/bindings.yaml
 - confidence: inferred
   path: ess/domains/tree.yaml
@@ -49,7 +51,7 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/guides/embed-the-runtime.md
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T02:06:16Z", actor: "agent:loom", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-22T10:25:38Z", actor: "agent:sdc", revision: 9, executor: "agent:loom", correlation: "runbook-cancel-2026-11-22"}
