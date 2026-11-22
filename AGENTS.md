@@ -192,6 +192,7 @@ phrases above; `adversary_agents_rules_carry_the_rules_commission_cites` fails w
 | A release's CHANGELOG entry says what breaks for a consumer: a `**Breaking:**` bullet per break or the line `No breaking changes.`, never both, and no `**Breaking:**` bullet that names nothing or says `none`; a `Breaking:` sentence in prose does not count; `No breaking changes.` is refused when `consumers/pinned/`, `crates/loom-sdk/tests/host_ports.rs` or `docs/contracts/run-events-v1.json` changed since the previous tag; a `**Breaking:**` bullet is refused on a tag that moves only the patch version, and removing a path the previous tag's SDK stability page lists is refused unless an earlier release listed it under `### Deprecated`; `release.yml` fetches the history and tags it diffs | `loom-xtask release-check` (`crates/loom-xtask/tests/release_check.rs`: `release_check_names_an_entry_without_a_breaking_bullet`, `release_check_refuses_no_breaking_changes_when_a_stable_surface_changed_since_the_previous_tag`, `release_check_accepts_no_breaking_changes_when_no_stable_surface_changed`, `release_check_refuses_a_breaking_bullet_that_names_no_break`, `release_check_refuses_an_entry_with_both_a_breaking_bullet_and_no_breaking_changes`, `release_check_passes_on_the_first_tag`, `a_removal_without_a_deprecated_release_is_refused`, `a_breaking_entry_on_a_patch_tag_is_refused`, `release_workflow_verifies_the_tag_and_reuses_the_check`), `crates/loom-xtask/tests/adversary_w20261023w1_u4.rs` |
 | The documented embedding builds and runs to `ApprovalRequired (repository.merge)` as an external crate: `consumers/pinned/` is its own workspace, depends on `b10x-loom-sdk` alone by path, includes `crates/loom-sdk/examples/software_change.rs` by `#[path]` and resolves one copy of each Loom and Canon crate; its library runs a `loom.agent/1` spec through `loom_sdk::Runtime` alone, and the run ends as the spec's budget and stop policy say | `task consumer-check` (`consumers/pinned/tests/embedding.rs`, `the_pinned_consumer_stops_at_approval_required`; `consumers/pinned/tests/agent_spec.rs`, `an_agent_defined_as_data_runs`), `crates/loom-xtask/tests/pinned_consumer.rs` (`the_agent_consumer_runs_a_spec_through_the_sdk_alone`) |
 | Loom builds `b10x-substrate-host` without its `git` feature: `Cargo.lock` holds no `git2`, `libgit2-sys`, `gix`, `gix-*`, `curl`, `curl-sys`, `openssl-sys` or `libz-sys`, no dependency path reaches a Git library, Loom's driver configuration names no Git source and a Git source on that driver is refused `workspace.git-source-unserved` at its first use; `loom-xtask linked-libraries <binary>` fails, naming the library, when `ldd` names `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz`, and `binaries.yml` runs it on the release binary | `crates/loom-intake-slice/tests/host_git_hardening.rs` (`the_lock_file_holds_no_git_library_and_no_curl`, `every_host_git_command_goes_through_a_hardened_helper`), `crates/loom-intake-slice/src/confinement.rs` (`the_driver_config_names_no_git_source`, `a_git_source_on_loom_s_driver_is_refused_unserved`), `crates/loom-xtask/src/linked_libraries.rs` (`linked_libraries_refuses_a_binary_that_links_libgit2`), `crates/loom-xtask/tests/release_check.rs` (`binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum`) |
+| Every durable write of the tree path syncs, through `loom_governor::durable` alone (a `FileCaseStore` write and a `LockedDir` replace 2 syncs, a remove 1, a run-log append 2, a tree store write 2, a kept blob 1), and a failed file sync is still an error; only a test build with the feature `test-unsynced-store` under `B10X_LOOM_TEST_UNSYNCED_STORE=1` in its own environment skips them, a bound program never receives the variable and no bindings or protocol member sets it, a release build cannot hold the feature, the test step refuses to start under the variable and the released binary is checked for the feature's marker | `crates/loom-governor/src/durable.rs` (`each_governor_write_syncs_its_file_and_directory`, `a_failing_file_sync_is_an_error_with_the_switch_off`, `no_sync_outside_the_door`, `only_the_allowed_files_name_or_set_the_switch`), `crates/loom-runlog/tests/run_log.rs` (`a_run_log_append_syncs_its_file_and_directory`), `crates/loom-tree/src/store.rs` (`a_tree_store_write_syncs_its_file_and_directory`), `crates/loom-bindings/src/program.rs` (`a_kept_blob_is_synced`), `crates/loom-cli/tests/tree_run.rs` (`the_switch_is_off_unless_its_variable_is_1`, `with_the_switch_a_two_level_tree_makes_no_sync`, `a_bound_program_never_sees_the_switch`, `a_bindings_or_protocol_member_cannot_set_the_switch`, `a_person_step_syncs_in_full`, `the_tree_run_binary_has_the_20_s_override`), `crates/loom-xtask/src/test_step.rs` (`the_test_step_refuses_the_switch_in_its_environment`, `a_binary_over_its_budget_fails_the_step`), `crates/loom-xtask/tests/release_check.rs` (`a_binary_with_the_test_sync_switch_is_refused`), `task durable-check` |
 
 ## ESS
 
@@ -298,7 +299,7 @@ Before a change is reported done, in this order:
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
    Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   the test step (`task test-step`), `task consumer-check`, then `task docs-check` and
+   the test step (`task test-step`), `task durable-check`, `task consumer-check`, then `task docs-check` and
    `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`, which
    installs cargo-nextest by a pinned version and digest). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
@@ -307,7 +308,8 @@ Before a change is reported done, in this order:
    steps: `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`, `conform` of the three
    conformance crates) and `cargo test --doc --workspace --locked`, prints the ten
    slowest tests on every run and fails over 120 s
-   (`crates/loom-xtask/src/test_step.rs`).
+   (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
+   `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s.
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
@@ -377,6 +379,30 @@ so a later command never reads an instant earlier than an earlier one. A test th
 beside another action holds the child until the action is done (`HOLD` and `release` in those
 test files) instead of sleeping a fixed time. With the retry option above, both packages' tests
 went from 269.6 s to 161.3 s of test time on 4 threads (2026-11-22).
+
+Every sync of a durable write on the tree path (the stores of `b10x-loom-governor`, the run log,
+the tree's store and lock, a kept blob, a staged file) goes through `loom_governor::durable`
+(`sync_file` returns the sync's error, `sync_dir` ignores it), which counts what it syncs;
+`no_sync_outside_the_door` (in `durable.rs`) fails on a sync anywhere else in `src/` of
+`b10x-loom-governor`, `-runlog`, `-tree`, `-bindings` and `-cli`. A full two-level tree of
+`tests/tree_run.rs` made about 1,000 fsyncs, 30 to 45 s under disk load, and the binary took 98
+to 145 s. Test builds turn on the feature `test-unsynced-store` of `b10x-loom-governor` (a
+dev-dependency of `b10x-loom-cli` alone), under which a process whose own environment holds
+`B10X_LOOM_TEST_UNSYNCED_STORE=1` syncs nothing and counts each sync it skipped, and writes its
+counts to the file `B10X_LOOM_TEST_SYNC_COUNTS` names at exit. `tests/tree_run.rs` sets it on
+every `b10x-loom` it starts; a bound program never sees it, since its environment is built whole
+(`crates/loom-bindings/src/child.rs`), and no bindings or protocol member sets it. Only
+`durable.rs`, `test_step.rs`, `unsynced_store.rs`, `tests/tree_run.rs` and
+`tests/support/loom.rs` name the variable, and only the last two set it
+(`only_the_allowed_files_name_or_set_the_switch`). The durability tests of the stores run in
+process and never set it. A build without debug assertions that holds the feature fails to
+compile, `task test-step` refuses to start with the variable in its environment, and
+`binaries.yml` runs `loom-xtask unsynced-store` on the released binary, which fails on the
+feature's marker bytes. `task durable-check`, in `task check` after the test step, runs the four
+count tests over `b10x-loom-governor`, `-runlog`, `-tree` and `-bindings` without the feature
+(read from nextest's report: each must run once and pass), checks that `cargo check --release`
+of `b10x-loom-governor` with the feature fails with its `compile_error!` and that the normal
+dependencies of `b10x-loom-cli` do not hold it.
 
 `.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
 builds inherit; the config file wins over one in the home directory, the manifest holds where no
@@ -1542,6 +1568,12 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   `action finished` leaves `case_outcome` records out. A log without them reads as before; Loom
   0.58.0 and earlier refuse a line that holds them. `tree status` gives a `case_outcome` entry the
   child's link `name`.
+- `Stopped` may hold `budget`, the budget that ended the run (`Cancel`, `MaxSteps` or
+  `MaxWallSeconds`, `loom.tree.SpentBudget`'s variants, spelled by `budget_name`), and only on a
+  `BudgetSpent` stop; a line holding it beside another stop, or another spelling, does not read
+  (`story:tree-status-names-what-it-read`; ESS cannot state the rule). `tree run` writes it on
+  every `BudgetSpent` stop. A `BudgetSpent` line without it, as Loom 0.58.0 wrote, still reads;
+  Loom 0.58.0 and earlier refuse a line that holds it.
 - The crate declares the events and writes what it is given; emitting them is
   `story:tree-run-command`'s. It depends on the governor for the lock and the stem, so the executor
   and Canon reach it only through the governor.
@@ -1622,7 +1654,14 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   `extra/`.
 - `tree status` (`status.rs`) prints `loom.tree-status/1`; `read_status` reads it back. Records,
   runs, approvals and copies are read from the governor, the run logs and `observations.json`,
-  never from `approvals-<stem>.json`.
+  never from `approvals-<stem>.json`. `protocols` holds one entry per protocol the cases use, once,
+  in the order of its first case, built from the catalog the status was read with (the host's, or
+  the kept one) by `tree_protocol`, which also builds the entries of `tree-protocols.json`: its
+  `sha256` is the catalog's `ProtocolDefinition.sha256` of the document's bytes. Each case's `log`
+  says whether its run log verified (a missing log does, as no line); a log that does not is
+  named with the reader's refusal, line and detail, its case's entry holds nothing read from it,
+  and the command still exits 0. `budget` is the one the case's last `stopped` line names. A
+  status printed before `log` and `budget` existed reads with both absent.
 - Every instant is the host clock's (UTC to the second) or the one `--at` gives
   (`YYYY-MM-DDTHH:MM:SSZ`), so two opens from the same inputs and `--at` write the same bytes.
 - Held by `crates/loom-cli/tests/tree_run.rs`.

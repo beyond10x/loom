@@ -2,8 +2,8 @@
 //! an absent optional member is left out, and an enum is its variant's name.
 
 use loom::tree::{
-    CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence, StatusRun,
-    TreeProtocol, TreeRefusal, TreeRun, TreeStatus, TreeVerify,
+    CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence, StatusLog,
+    StatusRun, TreeProtocol, TreeRefusal, TreeRun, TreeStatus, TreeVerify,
 };
 use serde_json::{Map, Value, json};
 
@@ -65,6 +65,27 @@ fn case_json(case: &CaseStatus) -> Value {
         "copies".into(),
         Value::Array(case.copies.iter().map(copy_json).collect()),
     );
+    put(&mut object, "log", case.log.as_ref().map(log_json));
+    put(
+        &mut object,
+        "budget",
+        case.budget
+            .map(|budget| Value::from(b10x_loom_runlog::budget_name(budget))),
+    );
+    Value::Object(object)
+}
+
+fn log_json(log: &StatusLog) -> Value {
+    let mut object = Map::new();
+    object.insert("verified".into(), json!(log.verified));
+    put(
+        &mut object,
+        "refusal",
+        log.refusal
+            .map(|refusal| Value::from(format!("{refusal:?}"))),
+    );
+    put(&mut object, "line", log.line.map(Value::from));
+    put(&mut object, "detail", log.detail.clone().map(Value::from));
     Value::Object(object)
 }
 

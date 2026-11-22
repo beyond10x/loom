@@ -1,0 +1,154 @@
+format: loom.tree-suite/1
+# Thirteen entries of Runbook's cycles/suite.yaml (runbook.cycles/1, main), written as
+# loom.tree-suite/1 by Loom to show the shapes the format takes. Decoded only: the sdc protocol,
+# its bindings and the seed directories are Runbook's and are not in this repository.
+defaults:
+  protocol: sdc@1
+  bindings: bindings/sdc.yaml
+  seed: [{from: seeds/idea, to: .}]
+cycles:
+  - name: stub-cycle
+    expect: {exit: 0}
+
+  - name: finding-person-stop
+    seed: [{from: seeds/idea, to: .}, {from: seeds/finding-spec-person.yaml, to: findings.yaml}]
+    expect:
+      exit: 3
+      stop: AwaitingPerson
+
+  - name: scope-changed
+    seed: [{from: seeds/scope-question, to: .}]
+    decide:
+      - {take: approve, case: billing, action: scope.answer, optional: true}
+    expect:
+      exit: 0
+      checks:
+        - {check: equals, name: q2-changed, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].status"}], is: changed}
+        - {check: equals, name: q2-answer, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].answer"}], is: "the billing clerk or the customer, before it is paid"}
+        - {check: equals, name: q2-by-person, select: [{doc: {in: work, path: questions.yaml}}, {path: "questions[id=q2].answered_by"}], is: "person:stand-in"}
+        - check: before
+          name: normalise-after-answer
+          select: [{log: {case: billing, event: ActionFinished}}]
+          first: {action: scope.answer}
+          then: {action: requirements.normalise, exit: 0}
+
+  - name: offline-sync
+    seed: [{from: seeds/offline-sync, to: .}]
+    expect:
+      exit: 0
+      checks:
+        - {check: lacks, name: no-offline-hosted, select: [{doc: {in: work, path: findings.yaml}}, {as: text}], is: offline-hosted}
+        - {check: equals, name: deployment-kept, select: [{doc: {in: work, path: context.yaml}}, {path: deployment.value}], is: "a hosted web server reachable over the internet"}
+
+  - name: offline-decision
+    seed: [{from: seeds/offline-decision, to: .}]
+    expect:
+      exit: 3
+      checks:
+        - {check: equals, name: needs-person, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=\"p-offline-hosted-context.deployment\"].status"}], is: needs_person}
+        - {check: matches, name: basis-q3, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=\"p-offline-hosted-context.deployment\"].basis"}], regex: "decision q3"}
+        - {check: matches, name: basis-both-sides, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=\"p-offline-hosted-context.deployment\"].basis"}], regex: "both sides"}
+        - {check: equals, name: deployment-kept, select: [{doc: {in: work, path: context.yaml}}, {path: deployment.value}], is: "a hosted web server reachable over the internet"}
+
+  - name: trace-gap
+    seed: [{from: seeds/trace-gap, to: .}]
+    expect:
+      exit: 0
+      outcome: operating
+      checks:
+        - {check: equals, name: r3-resolved, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=p-trace-r3].status"}], is: resolved}
+        - {check: equals, name: r3-by-agent, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=p-trace-r3].decided_by"}], is: agent}
+        - {check: count, name: spec-written-twice, select: [{log: {case: billing.spec, event: ActionFinished}}, {where: {action: spec.author}}], is: 2}
+        - check: contains
+          name: last-trace-counts
+          select: [{log: {case: billing.spec, event: ActionFinished}}, {where: {action: spec.trace}}, {pick: last}, {follow: blob}]
+          is: "3 traced to behaviour, 0 constraint, 0 dropped, 0 untraced"
+
+  - name: trace-gap-drop
+    seed: [{from: seeds/trace-gap-drop, to: .}]
+    decide:
+      - {take: close, case: billing.spec, outcome: dropped, optional: true}
+    expect:
+      exit: 0
+      checks:
+        - {check: equals, name: r3-resolved, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=p-trace-r3].status"}], is: resolved}
+        - {check: equals, name: r3-once-sent-back, select: [{doc: {in: work, path: findings.yaml}}, {path: "findings[id=p-trace-r3].attempts"}], is: 1}
+        - {check: equals, name: r3-dropped, select: [{doc: {in: work, path: requirements.yaml}}, {path: "requirements[id=r3].behaviour"}], is: dropped}
+        - check: contains
+          name: last-trace-drops
+          select: [{log: {case: billing.spec, event: ActionFinished}}, {where: {action: spec.trace}}, {pick: last}, {follow: blob}]
+          is: "1 dropped (r3), 0 untraced"
+
+  - name: trace-constraint
+    seed: [{from: seeds/trace-constraint, to: .}]
+    expect:
+      exit: 0
+      checks:
+        - {check: lacks, name: no-trace-finding, select: [{doc: {in: work, path: findings.yaml}}, {as: text}], is: p-trace}
+        - check: some
+          name: a-trace-counts-the-constraint
+          select: [{log: {case: billing.spec, event: ActionFinished}}, {where: {action: spec.trace}}, {follow: blob}, {as: text}]
+          where: {".": {contains: "2 traced to behaviour, 1 constraint (r3), 0 dropped, 0 untraced"}}
+
+  - name: review-reject-once
+    seed: [{from: seeds/review-reject-once, to: .}]
+    expect:
+      exit: 0
+      checks:
+        - {check: count, name: implemented-twice, select: [{log: {case: billing.invoices, event: ActionFinished}}, {where: {action: change.implement}}], is: 2}
+        - {check: sequence, name: rejected-then-approved, select: [{records: {case: billing.invoices, kind: code_review}}, {path: result}], is: [rejected, approved]}
+        - {check: all, name: reviewed-by-llm, select: [{records: {case: billing.invoices, kind: code_review}}], where: {producer: llm-review}}
+        - check: equals
+          name: rework-retries-the-review
+          select: [{runs: {case: billing.invoices}}, {where: {action: change.implement}}, {pick: last}, {path: "retry_of[*]"}, {follow: evidence}, {path: kind}]
+          is: code_review
+
+  - name: bugfix-full
+    protocol: sdc-bugfix@1
+    bindings: bindings/sdc-bugfix.yaml
+    seed: [{from: seeds/bugfix-pager, to: .}]
+    expect:
+      exit: 0
+      outcome: fixed
+      checks:
+        - {check: count, name: never-stopped, select: [{log: {case: ".", event: StopRecorded}}], is: 0}
+        - check: before
+          name: red-then-change
+          select: [{records: {case: "."}}]
+          first: {kind: repro_run, result: red}
+          then: {kind: implementation_change}
+
+  - name: run-stop
+    steps:
+      - {do: open}
+      - {do: run, exit: 3}
+      - {do: stop, name: stopped}
+      - {do: resume, exit: {not: 0}}
+      - {do: reopen, name: reopened}
+      - {do: run, exit: 3}
+    expect:
+      checks:
+        - {check: exists, name: stop-recorded, select: [{log: {case: ".", event: StopRecorded}}]}
+
+  - name: replay-unchanged
+    steps:
+      - {do: open}
+      - {do: run}
+      - {do: replay, name: replayed}
+    expect:
+      exit: 0
+      checks:
+        - {check: all, name: every-case-matches, select: [{step: replayed}, {path: "cases[*]"}], where: {state_matches_log: true, decision_matches_log: true}}
+
+  - name: implement-request-build
+    seed: [{from: seeds/implement-request, to: .}]
+    expect:
+      exit: 0
+      checks:
+        - check: compare
+          name: lib-as-written
+          left: {select: [{doc: {in: work, path: impl/src/lib.rs}}], take: digest}
+          op: eq
+          right: {select: [{suite: seeds/impl/src/lib.rs}], take: digest}
+        - {check: count, name: one-dry-command, select: [{doc: {in: work, path: dry-commands.txt}}, {as: lines}, {where: {".": {matches: "^would run: metaharness"}}}], is: 1}
+        - {check: contains, name: r1-cites-q4, select: [{doc: {in: work, path: requirements.yaml}}, {path: "requirements[id=r1].cites"}], is: q4}

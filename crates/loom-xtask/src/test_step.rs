@@ -7,7 +7,9 @@
 //! at 60 s and writes a JUnit report, then `cargo test --doc --workspace --locked` (nextest runs no
 //! doc tests). It reads every test's time from the JUnit report and prints the ten slowest on every
 //! run, green or red, then fails when either run failed, a test took longer than
-//! [`TEST_BUDGET`] or the step longer than [`STEP_BUDGET`]. The wall time is taken inside the
+//! [`TEST_BUDGET`], a binary of [`BINARY_BUDGETS`] longer than its summed budget, or the step
+//! longer than [`STEP_BUDGET`]. It refuses to start while the test sync switch
+//! (`B10X_LOOM_TEST_UNSYNCED_STORE`) is in its own environment. The wall time is taken inside the
 //! step, so a wait for a build slot before it starts does not count, and it starts once the test
 //! binaries are built (`cargo test --workspace --locked --no-run`, which nextest reuses), so a
 //! cold build does not count either; the doc tests' own compilation does. Beside that build it
@@ -30,6 +32,27 @@ pub const TEST_BUDGET: Duration = Duration::from_secs(60);
 /// How many of the slowest tests every run prints.
 const SLOWEST: usize = 10;
 
+/// The variable of the test sync switch (`loom_governor::durable`), which the step refuses to
+/// start under: only the tests that start `b10x-loom` set it, on that child alone.
+const TEST_SWITCH: &str = "B10X_LOOM_TEST_UNSYNCED_STORE";
+
+/// The step's answer to its own environment's value of [`TEST_SWITCH`]: an error naming it when
+/// the variable is there, whatever its value.
+pub fn refuse_the_switch(value: Option<&std::ffi::OsStr>) -> Result<(), String> {
+    match value {
+        None => Ok(()),
+        Some(value) => Err(format!(
+            "test step: {TEST_SWITCH} is set in the step's environment (to {value:?}), so the \
+             durability tests would not sync; unset it and start the step again"
+        )),
+    }
+}
+
+/// Test binaries held to a summed time of their own, beside [`TEST_BUDGET`] and [`STEP_BUDGET`]:
+/// `b10x-loom-cli::tree_run` (`story:tree-run-tests-fit-the-budget`).
+pub const BINARY_BUDGETS: [(&str, Duration); 1] =
+    [("b10x-loom-cli::tree_run", Duration::from_secs(60))];
+
 /// One test case of nextest's JUnit report.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Case {
@@ -42,6 +65,7 @@ pub struct Case {
 
 /// The step over the workspace, or over `packages` when any are named.
 pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
+    refuse_the_switch(std::env::var_os(TEST_SWITCH).as_deref())?;
     let mut scope: Vec<&str> = Vec::new();
     if packages.is_empty() {
         scope.push("--workspace");
@@ -200,6 +224,26 @@ pub fn verdict(
     }
 
     let mut failures = Vec::new();
+    for (binary, budget) in BINARY_BUDGETS {
+        let held: Vec<&Case> = cases.iter().filter(|case| case.binary == binary).collect();
+        if held.is_empty() {
+            continue;
+        }
+        let summed: f64 = held.iter().map(|case| case.seconds).sum();
+        text.push_str(&format!(
+            "\n{binary}: {summed:.1} s summed over {} test(s), of {} s",
+            held.len(),
+            budget.as_secs()
+        ));
+        if summed > budget.as_secs_f64() {
+            failures.push(format!(
+                "{binary} ran {summed:.1} s summed over its {} test(s), over the {} s they may \
+                 take together",
+                held.len(),
+                budget.as_secs()
+            ));
+        }
+    }
     if nextest != Some(0) {
         failures.push(format!("cargo nextest run exited {}", describe(nextest)));
     }
@@ -326,7 +370,7 @@ fn slot_tokens() -> Option<u32> {
         .filter(|&tokens| tokens > 0)
 }
 
-fn target_dir(root: &Path) -> PathBuf {
+pub(crate) fn target_dir(root: &Path) -> PathBuf {
     std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("target"))
@@ -340,6 +384,15 @@ fn target_dir(root: &Path) -> PathBuf {
 /// changes (ring's on `CARGO_MANIFEST_DIR` and `CARGO_PKG_*`) would otherwise rebuild its crate and
 /// everything above it here, after `task ess-gate` and `task conform` built them without.
 fn cargo(root: &Path, args: &[String]) -> Result<Option<i32>, String> {
+    let status = cargo_command(root)
+        .args(args)
+        .status()
+        .map_err(|e| format!("run cargo {}: {e}", args.join(" ")))?;
+    Ok(status.code())
+}
+
+/// The `cargo` on `PATH`, to run in `root`, as [`cargo`] starts it.
+pub(crate) fn cargo_command(root: &Path) -> Command {
     let mut command = Command::new("cargo");
     if std::env::var_os("ESS_TOOLCHAIN").is_none_or(|value| value.is_empty())
         && let Some(release) = crate::ess_suite::pinned_release(root)
@@ -361,12 +414,8 @@ fn cargo(root: &Path, args: &[String]) -> Result<Option<i32>, String> {
             command.env_remove(name);
         }
     }
-    let status = command
-        .args(args)
-        .current_dir(root)
-        .status()
-        .map_err(|e| format!("run cargo {}: {e}", args.join(" ")))?;
-    Ok(status.code())
+    command.current_dir(root);
+    command
 }
 
 /// The workspace's own packages, as `cargo metadata --no-deps` gives them.
@@ -543,6 +592,64 @@ mod tests {
             failures[0].contains("a_slow_one ran 60.0 s"),
             "{failures:?}"
         );
+    }
+
+    #[test]
+    fn the_test_step_refuses_the_switch_in_its_environment() {
+        assert_eq!(refuse_the_switch(None), Ok(()));
+        for value in ["1", "0", ""] {
+            let refused = refuse_the_switch(Some(std::ffi::OsStr::new(value)))
+                .expect_err("the step refuses to start under the switch");
+            assert!(
+                refused.contains("B10X_LOOM_TEST_UNSYNCED_STORE"),
+                "{value:?}: {refused}"
+            );
+        }
+    }
+
+    /// A report whose `tree_run` tests take `seconds` each, beside one test of another binary.
+    fn tree_run_report(seconds: &[f64]) -> String {
+        let mut xml = String::from(
+            r#"<testsuites name="nextest-run">
+    <testsuite name="b10x-loom-cli::tree_run" tests="2">
+"#,
+        );
+        for (n, time) in seconds.iter().enumerate() {
+            xml.push_str(&format!(
+                "        <testcase name=\"case_{n}\" classname=\"b10x-loom-cli::tree_run\" \
+                 timestamp=\"t\" time=\"{time:.3}\"/>\n"
+            ));
+        }
+        xml.push_str(
+            r#"    </testsuite>
+    <testsuite name="loom-xtask::checks" tests="1">
+        <testcase name="other" classname="loom-xtask::checks" timestamp="t" time="50.000"/>
+    </testsuite>
+</testsuites>
+"#,
+        );
+        xml
+    }
+
+    #[test]
+    fn a_binary_over_its_budget_fails_the_step() {
+        let over = parse_junit(&tree_run_report(&[30.5, 30.5]));
+        let (text, failures) = verdict(&over, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("b10x-loom-cli::tree_run")
+                && failures[0].contains("61.0 s")
+                && failures[0].contains("60 s"),
+            "{failures:?}"
+        );
+        assert!(
+            text.contains("b10x-loom-cli::tree_run: 61.0 s summed over 2 test(s)"),
+            "{text}"
+        );
+
+        let within = parse_junit(&tree_run_report(&[30.0, 29.0]));
+        let (_, failures) = verdict(&within, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
+        assert!(failures.is_empty(), "{failures:?}");
     }
 
     #[test]

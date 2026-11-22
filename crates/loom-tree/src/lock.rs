@@ -112,7 +112,7 @@ impl StoreLock {
                 .create_new(true)
                 .open(&temporary)?;
             writeln!(out, "{}", std::process::id())?;
-            out.sync_all()?;
+            loom_governor::durable::sync_file(&out)?;
             fs::rename(&temporary, &holder)
         })();
         named.map_err(|error| {

@@ -1,0 +1,12 @@
+format: loom.tree-suite/1
+cycles:
+  - name: opens
+    protocol: tour@1
+    bindings: bindings/tour.bindings.yaml
+    steps: [{do: open}, {do: status, name: opened}]
+    expect:
+      checks:
+        - check: count
+          name: one-case-open
+          select: [{step: opened}, {path: "cases[*]"}]
+          is: 1

@@ -43,6 +43,7 @@ tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "signal", "macr
 
 [dev-dependencies]
 b10x-loom-commission-testkit = { path = "../loom-commission-testkit" }
+b10x-loom-governor = { path = "../loom-governor", features = ["test-unsynced-store"] }
 b10x-loom-intake-references = { path = "../loom-intake-references" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice", features = ["test-clock"] }
 chrono = "0.4"

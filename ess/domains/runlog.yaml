@@ -160,7 +160,12 @@ types:
       - name: principal
         type: String
 
-  # The run stopped: the stop, and the decisions that would let it go on.
+  # The run stopped: the stop, the decisions that would let it go on, and on a `BudgetSpent` stop
+  # the budget that ended the run, one of `Cancel` (the run's cancel handle was set), `MaxSteps`
+  # (the run took its steps) and `MaxWallSeconds` (its seconds of wall time are spent), as
+  # `loom.tree.SpentBudget` spells them. `budget` is written exactly when `stop` is `BudgetSpent`;
+  # a line holding it beside another stop, or holding another spelling, does not read. A
+  # `BudgetSpent` line written before the member existed holds none and still reads.
   - name: loom.runlog.Stopped
     kind: struct
     fields:
@@ -168,6 +173,8 @@ types:
         type: String
       - name: next
         type: List<String>
+      - name: budget
+        type: Optional<String>
 
   # The run ended for good, and why.
   - name: loom.runlog.Terminated

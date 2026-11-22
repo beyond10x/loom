@@ -70,12 +70,10 @@ pub(crate) fn write_file(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), Ref
             .create_new(true)
             .open(&temporary)?;
         file.write_all(bytes)?;
-        file.sync_all()?;
+        loom_governor::durable::sync_file(&file)?;
         drop(file);
         fs::rename(&temporary, &target)?;
-        if let Ok(directory) = fs::File::open(dir) {
-            let _ = directory.sync_all();
-        }
+        loom_governor::durable::sync_dir(dir);
         Ok::<(), io::Error>(())
     })();
     written.map_err(|error| {
@@ -204,4 +202,35 @@ pub(crate) fn existing_store(dir: &Path) -> Result<PathBuf, Refused> {
         ));
     }
     fs::canonicalize(dir).map_err(|error| unreadable(dir.display(), error))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use loom_governor::durable::{counts, counts_on_this_thread};
+
+    /// story:tree-run-tests-fit-the-budget: a write syncs its file and the directory, through the
+    /// door of `loom_governor::durable`, counted on this thread alone.
+    #[test]
+    fn a_tree_store_write_syncs_its_file_and_directory() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/tmp/tree-store-sync")
+            .join(format!(
+                "{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let before = counts_on_this_thread();
+        super::write_file(&dir, "document.json", b"{}\n").unwrap();
+        let after = counts_on_this_thread();
+        assert_eq!(
+            (after.synced - before.synced, after.skipped - before.skipped),
+            (2, 0)
+        );
+        assert_eq!(counts().skipped, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

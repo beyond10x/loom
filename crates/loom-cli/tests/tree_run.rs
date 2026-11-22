@@ -7,7 +7,13 @@
 //! user's store (in process, a few milliseconds), copies the stubs into a fresh workspace and runs
 //! the binary with `HOME` and `XDG_DATA_HOME` at that scratch directory; no test reaches the
 //! network, a model or a credential, and each asserts it ended within 60 s.
+//!
+//! Each `b10x-loom` runs with the test sync switch on (`B10X_LOOM_TEST_UNSYNCED_STORE=1`, read only
+//! by a build with the feature `test-unsynced-store` of `b10x-loom-governor`), so no store write
+//! waits for the disk (`story:tree-run-tests-fit-the-budget`): what these tests prove is the binary's
+//! arguments, exit codes and decisions, and the durability tests of the stores keep full sync.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -19,7 +25,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
-use b10x_loom_tree::model::{TreeRefusalReason, TreeStop};
+use b10x_loom_tree::model::{SpentBudget, TreeRefusalReason, TreeStop};
 use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
 use b10x_loom_tree::{
     RunSettings, STATUS_FORMAT, TreeTime, decision_json, log_file_name, read_log, read_status,
@@ -42,6 +48,32 @@ const BOUND: Duration = Duration::from_secs(60);
 
 /// The instant every write of a command records in these tests.
 const AT: &str = "2026-11-22T08:00:00Z";
+
+/// The file a `b10x-loom` built for tests appends its sync counts to (`loom_governor::durable`).
+const SYNC_COUNTS: &str = "B10X_LOOM_TEST_SYNC_COUNTS";
+
+thread_local! {
+    /// The value of the test sync switch on each `b10x-loom` the test starts: `1`, so no store
+    /// write of the binary syncs (`story:tree-run-tests-fit-the-budget`), unless [`counted`] sets
+    /// another, or `None` for none.
+    static SWITCH_VALUE: RefCell<Option<String>> = RefCell::new(Some("1".to_owned()));
+    /// The file each `b10x-loom` the test starts appends its sync counts to, while [`counted`] runs.
+    static COUNTS_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Gives `command`, a start of `b10x-loom` by this binary, the test sync switch and the counts
+/// file of this thread. Every start of `b10x-loom` in the `tree_run` tests goes through here.
+fn with_the_switch(command: &mut Command) -> &mut Command {
+    match SWITCH_VALUE.with_borrow(Clone::clone) {
+        Some(value) => command.env("B10X_LOOM_TEST_UNSYNCED_STORE", value),
+        None => command.env_remove("B10X_LOOM_TEST_UNSYNCED_STORE"),
+    };
+    match COUNTS_FILE.with_borrow(Clone::clone) {
+        Some(file) => command.env(SYNC_COUNTS, file),
+        None => command.env_remove(SYNC_COUNTS),
+    };
+    command
+}
 
 /// One test's scratch directory: the user's home with the fixture protocols installed, the
 /// workspace with the stubs and the bindings files, and the path of the store.
@@ -121,6 +153,8 @@ impl Tree {
         self.root.join("workspace")
     }
 
+    /// `b10x-loom` for this test: its home and data directory the test's, the test sync switch on
+    /// unless [`counted`] says otherwise, and its sync counts written where [`counted`] reads them.
     fn command(&self) -> Command {
         let home = self.root.join("home");
         let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
@@ -129,6 +163,7 @@ impl Tree {
             .env("XDG_DATA_HOME", &home)
             .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
             .env_remove("RUST_LOG");
+        with_the_switch(&mut command);
         command
     }
 
@@ -719,6 +754,10 @@ fn ended_digest() -> String {
         .collect()
 }
 
+/// The file of the shared ended tree holding the syncs its commands made and skipped, all with the
+/// switch on.
+const SYNCED_FILE: &str = "synced.json";
+
 /// The two-level tree run to its end once per test run (the grant of `ticket.issue` taken twice),
 /// kept under `target/` beside the test scratch directories and keyed by [`ended_digest`]: an
 /// open, eight runs and their decisions cost seconds each, so each status test reads a fresh copy of
@@ -734,8 +773,15 @@ fn ended_tree() -> Ended {
         let _ = fs::remove_dir_all(&root);
         let mut tree = Tree::at(root.clone());
         tree.shared = true;
-        let (waits, ended) = run_to_end_twice(&tree, Some("ticket.issue"));
+        let ((waits, ended), synced) =
+            counted(Some("1"), || run_to_end_twice(&tree, Some("ticket.issue")));
         fs::write(root.join("waits.json"), serde_json::to_vec(&waits).unwrap()).unwrap();
+        fs::write(
+            root.join(SYNCED_FILE),
+            serde_json::to_vec(&json!({"synced": synced.synced, "skipped": synced.skipped}))
+                .unwrap(),
+        )
+        .unwrap();
         fs::write(root.join("ended.json"), serde_json::to_vec(&ended).unwrap()).unwrap();
     }
     lock.unlock().unwrap();
@@ -960,6 +1006,276 @@ fn the_printed_status_is_the_value_of_tree_status() {
     assert_eq!(STATUS_FORMAT, "loom.tree-status/1");
     assert_eq!(document["version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(read_status(&printed.stdout).unwrap(), value);
+}
+
+/// The two-level tree after one `tree run --max-steps 1` once per test run, kept as
+/// [`ended_tree`] keeps its tree: under `target/`, keyed by [`ended_digest`], built by the first
+/// test that asks holding a lock file. The run opened the first leg and stopped `BudgetSpent` in
+/// it before its next step. A fresh copy of the tree and the run's JSON; a test reads the copy with
+/// `tree status` and never runs it, since its store names the shared workspace.
+fn stepped_tree() -> (Tree, Value) {
+    let key = ended_digest();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let root = base.join(format!("tree-run-stepped-{}", &key[..16]));
+    let lock =
+        fs::File::create(base.join(format!("tree-run-stepped-{}.lock", &key[..16]))).unwrap();
+    lock.lock().unwrap();
+    if !root.join("stepped.json").exists() {
+        let _ = fs::remove_dir_all(&root);
+        let mut tree = Tree::at(root.clone());
+        tree.shared = true;
+        let opened = tree.open();
+        assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+        let ran = tree
+            .command()
+            .args([
+                "tree",
+                "run",
+                "--confinement",
+                "local",
+                "--max-steps",
+                "1",
+                "--at",
+                AT,
+                "--store",
+            ])
+            .arg(tree.store())
+            .output()
+            .unwrap();
+        assert_eq!(
+            ran.status.code(),
+            Some(5),
+            "{}{}",
+            stdout(&ran),
+            stderr(&ran)
+        );
+        fs::write(root.join("stepped.json"), &ran.stdout).unwrap();
+    }
+    lock.unlock().unwrap();
+    let ran = serde_json::from_slice(&fs::read(root.join("stepped.json")).unwrap()).unwrap();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let copy = base.join(format!(
+        "tree-run-stepped-copy-{}-{nanos}",
+        std::process::id()
+    ));
+    copy_dir(&root, &copy);
+    let tree = Tree {
+        root: copy,
+        started: Instant::now(),
+        shared: false,
+    };
+    (tree, ran)
+}
+
+#[test]
+fn a_status_names_each_protocol_its_cases_use_with_its_digest() {
+    let Ended { tree, .. } = ended_tree();
+    let status = json(&tree.tree("status"));
+    let cases = status["cases"].as_array().unwrap();
+    let legs = cases
+        .iter()
+        .filter(|case| case["protocol"] == "tour-leg@1")
+        .count();
+    assert!(legs >= 2, "more than one case uses tour-leg@1: {status}");
+    let catalog = tree.catalog();
+    let listed = status["protocols"].as_array().unwrap();
+    let registrations: Vec<&str> = listed
+        .iter()
+        .map(|protocol| protocol["registration"].as_str().unwrap())
+        .collect();
+    // One entry per protocol the cases use, once, in the order of its first case.
+    assert_eq!(registrations, ["tour@1", "tour-leg@1"], "{status}");
+    for (protocol, (id, file)) in listed
+        .iter()
+        .zip([("tour", "tour.yaml"), ("tour.leg", "tour-leg.yaml")])
+    {
+        let registration = protocol["registration"].as_str().unwrap();
+        let entry = catalog.get(registration).unwrap();
+        assert_eq!(protocol["protocol"], id, "{protocol}");
+        assert_eq!(protocol["revision"], 1, "{protocol}");
+        assert_eq!(protocol["file"], entry.definition.source.path, "{protocol}");
+        assert_eq!(protocol["sha256"], entry.definition.sha256, "{protocol}");
+        // The digest is the one of the protocol's own bytes, as the fixture holds them.
+        let bytes = fs::read(fixture_protocols().join(file)).unwrap();
+        assert_eq!(protocol["sha256"], sha256_hex(&bytes), "{protocol}");
+    }
+}
+
+#[test]
+fn a_status_names_a_log_that_does_not_verify() {
+    let (tree, ran) = stepped_tree();
+    let child = ran["case"].as_str().unwrap().to_owned();
+    assert_ne!(child, "root", "{ran}");
+    let status = json(&tree.tree("status"));
+    for case in status["cases"].as_array().unwrap() {
+        assert_eq!(case["log"], json!({"verified": true}), "{case}");
+    }
+    // One changed byte in the child's first line: its second line no longer names it.
+    let path = tree.store().join(log_file_name(&child));
+    let mut bytes = fs::read(&path).unwrap();
+    let first_line = bytes.iter().position(|byte| *byte == b'\n').unwrap();
+    let at = bytes[..first_line]
+        .windows(8)
+        .position(|window| window == b"tour-leg")
+        .unwrap();
+    bytes[at] = b'T';
+    fs::write(&path, &bytes).unwrap();
+    let expected = read_log(&bytes).unwrap_err();
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let entry_of_child = entry(&status, &child);
+    assert_eq!(
+        entry_of_child["log"],
+        json!({
+            "verified": false,
+            "refusal": "BrokenChain",
+            "line": 1,
+            "detail": expected.detail,
+        }),
+        "{entry_of_child}"
+    );
+    // Nothing is read from a log that does not verify.
+    for member in ["stop", "budget"] {
+        assert!(entry_of_child.get(member).is_none(), "{entry_of_child}");
+    }
+    assert_eq!(entry_of_child["stop_next"], json!([]), "{entry_of_child}");
+    assert_eq!(entry_of_child["approvals"], json!([]), "{entry_of_child}");
+    assert_eq!(
+        entry(&status, "root")["log"],
+        json!({"verified": true}),
+        "{status}"
+    );
+}
+
+#[test]
+fn a_status_reads_a_missing_log_as_verified_and_empty() {
+    let (tree, ran) = stepped_tree();
+    let child = ran["case"].as_str().unwrap().to_owned();
+    fs::remove_file(tree.store().join(log_file_name(&child))).unwrap();
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let entry_of_child = entry(&status, &child);
+    assert_eq!(
+        entry_of_child["log"],
+        json!({"verified": true}),
+        "{entry_of_child}"
+    );
+    for member in ["stop", "budget"] {
+        assert!(entry_of_child.get(member).is_none(), "{entry_of_child}");
+    }
+}
+
+#[test]
+fn a_step_budget_stop_names_max_steps_in_the_log_and_the_status() {
+    let (tree, ran) = stepped_tree();
+    assert_eq!(ran["stop"], "BudgetSpent", "{ran}");
+    assert_eq!(ran["steps"], 1, "{ran}");
+    assert_eq!(ran["detail"], "the run took its 1 steps", "{ran}");
+    let child = ran["case"].as_str().unwrap().to_owned();
+    let lines = log_lines(&tree, &child);
+    let last = lines.last().unwrap();
+    assert!(
+        matches!(
+            &last.event,
+            RunLogEvent::Stopped(stopped)
+                if stopped.stop == "BudgetSpent" && stopped.budget.as_deref() == Some("MaxSteps")
+        ),
+        "{last:?}"
+    );
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let status = json(&printed);
+    let entry_of_child = entry(&status, &child);
+    assert_eq!(entry_of_child["stop"], "BudgetSpent", "{entry_of_child}");
+    assert_eq!(entry_of_child["budget"], "MaxSteps", "{entry_of_child}");
+    assert!(entry(&status, "root").get("budget").is_none(), "{status}");
+    // The printed status reads back as the value `tree_status` returns, budget and logs included.
+    let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
+    assert_eq!(read_status(&printed.stdout).unwrap(), value);
+    let held = value.cases.iter().find(|case| case.case == child).unwrap();
+    assert_eq!(held.budget, Some(SpentBudget::MaxSteps));
+}
+
+#[test]
+fn a_cancelled_run_names_its_budget_in_the_stopped_line() {
+    let tree = Tree::new("cancel-first");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let cancel = AtomicBool::new(true);
+    let ran = run_tree(
+        &tree.store(),
+        &tree.catalog(),
+        &settings(None),
+        None,
+        Some(&cancel),
+    )
+    .unwrap();
+    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.steps, 0, "{ran:?}");
+    assert_eq!(ran.detail.as_deref(), Some("the run was cancelled"));
+    let lines = log_lines(&tree, "root");
+    // The `case opened` line `tree open` wrote, then the stop: no step was taken.
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert_eq!(
+        lines[1].event,
+        RunLogEvent::Stopped(b10x_loom_tree::runlog::Stopped {
+            stop: "BudgetSpent".to_owned(),
+            next: Vec::new(),
+            budget: Some("Cancel".to_owned()),
+        })
+    );
+    let status = json(&tree.tree("status"));
+    assert_eq!(entry(&status, "root")["budget"], "Cancel", "{status}");
+}
+
+#[test]
+fn a_wall_time_stop_names_max_wall_seconds_in_the_stopped_line() {
+    let tree = Tree::new("wall-time");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let started = Instant::now();
+    let mut settings = settings(None);
+    settings.max_wall_seconds = Some(1);
+    // The first step takes a second: the run's wall time is spent before the next.
+    let mut slept = false;
+    let mut observer = |_: &str, line: &RunLogLine| {
+        if !slept && matches!(line.event, RunLogEvent::ActionFinished(_)) {
+            slept = true;
+            std::thread::sleep(Duration::from_millis(1100));
+        }
+    };
+    let ran = run_tree(
+        &tree.store(),
+        &tree.catalog(),
+        &settings,
+        Some(&mut observer),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.steps, 1, "{ran:?}");
+    assert_eq!(
+        ran.detail.as_deref(),
+        Some("the run's 1 s of wall time are spent")
+    );
+    let lines = log_lines(&tree, "root");
+    let last = lines.last().unwrap();
+    assert!(
+        matches!(
+            &last.event,
+            RunLogEvent::Stopped(stopped)
+                if stopped.stop == "BudgetSpent"
+                    && stopped.budget.as_deref() == Some("MaxWallSeconds")
+        ),
+        "{last:?}"
+    );
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(5), "the run took {took:?}");
 }
 
 #[test]
@@ -1199,10 +1515,25 @@ fn observed_tree() -> (Tree, Vec<Value>) {
     lock.lock().unwrap();
     if !root.join("seen.json").exists() {
         let _ = fs::remove_dir_all(&root);
-        let mut tree = Tree::at(root.clone());
-        tree.shared = true;
-        let seen = child_lines_to_end(&tree);
-        fs::write(root.join("seen.json"), serde_json::to_vec(&seen).unwrap()).unwrap();
+        // `run_tree` writes the store in process: in a process of its own with the switch on, so
+        // those writes do not wait for the disk as the binary's do not.
+        let built = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "the_observed_tree_is_built_with_the_switch_on",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("B10X_LOOM_TEST_UNSYNCED_STORE", "1")
+            .env(OBSERVED_ROOT, &root)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success() && root.join("seen.json").exists(),
+            "{}{}",
+            stdout(&built),
+            stderr(&built)
+        );
     }
     lock.unlock().unwrap();
     let seen = serde_json::from_slice(&fs::read(root.join("seen.json")).unwrap()).unwrap();
@@ -1221,6 +1552,21 @@ fn observed_tree() -> (Tree, Vec<Value>) {
         shared: false,
     };
     (tree, seen)
+}
+
+/// The variable naming the directory [`observed_tree`] has its child process build the tree in.
+const OBSERVED_ROOT: &str = "TREE_RUN_OBSERVED_ROOT";
+
+/// Not a test of its own: the child process [`observed_tree`] starts, with the switch on in its
+/// own environment, builds the observed tree at [`OBSERVED_ROOT`].
+#[test]
+#[ignore = "run by observed_tree in a process of its own"]
+fn the_observed_tree_is_built_with_the_switch_on() {
+    let root = PathBuf::from(std::env::var_os(OBSERVED_ROOT).expect("started by observed_tree"));
+    let mut tree = Tree::at(root.clone());
+    tree.shared = true;
+    let seen = child_lines_to_end(&tree);
+    fs::write(root.join("seen.json"), serde_json::to_vec(&seen).unwrap()).unwrap();
 }
 
 #[test]
@@ -2267,7 +2613,8 @@ fn refused_with_an_empty_store(tree: &Tree, output: &Output, reason: &str, named
     assert!(empty, "the store holds {:?}", tree.snapshot());
 }
 
-/// The SHA-256 `tree status` names for the kept protocol `registration`.
+/// The SHA-256 `tree status` names for the protocol `registration`, which a case of the tree uses:
+/// the status lists only those (`kept_entry` reads what `tree open` kept).
 fn kept_sha256(tree: &Tree, registration: &str) -> String {
     let status = json(&tree.tree("status"));
     status["protocols"]
@@ -2278,6 +2625,21 @@ fn kept_sha256(tree: &Tree, registration: &str) -> String {
         .and_then(|kept| kept["sha256"].as_str())
         .unwrap_or_else(|| panic!("no kept {registration}: {status}"))
         .to_owned()
+}
+
+/// The entries of the store's `tree-protocols.json`: what `tree open --protocols` kept.
+fn kept_list(tree: &Tree) -> Vec<Value> {
+    let path = tree.store().join(b10x_loom_tree::PROTOCOLS_FILE);
+    let kept: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    kept["protocols"].as_array().unwrap().clone()
+}
+
+/// The entry `tree-protocols.json` keeps for `registration`.
+fn kept_entry(tree: &Tree, registration: &str) -> Value {
+    kept_list(tree)
+        .into_iter()
+        .find(|kept| kept["registration"] == registration)
+        .unwrap_or_else(|| panic!("tree-protocols.json keeps no {registration}"))
 }
 
 #[test]
@@ -2296,10 +2658,8 @@ fn a_protocols_directory_registers_what_its_files_declare() {
             loom_protocols::SourceKind::Directory
         );
     }
-    let status = json(&tree.tree("status"));
-    let kept: Vec<(&str, &str)> = status["protocols"]
-        .as_array()
-        .unwrap()
+    let kept = kept_list(&tree);
+    let kept: Vec<(&str, &str)> = kept
         .iter()
         .map(|kept| {
             (
@@ -2311,6 +2671,14 @@ fn a_protocols_directory_registers_what_its_files_declare() {
     assert_eq!(
         kept,
         [("tour-leg@1", "tour-leg.yaml"), ("tour@1", "tour.yaml")]
+    );
+    // The status lists the protocols the tree's cases use, from the kept catalog: the root's alone
+    // until a leg is opened, the entry `tree-protocols.json` keeps for it.
+    let status = json(&tree.tree("status"));
+    assert_eq!(
+        status["protocols"],
+        json!([kept_entry(&tree, "tour@1")]),
+        "{status}"
     );
 }
 
@@ -2332,7 +2700,10 @@ fn an_edit_after_tree_open_changes_nothing_in_the_open_tree() {
     let opened = open_from(&tree, &dir, "tour@1");
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     let leg = fixture_protocol("tour-leg.yaml");
-    let at_open = kept_sha256(&tree, "tour-leg@1");
+    let at_open = kept_entry(&tree, "tour-leg@1")["sha256"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     // Under the edited definition no leg could pass, so the root could not arrive.
     fs::write(
         dir.join("tour-leg.yaml"),
@@ -2400,9 +2771,19 @@ fn nothing_in_a_run_selects_or_replaces_a_protocol() {
         fs::read_to_string(workspace.join("tour-leg.yaml")).unwrap(),
         written
     );
-    // Every case keeps the registration and the SHA-256 of `tree open`.
+    // Every case keeps the registration and the SHA-256 of `tree open`: the status lists each
+    // protocol the cases use as `tree-protocols.json` kept it at `tree open`.
     let status = json(&tree.tree("status"));
-    assert_eq!(status["protocols"], at_open["protocols"], "{status}");
+    assert_eq!(
+        status["protocols"],
+        json!([kept_entry(&tree, "tour@1"), kept_entry(&tree, "tour-leg@1")]),
+        "{status}"
+    );
+    assert_eq!(
+        at_open["protocols"],
+        json!([kept_entry(&tree, "tour@1")]),
+        "{at_open}"
+    );
     let cases = status["cases"].as_array().unwrap();
     assert!(cases.len() > 2, "{status}");
     for case in cases {
@@ -2550,7 +2931,7 @@ fn a_changed_stored_protocol_is_refused() {
     let blob = tree
         .store()
         .join("blobs")
-        .join(kept_sha256(&tree, "tour-leg@1"));
+        .join(kept_entry(&tree, "tour-leg@1")["sha256"].as_str().unwrap());
     let mut bytes = fs::read(&blob).unwrap();
     bytes[0] ^= 1;
     fs::write(&blob, &bytes).unwrap();
@@ -2561,4 +2942,262 @@ fn a_changed_stored_protocol_is_refused() {
     assert!(text.contains("StoredProtocolChanged"), "{text}");
     assert!(text.contains("tour-leg@1"), "{text}");
     assert_eq!(tree.snapshot(), before);
+}
+
+// ---- the test sync switch (story:tree-run-tests-fit-the-budget) ----------------------------------
+
+/// The syncs every `b10x-loom` a closure of [`counted`] started made and skipped, summed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Synced {
+    synced: u64,
+    skipped: u64,
+}
+
+/// Runs `run` with the switch at `switch` (`None`: not in the environment) on every command it
+/// starts, each appending its counts to one fresh file, and returns what `run` answered and the
+/// counts summed. Fails when no command wrote its counts.
+fn counted<T>(switch: Option<&str>, run: impl FnOnce() -> T) -> (T, Synced) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let file = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("sync-counts-{}-{nanos}", std::process::id()));
+    let before = SWITCH_VALUE.replace(switch.map(str::to_owned));
+    COUNTS_FILE.set(Some(file.clone()));
+    let answered = run();
+    COUNTS_FILE.set(None);
+    SWITCH_VALUE.set(before);
+    let text = fs::read_to_string(&file).unwrap_or_default();
+    let _ = fs::remove_file(&file);
+    let mut sum = Synced {
+        synced: 0,
+        skipped: 0,
+    };
+    for line in text.lines() {
+        let counts: Value = serde_json::from_str(line).unwrap();
+        sum.synced += counts["synced"].as_u64().unwrap();
+        sum.skipped += counts["skipped"].as_u64().unwrap();
+    }
+    assert!(
+        text.lines().count() > 0,
+        "no b10x-loom wrote its sync counts"
+    );
+    (answered, sum)
+}
+
+#[test]
+fn the_switch_is_off_unless_its_variable_is_1() {
+    for value in [None, Some("0"), Some(" 1")] {
+        let tree = Tree::new("switch-off");
+        let (opened, counts) = counted(value, || tree.open_leg());
+        assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+        assert!(
+            counts.synced > 0 && counts.skipped == 0,
+            "{value:?}: {counts:?}"
+        );
+    }
+    let tree = Tree::new("switch-on");
+    let (opened, counts) = counted(Some("1"), || tree.open_leg());
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    assert!(counts.synced == 0 && counts.skipped > 0, "{counts:?}");
+}
+
+/// Read from the shared ended tree, whose every command ran with the switch on and counted.
+#[test]
+fn with_the_switch_a_two_level_tree_makes_no_sync() {
+    let Ended { tree, ended, .. } = ended_tree();
+    assert_eq!(ended["stop"], "Terminal", "{ended}");
+    let counts: Value =
+        serde_json::from_slice(&fs::read(tree.root.join(SYNCED_FILE)).unwrap()).unwrap();
+    assert_eq!(counts["synced"], 0, "{counts}");
+    assert!(counts["skipped"].as_u64().unwrap() > 0, "{counts}");
+}
+
+/// The same tree with the switch off syncs every write the switch skipped: about a thousand syncs,
+/// so in the slow lane (`task slow`).
+#[test]
+fn slow_without_the_switch_the_two_level_tree_syncs_what_the_switch_skips() {
+    let tree = Tree::new("proxy-on-again");
+    let ((_, ended), on) = counted(Some("1"), || run_to_end_twice(&tree, None));
+    assert_eq!(ended["stop"], "Terminal", "{ended}");
+    let tree = Tree::new("proxy-off");
+    let ((_, ended), off) = counted(None, || run_to_end_twice(&tree, None));
+    assert_eq!(ended["stop"], "Terminal", "{ended}");
+    assert_eq!(
+        off,
+        Synced {
+            synced: on.skipped,
+            skipped: 0
+        },
+        "with the switch: {on:?}"
+    );
+}
+
+/// A shell program that prints its environment, then checks the route as `route-check.sh` does.
+const ENV_CHECK: &str =
+    "#!/bin/sh\nenv\ntest -f route.txt || exit 1\ntest \"$(wc -l < route.txt)\" -ge 2\n";
+
+#[test]
+fn a_bound_program_never_sees_the_switch() {
+    let tree = Tree::new("program-env");
+    fs::write(tree.workspace().join("stubs/env-check.sh"), ENV_CHECK).unwrap();
+    let bindings = fs::read_to_string(tree.workspace().join("tour-leg.bindings.yaml"))
+        .unwrap()
+        .replace("stubs/route-check.sh", "stubs/env-check.sh");
+    fs::write(tree.workspace().join("env.bindings.yaml"), bindings).unwrap();
+    let opened = tree.open_leg_with("env.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let (ran, counts) = counted(Some("1"), || tree.run());
+    assert_eq!(
+        ran.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&ran),
+        stderr(&ran)
+    );
+    assert!(counts.skipped > 0, "the switch was on: {counts:?}");
+
+    let mut printed = 0;
+    for entry in fs::read_dir(tree.store().join("blobs")).unwrap() {
+        let blob = fs::read_to_string(entry.unwrap().path()).unwrap_or_default();
+        if blob.contains("LOOM_CASE=") {
+            printed += 1;
+        }
+        assert!(
+            !blob.contains("B10X_LOOM_TEST_UNSYNCED_STORE"),
+            "a bound program saw the switch:\n{blob}"
+        );
+    }
+    assert!(printed > 0, "no blob holds a program's environment");
+}
+
+#[test]
+fn a_bindings_or_protocol_member_cannot_set_the_switch() {
+    let leg = fs::read_to_string(Path::new(FIXTURE).join("tour-leg.bindings.yaml")).unwrap();
+    for (label, member) in [
+        (
+            "top",
+            leg.replace(
+                "actions:\n",
+                "B10X_LOOM_TEST_UNSYNCED_STORE: \"1\"\nactions:\n",
+            ),
+        ),
+        (
+            "executor",
+            leg.replacen(
+                "      kind: program\n",
+                "      kind: program\n      B10X_LOOM_TEST_UNSYNCED_STORE: \"1\"\n",
+                1,
+            ),
+        ),
+    ] {
+        assert_ne!(member, leg, "{label}");
+        let tree = Tree::new("switch-member");
+        fs::write(tree.workspace().join("member.bindings.yaml"), member).unwrap();
+        let (opened, _) = counted(None, || tree.open_leg_with("member.bindings.yaml"));
+        refused_with_an_empty_store(
+            &tree,
+            &opened,
+            "UndeclaredMember",
+            &["B10X_LOOM_TEST_UNSYNCED_STORE"],
+        );
+    }
+
+    // A program argv and a protocol description naming the switch, run twice: with the switch on,
+    // then off, where the run must sync every write the first skipped. The writer adds both stops
+    // at once, so the run checks the route once before it waits: half the writes of the fixture's.
+    let bindings = leg.replace(
+        "argv: [sh, stubs/route-write.sh]",
+        "argv: [env, B10X_LOOM_TEST_UNSYNCED_STORE=1, sh, stubs/route-write-both.sh]",
+    );
+    assert_ne!(bindings, leg);
+    let protocol = fixture_protocol("tour-leg.yaml").replace(
+        "One leg of a walking tour.",
+        "B10X_LOOM_TEST_UNSYNCED_STORE=1 One leg of a walking tour.",
+    );
+    let open_and_run = |label: &str, switch: Option<&str>| {
+        let tree = Tree::new(label);
+        fs::write(tree.workspace().join("switch.bindings.yaml"), &bindings).unwrap();
+        fs::write(
+            tree.workspace().join("stubs/route-write-both.sh"),
+            "#!/bin/sh\necho stop >> route.txt\necho stop >> route.txt\n",
+        )
+        .unwrap();
+        let dir = protocols_dir(&tree, &[("tour-leg.yaml", &protocol)]);
+        let ((opened, ran), counts) = counted(switch, || {
+            (
+                open_from_with(&tree, &dir, "tour-leg@1", "switch.bindings.yaml"),
+                tree.run(),
+            )
+        });
+        assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+        assert_eq!(
+            ran.status.code(),
+            Some(3),
+            "{}{}",
+            stdout(&ran),
+            stderr(&ran)
+        );
+        counts
+    };
+    let on = open_and_run("switch-documents-on", Some("1"));
+    assert!(on.synced == 0 && on.skipped > 0, "{on:?}");
+    let off = open_and_run("switch-documents-off", None);
+    assert_eq!(
+        off,
+        Synced {
+            synced: on.skipped,
+            skipped: 0
+        },
+        "with the switch: {on:?}"
+    );
+}
+
+#[test]
+fn a_person_step_syncs_in_full() {
+    let step = |label: &str, switch: Option<&str>| {
+        let (tree, decisions) = signpost(label);
+        let decision = about(&decisions, "post.sign");
+        let (taken, counts) = counted(switch, || tree.printed(&decision));
+        assert_eq!(
+            taken.status.code(),
+            Some(0),
+            "{}{}",
+            stdout(&taken),
+            stderr(&taken)
+        );
+        assert_eq!(records_of(&tree, "root", "post_signed").len(), 1);
+        counts
+    };
+    let on = step("person-on", Some("1"));
+    assert!(on.synced == 0 && on.skipped > 0, "{on:?}");
+    let off = step("person-off", None);
+    assert_eq!(
+        off,
+        Synced {
+            synced: on.skipped,
+            skipped: 0
+        },
+        "with the switch: {on:?}"
+    );
+}
+
+#[test]
+fn the_tree_run_binary_has_the_20_s_override() {
+    let id = concat!(env!("CARGO_PKG_NAME"), "::", env!("CARGO_CRATE_NAME"));
+    assert_eq!(id, "b10x-loom-cli::tree_run");
+    if let Some(running) = std::env::var_os("NEXTEST_BINARY_ID") {
+        assert_eq!(running, id, "nextest names this binary otherwise");
+    }
+    let config = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.config/nextest.toml"),
+    )
+    .unwrap();
+    let held = config.split("[[").any(|table| {
+        table.starts_with("profile.default.overrides]]")
+            && table.contains(&format!("binary_id({id})"))
+            && table.contains(r#"slow-timeout = { period = "20s", terminate-after = 1 }"#)
+    });
+    assert!(held, "no override kills a test of {id} at 20 s:\n{config}");
 }

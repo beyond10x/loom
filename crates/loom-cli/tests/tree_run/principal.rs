@@ -241,11 +241,15 @@ fn placeholders(tree: &Tree, text: &str) -> String {
 /// replaced as by [`placeholders`].
 const WAITING_STATUS: &str = concat!(
     r#"{"cases":[{"approvals":[],"case":"root","case_file":"<root>/store/case-726f6f74.json","#,
-    r#""copies":[],"evidence":[],"open_obligations":[],"protocol":"sign@1","protocol_id":"sign","#,
+    r#""copies":[],"evidence":[],"log":{"verified":true},"open_obligations":[],"protocol":"sign@1","#,
+    r#""protocol_id":"sign","#,
     r#""protocol_revision":"1","revision":1,"run_log":"<root>/store/runlog-case-726f6f74.jsonl","#,
     r#""runs":[],"stop":"AwaitingPerson","stop_next":["post.seal of case root at revision 1","#,
     r#""post.sign of case root at revision 1","post.stamp of case root at revision 1"]}],"#,
-    r#""format":"loom.tree-status/1","protocols":[],"root":"root","store":"<root>/store","#,
+    r#""format":"loom.tree-status/1","protocols":[{"file":"","protocol":"sign","#,
+    r#""registration":"sign@1","revision":1,"#,
+    r#""sha256":"67185f0c4ae58bcf9c3fd10d0453e1398a47e9b28add9bae25502d9e3b5e4fe8"}],"#,
+    r#""root":"root","store":"<root>/store","#,
     r#""version":"<version>","workspace":"<root>/workspace"}"#,
     "\n"
 );
