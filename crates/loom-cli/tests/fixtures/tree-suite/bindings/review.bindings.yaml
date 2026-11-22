@@ -1,0 +1,36 @@
+format: loom.bindings/1
+protocol: review@1
+artifacts:
+  draft: draft.txt
+actions:
+  - action: draft.write
+    executor:
+      kind: program
+      argv: [sh, stubs/draft-write.sh]
+    retry_when:
+      draft_review: [rejected]
+  - action: draft.review
+    executor:
+      kind: person
+      principal: reviewer
+    evidence:
+      - kind: draft_review
+        subject: draft
+        producer: reviewer
+        from: effect
+        results: {performed: approved, rejected: rejected}
+  - action: draft.judge
+    executor:
+      kind: person
+      principal: reviewer
+    evidence:
+      - kind: draft_review
+        subject: draft
+        producer: reviewer
+        from: effect
+        results: {performed: approved, rejected: rejected}
+      - kind: draft_note
+        subject: draft
+        producer: reviewer
+        from: effect
+        results: {performed: noted}
