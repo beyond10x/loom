@@ -10,11 +10,30 @@ custom_edit_url: null
 
 # Governor
 
-The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, every evidence record received with whether it applies, and every explicit decision recorded for it; and the observations kept beside the cases.
+The governor's held case as a store writes it: the case id, the protocol that governs it, the case revision, the current revision of every declared artifact, the value of every case input the protocol declares, the independence dimensions the host declared for each evidence producer, every evidence record received with whether it applies, every explicit decision recorded for it, the links to the case that opened it and to the cases it opened, and how it terminated; and the observations kept beside the cases.
 
 `loom.governor` is one of loom's bounded contexts. [All domains](./index.mdx).
 
 ## Types
+
+### `CaseLink`
+
+`loom.governor.CaseLink` is a record of seven fields:
+
+- `parent` — `loom.governor.StoredCaseId`
+- `child` — `loom.governor.StoredCaseId`
+- `name` — `String`
+- `action` — `String`
+- `outcome_evidence` — `Uuid`
+- `subject` — `String`
+- `subject_revision` — `String`
+
+### `CaseTermination`
+
+`loom.governor.CaseTermination` is a record of two fields:
+
+- `outcome` — `String`
+- `instant` — `Timestamp`
 
 ### `CompletionRule`
 
@@ -29,7 +48,7 @@ The governor's held case as a store writes it: the case id, the protocol that go
 
 ### `StoredCase`
 
-`loom.governor.StoredCase` is a record of eight fields:
+`loom.governor.StoredCase` is a record of 11 fields:
 
 - `id` — `loom.governor.StoredCaseId`
 - `protocol` — `String`
@@ -39,62 +58,13 @@ The governor's held case as a store writes it: the case id, the protocol that go
 - `independence` — `Optional<List<loom.governor.StoredIndependence>>`, which may be absent
 - `evidence` — `List<loom.governor.StoredEvidence>`
 - `decisions` — `Optional<List<loom.evaluation.ExplicitDecision>>`, which may be absent
+- `parent` — `Optional<loom.governor.CaseLink>`, which may be absent
+- `children` — `Optional<List<loom.governor.CaseLink>>`, which may be absent
+- `termination` — `Optional<loom.governor.CaseTermination>`, which may be absent
 
 ### `StoredCaseId`
 
 `loom.governor.StoredCaseId` wraps `String` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses.
-
-### `StoredDecisionRequest`
-
-`loom.governor.StoredDecisionRequest` is a record of four fields:
-
-- `position` — `Integer`
-- `state` — `loom.decision.DecisionRequest.State`
-- `request` — `loom.governor.StoredDecisionRequestData`
-- `records` — `List<loom.decision.EscalationSuppressedRecord>`
-
-### `StoredDecisionRequestData`
-
-`loom.governor.StoredDecisionRequestData` is a record of 38 fields:
-
-- `request_id` — `loom.decision.DecisionRequestId`
-- `case_id` — `loom.decision.CaseId`
-- `question_key` — `String`
-- `record_key` — `String`
-- `unblocks` — `loom.decision.Unblocks`
-- `subject_artifact` — `loom.decision.ArtifactId`
-- `subject_revision` — `loom.decision.Revision`
-- `subject_path` — `Optional<String>`, which may be absent
-- `question` — `String`
-- `options` — `List<loom.decision.DecisionOption>`
-- `autonomy_level` — `loom.decision.AutonomyLevel`
-- `decision_class` — `loom.decision.DecisionClassId`
-- `holder` — `loom.decision.Holder`
-- `eligible` — `List<loom.decision.Principal>`
-- `addressed_to` — `loom.decision.Principal`
-- `opened_at` — `Timestamp`
-- `expires_at` — `Optional<Timestamp>`, which may be absent
-- `supersedes` — `Optional<loom.decision.DecisionRequestId>`, which may be absent
-- `recommended_option` — `Optional<loom.decision.OptionLetter>`, which may be absent
-- `recommended_answer` — `Optional<String>`, which may be absent
-- `recommendation_strength` — `loom.decision.Strength`
-- `default_on_silence` — `Boolean`
-- `grounds` — `List<loom.decision.Ground>`
-- `recommended_by` — `Optional<loom.decision.ProposerKind>`, which may be absent
-- `grounding_report` — `Optional<String>`, which may be absent
-- `no_recommendation_reason` — `Optional<String>`, which may be absent
-- `escalated_to` — `Optional<loom.decision.Principal>`, which may be absent
-- `escalation_reason` — `Optional<String>`, which may be absent
-- `decided_option` — `Optional<loom.decision.OptionLetter>`, which may be absent
-- `decided_answer` — `Optional<String>`, which may be absent
-- `decided_by` — `Optional<loom.decision.Principal>`, which may be absent
-- `decided_by_kind` — `Optional<loom.decision.PrincipalKind>`, which may be absent
-- `decided_at` — `Optional<Timestamp>`, which may be absent
-- `decided_case_revision` — `Optional<loom.decision.Revision>`, which may be absent
-- `decision_reasons` — `List<String>`
-- `produced_record` — `Optional<loom.decision.ProducedRecord>`, which may be absent
-- `superseded_by` — `Optional<loom.decision.DecisionRequestId>`, which may be absent
-- `superseded_reason` — `Optional<String>`, which may be absent
 
 ### `StoredEvidence`
 
@@ -140,9 +110,9 @@ The governor's held case as a store writes it: the case id, the protocol that go
 - `observed_at` — `Timestamp`
 - `payload` — `Json`
 
-Four of the types above are reached by nothing else in this system: `loom.governor.CompletionRule`, `loom.governor.StoredCase`, `loom.governor.StoredDecisionRequest` and `loom.governor.StoredObservation`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+Three of the types above are reached by nothing else in this system: `loom.governor.CompletionRule`, `loom.governor.StoredCase` and `loom.governor.StoredObservation`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:bd82b6dd48af2bdb5f89d09c9ed2b6ae04b6220a9ef00d27def4137336f736e6`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:d958dfbdcec1dd2498b4e15b85488f0432d2a42b2d0f8c65659a94e6aa296247`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

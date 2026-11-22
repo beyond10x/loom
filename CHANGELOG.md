@@ -23,6 +23,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `CanonGovernor::record_step` writes a step's revision moves and records in one store write; `FileCaseStore::update_until` (story:bound-artifact-revisions)
 - `ProtocolCatalog` and `CanonGovernor` take a protocol with a scoped requirement, `supplied_by`, `author`, `revises`, `decided_by` or a `children` form's `subject` and `revision`; one with `imports` is refused `MissingImport` (story:canon-0-10-0-pin)
 - `b10x_loom_bindings::retry_records`; a retried bound program gets `LOOM_RETRY_FEEDBACK`, a `loom.retry-feedback/1` document whose records name `action` and `exit` (story:bound-program-retry-records)
+- `CanonGovernor::open_children`, `terminate` and `tree`: a `case_open` action opens child cases, each child's outcome replaces its `case_outcome` record in the parent (story:child-case-runtime)
+- `b10x_loom_bindings::OpenEffects` performs an `open` binding; `check_case_open` holds `open` to `case_open` at load (story:child-case-runtime)
+- `b10x_loom_bindings::CopyEffects` copies the latest current record of a kind from another case of the tree; `copy_due` (story:record-copy-between-cases)
+- `loom.bindings.CopiedRecord`, `CopyRefusalReason` and `CopyRefusal`, the copy's observation and its refusals (story:record-copy-between-cases)
+- `program_root: bindings` and `b10x_loom_bindings::resolve_programs`: a bound program named beside its bindings file (story:bound-program-contract)
+- A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
 - `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
 
 ### Changed
@@ -46,6 +52,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
 - **Breaking:** Canon `0.9.0` -> `0.10.0`: `ProtocolEntry::model` is Canon 0.10.0's `Protocol`; every decision document names `0.10.0` and gains `missing_evidence` and `pending_decisions` where they apply; frontier ids change (story:canon-0-10-0-pin)
 - **Breaking:** `loom::bindings::ProgramRun` gains `retry_of`, the evidence ids of the retry records a run was given (story:bound-program-retry-records)
+- **Breaking:** `CaseState` gains `parent`, `children` and `termination`; Loom 0.58.0 and earlier refuse a case file that holds them (story:child-case-runtime)
+- **Breaking:** `loom.governor.StoredCase` gains `parent`, `children` and `termination`, with the new `CaseLink` and `CaseTermination` (story:child-case-runtime)
+- **Breaking:** `with_catalog` and `with_protocol` refuse protocols whose `case_open` openings form a cycle, `InvalidProtocol` (story:child-case-runtime)
+- **Breaking:** the evidence port refuses a `case_outcome` record for a case with a parent or child link, or naming a held case (story:child-case-runtime)
+- **Breaking:** the evidence port refuses a host `case_outcome` record for every case whose protocol declares `case_open`, and so does `CanonGovernor::record_step` for a step's records, which Loom 0.58.0 received; a host that composes cases itself opts back in with `CanonGovernor::with_host_case_outcomes` (story:child-case-runtime)
+- **Breaking:** `loom.governor.CaseLink` gains `name`, the name the opening gave the child (the same for a repeated child `<id>.2`); `FileCaseStore` refuses a link without it, with a name that is not one plain segment or not the one its child id was built from (story:child-case-runtime)
+- **Breaking:** every bound program also gets `LOOM_TIMEOUT_SECONDS`, and a child case `LOOM_CASE_NAME` and `LOOM_PARENT_CASE_NAME` (story:bound-program-contract)
+- **Breaking:** `bound_case_child` takes `CaseNames`; `ProgramEnvironment` gains `loom_timeout_seconds`, `loom_case_name`, `loom_parent_case_name` (story:bound-program-contract)
+- **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
+- **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
 
 ### Removed
 

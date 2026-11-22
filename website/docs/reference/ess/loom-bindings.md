@@ -49,10 +49,11 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 
 ### `BindingsDocument`
 
-`loom.bindings.BindingsDocument` is a record of five fields:
+`loom.bindings.BindingsDocument` is a record of six fields:
 
 - `format` — `String`
 - `protocol` — `String`
+- `program_root` — `Optional<loom.bindings.ProgramRoot>`, which may be absent
 - `artifacts` — `List<loom.bindings.ArtifactPath>`
 - `independence` — `List<loom.bindings.ProducerIndependence>`
 - `actions` — `List<loom.bindings.BoundAction>`
@@ -68,11 +69,11 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 
 ### `BindingsRefusalReason`
 
-`loom.bindings.BindingsRefusalReason` is one of `Malformed`, `UndeclaredMember`, `MissingMember`, `UnsupportedFormat`, `InvalidArgv`, `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`, `InvalidToolName`, `InvalidEffectResult`, `ProtocolMismatch`, `UnknownAction`, `DuplicateAction`, `KindNotProducible`, `UndeclaredArtifact`, `UndeclaredEvidenceKind`, `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace` and `UndeclaredDimension`.
+`loom.bindings.BindingsRefusalReason` is one of `Malformed`, `UndeclaredMember`, `MissingMember`, `UnsupportedFormat`, `InvalidArgv`, `InvalidProtocol`, `InvalidEvidence`, `InvalidBudget`, `InvalidToolName`, `InvalidEffectResult`, `ProtocolMismatch`, `UnknownAction`, `DuplicateAction`, `KindNotProducible`, `UndeclaredArtifact`, `UndeclaredEvidenceKind`, `MemberNotForExecutor`, `TimeoutOutOfRange`, `PathNotInWorkspace`, `UndeclaredDimension`, `ExitClassConflict` and `ProgramNotBesideBindings`.
 
 ### `BoundAction`
 
-`loom.bindings.BoundAction` is a record of 10 fields:
+`loom.bindings.BoundAction` is a record of 11 fields:
 
 - `action` — `String`
 - `executor` — `loom.bindings.ExecutorSpec`
@@ -84,6 +85,7 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 - `timeout_seconds` — `Optional<Integer>`, which may be absent
 - `retry_when` — `List<loom.bindings.RetryCondition>`
 - `handoff` — `Optional<String>`, which may be absent
+- `exits` — `Optional<loom.bindings.ExitClasses>`, which may be absent
 
 ### `BoundStep`
 
@@ -94,6 +96,28 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 - `discarded` — `Optional<loom.bindings.DiscardReason>`, which may be absent
 - `placements` — `List<loom.bindings.ArtifactPlacement>`
 - `moves` — `List<loom.bindings.RevisionMove>`
+
+### `CopiedRecord`
+
+`loom.bindings.CopiedRecord` is a record of five fields:
+
+- `case` — `String`
+- `action` — `String`
+- `source_case` — `String`
+- `source_evidence` — `String`
+- `dropped_upstream` — `List<String>`
+
+### `CopyRefusal`
+
+`loom.bindings.CopyRefusal` is a record of three fields:
+
+- `reason` — `loom.bindings.CopyRefusalReason`
+- `action` — `String`
+- `detail` — `String`
+
+### `CopyRefusalReason`
+
+`loom.bindings.CopyRefusalReason` is one of `NoSourceRecord`, `NoSourceCase` and `SubjectUndeclared`.
 
 ### `DiscardReason`
 
@@ -132,6 +156,17 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 - `evidence` — `Optional<String>`, which may be absent
 - `from` — `Optional<String>`, which may be absent
 
+### `ExitClass`
+
+`loom.bindings.ExitClass` is one of `Error` and `NotCalled`.
+
+### `ExitClasses`
+
+`loom.bindings.ExitClasses` is a record of two fields:
+
+- `error` — `List<Integer>`
+- `not_called` — `List<Integer>`
+
 ### `ProducerIndependence`
 
 `loom.bindings.ProducerIndependence` is a record of two fields:
@@ -141,11 +176,14 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 
 ### `ProgramEnvironment`
 
-`loom.bindings.ProgramEnvironment` is a record of three fields:
+`loom.bindings.ProgramEnvironment` is a record of six fields:
 
 - `path` — `Optional<String>`, which may be absent
 - `loom_case` — `String`
 - `loom_retry_feedback` — `Optional<String>`, which may be absent
+- `loom_timeout_seconds` — `Integer`
+- `loom_case_name` — `Optional<String>`, which may be absent
+- `loom_parent_case_name` — `Optional<String>`, which may be absent
 
 ### `ProgramRefusal`
 
@@ -157,11 +195,15 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 
 ### `ProgramRefusalReason`
 
-`loom.bindings.ProgramRefusalReason` is one of `ResultNotInTable`, `ReportUnreadable`, `ArgumentsUnreadable`, `RunsSpent`, `CaseOfAnotherProtocol` and `ArtifactUnreadable`.
+`loom.bindings.ProgramRefusalReason` is one of `ResultNotInTable`, `ReportUnreadable`, `ArgumentsUnreadable`, `RunsSpent`, `CaseOfAnotherProtocol`, `ArtifactUnreadable` and `ProgramError`.
+
+### `ProgramRoot`
+
+`loom.bindings.ProgramRoot` is one of `Workspace` and `Bindings`.
 
 ### `ProgramRun`
 
-`loom.bindings.ProgramRun` is a record of seven fields:
+`loom.bindings.ProgramRun` is a record of eight fields:
 
 - `case` — `String`
 - `action` — `String`
@@ -170,6 +212,7 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 - `timed_out` — `Boolean`
 - `runner_refusal` — `Optional<String>`, which may be absent
 - `retry_of` — `List<String>`
+- `class` — `Optional<loom.bindings.ExitClass>`, which may be absent
 
 ### `RecordedEvidence`
 
@@ -264,9 +307,9 @@ The `loom.bindings/1` document: per action of one registered protocol its execut
 
 - `allow` — `List<String>`
 
-Nine of the types above are reached by nothing else in this system: `loom.bindings.BindingsDocument`, `loom.bindings.BindingsRefusal`, `loom.bindings.BoundStep`, `loom.bindings.ProgramEnvironment`, `loom.bindings.ProgramRefusal`, `loom.bindings.ProgramRun`, `loom.bindings.RecordedEvidence`, `loom.bindings.RetryFeedback` and `loom.bindings.RevisionRefusal`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+11 of the types above are reached by nothing else in this system: `loom.bindings.BindingsDocument`, `loom.bindings.BindingsRefusal`, `loom.bindings.BoundStep`, `loom.bindings.CopiedRecord`, `loom.bindings.CopyRefusal`, `loom.bindings.ProgramEnvironment`, `loom.bindings.ProgramRefusal`, `loom.bindings.ProgramRun`, `loom.bindings.RecordedEvidence`, `loom.bindings.RetryFeedback` and `loom.bindings.RevisionRefusal`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:8774fd8a3b2ba7e59e67d7fbea2dd1771223dbc140379502120a6654cb71c34c`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:4d3883c28f5b592d8b88b3ea3225f3157fbca5fcfc98e414d173fdc973f1b572`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

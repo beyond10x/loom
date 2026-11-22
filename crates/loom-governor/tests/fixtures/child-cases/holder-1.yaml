@@ -1,0 +1,22 @@
+format: protocol/1
+protocol:
+  id: holder
+  revision: 1
+  description: >-
+    A parent whose case_open opens a drafter case about the idea, which the drafter's protocol
+    also declares (story child-case-runtime, the subject revision rule).
+artifacts:
+  idea: {}
+evidence_kinds:
+  case_outcome: {}
+claims:
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  draft.open:
+    effect: write
+    case_open: {protocol: drafter, subject: idea}
+outcomes:
+  delivered:
+    requires: {claim: children.passed}

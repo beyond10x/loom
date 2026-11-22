@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 4ad6b9940a1b56fdeb9599781b32186cc78703b8456ee8f2c325d2896eb13323
+// contract digest 6a11f708ca50ab2e73836876ae5a92421f2c85ffa5f8f197194f2f98694a8e71
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -57,6 +57,8 @@ pub struct BindingsDocument {
     pub format: String,
     /// `protocol` — `String`.
     pub protocol: String,
+    /// `program_root` — `Optional<loom.bindings.ProgramRoot>`.
+    pub program_root: Option<ProgramRoot>,
     /// `artifacts` — `List<loom.bindings.ArtifactPath>`.
     pub artifacts: Vec<ArtifactPath>,
     /// `independence` — `List<loom.bindings.ProducerIndependence>`.
@@ -121,6 +123,10 @@ pub enum BindingsRefusalReason {
     PathNotInWorkspace,
     /// `UndeclaredDimension`.
     UndeclaredDimension,
+    /// `ExitClassConflict`.
+    ExitClassConflict,
+    /// `ProgramNotBesideBindings`.
+    ProgramNotBesideBindings,
 }
 
 /// BoundAction — `loom.bindings.BoundAction`.
@@ -146,6 +152,8 @@ pub struct BoundAction {
     pub retry_when: Vec<RetryCondition>,
     /// `handoff` — `Optional<String>`.
     pub handoff: Option<String>,
+    /// `exits` — `Optional<loom.bindings.ExitClasses>`.
+    pub exits: Option<ExitClasses>,
 }
 
 /// BoundStep — `loom.bindings.BoundStep`.
@@ -161,6 +169,43 @@ pub struct BoundStep {
     pub placements: Vec<ArtifactPlacement>,
     /// `moves` — `List<loom.bindings.RevisionMove>`.
     pub moves: Vec<RevisionMove>,
+}
+
+/// CopiedRecord — `loom.bindings.CopiedRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopiedRecord {
+    /// `case` — `String`.
+    pub case: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `source_case` — `String`.
+    pub source_case: String,
+    /// `source_evidence` — `String`.
+    pub source_evidence: String,
+    /// `dropped_upstream` — `List<String>`.
+    pub dropped_upstream: Vec<String>,
+}
+
+/// CopyRefusal — `loom.bindings.CopyRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyRefusal {
+    /// `reason` — `loom.bindings.CopyRefusalReason`.
+    pub reason: CopyRefusalReason,
+    /// `action` — `String`.
+    pub action: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// CopyRefusalReason — `loom.bindings.CopyRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyRefusalReason {
+    /// `NoSourceRecord`.
+    NoSourceRecord,
+    /// `NoSourceCase`.
+    NoSourceCase,
+    /// `SubjectUndeclared`.
+    SubjectUndeclared,
 }
 
 /// DiscardReason — `loom.bindings.DiscardReason`: one of a closed set of names.
@@ -233,6 +278,24 @@ pub struct ExecutorSpec {
     pub from: Option<String>,
 }
 
+/// ExitClass — `loom.bindings.ExitClass`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitClass {
+    /// `Error`.
+    Error,
+    /// `NotCalled`.
+    NotCalled,
+}
+
+/// ExitClasses — `loom.bindings.ExitClasses`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExitClasses {
+    /// `error` — `List<Integer>`.
+    pub error: Vec<i64>,
+    /// `not_called` — `List<Integer>`.
+    pub not_called: Vec<i64>,
+}
+
 /// ProducerIndependence — `loom.bindings.ProducerIndependence`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProducerIndependence {
@@ -251,6 +314,12 @@ pub struct ProgramEnvironment {
     pub loom_case: String,
     /// `loom_retry_feedback` — `Optional<String>`.
     pub loom_retry_feedback: Option<String>,
+    /// `loom_timeout_seconds` — `Integer`.
+    pub loom_timeout_seconds: i64,
+    /// `loom_case_name` — `Optional<String>`.
+    pub loom_case_name: Option<String>,
+    /// `loom_parent_case_name` — `Optional<String>`.
+    pub loom_parent_case_name: Option<String>,
 }
 
 /// ProgramRefusal — `loom.bindings.ProgramRefusal`.
@@ -279,6 +348,17 @@ pub enum ProgramRefusalReason {
     CaseOfAnotherProtocol,
     /// `ArtifactUnreadable`.
     ArtifactUnreadable,
+    /// `ProgramError`.
+    ProgramError,
+}
+
+/// ProgramRoot — `loom.bindings.ProgramRoot`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgramRoot {
+    /// `Workspace`.
+    Workspace,
+    /// `Bindings`.
+    Bindings,
 }
 
 /// ProgramRun — `loom.bindings.ProgramRun`.
@@ -298,6 +378,8 @@ pub struct ProgramRun {
     pub runner_refusal: Option<String>,
     /// `retry_of` — `List<String>`.
     pub retry_of: Vec<String>,
+    /// `class` — `Optional<loom.bindings.ExitClass>`.
+    pub class: Option<ExitClass>,
 }
 
 /// RecordedEvidence — `loom.bindings.RecordedEvidence`.

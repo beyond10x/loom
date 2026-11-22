@@ -541,7 +541,11 @@ fn model_chosen_arguments_reach_standard_input_alone() {
         .ok()
         .map(|path| ("PATH".to_owned(), path))
         .into_iter()
-        .chain([("LOOM_CASE".to_owned(), CASE.to_owned())])
+        .chain([
+            ("LOOM_CASE".to_owned(), CASE.to_owned()),
+            // story:bound-program-contract: the run's timeout, 60 s when the binding names none.
+            ("LOOM_TIMEOUT_SECONDS".to_owned(), "60".to_owned()),
+        ])
         .collect();
     assert_eq!(environment.set, expected);
     let stdin: serde_json::Value = serde_json::from_slice(child.stdin().unwrap()).unwrap();
@@ -578,7 +582,7 @@ fn arguments_from_output_reaches_standard_input_alone_and_over_the_bound_starts_
     assert!(children[1].args().is_empty());
     assert_eq!(
         children[1].environment().set.keys().collect::<Vec<_>>(),
-        ["LOOM_CASE", "PATH"]
+        ["LOOM_CASE", "LOOM_TIMEOUT_SECONDS", "PATH"]
     );
     let stdin: serde_json::Value = serde_json::from_slice(children[1].stdin().unwrap()).unwrap();
     assert_eq!(
