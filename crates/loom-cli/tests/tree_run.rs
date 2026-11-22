@@ -2534,7 +2534,8 @@ fn refused_with_an_empty_store(tree: &Tree, output: &Output, reason: &str, named
     assert!(empty, "the store holds {:?}", tree.snapshot());
 }
 
-/// The SHA-256 `tree status` names for the kept protocol `registration`.
+/// The SHA-256 `tree status` names for the protocol `registration`, which a case of the tree uses:
+/// the status lists only those (`kept_entry` reads what `tree open` kept).
 fn kept_sha256(tree: &Tree, registration: &str) -> String {
     let status = json(&tree.tree("status"));
     status["protocols"]
@@ -2851,7 +2852,7 @@ fn a_changed_stored_protocol_is_refused() {
     let blob = tree
         .store()
         .join("blobs")
-        .join(kept_sha256(&tree, "tour-leg@1"));
+        .join(kept_entry(&tree, "tour-leg@1")["sha256"].as_str().unwrap());
     let mut bytes = fs::read(&blob).unwrap();
     bytes[0] ^= 1;
     fs::write(&blob, &bytes).unwrap();
