@@ -16,10 +16,13 @@ use std::process::{Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const MODEL_PORT: u16 = 8401;
 
 fn loom() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    loom_bin::loom()
 }
 
 fn boundary(arguments: &[&str]) -> Output {

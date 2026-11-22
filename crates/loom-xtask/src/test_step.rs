@@ -14,7 +14,8 @@
 //! fills the schema cache the `crd` tests of `b10x-loom-resource` read ([`fill_schema_cache`]) and
 //! the syntheses the generator tests of `loom-xtask` and `loom-commission-xtask` read
 //! ([`fill_synthesis_stand_in`]), so no test of the step makes one or waits for it. `-p <package>` runs the
-//! same over named packages; in a build-pool job nextest runs `SLOT_TOKENS` tests at once.
+//! same over named packages, the doc tests over those of them with a library ([`with_library`]);
+//! in a build-pool job nextest runs `SLOT_TOKENS` tests at once.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -124,7 +125,22 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     let nextest = cargo(root, &nextest)?;
     let nextest_seconds = started.elapsed().as_secs_f64();
     let doc_started = Instant::now();
-    let doc = cargo(root, &with(&["test", "--doc"], &["--locked"]))?;
+    let doc = if packages.is_empty() {
+        cargo(root, &with(&["test", "--doc"], &["--locked"]))?
+    } else {
+        let libraries = with_library(&metadata(root)?, packages);
+        if libraries.is_empty() {
+            println!("test step: no named package has a library target, so no doc tests");
+            Some(0)
+        } else {
+            let mut doc: Vec<String> = ["test", "--doc"].map(str::to_owned).to_vec();
+            for package in libraries {
+                doc.extend(["-p".to_owned(), package]);
+            }
+            doc.push("--locked".to_owned());
+            cargo(root, &doc)?
+        }
+    };
     let doc_seconds = doc_started.elapsed().as_secs_f64();
     let wall = started.elapsed();
 
@@ -330,6 +346,52 @@ fn cargo(root: &Path, args: &[String]) -> Result<Option<i32>, String> {
     Ok(status.code())
 }
 
+/// The workspace's own packages, as `cargo metadata --no-deps` gives them.
+fn metadata(root: &Path) -> Result<serde_json::Value, String> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--no-deps", "--format-version", "1", "--locked"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("run cargo metadata: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "test step: cargo metadata exited {}: {}",
+            describe(output.status.code()),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    serde_json::from_slice(&output.stdout).map_err(|e| format!("test step: cargo metadata: {e}"))
+}
+
+/// The packages of `packages` with a target `cargo test --doc` tests (a library or a
+/// proc-macro), in the order named: `cargo test --doc` over a package with binaries only fails
+/// with "no library targets found".
+fn with_library(metadata: &serde_json::Value, packages: &[String]) -> Vec<String> {
+    let documented = |name: &str| {
+        metadata["packages"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|package| {
+                package["name"] == name
+                    && package["targets"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|target| {
+                            target["kind"].as_array().into_iter().flatten().any(|kind| {
+                                matches!(kind.as_str(), Some("lib" | "rlib" | "proc-macro"))
+                            })
+                        })
+            })
+    };
+    packages
+        .iter()
+        .filter(|package| documented(package))
+        .cloned()
+        .collect()
+}
+
 /// Every `<testcase>` of a JUnit report: its `classname` (the binary), `name`, `time`, and whether
 /// it holds a `<failure>` or `<error>`.
 pub fn parse_junit(xml: &str) -> Vec<Case> {
@@ -391,6 +453,23 @@ mod tests {
     </testsuite>
 </testsuites>
 "#;
+
+    #[test]
+    fn the_doc_tests_run_over_the_named_packages_with_a_library_only() {
+        let metadata = serde_json::json!({"packages": [
+            {"name": "a-lib", "targets": [{"kind": ["lib"]}, {"kind": ["test"]}]},
+            {"name": "a-tool", "targets": [{"kind": ["bin"]}, {"kind": ["test"]}]},
+            {"name": "a-macro", "targets": [{"kind": ["proc-macro"]}]},
+            {"name": "both", "targets": [{"kind": ["bin"]}, {"kind": ["rlib"]}]},
+        ]});
+        let named = |names: &[&str]| names.iter().map(|&n| n.to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            with_library(&metadata, &named(&["a-tool", "both", "a-lib", "a-macro"])),
+            named(&["both", "a-lib", "a-macro"])
+        );
+        assert!(with_library(&metadata, &named(&["a-tool"])).is_empty());
+        assert!(with_library(&metadata, &named(&["not-a-member"])).is_empty());
+    }
 
     #[test]
     fn the_report_gives_each_test_its_binary_time_and_failure() {

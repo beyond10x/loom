@@ -384,6 +384,7 @@ fn run_case_for(dir: &Path, seconds: i64, runner: Option<Arc<dyn TestRunner>>) -
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: Some(dir.join("metrics.json")),
+            ..RunOptions::default()
         },
     );
     let output = String::from_utf8_lossy(&output).into_owned();

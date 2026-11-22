@@ -358,7 +358,23 @@ default: `A2aServer::with_deadlines` (`Deadlines::HOST`: 10 s head, 30 s body, 1
 drain) and `with_stream_idle` (300 s) in `b10x-loom-a2a`, `ConnectorsRelay::with_bounds`
 (`RelayBounds::HOST`: 5 s connect, 20 s request) in `b10x-loom-connectors`,
 `EngineRunner::with_kill_bounds` (`KillBounds::HOST`: 5 s grace, 5 s settle) in
-`b10x-loom-intake-slice`.
+`b10x-loom-intake-slice`, `RunOptions::with_model_retry` (`run::MODEL_RETRY`: three attempts,
+1 s then 2 s) there too, and `Host::with_lock_wait` (`state::LOCK_WAIT`, 2 s) and
+`Host::with_model_retry` (`run::MODEL_RETRY`) in `b10x-loom-plugin`.
+
+The executor keeps its observations' instants strictly increasing in whole seconds and waits on
+its clock for the next second, so a run's every observation after the first waited up to 1 s:
+the tests of `b10x-loom-cli` and `b10x-loom-intake-slice` were about 97 % asleep (a profile of
+three of them: 0.1 s of CPU in 3.5 to 4.6 s). Test builds turn on the feature `test-clock` of
+`b10x-loom-intake-slice` (a dev-dependency of the crate on itself, of `b10x-loom-cli` and of
+`b10x-loom-sdk`), under which `SystemClock` reads the host clock plus a virtual offset and a wait on it advances the
+offset instead of sleeping (`clock::test_clock`); no other build has the feature. The processes
+one test starts share the offset through the file `B10X_LOOM_TEST_CLOCK` names, which
+`crates/loom-cli/tests/support/loom.rs` sets for every `b10x-loom` a test of that crate starts,
+so a later command never reads an instant earlier than an earlier one. A test that runs a child
+beside another action holds the child until the action is done (`HOLD` and `release` in those
+test files) instead of sleeping a fixed time. With the retry option above, both packages' tests
+went from 269.6 s to 161.3 s of test time on 4 threads (2026-11-22).
 
 `.cargo/config.toml` and the workspace `Cargo.toml` set `[profile.dev] debug = false`, which test
 builds inherit; the config file wins over one in the home directory, the manifest holds where no
@@ -371,7 +387,11 @@ build of their dependencies takes about twice as long, an incremental one no lon
 `b10x-loom-governor` is built at `opt-level = 2` too: its cost tests
 (`…_costs_a_bounded_multiple_of_deciding`) compare a path in its own code with deciding in
 Canon, a dependency, and with only Canon optimized the ratio rose from about 14 to 40 to 70
-against a bound of 40; with both optimized it is about 18.
+against a bound of 40; with both optimized it is about 18. The workspace's own crates build at
+`opt-level = 1` (`[profile.dev]` there): on 4 threads the tests of `b10x-loom-cli`,
+`b10x-loom-intake-slice` and `b10x-loom-runlog` took 349 s of test time and 92 s of wall time at
+`opt-level = 0`, 252 s and 66 s at 1 (2026-11-22, one loaded host, one run each); rebuilding
+those crates at 1 over built dependencies took 184 s.
 
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI

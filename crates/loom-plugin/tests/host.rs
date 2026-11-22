@@ -444,7 +444,7 @@ fn a_held_state_directory_refuses_a_second_host() {
 
     let refused = run_plugin_on(
         &plugin,
-        &fixture.host(&config),
+        &fixture.host(&config).with_lock_wait(REFUSAL_WAIT),
         &state,
         &AtomicBool::new(true),
     );
@@ -462,7 +462,10 @@ fn a_held_state_directory_refuses_a_second_host() {
             .contains(&state.display().to_string())
     );
     assert!(held.record().unwrap().is_empty(), "nothing was written");
-    assert!(StateDir::open(&state, &config).is_err(), "still held");
+    assert!(
+        StateDir::open_waiting(&state, &config, REFUSAL_WAIT).is_err(),
+        "still held"
+    );
     drop(held);
     StateDir::open(&state, &config).expect("released once the first host is gone");
 }
@@ -959,3 +962,7 @@ fn a_connectors_timeout_stops_no_item() {
         "one turn per cycle"
     );
 }
+
+/// How long a refused second host waits for the held lock here: the holder in these cases
+/// keeps it, so the wait only delays the refusal ([`StateDir::open_waiting`]).
+const REFUSAL_WAIT: std::time::Duration = std::time::Duration::from_millis(200);

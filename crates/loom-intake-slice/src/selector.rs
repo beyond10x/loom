@@ -45,6 +45,7 @@ use b10x_loom_executor::model_selector::{self as chooser, select_once};
 use b10x_loom_intake_references::ExtractedReference;
 use intake_model::results::{Capture, StoredResult};
 use llm_core::{BoxFuture, Cancel, Error, Model, StreamSink, TurnOutcome, TurnRequest};
+use llm_routing::RetryPolicy;
 use serde_json::Value;
 
 pub use b10x_loom_executor::model_selector::{
@@ -69,15 +70,33 @@ pub type ModelArguments<'m> = chooser::ModelArguments<'m, Briefing>;
 
 /// Sends `request` to `model` with the slice's caller retries: at most three identical attempts,
 /// on llm's retry classification, none after the turn offered a stream event, the backoff
-/// cancellation-aware. Every request of the slice's selector and generator is sent through it.
+/// cancellation-aware. Every request of the slice's selector and generator is sent through it
+/// ([`send_with_policy`] with [`crate::run::MODEL_RETRY`]).
 pub fn send_with_retries<'a>(
     model: &'a dyn Model,
     request: &'a TurnRequest,
     sink: &'a mut dyn StreamSink,
     cancel: &'a Cancel,
 ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
+    send_with_policy(
+        model,
+        request,
+        sink,
+        cancel,
+        crate::model_retry::MODEL_RETRY,
+    )
+}
+
+/// [`send_with_retries`] with the attempts and backoff of `policy`.
+pub fn send_with_policy<'a>(
+    model: &'a dyn Model,
+    request: &'a TurnRequest,
+    sink: &'a mut dyn StreamSink,
+    cancel: &'a Cancel,
+    policy: RetryPolicy,
+) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
     Box::pin(crate::model_retry::turn_with_retries(
-        model, request, sink, cancel,
+        model, request, sink, cancel, policy,
     ))
 }
 
@@ -146,6 +165,7 @@ struct Brief {
     working: Option<WorkingContext>,
     metrics: ContextMetrics,
     query: bool,
+    retry: RetryPolicy,
 }
 
 impl Briefing {
@@ -176,8 +196,16 @@ impl Briefing {
                 working: (policy == ContextPolicy::Bounded).then(WorkingContext::new),
                 metrics,
                 query: false,
+                retry: crate::model_retry::MODEL_RETRY,
             })),
         }
+    }
+
+    /// Retry its model requests by `policy` instead of [`crate::run::MODEL_RETRY`].
+    #[must_use]
+    pub fn with_retry(self, policy: RetryPolicy) -> Self {
+        self.brief().retry = policy;
+        self
     }
 
     /// Use the read-only system-query prompt profile, with the same context machinery.
@@ -598,7 +626,7 @@ impl chooser::Briefing for Briefing {
         reference_arguments_schema(action)
     }
 
-    /// [`send_with_retries`].
+    /// [`send_with_policy`] with the briefing's retry policy.
     fn send<'a>(
         &'a self,
         model: &'a dyn Model,
@@ -606,7 +634,8 @@ impl chooser::Briefing for Briefing {
         sink: &'a mut dyn StreamSink,
         cancel: &'a Cancel,
     ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
-        send_with_retries(model, request, sink, cancel)
+        let policy = self.brief().retry;
+        send_with_policy(model, request, sink, cancel, policy)
     }
 
     /// One selection request; with bounded context, an exchange in which every history or result

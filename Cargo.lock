@@ -628,6 +628,7 @@ dependencies = [
  "b10x-loom-governor",
  "b10x-loom-intake-references",
  "b10x-loom-intake-router",
+ "b10x-loom-intake-slice",
  "b10x-loom-protocols",
  "b10x-substrate-host",
  "b10x-substrate-wire",

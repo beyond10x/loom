@@ -22,7 +22,6 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_commission_testkit::fake_governor::{Answer, FakeGovernor, GovernorCall};
 
 const CASE: &str = "case-logged";
-const PER_THREAD: u64 = 5_000;
 
 fn uuid(n: u64) -> Uuid {
     Uuid(format!("00000000-0000-4000-8000-{n:012x}"))
@@ -90,8 +89,10 @@ fn the_ports_take_no_answer_and_log_no_call() {
     assert_eq!(governor.evidence().len(), 1);
 }
 
-#[test]
-fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
+/// A submitter, an observer and a caller, each making `per_thread` calls on one fake Governor while
+/// this thread reads its logs: nothing is lost, nothing reordered, no log shrinks between reads.
+/// Each read clones the logs, so the count sets the time.
+fn concurrent_ports_and_calls(per_thread: u64) {
     let governor = Arc::new(FakeGovernor::new());
     governor.script(case(), [Answer::at(7)]);
     let start = Arc::new(Barrier::new(4));
@@ -100,7 +101,7 @@ fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
         let (governor, start) = (Arc::clone(&governor), Arc::clone(&start));
         thread::spawn(move || {
             start.wait();
-            for n in 0..PER_THREAD {
+            for n in 0..per_thread {
                 submit_evidence(&*governor, "service:ci", record(n))
                     .unwrap_or_else(|error| panic!("submit {n}: {error:?}"));
             }
@@ -110,7 +111,7 @@ fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
         let (governor, start) = (Arc::clone(&governor), Arc::clone(&start));
         thread::spawn(move || {
             start.wait();
-            for n in 0..PER_THREAD {
+            for n in 0..per_thread {
                 governor
                     .observe(Observation::new(observation(n)))
                     .unwrap_or_else(|error| panic!("observe {n}: {error:?}"));
@@ -121,7 +122,7 @@ fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
         let (governor, start) = (Arc::clone(&governor), Arc::clone(&start));
         thread::spawn(move || {
             start.wait();
-            for _ in 0..PER_THREAD {
+            for _ in 0..per_thread {
                 assert_eq!(governor.current_revision(&case()), Ok(7));
             }
         })
@@ -154,7 +155,7 @@ fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
             .iter()
             .map(|e| e.evidence_id.clone())
             .collect::<Vec<_>>(),
-        (0..PER_THREAD)
+        (0..per_thread)
             .map(|n| record(n).evidence_id)
             .collect::<Vec<_>>(),
         "every submitted record is recorded once, in submission order"
@@ -162,12 +163,12 @@ fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
     assert!(evidence.iter().all(|e| e.producer == "service:ci"));
     assert_eq!(
         observations,
-        (0..PER_THREAD).map(observation).collect::<Vec<_>>(),
+        (0..per_thread).map(observation).collect::<Vec<_>>(),
         "every observation is recorded once, in delivery order"
     );
     assert_eq!(
         calls,
-        vec![GovernorCall::CurrentRevision(case()); PER_THREAD as usize],
+        vec![GovernorCall::CurrentRevision(case()); usize::try_from(per_thread).expect("small")],
         "the call log holds exactly the Governor calls"
     );
     for window in snapshots.windows(2) {
@@ -177,4 +178,17 @@ fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
             "a record shrank between reads: {window:?}"
         );
     }
+}
+
+/// [`concurrent_ports_and_calls`] with 1 000 calls a thread.
+#[test]
+fn concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
+    concurrent_ports_and_calls(1_000);
+}
+
+/// [`concurrent_ports_and_calls`] with 5 000 calls a thread, the count the case held before, in
+/// the slow lane (`task slow`): about 9 s on a loaded host.
+#[test]
+fn slow_concurrent_ports_and_calls_lose_nothing_and_reorder_nothing() {
+    concurrent_ports_and_calls(5_000);
 }

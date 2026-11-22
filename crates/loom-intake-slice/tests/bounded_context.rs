@@ -178,6 +178,7 @@ fn long_workflow(policy: ContextPolicy) -> WorkflowOutcome {
         &RunOptions {
             context_policy: policy,
             context_report: Some(report_path.clone()),
+            ..RunOptions::default()
         },
     )
     .unwrap();
@@ -404,6 +405,7 @@ fn history_retrieval_cannot_bypass_an_approval_requirement_changed_after_generat
         &RunOptions {
             context_policy: ContextPolicy::Bounded,
             context_report: None,
+            ..RunOptions::default()
         },
     )
     .unwrap();
@@ -446,6 +448,7 @@ fn a_ninth_lookup_stops_selection_or_refuses_arguments_without_another_lookup() 
             &RunOptions {
                 context_policy: ContextPolicy::Bounded,
                 context_report: None,
+                ..RunOptions::default()
             },
         );
         if stage == "action_arguments" {
@@ -492,6 +495,7 @@ fn final_step_capacity_failure_preserves_completed_effects_and_writes_the_report
         &RunOptions {
             context_policy: ContextPolicy::Bounded,
             context_report: Some(report_path.clone()),
+            ..RunOptions::default()
         },
     );
     let error = result.unwrap_err().to_string();

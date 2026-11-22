@@ -182,13 +182,17 @@ fn a_launch_needing_another_driver_is_refused_while_a_child_runs() {
             let started = workspace.join("target/started");
             let first = ChildCommand::new(
                 "sh",
-                ["-c", "touch target/started; sleep 3; printf first-done"],
+                [
+                    "-c",
+                    format!("touch target/started; {HOLD}; printf first-done").as_str(),
+                ],
                 workspace,
             );
             let first_runner = runner.clone();
             let handle = std::thread::spawn(move || first_runner.run_child(&first));
             wait_for(&started, &handle);
             let other = runner.run_child(&ChildCommand::new("true", [] as [&str; 0], &elsewhere));
+            release(workspace);
             let error = other.expect_err("no driver is opened over a running child");
             assert_eq!(
                 error.reason,
@@ -217,7 +221,10 @@ fn a_test_runs_beside_a_running_child_through_one_runner() {
             let started = workspace.join("target/started");
             let child = ChildCommand::new(
                 "sh",
-                ["-c", "touch target/started; sleep 3; printf child-done"],
+                [
+                    "-c",
+                    format!("touch target/started; {HOLD}; printf child-done").as_str(),
+                ],
                 workspace,
             );
             let child_runner = runner.clone();
@@ -229,6 +236,7 @@ fn a_test_runs_beside_a_running_child_through_one_runner() {
                     workspace,
                 )
                 .expect("the test runs beside the child");
+            release(workspace);
             assert_eq!(
                 (test.exit_code, test.output.as_str()),
                 (Some(0), "test-done")
@@ -1425,7 +1433,10 @@ fn a_dropped_live_child_is_killed() {
         let child = runner
             .spawn_child(&ChildCommand::new(
                 "sh",
-                ["-c", "touch target/started; sleep 2; touch target/survived"],
+                [
+                    "-c",
+                    format!("touch target/started; {HOLD}; touch target/survived").as_str(),
+                ],
                 workspace,
             ))
             .expect("the shell starts live");
@@ -1435,7 +1446,9 @@ fn a_dropped_live_child_is_killed() {
             std::thread::sleep(Duration::from_millis(50));
         }
         drop(child);
-        std::thread::sleep(Duration::from_secs(3));
+        // A child that outlived the drop leaves its hold within 50 ms of the release.
+        release(workspace);
+        std::thread::sleep(Duration::from_secs(1));
         assert!(
             !workspace.join("target/survived").exists(),
             "the dropped child was killed"
@@ -2130,6 +2143,16 @@ fn sandbox_path_maps_the_workspace_and_each_root() {
 }
 
 /// Wait until the child running on `handle` created `marker`.
+/// A child's shell line that holds until the host creates `target/release` in its workspace
+/// ([`release`]), at most 30 s: the child runs exactly as long as the host's check needs.
+const HOLD: &str =
+    "i=0; while [ ! -e target/release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done";
+
+/// Ends the [`HOLD`] of the child working in `workspace`.
+fn release(workspace: &std::path::Path) {
+    std::fs::write(workspace.join("target/release"), "").expect("the release marker");
+}
+
 fn wait_for<T: std::fmt::Debug>(marker: &Path, handle: &std::thread::JoinHandle<T>) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     while !marker.exists() {
