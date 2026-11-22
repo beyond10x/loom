@@ -20,6 +20,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
 - `b10x_loom_bindings::content_revision`, `placements` and `PlacedRevisions`: a placed artifact's revision is its content digest (story:bound-artifact-revisions)
 - `CanonGovernor::record_step` writes a step's revision moves and records in one store write; `FileCaseStore::update_until` (story:bound-artifact-revisions)
+- `ProtocolCatalog` and `CanonGovernor` take a protocol with a scoped requirement, `supplied_by`, `author`, `revises`, `decided_by` or a `children` form's `subject` and `revision`; one with `imports` is refused `MissingImport` (story:canon-0-10-0-pin)
 
 ### Changed
 
@@ -39,6 +40,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** after a `program` step each placed artifact moves to its content digest, and its records name that revision (story:bound-artifact-revisions)
 - A `program` step of an action that does not write whose program changed a placed artifact records nothing, `Discarded` (story:bound-artifact-revisions)
 - `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
+- **Breaking:** Canon `0.9.0` -> `0.10.0`: `ProtocolEntry::model` is Canon 0.10.0's `Protocol`; every decision document names `0.10.0` and gains `missing_evidence` and `pending_decisions` where they apply; frontier ids change (story:canon-0-10-0-pin)
 
 ### Removed
 

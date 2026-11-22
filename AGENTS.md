@@ -577,12 +577,21 @@ refuses such a case of a built-in protocol naming the case and the input
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
 Canon is named by the `b10x-canon` line of each of `crates/loom-governor/Cargo.toml`,
-`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.9.0"`), pinned
+`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.10.0"`), pinned
 by `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
 with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
 adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
-register and are decided like any other construct, and Loom opens no child case itself.
+register and are decided like any other construct, and Loom opens no child case itself. Canon
+0.10.0 adds a `scope` on a capability requirement, `supplied_by` on an evidence kind, `author`,
+`revises` and `decided_by`, and a `children` form's `subject` and `revision: current`; such a
+protocol registers and Canon decides it, but Loom does not read all of it: the frontier carries the
+capability id alone, the scope only inside Canon's reason, and `action_facts` reads a `children`
+form's `case_outcome` records about any artifact at any revision, not its `subject` and `revision`.
+A protocol with `imports` is refused at registration (`MissingImport`): Loom hands Canon no imported
+document. Every decision document is Canon 0.10.0's (`missing_evidence`, `pending_decisions`), and a
+frontier id hashes it, so it changes with each Canon move; no store holds one
+(`crates/loom-governor/tests/canon_0_10_0.rs`).
 
 ## Connectors
 
