@@ -4020,14 +4020,16 @@ mod tests {
             "exec.cgroup-kill": true,
             "exec.output-limit-bytes": 1_048_576,
             "workspace.guarded-io": true,
-            "exec.read-only-roots": {"max_roots": 4},
+            "exec.read-only-roots": {"max_roots": 8},
             "exec.read-only-files": {"max_files": 16},
         });
         let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
         // story:substrate-0-21-pin: since Substrate 0.15.0 the `linux` adapter also proves
         // `stdin_pipe` and `output_live` whenever its floor (argv-only exec and namespaces) holds,
         // as it does here, and `FACT_ORDER` places them last; the three facts of 0.14.0 keep their
-        // place.
+        // place. story:substrate-0-24-0-pin: Substrate 0.22.0 publishes 8 roots, and the facts of
+        // 0.23.0 and 0.24.0 (`exec_subpaths`, `exec_denied_paths`) are proved only with an exec
+        // gate, which Loom does not name, so the list is the same on 0.24.0's `FACT_ORDER`.
         assert_eq!(
             facts,
             [

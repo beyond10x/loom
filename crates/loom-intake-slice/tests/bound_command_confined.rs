@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings};
+use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings, bound_program_child};
 use b10x_loom_intake_slice::clock::SystemClock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, ChildCommand, ChildOutput, ConfinementAdapter, ConfinementError,
@@ -462,6 +462,125 @@ fn under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace() {
             );
         },
     );
+}
+
+/// The program that moves a file's blocks (`EXT4_IOC_MOVE_EXT`).
+const E4DEFRAG: &str = "/usr/bin/e4defrag";
+
+/// story:substrate-0-24-0-pin, the ioctl floor of Substrate 0.24.0 (its ADR 0050): a confined
+/// bound program cannot move the blocks of a file in its ext4 workspace. The program writes a
+/// 1 MiB file in 16 pieces, interleaved with a second file and each synced, so the file holds
+/// several extents and `e4defrag` calls `EXT4_IOC_MOVE_EXT` (a file of one extent is left alone).
+/// The seccomp program answers it `EACCES`: `e4defrag` names `Permission denied`, and the file's
+/// SHA-256 is what it was.
+///
+/// The child is the one `bindings::bound_program_child` builds for the program, with one
+/// read-only file beside it: `e4defrag` reads the mount table at `/etc/mtab`, which Substrate's
+/// view does not hold, so the case mounts one naming `/workspace` as ext4. The case skips naming
+/// what is missing without `e4defrag`, an ext4 workspace or delegation, and fails instead where
+/// `LOOM_REQUIRE_DELEGATION` is set.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn under_linux_a_bound_program_cannot_move_file_blocks() {
+    support::delegated(
+        "under_linux_a_bound_program_cannot_move_file_blocks",
+        &[],
+        |runner, workspace| {
+            if let Some(missing) = ioctl_prerequisite(workspace) {
+                assert!(
+                    std::env::var_os("LOOM_REQUIRE_DELEGATION").is_none(),
+                    "LOOM_REQUIRE_DELEGATION is set and a prerequisite is missing: {missing}"
+                );
+                return support::skip(&missing);
+            }
+            let case = Case::new("linux_move_ext");
+            let mtab = case.root.join("mtab");
+            std::fs::write(&mtab, "/dev/root /workspace ext4 rw 0 0\n").unwrap();
+            let script = case.script(
+                "move-blocks",
+                &format!(
+                    "f=/workspace/target/blob\n\
+                     s=/workspace/target/spacer\n\
+                     i=0\n\
+                     while [ \"$i\" -lt 16 ]; do\n\
+                     /usr/bin/dd if=/dev/urandom of=\"$f\" bs=65536 count=1 seek=\"$i\" conv=notrunc,fsync status=none || exit 3\n\
+                     /usr/bin/dd if=/dev/urandom of=\"$s\" bs=65536 count=1 seek=\"$i\" conv=notrunc,fsync status=none || exit 3\n\
+                     i=$((i + 1))\n\
+                     done\n\
+                     /usr/bin/rm -f \"$s\"\n\
+                     before=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
+                     size=$(/usr/bin/stat -c %s \"$f\")\n\
+                     {E4DEFRAG} \"$f\" >/workspace/target/e4defrag.out\n\
+                     status=$?\n\
+                     after=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
+                     printf 'status=%s\\nsize=%s\\nbefore=%s\\nafter=%s\\n' \"$status\" \"$size\" \"$before\" \"$after\"\n\
+                     /usr/bin/cat /workspace/target/e4defrag.out\n"
+                ),
+            );
+            let child = bound_program_child(
+                &[script.display().to_string()],
+                "{}",
+                Duration::from_secs(30),
+                workspace,
+                None,
+            )
+            .expect("the bound program's child")
+            .with_read_only_file(&mtab, "/etc/mtab");
+            assert_eq!(child.sandbox_path(&script), Some(script.clone()));
+            let result = runner.run_child(&child).expect("the program runs confined");
+            let stdout = String::from_utf8_lossy(&result.child_output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&result.child_output.stderr).into_owned();
+            let kept = format!(
+                "exit {:?}\n{stdout}e4defrag's stderr: {stderr}",
+                result.exit_code
+            );
+            eprintln!("{kept}");
+            assert_eq!(result.exit_code, Some(0), "{kept}");
+            assert_eq!(result.applied.backend, Backend::Substrate, "{kept}");
+            let reported = |name: &str| -> String {
+                stdout
+                    .lines()
+                    .find_map(|line| line.strip_prefix(&format!("{name}=")))
+                    .unwrap_or_else(|| panic!("no {name}: {kept}"))
+                    .to_owned()
+            };
+            assert_eq!(reported("size"), "1048576", "{kept}");
+            assert!(
+                stderr.contains("Permission denied"),
+                "EXT4_IOC_MOVE_EXT is answered EACCES: {kept}"
+            );
+            assert_eq!(reported("before").len(), 64, "{kept}");
+            assert_eq!(
+                reported("before"),
+                reported("after"),
+                "the file's content is unchanged: {kept}"
+            );
+        },
+    );
+}
+
+/// What this host lacks for the ioctl case, if anything: `e4defrag`, or an ext4 workspace.
+fn ioctl_prerequisite(workspace: &Path) -> Option<String> {
+    if !Path::new(E4DEFRAG).is_file() {
+        return Some(format!("executable {E4DEFRAG}"));
+    }
+    let kind = std::process::Command::new("/usr/bin/stat")
+        .args(["-f", "-c", "%T"])
+        .arg(workspace)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
+    match kind.as_deref() {
+        Some("ext2/ext3") => None,
+        other => Some(format!(
+            "an ext4 workspace ({} is on {other:?})",
+            workspace.display()
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

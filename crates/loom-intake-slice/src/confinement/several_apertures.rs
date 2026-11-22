@@ -50,9 +50,12 @@ fn assert_refused(apertures: &[EgressAperture], named: &str) {
     assert!(error.detail.contains(named), "{named}: {error}");
 }
 
+/// story:substrate-0-24-0-pin: Substrate 0.22.0 raised the bound from 4 to 8 apertures, and Loom's
+/// re-export follows it.
 #[test]
-fn more_than_four_apertures_are_refused_naming_the_count() {
-    let five: Vec<_> = (1..=5)
+fn more_than_eight_apertures_are_refused_naming_the_count() {
+    assert_eq!(MAX_EGRESS_APERTURES, 8);
+    let nine: Vec<_> = (1..=9)
         .map(|n| {
             aperture(
                 &format!("api{n}"),
@@ -61,10 +64,10 @@ fn more_than_four_apertures_are_refused_naming_the_count() {
             )
         })
         .collect();
-    assert_refused(&five, "5 egress apertures");
-    assert_refused(&five, &format!("at most {MAX_EGRESS_APERTURES}"));
-    for n in 1..=5 {
-        assert_refused(&five, &format!("`api{n}` (api{n}.example.test)"));
+    assert_refused(&nine, "9 egress apertures");
+    assert_refused(&nine, "at most 8");
+    for n in 1..=9 {
+        assert_refused(&nine, &format!("`api{n}` (api{n}.example.test)"));
     }
 }
 
