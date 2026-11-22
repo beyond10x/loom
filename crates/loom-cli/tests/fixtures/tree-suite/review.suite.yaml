@@ -24,10 +24,11 @@ cycles:
         - check: contains
           name: reasons-in-the-blob
           select:
-            - {log: {case: ".", event: ActionFinished}}
+            - {doc: {in: store, path: observations.json}}
+            - {path: "[source=loom/person].payload"}
             - {where: {action: draft.review}}
             - {pick: first}
-            - {follow: blob}
+            - {follow: {blob: blob_sha256}}
           is: "one\ntwo"
 
   - name: entry-result

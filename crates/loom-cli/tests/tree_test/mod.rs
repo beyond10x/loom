@@ -978,9 +978,9 @@ fn review_protocols(dir: &Path) -> PathBuf {
     protocols
 }
 
-/// `tree test --only <only>` of the fixture suite `suite` in a fresh directory, over the review
-/// protocols for `review.suite.yaml` and the fixture's own otherwise: the directory, the output
-/// and the `--report`.
+/// `tree test --only <only> --workers 2` of the fixture suite `suite` in a fresh directory, over
+/// the review protocols for `review.suite.yaml` and the fixture's own otherwise: the directory,
+/// the output and the `--report`. Two selected cycles run at once, so the test keeps its 5 s.
 fn suite_cycles(label: &str, suite: &str, only: &str) -> (PathBuf, String, Value) {
     let dir = fresh_scratch(label);
     fs::create_dir_all(&dir).unwrap();
@@ -994,7 +994,7 @@ fn suite_cycles(label: &str, suite: &str, only: &str) -> (PathBuf, String, Value
         "scratch",
         &Path::new(FIXTURE).join(suite),
         &protocols,
-        &["--only", only],
+        &["--only", only, "--workers", "2"],
     );
     let said = format!("{}{}", text(&tested.stdout), text(&tested.stderr));
     let report_file = dir.join("scratch.json");
@@ -1021,7 +1021,8 @@ fn as_expected(report: &Value, name: &str, said: &str) {
 }
 
 /// Test 1: a step's named result and reasons: `[rejected, approved]` in order, and the first
-/// review's `action finished` line names the blob of the reasons, one per line.
+/// review's person observation names the blob of the reasons, one per line. (A person's `action
+/// finished` line names no blob: `PersonEffects` puts the digest in its observation alone.)
 #[test]
 fn the_approve_step_records_a_named_result() {
     let started = Instant::now();

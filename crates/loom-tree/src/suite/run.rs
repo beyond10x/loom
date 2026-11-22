@@ -32,9 +32,9 @@ use super::check::{Captured, capture_after, evaluate_checks, holds};
 use super::decode::{SuiteRefused, read_suite};
 use super::select::{CycleView, select_values};
 use crate::{
-    ApproveRequest, CloseRequest, KeptProtocol, OpenRequest, Refused, RunSettings, TreeTime,
-    open_tree, read_manifest, read_protocols_directory, run_tree, status_json, tree_status,
-    verify_json, verify_tree,
+    ApproveRequest, CloseRequest, KeptProtocol, OpenRequest, Reasons, Refused, RunSettings,
+    TreeTime, open_tree, read_manifest, read_protocols_directory, run_tree, status_json,
+    tree_status, verify_json, verify_tree,
 };
 use loom::primitives::Decimal;
 use loom::tree::{SelectItem, WaitingCycle};
@@ -659,6 +659,22 @@ impl StepEnd {
     }
 }
 
+/// The decision an `approve` step or entry names: `Deny` for `deny: true`, else `Allow`.
+fn decision_of(deny: Option<bool>) -> ApprovalDecision {
+    if deny == Some(true) {
+        ApprovalDecision::Deny
+    } else {
+        ApprovalDecision::Allow
+    }
+}
+
+/// The `reasons` of an `approve` step or entry as the one text `tree approve --reasons` takes:
+/// the entries joined by line feeds, so the 60-line bound counts the entries and the lines inside
+/// them. `tree approve` bounds and refuses it as it stands.
+fn joined_reasons(reasons: Option<&[String]>) -> Option<String> {
+    reasons.map(|reasons| reasons.join("\n"))
+}
+
 /// One cycle as it runs.
 struct Cycle<'a> {
     cycle: &'a SuiteCycle,
@@ -1110,15 +1126,16 @@ impl SuiteRun<'_> {
             StepKind::Run => self.run(running, step, label, time)?,
             StepKind::Approve => {
                 let case = step.case.clone().unwrap_or_else(|| self.root(running));
+                let reasons = joined_reasons(step.reasons.as_deref());
                 match crate::approve(&ApproveRequest {
                     store: &running.store,
                     case: &case,
                     capability: step.capability.as_deref(),
                     principal: self.principal(running, step.principal.as_ref()),
-                    decision: ApprovalDecision::Allow,
+                    decision: decision_of(step.deny),
                     action: step.action.as_deref(),
-                    result: None,
-                    reasons: None,
+                    result: step.result.as_deref(),
+                    reasons: reasons.as_deref().map(Reasons::Text),
                     time: time.clone(),
                     catalog: self.catalog,
                     runner: Some(Arc::clone(&self.settings.runner)),
@@ -1293,15 +1310,16 @@ impl SuiteRun<'_> {
                         DecisionKind::ApproveAction => decision.action.as_deref(),
                         _ => None,
                     };
+                    let reasons = joined_reasons(entry.reasons.as_deref());
                     crate::approve(&ApproveRequest {
                         store: &running.store,
                         case: &decision.case,
                         capability: decision.capability.as_deref(),
                         principal,
-                        decision: ApprovalDecision::Allow,
+                        decision: decision_of(entry.deny),
                         action,
-                        result: None,
-                        reasons: None,
+                        result: entry.result.as_deref(),
+                        reasons: reasons.as_deref().map(Reasons::Text),
                         time: time.clone(),
                         catalog: self.catalog,
                         runner: Some(Arc::clone(&self.settings.runner)),
