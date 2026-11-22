@@ -273,6 +273,10 @@ pub(crate) fn load(
     // An agent binding is named before any other defect of the file.
     agent_refusal(file, &document)?;
     check(&document, registration, protocol).map_err(|refusal| refused(refusal.to_string()))?;
+    // With `program_root: bindings` a program path is the file beside the bindings file.
+    let directory = file.parent().unwrap_or(file);
+    let document = b10x_loom_bindings::resolve_programs(&document, directory)
+        .map_err(|refusal| refused(refusal.to_string()))?;
     Ok(LoadedBindings {
         file: file.to_owned(),
         document,
