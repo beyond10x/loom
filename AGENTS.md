@@ -1369,8 +1369,9 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `bound_case_child` (`src/child.rs`, `story:bound-program-case-id`) builds the child: it calls
   `bound_program_child` (the one definition the intake slice's `CommandRunner` also uses) and
   replaces the environment with the one `loom.bindings.ProgramEnvironment` describes, `PATH` at
-  the host's value and `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
-  and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
+  the host's value, `LOOM_CASE` (`CASE_VARIABLE`) = the id of the case the port was built for,
+  `LOOM_TIMEOUT_SECONDS`, and `LOOM_CASE_NAME` and `LOOM_PARENT_CASE_NAME` where the governor
+  stored them, and nothing else; a case id over `MAX_CASE_VARIABLE_BYTES` (4096) refuses the step before
   anything starts. It is the only caller of `bound_program_child` in `crates/loom-bindings/src`
   (`every_child_of_the_crate_is_built_by_bound_case_child`), so a port of the crate that starts a
   program gives the case id; the intake slice's commands keep `PATH` alone. Held by
@@ -1417,9 +1418,9 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   from the first cited `PROGRAM_SOURCE` observation of that case (the blob only when it names 64
   lowercase hex digits), none of them otherwise. After the run count and the placements and before
   the arguments, a step with records keeps the `loom.retry-feedback/1` document through
-  `keep_blob`; `retry::given` rebuilds the bound child's environment through `child::environment`
-  from `ProgramEnvironment` (`PATH`, `LOOM_RETRY_FEEDBACK` = `RETRY_FEEDBACK_VARIABLE` at its
-  canonical path, `LOOM_CASE` last), mounted `at_host_path` unless the runner is `local`; with none
+  `keep_blob`; `retry::given` adds `LOOM_RETRY_FEEDBACK` = `RETRY_FEEDBACK_VARIABLE` at its
+  canonical path to the environment `bound_case_child` built (every other variable kept as that
+  function set it, `story:bound-program-contract`), mounted `at_host_path` unless the runner is `local`; with none
   the variable is absent and nothing is written. A log is the last 60 lines, at most 65536 bytes of
   text, of a blob that is a regular file hashing to its name, one per distinct blob. The run's
   `ProgramRun.retry_of` names the records. Held by `crates/loom-bindings/tests/bound_retry.rs`.
@@ -1455,6 +1456,23 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   dropped ones named in `CopiedRecord`). Only this port writes `COPY_SOURCE`, and no argument,
   report or program output selects the source. It starts no process. Held by
   `crates/loom-bindings/tests/bound_copy.rs`.
+- The program contract (`story:bound-program-contract`, `resolve.rs`, `child.rs`, `program.rs`):
+  `program_root` and `exits` come from the bindings document alone. With `program_root: bindings`,
+  `resolve_programs(document, directory)` replaces every relative `argv[0]` and
+  `arguments_from[0]` holding a `/` by the absolute real path of its file under the canonical
+  `directory`, refusing `ProgramNotBesideBindings` a `..` segment, a path naming no regular file
+  and a real path outside the directory (a link out of it included); a port given such a document
+  unresolved refuses the step before anything starts (`ProgramEffects::unresolved`).
+  `bound_case_child` sets `LOOM_TIMEOUT_SECONDS` (`TIMEOUT_VARIABLE`, the whole seconds of the
+  run's timeout), `LOOM_CASE_NAME` (`CASE_NAME_VARIABLE`) and `LOOM_PARENT_CASE_NAME`
+  (`PARENT_CASE_NAME_VARIABLE`) beside `LOOM_CASE`, after the child is built, from `CaseNames`,
+  which the port reads from the governor's stored `parent` links alone, refusing a name that is
+  not one child name of at most 4096 bytes. An exit in `exits.error` records nothing and refuses
+  the step `ProgramError` with `ends_run`; one in `exits.not_called` records nothing and is
+  performed; `ProgramRun.class` names either, `runs` skips both, and a timeout is in neither. A
+  code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
+  `check`. Each step starts the bound program once; repeated not-called runs are bounded by the
+  driving loop's step budget and idle bound. Held by `crates/loom-bindings/tests/program_contract.rs`.
 - `b10x-loom run --action-bindings` and `intake.bindings` are not changed; accepting this format
   there is another story's.
 

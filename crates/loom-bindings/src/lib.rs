@@ -6,7 +6,9 @@
 //! `argv` that is empty or not a list of strings, a result table that is not one. [`check`] holds
 //! the decoded document against the compiled protocol it names, as it is loaded. Both refuse the
 //! first defect found, naming the action and the member. [`unbound`] lists the actions the
-//! document binds nothing to; that is not an error.
+//! document binds nothing to; that is not an error. [`resolve_programs`] turns the program paths
+//! of a document with `program_root: bindings` into the absolute real paths of the files beside
+//! its bindings file.
 //!
 //! [`ProgramEffects`] is the effect port that performs an action bound to a `program` executor,
 //! for any registered protocol: it starts each program through the host's runner alone, as
@@ -35,16 +37,21 @@ mod decode;
 mod load;
 mod open;
 mod program;
+mod resolve;
 mod retry;
 mod revision;
 mod tree;
 
-pub use child::{CASE_VARIABLE, MAX_CASE_VARIABLE_BYTES, bound_case_child};
+pub use child::{
+    CASE_NAME_VARIABLE, CASE_VARIABLE, CaseNames, MAX_CASE_VARIABLE_BYTES,
+    PARENT_CASE_NAME_VARIABLE, TIMEOUT_VARIABLE, bound_case_child,
+};
 pub use copy::{COPY_SOURCE, CopyEffects};
 pub use decode::decode;
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};
+pub use resolve::resolve_programs;
 pub use retry::{
     RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, retry_records,
 };
