@@ -299,7 +299,9 @@ Before a change is reported done, in this order:
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
    Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
-   the test step (`task test-step`), `task durable-check`, `task consumer-check`, then `task docs-check` and
+   the test step (`task test-step`), `task durable-check`, `task consumer-check`,
+   `task embedder-check` (`cargo check --offline --locked` of the embedder fixture, an engine on
+   `b10x-loom-tree` alone), then `task docs-check` and
    `task commission:docs-drift`. CI runs exactly this (`check.yml`, job `loom / task check`, which
    installs cargo-nextest by a pinned version and digest). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
@@ -1674,6 +1676,21 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   ends with `TREE_CONFINEMENT_PRECONDITION` (`lib.rs`), which `tree run --help` states too
   (`crates/loom-cli/tests/tree_run/delegated_cgroup.rs`; its delegated cases skip without
   bubblewrap or a user systemd manager unless `LOOM_REQUIRE_DELEGATION` is set).
+- `tree run` builds that runner through `b10x_loom_tree::embed` (`crates/loom-tree/src/embed.rs`,
+  re-exported as `loom_sdk::tree`), the module an engine that runs trees in-process uses, so the
+  two build one runner the same way; only the re-exec stays the CLI's. `TreeRunner::on_root`
+  holds the root (`hold_cgroup_root`) and builds `SubstrateRunner::new(Some(root))`, never a root
+  discovered; `in_own_scope` calls `prepare_delegated_cgroup` first; `local` opens the `local`
+  adapter for `UNCONFINED_FLAG_REASON`. The runner `runner()` hands out owns the hold, so every
+  clone keeps it, and every `TestRunner` method forwards to the inner runner, the defaulted ones
+  included. The flock is per open file, so a second `on_root` in the same process is refused as
+  one in another process is. `host_catalog`, `encode_line`, `ProtocolCatalog`,
+  `ConfinementError`, `Cancel` and `DEFAULT_PRINCIPAL` are re-exported beside it. Its witness is
+  the fixture package `crates/loom-tree/tests/embedder/` (`b10x-loom-tree-embedder-fixture`,
+  binary `embedder`, a workspace member listed by name in `Cargo.toml`), which depends on
+  `b10x-loom-tree` alone, and its tests run `embedder` on a delegated root, in a scope of its
+  own and under `local`; `task embedder-check` builds it offline. A new public item of `embed`
+  needs its row on the SDK stability page (`every_tree_path_on_the_page_resolves`).
 - `tree approve --action` takes a `person` action as its principal through `PersonEffects`
   (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
   program's are. `tree run` never takes a person action. Without `--capability` it records no

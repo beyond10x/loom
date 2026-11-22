@@ -3,7 +3,7 @@ title: SDK stability
 sidebar_label: SDK stability
 sidebar_position: 4
 description: The stable surface of b10x-loom-sdk, the ports a host implements and the loom_sdk paths control-plane imports, with the promise Loom makes for them.
-source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/runtime.rs, crates/loom-sdk/src/models.rs, crates/loom-sdk/src/agent.rs, crates/loom-sdk/tests/host_ports.rs, crates/loom-session-executor/src/lib.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
+source: crates/loom-sdk/src/lib.rs, crates/loom-sdk/src/runtime.rs, crates/loom-sdk/src/models.rs, crates/loom-sdk/src/agent.rs, crates/loom-sdk/tests/host_ports.rs, crates/loom-session-executor/src/lib.rs, crates/loom-tree/src/embed.rs, control-plane's crates/control-plane-runtime (its loom_sdk imports), CHANGELOG.md
 ---
 
 # SDK stability
@@ -123,7 +123,13 @@ implements it through.
 | `loom_sdk::MemoryCaseStore` | An in-memory `CaseStore` |
 | `loom_sdk::CaseInputs` | The case inputs a host gives when it opens a case |
 | `loom_sdk::CaseIndependence` | The independence dimensions a host declares for each evidence producer when it opens a case |
-| `loom_sdk::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission |
+| `loom_sdk::ProtocolCatalog`, `loom_sdk::tree::ProtocolCatalog` | The protocol catalog shared by routing, case opening and admission; one type at two paths, the second beside the tree runner |
+| `loom_sdk::tree::TreeRunner` | The runner of a case tree run in-process (`b10x_loom_tree::embed`), handed to `RunSettings::runner` by `runner`; it never discovers a cgroup root. `on_root` holds the delegated root it is given for the process and builds Substrate's `linux` adapter on it; a root another process or another runner of this process holds, or one that does not qualify, is refused `ConfinementRefused` naming it, as `b10x-loom tree run` refuses it. `in_own_scope`, for a process started in a delegated scope (`systemd-run --user --scope -p Delegate=yes`), moves the calling process, every thread of it, into a leaf of the scope and holds the scope. `local` opens Substrate's `local` adapter for the reason the bound-program port admits, which it supplies itself, and holds no root. `runner` returns the `TestRunner` that holds the root: the root is released only when the `TreeRunner` and every clone of that runner are dropped |
+| `loom_sdk::tree::host_catalog` | The host's catalog, as `b10x-loom` reads it: the bundled protocols and the user's installed ones; refused `UnknownProtocol` when the installed catalog cannot be read |
+| `loom_sdk::tree::encode_line` | The JSON line of a run-log line an observer gets, without its line feed: the bytes the case's log holds for it |
+| `loom_sdk::tree::Cancel` | The cancel handle every port of a tree run holds; `run_tree` sets it from the caller's flag, and a program it is set for is ended |
+| `loom_sdk::tree::DEFAULT_PRINCIPAL` | The principal an `Approve` decision names for a capability no `person` binding holds, and the one its printed command records: `operator`, a value this promise covers |
+| `loom_sdk::tree::ConfinementError` | `loom_sdk::ConfinementError` beside the tree runner: why a runner refused to launch |
 | `loom_sdk::models::from_config` | Loads a host's models from a models configuration (YAML): the model of each declared role, over the `llm.routes/1` document it names, relative to the configuration's directory; every endpoint of the routes document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
 | `loom_sdk::models::from_routes` | The llm `Model` one name of an `llm.routes/1` document serves: a route, or `<endpoint>/<model-id>` of a declared endpoint; every endpoint of the document must resolve, including ones no role uses ([llm issue 36](https://github.com/beyond10x/llm/issues/36)) |
 | `loom_sdk::models::parse_config` | Parses a models configuration into a `ModelsConfig`, the parser `from_config` uses |

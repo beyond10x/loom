@@ -17,6 +17,7 @@
 //! | [`governor`] | `b10x-loom-governor` | The governor: [`CanonGovernor`] evaluates a case's protocol with Canon over a [`CaseStore`] and issues its frontier. |
 //! | [`agent`] | `loom` (generated) | An agent as data: the `loom.agent` domain's types ([`agent::AgentSpec`], [`agent::ToolPolicy`], [`agent::DecisionMode`]) and [`agent::parse`], which decodes one `loom.agent/1` document and refuses a member the domain does not declare. |
 //! | [`intake`] | `b10x-loom-intake-router`, `b10x-loom-intake-slice` | Intake: the router that proposes a protocol for an intent ([`intake::router`]), and the slice's case opening, local executor, test-result verifier and local effect adapter ([`intake::slice`]). |
+//! | [`tree`] | `b10x-loom-tree` (its `embed` module) | Running case trees in-process: [`tree::TreeRunner`], the runner on a delegated cgroup root the process holds and never one discovered, the host's catalog, the run-log line encoder, the cancel handle and the principal an `Approve` decision names. |
 //!
 //! The items an embedding always touches are also re-exported at the top: [`run_until_blocked`],
 //! [`LoopContext`] and its four parts [`Ids`], [`Clock`], [`Limits`] and [`HostControl`],
@@ -137,6 +138,11 @@ pub use runtime::Runtime;
 
 /// The protocol catalog shared by routing, case initialization and governor admission.
 pub use loom_protocols::ProtocolCatalog;
+
+/// What an engine that runs case trees in-process needs beside `b10x-loom-tree`'s functions
+/// (`b10x_loom_tree::embed`): a runner on a delegated cgroup root it holds, never one discovered,
+/// the host's catalog, the run-log line encoder, the cancel handle and the default principal.
+pub use b10x_loom_tree::embed as tree;
 
 /// The `serde_json` Loom links. A host's [`loom::model_selector::Briefing`] returns an action's
 /// argument schema as its `Value`, so a host implements the port through `loom_sdk` alone.

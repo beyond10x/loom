@@ -41,6 +41,7 @@ tasks:
       - task: test-step
       - task: durable-check
       - task: consumer-check
+      - task: embedder-check
       - task: docs-check
       - task: commission:docs-drift
 
@@ -177,6 +178,11 @@ tasks:
       - cp Cargo.lock consumers/pinned/Cargo.lock
       - cargo fmt --manifest-path consumers/pinned/Cargo.toml --check
       - cargo test --manifest-path consumers/pinned/Cargo.toml --offline
+
+  embedder-check:
+    desc: Build crates/loom-tree/tests/embedder, an engine that depends on b10x-loom-tree alone, offline over the workspace's Cargo.lock.
+    cmds:
+      - cargo check --offline --locked -p b10x-loom-tree-embedder-fixture
 
   plan:
     desc: Validate the AEP planning store.
