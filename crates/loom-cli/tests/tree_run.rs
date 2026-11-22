@@ -1293,6 +1293,11 @@ fn tour_protocols(tree: &Tree) -> PathBuf {
 
 /// `tree open --protocols dir` of the root `protocol` with the bindings file `tour.bindings.yaml`.
 fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
+    open_from_with(tree, dir, protocol, "tour.bindings.yaml")
+}
+
+/// `tree open --protocols dir` of the root `protocol` with the bindings file `bindings`.
+fn open_from_with(tree: &Tree, dir: &Path, protocol: &str, bindings: &str) -> Output {
     tree.command()
         .args([
             "tree",
@@ -1307,7 +1312,7 @@ fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
         .arg("--protocols")
         .arg(dir)
         .arg("--bindings")
-        .arg(tree.workspace().join("tour.bindings.yaml"))
+        .arg(tree.workspace().join(bindings))
         .arg("--workspace")
         .arg(tree.workspace())
         .output()
@@ -1404,6 +1409,79 @@ fn an_edit_after_tree_open_changes_nothing_in_the_open_tree() {
     assert_eq!(kept_sha256(&tree, "tour-leg@1"), at_open);
     let kept = fs::read_to_string(tree.store().join("blobs").join(&at_open)).unwrap();
     assert_eq!(kept, leg);
+}
+
+#[test]
+fn nothing_in_a_run_selects_or_replaces_a_protocol() {
+    let tree = Tree::new("protocols-unselected");
+    let dir = tour_protocols(&tree);
+    let leg = fixture_protocol("tour-leg.yaml");
+    let workspace = tree.workspace();
+    // Each leg's writer writes a `tour-leg` document of its own over the directory's file and into
+    // the workspace, and prints it as its report.
+    let replacing = fs::read_to_string(workspace.join("tour-leg.bindings.yaml"))
+        .unwrap()
+        .replace(
+            "argv: [sh, stubs/route-write.sh]",
+            &format!("argv: [sh, stubs/route-replace.sh, {}]", dir.display()),
+        );
+    fs::write(workspace.join("tour-leg-replace.bindings.yaml"), &replacing).unwrap();
+    fs::write(
+        workspace.join("tour-replace.bindings.yaml"),
+        fs::read_to_string(workspace.join("tour.bindings.yaml"))
+            .unwrap()
+            .replace("tour-leg.bindings.yaml", "tour-leg-replace.bindings.yaml"),
+    )
+    .unwrap();
+    let opened = open_from_with(&tree, &dir, "tour@1", "tour-replace.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let at_open = json(&tree.tree("status"));
+    // A child bindings file naming `tour@1` does not select the protocol of its case: the run is
+    // refused and records nothing.
+    fs::write(
+        workspace.join("tour-leg-replace.bindings.yaml"),
+        replacing.replace("protocol: tour-leg@1", "protocol: tour@1"),
+    )
+    .unwrap();
+    let refused = tree.run();
+    assert_ne!(refused.status.code(), Some(0), "{}", stdout(&refused));
+    let text = stderr(&refused);
+    assert!(
+        text.contains("BindingsRefused") && text.contains("tour@1"),
+        "{text}"
+    );
+    fs::write(workspace.join("tour-leg-replace.bindings.yaml"), &replacing).unwrap();
+    assert_eq!(json(&tree.tree("status")), at_open);
+    let (_, ended) = run_opened(&tree, None);
+    assert_eq!(ended["detail"], "arrived", "{ended}");
+    // The writers ran: the directory's file and the workspace hold their document.
+    let written = fs::read_to_string(dir.join("tour-leg.yaml")).unwrap();
+    assert!(
+        written.contains("  finished:\n") && written != leg,
+        "{written}"
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("tour-leg.yaml")).unwrap(),
+        written
+    );
+    // Every case keeps the registration and the SHA-256 of `tree open`.
+    let status = json(&tree.tree("status"));
+    assert_eq!(status["protocols"], at_open["protocols"], "{status}");
+    let cases = status["cases"].as_array().unwrap();
+    assert!(cases.len() > 2, "{status}");
+    for case in cases {
+        let expected = if case.get("parent").is_none() {
+            "tour@1"
+        } else {
+            "tour-leg@1"
+        };
+        assert_eq!(case["protocol"], expected, "{case}");
+    }
+    let kept = kept_sha256(&tree, "tour-leg@1");
+    assert_eq!(
+        fs::read_to_string(tree.store().join("blobs").join(&kept)).unwrap(),
+        leg
+    );
 }
 
 #[test]
