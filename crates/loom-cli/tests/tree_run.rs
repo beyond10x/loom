@@ -13,7 +13,15 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use loom_protocols::InstallStore;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
+use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
+use b10x_loom_tree::model::TreeStop;
+use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
+use b10x_loom_tree::{RunSettings, TreeTime, log_file_name, read_log, run_tree};
+use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::Value;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
@@ -67,6 +75,13 @@ impl Tree {
             }
         }
         Self { root, started }
+    }
+
+    /// The catalog of the test's user: the bundled protocols and the two installed.
+    fn catalog(&self) -> ProtocolCatalog {
+        InstallStore::new(self.root.join("home/loom/protocols"))
+            .catalog()
+            .unwrap()
     }
 
     fn store(&self) -> PathBuf {
@@ -432,4 +447,140 @@ fn a_one_case_tree_runs_through_its_waits_to_its_outcome() {
     assert_eq!(ended["detail"], "passed", "{ended}");
     let verified = tree.tree("verify");
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
+}
+
+#[test]
+fn a_childs_wait_stops_the_run_naming_the_child_case() {
+    let tree = Tree::new("child-wait");
+    let opened = tree.open();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+
+    // The root opens its first leg, which runs until its route waits on the guide.
+    let first = tree.run();
+    assert_eq!(
+        first.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&first),
+        stderr(&first)
+    );
+    let waited = json(&first);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    let child = waited["case"].as_str().unwrap().to_owned();
+    assert_ne!(child, "root", "{waited}");
+    let decision = &waited["decisions"][0];
+    assert_eq!(decision["case"], child.as_str(), "{waited}");
+    let command: Vec<&str> = decision["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    assert_eq!(&command[..3], ["b10x-loom", "tree", "approve"], "{waited}");
+    let at = command.iter().position(|word| *word == "--case").unwrap();
+    assert_eq!(command[at + 1], child, "{waited}");
+
+    // The status lists the child below the root, and the root logs its opening.
+    let status = tree.tree("status");
+    assert_eq!(status.status.code(), Some(0), "{}", stderr(&status));
+    let status = json(&status);
+    let cases = status["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 2, "{status}");
+    assert_eq!(cases[1]["case"], child.as_str(), "{status}");
+    assert_eq!(cases[1]["parent"], "root", "{status}");
+    assert_eq!(cases[1]["protocol"], "tour-leg@1", "{status}");
+    let root_log = fs::read_to_string(cases[0]["run_log"].as_str().unwrap()).unwrap();
+    assert!(root_log.contains("ChildOpened"), "{root_log}");
+    let verified = tree.tree("verify");
+    assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
+}
+
+/// The settings of a run through the library: the `local` runner, the instant `AT`, `max_steps`.
+fn settings(max_steps: Option<i64>) -> RunSettings {
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    RunSettings {
+        max_steps,
+        max_wall_seconds: None,
+        time: TreeTime::At(AT.to_owned()),
+        runner: Arc::new(runner),
+    }
+}
+
+/// The lines of `case`'s log in the store of `tree`.
+fn log_lines(tree: &Tree, case: &str) -> Vec<RunLogLine> {
+    let bytes = fs::read(tree.store().join(log_file_name(case))).unwrap();
+    read_log(&bytes).unwrap()
+}
+
+#[test]
+fn an_observer_is_given_each_run_log_line_right_after_it_is_written() {
+    let tree = Tree::new("observer");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let catalog = tree.catalog();
+    let store = tree.store();
+    let mut seen: Vec<(String, RunLogLine)> = Vec::new();
+    let mut observer = |case: &str, line: &RunLogLine| {
+        // The line is in the log when the observer is given it.
+        let written = log_lines(&tree, case);
+        assert_eq!(written.last(), Some(line));
+        seen.push((case.to_owned(), line.clone()));
+    };
+    let ran = run_tree(
+        &store,
+        &catalog,
+        &settings(Some(3)),
+        Some(&mut observer),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    let written = log_lines(&tree, "root");
+    // Every line the run wrote, in order: all but the `case opened` line `tree open` wrote.
+    let observed: Vec<RunLogLine> = seen.iter().map(|(_, line)| line.clone()).collect();
+    assert_eq!(observed, written[1..].to_vec());
+    assert!(seen.iter().all(|(case, _)| case == "root"));
+}
+
+#[test]
+fn a_cancelled_run_ends_budget_spent_before_its_next_step() {
+    let tree = Tree::new("cancel");
+    let opened = tree.open_leg();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let catalog = tree.catalog();
+    let cancel = AtomicBool::new(false);
+    // The handle is set once the first step finished; the run asks it before the next.
+    let mut observer = |_: &str, line: &RunLogLine| {
+        if matches!(line.event, RunLogEvent::ActionFinished(_)) {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    };
+    let ran = run_tree(
+        &tree.store(),
+        &catalog,
+        &settings(None),
+        Some(&mut observer),
+        Some(&cancel),
+    )
+    .unwrap();
+    assert_eq!(ran.stop, TreeStop::BudgetSpent, "{ran:?}");
+    assert_eq!(ran.steps, 1, "{ran:?}");
+    let written = log_lines(&tree, "root");
+    let last = written.last().unwrap();
+    assert!(
+        matches!(&last.event, RunLogEvent::Stopped(stopped) if stopped.stop == "BudgetSpent"),
+        "{last:?}"
+    );
+    let finished = written
+        .iter()
+        .filter(|line| matches!(line.event, RunLogEvent::ActionFinished(_)))
+        .count();
+    assert_eq!(finished, 1);
+    // The first step checked the route; the writer, the next step, never ran.
+    assert!(!tree.workspace().join("route.txt").exists());
 }

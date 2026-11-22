@@ -5,9 +5,10 @@
 //! after an `evaluated` line of that revision and before the next `evaluated` line, and at the
 //! revision its step left the case at, so that a writer is not taken again on its own write. Whether an
 //! action is due again whatever its history (a retry, a pending copy) is the host's answer, given
-//! as a set of actions.
+//! as a set of actions; so is whether an action is idle whatever its history (a copy whose source
+//! holds nothing new), which counts as performed at every revision.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use b10x_loom_executor::selection::StepHistory;
 use loom::runlog::{RunLogEvent, RunLogLine};
@@ -16,7 +17,9 @@ use loom::runlog::{RunLogEvent, RunLogLine};
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LogHistory {
     performed: BTreeSet<(String, i64)>,
+    finished: BTreeMap<String, usize>,
     due: BTreeSet<String>,
+    idle: BTreeSet<String>,
 }
 
 impl LogHistory {
@@ -25,6 +28,7 @@ impl LogHistory {
     /// the one its step left: that of the next `evaluated` line, else `current`.
     pub fn new(lines: &[RunLogLine], current: i64, due: BTreeSet<String>) -> Self {
         let mut performed = BTreeSet::new();
+        let mut count = BTreeMap::new();
         let mut revision = None;
         let mut left: Vec<String> = Vec::new();
         for line in lines {
@@ -39,6 +43,7 @@ impl LogHistory {
                     if let Some(revision) = revision {
                         performed.insert((finished.action.clone(), revision));
                     }
+                    *count.entry(finished.action.clone()).or_insert(0) += 1;
                     left.push(finished.action.clone());
                 }
                 _ => {}
@@ -47,21 +52,31 @@ impl LogHistory {
         for action in left {
             performed.insert((action, current));
         }
-        Self { performed, due }
+        Self {
+            performed,
+            finished: count,
+            due,
+            idle: BTreeSet::new(),
+        }
+    }
+
+    /// The same history with `idle` actions, never useful now.
+    #[must_use]
+    pub fn with_idle(mut self, idle: BTreeSet<String>) -> Self {
+        self.idle = idle;
+        self
     }
 
     /// The number of `action finished` lines for `action` the history read, at any revision.
     pub fn performed(&self, action: &str) -> usize {
-        self.performed
-            .iter()
-            .filter(|(performed, _)| performed == action)
-            .count()
+        self.finished.get(action).copied().unwrap_or(0)
     }
 }
 
 impl StepHistory for LogHistory {
     fn performed_at(&self, action: &str, case_revision: i64) -> Result<bool, String> {
-        Ok(self.performed.contains(&(action.to_owned(), case_revision)))
+        Ok(self.idle.contains(action)
+            || self.performed.contains(&(action.to_owned(), case_revision)))
     }
 
     fn due(&self, action: &str) -> Result<bool, String> {

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use b10x_loom_commission::model::responsibility::CaseId;
 use b10x_loom_commission::ports::governor::Governor as _;
 use b10x_loom_runlog::log_file_name;
+use loom::governor::CaseLink;
 use loom::runlog::RunLogEvent;
 use loom::tree::{CaseStatus, TreeRefusalReason, TreeStatus};
 use loom_governor::{CanonGovernor, FileCaseStore, case_file_stem};
@@ -13,21 +14,30 @@ use loom_protocols::ProtocolCatalog;
 use crate::store::{existing_store, read_manifest, read_regular};
 use crate::{Refused, unreadable};
 
-/// One case of the tree and its parent.
+/// One case of the tree, its parent and the link the two hold.
 pub(crate) struct Member {
     pub(crate) case: String,
     pub(crate) parent: Option<String>,
+    pub(crate) link: Option<CaseLink>,
 }
 
-/// The cases of the tree rooted at `root`, the root first and each case before its children.
+/// The cases of the tree rooted at `root`, the root first and each case before its children, in
+/// the order they were opened: the governor's [`CanonGovernor::tree`].
 pub(crate) fn members<S: loom_governor::FallibleCaseStore>(
-    _governor: &CanonGovernor<S>,
+    governor: &CanonGovernor<S>,
     root: &str,
 ) -> Result<Vec<Member>, Refused> {
-    Ok(vec![Member {
-        case: root.to_owned(),
-        parent: None,
-    }])
+    let cases = governor
+        .tree(&CaseId(root.to_owned()))
+        .map_err(|error| unreadable(format!("the tree of case {root}"), format!("{error:?}")))?;
+    Ok(cases
+        .into_iter()
+        .map(|held| Member {
+            case: held.case.0,
+            parent: held.parent.as_ref().map(|link| link.parent.0.clone()),
+            link: held.parent,
+        })
+        .collect())
 }
 
 /// The status of the tree in the store `store`, read with `catalog`: per case its id, its parent,
@@ -73,7 +83,11 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
             parent: member.parent,
             protocol,
             revision: frontier.case_revision,
-            outcome: None,
+            outcome: governor
+                .case_state(&id)
+                .map_err(|error| unreadable(format!("case {}", member.case), format!("{error:?}")))?
+                .termination
+                .map(|termination| termination.outcome),
             stop: last_stop(&log)?,
             open_obligations: open,
             case_file: text(&store.join(format!("{}.json", case_file_stem(&member.case)))),

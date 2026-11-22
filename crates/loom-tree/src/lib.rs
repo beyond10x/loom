@@ -40,6 +40,10 @@ mod verify;
 
 use std::fmt;
 
+/// The name of a case's run log in the store, and the reading of a log's bytes into its lines.
+pub use b10x_loom_runlog::{log_file_name, verify as read_log};
+/// The run-log lines a [`RunObserver`] is given.
+pub use loom::runlog;
 pub use loom::tree as model;
 
 pub use approvals::{TreeAuthority, approvals_file_name, read_approvals};

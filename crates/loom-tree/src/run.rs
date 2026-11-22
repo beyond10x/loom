@@ -20,7 +20,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
-use b10x_loom_bindings::{PlacedRevisions, ProgramEffects, retry_records};
+use b10x_loom_bindings::{
+    CopyEffects, OpenEffects, PlacedRevisions, ProgramEffects, retry_records,
+};
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionJson;
 use b10x_loom_commission::model::responsibility::{
@@ -39,7 +41,10 @@ use b10x_loom_executor::{DeterministicSelector, EmptyObjectArguments, Loom};
 use b10x_loom_intake_slice::confinement::TestRunner;
 use b10x_loom_runlog::log_file_name;
 use loom::bindings::{BindingsDocument, Executor};
-use loom::runlog::{ActionFinished, Evaluated, RunLogEvent, RunLogLine, Stopped, Terminated};
+use loom::runlog::{
+    ActionFinished, CaseOpened, ChildClosed, ChildOpened, Evaluated, RunLogEvent, RunLogLine,
+    Stopped, Terminated,
+};
 use loom::tree::{
     ApprovalDecision, DecisionKind, NextDecision, TreeManifest, TreeRefusalReason, TreeRun,
     TreeStop,
@@ -103,6 +108,8 @@ impl std::fmt::Debug for RunSettings {
 /// What a case of the run is.
 struct Held {
     case: String,
+    parent: Option<String>,
+    file: PathBuf,
     bindings: BindingsDocument,
 }
 
@@ -151,6 +158,7 @@ pub fn run_tree(
         for case in &held {
             logs.reconcile(&case.case)?;
         }
+        close_terminated(&governor, &logs, &store, &held, &mut emit)?;
         let stop_before = if cancel.is_some_and(|cancel| cancel.load(Ordering::SeqCst)) {
             Some("the run was cancelled".to_owned())
         } else if settings.max_steps.is_some_and(|max| steps >= max) {
@@ -208,20 +216,31 @@ pub fn run_tree(
         }
         let legitimate = legitimate_outcomes(&governor, &id)?;
         let lines = read_lines(&store, &case.case)?;
-        let due = due_actions(&governor, &id, &case.bindings)?;
+        let mut due = due_actions(&governor, &id, &case.bindings)?;
         let revision = governor
             .current_revision(&id)
             .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
-        let history = LogHistory::new(&lines, revision, due);
         let before: BTreeSet<String> = evidence_ids(&governor, &id)?;
         let effects = TreeEffects::new(
             &governor,
             &id,
             &case.bindings,
+            &case.file,
+            catalog,
             &workspace,
             &store,
             &settings.runner,
         )?;
+        // A copy is taken when its source holds something new, and is idle otherwise.
+        let mut idle = BTreeSet::new();
+        for (action, copy_due) in effects.copies_due(&case.bindings)? {
+            if copy_due {
+                due.insert(action);
+            } else {
+                idle.insert(action);
+            }
+        }
+        let history = LogHistory::new(&lines, revision, due).with_idle(idle);
         let selector = DeterministicSelector::new(id.clone(), &governor, &history);
         let executor = Loom::new(selector, EmptyObjectArguments, "Run the tree's case.")
             .with_governor(&governor)
@@ -255,6 +274,7 @@ pub fn run_tree(
                 }),
             )?;
             emit(&case.case, line);
+            opened(&governor, &logs, &case.case, outcome, &mut emit)?;
             continue;
         }
 
@@ -303,6 +323,7 @@ pub fn run_tree(
                     }),
                 )?;
                 emit(&case.case, line);
+                opened(&governor, &logs, &case.case, outcome, &mut emit)?;
                 continue;
             }
         }
@@ -313,13 +334,14 @@ pub fn run_tree(
             && (completed
                 || waiting_actions(&governor, &id, &case.bindings, &history, revision)?.is_empty())
         {
-            let line = logs.append(
-                &case.case,
-                RunLogEvent::Terminated(Terminated {
-                    reason: legitimate[0].clone(),
-                }),
-            )?;
-            emit(&case.case, line);
+            let instant = settings.time.now()?;
+            governor
+                .terminate(&id, &legitimate[0], &instant.0)
+                .map_err(|error| {
+                    Refused::new(TreeRefusalReason::StoreUnreadable, error.to_string())
+                        .case(case.case.clone())
+                })?;
+            closed(&logs, case, &legitimate[0], &mut emit)?;
             if case.case == manifest.root {
                 return Ok(TreeRun {
                     stop: TreeStop::Terminal,
@@ -370,7 +392,7 @@ fn tree_cases<S: loom_governor::FallibleCaseStore>(
     root_bindings: &str,
     catalog: &ProtocolCatalog,
 ) -> Result<Vec<Held>, Refused> {
-    let mut held = Vec::new();
+    let mut held: Vec<Held> = Vec::new();
     for member in members(governor, root)? {
         let id = CaseId(member.case.clone());
         let protocol = governor
@@ -383,14 +405,165 @@ fn tree_cases<S: loom_governor::FallibleCaseStore>(
             )
             .case(member.case.clone())
         })?;
-        let file = PathBuf::from(root_bindings);
+        let file = match (&member.parent, &member.link) {
+            (Some(parent), Some(link)) => {
+                let parent = held
+                    .iter()
+                    .find(|held| held.case == *parent)
+                    .ok_or_else(|| {
+                        unreadable(
+                            format!("case {}", member.case),
+                            format!("its parent {parent} is not listed before it"),
+                        )
+                    })?;
+                child_file(parent, &link.action)?
+            }
+            _ => PathBuf::from(root_bindings),
+        };
         let loaded = load(&file, entry.name(), &entry.model)?;
         held.push(Held {
             case: member.case,
+            parent: member.parent,
+            file,
             bindings: loaded.document,
         });
     }
     Ok(held)
+}
+
+/// The bindings file of the child that `action` of `parent` opened: the `bindings` member of its
+/// `open` executor, relative to the directory of the parent's file, whose real path lies below
+/// that directory.
+fn child_file(parent: &Held, action: &str) -> Result<PathBuf, Refused> {
+    let refused = |detail: String| {
+        Refused::new(TreeRefusalReason::BindingsRefused, detail)
+            .file(parent.file.display().to_string())
+            .action(action.to_owned())
+    };
+    let relative = parent
+        .bindings
+        .actions
+        .iter()
+        .find(|bound| bound.action == action && bound.executor.kind == Executor::Open)
+        .and_then(|bound| bound.executor.bindings.clone())
+        .ok_or_else(|| {
+            refused(format!(
+                "case {} names no open executor with a bindings file for {action}",
+                parent.case
+            ))
+        })?;
+    let directory = parent.file.parent().map(Path::to_owned).unwrap_or_default();
+    let real = std::fs::canonicalize(directory.join(&relative)).map_err(|error| {
+        refused(format!(
+            "the child bindings file {relative:?} cannot be read: {error}"
+        ))
+    })?;
+    let base = std::fs::canonicalize(&directory).unwrap_or(directory);
+    if !real.starts_with(&base) {
+        return Err(refused(format!(
+            "the child bindings file {relative:?} lies outside the directory of the file that names it"
+        )));
+    }
+    Ok(real)
+}
+
+/// Writes that `case` ended through `outcome`: its `terminated` line, then, for a child, the
+/// `child closed` line in its parent's log.
+fn closed(
+    logs: &Logs,
+    case: &Held,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let line = logs.append(
+        &case.case,
+        RunLogEvent::Terminated(Terminated {
+            reason: outcome.to_owned(),
+        }),
+    )?;
+    emit(&case.case, line);
+    if let Some(parent) = &case.parent {
+        let line = logs.append(
+            parent,
+            RunLogEvent::ChildClosed(ChildClosed {
+                child: case.case.clone(),
+                outcome: Some(outcome.to_owned()),
+            }),
+        )?;
+        emit(parent, line);
+    }
+    Ok(())
+}
+
+/// The outcome the governor terminated `case` through, when it did.
+fn termination<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+) -> Result<Option<String>, Refused> {
+    Ok(governor
+        .case_state(&CaseId(case.to_owned()))
+        .map_err(|error| unreadable(format!("case {case}"), format!("{error:?}")))?
+        .termination
+        .map(|termination| termination.outcome))
+}
+
+/// Writes the lines of each case the governor holds terminated and whose log does not yet say
+/// so: a run stopped between the termination and its lines.
+fn close_terminated<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    store: &Path,
+    held: &[Held],
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    for case in held {
+        if let Some(outcome) = termination(governor, &case.case)?
+            && !terminated(store, &case.case)
+        {
+            closed(logs, case, &outcome, emit)?;
+        }
+    }
+    Ok(())
+}
+
+/// Writes, for each child an `open` step opened, its `case opened` line and the parent's
+/// `child opened` line.
+fn opened<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    parent: &str,
+    outcome: &EffectOutcome,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let EffectOutcome::Performed(performed) = outcome else {
+        return Ok(());
+    };
+    let report = plain_commission(&performed.report);
+    let Some(children) = report["children"].as_array() else {
+        return Ok(());
+    };
+    for child in children.iter().filter_map(serde_json::Value::as_str) {
+        let protocol = governor
+            .protocol(&CaseId(child.to_owned()))
+            .map_err(|error| unreadable(format!("case {child}"), format!("{error:?}")))?;
+        let line = logs.append(
+            child,
+            RunLogEvent::CaseOpened(CaseOpened {
+                case: child.to_owned(),
+                protocol: protocol.clone(),
+            }),
+        )?;
+        emit(child, line);
+        let line = logs.append(
+            parent,
+            RunLogEvent::ChildOpened(ChildOpened {
+                child: child.to_owned(),
+                protocol,
+            }),
+        )?;
+        emit(parent, line);
+    }
+    Ok(())
 }
 
 /// The lines of `case`'s log in `store`.
@@ -698,10 +871,13 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     })
 }
 
-/// The effect port of one case: its `program` bindings through [`ProgramEffects`]. A `person`
+/// The effect port of one case: its `program` bindings through [`ProgramEffects`], its `open`
+/// bindings through [`OpenEffects`] and its `copy` bindings through [`CopyEffects`]. A `person`
 /// action is never performed by a run.
 pub(crate) struct TreeEffects<'a, S: loom_governor::FallibleCaseStore> {
     programs: ProgramEffects<'a, S>,
+    opens: OpenEffects<'a, S>,
+    copies: CopyEffects<'a, S>,
 }
 
 impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
@@ -709,10 +885,21 @@ impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
         governor: &'a CanonGovernor<S>,
         case: &CaseId,
         bindings: &'a BindingsDocument,
+        file: &Path,
+        catalog: &ProtocolCatalog,
         workspace: &Path,
         store: &Path,
         runner: &Arc<dyn TestRunner>,
     ) -> Result<Self, Refused> {
+        let refused = |error: String| {
+            Refused::new(TreeRefusalReason::BindingsRefused, error)
+                .case(case.0.clone())
+                .file(file.display().to_string())
+        };
+        let opens = OpenEffects::new(governor, case.clone(), bindings, file, catalog)
+            .map_err(|error| refused(error.to_string()))?;
+        let copies = CopyEffects::new(governor, case.clone(), bindings, catalog)
+            .map_err(|error| refused(error.to_string()))?;
         let programs = ProgramEffects::new(
             governor,
             case.clone(),
@@ -725,13 +912,36 @@ impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
             Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())
                 .case(case.0.clone())
         })?;
-        Ok(Self { programs })
+        Ok(Self {
+            programs,
+            opens,
+            copies,
+        })
+    }
+
+    /// The `copy` actions of the case and whether a step of each would write a copy now.
+    fn copies_due(&self, bindings: &BindingsDocument) -> Result<Vec<(String, bool)>, Refused> {
+        bindings
+            .actions
+            .iter()
+            .filter(|bound| bound.executor.kind == Executor::Copy)
+            .map(|bound| {
+                self.copies
+                    .copy_due(&bound.action)
+                    .map(|due| (bound.action.clone(), due))
+                    .map_err(|error| {
+                        unreadable(format!("action {}", bound.action), error.to_string())
+                    })
+            })
+            .collect()
     }
 }
 
 impl<S: loom_governor::FallibleCaseStore> EffectPort for TreeEffects<'_, S> {
     fn performs(&self, action: &str) -> bool {
         self.programs.performs(action)
+            || self.opens.performs(action)
+            || self.copies.performs(action)
     }
 
     fn invoke(
@@ -739,7 +949,14 @@ impl<S: loom_governor::FallibleCaseStore> EffectPort for TreeEffects<'_, S> {
         commission: &Commission<commission_state::Assigned>,
         request: &AdmittedRequest,
     ) -> Result<EffectOutcome, EffectError> {
-        self.programs.invoke(commission, request)
+        let action = request.data().action.as_str();
+        if self.opens.performs(action) {
+            self.opens.invoke(commission, request)
+        } else if self.copies.performs(action) {
+            self.copies.invoke(commission, request)
+        } else {
+            self.programs.invoke(commission, request)
+        }
     }
 }
 
