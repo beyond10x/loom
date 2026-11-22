@@ -1041,6 +1041,10 @@ fn a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated() {
                 ConfinementRefusal::CgroupUndelegated,
                 "{error}"
             );
+            assert!(
+                error.detail.contains("`limits`"),
+                "Substrate proves no limits on a root that holds no process of this one: {error}"
+            );
         },
     );
 }
