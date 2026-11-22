@@ -186,6 +186,15 @@ $ b10x-loom tree close --store fork-store --case root --outcome left --at 2026-1
 An outcome that is not legitimate for the case now is refused `OutcomeNotLegitimate`, and the
 store keeps every byte.
 
+An outcome's decision can wait for a writer's spent allowance: with a `from: runs` entry on the
+writer (see [Bindings](./bindings.md)), `requires: {decision: give_up, when: {claim: work.spent}}`
+counts `give_up` only once the run that reaches `budget.max_runs` wrote its `spent` record. Before
+that the outcome is blocked by the claim, and Canon neither counts `give_up` nor lists it under
+`pending_decisions`; after it `give_up` is pending. A decision recorded early is kept at the case
+revision it was taken at and counts once the writer is spent, provided no step moved an artifact
+in between; otherwise it is given again at the new revision. `when` holds claims and case inputs
+only: an evidence form in it is refused at registration, `evidence-in-decision-condition`.
+
 ## A writer's handoff
 
 A writer whose binding names a `handoff` hands the case to a person when it has done what it may:
