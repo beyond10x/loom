@@ -90,6 +90,14 @@
         "outcome": {
           "optional": true,
           "type": "String"
+        },
+        "record": {
+          "optional": true,
+          "type": "String"
+        },
+        "record_digest": {
+          "optional": true,
+          "type": "String"
         }
       }
     },
@@ -101,6 +109,14 @@
         },
         "protocol": {
           "optional": false,
+          "type": "String"
+        },
+        "record": {
+          "optional": true,
+          "type": "String"
+        },
+        "record_digest": {
+          "optional": true,
           "type": "String"
         }
       }

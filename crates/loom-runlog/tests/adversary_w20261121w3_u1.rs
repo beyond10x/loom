@@ -148,7 +148,14 @@ fn contract_line(contract: &Value, kind: &str) -> serde_json::Map<String, Value>
         .as_object()
         .expect("fields")
     {
-        line.insert(name.clone(), sample(stated));
+        // A child line's `record_digest` is a SHA-256 (story child-record-in-the-run-log), a form
+        // the contract cannot state.
+        let value = if name == "record_digest" {
+            json!(digest(b"facts"))
+        } else {
+            sample(stated)
+        };
+        line.insert(name.clone(), value);
     }
     line
 }
@@ -173,6 +180,9 @@ fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
     for (kind, body) in kinds {
         let full = contract_line(&contract, kind);
         let exclusive = ["exit", "refusal"];
+        // A child line holds `record` and `record_digest` together or neither (story
+        // child-record-in-the-run-log), which the contract cannot state either.
+        let paired = ["record", "record_digest"];
         let variants: Vec<serde_json::Map<String, Value>> = if kind == "ActionFinished" {
             for member in exclusive {
                 assert!(full.contains_key(member), "the contract states `{member}`");
@@ -226,6 +236,22 @@ fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
                         refusal(result),
                         (RunLogRefusal::CutLine, 0),
                         "{kind}: `{name}`, the only one of exit and refusal, left out"
+                    );
+                } else if paired.contains(&name.as_str())
+                    && (kind == "ChildOpened" || kind == "ChildClosed")
+                {
+                    assert_eq!(
+                        refusal(result),
+                        (RunLogRefusal::CutLine, 0),
+                        "{kind}: `{name}` left out of the pair record and record_digest"
+                    );
+                    let mut neither = without.clone();
+                    for member in paired {
+                        neither.remove(member);
+                    }
+                    assert!(
+                        verify(&one_line(&neither)).is_ok(),
+                        "{kind}: the pair left out together reads"
                     );
                 } else if stated["optional"] == json!(true) {
                     assert!(

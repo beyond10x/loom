@@ -12,7 +12,7 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:tree-run-command
 - depends_on: story:open-children-from-arguments-from
-revision: 5
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T04:04:26Z", actor: "agent:loom", revision: 4}
 - {from: "proposed", to: "active", at: "2026-11-22T05:48:23Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "runbook-activation-2026-11-22T0549Z"}
@@ -164,3 +164,7 @@ Edges:
 - depends_on `story:tree-run-command` and `story:open-children-from-arguments-from`.
 - Collides with `story:ess-rules-of-the-runtime` on `ess/domains/runlog.yaml` and
   `crates/loom-runlog`. That story starts after this one.
+
+- Shares the sync sites of `crates/loom-runlog/src/lib.rs` (`:295`, `:304`) with
+  `story:tree-run-tests-fit-the-budget`. A sync this story adds goes through that story's
+  `durable` door of `b10x-loom-governor`, and its test `no_sync_outside_the_door` holds.

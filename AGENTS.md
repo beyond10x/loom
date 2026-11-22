@@ -1532,6 +1532,16 @@ an id over 100 bytes). Its types are `loom.runlog` (`ess/domains/runlog.yaml`); 
   named by the line after it). A change to the last line alone is not detected, as a cut at a
   line boundary is not, and the next append makes it permanent; a log rewritten from a line on
   with a fresh chain also verifies: the log is not signed.
+- `ChildOpened` and `ChildClosed` may hold `record` (the child's `case_outcome` record in the
+  parent, the link's `outcome_evidence`) and `record_digest` (the SHA-256 of its facts, encoded as
+  `decision_digest` is), both or neither, the digest 64 lower-case hex digits; a line breaking
+  that does not read, so `verify` refuses it as above and an append refuses to write it
+  (`story:child-record-in-the-run-log`; ESS cannot state the pairing yet). `tree run` writes them:
+  `child opened` names the record as the opening wrote it, `child closed` as the termination
+  replaced it, so each write of the record is in exactly one line of the parent's log, and
+  `action finished` leaves `case_outcome` records out. A log without them reads as before; Loom
+  0.58.0 and earlier refuse a line that holds them. `tree status` gives a `case_outcome` entry the
+  child's link `name`.
 - The crate declares the events and writes what it is given; emitting them is
   `story:tree-run-command`'s. It depends on the governor for the lock and the stem, so the executor
   and Canon reach it only through the governor.
@@ -1575,6 +1585,19 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   (`tree approve`), more than one legitimate outcome (`tree close`, `close.rs`), or a writer's
   `handoff` text when nothing else is (command `tree run --confinement <the run's>`, from
   `RunSettings::confinement`). Every printed command runs unchanged (tests `the_printed_*`).
+- Under `--confinement substrate` (the default) `tree run` never lets a driver discover an ancestor
+  cgroup (`substrate_runner` in `tree.rs` refuses without a root). `--cgroup-root DIR` names the
+  root; without it `tree run` starts itself again under `systemd-run --user --scope -p
+  Delegate=yes` (`start_delegated`, shared with `run`), and the run started again moves into
+  `loom-controller-<pid>` of its scope (`prepare_delegated_cgroup`), the scope its root. Either way
+  `hold_cgroup_root` (`confinement.rs`) takes a `flock` on the root's directory for the whole run,
+  so a second process naming it is refused, and the kernel drops the hold when the holder ends,
+  killed or not; then `check_cgroup_root` refuses, naming the root and the rule, one that is not
+  a delegated cgroup v2 directory, not writable, without the process in a child, or not empty.
+  Each refusal is `ConfinementRefused` (`CgroupUndelegated` in its detail), before any step, and
+  ends with `TREE_CONFINEMENT_PRECONDITION` (`lib.rs`), which `tree run --help` states too
+  (`crates/loom-cli/tests/tree_run/delegated_cgroup.rs`; its delegated cases skip without
+  bubblewrap or a user systemd manager unless `LOOM_REQUIRE_DELEGATION` is set).
 - `tree approve --action` takes a `person` action as its principal through `PersonEffects`
   (`person.rs`): the declared records, with `upstream_revisions` for the entry's `upstream`, as a
   program's are. `tree run` never takes a person action. Without `--capability` it records no

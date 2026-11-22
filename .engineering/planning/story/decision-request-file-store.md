@@ -22,7 +22,7 @@ scope:
   path: crates/loom-governor/tests/decision_store.rs
 - confidence: cited
   path: ess/domains/governor.yaml
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 8, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 - {from: "proposed", to: "active", at: "2026-11-22T00:22:59Z", actor: "agent:sdc", revision: 10, decided_on: {"recorded":{"review_outcome":1}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
@@ -145,3 +145,9 @@ Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the sto
   - UNORDERED, outside the epic, none with a `depends_on` path to or from this story (checked in the graph JSON): `story:canon-0-9-0-pin` (`Cargo.toml`, `lib.rs`; status active), `story:engineering-protocols-dependency-removed` (`Cargo.toml`), `story:engineering-registry-calls-replaced` (`lib.rs`), `story:hash-chained-run-log` (`lib.rs`, `file_store.rs`, `locked_dir.rs`), `story:child-case-runtime` (`lib.rs`, `file_store.rs`, `governor.yaml`), `story:child-case-own-workspace` (`governor.yaml`), `story:record-copy-between-cases` and `story:bound-artifact-revisions` (`lib.rs`), `story:frontier-names-movers`, `story:standing-tree-rests-quiescent` (`lib.rs`) — cited from their scope entries or bodies. These are line-adjacent edits, not same-line edits, so the textual conflict is small, but the planner sees a shared file.
 - **Safety fact:** a new module and a new file prefix (`decision-…`) change no reader of the case, suspension or run files: each store opens only its own prefix (`case-`, `suspension-`, `workflow-run-`, `locked_dir.rs` module doc), and all four share one lock through `LockedDir` — step 2 (`crates/loom-governor/src/locked_dir.rs:1-22`), unproven. The lock is held for each operation and not across two, so the story's read-then-write conflict check has to be one `locked(...)` closure that reads the state, compares it and writes; `FileSuspensionStore` does this for hold and take (`file_suspension.rs:1-25`) — step 2, unproven.
 - **Contradicted by the code:** see Story defects.
+
+Edges:
+
+- Shares the sync sites of `crates/loom-governor/src/locked_dir.rs` and `file_store.rs` with
+  `story:tree-run-tests-fit-the-budget`. A sync this story adds goes through that story's
+  `durable` door of `b10x-loom-governor`, and its test `no_sync_outside_the_door` holds.

@@ -704,14 +704,17 @@ Usage: b10x-loom tree run [OPTIONS] --store <DIR>
 | `--max-steps <N>` | no | none | The most steps the run takes |
 | `--max-wall-seconds <SECONDS>` | no | none | The most seconds of wall time the run takes before a step |
 | `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under |
+| `--cgroup-root <DIR>` | no | none | The delegated cgroup v2 directory every confined program runs under: empty, writable, delegated, with this process in a child of it, and held by this run alone. Without it, tree run starts itself again in a delegated scope of its own |
 | `--at <INSTANT>` | no | none | The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
 
 ```text
 Every open child takes its steps before its parent's next one; each step is selected by the deterministic selector and performed through the action's bound executor. A case is terminated when its completion gives exactly one legitimate outcome and no action in it is useful. When the tree waits, each decision is printed with the exact command that records it; a handoff's command is the next tree run, under this run's --confinement. A person action is never taken by tree run.
 
+Confinement: the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree run starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree run --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined. Started again, tree run moves into a leaf of its scope and the scope is its cgroup root. A root is held by one tree run at a time and released when that run ends, killed or not, so two runs never share a root; tree run never takes an ancestor cgroup it finds.
+
 Exit status:
   0  the root is terminated through its one legitimate outcome
-  1  refused, nothing written: StoreInUse naming the holder, or the store or a bindings file cannot be read
+  1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
   5  the step or wall-time budget is spent, or the run was cancelled

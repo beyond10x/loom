@@ -45,9 +45,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 - `Loom::with_argument_schemas`, `arguments::check`, `check_value`, `ArgumentSchemas`, `ArgumentMismatch`; `ProtocolEntry::argument_schema(s)` (story:protocol-argument-schema)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
+- `tree run` names each write of a child's `case_outcome` record in its parent's log: `child opened` and `child closed` carry `record` and `record_digest` (story:child-record-in-the-run-log)
+- `tree status` gives a `case_outcome` entry `name`, the link name of the child it is about (story:child-record-in-the-run-log)
 - Every decision a waiting `tree run` prints runs unchanged: `tree approve --action` without `--capability` takes a person action whose protocol action needs none and records no authority, and one that needs a capability is refused `NotAPersonAction` naming it, with nothing written; a handoff's `tree run` carries the run's own `--confinement`, set through `RunSettings::confinement` (story:every-printed-decision-command-runs)
 - `tree approve --action A --result R` ends a person action with a named result: each `from: effect` entry of `A` records the result its table maps `R` to, and a result an entry does not list is refused `NotAPersonAction` naming the entry and its values, with nothing written; `--reasons TEXT` or `--reasons-file FILE` (with `--result`; at most 65536 bytes and 60 lines; a file inside the workspace, no link followed) are kept as `blobs/<sha256>` and reach a writer whose `retry_when` lists the result as the log of the person's record in `LOOM_RETRY_FEEDBACK`; a person binding's effect table may list named values besides `performed`, never `*`; `b10x_loom_bindings::PERSON_SOURCE`, `reasons_fit`, `read_reasons_file`, `keep_reasons` and `b10x_loom_tree::Reasons` (story:person-action-records-a-named-result)
 - `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
+- `b10x-loom tree run --cgroup-root DIR` runs confined programs under `DIR`, refused `ConfinementRefused` unless it is empty, writable, delegated and holds the run in a child; `confinement::hold_cgroup_root`, `check_cgroup_root`, `CgroupRootHold`, `SubstrateRunner::cgroup_root`; `b10x_loom_cli::start_delegated` (story:tree-run-takes-a-delegated-cgroup)
 - `b10x-loom tree test --suite FILE --protocols DIR --scratch DIR --at INSTANT [--confinement substrate|local] [--report FILE]` runs a `loom.tree-suite/1` suite of scripted tree cycles one after another, each in `<scratch>/<n>/`, and prints per cycle `as expected`, `FAILED` with the first difference, `pending` or `not run`, then the two summary lines; exit 0, 1, or 2 when refused before any cycle. A check is data: a selection over the sources `log`, `records`, `runs`, `cases`, `doc`, `files`, `step` and `suite`, and one of thirteen check kinds; a found value that is not a number, a boolean or a name Loom declares prints as its length and digest. A cycle that uses a part `SUITE_AVAILABILITY` marks waiting is pending and names its story. `b10x_loom_tree::suite`: `decode_suite`, `read_suite`, `evaluate_checks`, `capture_after`, `select`, `run_suite` with `SuiteSettings`, a `SuiteObserver` and a cancel flag; the suite and report types in `ess/domains/tree.yaml` (story:tree-suite-format)
 
 ### Changed
@@ -85,14 +88,21 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
 - `b10x-substrate-host` is built without its `git` feature: `b10x-loom` no longer links libgit2, libssh2, OpenSSL or zlib; a Git workspace source would need the feature back (story:drop-the-substrate-git-feature)
 - **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
+- **Breaking:** `loom::runlog::ChildOpened` and `ChildClosed` gain `record` and `record_digest`, both or neither; Loom 0.58.0 and earlier refuse a run log that holds them (story:child-record-in-the-run-log)
+- **Breaking:** `loom::tree::StatusEvidence` gains `name`; a literal names it (story:child-record-in-the-run-log)
 - **Breaking:** `ArgumentRequestState` gains `Matched` and `Mismatched`, set by the new `loom.run.CheckArguments` (story:protocol-argument-schema)
 - **Breaking:** the generated `behaviour::Context` gains `generate_string`, `TryContext` `try_generate_string` (story:protocol-argument-schema)
 - **Breaking:** a plugin turn proposes only arguments its protocol's schema admits; an action declaring none takes only `{}`; a step whose arguments the schema refuses (a `source.read` without `kind`, or whose `input` is no object) ends the turn `stopped` and no longer reaches the effect port, whose refusal went back to the model (story:protocol-argument-schema)
 - **Breaking:** `inbound-answer@1` and `operator-reply@1` declare `arguments` for each action; their definition digests change (story:protocol-argument-schema)
+- `tree run --confinement substrate` without `--cgroup-root` starts itself again in a delegated scope of its own and never discovers an ancestor cgroup; its refusal names `tree run --cgroup-root` or `--confinement local` (story:tree-run-takes-a-delegated-cgroup)
 
 ### Removed
 
 - No Loom crate depends on `b10x-canon-engineering`; a host that linked it beside Loom chooses its tag itself (story:engineering-protocols-dependency-removed)
+
+### Security
+
+- Two `tree run`s never share a cgroup root: each holds its root by a `flock` on the root's directory, so one run's driver no longer ends another run's confined launches (story:tree-run-takes-a-delegated-cgroup)
 
 ## [0.58.0] - 2026-11-21
 
