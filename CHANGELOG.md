@@ -20,6 +20,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
 - `CanonGovernor::open_children`, `terminate` and `tree`: a `case_open` action opens child cases, each child's outcome replaces its `case_outcome` record in the parent (story:child-case-runtime)
 - `b10x_loom_bindings::OpenEffects` performs an `open` binding; `check_case_open` holds `open` to `case_open` at load (story:child-case-runtime)
+- `b10x_loom_bindings::CopyEffects` copies the latest current record of a kind from another case of the tree; `copy_due` (story:record-copy-between-cases)
+- `loom.bindings.CopiedRecord`, `CopyRefusalReason` and `CopyRefusal`, the copy's observation and its refusals (story:record-copy-between-cases)
 
 ### Changed
 
