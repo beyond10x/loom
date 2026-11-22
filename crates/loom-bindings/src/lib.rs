@@ -54,7 +54,9 @@ pub use child::{
 };
 pub use copy::{COPY_SOURCE, CopyEffects};
 pub use decode::decode;
-pub use handoff::{HandoffCheck, LAUNCH_FAILURE_EXITS, handoff_check_of, run_handoff_check};
+pub use handoff::{
+    HandoffCheck, LAUNCH_FAILURE_EXITS, SIGNAL_EXITS, handoff_check_of, run_handoff_check,
+};
 pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
 pub use program::{ANY_KEY, BLOBS, PROGRAM_SOURCE, ProgramEffects, TIMEOUT_KEY};

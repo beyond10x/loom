@@ -10,11 +10,13 @@
 //! Its standard output followed by its standard error is kept as `blobs/<sha256>` in the store
 //! directory. It records nothing in the case and is not counted as a run of the action.
 //!
-//! An exit status other than 126 and 127 is the check's answer: 0 offers the handoff and any
-//! other skips it. A launch error (the child cannot be built, the runner refuses it, the program
-//! cannot be found or executed, which the launcher reports as 126 or 127), a run killed at its
-//! timeout, a run with no exit status (a signal) and output that cannot be kept are never a skip:
-//! each is a refusal, which stops the run.
+//! An exit status other than 126, 127 and 129 to 192 is the check's answer: 0 offers the handoff
+//! and any other skips it. A launch error (the child cannot be built, the runner refuses it, the
+//! program cannot be found or executed, which the launcher reports as 126 or 127), a run killed
+//! at its timeout, a run a signal ended (with no exit status, as `local` reports it, or with 128
+//! plus the signal, as Substrate does: 137 for SIGKILL, an out-of-memory or cgroup kill
+//! included) and output that cannot be kept are never a skip: each is a refusal, which stops the
+//! run. A check that exits 129 to 192 itself is refused as well.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -34,6 +36,11 @@ use crate::resolve::beside;
 /// The exit statuses a launcher gives a program it cannot execute (126) or find (127): Substrate
 /// starts a program through `/usr/bin/env`, which answers so. Neither is a check's answer.
 pub const LAUNCH_FAILURE_EXITS: [i64; 2] = [126, 127];
+
+/// The exit statuses Substrate gives a child a signal ended, 128 plus the signal (1 to 64), as a
+/// shell does: SIGKILL, which an out-of-memory or cgroup kill sends, is 137. None is a check's
+/// answer.
+pub const SIGNAL_EXITS: std::ops::RangeInclusive<i64> = 129..=192;
 
 /// What one run of a `handoff_when` check answered: its exit status or why it gave none, exactly
 /// one, and the SHA-256 of the blob holding its output when it was kept.
@@ -156,6 +163,14 @@ pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
         HandoffCheck::refused(
             format!(
                 "the check {program} could not be started: exit {code}, the status a launcher gives a program it cannot find or execute"
+            ),
+            kept,
+        )
+    } else if let Some(code) = exit.filter(|code| SIGNAL_EXITS.contains(code)) {
+        HandoffCheck::refused(
+            format!(
+                "the check {program} was ended by a signal: exit {code}, the status Substrate gives a child signal {} ended",
+                code - 128
             ),
             kept,
         )

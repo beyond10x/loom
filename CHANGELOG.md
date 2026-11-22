@@ -121,6 +121,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - No Loom crate depends on `b10x-canon-engineering`; a host that linked it beside Loom chooses its tag itself (story:engineering-protocols-dependency-removed)
 
+### Fixed
+
+- `run_handoff_check` refuses exit 129 to 192 (`SIGNAL_EXITS`, how Substrate reports a signal-ended check), never a skip (story:handoff-when-a-program-decides)
+
 ### Security
 
 - Two `tree run`s never share a cgroup root: each holds its root by a `flock` on the root's directory, so one run's driver no longer ends another run's confined launches (story:tree-run-takes-a-delegated-cgroup)

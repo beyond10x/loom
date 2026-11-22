@@ -195,7 +195,10 @@ actions:
   the binding's `timeout_seconds`. Exit 0 offers the handoff and takes no step; any other exit lets
   the writer run in that step, or leaves a stuck case `Stuck`. A check that cannot be started
   (exit 126 or 127 included), is killed at its timeout or by a signal is never a skip: the run
-  stops `HandoffCheckFailed`, naming the action, and the writer does not run. Each evaluation is
+  stops `HandoffCheckFailed`, naming the action, and the writer does not run. Under `local` a
+  signal leaves no exit status; under Substrate it is exit 128 plus the signal (137 for SIGKILL, as
+  an out-of-memory or cgroup kill ends it), so an exit from 129 to 192 is refused too, one the
+  check gives itself included (`SIGNAL_EXITS`). Each evaluation is
   one `HandoffChecked` line of the case's run log, with the check's exit or refusal and the blob of
   its output. Without `handoff` it is refused `MissingMember`, on another executor
   `MemberNotForExecutor`.

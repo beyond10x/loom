@@ -1657,7 +1657,10 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   Exit 0 takes no step and stops `AwaitingPerson` with the writer's `Handoff`; another exit hands
   the proposal on and the writer runs in that step; no exit status (a refusal of the runner, 126
   or 127, a timeout, a signal, a blob not kept) refuses the run `HandoffCheckFailed` naming the
-  action, exit 1. At a stuck stop such a writer's handoff is offered only on its check's exit 0.
+  action, exit 1. Substrate reports a signal as exit 128 plus the signal (137 for SIGKILL), so
+  129 to 192 (`SIGNAL_EXITS`) refuse too (`bound_retry.rs`,
+  `a_handoff_check_a_signal_ended_as_substrate_reports_it_is_a_refusal`; the fact itself:
+  `confined_child.rs`, `a_confined_child_a_signal_ended_reports_128_and_the_signal`). At a stuck stop such a writer's handoff is offered only on its check's exit 0.
   A `tree approve`d step is not checked. `crates/loom-cli/tests/tree_run/handoff_when.rs` holds
   it; its confinement case skips without delegation unless `LOOM_REQUIRE_DELEGATION` is set. Under
   `local` a missing program and a signal reach the check as a refusal of the runner, so the

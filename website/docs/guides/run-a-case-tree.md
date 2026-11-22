@@ -211,7 +211,9 @@ timeout. Exit 0 takes no step: the run stops `AwaitingPerson` with the writer's 
 (exit 3). Any other exit lets the writer run in the same step. At a stuck stop the handoff of such
 a writer is offered only when its check, run the same way, exits 0; otherwise the stop stays
 `Stuck` (exit 4). A check that cannot be started, is killed at its timeout or by a signal refuses
-the run `HandoffCheckFailed`, naming the action (exit 1), and the writer does not run. Each
+the run `HandoffCheckFailed`, naming the action (exit 1), and the writer does not run; under
+`substrate` a signal ends a check with exit 128 plus the signal (137 for SIGKILL), so every exit
+from 129 to 192 refuses the run. Each
 evaluation writes one `HandoffChecked` line to the case's run log before the stop or the step,
 with the check's `exit` or `refusal` and the `blob_digest` of its output; `tree status` and
 `tree verify` read that line and never run the check.
