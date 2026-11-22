@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:suite-runs-cycles-in-parallel
 kind: story
-status: draft
+status: proposed
 title: The suite runner runs cycles in parallel under local confinement and filters them by name
 summary: SuiteSettings gains workers (default 1) and only; results and observer calls in suite order; cancel starts no further cycle and a cancelled run step ends 'the suite was cancelled'; tree test gains --workers (1..64) and --only; CycleUnknown and SubstrateWorkersUnserved (workers above 1 under substrate, for story:suite-runs-cycles-under-one-cgroup-root); findings left to later
 tags:
@@ -39,7 +39,9 @@ scope:
   path: website/docs/guides/run-a-case-tree.md
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 8
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T12:27:09Z", actor: "agent:loom", revision: 9}
 ---
 ## Outcome
 

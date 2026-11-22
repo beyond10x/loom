@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-test-command
 kind: story
-status: draft
+status: proposed
 title: tree test kills a cycle at its timeout, prints the ten slowest and lists cycles
 summary: --cycle-timeout with a per-cycle cancel handle and CycleTimedOut; slowest line after the summary; --list reads the suite only; decide and requests now wait on story:tree-test-decide-and-requests (D123)
 tags:
@@ -39,7 +39,9 @@ scope:
   path: website/docs/guides/run-a-case-tree.md
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 9
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T12:27:10Z", actor: "agent:loom", revision: 10}
 ---
 ## Outcome
 

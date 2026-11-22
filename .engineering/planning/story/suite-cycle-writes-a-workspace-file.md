@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:suite-cycle-writes-a-workspace-file
 kind: story
-status: draft
+status: proposed
 title: A suite cycle can write or replace a workspace file between two runs of one cycle
 summary: New step kind write in loom.tree-suite/1 with from (a regular file of the suite, no link, at most 1 MiB) and to (a plain relative path in the cycle's workspace, no .., no link followed, written by create_new and rename); nothing in the run log or store; a failure is a difference of kind write; older Loom refuses StepKindUnknown; SUITE_AVAILABILITY entry
 tags:
@@ -40,7 +40,9 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/run-a-case-tree.md
-revision: 7
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T12:27:09Z", actor: "agent:loom", revision: 8}
 ---
 ## Outcome
 

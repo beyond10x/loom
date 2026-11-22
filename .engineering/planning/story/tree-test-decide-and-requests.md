@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-test-decide-and-requests
 kind: story
-status: draft
+status: proposed
 title: A suite cycle decides a tree's decision request and reads the requests
 summary: decide step and scripted decide entry decide a tree decision request in process, as decisions --tree; the requests source lists a case's requests and decisions; the three SUITE_AVAILABILITY entries become Available; first-cut acceptance
 tags:
@@ -27,7 +27,9 @@ scope:
   path: crates/loom-tree/src/suite/select.rs
 - confidence: cited
   path: website/docs/guides/run-a-case-tree.md
-revision: 2
+revision: 3
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T12:27:10Z", actor: "agent:loom", revision: 3}
 ---
 ## Outcome
 

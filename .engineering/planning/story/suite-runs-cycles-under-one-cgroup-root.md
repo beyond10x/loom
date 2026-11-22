@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:suite-runs-cycles-under-one-cgroup-root
 kind: story
-status: draft
+status: proposed
 title: tree test runs cycles side by side under Substrate
 summary: tree test --confinement substrate runs with --cgroup-root or a delegated scope started again, through embed::TreeRunner's runner (no SuiteSettings field); all cycle workspaces children of one directory (<scratch>/work/<n>, <scratch>/store/<n>) so one driver serves them; workers 2..16 under substrate, above 16 SubstrateWorkersUnserved; no cross-cycle workspace or process visibility
 tags:
@@ -49,7 +49,9 @@ scope:
   path: website/docs/guides/run-a-case-tree.md
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 4
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T12:27:10Z", actor: "agent:loom", revision: 5}
 ---
 ## Outcome
 
