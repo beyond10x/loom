@@ -1,9 +1,11 @@
 //! What a case of the tree already did, read from its run log: the deterministic selector's
 //! [`StepHistory`].
 //!
-//! An action was performed at a case revision when the log holds an `action finished` line for it
-//! after an `evaluated` line of that revision and before the next `evaluated` line, and at the
-//! revision its step left the case at, so that a writer is not taken again on its own write. Whether an
+//! An action was performed at the revision of its step and at the revision its step left, as the
+//! artifact moves its `action finished` lines name date them from the last `evaluated` line
+//! (`story:action-dated-by-revisions-its-step-left`), so that a writer is not taken again on its
+//! own write and an action whose inputs a later step moved is useful again. A log whose lines name
+//! no move (one an older Loom wrote) is dated by its `evaluated` lines, as before. Whether an
 //! action is due again whatever its history (a retry, a pending copy) is the host's answer, given
 //! as a set of actions; so is whether an action is idle whatever its history (a copy whose source
 //! holds nothing new), which counts as performed at every revision.
@@ -41,38 +43,36 @@ pub struct LogHistory {
 
 impl LogHistory {
     /// The history the lines of a case's log give, the case being at `current` now, with the
-    /// actions `due` again. An action counts as performed at the revision it was taken at and at
-    /// the one its step left: that of the next `evaluated` line, else `current`; a step its cancel
-    /// ended counts at neither.
+    /// actions `due` again.
+    ///
+    /// An action counts as performed at the revision of its step and at the revision its step
+    /// left: the revision of the last `evaluated` line raised by one per move each `action
+    /// finished` line since names, its own included. A step its cancel ended counts at neither,
+    /// and its moves still raise the revision. When the moves an interval's lines name do not
+    /// account for the revision of its closing `evaluated` line (else `current`), as in a log an
+    /// older Loom wrote without moves, each line of it that names no move also counts at that
+    /// revision; a line before the first `evaluated` line counts at that revision alone.
     pub fn new(lines: &[RunLogLine], current: i64, due: BTreeSet<String>) -> Self {
         let mut performed = BTreeSet::new();
         let mut count = BTreeMap::new();
-        let mut revision = None;
-        let mut left: Vec<String> = Vec::new();
+        let mut interval = Interval::default();
         for line in lines {
             match &line.event {
                 RunLogEvent::Evaluated(evaluated) => {
-                    revision = Some(evaluated.case_revision);
-                    for action in left.drain(..) {
-                        performed.insert((action, evaluated.case_revision));
-                    }
+                    let closed = std::mem::replace(
+                        &mut interval,
+                        Interval::opened_at(evaluated.case_revision),
+                    );
+                    closed.close(evaluated.case_revision, &mut performed);
                 }
                 RunLogEvent::ActionFinished(finished) => {
                     *count.entry(finished.action.clone()).or_insert(0) += 1;
-                    if cancelled(finished) {
-                        continue;
-                    }
-                    if let Some(revision) = revision {
-                        performed.insert((finished.action.clone(), revision));
-                    }
-                    left.push(finished.action.clone());
+                    interval.step(finished);
                 }
                 _ => {}
             }
         }
-        for action in left {
-            performed.insert((action, current));
-        }
+        interval.close(current, &mut performed);
         Self {
             performed,
             finished: count,
@@ -91,6 +91,68 @@ impl LogHistory {
     /// The number of `action finished` lines for `action` the history read, at any revision.
     pub fn performed(&self, action: &str) -> usize {
         self.finished.get(action).copied().unwrap_or(0)
+    }
+}
+
+/// The `action finished` lines of a log between one `evaluated` line (none before the first) and
+/// the next, or the end of the log.
+#[derive(Debug, Default)]
+struct Interval {
+    /// The case revision of the `evaluated` line that opened it; `None` before the first.
+    opened: Option<i64>,
+    /// The moves its lines named so far, a cancelled step's included.
+    moves: i64,
+    /// Each step its cancel did not end, in log order.
+    steps: Vec<Step>,
+}
+
+/// One step of an [`Interval`] its cancel did not end.
+#[derive(Debug)]
+struct Step {
+    action: String,
+    /// The revision of its step and the revision it left, when the interval has an opening one.
+    dated: Option<(i64, i64)>,
+    /// Whether its line names a move.
+    moved: bool,
+}
+
+impl Interval {
+    fn opened_at(revision: i64) -> Self {
+        Self {
+            opened: Some(revision),
+            ..Self::default()
+        }
+    }
+
+    /// Takes in the line of one step.
+    fn step(&mut self, finished: &ActionFinished) {
+        let taken = self.opened.map(|opened| opened.saturating_add(self.moves));
+        let moves = i64::try_from(finished.revisions.len()).unwrap_or(i64::MAX);
+        self.moves = self.moves.saturating_add(moves);
+        if cancelled(finished) {
+            return;
+        }
+        self.steps.push(Step {
+            action: finished.action.clone(),
+            dated: taken.map(|taken| (taken, taken.saturating_add(moves))),
+            moved: moves > 0,
+        });
+    }
+
+    /// Counts each step as performed, the interval closing at `revision`.
+    fn close(self, revision: i64, performed: &mut BTreeSet<(String, i64)>) {
+        let accounted = self
+            .opened
+            .is_some_and(|opened| opened.saturating_add(self.moves) == revision);
+        for step in self.steps {
+            if let Some((taken, left)) = step.dated {
+                performed.insert((step.action.clone(), taken));
+                performed.insert((step.action.clone(), left));
+            }
+            if !accounted && (!step.moved || step.dated.is_none()) {
+                performed.insert((step.action, revision));
+            }
+        }
     }
 }
 
@@ -245,11 +307,8 @@ mod tests {
                 status: CatalogueEntryStatus::Admissible,
             })
             .collect();
-        let selector = DeterministicSelector::new(
-            CaseId("root".into()),
-            Facts(revision, actions),
-            history,
-        );
+        let selector =
+            DeterministicSelector::new(CaseId("root".into()), Facts(revision, actions), history);
         selector
             .select(
                 &SelectionContext {
@@ -364,11 +423,7 @@ mod tests {
                 10,
             ),
             history(
-                vec![
-                    evaluated(9),
-                    finished("a", None, 0),
-                    finished("b", None, 0),
-                ],
+                vec![evaluated(9), finished("a", None, 0), finished("b", None, 0)],
                 10,
             ),
         ] {

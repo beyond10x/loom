@@ -34,6 +34,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Fixed
 
+- `LogHistory` dates an action by the moves its `action finished` line names, so a step a later step's write follows is taken again; older logs read as before (story:action-dated-by-revisions-its-step-left)
 - `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
 
 ### Security
