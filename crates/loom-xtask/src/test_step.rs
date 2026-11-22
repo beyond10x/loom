@@ -8,7 +8,10 @@
 //! doc tests). It reads every test's time from the JUnit report and prints the ten slowest on every
 //! run, green or red, then fails when either run failed, a test took longer than
 //! [`TEST_BUDGET`], a binary of [`BINARY_BUDGETS`] longer than its summed budget, or the step
-//! longer than [`STEP_BUDGET`]. It refuses to start while the test sync switch
+//! longer than [`STEP_BUDGET`]. Its summary line counts the tests that skipped for a missing
+//! prerequisite (a line `skipped:` in their output), and it names each; where a delegated user
+//! scope starts it sets [`REQUIRE_DELEGATION`] on its nextest run, so a delegated test that would
+//! skip fails instead ([`require_delegation`]). It refuses to start while the test sync switch
 //! (`B10X_LOOM_TEST_UNSYNCED_STORE`) is in its own environment. The wall time is taken inside the
 //! step, so a wait for a build slot before it starts does not count, and it starts once the test
 //! binaries are built (`cargo test --workspace --locked --no-run`, which nextest reuses), so a
@@ -48,6 +51,62 @@ pub fn refuse_the_switch(value: Option<&std::ffi::OsStr>) -> Result<(), String> 
     }
 }
 
+/// The variable the tests that need a delegated user scope read: set, a missing prerequisite fails
+/// them instead of skipping them (`crates/loom-cli/tests/tree_run/delegated_cgroup.rs`).
+pub const REQUIRE_DELEGATION: &str = "LOOM_REQUIRE_DELEGATION";
+
+/// Whether the step sets [`REQUIRE_DELEGATION`] to `1` on its nextest run, and the line it prints
+/// about it. A value the caller set stays as it is and `probe` is not run; otherwise the step sets
+/// it when `probe` (a delegated user scope starts here) passes, so a delegated test that skips
+/// fails the step, and leaves it unset, saying why, when the probe fails.
+pub fn require_delegation(
+    set: Option<&std::ffi::OsStr>,
+    probe: impl FnOnce() -> Result<(), String>,
+) -> (bool, String) {
+    if let Some(value) = set {
+        return (
+            false,
+            format!("test step: {REQUIRE_DELEGATION}={value:?} as the caller set it"),
+        );
+    }
+    match probe() {
+        Ok(()) => (
+            true,
+            format!(
+                "test step: a delegated user scope starts here, so {REQUIRE_DELEGATION}=1: a \
+                 delegated test that skips fails"
+            ),
+        ),
+        Err(why) => (
+            false,
+            format!(
+                "test step: {REQUIRE_DELEGATION} not set: no delegated user scope starts here \
+                 ({DELEGATION_PROBE}: {why}); the tests that need one skip and are named below"
+            ),
+        ),
+    }
+}
+
+/// The probe of a delegated user scope, as the tests that need one start it.
+const DELEGATION_PROBE: &str = "systemd-run --user --scope --quiet -p Delegate=yes true";
+
+/// Runs [`DELEGATION_PROBE`]: `Ok` when it exits 0, else what it said.
+fn probe_delegation() -> Result<(), String> {
+    let output = Command::new("systemd-run")
+        .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "true"])
+        .output()
+        .map_err(|e| format!("cannot start: {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
 /// Test binaries held to a summed time of their own, beside [`TEST_BUDGET`] and [`STEP_BUDGET`]:
 /// `b10x-loom-cli::tree_run` (`story:tree-run-tests-fit-the-budget`).
 pub const BINARY_BUDGETS: [(&str, Duration); 1] =
@@ -61,6 +120,8 @@ pub struct Case {
     pub name: String,
     pub seconds: f64,
     pub failed: bool,
+    /// The test printed a line starting `skipped:` (a missing prerequisite) and passed.
+    pub skipped: bool,
 }
 
 /// The step over the workspace, or over `packages` when any are named.
@@ -136,6 +197,40 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
         "test step: test binaries built in {:.1} s (not counted in the budget)",
         build_started.elapsed().as_secs_f64()
     );
+    if runs(SHARED_TREES.0) {
+        let fill_started = Instant::now();
+        let fill = with(
+            &["test"],
+            &[
+                "--locked",
+                "--test",
+                SHARED_TREES.1,
+                "--",
+                "--ignored",
+                "--exact",
+                SHARED_TREES.2,
+            ],
+        );
+        let filled = cargo(root, &fill)?;
+        if filled != Some(0) {
+            return Err(format!(
+                "test step: making the shared trees (cargo {}) exited {}",
+                fill.join(" "),
+                describe(filled)
+            ));
+        }
+        println!(
+            "test step: the shared trees of {}::{} made in {:.1} s (not counted in the budget)",
+            SHARED_TREES.0,
+            SHARED_TREES.1,
+            fill_started.elapsed().as_secs_f64()
+        );
+    }
+    let (require, said) = require_delegation(
+        std::env::var_os(REQUIRE_DELEGATION).as_deref(),
+        probe_delegation,
+    );
+    println!("{said}");
 
     let started = Instant::now();
     let report = target_dir(root).join("nextest/default/junit.xml");
@@ -150,7 +245,15 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
         }
         None => println!("test step: nextest's default test threads on {cpus} CPUs"),
     }
-    let nextest = cargo(root, &nextest)?;
+    let mut command = cargo_command(root);
+    if require {
+        command.env(REQUIRE_DELEGATION, "1");
+    }
+    let nextest = command
+        .args(&nextest)
+        .status()
+        .map_err(|e| format!("run cargo {}: {e}", nextest.join(" ")))?
+        .code();
     let nextest_seconds = started.elapsed().as_secs_f64();
     let doc_started = Instant::now();
     let doc = if packages.is_empty() {
@@ -204,12 +307,14 @@ pub fn verdict(
     sorted.sort_by(|a, b| b.seconds.total_cmp(&a.seconds));
     let binaries: std::collections::BTreeSet<&str> =
         cases.iter().map(|case| case.binary.as_str()).collect();
+    let skipped: Vec<&Case> = cases.iter().filter(|case| case.skipped).collect();
     let mut text = format!(
-        "test step: {} test(s) in {} binar{} by nextest ({nextest_seconds:.1} s), doc tests \
-         ({doc_seconds:.1} s); wall time {:.1} s of {} s\nslowest {SLOWEST} test(s):",
+        "test step: {} test(s) in {} binar{} by nextest ({nextest_seconds:.1} s), {} skipped, \
+         doc tests ({doc_seconds:.1} s); wall time {:.1} s of {} s\nslowest {SLOWEST} test(s):",
         cases.len(),
         binaries.len(),
         if binaries.len() == 1 { "y" } else { "ies" },
+        skipped.len(),
         wall.as_secs_f64(),
         STEP_BUDGET.as_secs(),
     );
@@ -221,6 +326,15 @@ pub fn verdict(
             case.name,
             if case.failed { "  FAILED" } else { "" }
         ));
+    }
+    if !skipped.is_empty() {
+        text.push_str(&format!(
+            "\nskipped {} test(s), a prerequisite missing:",
+            skipped.len()
+        ));
+        for case in &skipped {
+            text.push_str(&format!("\n  {} {}", case.binary, case.name));
+        }
     }
 
     let mut failures = Vec::new();
@@ -272,6 +386,12 @@ pub fn verdict(
     }
     (text, failures)
 }
+
+/// The package, test binary and ignored test that make the trees the tests of
+/// `b10x-loom-cli::tree_run` share (`crates/loom-cli/tests/tree_run.rs`): run after the build and
+/// before the timed run, so no test of the step builds one or waits on the lock of another that
+/// does, a wait each waiter counted in [`BINARY_BUDGETS`].
+const SHARED_TREES: (&str, &str, &str) = ("b10x-loom-cli", "tree_run", "the_shared_trees_are_made");
 
 /// The package whose `crd` tests read the schema cache.
 const CRD_PACKAGE: &str = "b10x-loom-resource";
@@ -489,14 +609,28 @@ pub fn parse_junit(xml: &str) -> Vec<Case> {
                 })
                 .unwrap_or_default()
         };
+        let failed = body.contains("<failure") || body.contains("<error");
         cases.push(Case {
             binary: attribute("classname"),
             name: attribute("name"),
             seconds: attribute("time").parse().unwrap_or(0.0),
-            failed: body.contains("<failure") || body.contains("<error"),
+            failed,
+            skipped: !failed && printed_a_skip(body),
         });
     }
     cases
+}
+
+/// Whether the output a `<testcase>` holds (its `<system-out>` and `<system-err>`, stored for a
+/// passing test by `store-success-output` in `.config/nextest.toml`) has a line that starts with
+/// `skipped:`, as a test that skips for a missing prerequisite prints.
+fn printed_a_skip(body: &str) -> bool {
+    let text = unescape(body)
+        .replace("<system-out>", "\n")
+        .replace("<system-err>", "\n")
+        .replace("<![CDATA[", "\n");
+    text.lines()
+        .any(|line| line.trim_start().starts_with("skipped:"))
 }
 
 fn unescape(text: &str) -> String {
@@ -554,18 +688,21 @@ mod tests {
                     name: "gate_holds_on_the_specification".to_owned(),
                     seconds: 1.25,
                     failed: false,
+                    skipped: false,
                 },
                 Case {
                     binary: "b10x-loom-executor::ess_gate".to_owned(),
                     name: "a_slow_one".to_owned(),
                     seconds: 60.004,
                     failed: true,
+                    skipped: false,
                 },
                 Case {
                     binary: "loom-xtask::checks".to_owned(),
                     name: "a & b".to_owned(),
                     seconds: 0.01,
                     failed: false,
+                    skipped: false,
                 },
             ]
         );
@@ -650,6 +787,139 @@ mod tests {
         let within = parse_junit(&tree_run_report(&[30.0, 29.0]));
         let (_, failures) = verdict(&within, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
         assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    /// A report holding one passing test that printed a skip, one that did not, and one whose
+    /// output only mentions the word.
+    const SKIPPING: &str = r#"<testsuites name="nextest-run">
+    <testsuite name="b10x-loom-cli::tree_run" tests="3">
+        <testcase name="delegated_cgroup::a_held_root" classname="b10x-loom-cli::tree_run" timestamp="t" time="0.010">
+            <system-out></system-out>
+            <system-err>skipped: missing prerequisite: a user systemd manager that starts a delegated scope
+</system-err>
+        </testcase>
+        <testcase name="a_one_case_tree" classname="b10x-loom-cli::tree_run" timestamp="t" time="1.500">
+            <system-out>
+running 1 test
+</system-out>
+        </testcase>
+        <testcase name="mentions" classname="b10x-loom-cli::tree_run" timestamp="t" time="0.200">
+            <system-err>the word skipped: inside a line is no skip
+</system-err>
+        </testcase>
+    </testsuite>
+</testsuites>
+"#;
+
+    #[test]
+    fn the_summary_line_counts_the_skipped_tests_and_names_each() {
+        let cases = parse_junit(SKIPPING);
+        let (text, failures) = verdict(&cases, Some(0), Some(0), Duration::from_secs(5), 1.0, 1.0);
+        assert!(failures.is_empty(), "{failures:?}");
+        let summary = text.lines().next().unwrap();
+        assert!(
+            summary.contains("3 test(s) in 1 binary") && summary.contains("1 skipped"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "skipped 1 test(s), a prerequisite missing:\n  b10x-loom-cli::tree_run delegated_cgroup::a_held_root"
+            ),
+            "{text}"
+        );
+        let skipped: Vec<&str> = cases
+            .iter()
+            .filter(|case| case.skipped)
+            .map(|case| case.name.as_str())
+            .collect();
+        assert_eq!(skipped, ["delegated_cgroup::a_held_root"], "{text}");
+
+        let (text, _) = verdict(
+            &parse_junit(REPORT),
+            Some(0),
+            Some(0),
+            Duration::from_secs(5),
+            1.0,
+            1.0,
+        );
+        assert!(
+            text.lines().next().unwrap().contains("0 skipped") && !text.contains("skipped 0"),
+            "{text}"
+        );
+    }
+
+    /// The commands of a task that take minutes in one build-pool job: the synthesis of `ess/`
+    /// (`suite-generate`, `suite-check`, 534.5 s on 2026-11-21) and the slow lane's tests.
+    const LONG_COMMANDS: [&str; 3] = ["suite-generate", "suite-check", "--profile slow"];
+
+    /// The longest a build-pool job may run when it names its time (`slot --timeout`,
+    /// `SLOT_TIMEOUT`); without a name it is ended at 10 minutes.
+    const POOL_MOST: Duration = Duration::from_secs(30 * 60);
+
+    /// Every task that runs a command of [`LONG_COMMANDS`] names the pool time of 30 minutes, and
+    /// the slow profile kills one test at least 10 minutes before the pool would end its job.
+    #[test]
+    fn a_task_that_takes_minutes_names_its_pool_time_and_a_slow_test_ends_before_it() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let taskfile: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&fs::read_to_string(root.join("Taskfile.yml")).unwrap())
+                .unwrap();
+        let tasks = taskfile["tasks"].as_mapping().unwrap();
+        let mut long = Vec::new();
+        for (name, task) in tasks {
+            let name = name.as_str().unwrap();
+            let commands = task["cmds"].as_sequence().cloned().unwrap_or_default();
+            let runs_long = commands.iter().any(|command| {
+                command
+                    .as_str()
+                    .is_some_and(|line| LONG_COMMANDS.iter().any(|long| line.contains(long)))
+            });
+            if runs_long {
+                long.push(name.to_owned());
+                assert_eq!(
+                    task["env"]["SLOT_TIMEOUT"].as_str(),
+                    Some("30m"),
+                    "task {name} runs a command that takes minutes and names no pool time of 30m"
+                );
+            }
+        }
+        assert_eq!(long, ["suite-generate", "slow"], "{long:?}");
+
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let limit = &config["profile"]["slow"]["slow-timeout"];
+        let period: u64 = limit["period"]
+            .as_str()
+            .and_then(|period| period.strip_suffix('s'))
+            .and_then(|seconds| seconds.parse().ok())
+            .unwrap();
+        let terminate = u64::try_from(limit["terminate-after"].as_integer().unwrap()).unwrap();
+        let per_test = Duration::from_secs(period * terminate);
+        assert!(
+            per_test + Duration::from_secs(10 * 60) <= POOL_MOST,
+            "the slow profile lets one test run {per_test:?}, too close to the pool's {POOL_MOST:?}"
+        );
+    }
+
+    #[test]
+    fn the_step_requires_delegation_where_a_delegated_scope_starts() {
+        let passes = || Ok(());
+        let fails = || Err("Failed to connect to user scope bus".to_owned());
+        let (set, said) = require_delegation(None, passes);
+        assert!(set, "{said}");
+        assert!(said.contains("LOOM_REQUIRE_DELEGATION=1"), "{said}");
+        let (set, said) = require_delegation(None, fails);
+        assert!(!set, "{said}");
+        assert!(
+            said.contains("not set") && said.contains("Failed to connect to user scope bus"),
+            "{said}"
+        );
+        let (set, said) = require_delegation(Some(std::ffi::OsStr::new("1")), || {
+            panic!("the probe runs only when the caller set nothing")
+        });
+        assert!(!set, "the caller's value stays: {said}");
+        assert!(said.contains("as the caller set it"), "{said}");
     }
 
     #[test]

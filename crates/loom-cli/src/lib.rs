@@ -293,13 +293,13 @@ pub enum TreeCommand {
 }
 
 /// What `tree test --help` says about the cycles, the output and the exit status.
-pub const TREE_TEST_HELP: &str = "Cycle n works in <scratch>/<n>/ (store/, work/) and nothing is \
-written outside --scratch, which must be absent or empty. The protocols are read once, as tree \
-open --protocols reads them. Each step runs through the function of its tree command in this \
-process; no b10x-loom process is started. A cycle that uses a step kind, source or member that \
-waits for a later story is pending and not run; one whose `when` fails is not run. One line is \
-printed per cycle as it ends, then the two summary lines; a found value that is not a number, a \
-boolean or a name Loom declares is printed as its length and digest.
+pub const TREE_TEST_HELP: &str = "Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but \
+the --report file is written outside --scratch, which must be absent or empty. The protocols are \
+read once, as tree open --protocols reads them. Each step runs through the function of its tree \
+command in this process; no b10x-loom process is started. A cycle that uses a step kind, source \
+or member that waits for a later story is pending and not run; one whose `when` fails is not run. \
+One line is printed per cycle as it ends, then the two summary lines; a found value that is not a \
+number, a boolean or a name Loom declares is printed as its length and digest.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected
@@ -311,6 +311,12 @@ pub const TREE_TEST_FAILED: u8 = 1;
 
 /// The exit status of `tree test` when it was refused before any cycle.
 pub const TREE_TEST_REFUSED: u8 = 2;
+
+/// Why `tree test` refuses its default confinement, and the remedy it accepts: the detail of its
+/// `ConfinementRefused` refusal before any cycle.
+pub const TREE_TEST_CONFINEMENT_PRECONDITION: &str = "CgroupUndelegated: tree test takes no \
+cgroup root yet, so its default confinement, substrate, cannot confine a program; pass \
+--confinement local to run every program unconfined";
 
 /// The arguments of `b10x-loom tree test`.
 #[derive(Debug, Args)]
@@ -329,7 +335,7 @@ pub struct TreeTestArgs {
     #[arg(long, value_name = "INSTANT")]
     pub at: String,
     /// The confinement every bound program starts under. `substrate` needs a delegated cgroup
-    /// root, which `tree test` does not take yet: it is refused before any cycle.
+    /// root, which `tree test` does not take yet: it is refused before any cycle; pass `local`.
     #[arg(long, value_enum, default_value = "substrate")]
     pub confinement: TreeConfinement,
     /// Also write the result as one loom.tree.SuiteReport JSON document to this file.
@@ -413,12 +419,16 @@ Confinement: ",
 root is held by one tree run at a time and released when that run ends, killed or not, so two runs \
 never share a root; tree run never takes an ancestor cgroup it finds.
 
+SIGTERM or SIGINT cancels the run: a program it is running is stopped with every process it \
+started and its step recorded cancelled, and the run ends Cancelled with exit status 5; a later \
+signal changes nothing.
+
 Exit status:
   0  the root is terminated through its one legitimate outcome
   1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
-  5  the step or wall-time budget is spent, or the run was cancelled"
+  5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run"
 );
 
 /// Set in a `b10x-loom` that `run` or `tree run` started again in a delegated scope

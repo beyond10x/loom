@@ -312,6 +312,13 @@ Before a change is reported done, in this order:
    slowest tests on every run and fails over 120 s
    (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
    `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s.
+   Before its timed run it makes the trees those tests share (`the_shared_trees_are_made`, an
+   ignored test of `tree_run.rs`), so no test of the run builds one or waits on the lock of
+   another that does. Its summary line counts the tests that printed a line `skipped:` (a missing
+   prerequisite; nextest's JUnit report keeps a passing test's output) and names each. Where
+   `systemd-run --user --scope -p Delegate=yes true` passes it sets `LOOM_REQUIRE_DELEGATION=1` on
+   its run, so a delegated test that would skip fails; CI's step `Probe a delegated user scope`
+   sets it for `task check` when the same probe passes there.
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
@@ -327,7 +334,11 @@ Before a change is reported done, in this order:
 
 The slow lane is `task slow`, started on its own and never by `task check`: it synthesizes `ess/`
 again and fails unless `generated/ess/loom/` is equal byte for byte (§ ESS), then runs every test
-named `slow_` (`cargo nextest run --profile slow`, `.config/nextest.toml`). Run it after every
+named `slow_` (`cargo nextest run --profile slow`, `.config/nextest.toml`), built in a pool job of
+their own first. `task slow` and `task suite-generate` name 30 minutes of pool time
+(`SLOT_TIMEOUT: 30m`), and the slow profile kills one test at 20 minutes, 10 before the pool ends
+its job (`a_task_that_takes_minutes_names_its_pool_time_and_a_slow_test_ends_before_it` in
+`test_step.rs`). Run it after every
 change under `ess/`, with `task suite-generate` before it, and after a change to the code a
 `slow_` test covers. A test that cannot meet the budget of `~/beyond10x/AGENTS.md` § Tests stay
 fast is renamed `slow_…` and runs there, never deleted; so is a test that starts a nested `cargo`
@@ -1647,7 +1658,10 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   with `next` the action the selector would take (`next_action`, nothing written); a step its
   cancel ended (refusal `Cancelled: …`) writes its `action finished` line and stops the run
   `Cancelled` naming its action. The run writes no `action started` line; the tests wait on the
-  program's own start marker (`crates/loom-tree/tests/main.rs`, `mod cancel`).
+  program's own start marker (`crates/loom-tree/tests/main.rs`, `mod cancel`). `b10x-loom tree
+  run` sets the flag on SIGTERM or SIGINT (`cancel_on_signals` in `tree.rs`, taken only by the
+  process that runs the steps, never by one that started itself again), so it ends exit 5 and no
+  bound program outlives it; a later signal changes nothing (`tests/tree_run/signals.rs`).
 - A writer's `handoff_when` (`handoff.rs`, `story:handoff-when-a-program-decides`): `Checked`
   wraps the step's executor, so once the deterministic selector picked an action whose binding
   carries one, `b10x_loom_bindings::run_handoff_check` runs it before the loop performs the step,

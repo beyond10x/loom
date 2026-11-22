@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use clap::ValueEnum as _;
 
@@ -25,9 +26,9 @@ use serde_json::json;
 
 use crate::{
     REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
-    TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs, TreeCloseArgs, TreeCommand,
-    TreeConfinement, TreeOpenArgs, TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated,
-    tree_run_exit_status,
+    TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs,
+    TreeCloseArgs, TreeCommand, TreeConfinement, TreeOpenArgs, TreeRunArgs, TreeStoreArgs,
+    TreeTestArgs, start_delegated, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -135,6 +136,19 @@ fn tree_runner(
 fn substrate_runner(held: Option<&TreeRunner>) -> Result<Arc<dyn TestRunner>, Refused> {
     held.map(TreeRunner::runner)
         .ok_or_else(|| confinement_refused("CgroupUndelegated: tree run holds no cgroup root"))
+}
+
+/// The runner of `tree test`'s `confinement`: `local` as `tree run` opens it; `substrate` refused
+/// with `tree test`'s own precondition and remedy ([`TREE_TEST_CONFINEMENT_PRECONDITION`]), since
+/// `tree test` takes no cgroup root and never names `tree run`'s.
+fn test_runner(confinement: TreeConfinement) -> Result<Arc<dyn TestRunner>, Refused> {
+    match confinement {
+        TreeConfinement::Substrate => Err(Refused::new(
+            TreeRefusalReason::ConfinementRefused,
+            TREE_TEST_CONFINEMENT_PRECONDITION,
+        )),
+        TreeConfinement::Local => tree_runner(confinement, None),
+    }
 }
 
 /// A `ConfinementRefused` refusal saying `detail`, then the precondition and remedy of `tree run`.
@@ -252,6 +266,10 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         Some(Placement::Held(runner)) => Some(runner),
         None => None,
     };
+    // Taken by the process that runs the steps alone: one that started itself again above waits
+    // for that run and handles no signal of its own, as before.
+    let cancel = Arc::new(AtomicBool::new(false));
+    cancel_on_signals(Arc::clone(&cancel))?;
     let catalog = tree_catalog(&resolved(&arguments.store)?)?;
     let settings = RunSettings {
         max_steps: arguments.max_steps,
@@ -268,7 +286,7 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         &catalog,
         &settings,
         None,
-        None,
+        Some(&cancel),
     )
     .map_err(|mut refused| {
         // A refusal of the confinement names tree run's own remedy, never `run`'s.
@@ -305,6 +323,52 @@ fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
         );
     }
     Ok(tree_run_exit_status(ran.stop))
+}
+
+/// Sets `cancel` on the first SIGTERM or SIGINT, so the run stops its program and ends
+/// `Cancelled` (exit 5) instead of dying with the program still running; a later signal changes
+/// nothing, since ending at once would leave the program running. The signals are taken before
+/// this returns, and a thread waits for them; one that cannot be taken refuses the run before it
+/// starts anything.
+fn cancel_on_signals(cancel: Arc<AtomicBool>) -> Result<(), Refused> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let refused = |why: String| {
+        Refused::new(
+            TreeRefusalReason::ConfinementRefused,
+            format!("{why}: a signal would end tree run with its program still running"),
+        )
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| refused(format!("no runtime for the stop signals: {e}")))?;
+    let (mut terminate, mut interrupt) = {
+        let _entered = runtime.enter();
+        let taken = |kind: SignalKind, name: &str| {
+            signal(kind).map_err(|e| refused(format!("{name} cannot be handled: {e}")))
+        };
+        (
+            taken(SignalKind::terminate(), "SIGTERM")?,
+            taken(SignalKind::interrupt(), "SIGINT")?,
+        )
+    };
+    std::thread::spawn(move || {
+        runtime.block_on(async {
+            tokio::select! {
+                _ = terminate.recv() => {}
+                _ = interrupt.recv() => {}
+            }
+            cancel.store(true, Ordering::SeqCst);
+            eprintln!("b10x-loom: tree run: cancelling, stopping the running program first");
+            loop {
+                tokio::select! {
+                    _ = terminate.recv() => {}
+                    _ = interrupt.recv() => {}
+                }
+            }
+        });
+    });
+    Ok(())
 }
 
 /// `word` as one word of a POSIX shell: bare when it holds only safe characters, else quoted.
@@ -428,7 +492,7 @@ fn test(arguments: &TreeTestArgs) -> u8 {
         Ok(paths) => paths,
         Err(refused) => return tree_refused(refused),
     };
-    let runner = match tree_runner(arguments.confinement, None) {
+    let runner = match test_runner(arguments.confinement) {
         Ok(runner) => runner,
         Err(refused) => return tree_refused(refused),
     };
@@ -520,6 +584,18 @@ mod tests {
             refused.0.detail
         );
         assert!(tree_runner(TreeConfinement::Substrate, None).is_err());
+
+        let Err(refused) = test_runner(TreeConfinement::Substrate) else {
+            panic!("a substrate runner for tree test");
+        };
+        assert_eq!(refused.0.reason, TreeRefusalReason::ConfinementRefused);
+        assert!(
+            refused.0.detail.contains("--confinement local")
+                && !refused.0.detail.contains("tree run")
+                && !refused.0.detail.contains("--cgroup-root"),
+            "{}",
+            refused.0.detail
+        );
 
         let root = Path::new("/sys/fs/cgroup/loom-held-root");
         let refused = TreeRunner::on_root(root).unwrap_err();

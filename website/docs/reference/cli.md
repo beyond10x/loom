@@ -712,12 +712,14 @@ Every open child takes its steps before its parent's next one; each step is sele
 
 Confinement: the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree run starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree run --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined. Started again, tree run moves into a leaf of its scope and the scope is its cgroup root. A root is held by one tree run at a time and released when that run ends, killed or not, so two runs never share a root; tree run never takes an ancestor cgroup it finds.
 
+SIGTERM or SIGINT cancels the run: a program it is running is stopped with every process it started and its step recorded cancelled, and the run ends Cancelled with exit status 5; a later signal changes nothing.
+
 Exit status:
   0  the root is terminated through its one legitimate outcome
   1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
-  5  the step or wall-time budget is spent, or the run was cancelled
+  5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run
 ```
 
 ## `b10x-loom tree approve`
@@ -819,11 +821,11 @@ Usage: b10x-loom tree test [OPTIONS] --suite <FILE> --protocols <DIR> --scratch 
 | `--protocols <DIR>` | yes | none | The directory whose `.yaml` files are the protocols of every cycle's tree |
 | `--scratch <DIR>` | yes | none | The directory the cycles work in: absent or empty |
 | `--at <INSTANT>` | yes | none | The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ` |
-| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` needs a delegated cgroup root, which `tree test` does not take yet: it is refused before any cycle |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` needs a delegated cgroup root, which `tree test` does not take yet: it is refused before any cycle; pass `local` |
 | `--report <FILE>` | no | none | Also write the result as one loom.tree.SuiteReport JSON document to this file |
 
 ```text
-Cycle n works in <scratch>/<n>/ (store/, work/) and nothing is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle as it ends, then the two summary lines; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
+Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but the --report file is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle as it ends, then the two summary lines; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected
