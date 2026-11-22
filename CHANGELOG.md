@@ -40,6 +40,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
+- `tree run` names each write of a child's `case_outcome` record in its parent's log: `child opened` and `child closed` carry `record` and `record_digest` (story:child-record-in-the-run-log)
+- `tree status` gives a `case_outcome` entry `name`, the link name of the child it is about (story:child-record-in-the-run-log)
 
 ### Changed
 
@@ -75,6 +77,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
 - **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
 - **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
+- **Breaking:** `loom::runlog::ChildOpened` and `ChildClosed` gain `record` and `record_digest`, both or neither; Loom 0.58.0 and earlier refuse a run log that holds them (story:child-record-in-the-run-log)
+- **Breaking:** `loom::tree::StatusEvidence` gains `name`; a literal names it (story:child-record-in-the-run-log)
 
 ### Removed
 

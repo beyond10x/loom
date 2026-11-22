@@ -355,7 +355,7 @@ pub fn run_tree(
                     Refused::new(TreeRefusalReason::StoreUnreadable, error.to_string())
                         .case(case.case.clone())
                 })?;
-            closed(&logs, case, &legitimate[0], &mut emit)?;
+            closed(&governor, &logs, case, &legitimate[0], &mut emit)?;
             if case.case == manifest.root {
                 return Ok(TreeRun {
                     stop: TreeStop::Terminal,
@@ -482,8 +482,10 @@ fn child_file(parent: &Held, action: &str) -> Result<PathBuf, Refused> {
 }
 
 /// Writes that `case` ended through `outcome`: its `terminated` line, then, for a child, the
-/// `child closed` line in its parent's log.
-fn closed(
+/// `child closed` line in its parent's log, naming the child's record as the termination replaced
+/// it.
+fn closed<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
     logs: &Logs,
     case: &Held,
     outcome: &str,
@@ -497,13 +499,14 @@ fn closed(
     )?;
     emit(&case.case, line);
     if let Some(parent) = &case.parent {
+        let (record, record_digest) = child_record(governor, parent, &case.case)?;
         let line = logs.append(
             parent,
             RunLogEvent::ChildClosed(ChildClosed {
                 child: case.case.clone(),
                 outcome: Some(outcome.to_owned()),
-                record: None,
-                record_digest: None,
+                record,
+                record_digest,
             }),
         )?;
         emit(parent, line);
@@ -536,14 +539,14 @@ fn close_terminated<S: loom_governor::FallibleCaseStore>(
         if let Some(outcome) = termination(governor, &case.case)?
             && !terminated(store, &case.case)
         {
-            closed(logs, case, &outcome, emit)?;
+            closed(governor, logs, case, &outcome, emit)?;
         }
     }
     Ok(())
 }
 
 /// Writes, for each child an `open` step opened, its `case opened` line and the parent's
-/// `child opened` line.
+/// `child opened` line, naming the child's record as the opening wrote it.
 fn opened<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     logs: &Logs,
@@ -570,13 +573,14 @@ fn opened<S: loom_governor::FallibleCaseStore>(
             }),
         )?;
         emit(child, line);
+        let (record, record_digest) = child_record(governor, parent, child)?;
         let line = logs.append(
             parent,
             RunLogEvent::ChildOpened(ChildOpened {
                 child: child.to_owned(),
                 protocol,
-                record: None,
-                record_digest: None,
+                record,
+                record_digest,
             }),
         )?;
         emit(parent, line);
@@ -707,6 +711,32 @@ fn evidence_ids<S: loom_governor::FallibleCaseStore>(
         .filter(|record| record.kind != "case_outcome")
         .map(|record| record.evidence_id.0.0)
         .collect())
+}
+
+/// The `case_outcome` record `parent` holds now for its child `child`: its evidence id, the
+/// link's `outcome_evidence`, and the SHA-256 of its facts, encoded as `decision_digest` is
+/// (`serde_json::to_vec` of the plain facts). Both `None` when the parent holds no link to
+/// `child` or no record under the link's id.
+fn child_record<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    parent: &str,
+    child: &str,
+) -> Result<(Option<String>, Option<String>), Refused> {
+    let state = governor
+        .case_state(&CaseId(parent.to_owned()))
+        .map_err(|error| unreadable(format!("case {parent}"), format!("{error:?}")))?;
+    let Some(link) = state.children.iter().find(|link| link.child.0 == child) else {
+        return Ok((None, None));
+    };
+    let id = &link.outcome_evidence.0;
+    Ok(state
+        .evidence
+        .iter()
+        .find(|held| held.data.evidence_id.0.0 == *id)
+        .map_or((None, None), |held| {
+            let bytes = serde_json::to_vec(&plain_commission(&held.data.facts)).unwrap_or_default();
+            (Some(id.clone()), Some(hex(&Sha256::digest(&bytes))))
+        }))
 }
 
 /// The exit, the refusal and the blob digest an effect's outcome names: an exit or a refusal,

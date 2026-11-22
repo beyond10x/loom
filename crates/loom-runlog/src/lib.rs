@@ -30,7 +30,10 @@
 //!   itself named otherwise.
 //!
 //! An `ActionFinished` holds an `exit` or a `refusal`, exactly one: a line with both or neither
-//! does not read as a line, so `verify` refuses it and an append refuses to write it.
+//! does not read as a line, so `verify` refuses it and an append refuses to write it. A
+//! `ChildOpened` or `ChildClosed` holds `record` and `record_digest` together or neither, the
+//! digest 64 lower-case hex digits, under the same rule. A log written before those members
+//! existed reads with both absent; a reader from before them refuses a line that holds them.
 //!
 //! What the log cannot show: a change to the last line alone is not detected, as a cut at a line
 //! boundary is not, since no line after it names its digest, and the next append makes the change
@@ -498,10 +501,14 @@ pub fn encode(line: &RunLogLine) -> String {
         RunLogEvent::ChildOpened(event) => {
             text(&mut out, "child", &event.child);
             text(&mut out, "protocol", &event.protocol);
+            optional(&mut out, "record", &event.record);
+            optional(&mut out, "record_digest", &event.record_digest);
         }
         RunLogEvent::ChildClosed(event) => {
             text(&mut out, "child", &event.child);
             optional(&mut out, "outcome", &event.outcome);
+            optional(&mut out, "record", &event.record);
+            optional(&mut out, "record_digest", &event.record_digest);
         }
         RunLogEvent::AuthorityRecorded(event) => {
             text(&mut out, "capability", &event.capability);
@@ -549,8 +556,8 @@ fn event_members(kind: &str) -> Option<&'static [&'static str]> {
             "revisions",
         ],
         "Discarded" => &["action", "reason"],
-        "ChildOpened" => &["child", "protocol"],
-        "ChildClosed" => &["child", "outcome"],
+        "ChildOpened" => &["child", "protocol", "record", "record_digest"],
+        "ChildClosed" => &["child", "outcome", "record", "record_digest"],
         "AuthorityRecorded" => &["capability", "decision", "principal"],
         "Stopped" => &["stop", "next"],
         "Terminated" => &["reason"],
@@ -648,18 +655,24 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
             action: text("action")?,
             reason: text("reason")?,
         }),
-        "ChildOpened" => RunLogEvent::ChildOpened(ChildOpened {
-            child: text("child")?,
-            protocol: text("protocol")?,
-            record: None,
-            record_digest: None,
-        }),
-        "ChildClosed" => RunLogEvent::ChildClosed(ChildClosed {
-            child: text("child")?,
-            outcome: optional_text(value, "", "outcome")?,
-            record: None,
-            record_digest: None,
-        }),
+        "ChildOpened" => {
+            let (record, record_digest) = child_record(value)?;
+            RunLogEvent::ChildOpened(ChildOpened {
+                child: text("child")?,
+                protocol: text("protocol")?,
+                record,
+                record_digest,
+            })
+        }
+        "ChildClosed" => {
+            let (record, record_digest) = child_record(value)?;
+            RunLogEvent::ChildClosed(ChildClosed {
+                child: text("child")?,
+                outcome: optional_text(value, "", "outcome")?,
+                record,
+                record_digest,
+            })
+        }
         "AuthorityRecorded" => RunLogEvent::AuthorityRecorded(AuthorityRecorded {
             capability: text("capability")?,
             decision: text("decision")?,
@@ -686,6 +699,40 @@ fn optional_text(value: &Value, at: &str, name: &str) -> Result<Option<String>, 
         .member(name)
         .map(|held| text_at(held, &json::nested(at, name), "a string").map(str::to_owned))
         .transpose()
+}
+
+/// The `record` and `record_digest` of a child line: both or neither, the digest 64 lower-case
+/// hex digits. ESS cannot state the pairing yet, so the reader holds it.
+fn child_record(value: &Value) -> Result<(Option<String>, Option<String>), DecodeError> {
+    let record = optional_text(value, "", "record")?;
+    let digest = optional_text(value, "", "record_digest")?;
+    let missing = |at: &str, beside: &str| DecodeError {
+        at: at.to_owned(),
+        expected: format!("a {at} beside {beside}: the two come together or not at all"),
+        found: "none".to_owned(),
+    };
+    match (&record, &digest) {
+        (Some(_), None) => Err(missing("record_digest", "record")),
+        (None, Some(_)) => Err(missing("record", "record_digest")),
+        (_, Some(held)) if !is_sha256(held) => Err(DecodeError {
+            at: "record_digest".to_owned(),
+            expected: "a SHA-256, 64 lower-case hex digits".to_owned(),
+            found: if held.len() == 64 {
+                "a character that is no lower-case hex digit".to_owned()
+            } else {
+                format!("{} bytes", held.len())
+            },
+        }),
+        _ => Ok((record, digest)),
+    }
+}
+
+/// Whether `text` is 64 lower-case hex digits.
+fn is_sha256(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn revision_move(value: &Value, at: &str) -> Result<RevisionMove, DecodeError> {

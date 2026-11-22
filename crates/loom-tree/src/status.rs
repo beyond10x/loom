@@ -149,7 +149,7 @@ pub fn tree_status(store: &Path, catalog: &ProtocolCatalog) -> Result<TreeStatus
             protocol_id,
             protocol_revision,
             stop_next,
-            evidence: evidence(case, &state.evidence, &lines)?,
+            evidence: evidence(case, &state.evidence, &state.children, &lines)?,
             runs: runs(case, &observations),
             approvals: approvals(&lines, bindings),
             copies: copies(case, &observations, &state.evidence),
@@ -188,10 +188,12 @@ fn last_stop(lines: &[RunLogLine]) -> (Option<String>, Vec<String>) {
 }
 
 /// The records of `case`, in the order received, each with the action of the step whose `action
-/// finished` line names it.
+/// finished` line names it; a `case_outcome` record with the link name of the child among
+/// `children` whose `outcome_evidence` it is.
 fn evidence(
     case: &str,
     held: &[loom_governor::HeldEvidence],
+    children: &[CaseLink],
     lines: &[RunLogLine],
 ) -> Result<Vec<StatusEvidence>, Refused> {
     let text_of = |facts: &Value, name: &str| facts[name].as_str().map(str::to_owned);
@@ -219,17 +221,26 @@ fn evidence(
                 .get("upstream_revisions")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+            let kind = text_of(&facts, "kind").ok_or_else(refused)?;
+            let name = (kind == "case_outcome")
+                .then(|| {
+                    children
+                        .iter()
+                        .find(|link| link.outcome_evidence.0 == id)
+                        .map(|link| link.name.clone())
+                })
+                .flatten();
             Ok(StatusEvidence {
                 index: i64::try_from(index).unwrap_or(i64::MAX),
                 evidence_id: id,
-                kind: text_of(&facts, "kind").ok_or_else(refused)?,
+                kind,
                 result: text_of(&facts, "result"),
                 subject: text_of(&facts, "subject").ok_or_else(refused)?,
                 subject_revision: text_of(&facts, "subject_revision").ok_or_else(refused)?,
                 upstream_revisions: crate::encode::loom_json(&upstream),
                 producer: record.data.producer.clone(),
                 action,
-                name: None,
+                name,
             })
         })
         .collect()
