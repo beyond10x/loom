@@ -642,6 +642,8 @@ pub enum UpdateError {
     UndeclaredArtifact { artifact: String },
     /// The revision is not an identifier.
     InvalidRevision { artifact: String },
+    /// The case is terminated through `outcome` and takes no write ([`CanonGovernor::terminate`]).
+    Terminated { outcome: String },
 }
 
 impl fmt::Display for UpdateError {
@@ -658,6 +660,7 @@ impl fmt::Display for UpdateError {
                     "the revision of artifact `{artifact}` is not an identifier"
                 )
             }
+            Self::Terminated { outcome } => terminated(f, outcome),
         }
     }
 }
@@ -674,6 +677,8 @@ pub enum DecisionError {
     /// Canon refuses the decision for the case: `code` is Canon's refusal code
     /// (`undeclared-outcome`, `undeclared-decision`, `invalid-identifier`, ...).
     Refused { code: String, message: String },
+    /// The case is terminated through `outcome` and takes no write ([`CanonGovernor::terminate`]).
+    Terminated { outcome: String },
 }
 
 impl fmt::Display for DecisionError {
@@ -682,11 +687,20 @@ impl fmt::Display for DecisionError {
             Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
             Self::UnknownCase => f.write_str("the governor does not hold the case"),
             Self::Refused { code, message } => write!(f, "{code}: {message}"),
+            Self::Terminated { outcome } => terminated(f, outcome),
         }
     }
 }
 
 impl std::error::Error for DecisionError {}
+
+/// The text of every refusal of a write to a terminated case.
+fn terminated(f: &mut fmt::Formatter<'_>, outcome: &str) -> fmt::Result {
+    write!(
+        f,
+        "the case is terminated through outcome `{outcome}` and takes no write"
+    )
+}
 
 /// Why the governor refuses an evidence record's `observed_at` ([`CanonGovernor::check_evidence`]),
 /// naming the record by its evidence id. A refused record is not kept.
@@ -1656,6 +1670,8 @@ pub enum StepError {
     /// The record `evidence` is not about the revisions the case holds once the step's moves are
     /// applied: its case revision, its subject's revision or an upstream revision differs.
     StaleRecord { evidence: String, detail: String },
+    /// The case is terminated through `outcome` and takes no write ([`CanonGovernor::terminate`]).
+    Terminated { outcome: String },
 }
 
 impl From<GovernorError> for StepError {
@@ -1688,6 +1704,7 @@ impl fmt::Display for StepError {
                 f,
                 "evidence `{evidence}` is not about the revisions the step writes: {detail}"
             ),
+            Self::Terminated { outcome } => terminated(f, outcome),
         }
     }
 }
