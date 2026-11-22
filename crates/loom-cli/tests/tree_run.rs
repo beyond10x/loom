@@ -54,7 +54,11 @@ impl Tree {
         fs::create_dir_all(root.join("home")).unwrap();
         fs::create_dir_all(root.join("workspace/stubs")).unwrap();
         let installed = InstallStore::new(root.join("home/loom/protocols"));
-        for (name, file) in [("tour@1", "tour.yaml"), ("tour-leg@1", "tour-leg.yaml")] {
+        for (name, file) in [
+            ("tour@1", "tour.yaml"),
+            ("tour-leg@1", "tour-leg.yaml"),
+            ("fork@1", "../extra/fork.yaml"),
+        ] {
             installed
                 .install_file(
                     name,
@@ -181,6 +185,18 @@ impl Tree {
             .args(["--at", AT])
             .output()
             .unwrap()
+    }
+
+    /// Runs the command a waiting `tree run` printed exactly as printed: no flag added.
+    fn printed(&self, decision: &Value) -> Output {
+        let words: Vec<String> = decision["command"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|word| word.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(words[0], "b10x-loom", "{decision}");
+        self.command().args(&words[1..]).output().unwrap()
     }
 
     fn tree(&self, verb: &str) -> Output {
@@ -604,6 +620,11 @@ fn run_to_end(tree: &Tree) -> (Vec<(Value, Value)>, Value) {
 fn run_to_end_twice(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    run_opened(tree, twice)
+}
+
+/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end`].
+fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
     let mut waits = Vec::new();
     for _ in 0..8 {
         let ran = tree.run();
@@ -929,4 +950,490 @@ fn a_person_record_names_the_revisions_of_its_declared_upstream() {
     );
     let undeclared = approval_record("person-no-upstream", "tour-leg.bindings.yaml");
     assert_eq!(undeclared["upstream_revisions"], json!({}), "{undeclared}");
+}
+
+#[test]
+fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
+    let tree = Tree::new("close");
+    let opened = tree
+        .command()
+        .args([
+            "tree",
+            "open",
+            "--protocol",
+            "fork@1",
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .arg("--bindings")
+        .arg(tree.workspace().join("fork.bindings.yaml"))
+        .arg("--workspace")
+        .arg(tree.workspace())
+        .output()
+        .unwrap();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+
+    // Once the road is seen both outcomes are legitimate: the run waits and prints two closes.
+    let waited = tree.run();
+    assert_eq!(
+        waited.status.code(),
+        Some(3),
+        "{}{}",
+        stdout(&waited),
+        stderr(&waited)
+    );
+    let waited = json(&waited);
+    assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+    let decisions = waited["decisions"].as_array().unwrap();
+    let outcomes: Vec<&str> = decisions
+        .iter()
+        .map(|decision| decision["outcome"].as_str().unwrap())
+        .collect();
+    assert_eq!(outcomes, ["kept", "left"], "{waited}");
+    for decision in decisions {
+        assert_eq!(decision["kind"], "Close", "{waited}");
+        assert_eq!(decision["command"][2], "close", "{waited}");
+    }
+
+    // An outcome that is not legitimate is refused and the store keeps every byte.
+    let before = tree.snapshot();
+    let refused = tree
+        .command()
+        .args([
+            "tree",
+            "close",
+            "--case",
+            "root",
+            "--outcome",
+            "lost",
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .output()
+        .unwrap();
+    assert_ne!(refused.status.code(), Some(0), "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("OutcomeNotLegitimate"),
+        "{}",
+        stderr(&refused)
+    );
+    assert_eq!(tree.snapshot(), before);
+
+    // The printed command closes the case through `left`; the tree is then terminal through it.
+    let closed = tree.printed(&decisions[1]);
+    assert_eq!(closed.status.code(), Some(0), "{}", stderr(&closed));
+    assert_eq!(json(&closed)["outcome"], "left");
+    let status = json(&tree.tree("status"));
+    assert_eq!(entry(&status, "root")["outcome"], "left", "{status}");
+    let lines = log_lines(&tree, "root");
+    assert!(
+        matches!(&lines.last().unwrap().event, RunLogEvent::Terminated(ended) if ended.reason == "left")
+    );
+    let verified = tree.tree("verify");
+    assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
+    let again = tree
+        .command()
+        .args([
+            "tree",
+            "close",
+            "--case",
+            "root",
+            "--outcome",
+            "kept",
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .output()
+        .unwrap();
+    assert!(
+        stderr(&again).contains("CaseTerminated"),
+        "{}",
+        stderr(&again)
+    );
+}
+
+#[test]
+fn a_writer_with_a_handoff_waits_on_a_person_with_its_text() {
+    // The writer writes nothing and nothing sends it back: once it ran and the check found the
+    // route short, nothing is useful, and its handoff is the decision.
+    let tree = Tree::new("handoff");
+    let opened = tree.open_leg_with("tour-leg-handoff.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    for _ in 0..2 {
+        let waited = tree.run();
+        assert_eq!(
+            waited.status.code(),
+            Some(3),
+            "{}{}",
+            stdout(&waited),
+            stderr(&waited)
+        );
+        let waited = json(&waited);
+        assert_eq!(waited["stop"], "AwaitingPerson", "{waited}");
+        let decision = &waited["decisions"][0];
+        assert_eq!(decision["kind"], "Handoff", "{waited}");
+        assert_eq!(decision["action"], "route.write", "{waited}");
+        assert_eq!(
+            decision["decides"],
+            "Add a second stop to route.txt, then run the tree again."
+        );
+        let store = tree.store().display().to_string();
+        assert_eq!(
+            decision["command"],
+            json!(["b10x-loom", "tree", "run", "--store", store])
+        );
+    }
+    let writes = log_lines(&tree, "root")
+        .iter()
+        .filter(|line| matches!(&line.event, RunLogEvent::ActionFinished(finished) if finished.action == "route.write"))
+        .count();
+    assert_eq!(writes, 1, "the writer runs once at its revision");
+}
+
+/// The one decision a run that waits prints, of the kind `kind`.
+fn one_decision(ran: &Output, kind: &str) -> Value {
+    assert_eq!(ran.status.code(), Some(3), "{}{}", stdout(ran), stderr(ran));
+    let waited = json(ran);
+    let decisions = waited["decisions"].as_array().unwrap();
+    assert_eq!(decisions.len(), 1, "{waited}");
+    assert_eq!(decisions[0]["kind"], kind, "{waited}");
+    decisions[0].clone()
+}
+
+#[test]
+fn every_command_a_leg_prints_runs_as_printed_to_its_outcome() {
+    // A handoff, a person action under a capability and a capability alone, each answered by
+    // the command the run printed, with no flag added, until the case passes.
+    let tree = Tree::new("printed");
+    let opened = tree.open_leg_with("tour-leg-handoff.bindings.yaml");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let handoff = one_decision(&tree.run(), "Handoff");
+    // The person does what the handoff text asks.
+    fs::write(tree.workspace().join("route.txt"), "start\nend\n").unwrap();
+    let approve_action = one_decision(&tree.printed(&handoff), "ApproveAction");
+    assert_eq!(
+        approve_action["capability"], "guide.approve",
+        "{approve_action}"
+    );
+    let taken = tree.printed(&approve_action);
+    assert_eq!(
+        taken.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&taken),
+        stderr(&taken)
+    );
+    let approve = one_decision(&tree.run(), "Approve");
+    let granted = tree.printed(&approve);
+    assert_eq!(
+        granted.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&granted),
+        stderr(&granted)
+    );
+    let ended = tree.run();
+    assert_eq!(
+        ended.status.code(),
+        Some(0),
+        "{}{}",
+        stdout(&ended),
+        stderr(&ended)
+    );
+    assert_eq!(json(&ended)["detail"], "passed");
+}
+
+/// The fixture's protocols directory: `tour.yaml`, `tour-leg.yaml` and the subdirectory `old/`.
+fn fixture_protocols() -> PathBuf {
+    Path::new(FIXTURE).join("protocols")
+}
+
+/// The text of the fixture protocol file `name`.
+fn fixture_protocol(name: &str) -> String {
+    fs::read_to_string(fixture_protocols().join(name)).unwrap()
+}
+
+/// A protocols directory of the test holding `files`, by name.
+fn protocols_dir(tree: &Tree, files: &[(&str, &str)]) -> PathBuf {
+    let dir = tree.root.join("protocols");
+    fs::create_dir_all(&dir).unwrap();
+    for (name, text) in files {
+        fs::write(dir.join(name), text).unwrap();
+    }
+    dir
+}
+
+/// The fixture's two protocols as a directory of the test.
+fn tour_protocols(tree: &Tree) -> PathBuf {
+    protocols_dir(
+        tree,
+        &[
+            ("tour.yaml", &fixture_protocol("tour.yaml")),
+            ("tour-leg.yaml", &fixture_protocol("tour-leg.yaml")),
+        ],
+    )
+}
+
+/// `tree open --protocols dir` of the root `protocol` with the bindings file `tour.bindings.yaml`.
+fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
+    tree.command()
+        .args([
+            "tree",
+            "open",
+            "--protocol",
+            protocol,
+            "--at",
+            AT,
+            "--store",
+        ])
+        .arg(tree.store())
+        .arg("--protocols")
+        .arg(dir)
+        .arg("--bindings")
+        .arg(tree.workspace().join("tour.bindings.yaml"))
+        .arg("--workspace")
+        .arg(tree.workspace())
+        .output()
+        .unwrap()
+}
+
+/// Asserts `output` is a refusal naming `reason` and each of `named`, and the store holds nothing.
+fn refused_with_an_empty_store(tree: &Tree, output: &Output, reason: &str, named: &[&str]) {
+    assert_ne!(output.status.code(), Some(0), "{}", stdout(output));
+    let text = stderr(output);
+    assert!(text.contains(reason), "{text}");
+    for name in named {
+        assert!(text.contains(name), "{name}: {text}");
+    }
+    let empty = fs::read_dir(tree.store()).map_or(true, |mut entries| entries.next().is_none());
+    assert!(empty, "the store holds {:?}", tree.snapshot());
+}
+
+/// The SHA-256 `tree status` names for the kept protocol `registration`.
+fn kept_sha256(tree: &Tree, registration: &str) -> String {
+    let status = json(&tree.tree("status"));
+    status["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|kept| kept["registration"] == registration)
+        .and_then(|kept| kept["sha256"].as_str())
+        .unwrap_or_else(|| panic!("no kept {registration}: {status}"))
+        .to_owned()
+}
+
+#[test]
+fn a_protocols_directory_registers_what_its_files_declare() {
+    let tree = Tree::new("protocols-registered");
+    let opened = open_from(&tree, &fixture_protocols(), "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let catalog = b10x_loom_tree::stored_catalog(&tree.store())
+        .unwrap()
+        .expect("a kept catalog");
+    let names: Vec<&str> = catalog.iter().map(|entry| entry.name()).collect();
+    assert_eq!(names, ["tour-leg@1", "tour@1"]);
+    for entry in catalog.iter() {
+        assert_eq!(
+            entry.definition.source.kind,
+            loom_protocols::SourceKind::Directory
+        );
+    }
+    let status = json(&tree.tree("status"));
+    let kept: Vec<(&str, &str)> = status["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|kept| {
+            (
+                kept["registration"].as_str().unwrap(),
+                kept["file"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        kept,
+        [("tour-leg@1", "tour-leg.yaml"), ("tour@1", "tour.yaml")]
+    );
+}
+
+#[test]
+fn a_tree_from_a_protocols_directory_runs_with_the_directory_deleted() {
+    let tree = Tree::new("protocols-deleted");
+    let dir = tour_protocols(&tree);
+    let opened = open_from(&tree, &dir, "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    fs::remove_dir_all(&dir).unwrap();
+    let (_, ended) = run_opened(&tree, None);
+    assert_eq!(ended["detail"], "arrived", "{ended}");
+}
+
+#[test]
+fn an_edit_after_tree_open_changes_nothing_in_the_open_tree() {
+    let tree = Tree::new("protocols-edited");
+    let dir = tour_protocols(&tree);
+    let opened = open_from(&tree, &dir, "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let leg = fixture_protocol("tour-leg.yaml");
+    let at_open = kept_sha256(&tree, "tour-leg@1");
+    // Under the edited definition no leg could pass, so the root could not arrive.
+    fs::write(
+        dir.join("tour-leg.yaml"),
+        leg.replace("  passed:\n", "  finished:\n"),
+    )
+    .unwrap();
+    let (_, ended) = run_opened(&tree, None);
+    assert_eq!(ended["detail"], "arrived", "{ended}");
+    // The status names the SHA-256 of the file as it was at `tree open`: the kept blob's bytes.
+    assert_eq!(kept_sha256(&tree, "tour-leg@1"), at_open);
+    let kept = fs::read_to_string(tree.store().join("blobs").join(&at_open)).unwrap();
+    assert_eq!(kept, leg);
+}
+
+#[test]
+fn two_files_declaring_one_protocol_and_revision_are_refused() {
+    let tree = Tree::new("protocols-twice");
+    let tour = fixture_protocol("tour.yaml");
+    let dir = tour_protocols(&tree);
+    fs::write(dir.join("tour-copy.yaml"), &tour).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "DuplicateProtocol",
+        &["tour-copy.yaml", "tour.yaml"],
+    );
+}
+
+#[test]
+fn two_files_declaring_one_protocol_id_are_refused() {
+    let tree = Tree::new("protocols-two-revisions");
+    let tour = fixture_protocol("tour.yaml");
+    let dir = tour_protocols(&tree);
+    fs::write(
+        dir.join("tour-two.yaml"),
+        tour.replacen("  revision: 1\n", "  revision: 2\n", 1),
+    )
+    .unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "DuplicateProtocol",
+        &["tour-two.yaml", "tour.yaml"],
+    );
+}
+
+#[test]
+fn a_protocol_canon_refuses_is_refused_naming_the_file() {
+    let tree = Tree::new("protocols-invalid");
+    let dir = tour_protocols(&tree);
+    let invalid = fixture_protocol("tour-leg.yaml")
+        .replace("  id: tour.leg\n", "  id: tour.broken\n")
+        .replace("{claim: ticket.issued}", "{claim: no.such.claim}");
+    fs::write(dir.join("broken.yaml"), invalid).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(&tree, &opened, "ProtocolRefused", &["broken.yaml"]);
+    let detail = &json_line(&opened)["detail"];
+    assert!(detail.as_str().unwrap().len() <= 1024 + 6, "{detail}");
+}
+
+/// The JSON object of the refusal's second line on standard error.
+fn json_line(output: &Output) -> Value {
+    let text = stderr(output);
+    let line = text.lines().find(|line| line.starts_with('{')).unwrap();
+    serde_json::from_str(line).unwrap()
+}
+
+#[test]
+fn a_link_leaving_the_protocols_directory_is_refused() {
+    let tree = Tree::new("protocols-link");
+    let dir = tour_protocols(&tree);
+    let outside = tree.root.join("outside.yaml");
+    fs::write(
+        &outside,
+        fixture_protocol("tour-leg.yaml").replace("  id: tour.leg\n", "  id: tour.outside\n"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("elsewhere.yaml")).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "ProtocolLinkLeavesDirectory",
+        &["elsewhere.yaml", "outside.yaml"],
+    );
+}
+
+#[test]
+fn the_root_protocol_must_be_in_the_protocols_directory() {
+    let tree = Tree::new("protocols-root");
+    let opened = open_from(&tree, &fixture_protocols(), "system-query@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "ProtocolNotInDirectory",
+        &["system-query@1"],
+    );
+}
+
+#[test]
+fn a_child_protocol_the_directory_lacks_is_refused() {
+    let tree = Tree::new("protocols-child");
+    let tour = fixture_protocol("tour.yaml").replacen(
+        "case_open: {protocol: tour.leg,",
+        "case_open: {protocol: tour.detour,",
+        1,
+    );
+    let dir = protocols_dir(
+        &tree,
+        &[
+            ("tour.yaml", &tour),
+            ("tour-leg.yaml", &fixture_protocol("tour-leg.yaml")),
+        ],
+    );
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(
+        &tree,
+        &opened,
+        "ProtocolNotInDirectory",
+        &["tour.detour", "tour.yaml"],
+    );
+}
+
+#[test]
+fn a_directory_with_no_protocol_file_is_refused() {
+    let tree = Tree::new("protocols-none");
+    let dir = protocols_dir(&tree, &[("notes.txt", "not a protocol\n")]);
+    fs::create_dir_all(dir.join("sub")).unwrap();
+    fs::write(dir.join("sub/tour.yaml"), fixture_protocol("tour.yaml")).unwrap();
+    let opened = open_from(&tree, &dir, "tour@1");
+    refused_with_an_empty_store(&tree, &opened, "NoProtocolFiles", &[]);
+}
+
+#[test]
+fn a_changed_stored_protocol_is_refused() {
+    let tree = Tree::new("protocols-changed");
+    let dir = tour_protocols(&tree);
+    let opened = open_from(&tree, &dir, "tour@1");
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let blob = tree
+        .store()
+        .join("blobs")
+        .join(kept_sha256(&tree, "tour-leg@1"));
+    let mut bytes = fs::read(&blob).unwrap();
+    bytes[0] ^= 1;
+    fs::write(&blob, &bytes).unwrap();
+    let before = tree.snapshot();
+    let ran = tree.run();
+    assert_ne!(ran.status.code(), Some(0), "{}", stdout(&ran));
+    let text = stderr(&ran);
+    assert!(text.contains("StoredProtocolChanged"), "{text}");
+    assert!(text.contains("tour-leg@1"), "{text}");
+    assert_eq!(tree.snapshot(), before);
 }

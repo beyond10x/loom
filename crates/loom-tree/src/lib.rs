@@ -25,6 +25,7 @@
 
 mod approvals;
 mod approve;
+mod close;
 mod context;
 mod encode;
 mod history;
@@ -32,6 +33,7 @@ mod lock;
 mod log;
 mod open;
 mod person;
+mod protocols;
 mod read;
 mod run;
 mod status;
@@ -55,15 +57,19 @@ pub use loom::tree as model;
 
 pub use approvals::{TreeAuthority, approvals_file_name, read_approvals};
 pub use approve::{ApproveRequest, MAX_NAME_BYTES, approve};
+pub use close::{CaseClosed, CloseRequest, close};
 pub use context::derived_uuid;
 pub use encode::{decision_json, refusal_json, run_json, status_json, verify_json};
 pub use history::LogHistory;
 pub use lock::{HOLDER_FILE, LOCK_FILE, StoreLock};
 pub use log::{head_file_name, verify_case_log};
 pub use open::{OpenRequest, OpenedTree, open_tree};
+pub use protocols::{
+    KeptProtocol, PROTOCOLS_FILE, ProtocolDirectory, read_protocols_directory, stored_catalog,
+};
 pub use read::read_status;
 pub use run::{RunObserver, RunSettings, TREE_PRINCIPAL, run_tree};
-pub use status::{PROTOCOLS_FILE, STATUS_FORMAT, stored_catalog, tree_status};
+pub use status::{STATUS_FORMAT, tree_status};
 pub use store::{FORMAT, MANIFEST, read_manifest};
 pub use time::TreeTime;
 pub use verify::verify_tree;

@@ -352,7 +352,7 @@ fn parse_registration(name: &str) -> Option<u64> {
 /// The registration the catalog gives protocol `id` at `revision`, as the bundled catalog does
 /// (`software.change/1` is `software-change@1`): dots and underscores become hyphens and
 /// `/<major>` becomes `@<major>`. `None` when the result is still no registration.
-fn registration_for(id: &str, revision: &str) -> Option<String> {
+pub fn registration_for(id: &str, revision: &str) -> Option<String> {
     if id.len() > 100 {
         return None;
     }

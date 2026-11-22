@@ -276,6 +276,9 @@ pub enum TreeCommand {
     /// current revision.
     #[command(after_help = TREE_APPROVE_HELP)]
     Approve(TreeApproveArgs),
+    /// Terminate one case of the tree through an outcome Canon reports legitimate for it now: the
+    /// choice a waiting `tree run` prints when more than one is.
+    Close(TreeCloseArgs),
     /// Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or
     /// stop, open obligations, and the paths of its case file and run log.
     #[command(after_help = TREE_STATUS_HELP)]
@@ -395,6 +398,12 @@ pub struct TreeOpenArgs {
     /// The registration of the root's protocol, `name@major`.
     #[arg(long, value_name = "NAME@MAJOR")]
     pub protocol: String,
+    /// Read the tree's protocols from the files directly in this directory whose names end in
+    /// `.yaml`, each under the registration it declares, and keep them in the store: the tree's
+    /// catalog is those and no other. Without it the tree uses the installed and built-in
+    /// protocols.
+    #[arg(long, value_name = "DIR")]
+    pub protocols: Option<PathBuf>,
     /// The root's loom.bindings/1 file.
     #[arg(long, value_name = "FILE")]
     pub bindings: PathBuf,
@@ -437,6 +446,23 @@ pub struct TreeApproveArgs {
     #[arg(long, value_name = "ACTION", conflicts_with = "deny")]
     pub action: Option<String>,
     /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of `b10x-loom tree close`.
+#[derive(Debug, Args)]
+pub struct TreeCloseArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The case of the tree to close.
+    #[arg(long, value_name = "ID")]
+    pub case: String,
+    /// The outcome the case ends through.
+    #[arg(long, value_name = "OUTCOME")]
+    pub outcome: String,
+    /// The instant the termination records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
     #[arg(long, value_name = "INSTANT")]
     pub at: Option<String>,
 }
