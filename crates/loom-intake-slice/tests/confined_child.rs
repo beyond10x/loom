@@ -2468,3 +2468,203 @@ fn a_workdir_outside_the_childs_mounts_is_refused_before_launch() {
         assert_eq!(error.reason, past_every_check(), "{placed}: {error}");
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// A cancel of a child given input it does not read (`story:cancel-a-running-bound-program`)
+
+/// More than a pipe holds: the child never reads it.
+const UNREAD_INPUT_BYTES: usize = 1024 * 1024;
+
+/// A bound program always gets its arguments on standard input, and a child holding a cancel runs
+/// as a raw-pipe session. A child that reads none of more input than a pipe holds leaves the write
+/// blocked; its cancel still ends it within 7 s, refused `Cancelled`, never at its 15 s timeout
+/// and never as a result.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_cancelled_child_that_reads_no_input_ends_within_seven_seconds() {
+    delegated(
+        "a_cancelled_child_that_reads_no_input_ends_within_seven_seconds",
+        |runner, workspace| {
+            std::fs::create_dir_all(workspace.join("target")).unwrap();
+            let cancel = b10x_loom_intake_slice::confinement::Cancel::new();
+            let started = workspace.join("target/started");
+            let setter = {
+                let cancel = cancel.clone();
+                std::thread::spawn(move || {
+                    let deadline = Instant::now() + Duration::from_secs(30);
+                    while !started.exists() {
+                        assert!(Instant::now() < deadline, "the program never started");
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
+                    cancel.cancel();
+                    Instant::now()
+                })
+            };
+            let child = ChildCommand::new(
+                "sh",
+                ["-c", "/usr/bin/touch target/started; /usr/bin/sleep 30"],
+                workspace,
+            )
+            .with_timeout(Duration::from_secs(15))
+            .with_stdin(vec![b' '; UNREAD_INPUT_BYTES])
+            .with_cancel(cancel);
+            let answer = runner.run_child(&child);
+            let returned = Instant::now();
+            let cancelled_at = setter.join().expect("the handle was set");
+            let taken = returned.saturating_duration_since(cancelled_at);
+            assert!(
+                taken < Duration::from_secs(7),
+                "returned {taken:?} after its cancel: {:?}",
+                answer
+                    .as_ref()
+                    .map(|execution| (execution.exit_code, execution.timed_out))
+            );
+            let error = answer.expect_err("a cancelled child is refused");
+            assert_eq!(error.reason, ConfinementRefusal::Cancelled, "{error}");
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// What a `handoff_when` check's child reports under Substrate (`story:handoff-when-a-program-decides`)
+
+/// The check's child for `argv`, as `run_handoff_check` builds it (less the `LOOM_*` variables):
+/// by `bound_program_child`, with empty standard input, the whole workspace read-only.
+fn check_child(argv: &[&str], workspace: &Path) -> ChildCommand {
+    let argv: Vec<String> = argv.iter().map(|word| (*word).to_owned()).collect();
+    b10x_loom_intake_slice::bindings::bound_program_child(
+        &argv,
+        "",
+        Duration::from_secs(20),
+        workspace,
+        None,
+    )
+    .expect("the check's child builds")
+    .with_read_only_workspace()
+}
+
+/// Substrate reports a child a signal ended as the shell does, exit 128 plus the signal, never as
+/// no exit status: a SIGKILL-ended child, built as a check's is, exits 137. The check refuses
+/// such a status (`crates/loom-bindings/tests/bound_retry.rs`).
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_confined_child_a_signal_ended_reports_128_and_the_signal() {
+    delegated(
+        "a_confined_child_a_signal_ended_reports_128_and_the_signal",
+        |runner, workspace| {
+            let execution = runner
+                .run_child(&check_child(&["sh", "-c", "kill -9 $$"], workspace))
+                .expect("a child a signal ended is a result");
+            assert_eq!(
+                (execution.exit_code, execution.timed_out),
+                (Some(137), false),
+                "{}",
+                execution.output
+            );
+        },
+    );
+}
+
+/// A program Substrate cannot start comes back as a refusal of the runner or as exit 126 or 127,
+/// never as another exit, so the check never reads a launch failure as its answer.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_check_substrate_cannot_start_is_never_answered_with_another_exit() {
+    delegated(
+        "a_check_substrate_cannot_start_is_never_answered_with_another_exit",
+        |runner, workspace| {
+            std::fs::create_dir_all(workspace.join("target")).unwrap();
+            std::fs::create_dir_all(workspace.join("tools/dir")).unwrap();
+            std::fs::write(workspace.join("tools/plain.sh"), "exit 0\n").unwrap();
+            std::fs::write(
+                workspace.join("tools/no-interpreter.sh"),
+                "#!/no/such/interpreter\nexit 0\n",
+            )
+            .unwrap();
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(
+                    workspace.join("tools/no-interpreter.sh"),
+                    std::fs::Permissions::from_mode(0o755),
+                )
+                .unwrap();
+            }
+            let mut answers = Vec::new();
+            for argv in [
+                &["/no/such/check"][..],
+                &["no-such-check-on-path"][..],
+                &["tools/missing.sh"][..],
+                &["tools/plain.sh"][..],
+                &["tools/dir"][..],
+                &["tools/no-interpreter.sh"][..],
+            ] {
+                let answer = runner.run_child(&check_child(argv, workspace));
+                let shown = match &answer {
+                    Ok(execution) => format!(
+                        "exit {:?}, timed out {}, output {:?}",
+                        execution.exit_code, execution.timed_out, execution.output
+                    ),
+                    Err(error) => format!("refused {error}"),
+                };
+                let launch_failure = match &answer {
+                    Err(_) => true,
+                    Ok(execution) => {
+                        !execution.timed_out && matches!(execution.exit_code, Some(126 | 127))
+                    }
+                };
+                answers.push((argv[0], launch_failure, shown));
+            }
+            let skips: Vec<_> = answers.iter().filter(|(_, failure, _)| !failure).collect();
+            assert!(
+                skips.is_empty(),
+                "a program Substrate cannot start came back as an exit the check reads as its answer: {skips:#?}\nall: {answers:#?}"
+            );
+        },
+    );
+}
+
+/// The check's child writes nothing in its workspace, `target/` and `.git/` included, and the
+/// record names no writable scope.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_check_child_writes_nothing_in_its_workspace() {
+    delegated(
+        "a_check_child_writes_nothing_in_its_workspace",
+        |runner, workspace| {
+            std::fs::create_dir_all(workspace.join("target")).unwrap();
+            std::fs::create_dir_all(workspace.join(".git")).unwrap();
+            let script = "for path in wrote target/wrote .git/wrote; do \
+                 (echo x > \"$path\") 2>/dev/null && echo \"wrote $path\"; done; \
+                 mkdir made 2>/dev/null && echo made; exit 0";
+            let execution = runner
+                .run_child(&check_child(&["sh", "-c", script], workspace))
+                .expect("the check's child runs");
+            assert_eq!(execution.exit_code, Some(0), "{}", execution.output);
+            assert!(
+                execution.applied.writable_scopes.is_empty(),
+                "the record names a writable scope: {:?}",
+                execution.applied.writable_scopes
+            );
+            for path in ["wrote", "target/wrote", ".git/wrote", "made"] {
+                assert!(
+                    !workspace.join(path).exists(),
+                    "the read-only check wrote {path}: {}",
+                    execution.output
+                );
+            }
+        },
+    );
+}

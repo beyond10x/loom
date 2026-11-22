@@ -195,7 +195,10 @@ actions:
   the binding's `timeout_seconds`. Exit 0 offers the handoff and takes no step; any other exit lets
   the writer run in that step, or leaves a stuck case `Stuck`. A check that cannot be started
   (exit 126 or 127 included), is killed at its timeout or by a signal is never a skip: the run
-  stops `HandoffCheckFailed`, naming the action, and the writer does not run. Each evaluation is
+  stops `HandoffCheckFailed`, naming the action, and the writer does not run. Under `local` a
+  signal leaves no exit status; under Substrate it is exit 128 plus the signal (137 for SIGKILL, as
+  an out-of-memory or cgroup kill ends it), so an exit from 129 to 192 is refused too, one the
+  check gives itself included (`SIGNAL_EXITS`). Each evaluation is
   one `HandoffChecked` line of the case's run log, with the check's exit or refusal and the blob of
   its output. Without `handoff` it is refused `MissingMember`, on another executor
   `MemberNotForExecutor`.
@@ -340,10 +343,14 @@ The port is a Commission effect port: it performs the actions bound to `program`
   bound.
 - A port built `with_cancel(cancel)` (`confinement::Cancel`) reads the handle after the run count:
   set then, the step is refused `Cancelled: action <action>: …`, nothing starts and nothing is
-  observed. Every program the step starts, the `arguments_from` program included, holds it. Set
-  while one runs, its runner kills it with every process it started, with no grace (under `linux`
-  at its next read step, at most 1 s; under `local` within 100 ms, then waiting at most
-  `KillBounds::kill_settle`), and `run_child` returns within 7 s. The step is then refused
+  observed. Every program the step starts, the `arguments_from` program included, holds it. A
+  handle set after the port read it and before the runner starts the program starts nothing, but
+  the runner refuses that run `Cancelled`, so it is kept and counted as a cancelled run below. Set
+  while one runs, its runner kills it within 100 ms, with no grace: under `linux` with every
+  process it started (its cgroup), a write of its arguments the program does not read dropped;
+  under `local` with its process group, then waiting at most `KillBounds::kill_settle`, so
+  a process that left the group (`setsid`, a daemon) is not killed and survives the cancel.
+  `run_child` returns within 7 s. The step is then refused
   `Cancelled: action <action>: <program> was ended by its cancel: …`, and the refusal ends the run
   (`EffectRefused`). The run's observation is kept with `cancelled: true`, no `exit` and a
   `runner_refusal` naming `Cancelled`, and counts against `budget.max_runs`; the placed

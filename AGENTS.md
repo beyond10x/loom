@@ -1459,8 +1459,10 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   Read after the run count, a set handle refuses the step `Cancelled` (`cancelled_step`, ends the
   run), nothing started or observed. A runner refusal `ConfinementRefusal::Cancelled` of either
   child keeps the run's observation with `cancelled: true` (it counts), writes the moves alone and
-  refuses the step `Cancelled`, ending the run; no table, blob or record, so no retry record. Held
-  by the cancel tests of `bound_program.rs` and `bound_retry.rs`.
+  refuses the step `Cancelled`, ending the run; no table, blob or record, so no retry record. A
+  handle set after the port's read and before the runner's starts nothing and is such a refusal,
+  so that run counts too (documented, not changed). Held by the cancel tests of
+  `bound_program.rs` and `bound_retry.rs`.
 - A placed artifact's revision is Loom's (`revision.rs`, `story:bound-artifact-revisions`):
   `content_revision` is `t` and 16 hex digits of the SHA-256 over a file's bytes, a link's target
   string (never followed) or a tree's entries in path order, `none` while absent. It opens each
@@ -1657,7 +1659,10 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   Exit 0 takes no step and stops `AwaitingPerson` with the writer's `Handoff`; another exit hands
   the proposal on and the writer runs in that step; no exit status (a refusal of the runner, 126
   or 127, a timeout, a signal, a blob not kept) refuses the run `HandoffCheckFailed` naming the
-  action, exit 1. At a stuck stop such a writer's handoff is offered only on its check's exit 0.
+  action, exit 1. Substrate reports a signal as exit 128 plus the signal (137 for SIGKILL), so
+  129 to 192 (`SIGNAL_EXITS`) refuse too (`bound_retry.rs`,
+  `a_handoff_check_a_signal_ended_as_substrate_reports_it_is_a_refusal`; the fact itself:
+  `confined_child.rs`, `a_confined_child_a_signal_ended_reports_128_and_the_signal`). At a stuck stop such a writer's handoff is offered only on its check's exit 0.
   A `tree approve`d step is not checked. `crates/loom-cli/tests/tree_run/handoff_when.rs` holds
   it; its confinement case skips without delegation unless `LOOM_REQUIRE_DELEGATION` is set. Under
   `local` a missing program and a signal reach the check as a refusal of the runner, so the
@@ -2776,11 +2781,15 @@ each whole up to Substrate's output limit and flagged cut past it; `output` stay
 merged tail. `ChildCommand::with_stdin` (at most `MAX_INPUT_BYTES`, 16 MiB, refused before launch)
 runs the child as a Substrate raw-pipe session, writes the bytes once in 64 KiB frames and closes
 its input. `ChildCommand::with_cancel` (`Cancel`) runs a child given no input the same way with
-empty input, so its read loop sees the handle: set before launch, `run_child` refuses `Cancelled`
-with nothing started; set while it runs, the loop ends at its next `READ_STEP` and sends the
-drain deadline's `Kill` (grace 0) at once, and a child Substrate did not yet observe ended is
-refused `Cancelled`; under `local`, `finish` polls the handle every 100 ms and sends the
-deadline's `kill`. `SubstrateRunner::spawn_child` (`story:live-confined-child`) makes every check
+empty input, so its wait sees the handle: set before launch, `run_child` refuses `Cancelled`
+with nothing started; set while it runs, `until_cancelled` (read every `CANCEL_READ`, 100 ms)
+ends the wait beside the write and the read loop, both dropped (a write blocked on a child that
+reads nothing never holds the cancel to the timeout), the drain deadline's `Kill` (grace 0) is
+sent unless Substrate observed the end, and the run is refused `Cancelled` either way, never a
+result (`confined_child.rs`, `a_cancelled_child_that_reads_no_input_ends_within_seven_seconds`);
+under `local`, `finish` polls the handle every 100 ms and sends the deadline's `kill` to the
+process group only, so a process that left the group survives (`bound_program.rs`,
+`a_cancel_under_local_kills_the_group_and_not_a_process_that_left_it`). `SubstrateRunner::spawn_child` (`story:live-confined-child`) makes every check
 `run_child` makes before launch and returns a `ConfinedChild` (`confinement/child.rs`) running
 in the same kind of session: the host writes and closes its input, reads `ChildFrame`s naming
 their stream (`intake.confinement.ChildStream`), signals it (`ChildSignal`: an interrupt or

@@ -1681,3 +1681,36 @@ fn a_handoff_check_ended_by_its_timeout_or_a_signal_is_a_refusal() {
         );
     }
 }
+
+/// Substrate reports a child a signal ended as exit 128 plus the signal (SIGKILL: 137, as an
+/// out-of-memory or cgroup kill ends it; `a_confined_child_a_signal_ended_reports_128_and_the_signal`
+/// in `crates/loom-intake-slice/tests/confined_child.rs`). Such a check gave no answer: each
+/// status from 129 to 192 (signals 1 to 64) is a refusal naming the signal, its output kept, never
+/// a skip. 128 and 193 are answers.
+#[test]
+fn a_handoff_check_a_signal_ended_as_substrate_reports_it_is_a_refusal() {
+    for code in [129, 130, 137, 143, 192] {
+        let (check, _, scratch) = handoff_checked(code);
+        let said = format!("{code}: {check:?}");
+        assert_eq!(check.exit, None, "{said}");
+        assert!(!check.hands_off(), "{said}");
+        let refusal = check.refusal.as_deref().expect("a refusal");
+        assert!(
+            refusal.contains(&format!("exit {code}")) && refusal.contains("signal"),
+            "{said}"
+        );
+        let kept = check.blob_digest.as_deref().expect("the output is kept");
+        assert_eq!(
+            std::fs::read(scratch.blobs().join(kept)).unwrap(),
+            b"said\n"
+        );
+    }
+    for code in [128, 193, 255] {
+        let (check, _, _) = handoff_checked(code);
+        assert_eq!(
+            (check.exit, check.refusal.as_deref()),
+            (Some(i64::from(code)), None),
+            "{code}"
+        );
+    }
+}

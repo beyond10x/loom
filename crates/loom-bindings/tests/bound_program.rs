@@ -2335,3 +2335,160 @@ fn a_cancel_of_one_run_leaves_the_other_running() {
     assert_eq!(run["cancelled"], json!(false), "{run}");
     assert_eq!(result_of(&record(&second_governor)), json!("valid"));
 }
+
+/// What the documents of a cancel under `local` say of a process the program started in a
+/// session of its own: the kill reaches the program's process group and not it.
+const LEFT_THE_GROUP: &str = "a process that left the group";
+
+/// The text of `path`, relative to this crate's directory.
+fn text_of(path: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
+    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+/// A program that starts two processes, each writing a file of `target/` 3 s later with its
+/// output detached: `grouped` in its own process group, `late` in a session of its own
+/// (`setsid`); it sleeps 30 s itself.
+const SETSID_STUB: &str = "(sleep 3 && touch target/grouped) </dev/null >/dev/null 2>&1 &\n/usr/bin/setsid /bin/sh -c 'sleep 3 && touch target/late' </dev/null >/dev/null 2>&1 &\nsleep 30\n";
+
+/// Under `local` a cancel kills the program's process group: what the program started in its group
+/// ends with it, and a process that left the group (`setsid`) survives. The `Cancel` handle, the
+/// port's `with_cancel` and the guide pages say so, never "every process it started" alone.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancel_under_local_kills_the_group_and_not_a_process_that_left_it() {
+    let scratch = Scratch::new();
+    std::fs::create_dir(scratch.workspace.join("target")).unwrap();
+    let program = scratch.marking("program.sh", SETSID_STUB);
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        SIXTY_SECONDS,
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let cancel = Cancel::new();
+    let setter = cancel_when(scratch.marker(), CANCEL_AFTER, cancel.clone());
+    let end = {
+        let effects = port(&governor, &document, &scratch, CASE, Some(flag_runner()))
+            .unwrap()
+            .with_cancel(cancel);
+        drive(&governor, &effects, CASE, CHECK, args("{}"))
+    };
+    setter.join().expect("the handle was set");
+    let reason = refusal(&end);
+    assert!(reason.starts_with("Cancelled"), "{reason}");
+    let late = scratch.workspace.join("target/late");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !late.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the process that left the group did not survive the cancel"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !scratch.workspace.join("target/grouped").exists(),
+        "a process of the program's group outlived its cancel"
+    );
+    for path in [
+        "../loom-intake-slice/src/confinement.rs",
+        "src/program.rs",
+        "../../website/docs/guides/bindings.md",
+        "../../website/docs/guides/run-a-case-tree.md",
+    ] {
+        assert!(
+            text_of(path).contains(LEFT_THE_GROUP),
+            "{path} does not say that {LEFT_THE_GROUP} survives a cancel under local"
+        );
+    }
+}
+
+/// A runner that sets `cancel` when the port hands it a child and before the child starts: the
+/// handle is set after the port's own check (`program.rs`, before any program starts) and before
+/// the runner's, as a cancel from another thread lands while the port digests the placed
+/// artifacts, reads the case names or the retry feedback.
+struct CancelAtHandOver {
+    inner: Arc<dyn TestRunner>,
+    cancel: Cancel,
+}
+
+impl TestRunner for CancelAtHandOver {
+    fn run(&self, command: &TestCommand, root: &Path) -> Result<TestExecution, ConfinementError> {
+        self.inner.run(command, root)
+    }
+
+    fn backend(&self) -> Backend {
+        self.inner.backend()
+    }
+
+    fn label(&self) -> String {
+        self.inner.label()
+    }
+
+    fn local_reason(&self) -> Option<&str> {
+        self.inner.local_reason()
+    }
+
+    fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        self.cancel.cancel();
+        self.inner.run_child(child)
+    }
+
+    fn preflight_child(&self, root: &Path) -> Result<(), ConfinementError> {
+        self.inner.preflight_child(root)
+    }
+}
+
+/// What `with_cancel` and the guide page say of a handle set after the port read it and before
+/// the runner starts the program.
+const HANDED_OVER: &str = "after the port read it and before the runner starts";
+
+/// A handle set after the port's own check and before the runner starts the program starts
+/// nothing, and the step is refused `Cancelled`; the port keeps the run's observation
+/// (`cancelled: true`), which counts against `budget.max_runs` (the counting rule is
+/// `story:cancelled-step-may-run-again`'s). `with_cancel` and the guide page say so.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancel_set_at_the_hand_over_starts_nothing_and_keeps_a_counted_observation() {
+    let scratch = Scratch::new();
+    let program = scratch.marking("program.sh", "exit 0\n");
+    let document = document(&bound(
+        CHECK,
+        &[&program],
+        "    budget: {max_runs: 1}\n",
+        &[entry("gate", "exit", VALID_TABLE)],
+    ));
+    let governor = governor();
+    let cancel = Cancel::new();
+    let runner: Arc<dyn TestRunner> = Arc::new(CancelAtHandOver {
+        inner: flag_runner(),
+        cancel: cancel.clone(),
+    });
+    let end = {
+        let effects = port(&governor, &document, &scratch, CASE, Some(runner))
+            .unwrap()
+            .with_cancel(cancel);
+        drive(&governor, &effects, CASE, CHECK, args("{}"))
+    };
+    let reason = refusal(&end);
+    assert!(reason.starts_with("Cancelled"), "{reason}");
+    assert!(!scratch.marker().exists(), "the program started");
+    let observations: Vec<_> = port_observations(&governor)
+        .iter()
+        .map(|observation| plain(&observation.payload))
+        .collect();
+    assert_eq!(observations.len(), 1, "{observations:?}");
+    assert_eq!(
+        observations[0]["cancelled"],
+        json!(true),
+        "{observations:?}"
+    );
+    assert!(records(&governor).is_empty());
+    for path in ["src/program.rs", "../../website/docs/guides/bindings.md"] {
+        assert!(
+            text_of(path).contains(HANDED_OVER),
+            "{path} does not say what a handle set {HANDED_OVER} the program does"
+        );
+    }
+}
