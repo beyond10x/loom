@@ -2,8 +2,8 @@
   "provenance": {
     "system": "loom",
     "specification_version": "v1",
-    "source_digest": "08128d06d78d98e7d7e7a1d3828f7eafd90304eeee9255263ecbdf6b098056c9",
-    "contract_digest": "6a11f708ca50ab2e73836876ae5a92421f2c85ffa5f8f197194f2f98694a8e71"
+    "source_digest": "e3333b8cd01b74b28e5c266b08d1c06e5805c69aee7cb49e4b8379e69edd845a",
+    "contract_digest": "dc478223e9fa6254b8bc95052ca9b9fec458f5ce7d2a03717c1f7831ca73dc60"
   },
   "scope": {
     "profile": "component-skeletons",
@@ -1063,6 +1063,20 @@
     {
       "kind": "domain_type",
       "source": "loom.governor.StoredCaseId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredDecisionRequest",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "loom.governor.StoredDecisionRequestData",
       "disposition": {
         "disposition": "generated"
       }
