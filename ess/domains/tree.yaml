@@ -1108,7 +1108,14 @@ types:
   # file of the directory. `NoProtocolFiles`: the directory holds no protocol file.
   # `HandoffCheckFailed`: the `handoff_when` check of the named action could not be started, was
   # killed at its timeout or by a signal, or gave no exit status; the run stops, its `handoff
-  # checked` line written, and the action's program does not run.
+  # checked` line written, and the action's program does not run. `PersonProgramFailed` (story
+  # person-action-runs-a-program): the program of the person action `tree approve --action` takes
+  # was not started (its runs spent, a placed artifact that cannot be digested, an argv left
+  # unresolved, a timeout or a child that cannot be built; nothing is written), or it ran and did
+  # not end well (an exit other than 0, killed at its timeout, refused by its runner, or a program
+  # of an action that does not write changed a placed artifact): the approval, the run's
+  # observation, its blob, the moves and one `action finished` line are kept, and no person record
+  # is written. The detail names why, the exit or the blob digest, never the program's output.
   - name: loom.tree.TreeRefusalReason
     kind: enum
     variants:
@@ -1136,9 +1143,16 @@ types:
       - NoProtocolFiles
       - UnknownStatusFormat
       - HandoffCheckFailed
+      - PersonProgramFailed
 
   # A refused tree command: the reason, what is wrong, and where the reason names one the case,
   # the file, the action, the story that lifts it and the process id of the store's holder.
+  # `command` (story person-action-runs-a-program) is the argv of the refused `tree approve` call,
+  # `b10x-loom tree approve --store <store> --case <case> [--capability <capability>] --principal
+  # <principal> --action <action> [--result <result>] [--reasons <text> | --reasons-file <file>]
+  # [--at <instant>] --confinement <confinement> [--cgroup-root <dir>]`, the paths absolute: the
+  # command line sets it on every `PersonProgramFailed` and on no other reason, and running it
+  # takes the action again. The library leaves it absent.
   - name: loom.tree.TreeRefusal
     kind: struct
     fields:
@@ -1156,3 +1170,5 @@ types:
         type: Optional<String>
       - name: holder
         type: Optional<Integer>
+      - name: command
+        type: Optional<List<String>>

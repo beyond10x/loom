@@ -104,6 +104,7 @@ impl Refused {
             action: None,
             story: None,
             holder: None,
+            command: None,
         }))
     }
 

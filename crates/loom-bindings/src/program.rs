@@ -377,6 +377,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             retry_of,
             class: None,
             cancelled: false,
+            principal: None,
         };
         let mut blob_failure = None;
         match &answer {
