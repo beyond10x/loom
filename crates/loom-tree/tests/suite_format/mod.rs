@@ -821,6 +821,33 @@ fn follow_stays_in_the_cycle() {
         (difference.check.as_str(), difference.reason),
         ("escapes", DifferenceReason::PathOutsideCycle)
     );
+    // A link in the workspace to a file outside it is not read through.
+    let linked = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "suite-format-link-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    write(&linked.join("outside.txt"), "outside the cycle");
+    fs::create_dir_all(linked.join("work")).unwrap();
+    std::os::unix::fs::symlink(linked.join("outside.txt"), linked.join("work/leak.txt")).unwrap();
+    let through_link = checks_of(
+        "        - {check: exists, name: leaks, select: [{doc: {in: work, path: leak.txt}}]}\n",
+    );
+    let difference = evaluate_checks(
+        &through_link,
+        "expect",
+        &reading.view_of(&linked.join("work"), &reading.dir.join("store")),
+        &Captured::new(),
+    )
+    .unwrap();
+    assert_eq!(
+        (difference.check.as_str(), difference.reason),
+        ("leaks", DifferenceReason::PathOutsideCycle)
+    );
+    let _ = fs::remove_dir_all(&linked);
     reading.within_bound();
 }
 

@@ -391,3 +391,38 @@ fn a_set_cancel_flag_runs_no_cycle() {
     let _ = fs::remove_dir_all(&scratch);
     within_bound(started);
 }
+
+#[test]
+fn a_seed_that_is_a_link_is_refused_before_any_cycle() {
+    let started = Instant::now();
+    let dir = fresh_scratch("seed-link");
+    fs::create_dir_all(dir.join("suite/stubs")).unwrap();
+    fs::write(dir.join("outside.txt"), "outside the suite").unwrap();
+    // A link inside a seeded directory, to a file outside the suite.
+    std::os::unix::fs::symlink(dir.join("outside.txt"), dir.join("suite/stubs/leak.txt")).unwrap();
+    fs::write(
+        dir.join("suite/suite.yaml"),
+        "format: loom.tree-suite/1\ncycles:\n  - {name: leaks, protocol: tour@1, bindings: b.yaml, seed: [{from: stubs, to: stubs}]}\n",
+    )
+    .unwrap();
+    let refused = run_suite(
+        &dir.join("suite/suite.yaml"),
+        &local_settings(dir.join("scratch")),
+        None,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        format!("{:?}", refused.reason()),
+        "SeedUnusable",
+        "{refused}"
+    );
+    assert_eq!(
+        refused.member(),
+        Some("cycles[0].seed[0].from"),
+        "{refused}"
+    );
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
