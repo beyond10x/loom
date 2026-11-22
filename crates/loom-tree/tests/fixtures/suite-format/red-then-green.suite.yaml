@@ -1,0 +1,51 @@
+format: loom.tree-suite/1
+defaults: {protocol: fix@1, bindings: fix.bindings.yaml}
+cycles:
+  # A green names the red it follows. Over the records of the root, A is the last red repro_run,
+  # B the last implementation_change and C the last passed test_run, each taken with pick: last,
+  # so a rework's earlier failed test_run is never C. Seven conditions, nine checks.
+  - name: red-then-green
+    expect:
+      checks:
+        - check: before
+          name: red-then-change
+          select: [{records: {case: "."}}]
+          first: {kind: repro_run, result: red}
+          then: {kind: implementation_change}
+        - check: before
+          name: change-then-green
+          select: [{records: {case: "."}}]
+          first: {kind: implementation_change}
+          then: {kind: test_run, result: passed}
+        - check: all
+          name: red-has-a-revision
+          select: [{records: {case: "."}}, {where: {kind: repro_run, result: red}}, {pick: last}, {path: subject_revision}]
+          where: {".": {not_in: ["none", null]}}
+        - check: all
+          name: red-names-the-code
+          select: [{records: {case: "."}}, {where: {kind: repro_run, result: red}}, {pick: last}, {path: upstream_revisions.change}]
+          where: {".": {not_in: ["none", null]}}
+        - check: all
+          name: green-has-a-revision
+          select: [{records: {case: "."}}, {where: {kind: test_run, result: passed}}, {pick: last}, {path: subject_revision}]
+          where: {".": {not_in: ["none", null]}}
+        - check: compare
+          name: green-tests-the-red
+          left: {select: [{records: {case: "."}}, {where: {kind: test_run, result: passed}}, {pick: last}, {path: upstream_revisions.repro}]}
+          op: eq
+          right: {select: [{records: {case: "."}}, {where: {kind: repro_run, result: red}}, {pick: last}, {path: subject_revision}]}
+        - check: compare
+          name: change-answers-the-red
+          left: {select: [{records: {case: "."}}, {where: {kind: implementation_change}}, {pick: last}, {path: upstream_revisions.repro}]}
+          op: eq
+          right: {select: [{records: {case: "."}}, {where: {kind: repro_run, result: red}}, {pick: last}, {path: subject_revision}]}
+        - check: compare
+          name: green-tests-the-change
+          left: {select: [{records: {case: "."}}, {where: {kind: implementation_change}}, {pick: last}, {path: subject_revision}]}
+          op: eq
+          right: {select: [{records: {case: "."}}, {where: {kind: test_run, result: passed}}, {pick: last}, {path: subject_revision}]}
+        - check: compare
+          name: green-is-new-code
+          left: {select: [{records: {case: "."}}, {where: {kind: test_run, result: passed}}, {pick: last}, {path: subject_revision}]}
+          op: ne
+          right: {select: [{records: {case: "."}}, {where: {kind: repro_run, result: red}}, {pick: last}, {path: upstream_revisions.change}]}

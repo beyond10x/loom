@@ -3,6 +3,8 @@
 //! `crates/loom-cli/tests/tree_run.rs`. Scratch is under `CARGO_TARGET_TMPDIR`; no test reaches the
 //! network, a model or a credential.
 
+mod suite_format;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;

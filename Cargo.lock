@@ -809,7 +809,9 @@ dependencies = [
  "b10x-loom-protocols",
  "b10x-loom-runlog",
  "loom",
+ "regex",
  "serde_json",
+ "serde_yaml_ng",
  "sha2 0.11.0",
 ]
 

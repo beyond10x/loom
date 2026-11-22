@@ -34,6 +34,8 @@ mod store;
 mod time;
 mod verify;
 
+pub mod suite;
+
 use std::fmt;
 
 pub use loom::tree as model;
