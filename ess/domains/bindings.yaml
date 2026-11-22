@@ -5,7 +5,10 @@
 # in the old JSON format. The document is YAML, JSON is read as YAML. This domain declares the
 # decoded document and the refusals that decoding and the load-time check against a compiled
 # protocol give, and (story bound-program-result-table) the run of a `program` binding, the
-# evidence its result table records and the refusals of that step. An adapter, an aperture and a
+# evidence its result table records and the refusals of that step, and (story
+# bound-artifact-revisions) the revision Loom computes for each placed artifact, the revision moves
+# a step writes and a step's discard, and (story bound-program-case-id) the environment of every
+# program that port starts, `PATH` and `LOOM_CASE` and nothing else. An adapter, an aperture and a
 # remote endpoint are engine configuration and never binding data.
 domain: loom.bindings
 
@@ -271,6 +274,23 @@ types:
       - name: runner_refusal
         type: Optional<String>
 
+  # The environment of a program the program effect port starts (story bound-program-case-id),
+  # the bound program and its `arguments_from` program alike: `path`, the variable `PATH` at the
+  # host process's value (absent when the host has none), and `loom_case`, the variable
+  # `LOOM_CASE`, the id of the case the port was built for as the governor holds it (a child as
+  # `<parent id>.<name>`), at most 4096 bytes, else the step is refused and nothing starts. No
+  # other variable reaches such a program, and no host variable is inherited: no request's
+  # arguments, `arguments_from` output, program report, bindings document or host variable sets
+  # or changes either value. The intake slice's `run --action-bindings` commands are not started
+  # by this port and keep `PATH` alone.
+  - name: loom.bindings.ProgramEnvironment
+    kind: struct
+    fields:
+      - name: path
+        type: Optional<String>
+      - name: loom_case
+        type: String
+
   # An artifact and the revision the case holds for it when the program started.
   - name: loom.bindings.ArtifactRevision
     kind: struct
@@ -308,8 +328,10 @@ types:
   # not exit 0 or printed anything but one JSON object within 1 MiB (`ArgumentsUnreadable`, the
   # bound program is not started); the action has run its `budget.max_runs` times in the case
   # (`RunsSpent`, nothing is started); the case is held under another protocol than the one the
-  # bindings document binds (`CaseOfAnotherProtocol`, nothing is started or recorded). A refused
-  # step records no evidence.
+  # bindings document binds (`CaseOfAnotherProtocol`, nothing is started or recorded); a placed
+  # artifact cannot be digested (`ArtifactUnreadable`, story bound-artifact-revisions: before the
+  # run nothing is started, after it no revision moves and nothing is recorded). A refused step
+  # records no evidence.
   - name: loom.bindings.ProgramRefusalReason
     kind: enum
     variants:
@@ -318,6 +340,7 @@ types:
       - ArgumentsUnreadable
       - RunsSpent
       - CaseOfAnotherProtocol
+      - ArtifactUnreadable
 
   # A refused step: the reason, the action and what is wrong.
   - name: loom.bindings.ProgramRefusal
@@ -326,6 +349,90 @@ types:
       - name: reason
         type: loom.bindings.ProgramRefusalReason
       - name: action
+        type: String
+      - name: detail
+        type: String
+
+  # An artifact the document places at a path in the workspace (`artifacts`) and the revision Loom
+  # computes for what is there (story bound-artifact-revisions): `t` and the first 16 hex digits of
+  # the SHA-256 over a file's bytes, or over the entries of a tree in path order (each entry's
+  # kind, relative path and bytes; a symbolic link's bytes are its target string, never followed);
+  # `none` while nothing is at the path. No executor, program report, argument or document names
+  # a revision.
+  - name: loom.bindings.ArtifactPlacement
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: path
+        type: String
+      - name: revision
+        type: String
+
+  # One artifact revision a step or an evaluation moved: from the revision the case held to the
+  # one computed for its placed path.
+  - name: loom.bindings.RevisionMove
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: from
+        type: String
+      - name: to
+        type: String
+
+  # How a bound step that ran its program was written: `Recorded`, its revision moves and its
+  # records in one store write; `Discarded`, its revision moves alone, its records dropped for the
+  # reason it names.
+  - name: loom.bindings.StepOutcome
+    kind: enum
+    variants: [Recorded, Discarded]
+
+  # Why a step's records were dropped: the action's effect class is not `write` (it is `read` or
+  # none) and its program changed a placed artifact (`ChangedByNonWriter`).
+  - name: loom.bindings.DiscardReason
+    kind: enum
+    variants: [ChangedByNonWriter]
+
+  # A bound step as the program effect port reports it once written: the action, the outcome, the
+  # discard reason (present exactly when the outcome is `Discarded`), the placements computed after
+  # the program ended and the revision moves written.
+  - name: loom.bindings.BoundStep
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: outcome
+        type: loom.bindings.StepOutcome
+      - name: discarded
+        type: Optional<loom.bindings.DiscardReason>
+      - name: placements
+        type: List<loom.bindings.ArtifactPlacement>
+      - name: moves
+        type: List<loom.bindings.RevisionMove>
+
+  # Why a placed path is not digested, nothing at it read: an absolute path, a `..` segment or a
+  # symbolic link among the path's directories (`OutsideWorkspace`); more bytes, entries or levels
+  # than the bound (`TooLarge`); a file or directory that changed while it was read
+  # (`ChangedWhileRead`); an entry that is neither a file, a directory nor a link, or one that
+  # cannot be opened (`Unreadable`).
+  - name: loom.bindings.RevisionRefusalReason
+    kind: enum
+    variants:
+      - OutsideWorkspace
+      - TooLarge
+      - ChangedWhileRead
+      - Unreadable
+
+  # A placed path that was not digested: the reason, the artifact, its path and what is wrong.
+  - name: loom.bindings.RevisionRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.bindings.RevisionRefusalReason
+      - name: artifact
+        type: String
+      - name: path
         type: String
       - name: detail
         type: String

@@ -185,11 +185,18 @@ fn target_dir(root: &Path) -> PathBuf {
 
 /// Runs the `cargo` on `PATH` in `root`, its output passed through, and returns its exit code.
 ///
+/// With `ESS_TOOLCHAIN` the release `ess/ess-inputs.yaml` requires when the caller set none, as
+/// the Taskfiles do, so a test that starts `ess` runs the pin under a newer dispatcher.
 /// Without the variables `cargo run` set for this program: a build script that reruns when one
 /// changes (ring's on `CARGO_MANIFEST_DIR` and `CARGO_PKG_*`) would otherwise rebuild its crate and
 /// everything above it here, after `task ess-gate` and `task conform` built them without.
 fn cargo(root: &Path, args: &[String]) -> Result<Option<i32>, String> {
     let mut command = Command::new("cargo");
+    if std::env::var_os("ESS_TOOLCHAIN").is_none_or(|value| value.is_empty())
+        && let Some(release) = crate::ess_suite::pinned_release(root)
+    {
+        command.env("ESS_TOOLCHAIN", release);
+    }
     for (name, _) in std::env::vars_os() {
         let Some(name) = name.to_str() else { continue };
         if name.starts_with("CARGO_PKG_")

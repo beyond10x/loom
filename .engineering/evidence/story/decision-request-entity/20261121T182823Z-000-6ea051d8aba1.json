@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T18:28:23Z",
+  "actor": "agent:loom",
+  "artifact": "story:decision-request-entity",
+  "kind": "story",
+  "revision": 42,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "the note of pass 2 (the sentence on what synthesis reaches for RecordProduced) corrected in 86313d78 and e1373728; the point it could not establish settled by a mutant and the test of 838536f2 (impl/decision-request-entity)",
+    "review": "review-result:decision-request-entity-security-2",
+    "outcome": "fixed"
+  }
+}

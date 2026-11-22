@@ -1268,9 +1268,9 @@
     "loom.session.SessionFailed"
   ],
   "provenance": {
-    "contract_digest": "b8861e6c0dcd516ae6a61f772ec91a14f639811cafa340e3d466e8a1ef368f96",
+    "contract_digest": "13ca2bf501982c83ecdc4d9e9b4563a7ac69a97b29083eab85b7a6b20eb29ca5",
     "scenario_initial_state": "empty",
-    "spec_digest": "8ee2331e35a0bd16da759d58a31a2ef3737667e04a6a3de9fe3e50dcf93ff73d",
+    "spec_digest": "4fb73bd9a3e929b4f366604f76e7c25f0820d3eee25a1084286d906e203f2002",
     "specification_version": "v1",
     "suite_version": "ess-conformance/65",
     "system": "loom"

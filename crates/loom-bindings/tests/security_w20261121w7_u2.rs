@@ -541,6 +541,7 @@ fn model_chosen_arguments_reach_standard_input_alone() {
         .ok()
         .map(|path| ("PATH".to_owned(), path))
         .into_iter()
+        .chain([("LOOM_CASE".to_owned(), CASE.to_owned())])
         .collect();
     assert_eq!(environment.set, expected);
     let stdin: serde_json::Value = serde_json::from_slice(child.stdin().unwrap()).unwrap();
@@ -575,7 +576,10 @@ fn arguments_from_output_reaches_standard_input_alone_and_over_the_bound_starts_
     assert_eq!(children.len(), 2);
     assert_eq!(children[1].program(), "/opt/stub/program");
     assert!(children[1].args().is_empty());
-    assert_eq!(children[1].environment().set.len(), 1);
+    assert_eq!(
+        children[1].environment().set.keys().collect::<Vec<_>>(),
+        ["LOOM_CASE", "PATH"]
+    );
     let stdin: serde_json::Value = serde_json::from_slice(children[1].stdin().unwrap()).unwrap();
     assert_eq!(
         stdin,
