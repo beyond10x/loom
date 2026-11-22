@@ -217,7 +217,7 @@ fn run_cancellable(
         for case in &held {
             logs.reconcile(&case.case)?;
         }
-        close_terminated(&governor, &logs, &store, &held, &mut emit)?;
+        take_over(&governor, &logs, &store, &held, &mut emit)?;
         let cancelled_before = cancelled();
         let stop_before = if cancelled_before {
             None
@@ -625,6 +625,20 @@ pub(crate) fn closed_lines<S: loom_governor::FallibleCaseStore>(
     outcome: &str,
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
+    terminated_line(logs, case, outcome, emit)?;
+    if let Some(parent) = parent {
+        child_closed_line(governor, logs, parent, case, outcome, emit)?;
+    }
+    Ok(())
+}
+
+/// Appends `terminated` through `outcome` to `case`'s log.
+fn terminated_line(
+    logs: &Logs,
+    case: &str,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
     let line = logs.append(
         case,
         RunLogEvent::Terminated(Terminated {
@@ -632,20 +646,82 @@ pub(crate) fn closed_lines<S: loom_governor::FallibleCaseStore>(
         }),
     )?;
     emit(case, line);
-    if let Some(parent) = parent {
-        let (record, record_digest) = child_record(governor, parent, case)?;
-        let line = logs.append(
-            parent,
-            RunLogEvent::ChildClosed(ChildClosed {
-                child: case.to_owned(),
-                outcome: Some(outcome.to_owned()),
-                record,
-                record_digest,
-            }),
-        )?;
-        emit(parent, line);
-    }
     Ok(())
+}
+
+/// Appends `child closed` of `child` through `outcome` to `parent`'s log, naming the child's
+/// record as the termination replaced it.
+fn child_closed_line<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    parent: &str,
+    child: &str,
+    outcome: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let (record, record_digest) = child_record(governor, parent, child)?;
+    let line = logs.append(
+        parent,
+        RunLogEvent::ChildClosed(ChildClosed {
+            child: child.to_owned(),
+            outcome: Some(outcome.to_owned()),
+            record,
+            record_digest,
+        }),
+    )?;
+    emit(parent, line);
+    Ok(())
+}
+
+/// Appends `case opened` to `child`'s log, naming the protocol the governor holds it under.
+fn case_opened_line<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    child: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let line = logs.append(
+        child,
+        RunLogEvent::CaseOpened(CaseOpened {
+            case: child.to_owned(),
+            protocol: child_protocol(governor, child)?,
+        }),
+    )?;
+    emit(child, line);
+    Ok(())
+}
+
+/// Appends `child opened` of `child` to `parent`'s log, naming the child's record as the parent
+/// holds it now.
+fn child_opened_line<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    parent: &str,
+    child: &str,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let (record, record_digest) = child_record(governor, parent, child)?;
+    let line = logs.append(
+        parent,
+        RunLogEvent::ChildOpened(ChildOpened {
+            child: child.to_owned(),
+            protocol: child_protocol(governor, child)?,
+            record,
+            record_digest,
+        }),
+    )?;
+    emit(parent, line);
+    Ok(())
+}
+
+/// The registration the governor holds `case` under.
+fn child_protocol<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &str,
+) -> Result<String, Refused> {
+    governor
+        .protocol(&CaseId(case.to_owned()))
+        .map_err(|error| unreadable(format!("case {case}"), format!("{error:?}")))
 }
 
 /// The outcome the governor terminated `case` through, when it did.
@@ -660,20 +736,52 @@ pub(crate) fn termination<S: loom_governor::FallibleCaseStore>(
         .map(|termination| termination.outcome))
 }
 
-/// Writes the lines of each case the governor holds terminated and whose log does not yet say
-/// so: a run stopped between the termination and its lines.
-fn close_terminated<S: loom_governor::FallibleCaseStore>(
+/// Writes the lines of a child event a run stopped between its two appends left out, each only
+/// when its log does not hold it yet, so a second writer writes none again. In the order of
+/// `held`, each case before its children: for every child the governor links, its `case opened`
+/// line and the parent's `child opened` line naming it; then for every case the governor holds
+/// terminated, its `terminated` line and, for a child, the parent's `child closed` line naming it.
+fn take_over<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     logs: &Logs,
     store: &Path,
     held: &[Held],
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
+    let holds = |case: &str, wanted: &dyn Fn(&RunLogEvent) -> bool| {
+        read_lines(store, case).map(|lines| lines.iter().any(|line| wanted(&line.event)))
+    };
     for case in held {
-        if let Some(outcome) = termination(governor, &case.case)?
-            && !terminated(store, &case.case)
+        let Some(parent) = case.parent.as_deref() else {
+            continue;
+        };
+        let child = case.case.as_str();
+        if !holds(child, &|event| matches!(event, RunLogEvent::CaseOpened(_)))? {
+            case_opened_line(governor, logs, child, emit)?;
+        }
+        if !holds(
+            parent,
+            &|event| matches!(event, RunLogEvent::ChildOpened(opened) if opened.child == child),
+        )? {
+            child_opened_line(governor, logs, parent, child, emit)?;
+        }
+    }
+    for case in held {
+        let Some(outcome) = termination(governor, &case.case)? else {
+            continue;
+        };
+        if !holds(&case.case, &|event| {
+            matches!(event, RunLogEvent::Terminated(_))
+        })? {
+            terminated_line(logs, &case.case, &outcome, emit)?;
+        }
+        if let Some(parent) = case.parent.as_deref()
+            && !holds(
+                parent,
+                &|event| matches!(event, RunLogEvent::ChildClosed(closed) if closed.child == case.case),
+            )?
         {
-            closed(governor, logs, case, &outcome, emit)?;
+            child_closed_line(governor, logs, parent, &case.case, &outcome, emit)?;
         }
     }
     Ok(())
@@ -696,28 +804,8 @@ fn opened<S: loom_governor::FallibleCaseStore>(
         return Ok(());
     };
     for child in children.iter().filter_map(serde_json::Value::as_str) {
-        let protocol = governor
-            .protocol(&CaseId(child.to_owned()))
-            .map_err(|error| unreadable(format!("case {child}"), format!("{error:?}")))?;
-        let line = logs.append(
-            child,
-            RunLogEvent::CaseOpened(CaseOpened {
-                case: child.to_owned(),
-                protocol: protocol.clone(),
-            }),
-        )?;
-        emit(child, line);
-        let (record, record_digest) = child_record(governor, parent, child)?;
-        let line = logs.append(
-            parent,
-            RunLogEvent::ChildOpened(ChildOpened {
-                child: child.to_owned(),
-                protocol,
-                record,
-                record_digest,
-            }),
-        )?;
-        emit(parent, line);
+        case_opened_line(governor, logs, child, emit)?;
+        child_opened_line(governor, logs, parent, child, emit)?;
     }
     Ok(())
 }
