@@ -1,0 +1,64 @@
+name: binaries
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The release version, the tag the calling run was started for.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  x86_64-unknown-linux-gnu:
+    name: binaries / x86_64-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container: rust:1.99-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Build b10x-loom from the locked dependencies
+        run: cargo build --release --locked -p b10x-loom-cli --bin b10x-loom
+
+      - name: Pack the binary with its license, and write the archive's SHA-256 checksum
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "not a release version: $VERSION" >&2
+            exit 1
+          fi
+          test "$(target/release/b10x-loom --version)" = "b10x-loom $VERSION"
+          name="b10x-loom-$VERSION-x86_64-unknown-linux-gnu"
+          mkdir "$name"
+          install -m 0755 target/release/b10x-loom "$name/b10x-loom"
+          install -m 0644 LICENSE "$name/LICENSE"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          cat "$name.tar.gz.sha256"
+
+      - name: Keep the archive and its checksum as the workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: b10x-loom-${{ inputs.version }}
+          path: |
+            b10x-loom-${{ inputs.version }}-x86_64-unknown-linux-gnu.tar.gz
+            b10x-loom-${{ inputs.version }}-x86_64-unknown-linux-gnu.tar.gz.sha256
+          retention-days: 30
+          if-no-files-found: error
