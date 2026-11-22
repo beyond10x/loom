@@ -10,20 +10,21 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
 use b10x_loom_commission::model::responsibility::{
     ActionStatus, CaseId, CompletionDetermination, CompletionDeterminationComplete, EvidenceData,
-    EvidenceId, Observation, ObservationData, ObservationId, Truth,
+    EvidenceId, GovernorError, Observation, ObservationData, ObservationId, Truth,
 };
-use b10x_loom_commission::ports::evidence::{ObservationPort, submit_evidence};
+use b10x_loom_commission::ports::evidence::{EvidenceError, ObservationPort, submit_evidence};
 use b10x_loom_commission::ports::governor::Governor as _;
 use loom_governor::{
     CHILD_OUTCOME_PRODUCER, CanonGovernor, CaseIndependence, CaseInputs, CaseState, ChildError,
-    ChildOpening, FallibleCaseStore, FileCaseStore, OpenError, TerminateError,
+    ChildOpening, DecisionError, EvaluationTime, FallibleCaseStore, FileCaseStore, MemoryCaseStore,
+    OpenError, StepError, TerminateError, UpdateError,
 };
 use loom_protocols::{ProtocolCatalog, ProtocolSource, SourceKind};
 use serde_json::{Value, json};
@@ -1503,4 +1504,254 @@ fn a_program_step_cannot_write_a_case_outcome_record_for_a_case_open_protocol() 
             assert_eq!(after, before + usize::from(lone_allowed), "{}", case.0);
         }
     }
+}
+
+// ---- a terminated case stays terminated (story:governor-keeps-a-terminated-case-terminated) -------
+//
+// The fixture is the w7 security review's (lane 4): a case terminated through `passed` while its
+// verdict is fresh, under a trusted time held in a cell the test sets. Its protocol adds the
+// outcome `waived`, which requires the explicit decision `waiver`, so a decision Canon would take
+// exists for the refusal of `decide` to be seen.
+
+const REVIEW_NAME: &str = "review-sec-closed@1";
+
+/// `passed` on a verdict about `work` that says something for 60 seconds; `waived` on a decision.
+const REVIEW_PROTOCOL: &str = r"
+format: protocol/1
+protocol: {id: review.sec.closed, revision: 1}
+artifacts: {work: {}}
+evidence_kinds:
+  verdict: {max_age: 60s}
+claims:
+  work.passed:
+    true_when:
+      evidence: {kind: verdict, subject: work, result: passed}
+actions:
+  work.do:
+    effect: write
+    may_produce:
+      - evidence: verdict
+outcomes:
+  passed:
+    requires: {claim: work.passed}
+  waived:
+    requires: {decision: waiver}
+";
+
+const OBSERVED: &str = "2026-11-21T12:00:00Z";
+const TERMINATED: &str = "2026-11-21T12:00:10Z";
+const AN_HOUR_LATER: &str = "2026-11-21T13:00:10Z";
+
+/// A trusted time the test sets; `None` is no trusted time.
+#[derive(Clone, Default)]
+struct TimeCell(Arc<Mutex<Option<String>>>);
+
+impl TimeCell {
+    fn set(&self, at: Option<&str>) {
+        *self.0.lock().unwrap() = at.map(str::to_owned);
+    }
+}
+
+impl EvaluationTime for TimeCell {
+    fn at(&self, _: &CaseId) -> Result<Option<String>, GovernorError> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+}
+
+type Reviewed = CanonGovernor<MemoryCaseStore, TimeCell>;
+
+/// A passed verdict about `work` at the case's current revisions, citing a fresh observation made
+/// at `OBSERVED`; `n` keeps ids apart.
+fn review_verdict(governor: &Reviewed, case: &CaseId, n: u64) -> EvidenceData {
+    let observation = ObservationId(uuid(0x9000 + n));
+    ObservationPort::observe(
+        governor,
+        Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "trusted:review-sec".into(),
+            subject: "work".into(),
+            observed_at: Timestamp(OBSERVED.into()),
+            payload: commission_json::Value::Null,
+        }),
+    )
+    .expect("the observation is received");
+    let revision = governor.revisions(case).unwrap()["work"].clone();
+    EvidenceData {
+        evidence_id: EvidenceId(uuid(n)),
+        case_id: case.clone(),
+        kind: "verdict".into(),
+        subject_revision: governor.current_revision(case).unwrap(),
+        producer: "worker".into(),
+        observation_ids: vec![observation],
+        facts: commission_json::parse(
+            &json!({
+                "format": "canon-evidence/1",
+                "id": format!("verdict-{n}"),
+                "kind": "verdict",
+                "subject": "work",
+                "subject_revision": revision,
+                "result": "passed",
+                "observed_at": OBSERVED,
+            })
+            .to_string(),
+        )
+        .unwrap(),
+        provenance: commission_json::Value::Null,
+    }
+}
+
+/// A governor over memory with the fixture protocol and the time `cell`, and a case opened under
+/// it with `work` at `w1`, a fresh passed verdict, and terminated through `passed`.
+fn terminated_case(cell: &TimeCell) -> (Reviewed, CaseId) {
+    let governor = CanonGovernor::new(MemoryCaseStore::default())
+        .with_protocol_yaml(REVIEW_NAME, REVIEW_PROTOCOL)
+        .expect("the fixture protocol registers")
+        .with_evaluation_time(cell.clone());
+    let case = governor
+        .open(
+            REVIEW_NAME,
+            BTreeMap::from([("work".to_owned(), "w1".to_owned())]),
+            CaseInputs::none(),
+        )
+        .expect("the case opens");
+    let verdict = review_verdict(&governor, &case, 1);
+    submit_evidence(&governor, "worker", verdict).expect("the verdict is received");
+    governor
+        .terminate(&case, "passed", TERMINATED)
+        .expect("the termination is legitimate while the verdict is fresh");
+    (governor, case)
+}
+
+/// What the contract says of a terminated case: completion is the stored outcome and the
+/// frontier blocks every action with the reason `{"terminated":"passed"}`. `Err` names each part
+/// that does not hold.
+fn still_terminated(governor: &Reviewed, case: &CaseId) -> Result<(), String> {
+    let mut broken = Vec::new();
+    let expected = CompletionDetermination::Complete(CompletionDeterminationComplete {
+        outcome: "passed".into(),
+    });
+    match governor.completion(case) {
+        Ok(completion) if completion == expected => {}
+        other => broken.push(format!("completion is {other:?}, not the stored `passed`")),
+    }
+    match governor.frontier(case) {
+        Ok(frontier)
+            if !frontier.data().actions.is_empty()
+                && frontier.data().actions.iter().all(|action| {
+                    action.status == ActionStatus::Blocked
+                        && action
+                            .reasons
+                            .iter()
+                            .any(|reason| reason == r#"{"terminated":"passed"}"#)
+                }) => {}
+        Ok(frontier) => broken.push(format!(
+            "an action is not blocked by the termination: {:?}",
+            frontier.data().actions
+        )),
+        Err(error) => broken.push(format!("the frontier is {error:?}, not one blocking all")),
+    }
+    if broken.is_empty() {
+        Ok(())
+    } else {
+        Err(broken.join("; "))
+    }
+}
+
+/// The review's case 1: the trusted time passes the verdict's `max_age` after the termination.
+/// Nothing was written; the case is still complete with `passed` and its frontier blocked.
+#[test]
+fn a_terminated_case_stays_complete_after_its_evidence_ages_out() {
+    let cell = TimeCell::default();
+    cell.set(Some(TERMINATED));
+    let (governor, case) = terminated_case(&cell);
+    still_terminated(&governor, &case).expect("right after the termination");
+    let held = governor.case_state(&case).unwrap();
+
+    cell.set(Some(AN_HOUR_LATER));
+    assert_eq!(
+        governor.case_state(&case).unwrap(),
+        held,
+        "the store holds the case as terminated"
+    );
+    let result = still_terminated(&governor, &case);
+    assert!(
+        result.is_ok(),
+        "an hour after a legitimate termination, with nothing written: {}",
+        result.unwrap_err()
+    );
+}
+
+/// The review's case 2 under D1 a: `update_revision` on a terminated case is refused naming the
+/// stored outcome, and the case keeps its revisions and its revision number.
+#[test]
+fn a_revision_move_on_a_terminated_case_is_refused() {
+    let cell = TimeCell::default();
+    let (governor, case) = terminated_case(&cell);
+    still_terminated(&governor, &case).expect("right after the termination");
+    let revisions = governor.revisions(&case).unwrap();
+    let revision = governor.current_revision(&case).unwrap();
+
+    assert_eq!(
+        governor.update_revision(&case, "work", "w2"),
+        Err(UpdateError::Terminated {
+            outcome: "passed".into()
+        })
+    );
+    assert_eq!(governor.revisions(&case).unwrap(), revisions);
+    assert_eq!(governor.current_revision(&case).unwrap(), revision);
+    let result = still_terminated(&governor, &case);
+    assert!(
+        result.is_ok(),
+        "after the refused move: {}",
+        result.unwrap_err()
+    );
+}
+
+/// D1 a: a step (a move, and a record), a decision and a record through the evidence port are
+/// each refused on a terminated case, and the stored case is as before each of them.
+#[test]
+fn a_step_a_decision_and_a_record_on_a_terminated_case_are_refused() {
+    let cell = TimeCell::default();
+    let (governor, case) = terminated_case(&cell);
+    // The records' observations are received first; an observation is not a write to the case.
+    let stepped = review_verdict(&governor, &case, 2);
+    let submitted = review_verdict(&governor, &case, 3);
+    let attributing = Attributing::default();
+    submit_evidence(&attributing, "worker", stepped).unwrap();
+    let held = governor.case_state(&case).unwrap();
+    let terminated = StepError::Terminated {
+        outcome: "passed".into(),
+    };
+
+    let moved = governor.record_step(
+        &case,
+        &BTreeMap::from([("work".to_owned(), "w2".to_owned())]),
+        Vec::new(),
+    );
+    assert_eq!(moved, Err(terminated.clone()), "a step moving `work`");
+    assert_eq!(governor.case_state(&case).unwrap(), held);
+
+    let recorded = governor.record_step(&case, &BTreeMap::new(), attributing.0.into_inner());
+    assert_eq!(recorded, Err(terminated), "a step holding a record");
+    assert_eq!(governor.case_state(&case).unwrap(), held);
+
+    assert_eq!(
+        governor.decide(&case, "waived", "waiver", "lead"),
+        Err(DecisionError::Terminated {
+            outcome: "passed".into()
+        })
+    );
+    assert_eq!(governor.case_state(&case).unwrap(), held);
+
+    assert_eq!(
+        submit_evidence(&governor, "worker", submitted),
+        Err(EvidenceError::Governor(GovernorError::GovernorUnavailable))
+    );
+    assert_eq!(governor.case_state(&case).unwrap(), held);
+    let result = still_terminated(&governor, &case);
+    assert!(
+        result.is_ok(),
+        "after the refused writes: {}",
+        result.unwrap_err()
+    );
 }
