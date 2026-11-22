@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bound-program-contract
 kind: story
-status: draft
+status: active
 title: A bound program can be named beside its bindings file, sees its run's timeout in its environment, and an exit its binding classes as a program error or as not called records nothing and is not counted
 summary: program_root bindings and resolve_programs; LOOM_TIMEOUT_SECONDS, LOOM_CASE_NAME and LOOM_PARENT_CASE_NAME beside LOOM_CASE; exits {error, not_called}, no default list; ProgramError ends the run
 tags:
@@ -36,7 +36,10 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T00:22:56Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
+- {from: "proposed", to: "active", at: "2026-11-22T00:22:56Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
 ---
 ## Outcome
 

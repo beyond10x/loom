@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:open-children-from-arguments-from
 kind: story
-status: draft
+status: active
 title: An open binding with arguments_from opens one child per name its program prints, runs that program as a program binding's arguments program runs, and resumes a cut opening without opening a child twice
 summary: run_arguments_from shared by both ports; OpenEffects::new takes workspace, store and runner; printed object checked against the action's arguments schema; names checked before any write; the list kept as a loom/open observation and a blob, reused on resume
 tags:
@@ -37,7 +37,10 @@ scope:
   path: ess/domains/bindings.yaml
 - confidence: inferred
   path: website/docs/guides/bindings.md
-revision: 5
+revision: 7
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-22T00:22:59Z", actor: "agent:sdc", revision: 6, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
+- {from: "proposed", to: "active", at: "2026-11-22T00:23:00Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w9"}
 ---
 ## Outcome
 
