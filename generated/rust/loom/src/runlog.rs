@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 2e394929311bcf9897d6f4dddd3ea40e780ea6ec132bbdfa86b8e49fe675ba92
+// contract digest d88f79a8b057adcafd0cb7bd6e008cde0c77ea685e9bfe250f44793ec0cd3da1
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run log — `loom.runlog`.
@@ -59,6 +59,10 @@ pub struct ChildClosed {
     pub child: String,
     /// `outcome` — `Optional<String>`.
     pub outcome: Option<String>,
+    /// `record` — `Optional<String>`.
+    pub record: Option<String>,
+    /// `record_digest` — `Optional<String>`.
+    pub record_digest: Option<String>,
 }
 
 /// ChildOpened — `loom.runlog.ChildOpened`.
@@ -68,6 +72,10 @@ pub struct ChildOpened {
     pub child: String,
     /// `protocol` — `String`.
     pub protocol: String,
+    /// `record` — `Optional<String>`.
+    pub record: Option<String>,
+    /// `record_digest` — `Optional<String>`.
+    pub record_digest: Option<String>,
 }
 
 /// Discarded — `loom.runlog.Discarded`.
