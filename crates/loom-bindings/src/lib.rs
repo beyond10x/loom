@@ -53,7 +53,7 @@ pub use child::{
     PARENT_CASE_NAME_VARIABLE, TIMEOUT_VARIABLE, bound_case_child,
 };
 pub use copy::{COPY_SOURCE, CopyEffects};
-pub use decode::decode;
+pub use decode::{PRINCIPAL_PLACEHOLDER, decode};
 pub use handoff::{
     HandoffCheck, LAUNCH_FAILURE_EXITS, SIGNAL_EXITS, handoff_check_of, run_handoff_check,
 };

@@ -232,8 +232,17 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
     let id = Some(bound.action.as_str());
     let spec = &bound.executor;
     let kind = spec.kind;
-    let members: [(&str, bool, Executor); 11] = [
-        ("argv", spec.argv.is_some(), Executor::Program),
+    // `argv` is a program's and a person's (`story:person-action-runs-a-program`): a person's
+    // approval runs it.
+    if spec.argv.is_some() && !matches!(kind, Executor::Program | Executor::Person) {
+        return Err(refuse(
+            Reason::MemberNotForExecutor,
+            id,
+            "executor.argv",
+            format!("belongs to the Program and Person executors, not {kind:?}"),
+        ));
+    }
+    let members: [(&str, bool, Executor); 10] = [
         ("adapter", spec.adapter.is_some(), Executor::Agent),
         ("model", spec.model.is_some(), Executor::Agent),
         ("inputs", spec.inputs.is_some(), Executor::Agent),
@@ -265,6 +274,21 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
                 id,
                 member,
                 format!("belongs to the Program executor, not {kind:?}"),
+            ));
+        }
+    }
+    // A person's program reads `{}` on standard input, and its exit decides only whether the
+    // person's effect happened: it takes no arguments and no exit classes.
+    for (member, present) in [
+        ("arguments", bound.arguments.is_some()),
+        ("arguments_from", bound.arguments_from.is_some()),
+    ] {
+        if present && kind == Executor::Person {
+            return Err(refuse(
+                Reason::MemberNotForExecutor,
+                id,
+                member,
+                "belongs to a program step, not to the Person executor: a person's program reads {} on standard input",
             ));
         }
     }
