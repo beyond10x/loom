@@ -816,7 +816,8 @@ mod tests {
     #[test]
     fn a_number_past_a_double_is_checked_as_this_build_holds_it() {
         let held: serde_json::Value = serde_json::from_str("9007199254740992.5").expect("a number");
-        let arbitrary_precision = held.to_string() == "9007199254740992.5";
+        let arbitrary_precision =
+            serde_json::to_string(&held).ok().as_deref() == Some("9007199254740992.5");
         println!(
             "arbitrary_precision: {}",
             if arbitrary_precision { "on" } else { "off" }
