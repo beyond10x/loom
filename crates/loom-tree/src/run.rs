@@ -217,12 +217,19 @@ fn run_cancellable(
         }
     };
 
+    // A child event's two lines are written one after the other in this process (`opened`,
+    // `closed`), so only a run stopped before this one leaves one of them out: taken over once.
+    let held = tree_cases(&governor, &manifest.root, &manifest.bindings, catalog)?;
+    for case in &held {
+        logs.reconcile(&case.case)?;
+    }
+    take_over(&governor, &logs, &store, &held, &mut emit)?;
+
     loop {
         let held = tree_cases(&governor, &manifest.root, &manifest.bindings, catalog)?;
         for case in &held {
             logs.reconcile(&case.case)?;
         }
-        take_over(&governor, &logs, &store, &held, &mut emit)?;
         let cancelled_before = cancelled();
         let stop_before = if cancelled_before {
             None
@@ -746,6 +753,9 @@ pub(crate) fn termination<S: loom_governor::FallibleCaseStore>(
 /// `held`, each case before its children: for every child the governor links, its `case opened`
 /// line and the parent's `child opened` line naming it; then for every case the governor holds
 /// terminated, its `terminated` line and, for a child, the parent's `child closed` line naming it.
+///
+/// Each log is read once, before anything is written: a line written here is of another kind, or
+/// names another child, than every line looked for after it in the same log.
 fn take_over<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     logs: &Logs,
@@ -753,21 +763,26 @@ fn take_over<S: loom_governor::FallibleCaseStore>(
     held: &[Held],
     emit: &mut impl FnMut(&str, RunLogLine),
 ) -> Result<(), Refused> {
+    let mut read = BTreeMap::new();
+    for case in held {
+        read.insert(case.case.as_str(), read_lines(store, &case.case)?);
+    }
     let holds = |case: &str, wanted: &dyn Fn(&RunLogEvent) -> bool| {
-        read_lines(store, case).map(|lines| lines.iter().any(|line| wanted(&line.event)))
+        read.get(case)
+            .is_some_and(|lines| lines.iter().any(|line| wanted(&line.event)))
     };
     for case in held {
         let Some(parent) = case.parent.as_deref() else {
             continue;
         };
         let child = case.case.as_str();
-        if !holds(child, &|event| matches!(event, RunLogEvent::CaseOpened(_)))? {
+        if !holds(child, &|event| matches!(event, RunLogEvent::CaseOpened(_))) {
             case_opened_line(governor, logs, child, emit)?;
         }
         if !holds(
             parent,
             &|event| matches!(event, RunLogEvent::ChildOpened(opened) if opened.child == child),
-        )? {
+        ) {
             child_opened_line(governor, logs, parent, child, emit)?;
         }
     }
@@ -777,14 +792,14 @@ fn take_over<S: loom_governor::FallibleCaseStore>(
         };
         if !holds(&case.case, &|event| {
             matches!(event, RunLogEvent::Terminated(_))
-        })? {
+        }) {
             terminated_line(logs, &case.case, &outcome, emit)?;
         }
         if let Some(parent) = case.parent.as_deref()
             && !holds(
                 parent,
                 &|event| matches!(event, RunLogEvent::ChildClosed(closed) if closed.child == case.case),
-            )?
+            )
         {
             child_closed_line(governor, logs, parent, &case.case, &outcome, emit)?;
         }
