@@ -162,7 +162,11 @@ never from the candidate list:
   every record the evidence check accepted. A `children` form (Canon 0.9.0) reads `case_outcome`
   the same way, about any artifact: its `subject` and `revision` (Canon 0.10.0) are not read
   here, though Canon reads only the records about that subject, and with `revision: current` at
-  its current revision (until `story:selector-stop-names-set-aside-record`).
+  its current revision (until `story:selector-stop-names-set-aside-record`). A `descended` form
+  (Canon 0.11.0) reads its `first` kind as an order form does, whatever the revision, and its
+  `then` kind as an evidence match does, at the subject's current revision, as Canon reads them;
+  a record about an earlier revision of the `then` kind therefore counts for nothing once the
+  subject moved.
 - `StepHistory` answers `performed_at(action, case_revision)` and `due(action)`.
 
 An action is useful while `due` is true (`retry_when`, a pending copy). Otherwise it is not useful
