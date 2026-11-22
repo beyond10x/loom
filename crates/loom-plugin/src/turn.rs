@@ -89,6 +89,7 @@ use loom_sdk::governor::FallibleCaseStore;
 use loom_sdk::intake::router::{RouterError, classify_with_catalog};
 use loom_sdk::intake::slice::run::RetryPolicy;
 use loom_sdk::intake::slice::selector::send_with_policy;
+use loom_sdk::loom::arguments::ArgumentSchemas;
 use loom_sdk::loom::model_selector::{
     ARGUMENTS_TOOL, ArgumentsError, AskError, Briefing, ModelArguments, ModelSelector, NO_ACTION,
     SELECT_TOOL, arguments_once, select_once,
@@ -359,6 +360,12 @@ pub fn turn_with<S: FallibleCaseStore>(
         }
     };
     let catalog = ProtocolCatalog::plugins().map_err(PluginError::Turn)?;
+    // The argument schemas of the protocol the case opens on, from the entry the governor runs:
+    // what Loom checks each step's generated arguments against before revalidation.
+    let schemas: ArgumentSchemas = catalog
+        .get(options.protocol)
+        .map(|entry| entry.argument_schemas().into_iter().collect())
+        .unwrap_or_default();
     let governor = CanonGovernor::new(options.store)
         .with_catalog(&catalog)
         .map_err(|error| PluginError::Turn(error.to_string()))?;
@@ -435,6 +442,7 @@ pub fn turn_with<S: FallibleCaseStore>(
             ModelArguments::new(&lent, briefing),
             context.as_str(),
         )
+        .with_argument_schemas(schemas)
         .with_governor(&governor),
         admits: &projection.actions,
         asked: &asked,

@@ -16,7 +16,9 @@
 //!   replacement is held (ESS refuses that guard beside `wrong_state`, `ESS-COMMAND-004`);
 //! * `RecordSelection` by the generated behaviour of that `RequestRecord`, over the selections it
 //!   holds and the selection records it keeps;
-//! * the views `Catalogues`, `Selections` and `SelectionRecords` from what the two records hold.
+//! * `CheckArguments` by that `RequestRecord`'s behaviour, over the argument requests it holds;
+//! * the views `Catalogues`, `Selections`, `SelectionRecords` and `ArgumentRequests` from what
+//!   the two records hold.
 //!
 //! The `loom.session` domain's `ProposeSessionChange` is answered by `b10x-loom-session-executor`,
 //! which records a session only by running one: the target runs a scripted Claude Code session
@@ -61,6 +63,11 @@
 //! two lists only, so the suite does not exercise its membership rule; the comment in
 //! `revalidate_selection` names the test that does.
 //!
+//! `CheckArguments`' `undeclared-not-empty` and `mismatched` are `external:` too: Canon's
+//! `check_arguments` decides them over the schema the host loaded and the generated arguments,
+//! neither of which the command carries. The target stages the verdict the scenario forced on the
+//! record (a match when it forced none), and the record's behaviour answers from it.
+//!
 //! Each scenario starts from empty records, an empty event log and no forced outcome, so no
 //! observation of one scenario can satisfy another. Consistency tokens come from a counter, so two
 //! runs of one suite report the same thing.
@@ -76,17 +83,18 @@ mod session;
 
 use std::cell::RefCell;
 
-use b10x_loom_executor::arguments::RequestRecord;
+use b10x_loom_executor::arguments::{ArgumentVerdict, RequestRecord};
 use b10x_loom_executor::model::behaviour::SelectionStorage;
 use b10x_loom_executor::model::run::obligations::{
-    OverruleSelectionBehavior, ProjectCatalogueBehavior, RecordSelectionBehavior,
-    RequestArgumentsBehavior, RevalidateSelectionBehavior,
+    CheckArgumentsBehavior, OverruleSelectionBehavior, ProjectCatalogueBehavior,
+    RecordSelectionBehavior, RequestArgumentsBehavior, RevalidateSelectionBehavior,
 };
 use b10x_loom_executor::model::run::{
-    ArgumentRequestId, CatalogueId, OverruleSelection, OverruleSelectionOutcome, ProjectCatalogue,
-    ProjectCatalogueOutcome, RecordSelection, RecordSelectionOutcome, RequestArguments,
-    RequestArgumentsOutcome, RevalidateSelection, RevalidateSelectionOutcome, SelectAction,
-    SelectActionOutcome, SelectionId, SelectionRecordId, SelectionState, TurnId,
+    ArgumentRequestId, ArgumentsMismatched, CatalogueId, CheckArguments, CheckArgumentsOutcome,
+    OverruleSelection, OverruleSelectionOutcome, ProjectCatalogue, ProjectCatalogueOutcome,
+    RecordSelection, RecordSelectionOutcome, RequestArguments, RequestArgumentsOutcome,
+    RevalidateSelection, RevalidateSelectionOutcome, SelectAction, SelectActionOutcome,
+    SelectionId, SelectionRecordId, SelectionState, TurnId,
 };
 use b10x_loom_executor::projection::CatalogueRecord;
 use b10x_loom_executor::selection::select_action;
@@ -115,6 +123,7 @@ const REQUEST_ARGUMENTS: &str = "loom.run.RequestArguments";
 const REVALIDATE_SELECTION: &str = "loom.run.RevalidateSelection";
 const OVERRULE_SELECTION: &str = "loom.run.OverruleSelection";
 const RECORD_SELECTION: &str = "loom.run.RecordSelection";
+const CHECK_ARGUMENTS: &str = "loom.run.CheckArguments";
 
 const CATALOGUE_PROJECTED: &str = "loom.run.CatalogueProjected";
 const ACTION_SELECTED: &str = "loom.run.ActionSelected";
@@ -124,6 +133,8 @@ const SELECTION_NOT_IN_FRONTIER: &str = "loom.run.SelectionNotInFrontier";
 const SELECTION_ADMITTED: &str = "loom.run.SelectionAdmitted";
 const SELECTION_OVERRULED: &str = "loom.run.SelectionOverruled";
 const SELECTION_RECORDED: &str = "loom.run.SelectionRecorded";
+const ARGUMENTS_MATCHED: &str = "loom.run.ArgumentsMatched";
+const ARGUMENTS_MISMATCHED: &str = "loom.run.ArgumentsMismatched";
 
 const CATALOGUE_EXISTS: &str = "loom.run.CatalogueExists";
 const CATALOGUE_NOT_FOUND: &str = "loom.run.CatalogueNotFound";
@@ -134,13 +145,17 @@ const SELECTION_NOT_FOUND: &str = "loom.run.SelectionNotFound";
 const SELECTION_NOT_SELECTED: &str = "loom.run.SelectionNotSelected";
 const SELECTION_STATE_CONFLICT: &str = "loom.run.SelectionStateConflict";
 const SELECTION_RECORD_EXISTS: &str = "loom.run.SelectionRecordExists";
+const ARGUMENT_REQUEST_STATE_CONFLICT: &str = "loom.run.ArgumentRequestStateConflict";
 
 const CATALOGUES: &str = "loom.run.Catalogues";
 const SELECTIONS: &str = "loom.run.Selections";
 const SELECTION_RECORDS: &str = "loom.run.SelectionRecords";
+const ARGUMENT_REQUESTS: &str = "loom.run.ArgumentRequests";
 
-/// The external outcome a scenario may force.
+/// The external outcomes a scenario may force.
 const NOT_IN_FRONTIER: &str = "not-in-frontier";
+const UNDECLARED_NOT_EMPTY: &str = "undeclared-not-empty";
+const MISMATCHED: &str = "mismatched";
 
 /// One scenario's state.
 #[derive(Default)]
@@ -153,6 +168,9 @@ struct Live {
     log: Vec<ObservedEvent>,
     /// Whether the next `RevalidateSelection` is to find its action outside the frontier.
     not_in_frontier: bool,
+    /// The mismatch the scenario forced for the next `CheckArguments`: whether the action
+    /// declares a schema (`mismatched`) or none (`undeclared-not-empty`).
+    forced_arguments: Option<bool>,
     /// The refusal branch of `CheckAgentSpec` the scenario forced for the next check, whose
     /// fixture the target reads when the input's path names no file (the `agent` module).
     forced_check: Option<String>,
@@ -231,6 +249,7 @@ impl ConformanceTarget for LoomTarget {
             REVALIDATE_SELECTION => revalidate_selection(&mut live, input, correlation),
             OVERRULE_SELECTION => overrule_selection(&mut live, input, correlation),
             RECORD_SELECTION => record_selection(&mut live, input, correlation),
+            CHECK_ARGUMENTS => check_arguments(&mut live, input, correlation),
             session::PROPOSE_SESSION_CHANGE => {
                 session::propose_session_change(&mut live, input, correlation)?
             }
@@ -388,6 +407,27 @@ impl ConformanceTarget for LoomTarget {
                     ])
                 })
                 .collect(),
+            ARGUMENT_REQUESTS => live
+                .requests
+                .argument_requests()
+                .iter()
+                .map(|held| {
+                    ViewRow::from([
+                        (
+                            "argument_request_id".to_owned(),
+                            codec::id(&held.data.argument_request_id.0),
+                        ),
+                        (
+                            "selection_id".to_owned(),
+                            codec::id(&held.data.selection_id.0),
+                        ),
+                        (
+                            "state".to_owned(),
+                            codec::argument_request_state(held.state),
+                        ),
+                    ])
+                })
+                .collect(),
             session::AGENT_SESSIONS => live.sessions.iter().map(session::row).collect(),
             resource::LOOM_AGENTS => resource::rows(&live.resources).ok_or_else(|| {
                 TargetError::unavailable(
@@ -436,6 +476,12 @@ impl ConformanceTarget for LoomTarget {
         if forced == format!("{REVALIDATE_SELECTION}/{NOT_IN_FRONTIER}") {
             self.live.borrow_mut().not_in_frontier = true;
             return Ok(());
+        }
+        for (branch, declared) in [(UNDECLARED_NOT_EMPTY, false), (MISMATCHED, true)] {
+            if forced == format!("{CHECK_ARGUMENTS}/{branch}") {
+                self.live.borrow_mut().forced_arguments = Some(declared);
+                return Ok(());
+            }
         }
         if let Some(branch) = forced
             .strip_prefix(agent::CHECK_AGENT_SPEC)
@@ -739,6 +785,79 @@ fn revalidate_selection(
         RevalidateSelectionOutcome::WrongStateUnknownInstance => {
             selection_wrong_state(REVALIDATE_SELECTION, None)
         }
+    })
+}
+
+/// `CheckArguments`, by the `RequestRecord`'s behaviour, with the verdict the executor's check
+/// would reach: a mismatch when the scenario forced `undeclared-not-empty` or `mismatched` for this
+/// invocation (with a schema declared for the second only), a match otherwise. The forced outcome
+/// lapses after this invocation. Canon decides the verdict in a run (`arguments::check_value`);
+/// the suite holds only how the record answers it, as for `not-in-frontier`.
+fn check_arguments(
+    live: &mut Live,
+    input: &Input,
+    correlation: &CorrelationId,
+) -> Option<SemanticCommandResult> {
+    let forced = live.forced_arguments.take();
+    let command = CheckArguments {
+        argument_request_id: ArgumentRequestId(codec::uuid(input, "argument_request_id")?),
+        action: codec::text(input, "action")?,
+    };
+    let verdict = match forced {
+        Some(declared) => ArgumentVerdict::Mismatched {
+            declared,
+            reason: format!("forced by the scenario for `{}`", command.action),
+        },
+        None => ArgumentVerdict::Matched,
+    };
+    live.requests
+        .stage_verdict(command.argument_request_id.clone(), verdict);
+    let requested = command.argument_request_id.clone();
+    let mismatched = |live: &mut Live, outcome: &str, mismatch: ArgumentsMismatched| {
+        let published = live.publish(
+            event(ARGUMENTS_MISMATCHED)
+                .with(
+                    "argument_request_id",
+                    codec::id(&mismatch.argument_request_id.0),
+                )
+                .with("action", Node::Text(mismatch.action))
+                .with("declared", Node::Bool(mismatch.declared))
+                .with("reason", Node::Text(mismatch.reason)),
+            correlation,
+        );
+        took(CHECK_ARGUMENTS, outcome).emitting(published)
+    };
+    Some(match live.requests.check_arguments(command).ok()? {
+        CheckArgumentsOutcome::UndeclaredNotEmpty {
+            arguments_mismatched,
+        } => mismatched(live, UNDECLARED_NOT_EMPTY, arguments_mismatched),
+        CheckArgumentsOutcome::Mismatched {
+            arguments_mismatched,
+        } => mismatched(live, MISMATCHED, arguments_mismatched),
+        CheckArgumentsOutcome::Matched { arguments_matched } => {
+            let published = live.publish(
+                event(ARGUMENTS_MATCHED).with(
+                    "argument_request_id",
+                    codec::id(&arguments_matched.argument_request_id.0),
+                ),
+                correlation,
+            );
+            took(CHECK_ARGUMENTS, "matched").emitting(published)
+        }
+        CheckArgumentsOutcome::WrongState { error: conflict } => refused(
+            CHECK_ARGUMENTS,
+            "wrong-state",
+            ARGUMENT_REQUEST_STATE_CONFLICT,
+            "argument_request_id",
+            codec::id(&conflict.argument_request_id.0),
+        ),
+        CheckArgumentsOutcome::WrongStateUnknownInstance => refused(
+            CHECK_ARGUMENTS,
+            "wrong-state",
+            ARGUMENT_REQUEST_STATE_CONFLICT,
+            "argument_request_id",
+            codec::id(&requested.0),
+        ),
     })
 }
 
