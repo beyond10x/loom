@@ -84,6 +84,11 @@ impl SelectionStorage for SpecPorts {
 }
 
 impl Context for SpecPorts {
+    // Asked only by `loom.run.CheckArguments`, which this port never runs.
+    fn generate_string(&mut self) -> String {
+        String::new()
+    }
+
     fn external(&mut self, _command: ExternalCommand<'_>, _outcome: &'static str) -> bool {
         false
     }

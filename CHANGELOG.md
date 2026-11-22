@@ -39,6 +39,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
 - An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
 - `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
+- `Loom::with_argument_schemas`, `arguments::check`, `check_value`, `ArgumentSchemas`, `ArgumentMismatch`; `ProtocolEntry::argument_schema(s)` (story:protocol-argument-schema)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
 - `loom_governor::FileDecisionStore`: decision requests and their records a file each, as `loom.governor.StoredDecisionRequest` (story:decision-request-file-store)
 
@@ -75,7 +76,12 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
 - **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
 - **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
+- `b10x-substrate-host` is built without its `git` feature: `b10x-loom` no longer links libgit2, libssh2, OpenSSL or zlib; a Git workspace source would need the feature back (story:drop-the-substrate-git-feature)
 - **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
+- **Breaking:** `ArgumentRequestState` gains `Matched` and `Mismatched`, set by the new `loom.run.CheckArguments` (story:protocol-argument-schema)
+- **Breaking:** the generated `behaviour::Context` gains `generate_string`, `TryContext` `try_generate_string` (story:protocol-argument-schema)
+- **Breaking:** a plugin turn proposes only arguments its protocol's schema admits; an action declaring none takes only `{}`; a step whose arguments the schema refuses (a `source.read` without `kind`, or whose `input` is no object) ends the turn `stopped` and no longer reaches the effect port, whose refusal went back to the model (story:protocol-argument-schema)
+- **Breaking:** `inbound-answer@1` and `operator-reply@1` declare `arguments` for each action; their definition digests change (story:protocol-argument-schema)
 
 ### Removed
 

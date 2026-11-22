@@ -50,6 +50,11 @@ impl SelectionStorage for Revalidating<'_> {
 }
 
 impl TryContext for Revalidating<'_> {
+    /// `RevalidateSelection` assigns no value of its own: unanswered.
+    fn try_generate_string(&mut self) -> Result<String, UnmetObligation> {
+        Err(unmet_context("loom.run.RevalidateSelection"))
+    }
+
     /// `not-in-frontier` is taken when the input's `frontier_actions` do not list the action of the
     /// selection it names, or when the record holds no such selection. Any other external branch
     /// is unanswered, so the command is refused rather than decided by a default.

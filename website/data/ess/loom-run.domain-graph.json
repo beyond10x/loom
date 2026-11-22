@@ -57,10 +57,29 @@
       "lifecycle": {
         "initial": "Requested",
         "states": [
+          "Matched",
+          "Mismatched",
           "Requested"
         ],
         "terminal": [
-          "Requested"
+          "Matched",
+          "Mismatched"
+        ],
+        "transitions": [
+          {
+            "from": [
+              "Requested"
+            ],
+            "name": "match",
+            "to": "Matched"
+          },
+          {
+            "from": [
+              "Requested"
+            ],
+            "name": "mismatch",
+            "to": "Mismatched"
+          }
         ]
       },
       "name": "ArgumentRequest"

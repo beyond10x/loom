@@ -231,10 +231,16 @@ entities:
         target: loom.run.Selection
         cardinality: one
         via: selection_id
+    # Checked once against the argument schema the loaded protocol declares for the action
+    # (loom.run.CheckArguments): Matched, or Mismatched. A Loom given no schemas checks nothing and
+    # the request stays Requested.
     lifecycle:
       initial: Requested
-      states: [Requested]
-      terminal: [Requested]
+      states: [Requested, Matched, Mismatched]
+      terminal: [Matched, Mismatched]
+      transitions:
+        - {name: match, from: [Requested], to: Matched}
+        - {name: mismatch, from: [Requested], to: Mismatched}
 
 errors:
   # The catalogue a selection names was never projected.
@@ -276,6 +282,12 @@ errors:
     fields:
       - name: catalogue_id
         type: loom.run.CatalogueId
+
+  # An argument request is checked once.
+  - name: loom.run.ArgumentRequestStateConflict
+    fields:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
 
   # Arguments are requested only for a selection still Selected.
   - name: loom.run.SelectionNotSelected
@@ -435,6 +447,54 @@ commands:
             argument_request_id: input.argument_request_id
             selection_id: input.selection_id
 
+  # The generated arguments of a requested action are checked against the argument schema the
+  # protocol the host loaded declares for it, after generation and before revalidation. Canon's
+  # check_arguments decides (the schema is Canon's, never an ESS noun of Loom's), so both refusals
+  # are `external:`, as not-in-frontier is in RevalidateSelection. Only a Mismatched request's
+  # selection is never revalidated or proposed.
+  - name: loom.run.CheckArguments
+    input:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
+      - name: action
+        type: String
+    outcomes:
+      - name: undeclared-not-empty
+        external: the protocol declares no argument schema for the action and the arguments are not the empty object
+        moves: loom.run.ArgumentRequest.mismatch
+        instance: argument_request_id
+        emits: [loom.run.ArgumentsMismatched]
+        payload:
+          loom.run.ArgumentsMismatched:
+            argument_request_id: input.argument_request_id
+            action: input.action
+            declared: false
+            reason: {generated: true}
+      - name: mismatched
+        external: the arguments do not satisfy the argument schema the protocol declares for the action
+        moves: loom.run.ArgumentRequest.mismatch
+        instance: argument_request_id
+        emits: [loom.run.ArgumentsMismatched]
+        payload:
+          loom.run.ArgumentsMismatched:
+            argument_request_id: input.argument_request_id
+            action: input.action
+            declared: true
+            reason: {generated: true}
+      - name: matched
+        moves: loom.run.ArgumentRequest.match
+        instance: argument_request_id
+        emits: [loom.run.ArgumentsMatched]
+        payload:
+          loom.run.ArgumentsMatched:
+            argument_request_id: input.argument_request_id
+      - name: wrong-state
+        wrong_state: true
+        error: loom.run.ArgumentRequestStateConflict
+        payload:
+          loom.run.ArgumentRequestStateConflict:
+            argument_request_id: input.argument_request_id
+
   # A confidence fallback overruled a fast selection: it names the stronger selector's selection
   # that replaced it, and is never revalidated nor given arguments. Only a Selected selection is
   # overruled. ESS refuses a when_related guard on the replacement beside wrong_state
@@ -590,6 +650,26 @@ events:
       - name: selection_id
         type: loom.run.SelectionId
 
+  # The generated arguments satisfy the action's declared schema, or are `{}` for an action whose
+  # protocol declares none.
+  - name: loom.run.ArgumentsMatched
+    fields:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
+
+  # The generated arguments were refused: `declared` says whether the protocol declares a schema
+  # for the action, `reason` names the failing location and keyword, never the whole value.
+  - name: loom.run.ArgumentsMismatched
+    fields:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
+      - name: action
+        type: String
+      - name: declared
+        type: Boolean
+      - name: reason
+        type: String
+
   - name: loom.run.SelectionAdmitted
     fields:
       - name: selection_id
@@ -680,6 +760,19 @@ views:
         type: Integer
       - name: state
         type: loom.run.SelectionRecord.State
+
+  # Every argument request with its state: what a second check of one request is refused against,
+  # and where a check's outcome is read.
+  - name: loom.run.ArgumentRequests
+    source: loom.run.ArgumentRequest
+    consistency: read_your_writes
+    fields:
+      - name: argument_request_id
+        type: loom.run.ArgumentRequestId
+      - name: selection_id
+        type: loom.run.SelectionId
+      - name: state
+        type: loom.run.ArgumentRequest.State
 
   # Every catalogue with its state: what a second projection of one id is checked against.
   - name: loom.run.Catalogues
