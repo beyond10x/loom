@@ -2876,11 +2876,17 @@ empty, holds more than 1 MiB (`MAX_CA_BUNDLE_BYTES`, Substrate's ceiling) or can
 on the path and again on the file opened, are refused `ScopeInvalid` before anything starts,
 naming the path (`check_ca_bundle`). A program containing `=` or starting with `-` (test or child)
 is refused before anything starts: Substrate execs through `/usr/bin/env`, which reads it as an
-assignment or an option. A runner and its clones share one driver per workspace directory, set
-of egress apertures (the whole set, in order) and certificate bundle, the bundle compared as its
-path and the bytes read
-(`DriverEgress`: Substrate fixes a driver's apertures and bundle when it opens), so children naming
-different bundles, or a bundle whose bytes changed, never share one,
+assignment or an option. Every runner of the process shares one driver per canonical cgroup root,
+workspace directory, set of egress apertures (the whole set, in order) and certificate bundle,
+the bundle compared as its path and the bytes read (`DriverKey` in the process's table `DRIVERS`;
+`DriverEgress`: Substrate fixes a driver's apertures and bundle when it opens), so children naming
+different bundles, or a bundle whose bytes changed, never share one; the table holds each driver
+weakly and each runner and its clones keep the drivers they used, so a driver closes when the last
+runner that used it is dropped (`story:concurrent-confined-runs`). A library caller running
+several trees in one process holds its delegated root once (`hold_cgroup_root`), gives every run
+`hold.root()` as its `cgroup_root`, gives each run its own workspace in one shared directory, and
+opens one `EngineRunner` per run or shares one (the four steps of
+`website/docs/guides/embed-the-runtime.md`). The table exists
 because opening a driver kills every `substrate-ex_*` cgroup under its root; each launch discards
 its finished execution from the driver (`discard_superseded_exec`), which tracks at most 128; no
 driver opens on a root while a launch of this process runs there (the process-wide count in
