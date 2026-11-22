@@ -1,7 +1,7 @@
 //! `tree status`: the tree as one document for a live view, of format [`STATUS_FORMAT`].
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use b10x_loom_bindings::{COPY_SOURCE, PROGRAM_SOURCE};
 use b10x_loom_commission::model::responsibility::{CaseId, ObservationData};
@@ -356,6 +356,6 @@ fn copies(
         .collect()
 }
 
-fn text(path: &PathBuf) -> String {
+fn text(path: &Path) -> String {
     path.display().to_string()
 }

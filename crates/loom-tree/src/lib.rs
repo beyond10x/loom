@@ -68,14 +68,15 @@ use model::{TreeRefusal, TreeRefusalReason};
 /// (`AgentNotRunYet`).
 pub const AGENT_STORY: &str = "story:bound-agent-node";
 
-/// A refused tree command: the generated `loom.tree.TreeRefusal`.
+/// A refused tree command: the generated `loom.tree.TreeRefusal`, boxed so that a `Result` of a
+/// tree function stays small.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refused(pub TreeRefusal);
+pub struct Refused(pub Box<TreeRefusal>);
 
 impl Refused {
     /// A refusal of `reason` saying `detail`, naming nothing else.
     pub fn new(reason: TreeRefusalReason, detail: impl Into<String>) -> Self {
-        Self(TreeRefusal {
+        Self(Box::new(TreeRefusal {
             reason,
             detail: detail.into(),
             case: None,
@@ -83,7 +84,7 @@ impl Refused {
             action: None,
             story: None,
             holder: None,
-        })
+        }))
     }
 
     /// This refusal naming `case`.

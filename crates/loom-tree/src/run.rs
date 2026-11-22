@@ -883,6 +883,7 @@ pub(crate) struct TreeEffects<'a, S: loom_governor::FallibleCaseStore> {
 }
 
 impl<'a, S: loom_governor::FallibleCaseStore> TreeEffects<'a, S> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         governor: &'a CanonGovernor<S>,
         case: &CaseId,

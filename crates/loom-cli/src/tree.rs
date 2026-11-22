@@ -17,7 +17,8 @@ use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
     ApproveRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record, open_tree,
-    refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status, verify_json, verify_tree,
+    refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status, verify_json,
+    verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;

@@ -5,10 +5,10 @@
 mod git;
 pub mod lock;
 mod store;
-use b10x_canon::model::Protocol;
 /// The Canon crate Loom links, so that an embedder names one runtime dependency and links the
 /// same Canon as Loom.
 pub use b10x_canon as canon;
+use b10x_canon::model::Protocol;
 pub use intake::protocols::{ProtocolDefinition, ProtocolSource, SourceKind};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
