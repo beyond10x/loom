@@ -1427,3 +1427,80 @@ fn a_case_file_whose_link_name_is_missing_not_one_segment_or_not_its_id_is_refus
         assert!(governor.case_state(holder).is_err(), "{label}");
     }
 }
+
+// ---- a step writes no child outcome ---------------------------------------------------------------
+
+/// An evidence port that keeps what `submit_evidence` attributes, for `record_step`.
+#[derive(Default)]
+struct Attributing(
+    std::cell::RefCell<Vec<b10x_loom_commission::ports::evidence::AttributedEvidence>>,
+);
+
+impl b10x_loom_commission::ports::evidence::EvidencePort for Attributing {
+    fn receive(
+        &self,
+        evidence: b10x_loom_commission::ports::evidence::AttributedEvidence,
+    ) -> Result<(), b10x_loom_commission::model::responsibility::GovernorError> {
+        self.0.borrow_mut().push(evidence);
+        Ok(())
+    }
+}
+
+#[test]
+fn a_program_step_cannot_write_a_case_outcome_record_for_a_case_open_protocol() {
+    for allowed in [false, true] {
+        let dir = dir();
+        let governor = CanonGovernor::new(FileCaseStore::open(&dir).unwrap());
+        let governor = if allowed {
+            governor.with_host_case_outcomes()
+        } else {
+            governor
+        };
+        let governor = governor.with_catalog(&catalog()).unwrap();
+        let lone = root(&governor, "parent@1");
+        let parent = open_root(&governor, "case-2", "parent@1", &[("idea", "idea-1")]);
+        let _ = open_children(&governor, &parent, &["review"]);
+        for (case, child) in [(&lone, "case-1.review"), (&parent, "case-2.other")] {
+            let n = ISSUED.fetch_add(1, Ordering::Relaxed);
+            let attributing = Attributing::default();
+            submit_evidence(
+                &attributing,
+                "program",
+                EvidenceData {
+                    evidence_id: EvidenceId(uuid(n)),
+                    case_id: case.clone(),
+                    kind: "case_outcome".into(),
+                    subject_revision: governor.current_revision(case).unwrap(),
+                    producer: "program".into(),
+                    observation_ids: vec![observed(&governor)],
+                    facts: commission_json::parse(
+                        &json!({
+                            "format": "canon-evidence/1",
+                            "id": format!("step-outcome-{n}"),
+                            "kind": "case_outcome",
+                            "subject": "idea",
+                            "subject_revision": "idea-1",
+                            "result": "passed",
+                            "child_case": child,
+                        })
+                        .to_string(),
+                    )
+                    .unwrap(),
+                    provenance: commission_json::Value::Null,
+                },
+            )
+            .unwrap();
+            let before = outcomes(&governor, case).len();
+            let step = governor.record_step(case, &BTreeMap::new(), attributing.0.into_inner());
+            let lone_allowed = allowed && case == &lone;
+            assert_eq!(
+                step.is_ok(),
+                lone_allowed,
+                "{} allowed {allowed}: {step:?}",
+                case.0
+            );
+            let after = outcomes(&governor, case).len();
+            assert_eq!(after, before + usize::from(lone_allowed), "{}", case.0);
+        }
+    }
+}

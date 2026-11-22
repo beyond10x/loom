@@ -1718,6 +1718,8 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
                 });
             }
             self.check_evidence(data).map_err(StepError::Evidence)?;
+            // A child's outcome is the governor's to write, through a step as through `receive`.
+            self.refuse_submitted_outcome(&held, &ir, data)?;
         }
         if records.is_empty()
             && revisions
