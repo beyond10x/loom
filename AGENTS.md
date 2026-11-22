@@ -729,9 +729,10 @@ refuses such a case of a built-in protocol naming the case and the input
 reports it `open`: one Canon reports `not_applicable` (the case's inputs do not select it) or `discharged` is not.
 
 Canon is named by the `b10x-canon` line of each of `crates/loom-governor/Cargo.toml`,
-`crates/loom-protocols/Cargo.toml` and `crates/loom-bindings/Cargo.toml` (`tag = "0.10.0"`), pinned
-by `Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
-with `cargo update -p b10x-canon` alone, and change the three lines together; any other crate that
+`crates/loom-protocols/Cargo.toml`, `crates/loom-bindings/Cargo.toml`,
+`crates/loom-executor/Cargo.toml` and `crates/loom-tree/Cargo.toml` (`tag = "0.11.0"`), pinned by
+`Cargo.lock`. A different reference builds a second Canon whose types do not match. Move Canon
+with `cargo update -p b10x-canon` alone, and change the five lines together; any other crate that
 adds Canon uses the same reference. Canon 0.9.0 lets a
 protocol declare `case_open` on an action and a `children` form over `case_outcome` records; they
 register and are decided like any other construct. A catalog or a registration whose openings form
@@ -742,9 +743,14 @@ protocol registers and Canon decides it, but Loom does not read all of it: the f
 capability id alone, the scope only inside Canon's reason, and `action_facts` reads a `children`
 form's `case_outcome` records about any artifact at any revision, not its `subject` and `revision`.
 A protocol with `imports` is refused at registration (`MissingImport`): Loom hands Canon no imported
-document. Every decision document is Canon 0.10.0's (`missing_evidence`, `pending_decisions`), and a
-frontier id hashes it, so it changes with each Canon move; no store holds one
-(`crates/loom-governor/tests/canon_0_10_0.rs`).
+document. Canon 0.11.0 adds `when` on an outcome's decision requirement, `revised_by` on an
+artifact, `records_together` on an action and a `descended` form; such a protocol registers and
+Canon decides it, a decision counting only while its `when` holds. Loom does not read all of it:
+it keeps no revision ancestry, so a case it hands Canon gives no `descends_from` and a `descended`
+form is `unknown` in every Loom case, and its runner does not enforce `records_together`, which
+has no evaluation meaning in Canon (only `canon simulate` reads it). Every decision document is Canon 0.11.0's
+(`missing_evidence`, `pending_decisions`), and a frontier id hashes it, so it changes with each
+Canon move; no store holds one (`crates/loom-governor/tests/canon_0_10_0.rs`).
 
 Child cases (`story:child-case-runtime`, `crates/loom-governor/src/children.rs`,
 `crates/loom-governor/tests/child_cases.rs`). `CanonGovernor::open_children(parent, action,
@@ -1421,6 +1427,8 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   dependency on that crate; keep the two together. `check` also refuses a `retry_when` kind the
   protocol does not declare, an `open` `bindings` path outside the workspace, and an evidence `from`
   the executor does not take (`effect` on a program; anything but `effect` on a person or an open).
+  `argv` belongs to a `program` and a `person`; `{principal}` (`PRINCIPAL_PLACEHOLDER`) is
+  decoded only in a person's argv, as a whole entry other than `argv[0]`, else `InvalidArgv`.
 - A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no
   `budget.max_runs` holds 8.
 - Every `BindingsRefusalReason` is reachable from a document: `every_refusal_reason_is_reachable_from_a_document`
@@ -1726,6 +1734,19 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   `--reasons`/`--reasons-file` (only with `--result`) are bounded to a retry log (`reasons_fit`,
   `read_reasons_file` in `loom-bindings`), kept as `blobs/<sha256>` and named by the person
   observation's `blob_sha256`, so `retry_records` gives them to a writer as that record's log.
+- A person binding with an `argv` (`story:person-action-runs-a-program`) runs one program per
+  approval through the program port's own two halves, `prepare` and `start` (`program.rs`), never
+  a second start path: `approve` admits `ApproveRequest::runner` and calls `prepare` before the
+  first write, so a refusal there (`ConfinementRefused`, or `PersonProgramFailed` naming
+  `RunsSpent`, `ArtifactUnreadable` or a program not started) writes nothing; `PersonEffects`
+  calls `start` inside the admitted effect. Only exit 0 records, in one `record_step` with the
+  moves; any other end writes the moves alone (none when an artifact cannot be digested after the
+  run), the run's `action finished` line, and refuses `PersonProgramFailed` naming the end and the
+  blob digest, never the output. `{principal}` is replaced only as a whole argv entry, never in
+  `argv[0]`, never in the environment. The CLI places the program as `tree run` does (`place`,
+  `tree_runner`) only when `person_program` answers true, and sets the refusal's `command` to the
+  call's own argv; the `ApproveAction` decision carries the run's `--confinement` and
+  `--cgroup-root` for such an action alone.
 - `tree open --protocols <dir>` (`protocols.rs`) reads the `.yaml` files directly in `<dir>` into a
   catalog of those alone (`SourceKind::Directory`, registration from `registration_for`), keeps
   each as `blobs/<sha256>` with `tree-protocols.json`, and marks the manifest's catalog

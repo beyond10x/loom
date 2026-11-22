@@ -1,0 +1,48 @@
+format: protocol/1
+protocol:
+  id: answer
+  revision: 1
+  description: >-
+    A question an owner answers. Taking the answer is a person's action under the capability
+    owner.answer, freeing it a person's action that needs none, and looking at it a person's
+    reading under owner.look. A binding may give each a program the owner's approval runs.
+artifacts:
+  subject: {}
+evidence_kinds:
+  answer_taken: {}
+  answer_freed: {}
+  answer_looked: {}
+claims:
+  answer.taken:
+    true_when:
+      evidence: {kind: answer_taken, subject: subject, result: taken}
+  answer.freed:
+    true_when:
+      evidence: {kind: answer_freed, subject: subject, result: freed}
+  answer.looked:
+    true_when:
+      evidence: {kind: answer_looked, subject: subject, result: looked}
+actions:
+  answer.take:
+    effect: write
+    requires:
+      - capability: owner.answer
+    may_produce:
+      - evidence: answer_taken
+  answer.free:
+    effect: write
+    may_produce:
+      - evidence: answer_freed
+  answer.look:
+    effect: read
+    requires:
+      - capability: owner.look
+    may_produce:
+      - evidence: answer_looked
+outcomes:
+  done:
+    requires:
+      all:
+        - {claim: answer.taken}
+        - {claim: answer.freed}
+        - {claim: answer.looked}

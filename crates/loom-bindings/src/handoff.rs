@@ -17,6 +17,12 @@
 //! plus the signal, as Substrate does: 137 for SIGKILL, an out-of-memory or cgroup kill
 //! included) and output that cannot be kept are never a skip: each is a refusal, which stops the
 //! run. A check that exits 129 to 192 itself is refused as well.
+//!
+//! Given the run's [`Cancel`] (story:handoff-check-holds-the-cancel), the check holds it as a
+//! bound program does: set before the check starts, nothing starts; set while it runs, the runner
+//! kills it with every process it started. Either way the check is refused
+//! `Cancelled: action <action>: the check <program> was cancelled` and marked
+//! [`HandoffCheck::cancelled`]. A check that ended before the cancel was read keeps its answer.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -24,8 +30,8 @@ use std::time::Duration;
 
 use b10x_loom_commission::model::responsibility::CaseId;
 use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
-use b10x_loom_intake_slice::confinement::TestRunner;
-use loom::bindings::{BindingsDocument, BoundAction, Executor, ProgramRoot};
+use b10x_loom_intake_slice::confinement::{Cancel, ConfinementRefusal, TestRunner};
+use loom::bindings::{BindingsDocument, BoundAction, Executor, ProgramRefusalReason, ProgramRoot};
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 
 use crate::arguments::case_names;
@@ -53,6 +59,9 @@ pub struct HandoffCheck {
     pub refusal: Option<String>,
     /// The SHA-256 of the blob holding its standard output followed by its standard error.
     pub blob_digest: Option<String>,
+    /// Whether the run's cancel ended the check, before it started or while it ran: its refusal
+    /// then starts `Cancelled:`.
+    pub cancelled: bool,
 }
 
 impl HandoffCheck {
@@ -66,6 +75,7 @@ impl HandoffCheck {
             exit: None,
             refusal: Some(refusal),
             blob_digest,
+            cancelled: false,
         }
     }
 }
@@ -84,8 +94,10 @@ pub fn handoff_check_of<'a>(
 }
 
 /// Runs the `handoff_when` check of `binding`, a binding of `document`, once for `case`, held by
-/// `governor`, in `workspace` through `runner`, keeping its output under `store` (see the module
-/// documentation). `None` when the binding carries no check.
+/// `governor`, in `workspace` through `runner`, keeping its output under `store`; the check
+/// holds `cancel` when given (see the module documentation). `None` when the binding carries no
+/// check.
+#[allow(clippy::too_many_arguments)]
 pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
     governor: &CanonGovernor<S, T>,
     case: &CaseId,
@@ -94,6 +106,7 @@ pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
     workspace: &Path,
     store: &Path,
     runner: &Arc<dyn TestRunner>,
+    cancel: Option<&Cancel>,
 ) -> Option<HandoffCheck> {
     let argv = binding.handoff_when.as_slice();
     let program = argv.first()?;
@@ -131,8 +144,25 @@ pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
         Ok(child) => child.with_read_only_workspace(),
         Err(why) => return not_started(&why),
     };
+    let child = match cancel {
+        Some(cancel) => child.with_cancel(cancel.clone()),
+        None => child,
+    };
     let execution = match runner.run_child(&child) {
         Ok(execution) => execution,
+        Err(refusal) if refusal.reason == ConfinementRefusal::Cancelled => {
+            return Some(HandoffCheck {
+                cancelled: true,
+                ..HandoffCheck::refused(
+                    format!(
+                        "{:?}: action {}: the check {program} was cancelled",
+                        ProgramRefusalReason::Cancelled,
+                        binding.action
+                    ),
+                    None,
+                )
+            });
+        }
         Err(refusal) => {
             return Some(HandoffCheck::refused(
                 format!("the check {program} was refused by its runner: {refusal}"),
@@ -179,6 +209,7 @@ pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
             exit: Some(code),
             refusal: None,
             blob_digest: kept,
+            cancelled: false,
         }
     } else {
         HandoffCheck::refused(

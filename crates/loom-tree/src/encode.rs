@@ -25,6 +25,11 @@ pub fn refusal_json(refusal: &TreeRefusal) -> Value {
         "action",
         refusal.action.clone().map(Value::from),
     );
+    put(
+        &mut object,
+        "command",
+        refusal.command.clone().map(Value::from),
+    );
     put(&mut object, "story", refusal.story.clone().map(Value::from));
     put(&mut object, "holder", refusal.holder.map(Value::from));
     Value::Object(object)

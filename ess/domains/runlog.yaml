@@ -120,7 +120,8 @@ types:
   # the stop or the step it decides: the action, the check's exit status or why it gave none (a
   # launch error, a timeout or a signal; one of the two, as on `ActionFinished`), and the digest of
   # the blob holding its output. Exit 0 offered the action's handoff; any other exit skipped it; a
-  # refusal stopped the run. The line is what a reader of the log takes the check's answer from:
+  # refusal stopped the run; a cancelled check's refusal starts `Cancelled:` and the run stopped
+  # `Cancelled`. The line is what a reader of the log takes the check's answer from:
   # nothing runs the check again to read it.
   - name: loom.runlog.HandoffChecked
     kind: struct

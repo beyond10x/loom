@@ -2075,6 +2075,8 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
                         ArtifactId::new(artifact.as_str()),
                         CaseArtifact {
                             revision: Revision::new(revision.as_str()),
+                            // Loom keeps no revision ancestry, so a `descended` form is unknown.
+                            descends_from: None,
                         },
                     )
                 })
@@ -2286,6 +2288,8 @@ type Reader<'p> = (&'p EvidenceKindId, Option<&'p ArtifactId>);
 /// `all`, `any` and `not`. Order forms and `children` forms are kept apart: they read the whole
 /// history, excluded records included. A `children` form reads the kind `case_outcome` about any
 /// artifact (Canon's `eval/composition.rs`, `value`), which a protocol with such a form declares.
+/// A `descended` form's `first` kind is an order reader, about revisions the current one descends
+/// from, and its `then` kind a match reader, about the subject's current revision.
 fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
     fn walk<'p>(
         predicate: &'p Predicate,
@@ -2315,6 +2319,10 @@ fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
             Predicate::Since(form) => {
                 orders.push((&form.last, form.subject.as_ref()));
                 orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Descended(form) => {
+                orders.push((&form.first.kind, form.subject.as_ref()));
+                matches.push((&form.then.kind, form.subject.as_ref()));
             }
             Predicate::Children(_) => orders.extend(case_outcome.map(|kind| (kind, None))),
             Predicate::Input(_) | Predicate::Claim(_) => {}

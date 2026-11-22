@@ -14,6 +14,9 @@
 //! (`story:cancel-a-running-bound-program`): a thread of the run reads the caller's flag every
 //! [`CANCEL_WATCH`] and sets the [`Cancel`] every port of the run holds; the step is refused
 //! `Cancelled`, its `action finished` line written, and the run ends `Cancelled` naming its action.
+//! A `handoff_when` check holds the same [`Cancel`], before a step and at a stuck stop
+//! (`story:handoff-check-holds-the-cancel`): a check it ended has its `handoff checked` line
+//! refused `Cancelled`, and the run ends `Cancelled` naming the action, whose program never starts.
 //! A case whose completion gives exactly one legitimate outcome and in which no action is useful
 //! is terminated through it.
 //! A case in which nothing is useful waits: on authority (an admissible action whose capability no
@@ -135,7 +138,8 @@ pub const CANCEL_WATCH: Duration = Duration::from_millis(100);
 
 /// Runs the tree in `store` with `catalog` (see the module documentation). `observer` is given
 /// each run-log line as it is written; `cancel`, set from any thread, ends the run `Cancelled`:
-/// before its next step, or during a step by ending the program it runs, within 10 s of being set.
+/// before its next step, or during a step by ending the program or the `handoff_when` check it
+/// runs, within 10 s of being set.
 ///
 /// # Errors
 /// [`Refused`]: `StoreInUse` naming the holder, `NotATree`, `LogRefused`, `BindingsRefused`,
@@ -329,6 +333,7 @@ fn run_cancellable(
             workspace: &workspace,
             store: &store,
             runner: &settings.runner,
+            cancel,
         };
         // The `handoff_when` check of the action the selector picks runs before the loop
         // performs it, and its line is written before the step or the stop.
@@ -350,6 +355,9 @@ fn run_cancellable(
         }
         match held_by_check {
             Some(CheckHeld::Refused(refused)) => return Err(refused),
+            Some(CheckHeld::Cancelled(action)) => {
+                return cancelled_stop(&logs, &case.case, vec![action], steps, &mut emit);
+            }
             Some(CheckHeld::HandedOff(action)) => {
                 let decisions = handoff_decision(
                     &id,
@@ -489,7 +497,7 @@ fn run_cancellable(
             }
             continue;
         }
-        let (stop, decisions) = waits(
+        let (stop, decisions) = match waits(
             &governor,
             &id,
             &case.bindings,
@@ -499,9 +507,15 @@ fn run_cancellable(
             revision,
             &history,
             &handoff_command(&store, settings),
+            &confinement_flags(settings),
             &checks,
             &mut emit,
-        )?;
+        )? {
+            Waits::Stop(stop, decisions) => (stop, decisions),
+            Waits::CheckCancelled(action) => {
+                return cancelled_stop(&logs, &case.case, vec![action], steps, &mut emit);
+            }
+        };
         let line = logs.append(
             &case.case,
             RunLogEvent::Stopped(Stopped {
@@ -1211,13 +1225,22 @@ fn handoff_command(store: &Path, settings: &RunSettings) -> Vec<String> {
         "--store".to_owned(),
         store.display().to_string(),
     ];
+    command.extend(confinement_flags(settings));
+    command
+}
+
+/// The run's `--confinement` and `--cgroup-root` as `settings` name them, which a printed command
+/// that starts programs carries: a handoff's `tree run`, and the `tree approve` of a person action
+/// whose binding names an `argv` (`story:person-action-runs-a-program`).
+fn confinement_flags(settings: &RunSettings) -> Vec<String> {
+    let mut flags = Vec::new();
     if let Some(confinement) = &settings.confinement {
-        command.extend(["--confinement".to_owned(), confinement.clone()]);
+        flags.extend(["--confinement".to_owned(), confinement.clone()]);
     }
     if let Some(root) = &settings.cgroup_root {
-        command.extend(["--cgroup-root".to_owned(), root.display().to_string()]);
+        flags.extend(["--cgroup-root".to_owned(), root.display().to_string()]);
     }
-    command
+    flags
 }
 
 /// The `Handoff` decision of `action` of `case` when its binding is not a person's and names a
@@ -1247,10 +1270,20 @@ fn handoff_decision(
     })
 }
 
+/// How a case in which no step was taken waits ([`waits`]), or that the run's cancel ended a
+/// `handoff_when` check it ran, naming the action.
+enum Waits {
+    /// The stop and the decisions that let the case go on.
+    Stop(TreeStop, Vec<NextDecision>),
+    /// The run's cancel ended the check of this action: the run stops `Cancelled`.
+    CheckCancelled(String),
+}
+
 /// One `Handoff` decision per action of `case` the frontier admits whose binding is not a person's
 /// and names a `handoff` ([`handoff_decision`]), the command `command` ([`handoff_command`]). A
 /// binding with `handoff_when` gives its decision only when its check, run now with its line
-/// written, exits 0; a check that gives no exit status refuses the run `HandoffCheckFailed`.
+/// written, exits 0; a check that gives no exit status refuses the run `HandoffCheckFailed`, and
+/// one the run's cancel ended answers [`Waits::CheckCancelled`].
 fn handoffs<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
@@ -1258,7 +1291,7 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
     command: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
-) -> Result<Vec<NextDecision>, Refused> {
+) -> Result<Waits, Refused> {
     let frontier = governor
         .frontier(case)
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
@@ -1277,6 +1310,9 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
                 continue;
             };
             emit(&case.0, line);
+            if check.cancelled {
+                return Ok(Waits::CheckCancelled(action.action.clone()));
+            }
             if check.refusal.is_some() {
                 return Err(checks.failed(&action.action, &check));
             }
@@ -1286,10 +1322,11 @@ fn handoffs<S: loom_governor::FallibleCaseStore>(
         }
         decisions.push(decision);
     }
-    Ok(decisions)
+    Ok(Waits::Stop(TreeStop::AwaitingPerson, decisions))
 }
 
-/// Why `case`, in which no step was taken, waits, and the decisions that let it go on.
+/// Why `case`, in which no step was taken, waits, and the decisions that let it go on, or the
+/// action whose `handoff_when` check the run's cancel ended.
 #[allow(clippy::too_many_arguments)]
 fn waits<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
@@ -1301,9 +1338,10 @@ fn waits<S: loom_governor::FallibleCaseStore>(
     revision: i64,
     history: &LogHistory,
     handoff: &[String],
+    confinement: &[String],
     checks: &HandoffChecks<'_, S>,
     emit: &mut impl FnMut(&str, RunLogLine),
-) -> Result<(TreeStop, Vec<NextDecision>), Refused> {
+) -> Result<Waits, Refused> {
     let store_text = store.display().to_string();
     let mut decisions = Vec::new();
     let mut person = false;
@@ -1346,6 +1384,10 @@ fn waits<S: loom_governor::FallibleCaseStore>(
         let kind = if kind == Executor::Person {
             person = true;
             command.extend(["--action".to_owned(), action.clone()]);
+            // A person action whose approval runs a program starts it as this run starts its own.
+            if bound.is_some_and(|bound| bound.executor.argv.is_some()) {
+                command.extend(confinement.iter().cloned());
+            }
             DecisionKind::ApproveAction
         } else {
             DecisionKind::Approve
@@ -1390,23 +1432,24 @@ fn waits<S: loom_governor::FallibleCaseStore>(
                 ],
             });
         }
-        return Ok((TreeStop::AwaitingPerson, decisions));
+        return Ok(Waits::Stop(TreeStop::AwaitingPerson, decisions));
     }
     if decisions.is_empty() {
         // Nothing is useful and nothing awaits approval: an admissible writer with a `handoff`
         // has done what it may, and a person continues from its text, then runs the tree again.
-        decisions = handoffs(governor, case, bindings, handoff, checks, emit)?;
-        if !decisions.is_empty() {
-            return Ok((TreeStop::AwaitingPerson, decisions));
+        match handoffs(governor, case, bindings, handoff, checks, emit)? {
+            Waits::Stop(_, handed) if handed.is_empty() => {}
+            waits => return Ok(waits),
         }
     }
-    Ok(if decisions.is_empty() {
-        (TreeStop::Stuck, decisions)
+    let stop = if decisions.is_empty() {
+        TreeStop::Stuck
     } else if person {
-        (TreeStop::AwaitingPerson, decisions)
+        TreeStop::AwaitingPerson
     } else {
-        (TreeStop::AwaitingAuthority, decisions)
-    })
+        TreeStop::AwaitingAuthority
+    };
+    Ok(Waits::Stop(stop, decisions))
 }
 
 /// The effect port of one case: its `program` bindings through [`ProgramEffects`], its `open`

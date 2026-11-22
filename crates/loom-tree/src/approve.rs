@@ -1,20 +1,26 @@
 //! `tree approve`: a principal's decision on one capability for one case of the tree, recorded at
 //! the case's current revision.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use b10x_loom_bindings::{ChildInputs, NotPrepared, Prepared, RunPlace, prepare};
+use b10x_loom_intake_slice::bindings::admit_bound_program_runner;
+use b10x_loom_intake_slice::confinement::{ConfinementError, TestRunner};
 
 use b10x_loom_commission::model::primitives::Timestamp as CommissionTimestamp;
-use b10x_loom_commission::model::responsibility::{ActionStatus, CaseId};
+use b10x_loom_commission::model::responsibility::{ActionStatus, CaseId, EffectOutcome};
 use b10x_loom_commission::ports::governor::Governor as _;
 use loom::bindings::{BindingsDocument, Executor, ResultSource};
-use loom::runlog::{AuthorityRecorded, RunLogEvent};
+use loom::runlog::{ActionFinished, AuthorityRecorded, RunLogEvent};
 use loom::tree::{ApprovalDecision, CaseApproval, TreeManifest, TreeRefusalReason};
 use loom_governor::{CanonGovernor, FallibleCaseStore, FileCaseStore};
 use loom_protocols::ProtocolCatalog;
 
 use crate::approvals::record_approval;
 use crate::log::Logs;
-use crate::person::{PERFORMED, PersonEffects};
+use crate::person::{PERFORMED, PersonEffects, ProgramEnd, ProgramEnded};
 use crate::run::{case_bindings, one_step};
 use crate::status::members;
 use crate::store::{existing_store, read_manifest};
@@ -24,7 +30,6 @@ use crate::{Refused, StoreLock, TreeTime, unreadable};
 pub const MAX_NAME_BYTES: usize = 200;
 
 /// What `tree approve` is given.
-#[derive(Debug)]
 pub struct ApproveRequest<'a> {
     /// The store directory `tree open` made.
     pub store: &'a Path,
@@ -48,6 +53,61 @@ pub struct ApproveRequest<'a> {
     pub time: TreeTime,
     /// The tree's catalog.
     pub catalog: &'a ProtocolCatalog,
+    /// The runner the program of a person action whose binding names an `argv` starts through,
+    /// as a program step's does; `None` refuses such an action `ConfinementRefused` (`NoRunner`)
+    /// before anything is written. An action with no program starts nothing and needs none.
+    pub runner: Option<Arc<dyn TestRunner>>,
+}
+
+impl std::fmt::Debug for ApproveRequest<'_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        out.debug_struct("ApproveRequest")
+            .field("store", &self.store)
+            .field("case", &self.case)
+            .field("capability", &self.capability)
+            .field("principal", &self.principal)
+            .field("decision", &self.decision)
+            .field("action", &self.action)
+            .field("result", &self.result)
+            .field("reasons", &self.reasons)
+            .field("time", &self.time)
+            .field("runner", &self.runner.as_ref().map(|runner| runner.label()))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Whether `action` of `case` in the tree `store` holds is bound to a person whose binding names
+/// an `argv`, a program its approval runs: read from the case's bindings, taking no lock of the
+/// store and writing nothing. A host calls it before [`approve`] to know whether the approval
+/// needs a runner.
+///
+/// # Errors
+/// As the store and the tree's bindings files are read: `NotATree`, `CaseNotInTree`,
+/// `UnknownProtocol`, `BindingsRefused`, `StoreUnreadable`.
+pub fn person_program(
+    store: &Path,
+    case: &str,
+    action: &str,
+    catalog: &ProtocolCatalog,
+) -> Result<bool, Refused> {
+    let store = existing_store(store)?;
+    let manifest = read_manifest(&store)?;
+    let cases =
+        FileCaseStore::open(store.clone()).map_err(|error| unreadable("the case store", error))?;
+    let governor = CanonGovernor::new(cases)
+        .with_catalog(catalog)
+        .map_err(|error| {
+            Refused::new(
+                TreeRefusalReason::UnknownProtocol,
+                format!("the tree's catalog is refused: {error}"),
+            )
+        })?;
+    let bindings = case_bindings(&governor, &manifest, catalog, case)?;
+    Ok(bindings.actions.iter().any(|bound| {
+        bound.action == action
+            && bound.executor.kind == Executor::Person
+            && bound.executor.argv.is_some()
+    }))
 }
 
 /// Where a person's reasons come from.
@@ -71,7 +131,22 @@ pub enum Reasons<'a> {
 /// given for; for a result without a person action to allow or that an entry of the action does
 /// not list, reasons without a result, and reasons that are empty, over 65536 bytes or 60 lines,
 /// or a file not read as [`b10x_loom_bindings::read_reasons_file`] reads it; `LogRefused` when
-/// the case's run log does not verify; `StoreUnreadable`. Nothing is written on a refusal.
+/// the case's run log does not verify; `StoreUnreadable`. Nothing is written on a refusal, but
+/// for `PersonProgramFailed` after a start.
+///
+/// A person action whose binding names an `argv` (`story:person-action-runs-a-program`) runs that
+/// program once, after the decision is recorded and inside the effect Commission admitted:
+/// `ConfinementRefused` when [`ApproveRequest::runner`] is none or not admitted for bound programs
+/// or refuses the workspace, and `PersonProgramFailed` when the step is refused before a start
+/// (`RunsSpent`, `ArtifactUnreadable`, a program that cannot be started), all before anything is
+/// written. Started, the program reads `{}` on standard input, the environment a program step's
+/// reads and the principal only as the argv entries that are exactly `{principal}`. Only an exit
+/// of 0 records, with the placed artifacts' revisions, in one store write. Any other end (an exit
+/// other than 0, killed at its timeout, refused by its runner, `ChangedByNonWriter`, a placed
+/// artifact that cannot be digested after the run) records nothing, keeps the approval and the
+/// run's observation, writes the moves of what could be digested and the case's `action
+/// finished` line, and refuses `PersonProgramFailed`, naming the end and the blob of the
+/// program's output by its digest, never what it printed.
 pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Refused> {
     let allows_action = request.action.is_some() && request.decision == ApprovalDecision::Allow;
     if request.capability.is_none() && !allows_action {
@@ -138,8 +213,14 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Ref
         .map_err(|error| unreadable(format!("case {}", request.case), format!("{error:?}")))?;
     let logs = Logs::open(&store, request.time.clone())?;
     logs.reconcile(request.case)?;
+    // The program of an allowed person action is prepared here, before anything is written: a
+    // refusal of its runner, its run count or its placed artifacts writes nothing.
+    let mut program = None;
     if let Some(action) = request.action {
-        person_action(&governor, &manifest, request, action)?;
+        let bindings = person_action(&governor, &manifest, request, action)?;
+        if request.decision == ApprovalDecision::Allow {
+            program = prepare_program(&governor, &store, &manifest, request, action, &bindings)?;
+        }
     }
     // The reasons are read and bounded before anything is written.
     let reasons = match request.reasons {
@@ -197,10 +278,139 @@ pub fn approve(request: &ApproveRequest<'_>) -> Result<Option<CaseApproval>, Ref
             request,
             action,
             &logs,
-            reasons_blob,
+            PersonStep {
+                reasons_blob,
+                program,
+            },
         )?;
     }
     Ok(approval)
+}
+
+/// A person's program prepared to start, and the admitted runner it starts through.
+type PersonProgram = (Prepared, Arc<dyn TestRunner>);
+
+/// What a person's step is taken with besides the request: the digest of the person's reasons
+/// kept as a blob, and the program its binding names, prepared.
+struct PersonStep {
+    reasons_blob: Option<String>,
+    program: Option<PersonProgram>,
+}
+
+/// The program of `action` prepared to start, with the admitted runner it starts through, when
+/// its person binding names an `argv`; `None` when it names none. Nothing is written.
+///
+/// # Errors
+/// `ConfinementRefused` when the request's runner is not admitted for bound programs or refuses
+/// the workspace; `PersonProgramFailed` when the step is refused before a start (`RunsSpent`,
+/// `ArtifactUnreadable`, a program that cannot be started); `StoreUnreadable`.
+fn prepare_program<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    store: &Path,
+    manifest: &TreeManifest,
+    request: &ApproveRequest<'_>,
+    action: &str,
+    bindings: &BindingsDocument,
+) -> Result<Option<PersonProgram>, Refused> {
+    let Some(bound) = bindings.actions.iter().find(|bound| {
+        bound.action == action
+            && bound.executor.kind == Executor::Person
+            && bound.executor.argv.is_some()
+    }) else {
+        return Ok(None);
+    };
+    let confinement = |error: ConfinementError| {
+        Refused::new(TreeRefusalReason::ConfinementRefused, error.to_string())
+            .case(request.case.to_owned())
+            .action(crate::time::cut(action).to_owned())
+    };
+    let runner = admit_bound_program_runner(request.runner.as_ref()).map_err(confinement)?;
+    let workspace = PathBuf::from(&manifest.workspace);
+    runner.preflight_child(&workspace).map_err(confinement)?;
+    let case = CaseId(request.case.to_owned());
+    let place = RunPlace {
+        governor,
+        case: &case,
+        document: bindings,
+        workspace: &workspace,
+        store,
+        runner: runner.as_ref(),
+        cancel: None,
+    };
+    // A person's program reads `{}` on standard input and no retry feedback.
+    match prepare(&place, bound, Some(request.principal), |_, _| {
+        Ok(ChildInputs::empty())
+    }) {
+        Ok(prepared) => Ok(Some((prepared, runner))),
+        Err(NotPrepared::Refused(outcome)) => {
+            let detail = match outcome {
+                EffectOutcome::Refused(refused) => refused.reason,
+                other => format!("{other:?}"),
+            };
+            Err(Refused::new(TreeRefusalReason::PersonProgramFailed, detail)
+                .case(request.case.to_owned())
+                .action(crate::time::cut(action).to_owned()))
+        }
+        Err(NotPrepared::Failed(error)) => {
+            Err(unreadable(format!("case {}", request.case), error.message))
+        }
+    }
+}
+
+/// The line the case's log gains for a person's program that did not end well: its exit, or why
+/// it has none, its blob, and no evidence.
+fn finished(action: &str, ended: &ProgramEnded) -> ActionFinished {
+    let run = &ended.run;
+    let (exit, refusal) = if run.timed_out {
+        (None, Some("timed out".to_owned()))
+    } else if run.exit.is_some() {
+        (run.exit, None)
+    } else {
+        (
+            None,
+            Some(
+                run.runner_refusal
+                    .clone()
+                    .unwrap_or_else(|| "ended with no exit".to_owned()),
+            ),
+        )
+    };
+    ActionFinished {
+        action: action.to_owned(),
+        exit,
+        refusal,
+        blob_digest: run.blob_sha256.clone(),
+        evidence: Vec::new(),
+        revisions: Vec::new(),
+    }
+}
+
+/// The refusal `PersonProgramFailed` of `action` whose program ended `ended`: it names the end
+/// and the blob of the program's output by its digest, never what the program printed.
+fn program_failed(request: &ApproveRequest<'_>, action: &str, ended: &ProgramEnded) -> Refused {
+    let program = &ended.program;
+    let how = match &ended.end {
+        ProgramEnd::Exit(Some(code)) => format!("ended exit {code}"),
+        ProgramEnd::Exit(None) => "ended with no exit".to_owned(),
+        ProgramEnd::TimedOut => "timed out".to_owned(),
+        ProgramEnd::RunnerRefused(text) => format!("was refused by its runner: {text}"),
+        ProgramEnd::ChangedByNonWriter => format!(
+            "ended exit 0 and changed a placed artifact, and {action} does not write (ChangedByNonWriter); the artifact's revision moved"
+        ),
+        ProgramEnd::Unreadable(why) => format!(
+            "ran, and a placed artifact could not be digested after it (ArtifactUnreadable); no revision moved: {why}"
+        ),
+    };
+    let output = ended.run.blob_sha256.as_deref().map_or_else(
+        || "it left no output".to_owned(),
+        |digest| format!("its output is the blob {digest}"),
+    );
+    Refused::new(
+        TreeRefusalReason::PersonProgramFailed,
+        format!("the program {program} of {action} {how}; nothing was recorded, and {output}"),
+    )
+    .case(request.case.to_owned())
+    .action(crate::time::cut(action).to_owned())
 }
 
 /// The refusal of `request`'s reasons, saying `detail`.
@@ -291,9 +501,17 @@ fn take_person_action<S: FallibleCaseStore>(
     request: &ApproveRequest<'_>,
     action: &str,
     logs: &Logs,
-    reasons_blob: Option<String>,
+    step: PersonStep,
 ) -> Result<(), Refused> {
+    let PersonStep {
+        reasons_blob,
+        program,
+    } = step;
     let bindings = person_action(governor, manifest, request, action)?;
+    let (prepared, runner) = match program {
+        Some((prepared, runner)) => (Some(prepared), Some(runner)),
+        None => (None, None),
+    };
     let case = CaseId(request.case.to_owned());
     let at = request.time.now()?;
     let revision = governor
@@ -316,8 +534,21 @@ fn take_person_action<S: FallibleCaseStore>(
         seed: seed.clone(),
         result: request.result.unwrap_or(PERFORMED).to_owned(),
         reasons_blob,
+        store: store.to_owned(),
+        program: RefCell::new(prepared),
+        runner,
+        ended: RefCell::new(None),
     };
-    let ended = one_step(governor, store, &case, action, &effects, &request.time)?;
-    logs.append(request.case, RunLogEvent::ActionFinished(ended))?;
+    let stepped = one_step(governor, store, &case, action, &effects, &request.time);
+    // A program that did not end well refused the step: its run is logged, and the refusal names
+    // how it ended.
+    if let Some(ended) = effects.ended.into_inner() {
+        logs.append(
+            request.case,
+            RunLogEvent::ActionFinished(finished(action, &ended)),
+        )?;
+        return Err(program_failed(request, action, &ended));
+    }
+    logs.append(request.case, RunLogEvent::ActionFinished(stepped?))?;
     Ok(())
 }

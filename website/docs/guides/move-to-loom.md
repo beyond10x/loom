@@ -56,7 +56,7 @@ An application that uses several of them can depend on `b10x-loom-sdk` alone; se
   where earlier releases had `repository.edit`.
 - [Canon](https://beyond10x.github.io/canon/) ([GitHub](https://github.com/beyond10x/canon)) is
   the reference Loom's manifests name (the `b10x-canon` line of each crate that pins it), tag
-  `0.10.0`. A consumer that adds Canon itself uses the same reference, or it builds a second Canon
+  `0.11.0`. A consumer that adds Canon itself uses the same reference, or it builds a second Canon
   whose types do not match.
 
 The [crate list](../reference/crates.md) is generated from the workspace and is the current list.
