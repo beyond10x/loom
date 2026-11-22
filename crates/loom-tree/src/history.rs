@@ -83,3 +83,61 @@ impl StepHistory for LogHistory {
         Ok(self.due.contains(action))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use b10x_loom_executor::selection::StepHistory as _;
+    use loom::primitives::Timestamp;
+    use loom::runlog::{ActionFinished, Evaluated, RunLogEvent, RunLogLine};
+
+    use super::LogHistory;
+
+    /// A log of `evaluated` at revision 3, then `action finished` for `a` refused `refusal`.
+    fn log(refusal: &str) -> Vec<RunLogLine> {
+        let at = Timestamp("2026-11-22T08:00:00Z".into());
+        vec![
+            RunLogLine {
+                seq: 0,
+                prev: None,
+                at: at.clone(),
+                event: RunLogEvent::Evaluated(Evaluated {
+                    case_revision: 3,
+                    frontier: "f".into(),
+                    decision_digest: String::new(),
+                }),
+            },
+            RunLogLine {
+                seq: 1,
+                prev: None,
+                at,
+                event: RunLogEvent::ActionFinished(ActionFinished {
+                    action: "a".into(),
+                    exit: None,
+                    refusal: Some(refusal.into()),
+                    blob_digest: None,
+                    evidence: Vec::new(),
+                    revisions: Vec::new(),
+                }),
+            },
+        ]
+    }
+
+    #[test]
+    fn history_knows_a_cancelled_line() {
+        let cancelled = LogHistory::new(
+            &log("Cancelled: action a: the step was cancelled"),
+            3,
+            BTreeSet::new(),
+        );
+        assert_eq!(cancelled.performed_at("a", 3), Ok(false));
+        assert_eq!(cancelled.performed("a"), 1);
+        let spent = LogHistory::new(
+            &log("RunsSpent: action a: a has run 1 times"),
+            3,
+            BTreeSet::new(),
+        );
+        assert_eq!(spent.performed_at("a", 3), Ok(true));
+    }
+}
