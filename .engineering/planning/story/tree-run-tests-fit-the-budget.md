@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-run-tests-fit-the-budget
 kind: story
-status: proposed
+status: active
 title: 'tree_run tests fit the test budget: the store syncs off only under a test switch a release binary cannot hold'
 summary: 'budget defect: tree_run binary 98-145 s, tests 32-48 s, cause ~1,000 fsyncs per tree; one sync door in loom-governor, test feature + env var under debug_assertions only, durability tests keep full sync, tree_run under 60 s, no test over 20 s'
 tags:
@@ -12,9 +12,10 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:tree-run-command
 - depends_on: story:test-step-within-budget
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T09:44:42Z", actor: "agent:loom", revision: 2}
+- {from: "proposed", to: "active", at: "2026-11-22T09:50:11Z", actor: "agent:loom", revision: 4}
 ---
 ## Outcome
 
