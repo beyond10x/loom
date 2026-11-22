@@ -1,0 +1,16 @@
+format: protocol/1
+protocol:
+  id: audit
+  revision: 1
+  description: >-
+    A protocol of story record-copy-between-cases that no case of the fixture tree is held under;
+    a case of it in another tree holds a roadmap approval.
+artifacts:
+  roadmap: {}
+evidence_kinds:
+  roadmap_approval: {}
+actions:
+  roadmap.approve:
+    effect: write
+    may_produce:
+      - evidence: roadmap_approval

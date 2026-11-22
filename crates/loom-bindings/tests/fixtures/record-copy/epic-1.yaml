@@ -1,0 +1,40 @@
+format: protocol/1
+protocol:
+  id: epic
+  revision: 1
+  description: >-
+    A child of story record-copy-between-cases: it reads the roadmap approval of another case of
+    its tree by a copy binding, and its approval counts only from a producer independent of its
+    work. It ends passed by its spec verdict alone, so a copy leaves it open.
+artifacts:
+  roadmap: {}
+  brief: {}
+  spec: {}
+evidence_kinds:
+  roadmap_approval: {}
+  spec_verdict: {}
+independence_dimensions:
+  different_principal: {description: the principal who approves is not the one who works}
+claims:
+  roadmap.approved:
+    true_when:
+      evidence: {kind: roadmap_approval, subject: roadmap, result: approved, independent_on: [different_principal]}
+  spec.passed:
+    true_when:
+      evidence: {kind: spec_verdict, subject: spec, result: passed}
+actions:
+  roadmap.read:
+    effect: read
+    may_produce:
+      - evidence: roadmap_approval
+  roadmap.approve:
+    effect: write
+    may_produce:
+      - evidence: roadmap_approval
+  spec.check:
+    effect: read
+    may_produce:
+      - evidence: spec_verdict
+outcomes:
+  passed:
+    requires: {claim: spec.passed}

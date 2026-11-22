@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 21380175cf192d59ddb91cecc416f276b3f49e07eca5dca56ea209428d8b5dd3
+// contract digest be5bd719f4616e0ba8ec944c2d7572a791ae9de98442c12a8aa2975ae0bca753
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -135,6 +135,43 @@ pub struct BoundAction {
     pub retry_when: Vec<RetryCondition>,
     /// `handoff` — `Optional<String>`.
     pub handoff: Option<String>,
+}
+
+/// CopiedRecord — `loom.bindings.CopiedRecord`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopiedRecord {
+    /// `case` — `String`.
+    pub case: String,
+    /// `action` — `String`.
+    pub action: String,
+    /// `source_case` — `String`.
+    pub source_case: String,
+    /// `source_evidence` — `String`.
+    pub source_evidence: String,
+    /// `dropped_upstream` — `List<String>`.
+    pub dropped_upstream: Vec<String>,
+}
+
+/// CopyRefusal — `loom.bindings.CopyRefusal`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyRefusal {
+    /// `reason` — `loom.bindings.CopyRefusalReason`.
+    pub reason: CopyRefusalReason,
+    /// `action` — `String`.
+    pub action: String,
+    /// `detail` — `String`.
+    pub detail: String,
+}
+
+/// CopyRefusalReason — `loom.bindings.CopyRefusalReason`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyRefusalReason {
+    /// `NoSourceRecord`.
+    NoSourceRecord,
+    /// `NoSourceCase`.
+    NoSourceCase,
+    /// `SubjectUndeclared`.
+    SubjectUndeclared,
 }
 
 /// EvidenceEntry — `loom.bindings.EvidenceEntry`.
