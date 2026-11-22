@@ -149,15 +149,19 @@ fn an_approval_names_the_principal_it_records() {
     assert_eq!(decision["kind"], "Approve", "{decision}");
     assert_eq!(decision["principal"], DEFAULT_PRINCIPAL_TEXT, "{decision}");
     assert_eq!(command_principal(&decision), DEFAULT_PRINCIPAL_TEXT);
-    let before = log_lines(&tree, "root").len();
-    let granted = tree.printed(&decision);
-    assert_eq!(granted.status.code(), Some(0), "{}", stderr(&granted));
-    let written = lines_since(&tree, "root", before);
-    assert_eq!(
-        authorities(&written),
-        [("clerk.stamp".to_owned(), DEFAULT_PRINCIPAL_TEXT.to_owned())],
-        "{written:?}"
-    );
+    // The default restricts nothing: the command with another principal records that principal,
+    // and the command as printed records the default.
+    for principal in ["clerk", DEFAULT_PRINCIPAL_TEXT] {
+        let before = log_lines(&tree, "root").len();
+        let granted = tree.printed(&with_principal(&decision, principal));
+        assert_eq!(granted.status.code(), Some(0), "{}", stderr(&granted));
+        let written = lines_since(&tree, "root", before);
+        assert_eq!(
+            authorities(&written),
+            [("clerk.stamp".to_owned(), principal.to_owned())],
+            "{written:?}"
+        );
+    }
 }
 
 #[test]
