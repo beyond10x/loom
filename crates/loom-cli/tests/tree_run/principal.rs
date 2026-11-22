@@ -200,20 +200,7 @@ fn a_decider_principal_is_named_and_accepted() {
     assert_eq!(decision["kind"], "ApproveAction", "{decision}");
     assert_eq!(decision["principal"], "decider:model", "{decision}");
     assert_eq!(command_principal(&decision), "decider:model");
-    let taken = tree
-        .command()
-        .args(["tree", "approve", "--at", AT, "--store"])
-        .arg(tree.store())
-        .args([
-            "--case",
-            "root",
-            "--principal",
-            "decider:model",
-            "--action",
-            "post.sign",
-        ])
-        .output()
-        .unwrap();
+    let taken = tree.approved("root", None, "decider:model", Some("post.sign"), None, None);
     assert_eq!(
         taken.status.code(),
         Some(0),
@@ -273,9 +260,8 @@ const WAITING_LOG: &str = concat!(
 #[test]
 fn status_and_run_log_do_not_change() {
     let (tree, _) = waiting_sign("principal-unchanged", "sign.bindings.yaml");
-    let status = tree.tree("status");
-    assert_eq!(status.status.code(), Some(0), "{}", stderr(&status));
-    assert_eq!(placeholders(&tree, &stdout(&status)), WAITING_STATUS);
+    let status = format!("{}\n", tree.status());
+    assert_eq!(placeholders(&tree, &status), WAITING_STATUS);
     let log = fs::read_to_string(tree.store().join(log_file_name("root"))).unwrap();
     assert_eq!(log, WAITING_LOG);
 }

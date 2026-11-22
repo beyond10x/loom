@@ -23,13 +23,18 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use b10x_loom_cli::{TREE_LOG_FAILED, TREE_REFUSED, tree_run_exit_status};
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
-use b10x_loom_tree::model::{SpentBudget, TreeRefusalReason, TreeStop};
+use b10x_loom_tree::model::{
+    ApprovalDecision, CaseApproval, SpentBudget, TreeRefusalReason, TreeStop,
+};
 use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
 use b10x_loom_tree::{
-    RunSettings, STATUS_FORMAT, TreeTime, decision_json, log_file_name, read_log, read_status,
-    run_tree, status_json, tree_status,
+    ApproveRequest, CaseClosed, CloseRequest, OpenRequest, OpenedTree, Reasons, Refused,
+    RunSettings, STATUS_FORMAT, TreeTime, decision_json, log_file_name, open_tree, read_log,
+    read_protocols_directory, read_status, refusal_json, run_json, run_tree, status_json,
+    stored_catalog, tree_status, verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
@@ -65,9 +70,33 @@ thread_local! {
     static COUNTS_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
+/// The variable naming the file each start of `b10x-loom` by these tests appends one line to, the
+/// name of the starting thread (its test's): `task test-step` sets it and holds the count to the
+/// bound of `START_BUDGETS` in `crates/loom-xtask/src/test_step.rs`
+/// (`story:tree-run-tests-fit-the-test-budget`).
+const STARTS: &str = "LOOM_TREE_RUN_STARTS";
+
+/// Appends one line, this thread's name, to the file [`STARTS`] names, when it names one.
+fn count_a_start() {
+    use std::io::Write as _;
+    let Some(file) = std::env::var_os(STARTS) else {
+        return;
+    };
+    let thread = std::thread::current();
+    let line = format!("{}\n", thread.name().unwrap_or("<unnamed>"));
+    let mut opened = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .unwrap_or_else(|error| panic!("{STARTS}={}: {error}", file.display()));
+    opened.write_all(line.as_bytes()).unwrap();
+}
+
 /// Gives `command`, a start of `b10x-loom` by this binary, the test sync switch and the counts
-/// file of this thread. Every start of `b10x-loom` in the `tree_run` tests goes through here.
+/// file of this thread, and counts the start ([`count_a_start`]). Every start of `b10x-loom` in the
+/// `tree_run` tests goes through here (`every_start_goes_through_with_the_switch`).
 fn with_the_switch(command: &mut Command) -> &mut Command {
+    count_a_start();
     match SWITCH_VALUE.with_borrow(Clone::clone) {
         Some(value) => command.env("B10X_LOOM_TEST_UNSYNCED_STORE", value),
         None => command.env_remove("B10X_LOOM_TEST_UNSYNCED_STORE"),
@@ -77,6 +106,87 @@ fn with_the_switch(command: &mut Command) -> &mut Command {
         None => command.env_remove(SYNC_COUNTS),
     };
     command
+}
+
+/// Turns the test sync switch on in this test process, so a store the library writes in process
+/// does not wait for the disk, as the stores the binary writes do not: with the syncs, the tests
+/// that moved in process took 271 s summed, against 152 s without them
+/// (`story:tree-run-tests-fit-the-test-budget`). [`Tree::at`] calls it, before the test's
+/// first write. A `b10x-loom` a test starts still gets the switch [`with_the_switch`] gives it, set
+/// or removed in its own environment.
+fn unsynced_in_process() {
+    static ON: std::sync::Once = std::sync::Once::new();
+    ON.call_once(|| {
+        // SAFETY: nextest runs each test in a process of its own, and this runs on the test's
+        // thread before the test starts a thread or a process; under `cargo test` the other
+        // tests' threads read the environment through `std`, which holds its lock for that.
+        unsafe { std::env::set_var("B10X_LOOM_TEST_UNSYNCED_STORE", "1") };
+    });
+}
+
+/// The protocols each test's user has installed: registration and file of the fixture.
+const INSTALLED: [(&str, &str); 5] = [
+    ("tour@1", "tour.yaml"),
+    ("tour-leg@1", "tour-leg.yaml"),
+    ("fork@1", "../extra/fork.yaml"),
+    ("sign@1", "../extra/sign.yaml"),
+    ("review@1", "../extra/review.yaml"),
+];
+
+/// A user's home with [`INSTALLED`] installed, made once per test run under `target/` and keyed by
+/// the protocols' bytes and this test binary, which holds the install's code: an install syncs
+/// each file it writes, ten syncs a tree (17 ms each on a busy disk), so each test copies this one
+/// (`story:tree-run-tests-fit-the-test-budget`). Made in a directory of its own and renamed into
+/// place, so a home that is there is whole.
+fn installed_home() -> PathBuf {
+    let mut hasher = Sha256::new();
+    for (name, file) in INSTALLED {
+        hasher.update(name.as_bytes());
+        hasher.update([0]);
+        hasher.update(fs::read(Path::new(FIXTURE).join("protocols").join(file)).unwrap());
+        hasher.update([0]);
+    }
+    let binary = fs::metadata(std::env::current_exe().unwrap()).unwrap();
+    hasher.update(binary.len().to_be_bytes());
+    let built = binary
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap();
+    hasher.update(built.as_nanos().to_be_bytes());
+    let key: String = hasher.finalize()[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let home = base.join(format!("tree-run-home-{key}"));
+    if home.is_dir() {
+        return home;
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let making = base.join(format!(
+        "tree-run-home-{key}-{}-{nanos}",
+        std::process::id()
+    ));
+    let installed = InstallStore::new(making.join("loom/protocols"));
+    for (name, file) in INSTALLED {
+        installed
+            .install_file(
+                name,
+                &Path::new(FIXTURE).join("protocols").join(file),
+                false,
+            )
+            .unwrap();
+    }
+    // Another test that made it first leaves its home in place: this one is not needed.
+    if fs::rename(&making, &home).is_err() {
+        let _ = fs::remove_dir_all(&making);
+    }
+    assert!(home.is_dir(), "no home at {}", home.display());
+    home
 }
 
 /// One test's scratch directory: the user's home with the fixture protocols installed, the
@@ -102,25 +212,10 @@ impl Tree {
 
     /// A fresh scratch directory at `root`.
     fn at(root: PathBuf) -> Self {
+        unsynced_in_process();
         let started = Instant::now();
-        fs::create_dir_all(root.join("home")).unwrap();
+        copy_dir(&installed_home(), &root.join("home"));
         fs::create_dir_all(root.join("workspace/stubs")).unwrap();
-        let installed = InstallStore::new(root.join("home/loom/protocols"));
-        for (name, file) in [
-            ("tour@1", "tour.yaml"),
-            ("tour-leg@1", "tour-leg.yaml"),
-            ("fork@1", "../extra/fork.yaml"),
-            ("sign@1", "../extra/sign.yaml"),
-            ("review@1", "../extra/review.yaml"),
-        ] {
-            installed
-                .install_file(
-                    name,
-                    &Path::new(FIXTURE).join("protocols").join(file),
-                    false,
-                )
-                .unwrap();
-        }
         for entry in fs::read_dir(Path::new(FIXTURE).join("stubs")).unwrap() {
             let entry = entry.unwrap();
             fs::copy(
@@ -171,25 +266,79 @@ impl Tree {
         command
     }
 
-    /// `tree open` of `tour@1` with the bindings file `bindings` of the workspace into `store`.
-    fn open_into(&self, store: &Path, bindings: &str) -> Output {
-        self.command()
+    /// The catalog `b10x-loom tree` reads for this tree (`tree_catalog` in
+    /// `crates/loom-cli/src/tree.rs`): the one its store keeps, else the user's.
+    fn tree_catalog(&self) -> Result<ProtocolCatalog, Refused> {
+        Ok(stored_catalog(&self.store())?.unwrap_or_else(|| self.catalog()))
+    }
+
+    /// `tree open` of `protocol` with the bindings file `bindings` of the workspace into `store`,
+    /// from the protocols directory `protocols` when one is given, in process.
+    fn opened(
+        &self,
+        store: &Path,
+        protocol: &str,
+        bindings: &str,
+        protocols: Option<&Path>,
+    ) -> Output {
+        let (catalog, kept) = match protocols {
+            Some(directory) => match read_protocols_directory(directory) {
+                Ok(read) => (read.catalog, read.kept),
+                Err(refused) => return refusal(&refused),
+            },
+            None => (self.catalog(), Vec::new()),
+        };
+        answered(
+            open_tree(&OpenRequest {
+                store: store.to_owned(),
+                workspace: self.workspace(),
+                protocol: protocol.to_owned(),
+                bindings: self.workspace().join(bindings),
+                revisions: Vec::new(),
+                case: "root".to_owned(),
+                time: at(),
+                catalog: &catalog,
+                protocols: kept,
+            }),
+            |opened| (0, opened_json(&opened)),
+        )
+    }
+
+    /// `tree open` as [`Tree::opened`] opens it, started as `b10x-loom`.
+    fn open_started(
+        &self,
+        store: &Path,
+        protocol: &str,
+        bindings: &str,
+        protocols: Option<&Path>,
+    ) -> Output {
+        let mut command = self.command();
+        command
             .args([
                 "tree",
                 "open",
                 "--protocol",
-                "tour@1",
+                protocol,
                 "--at",
                 AT,
                 "--store",
             ])
-            .arg(store)
+            .arg(store);
+        if let Some(directory) = protocols {
+            command.arg("--protocols").arg(directory);
+        }
+        command
             .arg("--bindings")
             .arg(self.workspace().join(bindings))
             .arg("--workspace")
             .arg(self.workspace())
             .output()
             .unwrap()
+    }
+
+    /// `tree open` of `tour@1` with the bindings file `bindings` of the workspace into `store`.
+    fn open_into(&self, store: &Path, bindings: &str) -> Output {
+        self.opened(store, "tour@1", bindings, None)
     }
 
     fn open(&self) -> Output {
@@ -203,20 +352,27 @@ impl Tree {
 
     /// `tree open` of `tour-leg@1` alone with the bindings file `bindings` of the workspace.
     fn open_leg_with(&self, bindings: &str) -> Output {
-        self.command()
-            .args(["tree", "open", "--protocol", "tour-leg@1", "--at", AT])
-            .arg("--store")
-            .arg(self.store())
-            .arg("--bindings")
-            .arg(self.workspace().join(bindings))
-            .arg("--workspace")
-            .arg(self.workspace())
-            .output()
-            .unwrap()
+        self.opened(&self.store(), "tour-leg@1", bindings, None)
     }
 
-    /// `tree run` on the store, every program through the `local` runner.
+    /// `tree run --confinement local --at AT` on the store, in process: `run_tree` with
+    /// [`settings`].
     fn run(&self) -> Output {
+        self.run_with(None)
+    }
+
+    /// [`Tree::run`] with `--max-steps`.
+    fn run_with(&self, max_steps: Option<i64>) -> Output {
+        answered(
+            self.tree_catalog().and_then(|catalog| {
+                run_tree(&self.store(), &catalog, &settings(max_steps), None, None)
+            }),
+            |ran| (tree_run_exit_status(ran.stop), run_json(&ran)),
+        )
+    }
+
+    /// `tree run` as [`Tree::run`] runs it, started as `b10x-loom`.
+    fn run_started(&self) -> Output {
         self.command()
             .args([
                 "tree",
@@ -232,17 +388,41 @@ impl Tree {
             .unwrap()
     }
 
-    /// Runs the command a waiting `tree run` printed, from its JSON.
+    /// Takes the decision a waiting `tree run` printed, from its JSON, in process: the flags of
+    /// its command, with `--at` added, given to the library as `crates/loom-cli/src/tree.rs`
+    /// gives them.
     fn decided(&self, decision: &Value) -> Output {
-        let words: Vec<String> = decision["command"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|word| word.as_str().unwrap().to_owned())
-            .collect();
-        assert_eq!(words[0], "b10x-loom", "{decision}");
+        let words = command_words(decision);
+        let flag = |name: &str| {
+            words
+                .iter()
+                .position(|word| word == name)
+                .map(|at| words[at + 1].as_str())
+        };
+        let case = flag("--case");
+        match words[2].as_str() {
+            "approve" => self.approved(
+                case.unwrap(),
+                flag("--capability"),
+                flag("--principal").unwrap(),
+                flag("--action"),
+                None,
+                None,
+            ),
+            "close" => self.closed(case.unwrap(), flag("--outcome").unwrap()),
+            "run" => {
+                assert_eq!(flag("--confinement"), Some("local"), "{decision}");
+                self.run()
+            }
+            other => panic!("no decision runs `tree {other}`: {decision}"),
+        }
+    }
+
+    /// Runs the command a waiting `tree run` printed, from its JSON, with `--at` added, started as
+    /// `b10x-loom`.
+    fn decided_started(&self, decision: &Value) -> Output {
         self.command()
-            .args(&words[1..])
+            .args(&command_words(decision)[1..])
             .args(["--at", AT])
             .output()
             .unwrap()
@@ -250,16 +430,13 @@ impl Tree {
 
     /// Runs the command a waiting `tree run` printed exactly as printed: no flag added.
     fn printed(&self, decision: &Value) -> Output {
-        let words: Vec<String> = decision["command"]
-            .as_array()
+        self.command()
+            .args(&command_words(decision)[1..])
+            .output()
             .unwrap()
-            .iter()
-            .map(|word| word.as_str().unwrap().to_owned())
-            .collect();
-        assert_eq!(words[0], "b10x-loom", "{decision}");
-        self.command().args(&words[1..]).output().unwrap()
     }
 
+    /// `tree <verb> --store <store>`, started as `b10x-loom`.
     fn tree(&self, verb: &str) -> Output {
         self.command()
             .args(["tree", verb, "--store"])
@@ -268,6 +445,76 @@ impl Tree {
             .unwrap()
     }
 
+    /// The document `tree status` prints for the store, from `tree_status` in process.
+    fn status(&self) -> Value {
+        status_json(&tree_status(&self.store(), &self.tree_catalog().unwrap()).unwrap())
+    }
+
+    /// `tree verify` of the store, in process: `verify_tree`.
+    fn verified(&self) -> Output {
+        answered(
+            self.tree_catalog()
+                .and_then(|catalog| verify_tree(&self.store(), &catalog)),
+            |verified| {
+                let code = if verified.failure.is_none() {
+                    0
+                } else {
+                    TREE_LOG_FAILED
+                };
+                (code, verify_json(&verified))
+            },
+        )
+    }
+
+    /// `tree approve --at AT` of the store in process: an allow of `capability` by `principal` for
+    /// `case`, taking the person action `action` with `result` and `reasons` when given.
+    fn approved(
+        &self,
+        case: &str,
+        capability: Option<&str>,
+        principal: &str,
+        action: Option<&str>,
+        result: Option<&str>,
+        reasons: Option<Reasons<'_>>,
+    ) -> Output {
+        let catalog = match self.tree_catalog() {
+            Ok(catalog) => catalog,
+            Err(refused) => return refusal(&refused),
+        };
+        answered(
+            b10x_loom_tree::approve(&ApproveRequest {
+                store: &self.store(),
+                case,
+                capability,
+                principal,
+                decision: ApprovalDecision::Allow,
+                action,
+                result,
+                reasons,
+                time: at(),
+                catalog: &catalog,
+            }),
+            |approval| (0, approval_json(approval, case, action, principal)),
+        )
+    }
+
+    /// `tree close --at AT` of `case` through `outcome`, in process.
+    fn closed(&self, case: &str, outcome: &str) -> Output {
+        let catalog = match self.tree_catalog() {
+            Ok(catalog) => catalog,
+            Err(refused) => return refusal(&refused),
+        };
+        answered(
+            b10x_loom_tree::close(&CloseRequest {
+                store: &self.store(),
+                case,
+                outcome,
+                time: at(),
+                catalog: &catalog,
+            }),
+            |closed| (0, closed_json(&closed)),
+        )
+    }
     /// Every file of the store and its bytes, by name.
     fn snapshot(&self) -> Vec<(String, Vec<u8>)> {
         snapshot(&self.store())
@@ -316,6 +563,102 @@ fn json(output: &Output) -> Value {
         .unwrap_or_else(|error| panic!("{error}: {}{}", stdout(output), stderr(output)))
 }
 
+// ---- the commands in process (story:tree-run-tests-fit-the-test-budget) -------------------------
+//
+// A test starts `b10x-loom` only when the binary is what it is about: its arguments, exit codes,
+// printed text, signals, confinement and delegation. A test about what the library does calls
+// `b10x_loom_tree` in process, and gets the answer the command would have given, made as
+// `crates/loom-cli/src/tree.rs` makes it: the document on standard output, a refusal's two lines
+// on standard error, the exit status. Each command keeps one test that starts it and compares its
+// answer with the library's (`each_command_keeps_one_test_through_the_binary`).
+
+/// The instant `--at AT` gives a command.
+fn at() -> TreeTime {
+    TreeTime::At(AT.to_owned())
+}
+
+/// The words of the command a decision printed, `b10x-loom` first.
+fn command_words(decision: &Value) -> Vec<String> {
+    let words: Vec<String> = decision["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(words[0], "b10x-loom", "{decision}");
+    words
+}
+
+/// What a tree command answers, given the library's answer: `document` gives the exit status and
+/// the document of a value, a refusal answers as [`refusal`].
+fn answered<T>(result: Result<T, Refused>, document: impl FnOnce(T) -> (u8, Value)) -> Output {
+    match result {
+        Ok(value) => {
+            let (code, printed) = document(value);
+            output(code, format!("{printed}\n"), String::new())
+        }
+        Err(refused) => refusal(&refused),
+    }
+}
+
+/// What a tree command answers for `refused`: exit 1, the refusal and its document on standard
+/// error.
+fn refusal(refused: &Refused) -> Output {
+    output(
+        TREE_REFUSED,
+        String::new(),
+        format!(
+            "b10x-loom: tree refused: {refused}\n{}\n",
+            refusal_json(&refused.0)
+        ),
+    )
+}
+
+fn output(code: u8, stdout: String, stderr: String) -> Output {
+    use std::os::unix::process::ExitStatusExt as _;
+    Output {
+        status: std::process::ExitStatus::from_raw(i32::from(code) << 8),
+        stdout: stdout.into_bytes(),
+        stderr: stderr.into_bytes(),
+    }
+}
+
+/// The document `tree open` prints for `opened`.
+fn opened_json(opened: &OpenedTree) -> Value {
+    json!({
+        "store": opened.store.display().to_string(),
+        "root": opened.root,
+        "protocol": opened.protocol,
+        "workspace": opened.workspace.display().to_string(),
+    })
+}
+
+/// The document `tree approve` prints: the approval recorded, or the person action taken when it
+/// records none.
+fn approval_json(
+    approval: Option<CaseApproval>,
+    case: &str,
+    action: Option<&str>,
+    principal: &str,
+) -> Value {
+    match approval {
+        Some(approval) => json!({
+            "case": approval.case,
+            "capability": approval.capability,
+            "decision": format!("{:?}", approval.decision),
+            "principal": approval.principal,
+            "case_revision": approval.case_revision,
+            "at": approval.at.0,
+        }),
+        None => json!({"case": case, "action": action, "principal": principal}),
+    }
+}
+
+/// The document `tree close` prints for `closed`.
+fn closed_json(closed: &CaseClosed) -> Value {
+    json!({"case": closed.case, "outcome": closed.outcome, "at": closed.at.0})
+}
+
 #[test]
 fn an_agent_binding_is_refused_before_anything_runs() {
     let tree = Tree::new("agent");
@@ -343,9 +686,7 @@ fn tree_open_keeps_the_root_case_and_tree_status_names_its_files() {
     assert_eq!(opened["root"], "root");
     assert_eq!(opened["protocol"], "tour@1");
 
-    let status = tree.tree("status");
-    assert_eq!(status.status.code(), Some(0), "{}", stderr(&status));
-    let status = json(&status);
+    let status = tree.status();
     let cases = status["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 1, "{status}");
     assert_eq!(cases[0]["case"], "root");
@@ -367,12 +708,15 @@ fn tree_verify_names_the_case_and_line_of_a_changed_byte() {
     let tree = Tree::new("verify");
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    // What the command prints is the value of `verify_tree`, read with the tree's catalog.
+    let library = || verify_json(&verify_tree(&tree.store(), &tree.catalog()).unwrap());
     let verified = tree.tree("verify");
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
     assert_eq!(json(&verified)["cases"], 1);
+    assert_eq!(json(&verified), library());
 
     // The log's only line is its last: the chain names no digest of it, the head does.
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let log = PathBuf::from(status["cases"][0]["run_log"].as_str().unwrap());
     let mut bytes = fs::read(&log).unwrap();
     let at = bytes
@@ -386,6 +730,7 @@ fn tree_verify_names_the_case_and_line_of_a_changed_byte() {
     assert_eq!(verified.status.code(), Some(3), "{said}");
     assert!(said.contains("case root line 0"), "{said}");
     assert_eq!(json(&verified)["failure"]["line"], 0);
+    assert_eq!(json(&verified), library());
 }
 
 #[test]
@@ -425,7 +770,14 @@ fn an_approval_is_recorded_for_one_case_one_capability_and_its_revision() {
             .unwrap()
     };
     let before = tree.snapshot();
-    let refused = approve("root.elsewhere");
+    let refused = tree.approved(
+        "root.elsewhere",
+        Some("guide.issue"),
+        "guide",
+        None,
+        None,
+        None,
+    );
     assert_eq!(refused.status.code(), Some(1), "{}", stderr(&refused));
     assert!(
         stderr(&refused).contains("CaseNotInTree"),
@@ -438,6 +790,10 @@ fn an_approval_is_recorded_for_one_case_one_capability_and_its_revision() {
         "a refused approval wrote into the store"
     );
 
+    // The command writes the approvals file `approve` writes into a copy of the store, `--at` the
+    // same.
+    let copy = tree.root.join("store-copy");
+    copy_dir(&tree.store(), &copy);
     let approved = approve("root");
     assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
     let approval = json(&approved);
@@ -446,9 +802,28 @@ fn an_approval_is_recorded_for_one_case_one_capability_and_its_revision() {
     assert_eq!(approval["decision"], "Allow");
     assert_eq!(approval["principal"], "guide");
     assert_eq!(approval["case_revision"], 1);
+    let library = b10x_loom_tree::approve(&ApproveRequest {
+        store: &copy,
+        case: "root",
+        capability: Some("guide.issue"),
+        principal: "guide",
+        decision: ApprovalDecision::Allow,
+        action: None,
+        result: None,
+        reasons: None,
+        time: at(),
+        catalog: &tree.catalog(),
+    })
+    .unwrap();
+    assert_eq!(approval, approval_json(library, "root", None, "guide"));
+    let file = b10x_loom_tree::approvals_file_name("root");
+    assert_eq!(
+        fs::read(tree.store().join(&file)).unwrap(),
+        fs::read(copy.join(&file)).unwrap()
+    );
     let approvals = b10x_loom_tree::read_approvals(&tree.store(), "root").unwrap();
     assert_eq!(approvals.len(), 1, "{approvals:?}");
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let log = fs::read_to_string(status["cases"][0]["run_log"].as_str().unwrap()).unwrap();
     assert!(
         log.lines()
@@ -457,7 +832,7 @@ fn an_approval_is_recorded_for_one_case_one_capability_and_its_revision() {
             .contains(r#""kind":"AuthorityRecorded""#),
         "{log}"
     );
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
 }
 
@@ -467,7 +842,7 @@ fn two_opens_with_the_same_at_write_the_same_bytes() {
     let first = tree.root.join("first");
     let second = tree.root.join("second");
     for store in [&first, &second] {
-        let opened = tree.open_into(store, "tour.bindings.yaml");
+        let opened = tree.open_started(store, "tour@1", "tour.bindings.yaml", None);
         assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     }
     let names: Vec<String> = snapshot(&first).into_iter().map(|(name, _)| name).collect();
@@ -476,16 +851,69 @@ fn two_opens_with_the_same_at_write_the_same_bytes() {
         "{names:?}"
     );
     assert_eq!(snapshot(&first), snapshot(&second));
+    // The library's open of the same inputs, `--at` the same, writes the same bytes.
+    let third = tree.root.join("third");
+    open_tree(&OpenRequest {
+        store: third.clone(),
+        workspace: tree.workspace(),
+        protocol: "tour@1".to_owned(),
+        bindings: tree.workspace().join("tour.bindings.yaml"),
+        revisions: Vec::new(),
+        case: "root".to_owned(),
+        time: at(),
+        catalog: &tree.catalog(),
+        protocols: Vec::new(),
+    })
+    .unwrap();
+    assert_eq!(snapshot(&first), snapshot(&third));
 }
 
 #[test]
 fn a_one_case_tree_runs_through_its_waits_to_its_outcome() {
+    // Each `tree run` of `tree` is compared with `run_tree` over `twin`, the same tree opened from
+    // the same inputs and brought to the same state: the stop, case, steps and decisions it prints
+    // are the library's, `twin`'s scratch directory read as `tree`'s.
     let tree = Tree::new("one-case");
-    let opened = tree.open_leg();
-    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let twin = Tree::new("one-case-twin");
+    for opened in [tree.open_leg(), twin.open_leg()] {
+        assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    }
+    let run = || {
+        let printed = tree.run_started();
+        let ran = run_tree(
+            &twin.store(),
+            &twin.tree_catalog().unwrap(),
+            &settings(None),
+            None,
+            None,
+        )
+        .unwrap();
+        let library = run_json(&ran).to_string().replace(
+            &twin.root.display().to_string(),
+            &tree.root.display().to_string(),
+        );
+        assert_eq!(json(&printed).to_string(), library, "{}", stderr(&printed));
+        assert_eq!(
+            printed.status.code(),
+            Some(i32::from(tree_run_exit_status(ran.stop)))
+        );
+        for file in ["route.txt", "ticket.txt"] {
+            assert_eq!(
+                fs::read(tree.workspace().join(file)).ok(),
+                fs::read(twin.workspace().join(file)).ok(),
+                "{file}"
+            );
+        }
+        let decisions = ran.decisions.iter().map(decision_json).collect::<Vec<_>>();
+        if let Some(decision) = decisions.first() {
+            let taken = twin.decided(decision);
+            assert_eq!(taken.status.code(), Some(0), "{}", stderr(&taken));
+        }
+        printed
+    };
 
     // The writer runs until the check is valid; the approval of the route is a person's.
-    let first = tree.run();
+    let first = run();
     assert_eq!(
         first.status.code(),
         Some(3),
@@ -506,7 +934,7 @@ fn a_one_case_tree_runs_through_its_waits_to_its_outcome() {
     assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
 
     // The ticket waits on its capability, then is issued and the case ends through `passed`.
-    let second = tree.run();
+    let second = run();
     assert_eq!(
         second.status.code(),
         Some(3),
@@ -521,7 +949,7 @@ fn a_one_case_tree_runs_through_its_waits_to_its_outcome() {
     let approved = tree.decided(decision);
     assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
 
-    let last = tree.run();
+    let last = run();
     assert_eq!(
         last.status.code(),
         Some(0),
@@ -532,7 +960,7 @@ fn a_one_case_tree_runs_through_its_waits_to_its_outcome() {
     let ended = json(&last);
     assert_eq!(ended["stop"], "Terminal", "{ended}");
     assert_eq!(ended["detail"], "passed", "{ended}");
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
 }
 
@@ -568,9 +996,7 @@ fn a_childs_wait_stops_the_run_naming_the_child_case() {
     assert_eq!(command[at + 1], child, "{waited}");
 
     // The status lists the child below the root, and the root logs its opening.
-    let status = tree.tree("status");
-    assert_eq!(status.status.code(), Some(0), "{}", stderr(&status));
-    let status = json(&status);
+    let status = tree.status();
     let cases = status["cases"].as_array().unwrap();
     assert_eq!(cases.len(), 2, "{status}");
     assert_eq!(cases[1]["case"], child.as_str(), "{status}");
@@ -578,7 +1004,7 @@ fn a_childs_wait_stops_the_run_naming_the_child_case() {
     assert_eq!(cases[1]["protocol"], "tour-leg@1", "{status}");
     let root_log = fs::read_to_string(cases[0]["run_log"].as_str().unwrap()).unwrap();
     assert!(root_log.contains("ChildOpened"), "{root_log}");
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
 }
 
@@ -675,19 +1101,42 @@ fn a_cancelled_run_ends_cancelled_before_its_next_step() {
 }
 
 /// `tree open` of the two-level tree, then `tree run` and each first printed decision in turn
-/// until a run exits other than 3, taking the decision on `twice` two times in a row: per wait the
-/// run's JSON and the status read at it, and the last run's JSON.
+/// until a run exits other than 3, taking the decision on `twice` two times in a row, every
+/// command started as `b10x-loom`: per wait the run's JSON and the status read at it, and the last
+/// run's JSON.
 fn run_to_end_twice(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
-    let opened = tree.open();
+    let opened = tree.open_started(&tree.store(), "tour@1", "tour.bindings.yaml", None);
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
-    run_opened(tree, twice)
+    to_the_end(
+        twice,
+        || tree.run_started(),
+        || json(&tree.tree("status")),
+        |decision| tree.decided_started(decision),
+    )
 }
 
-/// `tree run` and each first printed decision in turn on a tree already open, as [`run_to_end_twice`].
+/// `tree run` and each first printed decision in turn on a tree already open, as
+/// [`run_to_end_twice`] runs them, in process.
 fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
+    to_the_end(
+        twice,
+        || tree.run(),
+        || tree.status(),
+        |decision| tree.decided(decision),
+    )
+}
+
+/// `run` and each first decision it printed, taken by `decide`, in turn until a run exits other
+/// than 3, as [`run_to_end_twice`] says; `status` reads the status at each wait.
+fn to_the_end(
+    twice: Option<&str>,
+    run: impl Fn() -> Output,
+    status: impl Fn() -> Value,
+    decide: impl Fn(&Value) -> Output,
+) -> (Vec<(Value, Value)>, Value) {
     let mut waits = Vec::new();
     for _ in 0..8 {
-        let ran = tree.run();
+        let ran = run();
         if ran.status.code() != Some(3) {
             assert_eq!(
                 ran.status.code(),
@@ -699,11 +1148,11 @@ fn run_opened(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) 
             return (waits, json(&ran));
         }
         let waited = json(&ran);
-        let status = json(&tree.tree("status"));
-        let decided = tree.decided(&waited["decisions"][0]);
+        let status = status();
+        let decided = decide(&waited["decisions"][0]);
         assert_eq!(decided.status.code(), Some(0), "{}", stderr(&decided));
         if twice.is_some_and(|action| waited["decisions"][0]["action"] == action) {
-            let again = tree.decided(&waited["decisions"][0]);
+            let again = decide(&waited["decisions"][0]);
             assert_eq!(again.status.code(), Some(0), "{}", stderr(&again));
         }
         waits.push((waited, status));
@@ -844,7 +1293,7 @@ fn entry<'a>(status: &'a Value, case: &str) -> &'a Value {
 fn a_status_names_each_cases_link_protocol_and_stop() {
     let Ended { tree, waits, ended } = ended_tree();
     assert_eq!(ended["stop"], "Terminal", "{ended}");
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let root = entry(&status, "root");
     assert!(
         root.get("name").is_none() && root.get("parent").is_none(),
@@ -876,7 +1325,7 @@ fn a_status_names_each_cases_link_protocol_and_stop() {
 #[test]
 fn a_status_lists_each_record_in_the_order_received() {
     let Ended { tree, .. } = ended_tree();
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let root = entry(&status, "root");
     let records = root["evidence"].as_array().unwrap();
     for (index, record) in records.iter().enumerate() {
@@ -922,7 +1371,7 @@ fn a_status_lists_each_record_in_the_order_received() {
 #[test]
 fn a_status_counts_the_attempts_of_a_retried_writer() {
     let Ended { tree, .. } = ended_tree();
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let first = entry(&status, "root.first");
     let writes: Vec<&Value> = first["runs"]
         .as_array()
@@ -956,7 +1405,7 @@ fn a_status_lists_each_approval_in_the_order_recorded() {
     // The grant of the ticket is recorded twice at one revision (the shared tree takes it twice):
     // two entries, one decision in the approvals file.
     let Ended { tree, .. } = ended_tree();
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let first = entry(&status, "root.first");
     let approvals = first["approvals"].as_array().unwrap();
     assert_eq!(approvals.len(), 3, "{first}");
@@ -986,7 +1435,7 @@ fn a_status_lists_each_approval_in_the_order_recorded() {
 #[test]
 fn a_status_names_the_copy_into_the_root() {
     let Ended { tree, .. } = ended_tree();
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     assert_eq!(
         entry(&status, "root")["copies"],
         json!([{"source_case": "root.first", "target_case": "root", "record_kind": "route_approval"}]),
@@ -1078,7 +1527,7 @@ fn stepped_tree() -> (Tree, Value) {
 #[test]
 fn a_status_names_each_protocol_its_cases_use_with_its_digest() {
     let Ended { tree, .. } = ended_tree();
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     let cases = status["cases"].as_array().unwrap();
     let legs = cases
         .iter()
@@ -1114,7 +1563,7 @@ fn a_status_names_a_log_that_does_not_verify() {
     let (tree, ran) = stepped_tree();
     let child = ran["case"].as_str().unwrap().to_owned();
     assert_ne!(child, "root", "{ran}");
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     for case in status["cases"].as_array().unwrap() {
         assert_eq!(case["log"], json!({"verified": true}), "{case}");
     }
@@ -1129,9 +1578,7 @@ fn a_status_names_a_log_that_does_not_verify() {
     bytes[at] = b'T';
     fs::write(&path, &bytes).unwrap();
     let expected = read_log(&bytes).unwrap_err();
-    let printed = tree.tree("status");
-    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
-    let status = json(&printed);
+    let status = tree.status();
     let entry_of_child = entry(&status, &child);
     assert_eq!(
         entry_of_child["log"],
@@ -1161,9 +1608,7 @@ fn a_status_reads_a_missing_log_as_verified_and_empty() {
     let (tree, ran) = stepped_tree();
     let child = ran["case"].as_str().unwrap().to_owned();
     fs::remove_file(tree.store().join(log_file_name(&child))).unwrap();
-    let printed = tree.tree("status");
-    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
-    let status = json(&printed);
+    let status = tree.status();
     let entry_of_child = entry(&status, &child);
     assert_eq!(
         entry_of_child["log"],
@@ -1192,16 +1637,14 @@ fn a_step_budget_stop_names_max_steps_in_the_log_and_the_status() {
         ),
         "{last:?}"
     );
-    let printed = tree.tree("status");
-    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
-    let status = json(&printed);
+    let status = tree.status();
     let entry_of_child = entry(&status, &child);
     assert_eq!(entry_of_child["stop"], "BudgetSpent", "{entry_of_child}");
     assert_eq!(entry_of_child["budget"], "MaxSteps", "{entry_of_child}");
     assert!(entry(&status, "root").get("budget").is_none(), "{status}");
-    // The printed status reads back as the value `tree_status` returns, budget and logs included.
+    // The status reads back as the value `tree_status` returns, budget and logs included.
     let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
-    assert_eq!(read_status(&printed.stdout).unwrap(), value);
+    assert_eq!(read_status(status.to_string().as_bytes()).unwrap(), value);
     let held = value.cases.iter().find(|case| case.case == child).unwrap();
     assert_eq!(held.budget, Some(SpentBudget::MaxSteps));
 }
@@ -1235,7 +1678,7 @@ fn a_cancelled_run_stops_cancelled_naming_its_next_action() {
     assert_eq!(stopped.stop, "Cancelled", "{stopped:?}");
     assert_eq!(stopped.budget, None, "{stopped:?}");
     assert_eq!(stopped.next.len(), 1, "{stopped:?}");
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     assert_eq!(entry(&status, "root")["stop"], "Cancelled", "{status}");
     assert!(entry(&status, "root").get("budget").is_none(), "{status}");
     // The next run, not cancelled, takes that action first.
@@ -1306,7 +1749,7 @@ fn a_status_of_an_unknown_format_is_refused() {
     let tree = Tree::new("status-format");
     let opened = tree.open();
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
-    let mut document = json(&tree.tree("status"));
+    let mut document = tree.status();
     document["format"] = json!("loom.tree-status/2");
     let refused = read_status(document.to_string().as_bytes()).unwrap_err();
     assert_eq!(refused.0.reason, TreeRefusalReason::UnknownStatusFormat);
@@ -1337,22 +1780,7 @@ fn a_spent_run_budget_ends_the_retries_of_a_step() {
     fs::write(tree.workspace().join("route.txt"), "start\n").unwrap();
     let opened = tree.open_leg_with("tour-leg-idle.bindings.yaml");
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
-    let ran = tree
-        .command()
-        .args([
-            "tree",
-            "run",
-            "--confinement",
-            "local",
-            "--max-steps",
-            "100",
-            "--at",
-            AT,
-        ])
-        .arg("--store")
-        .arg(tree.store())
-        .output()
-        .unwrap();
+    let ran = tree.run_with(Some(100));
     let lines = log_lines(&tree, "root");
     let writes = lines
         .iter()
@@ -1390,7 +1818,7 @@ fn approval_record(name: &str, bindings: &str) -> Value {
     );
     let approved = tree.decided(&json(&waited)["decisions"][0]);
     assert_eq!(approved.status.code(), Some(0), "{}", stderr(&approved));
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     entry(&status, "root")["evidence"]
         .as_array()
         .unwrap()
@@ -1578,12 +2006,14 @@ fn observed_tree() -> (Tree, Vec<Value>) {
 }
 
 /// Not a test of its own: the test step (`crates/loom-xtask/src/test_step.rs`) runs it after its
-/// build and before its timed run, so the shared trees ([`ended_tree`], [`stepped_tree`],
-/// [`observed_tree`]) are made once and no test of the timed run makes one or waits on the lock of
-/// another that does: a waiter's wait counted in the binary's summed time, once per waiter.
+/// build and before its timed run, so the installed home ([`installed_home`]) and the shared trees
+/// ([`ended_tree`], [`stepped_tree`], [`observed_tree`]) are made once and no test of the timed run
+/// makes one or waits on the lock of another that does: a waiter's wait counted in the binary's
+/// summed time, once per waiter.
 #[test]
 #[ignore = "run by the test step before its timed run"]
 fn the_shared_trees_are_made() {
+    installed_home();
     drop(ended_tree());
     drop(stepped_tree());
     drop(observed_tree());
@@ -1707,9 +2137,7 @@ fn a_status_names_the_child_of_each_case_outcome_record() {
         stdout(&ran),
         stderr(&ran)
     );
-    let printed = tree.tree("status");
-    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
-    let status = json(&printed);
+    let status = tree.status();
     let root = case_file(&tree.store(), "root");
     let names: BTreeMap<&str, &str> = root["children"]
         .as_array()
@@ -1736,9 +2164,9 @@ fn a_status_names_the_child_of_each_case_outcome_record() {
         }
     }
     assert_eq!(named, 1, "{status}");
-    // The printed status reads back as the value it printed, `name` included.
+    // The status reads back as the value it shows, `name` included.
     let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
-    assert_eq!(read_status(&printed.stdout).unwrap(), value);
+    assert_eq!(read_status(status.to_string().as_bytes()).unwrap(), value);
     assert_eq!(status, status_json(&value));
 }
 
@@ -1775,25 +2203,7 @@ fn an_observer_is_given_the_record_of_each_child_line() {
 #[test]
 fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
     let tree = Tree::new("close");
-    let opened = tree
-        .command()
-        .args([
-            "tree",
-            "open",
-            "--protocol",
-            "fork@1",
-            "--at",
-            AT,
-            "--store",
-        ])
-        .arg(tree.store())
-        .arg("--bindings")
-        .arg(tree.workspace().join("fork.bindings.yaml"))
-        .arg("--workspace")
-        .arg(tree.workspace())
-        .output()
-        .unwrap();
-    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    open_with(&tree, "fork@1", "fork.bindings.yaml");
 
     // Once the road is seen both outcomes are legitimate: the run waits and prints two closes.
     let waited = tree.run();
@@ -1819,22 +2229,7 @@ fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
 
     // An outcome that is not legitimate is refused and the store keeps every byte.
     let before = tree.snapshot();
-    let refused = tree
-        .command()
-        .args([
-            "tree",
-            "close",
-            "--case",
-            "root",
-            "--outcome",
-            "lost",
-            "--at",
-            AT,
-            "--store",
-        ])
-        .arg(tree.store())
-        .output()
-        .unwrap();
+    let refused = tree.closed("root", "lost");
     assert_ne!(refused.status.code(), Some(0), "{}", stdout(&refused));
     assert!(
         stderr(&refused).contains("OutcomeNotLegitimate"),
@@ -1844,33 +2239,38 @@ fn a_case_with_two_legitimate_outcomes_waits_for_tree_close() {
     assert_eq!(tree.snapshot(), before);
 
     // The printed command closes the case through `left`; the tree is then terminal through it.
+    // What it prints is the `CaseClosed` that `close` returns on a copy of the store taken before
+    // it, at the host clock, as the printed command reads it: no earlier.
+    let copy = tree.root.join("store-copy");
+    copy_dir(&tree.store(), &copy);
     let closed = tree.printed(&decisions[1]);
     assert_eq!(closed.status.code(), Some(0), "{}", stderr(&closed));
     assert_eq!(json(&closed)["outcome"], "left");
-    let status = json(&tree.tree("status"));
+    let library = b10x_loom_tree::close(&CloseRequest {
+        store: &copy,
+        case: "root",
+        outcome: "left",
+        time: TreeTime::Host,
+        catalog: &tree.catalog(),
+    })
+    .unwrap();
+    let mut printed = json(&closed);
+    let printed_at = printed["at"].as_str().unwrap().to_owned();
+    assert!(
+        printed_at.len() == 20 && printed_at <= library.at.0,
+        "{printed} {library:?}"
+    );
+    printed["at"] = json!(library.at.0);
+    assert_eq!(printed, closed_json(&library));
+    let status = tree.status();
     assert_eq!(entry(&status, "root")["outcome"], "left", "{status}");
     let lines = log_lines(&tree, "root");
     assert!(
         matches!(&lines.last().unwrap().event, RunLogEvent::Terminated(ended) if ended.reason == "left")
     );
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
-    let again = tree
-        .command()
-        .args([
-            "tree",
-            "close",
-            "--case",
-            "root",
-            "--outcome",
-            "kept",
-            "--at",
-            AT,
-            "--store",
-        ])
-        .arg(tree.store())
-        .output()
-        .unwrap();
+    let again = tree.closed("root", "kept");
     assert!(
         stderr(&again).contains("CaseTerminated"),
         "{}",
@@ -1980,24 +2380,7 @@ fn every_command_a_leg_prints_runs_as_printed_to_its_outcome() {
 
 /// `tree open` of `protocol` with the bindings file `bindings` of the workspace.
 fn open_with(tree: &Tree, protocol: &str, bindings: &str) {
-    let opened = tree
-        .command()
-        .args([
-            "tree",
-            "open",
-            "--protocol",
-            protocol,
-            "--at",
-            AT,
-            "--store",
-        ])
-        .arg(tree.store())
-        .arg("--bindings")
-        .arg(tree.workspace().join(bindings))
-        .arg("--workspace")
-        .arg(tree.workspace())
-        .output()
-        .unwrap();
+    let opened = tree.opened(&tree.store(), protocol, bindings, None);
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
 }
 
@@ -2038,7 +2421,7 @@ fn lines_since(tree: &Tree, case: &str, before: usize) -> Vec<RunLogLine> {
 
 /// The records of `kind` in the status of `case`.
 fn records_of(tree: &Tree, case: &str, kind: &str) -> Vec<Value> {
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     entry(&status, case)["evidence"]
         .as_array()
         .unwrap()
@@ -2150,7 +2533,7 @@ fn the_printed_person_action_without_a_capability_runs() {
     assert_eq!(signed.len(), 1, "{signed:?}");
     assert_eq!(signed[0]["result"], "signed", "{signed:?}");
     assert_eq!(signed[0]["producer"], "walker", "{signed:?}");
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
 }
 
@@ -2158,20 +2541,7 @@ fn the_printed_person_action_without_a_capability_runs() {
 fn a_person_action_that_needs_a_capability_is_refused_without_one() {
     let (tree, _) = signpost("needs-capability");
     let before = tree.snapshot();
-    let refused = tree
-        .command()
-        .args(["tree", "approve", "--store"])
-        .arg(tree.store())
-        .args([
-            "--case",
-            "root",
-            "--principal",
-            "clerk",
-            "--action",
-            "post.seal",
-        ])
-        .output()
-        .unwrap();
+    let refused = tree.approved("root", None, "clerk", Some("post.seal"), None, None);
     let said = stderr(&refused);
     assert_eq!(refused.status.code(), Some(1), "{said}");
     assert!(said.contains("NotAPersonAction"), "{said}");
@@ -2226,7 +2596,7 @@ fn the_printed_close_command_runs() {
     let ended = tree.run();
     assert_eq!(ended.status.code(), Some(0), "{}", stderr(&ended));
     assert_eq!(json(&ended)["stop"], "Terminal");
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     assert_eq!(entry(&status, "root")["outcome"], "left", "{status}");
 }
 
@@ -2282,8 +2652,33 @@ fn reviewed(label: &str) -> Tree {
     tree
 }
 
-/// `tree approve` of the person action `action` of the root as `reviewer`, with `flags` after.
+/// `tree approve --at AT` of the person action `action` of the root as `reviewer`, with `flags`
+/// after (`--result`, `--reasons`, `--reasons-file`), in process.
 fn review(tree: &Tree, action: &str, flags: &[&str]) -> Output {
+    let flag = |name: &str| {
+        flags
+            .iter()
+            .position(|flag| *flag == name)
+            .map(|at| flags[at + 1])
+    };
+    let file = flag("--reasons-file").map(PathBuf::from);
+    let reasons = match (flag("--reasons"), &file) {
+        (Some(text), _) => Some(Reasons::Text(text)),
+        (None, Some(path)) => Some(Reasons::File(path)),
+        (None, None) => None,
+    };
+    tree.approved(
+        "root",
+        None,
+        "reviewer",
+        Some(action),
+        flag("--result"),
+        reasons,
+    )
+}
+
+/// [`review`], started as `b10x-loom`.
+fn review_started(tree: &Tree, action: &str, flags: &[&str]) -> Output {
     tree.command()
         .args(["tree", "approve", "--at", AT, "--store"])
         .arg(tree.store())
@@ -2541,7 +2936,8 @@ fn reasons_out_of_bounds_or_outside_the_workspace_are_refused() {
 fn the_reasons_are_kept_as_a_blob_not_in_the_log() {
     let tree = reviewed("reasons-blob");
     let reasons = "Marker 7f3a: the second paragraph repeats the first.";
-    let taken = review(
+    // The command prints no word of the reasons.
+    let taken = review_started(
         &tree,
         "draft.review",
         &["--result", "rejected", "--reasons", reasons],
@@ -2613,27 +3009,10 @@ fn open_from(tree: &Tree, dir: &Path, protocol: &str) -> Output {
     open_from_with(tree, dir, protocol, "tour.bindings.yaml")
 }
 
-/// `tree open --protocols dir` of the root `protocol` with the bindings file `bindings`.
+/// `tree open --protocols dir` of the root `protocol` with the bindings file `bindings`, in
+/// process.
 fn open_from_with(tree: &Tree, dir: &Path, protocol: &str, bindings: &str) -> Output {
-    tree.command()
-        .args([
-            "tree",
-            "open",
-            "--protocol",
-            protocol,
-            "--at",
-            AT,
-            "--store",
-        ])
-        .arg(tree.store())
-        .arg("--protocols")
-        .arg(dir)
-        .arg("--bindings")
-        .arg(tree.workspace().join(bindings))
-        .arg("--workspace")
-        .arg(tree.workspace())
-        .output()
-        .unwrap()
+    tree.opened(&tree.store(), protocol, bindings, Some(dir))
 }
 
 /// Asserts `output` is a refusal naming `reason` and each of `named`, and the store holds nothing.
@@ -2651,7 +3030,7 @@ fn refused_with_an_empty_store(tree: &Tree, output: &Output, reason: &str, named
 /// The SHA-256 `tree status` names for the protocol `registration`, which a case of the tree uses:
 /// the status lists only those (`kept_entry` reads what `tree open` kept).
 fn kept_sha256(tree: &Tree, registration: &str) -> String {
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     status["protocols"]
         .as_array()
         .unwrap()
@@ -2709,7 +3088,7 @@ fn a_protocols_directory_registers_what_its_files_declare() {
     );
     // The status lists the protocols the tree's cases use, from the kept catalog: the root's alone
     // until a leg is opened, the entry `tree-protocols.json` keeps for it.
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     assert_eq!(
         status["protocols"],
         json!([kept_entry(&tree, "tour@1")]),
@@ -2777,7 +3156,7 @@ fn nothing_in_a_run_selects_or_replaces_a_protocol() {
     .unwrap();
     let opened = open_from_with(&tree, &dir, "tour@1", "tour-replace.bindings.yaml");
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
-    let at_open = json(&tree.tree("status"));
+    let at_open = tree.status();
     // A child bindings file naming `tour@1` does not select the protocol of its case: the run is
     // refused and records nothing.
     fs::write(
@@ -2793,7 +3172,7 @@ fn nothing_in_a_run_selects_or_replaces_a_protocol() {
         "{text}"
     );
     fs::write(workspace.join("tour-leg-replace.bindings.yaml"), &replacing).unwrap();
-    assert_eq!(json(&tree.tree("status")), at_open);
+    assert_eq!(tree.status(), at_open);
     let (_, ended) = run_opened(&tree, None);
     assert_eq!(ended["detail"], "arrived", "{ended}");
     // The writers ran: the directory's file and the workspace hold their document.
@@ -2808,7 +3187,7 @@ fn nothing_in_a_run_selects_or_replaces_a_protocol() {
     );
     // Every case keeps the registration and the SHA-256 of `tree open`: the status lists each
     // protocol the cases use as `tree-protocols.json` kept it at `tree open`.
-    let status = json(&tree.tree("status"));
+    let status = tree.status();
     assert_eq!(
         status["protocols"],
         json!([kept_entry(&tree, "tour@1"), kept_entry(&tree, "tour-leg@1")]),
@@ -3025,7 +3404,9 @@ fn counted<T>(switch: Option<&str>, run: impl FnOnce() -> T) -> (T, Synced) {
 fn the_switch_is_off_unless_its_variable_is_1() {
     for value in [None, Some("0"), Some(" 1")] {
         let tree = Tree::new("switch-off");
-        let (opened, counts) = counted(value, || tree.open_leg());
+        let (opened, counts) = counted(value, || {
+            tree.open_started(&tree.store(), "tour-leg@1", "tour-leg.bindings.yaml", None)
+        });
         assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
         assert!(
             counts.synced > 0 && counts.skipped == 0,
@@ -3033,7 +3414,9 @@ fn the_switch_is_off_unless_its_variable_is_1() {
         );
     }
     let tree = Tree::new("switch-on");
-    let (opened, counts) = counted(Some("1"), || tree.open_leg());
+    let (opened, counts) = counted(Some("1"), || {
+        tree.open_started(&tree.store(), "tour-leg@1", "tour-leg.bindings.yaml", None)
+    });
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     assert!(counts.synced == 0 && counts.skipped > 0, "{counts:?}");
 }
@@ -3083,7 +3466,7 @@ fn a_bound_program_never_sees_the_switch() {
     fs::write(tree.workspace().join("env.bindings.yaml"), bindings).unwrap();
     let opened = tree.open_leg_with("env.bindings.yaml");
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
-    let (ran, counts) = counted(Some("1"), || tree.run());
+    let (ran, counts) = counted(Some("1"), || tree.run_started());
     assert_eq!(
         ran.status.code(),
         Some(3),
@@ -3130,7 +3513,7 @@ fn a_bindings_or_protocol_member_cannot_set_the_switch() {
         assert_ne!(member, leg, "{label}");
         let tree = Tree::new("switch-member");
         fs::write(tree.workspace().join("member.bindings.yaml"), member).unwrap();
-        let (opened, _) = counted(None, || tree.open_leg_with("member.bindings.yaml"));
+        let opened = tree.open_leg_with("member.bindings.yaml");
         refused_with_an_empty_store(
             &tree,
             &opened,
@@ -3162,8 +3545,13 @@ fn a_bindings_or_protocol_member_cannot_set_the_switch() {
         let dir = protocols_dir(&tree, &[("tour-leg.yaml", &protocol)]);
         let ((opened, ran), counts) = counted(switch, || {
             (
-                open_from_with(&tree, &dir, "tour-leg@1", "switch.bindings.yaml"),
-                tree.run(),
+                tree.open_started(
+                    &tree.store(),
+                    "tour-leg@1",
+                    "switch.bindings.yaml",
+                    Some(&dir),
+                ),
+                tree.run_started(),
             )
         });
         assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));

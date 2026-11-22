@@ -8,7 +8,7 @@ path = "junit.xml"
 store-success-output = true
 
 [[profile.default.overrides]]
-filter = "binary_id(b10x-loom-cli::tree_run) and not test(/(^|::)slow_/)"
+filter = "(binary_id(b10x-loom-cli::tree_run) or (binary_id(b10x-loom-cli::main) and test(/^tree_run::/))) and not test(/(^|::)slow_/)"
 slow-timeout = { period = "20s", terminate-after = 1 }
 
 [profile.slow]

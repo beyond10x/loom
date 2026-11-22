@@ -194,7 +194,7 @@ fn a_terminated_tree_run_ends_cancelled_leaving_no_program_and_a_store_that_veri
         ended.stderr
     );
 
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(
         verified.status.code(),
         Some(0),
