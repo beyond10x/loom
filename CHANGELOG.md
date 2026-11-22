@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
+
 ### Changed
 
 - ESS 0.97.4 (format unchanged)

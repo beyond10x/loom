@@ -959,3 +959,149 @@ fn the_help_names_the_workers_the_selection_and_the_refusals() {
     }
     within_bound(started);
 }
+
+// Acceptance for `story:tree-suite-approve-result-and-reasons`: the `approve` step and the
+// `approve` entry pass `result`, `reasons` (joined by line feeds) and `deny` to `tree approve`.
+// `review.suite.yaml` has cycles over `review@1`, `approve.suite.yaml` over `tour@1`; each test runs
+// `tree test --only` of its own cycles, not the shared run.
+
+/// A protocols directory in `dir`: a copy of `tree-two-level/protocols` with
+/// `tree-two-level/extra/review.yaml` added. The fixture is never changed in place.
+fn review_protocols(dir: &Path) -> PathBuf {
+    let protocols = dir.join("protocols");
+    copy_dir(Path::new(PROTOCOLS), &protocols);
+    fs::copy(
+        Path::new(PROTOCOLS).join("../extra/review.yaml"),
+        protocols.join("review.yaml"),
+    )
+    .unwrap();
+    protocols
+}
+
+/// `tree test --only <only> --workers 2` of the fixture suite `suite` in a fresh directory, over
+/// the review protocols for `review.suite.yaml` and the fixture's own otherwise: the directory,
+/// the output and the `--report`. Two selected cycles run at once, so the test keeps its 5 s.
+fn suite_cycles(label: &str, suite: &str, only: &str) -> (PathBuf, String, Value) {
+    let dir = fresh_scratch(label);
+    fs::create_dir_all(&dir).unwrap();
+    let protocols = if suite == "review.suite.yaml" {
+        review_protocols(&dir)
+    } else {
+        PathBuf::from(PROTOCOLS)
+    };
+    let tested = tree_test_in(
+        &dir,
+        "scratch",
+        &Path::new(FIXTURE).join(suite),
+        &protocols,
+        &["--only", only, "--workers", "2"],
+    );
+    let said = format!("{}{}", text(&tested.stdout), text(&tested.stderr));
+    let report_file = dir.join("scratch.json");
+    assert!(report_file.is_file(), "{said}");
+    (dir, said, read_report(&report_file))
+}
+
+/// The report's result of the cycle `name`.
+fn cycle_of<'a>(report: &'a Value, name: &str) -> &'a Value {
+    report["cycles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cycle| cycle["name"] == name)
+        .unwrap_or_else(|| panic!("no cycle {name}: {report}"))
+}
+
+/// Asserts the cycle `name` ran and ended as the suite expects.
+fn as_expected(report: &Value, name: &str, said: &str) {
+    let cycle = cycle_of(report, name);
+    assert_eq!(cycle["pending"], false, "{said}{cycle}");
+    assert_eq!(cycle["run"], true, "{said}{cycle}");
+    assert_eq!(cycle["as_expected"], true, "{said}{cycle}");
+}
+
+/// Test 1: a step's named result and reasons: `[rejected, approved]` in order, and the first
+/// review's person observation names the blob of the reasons, one per line. (A person's `action
+/// finished` line names no blob: `PersonEffects` puts the digest in its observation alone.)
+#[test]
+fn the_approve_step_records_a_named_result() {
+    let started = Instant::now();
+    let (dir, said, report) = suite_cycles("step-result", "review.suite.yaml", "step-result");
+    as_expected(&report, "step-result", &said);
+    assert_eq!(cycle_of(&report, "step-result")["exit"], 0, "{report}");
+    // The store keeps the reasons as written, joined by one line feed, as a blob.
+    let blobs = dir.join("scratch/1/store/blobs");
+    let kept = fs::read_dir(&blobs)
+        .unwrap()
+        .any(|blob| fs::read(blob.unwrap().path()).unwrap() == b"one\ntwo");
+    assert!(kept, "no blob holds the reasons: {}", blobs.display());
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 2: a scripted entry's named result, the shape of Runbook's `decider-rework`.
+#[test]
+fn a_scripted_entry_records_a_named_result() {
+    let started = Instant::now();
+    let (dir, said, report) = suite_cycles("entry-result", "review.suite.yaml", "entry-result");
+    as_expected(&report, "entry-result", &said);
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 3: an entry's result answering a wait on a capability alone is refused
+/// `NotAPersonAction`, which ends the cycle with `StepFailed`; so is one whose person action's
+/// entry lists no such result (`guide.approve`'s `route.approve` lists `performed` alone).
+#[test]
+fn a_result_on_a_capability_wait_is_a_difference() {
+    let started = Instant::now();
+    let (dir, said, report) = suite_cycles(
+        "result-capability",
+        "approve.suite.yaml",
+        "result-on-a-capability-wait,result-on-guide-approve",
+    );
+    for (name, entry) in [
+        ("result-on-a-capability-wait", "decide[1]"),
+        ("result-on-guide-approve", "decide[0]"),
+    ] {
+        let cycle = cycle_of(&report, name);
+        assert_eq!(cycle["pending"], false, "{said}{cycle}");
+        assert_eq!(cycle["as_expected"], false, "{said}{cycle}");
+        let difference = &cycle["difference"];
+        assert_eq!(difference["check"], entry, "{cycle}");
+        assert_eq!(
+            difference["reason"],
+            format!("{:?}", DifferenceReason::StepFailed),
+            "{cycle}"
+        );
+        assert_eq!(difference["found"], "NotAPersonAction", "{cycle}");
+    }
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 4: `deny: true` records `authority recorded` with `Deny`, and `tree status` lists the
+/// approval with `answer: Deny`; no run follows the denial.
+#[test]
+fn a_denial_is_recorded_and_shown() {
+    let started = Instant::now();
+    let (dir, said, report) = suite_cycles("denial", "approve.suite.yaml", "denial");
+    as_expected(&report, "denial", &said);
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
+
+/// Test 5: 60 one-line reasons are taken, 61 are refused `NotAPersonAction` by the 60-line bound.
+#[test]
+fn the_reasons_limit_counts_lines() {
+    let started = Instant::now();
+    let (dir, said, report) = suite_cycles(
+        "reasons-limit",
+        "review.suite.yaml",
+        "reasons-at-the-limit,reasons-over-the-limit",
+    );
+    as_expected(&report, "reasons-at-the-limit", &said);
+    as_expected(&report, "reasons-over-the-limit", &said);
+    let _ = fs::remove_dir_all(&dir);
+    within_bound(started);
+}
