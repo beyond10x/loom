@@ -29,6 +29,9 @@ use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+#[path = "tree_run/delegated_cgroup.rs"]
+mod delegated_cgroup;
+
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 
 /// The bound of every test of this file.

@@ -426,6 +426,12 @@ impl SubstrateRunner {
         }
     }
 
+    /// The cgroup root this runner's drivers open on, as the host named it; `None` when a driver
+    /// discovers one as it opens ([`discover_cgroup_root`]).
+    pub fn cgroup_root(&self) -> Option<&Path> {
+        self.cgroup_root.as_deref()
+    }
+
     /// Probe the real backend before opening a model session. No test is launched.
     pub fn preflight(&self, root: &Path) -> Result<(), ConfinementError> {
         let root = validate_workspace(root, &[])?;
@@ -3638,6 +3644,138 @@ pub fn prepare_delegated_cgroup() -> Result<PathBuf, ConfinementError> {
     std::fs::write(root.join("cgroup.subtree_control"), "+cpu +memory +pids")
         .map_err(|e| fail(e.to_string()))?;
     Ok(root)
+}
+
+/// The controllers a cgroup root hands the cgroup of each launch, as Substrate's driver needs
+/// them.
+const ROOT_CONTROLLERS: [&str; 3] = ["cpu", "memory", "pids"];
+
+/// A cgroup root this process holds for as long as the value lives: an advisory `flock` on the
+/// root's own directory, which the kernel keys by that directory however a host spells its path,
+/// and releases when the holder ends, killed or not, so no stale hold outlives its process.
+/// Another process holding a root the same way is refused it meanwhile.
+#[derive(Debug)]
+pub struct CgroupRootHold {
+    root: PathBuf,
+    _directory: std::fs::File,
+}
+
+impl CgroupRootHold {
+    /// The canonical root held.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+/// Hold the cgroup root `root` for this process ([`CgroupRootHold`]), then check that it
+/// qualifies ([`check_cgroup_root`]). Refused `CgroupUndelegated`, naming the root: one that
+/// cannot be resolved or opened, one another process holds, and one that does not qualify.
+pub fn hold_cgroup_root(root: &Path) -> Result<CgroupRootHold, ConfinementError> {
+    let fail = |detail: String| refuse(ConfinementRefusal::CgroupUndelegated, detail);
+    let canonical = root.canonicalize().map_err(|e| {
+        fail(format!(
+            "the cgroup root {} is not delegated: it cannot be resolved ({e})",
+            root.display()
+        ))
+    })?;
+    let directory = std::fs::File::open(&canonical).map_err(|e| {
+        fail(format!(
+            "the cgroup root {} is not delegated: it cannot be opened ({e})",
+            canonical.display()
+        ))
+    })?;
+    match directory.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
+            return Err(fail(format!(
+                "the cgroup root {} is held by another process: two runs never share a root",
+                canonical.display()
+            )));
+        }
+        Err(std::fs::TryLockError::Error(e)) => {
+            return Err(fail(format!(
+                "the cgroup root {} cannot be held: {e}",
+                canonical.display()
+            )));
+        }
+    }
+    check_cgroup_root(&canonical)?;
+    Ok(CgroupRootHold {
+        root: canonical,
+        _directory: directory,
+    })
+}
+
+/// Whether the canonical cgroup root `root` qualifies as Substrate requires one, refused
+/// `CgroupUndelegated` naming it and the first rule it breaks, in this order: a cgroup v2
+/// directory, writable (its `cgroup.procs` opens for writing), delegated (its
+/// `cgroup.controllers` names cpu, memory and pids, and its `cgroup.subtree_control` hands them on
+/// or opens for writing), this process in a child of it, and empty (its `cgroup.procs` names no
+/// process).
+pub fn check_cgroup_root(root: &Path) -> Result<(), ConfinementError> {
+    let fail = |detail: String| refuse(ConfinementRefusal::CgroupUndelegated, detail);
+    let shown = root.display();
+    let writable = |file: &str| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(root.join(file))
+            .map(drop)
+    };
+    let names_all = |text: &str| {
+        ROOT_CONTROLLERS
+            .iter()
+            .all(|wanted| text.split_whitespace().any(|named| named == *wanted))
+    };
+    let Ok(controllers) = std::fs::read_to_string(root.join("cgroup.controllers")) else {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not delegated: it is no cgroup v2 directory"
+        )));
+    };
+    if let Err(e) = writable("cgroup.procs") {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not writable: its cgroup.procs does not open for writing ({e})"
+        )));
+    }
+    if !names_all(&controllers) {
+        let named = controllers.split_whitespace().collect::<Vec<_>>().join(" ");
+        return Err(fail(format!(
+            "the cgroup root {shown} is not delegated: its cgroup.controllers names {}, not cpu, memory and pids",
+            if named.is_empty() { "nothing" } else { &named }
+        )));
+    }
+    let handed = std::fs::read_to_string(root.join("cgroup.subtree_control")).unwrap_or_default();
+    if !names_all(&handed)
+        && let Err(e) = writable("cgroup.subtree_control")
+    {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not delegated: its cgroup.subtree_control does not open for writing ({e})"
+        )));
+    }
+    let current = current_cgroup();
+    if !current
+        .as_deref()
+        .is_some_and(|current| current != root && current.starts_with(root))
+    {
+        return Err(fail(format!(
+            "this process is not in a child of the cgroup root {shown}: it is in {}",
+            current.as_deref().map_or_else(
+                || "no cgroup v2".to_owned(),
+                |current| current.display().to_string()
+            )
+        )));
+    }
+    let processes = std::fs::read_to_string(root.join("cgroup.procs")).map_err(|e| {
+        fail(format!(
+            "the cgroup root {shown} is not writable: its cgroup.procs cannot be read ({e})"
+        ))
+    })?;
+    if !processes.trim().is_empty() {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not empty: it holds the processes {}",
+            processes.split_whitespace().collect::<Vec<_>>().join(" ")
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

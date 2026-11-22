@@ -333,20 +333,70 @@ Exit status:
   1  refused: the store holds no tree or cannot be read
   3  a log does not verify: the case and the line, counted from 0, on standard error";
 
-/// What `tree run --help` says about the steps, the waits and the exit status.
-pub const TREE_RUN_HELP: &str = "Every open child takes its steps before its parent's next one; \
+/// The precondition of `tree run`'s default confinement and its remedy, which `tree run --help`
+/// and every confinement refusal of `tree run` state.
+macro_rules! tree_confinement_precondition {
+    () => {
+        "the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: \
+without --cgroup-root, tree run starts itself again in a scope of its own under systemd-run --user \
+--scope -p Delegate=yes; pass tree run --cgroup-root DIR naming an empty, writable, delegated \
+cgroup v2 directory with this process in a child of it, or --confinement local to run every \
+program unconfined"
+    };
+}
+
+/// The precondition of `tree run`'s default confinement and its remedy, which every confinement
+/// refusal of `tree run` ends with.
+pub const TREE_CONFINEMENT_PRECONDITION: &str = tree_confinement_precondition!();
+
+/// What `tree run --help` says about the steps, the waits, the confinement and the exit status.
+pub const TREE_RUN_HELP: &str = concat!(
+    "Every open child takes its steps before its parent's next one; \
 each step is selected by the deterministic selector and performed through the action's bound \
 executor. A case is terminated when its completion gives exactly one legitimate outcome and no \
 action in it is useful. When the tree waits, each decision is printed with the exact command that \
 records it; a handoff's command is the next tree run, under this run's --confinement. A person \
 action is never taken by tree run.
 
+Confinement: ",
+    tree_confinement_precondition!(),
+    ". Started again, tree run moves into a leaf of its scope and the scope is its cgroup root. A \
+root is held by one tree run at a time and released when that run ends, killed or not, so two runs \
+never share a root; tree run never takes an ancestor cgroup it finds.
+
 Exit status:
   0  the root is terminated through its one legitimate outcome
-  1  refused, nothing written: StoreInUse naming the holder, or the store or a bindings file cannot be read
+  1  refused, nothing written: StoreInUse naming the holder, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
   3  the tree waits on a person or on authority: each decision and its command on standard error
   4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
-  5  the step or wall-time budget is spent, or the run was cancelled";
+  5  the step or wall-time budget is spent, or the run was cancelled"
+);
+
+/// Set in a `b10x-loom` that `run` or `tree run` started again in a delegated scope
+/// ([`start_delegated`]): it does not start itself again.
+pub const REEXEC_MARKER: &str = "B10X_LOOM_CONFINEMENT_REEXEC";
+
+/// The path of the file a `b10x-loom` started again creates once it runs in its scope.
+pub const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
+
+/// Starts `executable` with this process's own arguments in a delegated user systemd scope of its
+/// own (`systemd-run --user --scope -p Delegate=yes`), [`REEXEC_MARKER`] and `variables` set, and
+/// waits for it. `run` and `tree run` both start themselves again here.
+///
+/// # Errors
+/// `systemd-run` cannot be started.
+pub fn start_delegated(
+    executable: &std::path::Path,
+    variables: &[(&str, &std::ffi::OsStr)],
+) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("systemd-run")
+        .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
+        .arg(executable)
+        .args(std::env::args_os().skip(1))
+        .env(REEXEC_MARKER, "1")
+        .envs(variables.iter().copied())
+        .status()
+}
 
 /// The exit status of `tree run` for each way it stops.
 pub fn tree_run_exit_status(stop: b10x_loom_tree::model::TreeStop) -> u8 {
@@ -383,6 +433,11 @@ pub struct TreeRunArgs {
     /// The confinement every bound program starts under.
     #[arg(long, value_enum, default_value = "substrate")]
     pub confinement: TreeConfinement,
+    /// The delegated cgroup v2 directory every confined program runs under: empty, writable,
+    /// delegated, with this process in a child of it, and held by this run alone. Without it,
+    /// tree run starts itself again in a delegated scope of its own.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
     /// The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when
     /// absent.
     #[arg(long, value_name = "INSTANT")]
