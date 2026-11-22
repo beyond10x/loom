@@ -106,11 +106,11 @@ impl std::fmt::Debug for RunSettings {
 }
 
 /// What a case of the run is.
-struct Held {
-    case: String,
-    parent: Option<String>,
-    file: PathBuf,
-    bindings: BindingsDocument,
+pub(crate) struct Held {
+    pub(crate) case: String,
+    pub(crate) parent: Option<String>,
+    pub(crate) file: PathBuf,
+    pub(crate) bindings: BindingsDocument,
 }
 
 /// Runs the tree in `store` with `catalog` (see the module documentation). `observer` is given
@@ -386,7 +386,7 @@ pub fn run_tree(
 
 /// The cases of the tree, the root first and each before its children, with the bindings each
 /// runs under.
-fn tree_cases<S: loom_governor::FallibleCaseStore>(
+pub(crate) fn tree_cases<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     root: &str,
     root_bindings: &str,
@@ -676,7 +676,8 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
     Ok(due)
 }
 
-/// The ids of the records `case` holds.
+/// The ids of the records `case` holds, but the `case_outcome` records the governor writes for
+/// its children, which no step of the case gives.
 fn evidence_ids<S: loom_governor::FallibleCaseStore>(
     governor: &CanonGovernor<S>,
     case: &CaseId,
@@ -685,6 +686,7 @@ fn evidence_ids<S: loom_governor::FallibleCaseStore>(
         .evidence(case)
         .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?
         .into_iter()
+        .filter(|record| record.kind != "case_outcome")
         .map(|record| record.evidence_id.0.0)
         .collect())
 }

@@ -18,11 +18,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
-use b10x_loom_tree::model::TreeStop;
+use b10x_loom_tree::model::{TreeRefusalReason, TreeStop};
 use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
-use b10x_loom_tree::{RunSettings, TreeTime, log_file_name, read_log, run_tree};
+use b10x_loom_tree::{
+    RunSettings, STATUS_FORMAT, TreeTime, log_file_name, read_log, read_status, run_tree,
+    status_json, tree_status,
+};
 use loom_protocols::{InstallStore, ProtocolCatalog};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 
@@ -583,4 +586,247 @@ fn a_cancelled_run_ends_budget_spent_before_its_next_step() {
     assert_eq!(finished, 1);
     // The first step checked the route; the writer, the next step, never ran.
     assert!(!tree.workspace().join("route.txt").exists());
+}
+
+/// `tree open` of the two-level tree, then `tree run` and each first printed decision in turn
+/// until a run exits other than 3: per wait the run's JSON and the status read at it, and the last
+/// run's JSON.
+fn run_to_end(tree: &Tree) -> (Vec<(Value, Value)>, Value) {
+    run_to_end_twice(tree, None)
+}
+
+/// [`run_to_end`], taking the decision on `twice` two times in a row.
+fn run_to_end_twice(tree: &Tree, twice: Option<&str>) -> (Vec<(Value, Value)>, Value) {
+    let opened = tree.open();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let mut waits = Vec::new();
+    for _ in 0..8 {
+        let ran = tree.run();
+        if ran.status.code() != Some(3) {
+            assert_eq!(
+                ran.status.code(),
+                Some(0),
+                "{}{}",
+                stdout(&ran),
+                stderr(&ran)
+            );
+            return (waits, json(&ran));
+        }
+        let waited = json(&ran);
+        let status = json(&tree.tree("status"));
+        let decided = tree.decided(&waited["decisions"][0]);
+        assert_eq!(decided.status.code(), Some(0), "{}", stderr(&decided));
+        if twice.is_some_and(|action| waited["decisions"][0]["action"] == action) {
+            let again = tree.decided(&waited["decisions"][0]);
+            assert_eq!(again.status.code(), Some(0), "{}", stderr(&again));
+        }
+        waits.push((waited, status));
+    }
+    panic!("the tree did not end within 8 runs: {waits:?}");
+}
+
+/// The entry of `case` in `status`.
+fn entry<'a>(status: &'a Value, case: &str) -> &'a Value {
+    status["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["case"] == case)
+        .unwrap_or_else(|| panic!("no case {case}: {status}"))
+}
+
+#[test]
+fn a_status_names_each_cases_link_protocol_and_stop() {
+    let tree = Tree::new("status-link");
+    let (waits, ended) = run_to_end(&tree);
+    assert_eq!(ended["stop"], "Terminal", "{ended}");
+    let status = json(&tree.tree("status"));
+    let root = entry(&status, "root");
+    assert!(
+        root.get("name").is_none() && root.get("parent").is_none(),
+        "{root}"
+    );
+    assert_eq!(root["protocol_id"], "tour", "{root}");
+    assert_eq!(root["outcome"], "arrived", "{root}");
+    let first = entry(&status, "root.first");
+    assert_eq!(first["name"], "first", "{first}");
+    assert_eq!(first["parent"], "root", "{first}");
+    assert_eq!(first["protocol"], "tour-leg@1", "{first}");
+    assert_eq!(first["protocol_id"], "tour-leg", "{first}");
+    assert_eq!(first["protocol_revision"], "1", "{first}");
+    assert_eq!(first["outcome"], "passed", "{first}");
+    // Read at the wait on `ticket.issue`, the waiting case names the decision the run printed.
+    let (waited, at_wait) = waits
+        .iter()
+        .find(|(waited, _)| waited["decisions"][0]["action"] == "ticket.issue")
+        .unwrap();
+    let waiting = entry(at_wait, waited["case"].as_str().unwrap());
+    assert_eq!(waiting["stop"], "AwaitingAuthority", "{waiting}");
+    assert_eq!(
+        waiting["stop_next"],
+        json!([waited["decisions"][0]["decides"]]),
+        "{waiting}"
+    );
+}
+
+#[test]
+fn a_status_lists_each_record_in_the_order_received() {
+    let tree = Tree::new("status-records");
+    run_to_end(&tree);
+    let status = json(&tree.tree("status"));
+    let root = entry(&status, "root");
+    let records = root["evidence"].as_array().unwrap();
+    for (index, record) in records.iter().enumerate() {
+        assert_eq!(record["index"], index, "{root}");
+    }
+    let kinds: Vec<&str> = records
+        .iter()
+        .map(|record| record["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["case_outcome", "first_leg_opened", "route_approval"],
+        "{root}"
+    );
+    // The governor writes the child's `case_outcome` record with the opening, before the step's own.
+    assert!(records[0].get("action").is_none(), "{root}");
+    assert_eq!(records[1]["action"], "first.open", "{root}");
+    let copied = &records[2];
+    assert_eq!(copied["action"], "approval.copy", "{root}");
+    // The copy keeps the source record's members.
+    let first = entry(&status, "root.first");
+    let source = first["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| record["kind"] == "route_approval")
+        .unwrap();
+    for member in ["result", "producer", "subject", "subject_revision"] {
+        assert_eq!(copied[member], source[member], "{member}: {root}");
+    }
+    assert_eq!(source["action"], "route.approve", "{first}");
+    assert!(copied["upstream_revisions"].is_object(), "{root}");
+}
+
+#[test]
+fn a_status_counts_the_attempts_of_a_retried_writer() {
+    let tree = Tree::new("status-runs");
+    run_to_end(&tree);
+    let status = json(&tree.tree("status"));
+    let first = entry(&status, "root.first");
+    let writes: Vec<&Value> = first["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|run| run["action"] == "route.write")
+        .collect();
+    assert_eq!(writes.len(), 2, "{first}");
+    assert_eq!(writes[0]["attempt"], 1, "{first}");
+    assert_eq!(writes[0]["retried"], true, "{first}");
+    assert_eq!(writes[0]["retry_of"], json!([]), "{first}");
+    assert_eq!(writes[1]["attempt"], 2, "{first}");
+    assert_eq!(writes[1]["retried"], false, "{first}");
+    let retry_of = writes[1]["retry_of"].as_array().unwrap();
+    assert!(!retry_of.is_empty(), "{first}");
+    // Each record the second run was given is a check record of the leg that found it invalid.
+    for id in retry_of {
+        let record = first["evidence"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["evidence_id"] == *id)
+            .unwrap_or_else(|| panic!("{id}: {first}"));
+        assert_eq!(record["action"], "route.check", "{first}");
+        assert_eq!(record["result"], "invalid", "{first}");
+    }
+}
+
+#[test]
+fn a_status_lists_each_approval_in_the_order_recorded() {
+    let tree = Tree::new("status-approvals");
+    // The grant of the ticket is recorded twice at one revision: two entries, one decision in
+    // the approvals file.
+    run_to_end_twice(&tree, Some("ticket.issue"));
+    let status = json(&tree.tree("status"));
+    let first = entry(&status, "root.first");
+    let approvals = first["approvals"].as_array().unwrap();
+    assert_eq!(approvals.len(), 3, "{first}");
+    assert_eq!(approvals[0]["capability"], "guide.approve", "{first}");
+    assert_eq!(approvals[0]["action"], "route.approve", "{first}");
+    assert_eq!(approvals[0]["actor"], "guide", "{first}");
+    assert_eq!(approvals[0]["at"], AT, "{first}");
+    for grant in &approvals[1..] {
+        assert_eq!(grant["capability"], "guide.issue", "{first}");
+        assert_eq!(grant["answer"], "Allow", "{first}");
+        assert!(grant.get("action").is_none(), "{first}");
+    }
+    let file = tree
+        .store()
+        .join(b10x_loom_tree::approvals_file_name("root.first"));
+    let kept: Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+    let issued = kept.to_string().matches("guide.issue").count();
+    assert_eq!(issued, 1, "{kept}");
+    assert!(
+        entry(&status, "root")["approvals"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_status_names_the_copy_into_the_root() {
+    let tree = Tree::new("status-copies");
+    run_to_end(&tree);
+    let status = json(&tree.tree("status"));
+    assert_eq!(
+        entry(&status, "root")["copies"],
+        json!([{"source_case": "root.first", "target_case": "root", "record_kind": "route_approval"}]),
+        "{status}"
+    );
+    assert_eq!(
+        entry(&status, "root.first")["copies"],
+        json!([]),
+        "{status}"
+    );
+}
+
+#[test]
+fn the_printed_status_is_the_value_of_tree_status() {
+    let tree = Tree::new("status-value");
+    run_to_end(&tree);
+    let printed = tree.tree("status");
+    assert_eq!(printed.status.code(), Some(0), "{}", stderr(&printed));
+    let value = tree_status(&tree.store(), &tree.catalog()).unwrap();
+    let document = json(&printed);
+    assert_eq!(document, status_json(&value));
+    assert_eq!(document["format"], STATUS_FORMAT);
+    assert_eq!(STATUS_FORMAT, "loom.tree-status/1");
+    assert_eq!(document["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(read_status(&printed.stdout).unwrap(), value);
+}
+
+#[test]
+fn a_status_of_an_unknown_format_is_refused() {
+    let tree = Tree::new("status-format");
+    let opened = tree.open();
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let mut document = json(&tree.tree("status"));
+    document["format"] = json!("loom.tree-status/2");
+    let refused = read_status(document.to_string().as_bytes()).unwrap_err();
+    assert_eq!(refused.0.reason, TreeRefusalReason::UnknownStatusFormat);
+    assert!(
+        refused.0.detail.contains("loom.tree-status/2"),
+        "{}",
+        refused.0.detail
+    );
+    document.as_object_mut().unwrap().remove("format");
+    document.as_object_mut().unwrap().remove("version");
+    let refused = read_status(document.to_string().as_bytes()).unwrap_err();
+    assert_eq!(refused.0.reason, TreeRefusalReason::UnknownStatusFormat);
+    assert!(
+        refused.0.detail.contains("no format"),
+        "{}",
+        refused.0.detail
+    );
 }

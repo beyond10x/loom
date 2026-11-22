@@ -17,7 +17,7 @@ use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::model::ApprovalDecision;
 use b10x_loom_tree::{
     ApproveRequest, OpenRequest, Refused, RunSettings, TreeTime, approve as record, open_tree,
-    refusal_json, run_json, run_tree, status_json, tree_status, verify_json, verify_tree,
+    refusal_json, run_json, run_tree, status_json, stored_catalog, tree_status, verify_json, verify_tree,
 };
 use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::json;
@@ -81,6 +81,14 @@ fn host_catalog() -> Result<ProtocolCatalog, Refused> {
         })
 }
 
+/// The catalog of the tree in `store`: the one it keeps, else the host's.
+fn tree_catalog(store: &Path) -> Result<ProtocolCatalog, Refused> {
+    match stored_catalog(store)? {
+        Some(catalog) => Ok(catalog),
+        None => host_catalog(),
+    }
+}
+
 fn open(arguments: &TreeOpenArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     let catalog = host_catalog()?;
@@ -131,7 +139,7 @@ fn tree_runner(confinement: TreeConfinement) -> Result<Arc<dyn TestRunner>, Refu
 
 fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
-    let catalog = host_catalog()?;
+    let catalog = tree_catalog(&resolved(&arguments.store)?)?;
     let settings = RunSettings {
         max_steps: arguments.max_steps,
         max_wall_seconds: arguments.max_wall_seconds,
@@ -190,8 +198,8 @@ fn shell_word(word: &str) -> String {
 
 fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
-    let catalog = host_catalog()?;
     let store = resolved(&arguments.store)?;
+    let catalog = tree_catalog(&store)?;
     let approval = record(&ApproveRequest {
         store: &store,
         case: &arguments.case,
@@ -224,15 +232,17 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
 }
 
 fn status(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
-    let catalog = host_catalog()?;
-    let status = tree_status(&resolved(&arguments.store)?, &catalog)?;
+    let store = resolved(&arguments.store)?;
+    let catalog = tree_catalog(&store)?;
+    let status = tree_status(&store, &catalog)?;
     println!("{}", printable(&status_json(&status).to_string()));
     Ok(0)
 }
 
 fn verify(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
-    let catalog = host_catalog()?;
-    let verified = verify_tree(&resolved(&arguments.store)?, &catalog)?;
+    let store = resolved(&arguments.store)?;
+    let catalog = tree_catalog(&store)?;
+    let verified = verify_tree(&store, &catalog)?;
     println!("{}", printable(&verify_json(&verified).to_string()));
     Ok(match &verified.failure {
         None => 0,
