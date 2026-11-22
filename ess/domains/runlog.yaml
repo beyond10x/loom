@@ -115,7 +115,11 @@ types:
       - name: reason
         type: String
 
-  # A child case was opened: its id and the registered protocol that governs it.
+  # A child case was opened: its id and the registered protocol that governs it, and the child's
+  # `case_outcome` record in the parent as the opening wrote it: `record` its evidence id (the
+  # link's `outcome_evidence`) and `record_digest` the SHA-256 of the record's facts, 64
+  # lower-case hex digits. `record` and `record_digest` come together or not at all; a line
+  # holding one without the other does not read.
   - name: loom.runlog.ChildOpened
     kind: struct
     fields:
@@ -123,15 +127,25 @@ types:
         type: String
       - name: protocol
         type: String
+      - name: record
+        type: Optional<String>
+      - name: record_digest
+        type: Optional<String>
 
   # A child case was closed, with the outcome it completed with (absent when it completed with
-  # none).
+  # none), and the child's `case_outcome` record in the parent as the termination replaced it:
+  # the same `record`, a new `record_digest`. The two come together or not at all, as on
+  # `ChildOpened`.
   - name: loom.runlog.ChildClosed
     kind: struct
     fields:
       - name: child
         type: String
       - name: outcome
+        type: Optional<String>
+      - name: record
+        type: Optional<String>
+      - name: record_digest
         type: Optional<String>
 
   # An authority decision was recorded: the capability asked for, the decision and the principal

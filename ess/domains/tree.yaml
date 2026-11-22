@@ -176,7 +176,9 @@ types:
   # One record a case of `tree status` holds, in the order the case received it: its position from
   # 0, the governor's id of it, and, read from its `canon-evidence/1` record, its kind, result,
   # subject, subject revision and upstream revisions (an object of artifact to revision), its
-  # producer, and the action of the step that gave it (absent when no step did).
+  # producer, and the action of the step that gave it (absent when no step did). A `case_outcome`
+  # record carries `name`, the link name of the child it is about (the parent's `children[].name`
+  # whose `outcome_evidence` is the record's id); every other record carries none.
   - name: loom.tree.StatusEvidence
     kind: struct
     fields:
@@ -197,6 +199,8 @@ types:
       - name: producer
         type: String
       - name: action
+        type: Optional<String>
+      - name: name
         type: Optional<String>
 
   # One run of a bound program of a case: the action, its exit (absent when it timed out or the
