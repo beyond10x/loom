@@ -764,6 +764,7 @@ fn index(reason: Reason) -> usize {
         Reason::UndeclaredEvidenceKind => 19,
         Reason::ExitClassConflict => 20,
         Reason::ProgramNotBesideBindings => 21,
+        Reason::ArgumentsUndeclared => 22,
     }
 }
 
@@ -819,8 +820,65 @@ fn every_refusal_reason_is_reachable_from_a_document() {
             .0
             .reason,
     ));
-    let all: BTreeSet<usize> = (0..22).collect();
+    // The open effect port refuses, as it is built, `arguments_from` on an opening whose protocol
+    // declares no `arguments` schema.
+    reached.insert(index(undeclared_arguments()));
+    let all: BTreeSet<usize> = (0..23).collect();
     assert_eq!(reached, all);
+}
+
+/// The reason `OpenEffects::new` refuses an `open` binding with `arguments_from` on an action that
+/// declares `case_open` and no `arguments` schema.
+fn undeclared_arguments() -> Reason {
+    let nest = "format: protocol/1
+protocol:
+  id: nest
+  revision: 1
+artifacts:
+  spec: {}
+evidence_kinds:
+  case_outcome: {}
+actions:
+  kids.open:
+    effect: write
+    case_open: {protocol: leaf, subject: spec}
+";
+    let mut catalog = loom_protocols::ProtocolCatalog::default();
+    let source = || loom_protocols::ProtocolSource {
+        kind: loom_protocols::SourceKind::Memory,
+        location: "bindings-document-fixture".into(),
+        revision: String::new(),
+        path: String::new(),
+    };
+    let leaf = "format: protocol/1\nprotocol:\n  id: leaf\n  revision: 1\nartifacts:\n  spec: {}\n";
+    catalog.add_yaml("nest@1", nest, source()).unwrap();
+    catalog.add_yaml("leaf@1", leaf, source()).unwrap();
+    let text = "format: loom.bindings/1
+protocol: nest@1
+actions:
+  - action: kids.open
+    executor: {kind: open, each: kids, bindings: nest.yaml}
+    arguments_from: [/bin/true]
+";
+    let document = decode(text).expect("the document decodes");
+    let governor = loom_governor::CanonGovernor::new(loom_governor::MemoryCaseStore::default());
+    let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let refused = b10x_loom_bindings::OpenEffects::new(
+        &governor,
+        b10x_loom_commission::model::responsibility::CaseId("nest".into()),
+        &document,
+        &directory.join("nest.yaml"),
+        &catalog,
+        directory,
+        directory,
+        None,
+    )
+    .map(|_| ())
+    .expect_err("the port is refused");
+    match refused {
+        b10x_loom_bindings::OpenPortError::Refused(refusal) => refusal.0.reason,
+        other => panic!("not a refusal of the document: {other}"),
+    }
 }
 
 /// The first fenced block of `text` whose info string starts with `yaml` and whose body holds

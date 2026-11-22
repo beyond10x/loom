@@ -34,6 +34,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `b10x-loom tree approve --action` takes a `person` action as the approving principal (story:tree-run-command)
 - `tree status` prints `loom.tree-status/1`: per case its link name, protocol id and revision, the decisions it waits on, its records, program runs, approvals and copies; `b10x_loom_tree::read_status`, `stored_catalog` and `STATUS_FORMAT` (story:tree-run-command)
 - `b10x_loom_protocols::canon` re-exports the Canon crate Loom links; an embedder names one runtime dependency.
+- An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
+- `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 
 ### Changed
 
@@ -67,6 +69,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
 - **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
 - **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
+- **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
 
 ### Removed
 
