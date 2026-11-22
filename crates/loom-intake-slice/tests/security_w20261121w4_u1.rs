@@ -590,6 +590,7 @@ fn security_w20261121w4_u1_the_slice_run_line_names_local_and_its_reason() {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: None,
+            ..RunOptions::default()
         },
     );
     let printed = String::from_utf8(out).unwrap();

@@ -13,7 +13,7 @@
 //!   declare, and what the turn did so far, the reports of its reads included, as data in one
 //!   block ([`EARLIER_OPEN`] … [`EARLIER_CLOSE`]) no value can close. The sources are described
 //!   before the first model call. Every request is sent with Loom's caller retries
-//!   (`loom_sdk::intake::slice::selector::send_with_retries`).
+//!   (`loom_sdk::intake::slice::selector::send_with_policy`, under [`Host::model_retry`]).
 //! - The authority provider is [`PluginAuthority`]; the effect port [`DataSourceEffects`].
 //!
 //! A turn is one Run, bounded by [`TURN_STEP_BUDGET`]. On `inbound-answer@1` `source.read` and
@@ -87,7 +87,8 @@ use loom_sdk::commission::runtime::run_with_suspension;
 use loom_sdk::connectors::cli::SourceEntities;
 use loom_sdk::governor::FallibleCaseStore;
 use loom_sdk::intake::router::{RouterError, classify_with_catalog};
-use loom_sdk::intake::slice::selector::send_with_retries;
+use loom_sdk::intake::slice::run::RetryPolicy;
+use loom_sdk::intake::slice::selector::send_with_policy;
 use loom_sdk::loom::model_selector::{
     ARGUMENTS_TOOL, ArgumentsError, AskError, Briefing, ModelArguments, ModelSelector, NO_ACTION,
     SELECT_TOOL, arguments_once, select_once,
@@ -422,6 +423,7 @@ pub fn turn_with<S: FallibleCaseStore>(
         protocol: options.protocol,
         sends,
         item,
+        retry: host.model_retry(),
     };
     let recorded = Recorded {
         port: &effects,
@@ -870,6 +872,8 @@ struct TurnBriefing<'b, S> {
     /// Whether the turn may send its proposal.
     sends: bool,
     item: &'b InboundItem,
+    /// The retry policy of every request ([`Host::model_retry`]).
+    retry: RetryPolicy,
 }
 
 impl<S> Clone for TurnBriefing<'_, S> {
@@ -910,7 +914,7 @@ impl<S: FallibleCaseStore> Briefing for TurnBriefing<'_, S> {
         sink: &'a mut dyn StreamSink,
         cancel: &'a Cancel,
     ) -> BoxFuture<'a, Result<TurnOutcome, Error>> {
-        send_with_retries(model, request, sink, cancel)
+        send_with_policy(model, request, sink, cancel, self.retry)
     }
 
     /// One selection request; an answer without a usable call of `select_action`, or one naming

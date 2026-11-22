@@ -15,6 +15,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Added
 
 - Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
+- The model retry policy as a parameter, `run::MODEL_RETRY` its default (three attempts, 1 s then 2 s): `RunOptions::model_retry`, `RunOptions::with_context_policy`, `with_context_report` and `with_model_retry`, `Briefing::with_retry` and `selector::send_with_policy` (`b10x-loom-intake-slice`)
+- How long a host waits for a held state directory as a parameter, `state::LOCK_WAIT` (2 s) its default: `Host::with_lock_wait` and `StateDir::open_waiting`; a turn's model retry policy, `run::MODEL_RETRY` its default: `Host::with_model_retry` and `Host::model_retry` (`b10x-loom-plugin`); `run::RetryPolicy` (`b10x-loom-intake-slice`)
 - `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
 - `bindings::admit_bound_program_runner` and `bindings::bound_program_child`: a bound program's runner admission and child (story:bound-program-result-table)
 - `b10x_loom_bindings::ProgramEffects` runs a `program` binding through the host's runner; its result table alone makes evidence, every call of the runner counts against `budget.max_runs`, and a case of another protocol is refused `CaseOfAnotherProtocol` (story:bound-program-result-table)
@@ -23,10 +25,25 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `CanonGovernor::record_step` writes a step's revision moves and records in one store write; `FileCaseStore::update_until` (story:bound-artifact-revisions)
 - `ProtocolCatalog` and `CanonGovernor` take a protocol with a scoped requirement, `supplied_by`, `author`, `revises`, `decided_by` or a `children` form's `subject` and `revision`; one with `imports` is refused `MissingImport` (story:canon-0-10-0-pin)
 - `b10x_loom_bindings::retry_records`; a retried bound program gets `LOOM_RETRY_FEEDBACK`, a `loom.retry-feedback/1` document whose records name `action` and `exit` (story:bound-program-retry-records)
+- `CanonGovernor::open_children`, `terminate` and `tree`: a `case_open` action opens child cases, each child's outcome replaces its `case_outcome` record in the parent (story:child-case-runtime)
+- `b10x_loom_bindings::OpenEffects` performs an `open` binding; `check_case_open` holds `open` to `case_open` at load (story:child-case-runtime)
+- `b10x_loom_bindings::CopyEffects` copies the latest current record of a kind from another case of the tree; `copy_due` (story:record-copy-between-cases)
+- `loom.bindings.CopiedRecord`, `CopyRefusalReason` and `CopyRefusal`, the copy's observation and its refusals (story:record-copy-between-cases)
+- `program_root: bindings` and `b10x_loom_bindings::resolve_programs`: a bound program named beside its bindings file (story:bound-program-contract)
+- A `program` binding's `exits: {error, not_called}`: an exit listed records nothing and is not counted; an error ends the run (story:bound-program-contract)
+- `b10x-loom tree open`, `tree approve`, `tree status` and `tree verify` in the new crate `b10x-loom-tree`: one writer per store, `StoreInUse` names it (story:tree-run-command)
+- `b10x-loom tree run` drives a tree of cases on Commission's loop until the root ends or the tree waits, printing each decision as the command that takes it; `b10x_loom_tree::run_tree` takes an observer of each run-log line and a cancel handle (story:tree-run-command)
+- `b10x-loom tree approve --action` takes a `person` action as the approving principal (story:tree-run-command)
+- `tree status` prints `loom.tree-status/1`: per case its link name, protocol id and revision, the decisions it waits on, its records, program runs, approvals and copies; `b10x_loom_tree::read_status`, `stored_catalog` and `STATUS_FORMAT` (story:tree-run-command)
+- `b10x_loom_protocols::canon` re-exports the Canon crate Loom links; an embedder names one runtime dependency.
+- `b10x_loom_tree` re-exports `TestRunner`, `EngineRunner`, `EngineConfinement`, `ConfinementAdapter` and `UNCONFINED_FLAG_REASON`: an embedder builds `RunSettings` from `b10x-loom-tree` alone (story:tree-run-command)
+- An `open` binding with `each` and `arguments_from` opens one child per name its program prints, checked against the action's `arguments` schema; the list is kept as a `loom/open` observation and a blob and taken again by a cut opening (story:open-children-from-arguments-from)
+- `loom.bindings.OpenRefusalReason`, `OpenRefusal`, `ChildNameSource` and `ChildNames`; `b10x_loom_bindings::OpenPortError`; `loom_governor::plain_child_name` (story:open-children-from-arguments-from)
 - Each release carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz` and its `.sha256`, built by `binaries.yml` (story:release-binaries)
 
 ### Changed
 
+- **Breaking:** `RunOptions` gains the public field `model_retry`: a literal names it or ends in `..RunOptions::default()`
 - `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
 - A namespace egress entry beside `spec.boundary` is admitted when the chart's `allowedBoundaryHttpEgress` allows it, outside every allowed upstream's and the model route's namespace (story:boundary-admits-declared-http-egress)
 - **Breaking:** `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`; operator `Config` gains `allowed_boundary_http_egress` (story:boundary-admits-declared-http-egress)
@@ -46,6 +63,18 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `ProgramEffects` starts every program with `PATH` and `LOOM_CASE`, the port's case id, built by `bound_case_child` (story:bound-program-case-id)
 - **Breaking:** Canon `0.9.0` -> `0.10.0`: `ProtocolEntry::model` is Canon 0.10.0's `Protocol`; every decision document names `0.10.0` and gains `missing_evidence` and `pending_decisions` where they apply; frontier ids change (story:canon-0-10-0-pin)
 - **Breaking:** `loom::bindings::ProgramRun` gains `retry_of`, the evidence ids of the retry records a run was given (story:bound-program-retry-records)
+- **Breaking:** `CaseState` gains `parent`, `children` and `termination`; Loom 0.58.0 and earlier refuse a case file that holds them (story:child-case-runtime)
+- **Breaking:** `loom.governor.StoredCase` gains `parent`, `children` and `termination`, with the new `CaseLink` and `CaseTermination` (story:child-case-runtime)
+- **Breaking:** `with_catalog` and `with_protocol` refuse protocols whose `case_open` openings form a cycle, `InvalidProtocol` (story:child-case-runtime)
+- **Breaking:** the evidence port refuses a `case_outcome` record for a case with a parent or child link, or naming a held case (story:child-case-runtime)
+- **Breaking:** the evidence port refuses a host `case_outcome` record for every case whose protocol declares `case_open`, and so does `CanonGovernor::record_step` for a step's records, which Loom 0.58.0 received; a host that composes cases itself opts back in with `CanonGovernor::with_host_case_outcomes` (story:child-case-runtime)
+- **Breaking:** `loom.governor.CaseLink` gains `name`, the name the opening gave the child (the same for a repeated child `<id>.2`); `FileCaseStore` refuses a link without it, with a name that is not one plain segment or not the one its child id was built from (story:child-case-runtime)
+- **Breaking:** every bound program also gets `LOOM_TIMEOUT_SECONDS`, and a child case `LOOM_CASE_NAME` and `LOOM_PARENT_CASE_NAME` (story:bound-program-contract)
+- **Breaking:** `bound_case_child` takes `CaseNames`; `ProgramEnvironment` gains `loom_timeout_seconds`, `loom_case_name`, `loom_parent_case_name` (story:bound-program-contract)
+- **Breaking:** `BindingsDocument` gains `program_root`, `BoundAction` gains `exits`, `ProgramRun` gains `class` (story:bound-program-contract)
+- **Breaking:** `BindingsRefusalReason` gains `ExitClassConflict` and `ProgramNotBesideBindings`; `ProgramRefusalReason` gains `ProgramError` (story:bound-program-contract)
+- **Breaking:** `b10x_loom_cli::Command` gains `Tree`; an exhaustive match handles it (story:tree-run-command)
+- **Breaking:** `OpenEffects::new` takes the workspace, the store directory and the host's runner and returns `OpenPortError`; `BindingsRefusalReason` gains `ArgumentsUndeclared`; the `loom/open` observation's payload is `loom.bindings.ChildNames` (story:open-children-from-arguments-from)
 
 ### Removed
 

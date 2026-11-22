@@ -82,12 +82,14 @@ fn governors() -> Vec<(&'static str, CanonGovernor<MemoryCaseStore>)> {
         (
             "with_protocol_yaml",
             CanonGovernor::new(MemoryCaseStore::default())
+                .with_host_case_outcomes()
                 .with_protocol_yaml(NAME, PROTOCOL)
                 .expect("a protocol with case_open and a children form registers"),
         ),
         (
             "with_catalog",
             CanonGovernor::new(MemoryCaseStore::default())
+                .with_host_case_outcomes()
                 .with_catalog(&catalog())
                 .expect("the catalog holding it is admitted"),
         ),

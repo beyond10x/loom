@@ -700,7 +700,8 @@ fn a_bound_program_starts_with_path_and_loom_case_alone_in_its_environment() {
     let path = std::env::var("PATH").expect("the host has a UTF-8 PATH");
     assert_eq!(
         String::from_utf8(blob(&governor, &scratch)).unwrap(),
-        format!("LOOM_CASE={CASE}\nPATH={path}\n")
+        // story:bound-program-contract adds the run's timeout, 60 s when the binding names none.
+        format!("LOOM_CASE={CASE}\nLOOM_TIMEOUT_SECONDS=60\nPATH={path}\n")
     );
 }
 

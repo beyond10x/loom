@@ -7,11 +7,11 @@ lede: A fast typed-decision model as one implementation of ActionSelector, gated
 source: Atlas ADR 0073 (the rules every selector follows)
 ---
 
-A fast typed-decision model fits the selector role well: given the candidate actions, it returns one
-of them with a probability. The reasoning model then generates arguments for that action. Where
-selection is a narrow classification, this can reduce latency and cost.
+A fast typed-decision model fits the selector role: given the candidate actions, it returns one of
+them with a probability. The reasoning model then generates arguments for that action. Where
+selection is a narrow classification, a fast selector can reduce latency and cost.
 
-The fast selector is one implementation of `ActionSelector`. It is never the governor, the
+The fast selector is one implementation of `ActionSelector`. It is not the governor, the
 authority, the argument generator or the executor.
 
 ```text
@@ -30,8 +30,6 @@ ProposedAction → Commission rechecks revision, frontier, authority → effect
 
 ## Confidence policy
 
-An example policy:
-
 | selector probability | example policy |
 |---|---|
 | `p ≥ 0.90` | Accept the fast selection. |
@@ -40,16 +38,16 @@ An example policy:
 
 :::note[These thresholds are an example]
 Exact thresholds must be calibrated per domain and measured by a trial (Atlas ADR 0101). A high probability
-changes which path picks the action; it never changes what the action is allowed to do.
+changes which path picks the action. It does not change what the action is allowed to do.
 :::
 
 ## How a fallback is recorded
 
 When the fast choice is not accepted and the stronger selector answers instead, Loom records both
-selections. The fast one is `Overruled` and names the selection that replaced it; the replacement
+selections. The fast one is `Overruled` and records the selection that replaced it. The replacement
 alone reaches argument generation and revalidation. Each selection carries the strategy of the
 selector that made it, so an evaluation can tell which selector each pick came from. An accepted
-fast choice is one selection with no replacement, and a fast choice outside the candidates is never
+fast choice is one selection with no replacement, and a fast choice outside the candidates is not
 a selection.
 
 ## Large catalogues

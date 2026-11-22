@@ -1,0 +1,60 @@
+format: protocol/1
+protocol:
+  id: tour.leg
+  revision: 1
+  description: >-
+    One leg of a walking tour. A planner adds a stop to the route while the check finds it
+    invalid, until it has two; a check reads its shape; a guide approves the route and issues a
+    ticket. A leg passes once its ticket is issued and fails when it cannot be.
+artifacts:
+  route: {}
+  notes: {}
+  ticket: {}
+evidence_kinds:
+  route_check: {}
+  route_shape: {}
+  route_approval: {}
+  ticket_issued: {}
+claims:
+  route.valid:
+    true_when:
+      evidence: {kind: route_check, subject: route, result: valid}
+  route.approved:
+    true_when:
+      evidence: {kind: route_approval, subject: route, result: approved}
+  ticket.issued:
+    true_when:
+      evidence: {kind: ticket_issued, subject: ticket, result: issued}
+  ticket.refused:
+    true_when:
+      evidence: {kind: ticket_issued, subject: ticket, result: refused}
+actions:
+  route.write:
+    effect: write
+    precondition: {claim: route.valid, is: false}
+  route.check:
+    effect: read
+    may_produce:
+      - evidence: route_check
+      - evidence: route_shape
+  route.approve:
+    effect: write
+    precondition: {claim: route.valid}
+    requires:
+      - capability: guide.approve
+    may_produce:
+      - evidence: route_approval
+  ticket.issue:
+    effect: write
+    precondition: {claim: route.approved}
+    requires:
+      - capability: guide.issue
+    may_produce:
+      - evidence: ticket_issued
+  leg.rest:
+    effect: read
+outcomes:
+  passed:
+    requires: {claim: ticket.issued}
+  failed:
+    requires: {claim: ticket.refused}

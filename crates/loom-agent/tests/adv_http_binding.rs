@@ -4,6 +4,9 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -21,21 +24,35 @@ fn listen() -> (TcpListener, String) {
     (listener, base)
 }
 
-/// Waits up to `wait` for one connection, answers it with `response` and returns the request
-/// head; `None` when nothing connected.
-fn answer_within(
-    listener: TcpListener,
-    wait: Duration,
-    response: Vec<u8>,
-) -> JoinHandle<Option<String>> {
-    thread::spawn(move || {
+/// The listener of [`answer_within`].
+struct Answering {
+    handle: JoinHandle<Option<String>>,
+    read_returned: Arc<AtomicBool>,
+}
+
+impl Answering {
+    /// Called once the read returned: a read connects before it returns, so the listener stops
+    /// waiting after one more look at its queue, and the request head it took, if any.
+    fn join(self) -> thread::Result<Option<String>> {
+        self.read_returned.store(true, Ordering::SeqCst);
+        self.handle.join()
+    }
+}
+
+/// Waits up to `wait` for one connection, or until the read returned ([`Answering::join`]),
+/// answers it with `response` and returns the request head; `None` when nothing connected.
+fn answer_within(listener: TcpListener, wait: Duration, response: Vec<u8>) -> Answering {
+    let read_returned = Arc::new(AtomicBool::new(false));
+    let returned = Arc::clone(&read_returned);
+    let handle = thread::spawn(move || {
         listener.set_nonblocking(true).unwrap();
         let deadline = Instant::now() + wait;
         let mut socket = loop {
+            let last_look = returned.load(Ordering::SeqCst);
             match listener.accept() {
                 Ok((socket, _)) => break socket,
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                    if Instant::now() > deadline {
+                    if last_look || Instant::now() > deadline {
                         return None;
                     }
                     thread::sleep(Duration::from_millis(20));
@@ -59,7 +76,11 @@ fn answer_within(
         let _ = socket.write_all(&response);
         socket.shutdown(std::net::Shutdown::Both).ok();
         Some(String::from_utf8_lossy(&seen).into_owned())
-    })
+    });
+    Answering {
+        handle,
+        read_returned,
+    }
 }
 
 fn ok(body: &[u8]) -> Vec<u8> {
@@ -220,9 +241,11 @@ fn adv_a_redirect_location_is_held_to_max_bytes() {
 #[test]
 fn adv_a_listener_that_never_answers_is_unavailable_within_the_timeout() {
     let (listener, base) = listen();
+    let (read_returned, returned) = mpsc::channel::<()>();
     let holder = thread::spawn(move || {
         let (socket, _) = listener.accept().expect("a connection");
-        thread::sleep(Duration::from_secs(4));
+        // Held, unanswered, until the read returned, at most 4 s.
+        let _ = returned.recv_timeout(Duration::from_secs(4));
         drop(socket);
     });
     let started = Instant::now();
@@ -232,6 +255,7 @@ fn adv_a_listener_that_never_answers_is_unavailable_within_the_timeout() {
         &[],
     );
     let took = started.elapsed();
+    let _ = read_returned.send(());
     holder.join().unwrap();
     assert!(
         matches!(&result, Err(HttpReadError::Unavailable(_))),

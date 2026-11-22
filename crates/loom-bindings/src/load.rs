@@ -15,7 +15,9 @@ use std::collections::BTreeSet;
 /// `independence` dimension the protocol does not declare; and, per action in document order, an
 /// action the protocol does not declare, a duplicate, a member that does not belong to its
 /// executor (`tools`, a budget member other than `max_runs`, any executor member of another
-/// kind), an evidence `kind` outside the action's `may_produce`, a `subject` or `upstream` entry
+/// kind, `exits` on any but a program), an exit code `exits` lists in both classes or in a class
+/// and as a key of a `from: exit` table of the binding, an evidence `kind` outside the action's
+/// `may_produce`, a `subject` or `upstream` entry
 /// that is not a declared artifact, a `timeout_seconds` outside 1 to 3600, and an `inputs` or
 /// `outputs` path that is absolute or leaves the workspace, and an `open` executor's `bindings` path
 /// that is absolute, leaves the directory of the bindings file or names no file (`.`, a trailing
@@ -115,6 +117,7 @@ pub fn check(
             .map(|production| production.evidence.to_string())
             .collect();
         fit(bound)?;
+        exit_classes(bound)?;
         for condition in &bound.retry_when {
             if !declared_kinds.contains(&condition.kind) {
                 return Err(refuse(
@@ -252,6 +255,14 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
             ));
         }
     }
+    if bound.exits.is_some() && kind != Executor::Program {
+        return Err(refuse(
+            Reason::MemberNotForExecutor,
+            id,
+            "exits",
+            format!("belongs to the Program executor, not {kind:?}"),
+        ));
+    }
     if kind != Executor::Agent {
         if bound.tools.is_some() {
             return Err(refuse(
@@ -278,6 +289,50 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
                     format!("belongs to the Agent executor, not {kind:?}"),
                 ));
             }
+        }
+    }
+    Ok(())
+}
+
+/// Refuses an exit code `bound.exits` lists in both classes, or in a class and as a key of one of
+/// the binding's `from: exit` tables: such an exit never reaches the table, so it is in one place.
+fn exit_classes(bound: &BoundAction) -> Result<(), Refusal> {
+    let Some(exits) = &bound.exits else {
+        return Ok(());
+    };
+    let id = Some(bound.action.as_str());
+    for (index, code) in exits.not_called.iter().enumerate() {
+        if exits.error.contains(code) {
+            return Err(refuse(
+                Reason::ExitClassConflict,
+                id,
+                format!("exits.not_called[{index}]"),
+                format!("{code} is listed in exits.error too; an exit is in one class"),
+            ));
+        }
+    }
+    for (index, entry) in bound.evidence.iter().enumerate() {
+        if entry.from != ResultSource::Exit {
+            continue;
+        }
+        for rule in &entry.results {
+            let classed = |codes: &[i64]| codes.iter().any(|code| code.to_string() == rule.value);
+            let class = if classed(&exits.error) {
+                "exits.error"
+            } else if classed(&exits.not_called) {
+                "exits.not_called"
+            } else {
+                continue;
+            };
+            return Err(refuse(
+                Reason::ExitClassConflict,
+                id,
+                format!("evidence[{index}].results.{}", rule.value),
+                format!(
+                    "{class} lists the exit {}, which never reaches this table",
+                    rule.value
+                ),
+            ));
         }
     }
     Ok(())

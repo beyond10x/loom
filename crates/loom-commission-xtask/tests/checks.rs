@@ -42,11 +42,31 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
+
+/// The `ess` the generator runs here: a stand-in that answers the synthesis of the repository's
+/// `ess/commission/` from a copy made once a test run (`ess_suite::synthesis_stand_in`, which `task
+/// test-step` fills before the tests), and runs `ess` itself for any other call.
+fn stand_in() -> PathBuf {
+    let root = repo_root();
+    ess_suite::synthesis_stand_in(
+        &ess_suite::ess_program(&root),
+        &root.join("ess/commission"),
+        &ess_suite::RUST_CRATE,
+        &Path::new(env!("CARGO_TARGET_TMPDIR")).join(ess_suite::STAND_IN_CACHE),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The program run with `args`; a `drift` or `generate` runs on [`stand_in`].
 fn xtask(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_loom-commission-xtask"))
-        .args(args)
-        .output()
-        .expect("run loom-commission-xtask")
+    let mut command = Command::new(env!("CARGO_BIN_EXE_loom-commission-xtask"));
+    command.args(args);
+    if args.iter().any(|arg| matches!(*arg, "drift" | "generate")) {
+        command.arg("--ess").arg(stand_in());
+    }
+    command.output().expect("run loom-commission-xtask")
 }
 
 fn text(bytes: &[u8]) -> String {

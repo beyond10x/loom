@@ -368,6 +368,8 @@ fn expected_environment(case: &str) -> BTreeMap<String, String> {
         expected.insert("PATH".to_owned(), path);
     }
     expected.insert("LOOM_CASE".to_owned(), case.to_owned());
+    // story:bound-program-contract: the run's timeout, 60 s for a binding that names none.
+    expected.insert("LOOM_TIMEOUT_SECONDS".to_owned(), "60".to_owned());
     expected
 }
 
@@ -415,7 +417,12 @@ fn env_lines() -> BTreeSet<String> {
 
 fn expected_env_lines() -> BTreeSet<String> {
     let path = std::env::var("PATH").expect("the host has a UTF-8 PATH");
-    [format!("LOOM_CASE={CASE}"), format!("PATH={path}")].into()
+    [
+        format!("LOOM_CASE={CASE}"),
+        format!("PATH={path}"),
+        "LOOM_TIMEOUT_SECONDS=60".to_owned(),
+    ]
+    .into()
 }
 
 // ---------------------------------------------------------------------------------------------

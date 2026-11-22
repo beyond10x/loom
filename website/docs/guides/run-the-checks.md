@@ -11,8 +11,8 @@ source: Taskfile.yml, Taskfile.commission.yml, .github/workflows/pages.yml
 You need Rust, the [Task runner](https://taskfile.dev/), the `ess` command line of
 [ESS](https://beyond10x.github.io/ess/) ([GitHub](https://github.com/beyond10x/ess)), and
 bubblewrap at `/usr/bin/bwrap`. CI installs bubblewrap before testing delegation refusals.
-The dedicated confinement qualification additionally needs delegated cgroup v2 controllers;
-its explicit skip in the ordinary suite establishes no qualification. From the repository root:
+The dedicated confinement qualification also needs delegated cgroup v2 controllers. The ordinary
+suite skips it explicitly, and that skip establishes no qualification. From the repository root:
 
 ```console
 cargo fetch --locked
@@ -25,12 +25,12 @@ CI performs the same setup. `task check` runs, in order:
 | Step | Holds |
 |---|---|
 | `task spec`, `task commission:spec`, `task intake-spec` | The three ESS systems (`ess/`, `ess/commission/`, `ess/intake/`) validate |
-| `task ess-gate`, `task commission:ess-gate` | The hard gate: validate strictly, compile, synthesize with no refusal, no open question; Loom's reads the suite committed under `generated/ess/loom/` once the digest of its inputs matches `ess/` |
+| `task ess-gate`, `task commission:ess-gate` | The hard gate: validate strictly, compile, synthesize with no refusal, no open question. Loom's reads the suite committed under `generated/ess/loom/` once the digest of its inputs matches `ess/` |
 | `task drift`, `task commission:drift`, `task intake-drift` | Each generated Rust model equals a fresh synthesis of its specification |
 | `task no-hand-model`, `task commission:no-hand-model` | No hand-written type shadows one the specification declares |
 | `task conform`, `task commission:conform` | The executor and Commission each pass the ESS conformance suite synthesized from their specification |
 | `task commission:deps-guard` | Commission's contracts depend on no Loom executor, no Canon and no model-provider crate |
-| `cargo fmt --all --check`, `cargo clippy … -D warnings`, `loom-xtask test-step` | Format, lint and every test but the slow lane's: `cargo nextest run --workspace --locked` and the doc tests, failing a test over 60 s or the step over 120 s and printing the ten slowest tests; no test makes a model or network call |
+| `cargo fmt --all --check`, `cargo clippy … -D warnings`, `loom-xtask test-step` | Format, lint and every test but the slow lane's: `cargo nextest run --workspace --locked` and the doc tests, failing a test over 60 s or the step over 120 s and printing the ten slowest tests. No test makes a model or network call |
 | `task docs-check`, `task commission:docs-drift` | The generated documentation pages are current |
 
 `task check` does not run the slow lane. After a change under `ess/`, write the synthesized suite
@@ -41,7 +41,7 @@ task suite-generate
 task slow
 ```
 
-`task --list` names every task. To run one alone, name it:
+`task --list` lists every task. To run one alone, name it:
 
 ```console
 task intake-spec

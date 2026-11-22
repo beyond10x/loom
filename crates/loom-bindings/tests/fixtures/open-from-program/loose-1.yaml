@@ -1,0 +1,19 @@
+format: protocol/1
+protocol:
+  id: loose
+  revision: 1
+  description: >-
+    An opening whose arguments schema is any object, so the port's own checks of the member each
+    names are the ones that refuse.
+artifacts:
+  loose: {}
+evidence_kinds:
+  case_outcome: {}
+  epics_opened: {}
+actions:
+  epics.open:
+    effect: write
+    case_open: {protocol: task, subject: loose}
+    may_produce:
+      - evidence: epics_opened
+    arguments: {type: object}

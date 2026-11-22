@@ -9,9 +9,20 @@
 //! either is the constructor's. Every program, the `arguments_from` argv included, starts through
 //! that runner's [`TestRunner::run_child`] alone, as the child [`crate::bound_case_child`] builds:
 //! the argv, the arguments as JSON on standard input and never in an argv, an environment of
-//! `PATH` and `LOOM_CASE` (the id of the case the port was built for) alone, the binding's
-//! timeout, the workspace root as its start directory. A case id longer than
-//! [`crate::MAX_CASE_VARIABLE_BYTES`] refuses the step and nothing starts.
+//! `PATH`, `LOOM_CASE` (the id of the case the port was built for), `LOOM_TIMEOUT_SECONDS` (the
+//! whole seconds of the run's timeout) and, for a case a parent opened, `LOOM_CASE_NAME` and
+//! `LOOM_PARENT_CASE_NAME` as the governor stored them, alone, the binding's timeout, the
+//! workspace root as its start directory. A case id longer than
+//! [`crate::MAX_CASE_VARIABLE_BYTES`] refuses the step and nothing starts. A document whose
+//! `program_root` is `bindings` runs only once [`crate::resolve_programs`] resolved it: a program
+//! it still names beside its bindings file refuses the step and nothing starts.
+//!
+//! Exit classes (`story:bound-program-contract`): a run whose exit the binding's `exits.error`
+//! lists records nothing and refuses the step `ProgramError`, ending the run; one whose exit
+//! `exits.not_called` lists records nothing and the step is performed. Neither is counted against
+//! `budget.max_runs`; a run killed at its timeout is in neither class. Each step starts the bound
+//! program once, so repeated not-called runs are bounded by the loop that drives the port (its
+//! step budget and idle bound), never by the port.
 //!
 //! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
 //! and nothing starts; the action's run count (the observations this port kept for the action in
@@ -20,14 +31,14 @@
 //! arguments (the request's, else the
 //! binding's literal `arguments`, else the object the `arguments_from` argv prints, else `{}`; a
 //! request has none when its arguments are the empty object), an `arguments_from` that does not
-//! exit 0 or prints anything but one JSON object within [`MAX_REPORT_BYTES`] refused
+//! exit 0 or prints anything but one JSON object within `MAX_REPORT_BYTES` refused
 //! `ArgumentsUnreadable` before the bound program starts; the run; the blob of its standard output
 //! followed by its standard error, kept as `blobs/<sha256>` in the store directory through a
 //! temporary file and a rename; one observation of the run (`loom.bindings.ProgramRun`), kept for
 //! every call of `run_child` whatever it answered and whether the blob was kept or not, before a
 //! runner refusal or a blob failure ends the step; then, for
 //! each `evidence` entry, the value its `from` names (the exit code, `timeout` for a run killed at
-//! its timeout, or the JSON pointer into the report, one JSON object within [`MAX_REPORT_BYTES`])
+//! its timeout, or the JSON pointer into the report, one JSON object within `MAX_REPORT_BYTES`)
 //! looked up in its `results`, falling to `*`. A value neither lists is `ResultNotInTable`, a
 //! report that cannot be read `ReportUnreadable`; either records nothing. Otherwise one record per
 //! entry is submitted, of the entry's kind about its subject, with the entry's producer, the
@@ -69,15 +80,13 @@ use b10x_loom_commission::ports::evidence::{
     AttributedEvidence, EvidencePort, ObservationPort, submit_evidence,
 };
 use b10x_loom_commission::ports::governor::Governor;
-use b10x_loom_intake_slice::bindings::{
-    DEFAULT_TIMEOUT_SECONDS, MAX_REPORT_BYTES, admit_bound_program_runner,
-};
+use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{ConfinementError, TestExecution, TestRunner};
 use loom::bindings::{
     ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason, EvidenceEntry,
-    Executor, ProgramRefusal, ProgramRefusalReason, ProgramRun, RecordedEvidence, ResultSource,
-    StepOutcome,
+    Executor, ExitClass, ProgramRefusal, ProgramRefusalReason, ProgramRoot, ProgramRun,
+    RecordedEvidence, ResultSource, StepOutcome,
 };
 use loom_governor::{
     CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime, StepWritten,
@@ -86,10 +95,12 @@ use loom_governor::{
 use crate::revision::{describe, placements, revisions_of};
 use sha2::{Digest as _, Sha256};
 
-use crate::bound_case_child;
+use crate::arguments::{NotPrinted, case_names, one_object, run_arguments_from};
+use crate::resolve::beside;
+use crate::{CaseNames, bound_case_child};
 
 /// The `source` of every observation the port keeps: one per run of a bound program. The run count
-/// of an action in a case is the number of these naming it and the case.
+/// of an action in a case is the number of these naming it and the case and holding no `class`.
 pub const PROGRAM_SOURCE: &str = "loom/bound-program";
 /// The directory of the store directory that holds the blobs, each named by its SHA-256.
 pub const BLOBS: &str = "blobs";
@@ -157,7 +168,8 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             .find(|bound| bound.action == action && bound.executor.kind == Executor::Program)
     }
 
-    /// The runs of `action` in this case: the observations this port kept naming both.
+    /// The runs of `action` in this case: the observations this port kept naming both, but those
+    /// of a run whose exit the binding classes (`exits`), which are not counted.
     fn runs(&self, action: &str) -> Result<i64, EffectError> {
         let observations = self
             .governor
@@ -170,8 +182,34 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 text_member(&observation.payload, "case") == Some(self.case.0.as_str())
                     && text_member(&observation.payload, "action") == Some(action)
             })
+            .filter(|observation| {
+                matches!(
+                    observation.payload.member("class"),
+                    None | Some(commission_json::Value::Null)
+                )
+            })
             .count();
         Ok(i64::try_from(count).unwrap_or(i64::MAX))
+    }
+
+    /// The member of `binding` that names a program beside the bindings file when the document's
+    /// `program_root` is `bindings`: a document [`crate::resolve_programs`] did not resolve,
+    /// whose program would otherwise be read as a workspace path.
+    fn unresolved(&self, binding: &BoundAction) -> Option<&'static str> {
+        if self.document.program_root != Some(ProgramRoot::Bindings) {
+            return None;
+        }
+        let names = |argv: Option<&Vec<String>>| {
+            argv.and_then(|argv| argv.first())
+                .is_some_and(|program| beside(program))
+        };
+        if names(binding.executor.argv.as_ref()) {
+            Some("executor.argv[0]")
+        } else if names(binding.arguments_from.as_ref()) {
+            Some("arguments_from[0]")
+        } else {
+            None
+        }
     }
 
     fn perform(&self, request: &ActionRequestData) -> Result<EffectOutcome, EffectError> {
@@ -212,6 +250,11 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             return Ok(refused(format!("{action} is bound to no argv")));
         };
         let program = argv.first().map_or("the program", String::as_str);
+        if let Some(member) = self.unresolved(binding) {
+            return Ok(refused(format!(
+                "{program} was not started: {member} names a file beside the bindings file, and the document was not resolved with resolve_programs"
+            )));
+        }
         let seconds = binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
         let timeout = Duration::from_secs(u64::try_from(seconds).unwrap_or(1));
         // Taken before anything starts, so a timeout the clock cannot hold starts nothing.
@@ -233,10 +276,16 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 ));
             }
         };
+        // Read before anything starts and before anything is written: a name the governor holds
+        // that is not a child name, or a parent that cannot be read, starts and writes nothing.
+        let names = match case_names(self.governor, &self.case)? {
+            Ok(names) => names,
+            Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
+        };
         // After the run count and before anything starts: the records that send the action back,
         // kept as one document, or an error with nothing started and nothing observed.
         let feedback = crate::retry::feedback(self.governor, &self.case, binding, &self.store)?;
-        let arguments = match self.arguments(binding, request, timeout) {
+        let arguments = match self.arguments(binding, request, timeout, &names) {
             Ok(arguments) => arguments,
             Err(outcome) => return Ok(outcome),
         };
@@ -247,16 +296,12 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             &self.workspace,
             self.runner.local_reason(),
             &self.case,
+            &names,
         ) {
             Ok(child) => child,
             Err(why) => return Ok(refused(format!("{program} was not started: {why}"))),
         };
-        let child = crate::retry::given(
-            child,
-            feedback.as_ref(),
-            self.runner.local_reason(),
-            &self.case,
-        );
+        let child = crate::retry::given(child, feedback.as_ref(), self.runner.local_reason());
         // Read before the program starts, so the run's observation has an instant even when the
         // clock cannot be read after it.
         let started_at = instant(&SystemClock).map_err(EffectError::new)?;
@@ -272,6 +317,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             timed_out: false,
             runner_refusal: None,
             retry_of: feedback.map(|given| given.retry_of).unwrap_or_default(),
+            class: None,
         };
         let mut blob_failure = None;
         match &answer {
@@ -282,6 +328,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                 let digest = sha256(&blob);
                 run.exit = execution.exit_code.map(i64::from);
                 run.timed_out = execution.timed_out;
+                run.class = class_of(binding, execution);
                 match keep_blob(&self.store, &digest, &blob) {
                     Ok(()) => run.blob_sha256 = Some(digest),
                     Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
@@ -332,6 +379,34 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         if let Some(failure) = blob_failure {
             self.write(&targets, Vec::new())?;
             return Err(EffectError::new(failure));
+        }
+        // A classed exit never reaches the tables: it records nothing, its run is not counted,
+        // and a program error ends the run. The revisions still take what the workspace holds.
+        match run.class {
+            Some(ExitClass::Error) => {
+                self.write(&targets, Vec::new())?;
+                return Ok(program_error(action, program, &run));
+            }
+            Some(ExitClass::NotCalled) => {
+                let written = self.write(&targets, Vec::new())?;
+                let discarded = (changed && !writes).then_some(DiscardReason::ChangedByNonWriter);
+                return performed(
+                    &run,
+                    &[],
+                    &BoundStep {
+                        action: action.to_owned(),
+                        outcome: if discarded.is_some() {
+                            StepOutcome::Discarded
+                        } else {
+                            StepOutcome::Recorded
+                        },
+                        discarded,
+                        placements: after,
+                        moves: written.moves,
+                    },
+                );
+            }
+            None => {}
         }
         if changed && !writes {
             // A program of an action that does not write changed what it was to observe: its
@@ -468,6 +543,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         binding: &BoundAction,
         request: &ActionRequestData,
         timeout: Duration,
+        names: &CaseNames,
     ) -> Result<String, EffectOutcome> {
         let requested = &request.arguments.0;
         let none =
@@ -482,50 +558,22 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             return Ok("{}".to_owned());
         };
         let action = binding.action.as_str();
-        let program = argv
-            .first()
-            .map_or("the arguments_from program", String::as_str);
-        let unreadable = |detail: String| {
-            Err(refusal(
-                ProgramRefusalReason::ArgumentsUnreadable,
-                action,
-                detail,
-            ))
-        };
-        let child = match bound_case_child(
+        match run_arguments_from(
             argv,
             &commission_text(requested),
             timeout,
             &self.workspace,
-            self.runner.local_reason(),
+            self.runner.as_ref(),
             &self.case,
+            names,
         ) {
-            Ok(child) => child,
-            Err(why) => return Err(refused(format!("{program} was not started: {why}"))),
-        };
-        let execution = match self.runner.run_child(&child) {
-            Ok(execution) => execution,
-            Err(refusal) => {
-                return unreadable(format!("{program} was refused by its runner: {refusal}"));
-            }
-        };
-        if execution.timed_out {
-            return unreadable(format!("{program} was killed at its timeout"));
-        }
-        if execution.exit_code != Some(0) {
-            return unreadable(format!(
-                "{program} ended exit status {}",
-                execution
-                    .exit_code
-                    .map_or_else(|| "unknown".to_owned(), |code| code.to_string())
-            ));
-        }
-        match one_object(
-            &execution.child_output.stdout,
-            execution.child_output.stdout_truncated,
-        ) {
-            Ok(object) => Ok(object.to_string()),
-            Err(why) => unreadable(format!("{program}'s output {why}")),
+            Ok(printed) => Ok(printed.object.to_string()),
+            Err(NotPrinted::NotStarted(why)) => Err(refused(why)),
+            Err(NotPrinted::Unreadable(why)) => Err(refusal(
+                ProgramRefusalReason::ArgumentsUnreadable,
+                action,
+                why,
+            )),
         }
     }
 
@@ -694,48 +742,6 @@ fn look_up(entry: &EvidenceEntry, value: Option<&str>) -> Option<Option<String>>
         .map(|rule| rule.result.clone())
 }
 
-/// `bytes` read as one JSON object of at most [`MAX_REPORT_BYTES`], nested at most 64 deep and
-/// naming no member of an object twice; `truncated` says the runner kept only part of them. `Err`
-/// says why not, as a predicate.
-fn one_object(bytes: &[u8], truncated: bool) -> Result<serde_json::Value, String> {
-    if truncated || bytes.len() > MAX_REPORT_BYTES {
-        return Err(format!("is longer than {MAX_REPORT_BYTES} bytes"));
-    }
-    let text = std::str::from_utf8(bytes).map_err(|_| "is not UTF-8".to_owned())?;
-    // Commission's reader keeps every member as written and bounds the nesting, so a member named
-    // twice, which a pointer could read either way, is found.
-    let read =
-        commission_json::parse(text).map_err(|error| format!("is not one JSON value: {error}"))?;
-    if !matches!(read, commission_json::Value::Object(_)) {
-        return Err("is not a JSON object".to_owned());
-    }
-    if let Some(name) = named_twice(&read) {
-        return Err(format!("names the member {name:?} twice in one object"));
-    }
-    serde_json::from_str(text).map_err(|error| format!("is not one JSON value: {error}"))
-}
-
-/// The first member name an object of `value` holds twice.
-fn named_twice(value: &commission_json::Value) -> Option<String> {
-    let mut pending = vec![value];
-    while let Some(value) = pending.pop() {
-        match value {
-            commission_json::Value::Array(items) => pending.extend(items),
-            commission_json::Value::Object(members) => {
-                let mut seen = std::collections::BTreeSet::new();
-                for (name, member) in members {
-                    if !seen.insert(name.as_str()) {
-                        return Some(name.clone());
-                    }
-                    pending.push(member);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Keeps `bytes` as `<store>/blobs/<digest>`, written to a temporary file in that directory and
 /// renamed. A regular file already there that holds the same bytes is kept; anything else under
 /// that name, a link included, is replaced by the rename and never written through. A `blobs`
@@ -810,6 +816,46 @@ fn refusal(reason: ProgramRefusalReason, action: &str, detail: impl Into<String>
     ))
 }
 
+/// The class `binding`'s `exits` gives the exit of `execution`: none for a run killed at its
+/// timeout, whose status could not be read, or whose exit neither list holds.
+fn class_of(binding: &BoundAction, execution: &TestExecution) -> Option<ExitClass> {
+    if execution.timed_out {
+        return None;
+    }
+    let code = i64::from(execution.exit_code?);
+    let exits = binding.exits.as_ref()?;
+    if exits.error.contains(&code) {
+        Some(ExitClass::Error)
+    } else if exits.not_called.contains(&code) {
+        Some(ExitClass::NotCalled)
+    } else {
+        None
+    }
+}
+
+/// The step refused `ProgramError`, ending the run: `run`'s exit is one the binding's
+/// `exits.error` lists. The text names the exit code and the blob digest, never what the program
+/// printed.
+fn program_error(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome {
+    let refusal = ProgramRefusal {
+        reason: ProgramRefusalReason::ProgramError,
+        action: action.to_owned(),
+        detail: format!(
+            "{program} ended exit status {}, which exits.error lists; nothing was recorded, and its output is the blob {}",
+            run.exit
+                .map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
+            run.blob_sha256.as_deref().unwrap_or("(none)")
+        ),
+    };
+    EffectOutcome::Refused(EffectOutcomeRefused {
+        reason: format!(
+            "{:?}: action {}: {}",
+            refusal.reason, refusal.action, refusal.detail
+        ),
+        ends_run: true,
+    })
+}
+
 fn governor(error: impl std::fmt::Debug) -> EffectError {
     EffectError::new(format!("the governor: {error:?}"))
 }
@@ -823,6 +869,10 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
         "timed_out": run.timed_out,
         "runner_refusal": run.runner_refusal,
         "retry_of": run.retry_of,
+        "class": run.class.map(|class| match class {
+            ExitClass::Error => "error",
+            ExitClass::NotCalled => "not_called",
+        }),
     })
 }
 
@@ -857,7 +907,7 @@ fn commission_value(value: &serde_json::Value) -> Result<commission_json::Value,
 /// Writes a generated JSON value as JSON text, each number in the spelling it arrived in.
 macro_rules! json_writer {
     ($name:ident, $json:path) => {
-        fn $name(value: &$json) -> String {
+        pub(crate) fn $name(value: &$json) -> String {
             use $json as Value;
             fn push(out: &mut String, value: &Value) {
                 match value {

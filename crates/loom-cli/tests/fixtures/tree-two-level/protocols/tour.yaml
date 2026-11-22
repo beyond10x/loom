@@ -1,0 +1,67 @@
+format: protocol/1
+protocol:
+  id: tour
+  revision: 1
+  description: >-
+    A walking tour. A first leg plans the route and a guide approves it; once that approval is
+    copied into the tour, one more leg is opened per name the planner prints. The tour arrives
+    when the route is approved and every leg passed, turns back once a leg ended otherwise, and
+    is cancelled only by a decision.
+artifacts:
+  route: {}
+  tour: {}
+evidence_kinds:
+  case_outcome: {}
+  route_approval: {}
+  first_leg_opened: {}
+  legs_opened: {}
+claims:
+  route.approved:
+    true_when:
+      evidence: {kind: route_approval, subject: route, result: approved}
+  legs.opened:
+    true_when:
+      evidence: {kind: legs_opened, subject: tour, result: opened}
+  legs.passed:
+    true_when:
+      children: {in: [passed]}
+  a.leg.turned:
+    true_when:
+      not:
+        children: {in: [passed]}
+actions:
+  first.open:
+    effect: write
+    case_open: {protocol: tour.leg, subject: route}
+    may_produce:
+      - evidence: first_leg_opened
+  approval.copy:
+    effect: write
+    may_produce:
+      - evidence: route_approval
+  legs.open:
+    effect: write
+    precondition: {claim: route.approved}
+    case_open: {protocol: tour.leg, subject: route}
+    may_produce:
+      - evidence: legs_opened
+    arguments:
+      type: object
+      properties:
+        legs:
+          type: array
+          minItems: 1
+          items: {type: string, minLength: 1}
+      required: [legs]
+      additionalProperties: false
+outcomes:
+  arrived:
+    requires:
+      all:
+        - {claim: route.approved}
+        - {claim: legs.opened}
+        - {claim: legs.passed}
+  cancelled:
+    requires: {decision: cancel}
+  turned_back:
+    requires: {claim: a.leg.turned}

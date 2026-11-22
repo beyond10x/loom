@@ -1,0 +1,11 @@
+format: loom.bindings/1
+protocol: loose@1
+program_root: bindings
+artifacts:
+  loose: loose.md
+actions:
+  - action: epics.open
+    executor: {kind: open, each: epics, bindings: task.yaml}
+    arguments_from: [bin/list-epics]
+    evidence:
+      - {kind: epics_opened, subject: loose, producer: drive, from: effect, results: {performed: opened}}

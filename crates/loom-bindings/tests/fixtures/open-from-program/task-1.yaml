@@ -1,0 +1,14 @@
+format: protocol/1
+protocol:
+  id: task
+  revision: 1
+  description: The last level, which opens nothing.
+artifacts:
+  task: {}
+evidence_kinds:
+  verdict: {}
+actions:
+  task.do:
+    effect: write
+    may_produce:
+      - evidence: verdict

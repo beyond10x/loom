@@ -36,6 +36,9 @@ use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const INTENT: &str = "Fix the check in check.txt and verify the change.";
 
 /// The recorded run that reaches the merge gate: three steps, then `repository.merge` proposed.
@@ -177,7 +180,7 @@ fn the_binary_ends_a_failed_run_with_a_terminal_record_carrying_its_exit_status(
     let fixture = Fixture::new();
     let home = fixture.directory.path().join("home");
     std::fs::create_dir(&home).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let output = loom_bin::loom()
         .args(["run", "--output", "jsonl", "--confinement", "none"])
         .arg("--workspace")
         .arg(&fixture.workspace)
