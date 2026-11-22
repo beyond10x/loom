@@ -12,6 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- ESS 0.97.4 (format unchanged)
+
+### Fixed
+
+- `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
+
+## [0.59.0] - 2026-11-22
+
 ### Added
 
 - `from: runs` (`ResultSource::Runs`, `RUNS_SPENT`): a program entry records `spent` on the run reaching `budget.max_runs` (story:outcome-when-reads-the-run-count)
@@ -86,6 +96,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - **Breaking:** `RunOptions` gains the public field `model_retry`: a literal names it or ends in `..RunOptions::default()`
 - `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
+- ESS moves from 0.96.0 to 0.97.3 (`ess-conformance`, `ess-primitives`, `requires: ess 0.97.3`, the CLI CI installs); generated Rust is unchanged
 - A namespace egress entry beside `spec.boundary` is admitted when the chart's `allowedBoundaryHttpEgress` allows it, outside every allowed upstream's and the model route's namespace (story:boundary-admits-declared-http-egress)
 - **Breaking:** `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`; operator `Config` gains `allowed_boundary_http_egress` (story:boundary-admits-declared-http-egress)
 - **Breaking:** the operator refuses a configuration whose `allowedBoundaryUpstreams` or `modelRoute` URL has a host other than `<service>.<namespace>.svc[.cluster.local]`, such as a short service name or an IP address; admission, given such a URL on a `Config` built without `Config::parse`, admits no namespace egress entry beside `spec.boundary` (story:boundary-admits-declared-http-egress)
@@ -1601,7 +1612,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.58.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.59.0...HEAD
+[0.59.0]: https://github.com/beyond10x/loom/releases/tag/0.59.0
 [0.58.0]: https://github.com/beyond10x/loom/releases/tag/0.58.0
 [0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2
 [0.57.1]: https://github.com/beyond10x/loom/releases/tag/0.57.1
