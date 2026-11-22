@@ -59,7 +59,16 @@ const REEXEC_MARKER: &str = "B10X_LOOM_CONFINEMENT_REEXEC";
 const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
 const REEXEC_HANDOFF: &str = "B10X_LOOM_CONFINEMENT_HANDOFF";
 
+/// Runs the command, then writes the store's sync counts (`loom_governor::durable::write_counts`,
+/// which only a test build does) on every way out: each arm returns here, and the one
+/// `process::exit` (`agent serve` on its second signal) writes them first.
 fn main() -> ExitCode {
+    let code = dispatch();
+    loom_governor::durable::write_counts();
+    code
+}
+
+fn dispatch() -> ExitCode {
     match Cli::parse().command {
         Command::Run(arguments) => run_command(*arguments),
         Command::Protocols(arguments) => match protocols(arguments.command) {
@@ -779,6 +788,7 @@ fn stop_on_signals(stop: Arc<AtomicBool>) -> Result<(), String> {
                 _ = terminate.recv() => {}
                 _ = interrupt.recv() => {}
             }
+            loom_governor::durable::write_counts();
             std::process::exit(130);
         });
     });

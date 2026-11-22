@@ -194,6 +194,7 @@ use b10x_loom_executor::{ActionFactsPort, CaseFacts};
 use loom::run::ActionFacts;
 
 mod children;
+pub mod durable;
 mod file_decision;
 mod file_run_store;
 mod file_store;

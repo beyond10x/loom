@@ -14,6 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- `loom_governor::durable`: every sync of the tree path's stores through one counted door; its test-only feature `test-unsynced-store` (story:tree-run-tests-fit-the-budget)
 - Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
 - The model retry policy as a parameter, `run::MODEL_RETRY` its default (three attempts, 1 s then 2 s): `RunOptions::model_retry`, `RunOptions::with_context_policy`, `with_context_report` and `with_model_retry`, `Briefing::with_retry` and `selector::send_with_policy` (`b10x-loom-intake-slice`)
 - How long a host waits for a held state directory as a parameter, `state::LOCK_WAIT` (2 s) its default: `Host::with_lock_wait` and `StateDir::open_waiting`; a turn's model retry policy, `run::MODEL_RETRY` its default: `Host::with_model_retry` and `Host::model_retry` (`b10x-loom-plugin`); `run::RetryPolicy` (`b10x-loom-intake-slice`)

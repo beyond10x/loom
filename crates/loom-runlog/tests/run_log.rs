@@ -581,6 +581,22 @@ fn slow_two_processes_appending_200_lines_each_leave_400_that_verify() {
     );
 }
 
+/// story:tree-run-tests-fit-the-budget: an append syncs its file and the directory, through the
+/// door of `loom_governor::durable`, counted on this thread alone.
+#[test]
+fn a_run_log_append_syncs_its_file_and_directory() {
+    let dir = store_dir("synced-append");
+    let log = RunLog::open(&dir).expect("the store opens");
+    let before = loom_governor::durable::counts_on_this_thread();
+    log.append(CASE, at(0), event(0)).expect("appended");
+    let after = loom_governor::durable::counts_on_this_thread();
+    assert_eq!(
+        (after.synced - before.synced, after.skipped - before.skipped),
+        (2, 0)
+    );
+    assert_eq!(loom_governor::durable::counts().skipped, 0);
+}
+
 #[test]
 fn a_crash_at_each_step_of_an_append_leaves_n_or_n_plus_1_lines_that_verify() {
     const EXISTING: usize = 3;
