@@ -146,6 +146,18 @@ impl StateDir {
     /// when another host holds it, [`PluginError::State`] when a path cannot be resolved, or the
     /// directory or its record cannot be created or locked.
     pub fn open(path: &Path, config: &PluginConfig) -> Result<Self, PluginError> {
+        Self::open_waiting(path, config, LOCK_WAIT)
+    }
+
+    /// [`StateDir::open`], waiting `lock_wait` instead of [`LOCK_WAIT`] for a held lock.
+    ///
+    /// # Errors
+    /// As [`StateDir::open`].
+    pub fn open_waiting(
+        path: &Path,
+        config: &PluginConfig,
+        lock_wait: Duration,
+    ) -> Result<Self, PluginError> {
         refuse_inside(path, config)?;
         fs::create_dir_all(path).map_err(|error| {
             PluginError::State(format!("{} cannot be created: {error}", path.display()))
@@ -167,7 +179,7 @@ impl StateDir {
                 Ok(()) => break,
                 // A child another thread forks carries the descriptor until it executes, and holds
                 // the lock that long; a host holds it for its whole run.
-                Err(TryLockError::WouldBlock) if asked.elapsed() < LOCK_WAIT => {
+                Err(TryLockError::WouldBlock) if asked.elapsed() < lock_wait => {
                     std::thread::sleep(Duration::from_millis(20));
                 }
                 Err(TryLockError::WouldBlock) => {

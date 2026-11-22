@@ -116,6 +116,7 @@ fn software_intent_edits_tests_current_revision_and_stops_for_merge_approval_in_
             &RunOptions {
                 context_policy: policy,
                 context_report: Some(report.clone()),
+                ..RunOptions::default()
             },
         )
         .unwrap();
@@ -208,6 +209,7 @@ fn software_intent_refuses_missing_workspaces_before_touching_runner_or_agent() 
                 &RunOptions {
                     context_policy: policy,
                     context_report: None,
+                    ..RunOptions::default()
                 },
             )
             .unwrap_err();
@@ -253,6 +255,7 @@ fn passing_software_test_becomes_stale_after_an_edit_through_the_general_entrypo
         &RunOptions {
             context_policy: ContextPolicy::Bounded,
             context_report: None,
+            ..RunOptions::default()
         },
     )
     .unwrap();

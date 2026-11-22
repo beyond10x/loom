@@ -6,8 +6,11 @@ use std::fs;
 use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
+
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 fn scratch(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
@@ -22,7 +25,7 @@ fn scratch(name: &str) -> PathBuf {
 
 /// Runs `prepare-dirs` over `dirs`, killing it after 10 s: `None` when it had to be killed.
 fn prepare(dirs: &[&Path]) -> Option<i32> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+    let mut command = loom_bin::loom();
     command
         .args(["agent", "prepare-dirs"])
         .stdout(Stdio::null())

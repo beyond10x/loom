@@ -61,10 +61,114 @@ impl Clock for HostClock {
 /// The operating system clock's instant, in UTC. It resolves no timezone, so it cannot fail: the
 /// clock the slice reads an observation's `observed_at` and a governor's evaluation instant from
 /// when the host gives no other.
+///
+/// Built with the `test-clock` feature, which only the workspace's test builds enable, it reads
+/// the operating system clock plus a virtual offset, and a wait on it advances that offset instead
+/// of sleeping ([`test_clock`]).
 pub struct SystemClock;
 impl Clock for SystemClock {
     fn read(&self) -> Result<DateTime<FixedOffset>, String> {
-        Ok(Utc::now().fixed_offset())
+        #[cfg(feature = "test-clock")]
+        let now = Utc::now() + test_clock::offset()?;
+        #[cfg(not(feature = "test-clock"))]
+        let now = Utc::now();
+        Ok(now.fixed_offset())
+    }
+
+    #[cfg(feature = "test-clock")]
+    fn wait(&self, duration: std::time::Duration) {
+        test_clock::advance(duration);
+    }
+}
+
+/// The virtual offset of [`SystemClock`] in a test build: zero at first, advanced by every wait on
+/// the clock, so an observation that waits for the next whole second gets it without a test
+/// sleeping for it. The offset is the process's own, or, when [`test_clock::VARIABLE`] names a
+/// file, the one that file holds (decimal nanoseconds, under a file lock): the processes one test
+/// starts then share it, so an instant one of them reads is never earlier than one another read
+/// before.
+#[cfg(feature = "test-clock")]
+pub mod test_clock {
+    use std::fs::{File, OpenOptions};
+    use std::io::{Read, Seek, SeekFrom, Write};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
+
+    /// The environment variable naming the shared offset file.
+    pub const VARIABLE: &str = "B10X_LOOM_TEST_CLOCK";
+
+    static OFFSET: AtomicU64 = AtomicU64::new(0);
+
+    fn shared() -> Option<std::path::PathBuf> {
+        std::env::var_os(VARIABLE)
+            .filter(|path| !path.is_empty())
+            .map(Into::into)
+    }
+
+    fn held(file: &mut File) -> Result<u64, String> {
+        let mut text = String::new();
+        file.read_to_string(&mut text)
+            .map_err(|e| format!("the test clock file: {e}"))?;
+        let text = text.trim();
+        if text.is_empty() {
+            return Ok(0);
+        }
+        text.parse()
+            .map_err(|e| format!("the test clock file holds {text:?}: {e}"))
+    }
+
+    fn open(path: &std::path::Path) -> Result<File, String> {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+            .map_err(|e| format!("the test clock file {}: {e}", path.display()))
+    }
+
+    /// The offset now.
+    ///
+    /// # Errors
+    /// The shared file cannot be opened, locked or read.
+    pub fn offset() -> Result<chrono::TimeDelta, String> {
+        let nanos = match shared() {
+            Some(path) => {
+                let mut file = open(&path)?;
+                file.lock_shared()
+                    .map_err(|e| format!("locking the test clock file: {e}"))?;
+                held(&mut file)?
+            }
+            None => OFFSET.load(Ordering::SeqCst),
+        };
+        Ok(chrono::TimeDelta::nanoseconds(
+            i64::try_from(nanos).unwrap_or(i64::MAX),
+        ))
+    }
+
+    /// Advances the offset by `duration`.
+    ///
+    /// # Panics
+    /// The shared file cannot be opened, locked, read or written: a test build only.
+    pub fn advance(duration: Duration) {
+        let by = u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX);
+        let Some(path) = shared() else {
+            OFFSET.fetch_add(by, Ordering::SeqCst);
+            return;
+        };
+        let advanced = (|| -> Result<(), String> {
+            let mut file = open(&path)?;
+            file.lock()
+                .map_err(|e| format!("locking the test clock file: {e}"))?;
+            let next = held(&mut file)?.saturating_add(by);
+            file.seek(SeekFrom::Start(0))
+                .and_then(|_| file.set_len(0))
+                .and_then(|()| file.write_all(next.to_string().as_bytes()))
+                .map_err(|e| format!("writing the test clock file: {e}"))
+        })();
+        if let Err(error) = advanced {
+            panic!("{error}");
+        }
     }
 }
 

@@ -328,6 +328,52 @@ pub fn synthesize_once(ess: &Ess, spec: &Path, cache: &Path) -> Result<Synthesis
 }
 
 /// The cache directory, under a target directory's `tmp/` (a test's `CARGO_TARGET_TMPDIR`), of
+/// [`plain_synthesis_once`].
+pub const PLAIN_SYNTHESIS_CACHE: &str = "ess-plain-synthesis-cache";
+
+/// The specification whose plain synthesis `b10x-loom-commission-testkit`'s tests read, relative
+/// to the repository root: `task test-step` fills [`plain_synthesis_once`] for it before the tests.
+pub const PLAIN_SYNTHESIS_SPECIFICATION: &str = "ess/commission";
+
+/// `ess verify conform synthesize --path <spec> --out <dir>/suite.json`, with no other option, run
+/// in `cwd`: made once for every process that shares `cache` ([`made_once`], keyed by
+/// [`inputs_digest`] of `spec` and the `ess` version). The directory holds `suite.json`,
+/// `stdout`, `stderr` and `code` (the exit code, or `signal`); a failed synthesis is kept too, so
+/// every caller reports the same refusal.
+pub fn plain_synthesis_once(
+    ess: &Ess,
+    cwd: &Path,
+    spec: &Path,
+    cache: &Path,
+) -> Result<PathBuf, String> {
+    let version = ess_version(ess, Some(cwd))?;
+    let key = inputs_digest(spec, &version)?;
+    let key = format!("plain-{}", key.trim_start_matches("sha256:"));
+    made_once(cache, &key, |dir| {
+        let output = command(ess, Some(cwd))
+            .args(["verify", "conform", "synthesize", "--path"])
+            .arg(spec)
+            .arg("--out")
+            .arg(dir.join("suite.json"))
+            .output()
+            .map_err(|e| {
+                format!(
+                    "run `{} verify conform synthesize` (is ess on PATH?): {e}",
+                    ess.display()
+                )
+            })?;
+        let code = output
+            .status
+            .code()
+            .map_or_else(|| "signal".to_owned(), |c| c.to_string());
+        fs::write(dir.join("stdout"), &output.stdout)
+            .and_then(|()| fs::write(dir.join("stderr"), &output.stderr))
+            .and_then(|()| fs::write(dir.join("code"), code))
+            .map_err(|e| format!("write under {}: {e}", dir.display()))
+    })
+}
+
+/// The cache directory, under a target directory's `tmp/` (a test's `CARGO_TARGET_TMPDIR`), of
 /// [`synthesis_stand_in`].
 pub const STAND_IN_CACHE: &str = "ess-synthesis-cache";
 

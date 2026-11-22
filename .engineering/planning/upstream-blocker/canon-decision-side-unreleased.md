@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: upstream-blocker:canon-decision-side-unreleased
 kind: upstream-blocker
-status: open
+status: cleared
 title: No Canon release carries pending decisions or decision grounds
 summary: Canon's pending-decisions, decision-grounds and authority-revision-binding are accepted on a local wave branch, unreleased
 tags:
@@ -11,7 +11,9 @@ relations:
 - blocks: story:requests-from-canon-pending-decisions
 - blocks: story:decided-records-carry-grounds-to-canon
 - blocks: story:authority-records-bound-and-grounded-in-canon
-revision: 3
+revision: 4
+transitions:
+- {from: "open", to: "cleared", at: "2026-11-22T04:54:19Z", actor: "agent:loom", revision: 4}
 ---
 ## What is missing
 

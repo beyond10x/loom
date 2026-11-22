@@ -9,13 +9,16 @@
 use std::io::{ErrorKind, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+
+#[path = "support/loom.rs"]
+mod loom_bin;
 
 const CLASSIFY: &[u8] = include_bytes!("fixtures/catalog-route/classify.sse");
 const SELECT: &[u8] = include_bytes!("fixtures/catalog-route/select.sse");
@@ -275,10 +278,7 @@ fn an_unsendable_secret_value_is_never_echoed_nor_injected() {
 /// Without `--config` the help still gives both model flags the Codex default.
 #[test]
 fn without_config_both_model_flags_keep_their_default() {
-    let output = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
-        .args(["run", "--help"])
-        .output()
-        .unwrap();
+    let output = loom_bin::loom().args(["run", "--help"]).output().unwrap();
     let help = String::from_utf8_lossy(&output.stdout);
     for flag in ["      --model <ID>", "      --classifier-model <ID>"] {
         let start = help.find(flag).unwrap_or_else(|| panic!("{flag}: {help}"));
@@ -326,7 +326,7 @@ impl Scratch {
 
     fn run(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
         let home = self.root.join("home");
-        let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+        let mut command = loom_bin::loom();
         command
             .arg("run")
             .args(["--confinement", "none"])

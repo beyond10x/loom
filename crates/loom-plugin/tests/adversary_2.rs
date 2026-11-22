@@ -10,6 +10,7 @@ mod support;
 use std::fs;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use b10x_loom_plugin::project::project;
 use b10x_loom_plugin::state::{RECORD_FILE, StateDir};
@@ -22,6 +23,7 @@ use llm_core::{
     BoxFuture, Cancel, Capabilities, Dispatch, Error, ErrorCode, Model, Provenance, StreamSink,
     TurnOutcome, TurnRequest,
 };
+use loom_sdk::intake::slice::run::{MODEL_RETRY, RetryPolicy};
 use serde_json::json;
 use support::{FakePlugin, Fixture, Recorded, Scripted, Seen, chat, classification, item};
 
@@ -75,7 +77,7 @@ impl Model for Flaky {
 fn retried_wire_attempts_count_against_the_turn_model_budget() {
     let fixture = Fixture::new("adversary_2", "flaky_wire_budget");
     let config = fixture.config(vec![chat()]);
-    let host = fixture.host(&config);
+    let host = fixture.host(&config).with_model_retry(QUICK_RETRY);
     let item = item("item-1");
     let classified = classification(Intent::Ask, &["chat"], "0.9");
     let projection = project(&config, &classified);
@@ -263,3 +265,10 @@ fn a_torn_last_record_line_does_not_stop_the_host_for_good() {
     let ids: Vec<&str> = record.iter().map(|line| line.item.0.as_str()).collect();
     assert_eq!(ids, ["item-1", "item-2"], "each item once: {record:?}");
 }
+
+/// [`MODEL_RETRY`] with a 1 ms backoff base: the flaky wire's retries wait 1 ms and 2 ms instead
+/// of 1 s and 2 s.
+const QUICK_RETRY: RetryPolicy = RetryPolicy {
+    backoff_base: Duration::from_millis(1),
+    ..MODEL_RETRY
+};

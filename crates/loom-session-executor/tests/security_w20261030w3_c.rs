@@ -295,9 +295,13 @@ fn a_directory_of_another_user_at_the_path_is_refused_and_left_as_it_is() {
     );
 }
 
-/// How many leftover entries the emptying works through: enough that the swap, made right after
-/// the first of them is removed, lands while most are still to go.
+/// How many leftover entries the emptying works through in the slow lane: enough that the swap,
+/// made right after the first of them is removed, lands while most are still to go.
 const LEFTOVER: usize = 20_000;
+
+/// The leftover entries of `task check`'s case: the swap still lands right after the first
+/// removal, with a window a fifth as long for it to land inside the emptying.
+const CHECK_LEFTOVER: usize = 4_000;
 
 /// How many fresh attempts are made while the swap lands only after the emptying is over (the
 /// swapping thread was not scheduled in time), before such a run is taken as it is.
@@ -398,12 +402,12 @@ impl Swap {
 }
 
 /// One attempt: a leftover root of the session user's at `<scratch>/case-17` holding
-/// [`LEFTOVER`] entries, and `kept/`, another directory of the same user's holding entries under
+/// `leftover` entries, and `kept/`, another directory of the same user's holding entries under
 /// the same names. A second thread, running before the call starts, swaps the root for a link
 /// to `kept/` ([`exchange`], in one step) as soon as the root's modification time shows its
 /// first removal; the root itself is then at `<scratch>/moved`.
-fn swap_while_emptying(attempt: usize) -> Swap {
-    let fixture = Fixture::new(&format!("swapped-root-{attempt}"));
+fn swap_while_emptying(attempt: usize, leftover: usize) -> Swap {
+    let fixture = Fixture::new(&format!("swapped-root-{leftover}-{attempt}"));
     let sessions = Sessions::default();
     let scratch = fixture.scratch();
     std::fs::set_permissions(&scratch, std::fs::Permissions::from_mode(0o777))
@@ -415,7 +419,7 @@ fn swap_while_emptying(attempt: usize) -> Swap {
     std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700))
         .expect("the leftover's mode");
     std::fs::create_dir(&kept).expect("the user's directory elsewhere");
-    for n in 0..LEFTOVER {
+    for n in 0..leftover {
         std::fs::write(root.join(leftover_name(n)), "").expect("a leftover entry");
         std::fs::write(kept.join(leftover_name(n)), "kept\n").expect("a file of the user's");
     }
@@ -493,12 +497,24 @@ fn swap_while_emptying(attempt: usize) -> Swap {
 /// `ScratchCopy::claim`'s check of the locked handle's device and inode and its removals, which
 /// name each entry by the root's path. Nothing in the other directory may be removed, the copy
 /// and its home must not be made there, and no session may run there. A call that never begins
-/// to empty the root (it refuses the scratch) is never swapped and passes.
+/// to empty the root (it refuses the scratch) is never swapped and passes. Over
+/// [`CHECK_LEFTOVER`] entries; the slow lane's twin empties [`LEFTOVER`].
 #[test]
 fn a_root_swapped_for_a_link_while_its_leftover_is_emptied_reaches_nothing_outside_it() {
+    root_swapped_while_emptied(CHECK_LEFTOVER);
+}
+
+/// [`a_root_swapped_for_a_link_while_its_leftover_is_emptied_reaches_nothing_outside_it`] over
+/// [`LEFTOVER`] entries.
+#[test]
+fn slow_a_root_swapped_for_a_link_while_its_leftover_is_emptied_reaches_nothing_outside_it() {
+    root_swapped_while_emptied(LEFTOVER);
+}
+
+fn root_swapped_while_emptied(leftover: usize) {
     let mut last = None;
     for attempt in 0..ATTEMPTS {
-        let swap = swap_while_emptying(attempt);
+        let swap = swap_while_emptying(attempt, leftover);
         eprintln!(
             "attempt {attempt}: swapped {}, inside the emptying {}, removed {}, made {:?}, \
              outcome {}",
@@ -514,7 +530,7 @@ fn a_root_swapped_for_a_link_while_its_leftover_is_emptied_reaches_nothing_outsi
     assert!(
         swap.reached_nothing(),
         "swapped inside the emptying: {}; outcome {}; the user's files outside the root \
-         removed: {} of {LEFTOVER}; entries made outside the root: {:?}; sessions run outside \
+         removed: {} of {leftover}; entries made outside the root: {:?}; sessions run outside \
          the root: {:?}",
         swap.inside,
         swap.outcome,

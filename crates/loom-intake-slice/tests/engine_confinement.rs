@@ -102,6 +102,16 @@ fn shell(script: &str, workspace: &Path, args: &[&str]) -> ChildCommand {
     ChildCommand::new("sh", words, workspace).with_environment(baseline())
 }
 
+/// A child's shell line that holds until the host creates `target/release` in its workspace
+/// ([`release`]), at most 30 s: the child runs exactly as long as the host's check needs.
+const HOLD: &str =
+    "i=0; while [ ! -e target/release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done";
+
+/// Ends the [`HOLD`] of the child working in `workspace`.
+fn release(workspace: &std::path::Path) {
+    std::fs::write(workspace.join("target/release"), "").expect("the release marker");
+}
+
 /// The four launches of a runner, by name.
 const LAUNCHES: [&str; 4] = ["run_child", "run_child_with_stdin", "spawn_child", "run"];
 
@@ -864,9 +874,10 @@ fn building_a_linux_runner_ends_no_run() {
         |_, workspace| {
             let first = EngineRunner::open(&linux_confinement()).expect("linux builds");
             let live = first
-                .spawn_child(&shell("sleep 2; exit 7", workspace, &[]))
+                .spawn_child(&shell(&format!("{HOLD}; exit 7"), workspace, &[]))
                 .expect("the first runner's child starts");
             let _second = EngineRunner::open(&linux_confinement()).expect("linux builds again");
+            release(workspace);
             let result = live.wait().expect("the first child ends");
             assert_eq!(result.exit.exit_code, Some(7), "{:?}", result.output);
         },
@@ -972,6 +983,7 @@ fn a_local_run_prints_its_adapter_and_reason() {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: None,
+            ..RunOptions::default()
         },
     );
     let printed = String::from_utf8(out).unwrap();
@@ -1013,6 +1025,7 @@ fn slice_run_lines(runner: Arc<dyn TestRunner>) -> Vec<String> {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: None,
+            ..RunOptions::default()
         },
     );
     String::from_utf8(out)

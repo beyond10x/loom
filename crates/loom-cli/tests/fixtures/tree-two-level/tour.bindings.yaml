@@ -2,6 +2,7 @@ format: loom.bindings/1
 protocol: tour@1
 artifacts:
   route: route.txt
+  tour: tour.txt
 actions:
   - action: first.open
     executor:
@@ -10,7 +11,7 @@ actions:
       bindings: tour-leg.bindings.yaml
     evidence:
       - kind: first_leg_opened
-        subject: route
+        subject: tour
         producer: loom
         from: effect
         results: {performed: opened}
@@ -27,7 +28,7 @@ actions:
     arguments_from: [sh, stubs/legs.sh]
     evidence:
       - kind: legs_opened
-        subject: route
+        subject: tour
         producer: loom
         from: effect
         results: {performed: opened}
