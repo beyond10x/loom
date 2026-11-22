@@ -21,8 +21,13 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree test`: the suite step `write` copies a regular file of the suite's directory, at most `suite::MAX_WRITE_BYTES` (1 MiB), to a path of plain names in the cycle's workspace between two steps, never following a link (story:suite-cycle-writes-a-workspace-file)
 - **Breaking:** `loom::tree::CycleStep` gains `from` and `to`, a literal names them; `StepKind` gains `Write`, an exhaustive `match` needs the arm (story:suite-cycle-writes-a-workspace-file)
 - `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
+- `b10x-loom tree replay --store S [--case C]` (`b10x_loom_tree::replay_tree`, `rebuild_case`, `replay_difference`, `replay_json`; ESS `loom.tree.TreeReplay`, `CaseReplay`): decides every case again as of its last `evaluated` line and prints per case whether its state and Canon's decision equal that line; reads only, takes no lock; exit 0, 3 when a case differs (first one on stderr), 1 refused `NotATree`, `CaseNotInTree` or `LogRefused` (story:tree-replay-command)
+- `tree test`: the suite step `replay` runs `tree replay`, its JSON output given to `{step: <name>}` (story:tree-replay-command)
 
 ### Changed
+
+- Every `action finished` line names the artifact revisions its step moved in `revisions`, also when the step was refused or a person's program ended badly; before, the list was always empty (story:tree-replay-command)
+- **Breaking:** a suite step `replay` that gives `principal` is refused `MemberUndeclared`; `case` is its one member (story:tree-replay-command)
 
 - ESS 0.97.4 (format unchanged)
 - `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)

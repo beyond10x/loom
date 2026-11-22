@@ -1,6 +1,8 @@
 //! Acceptance for `story:tree-suite-format`, library half: a `loom.tree-suite/1` document decodes
 //! or is refused naming its member, its selections read what a cycle left and nothing else, and
-//! its thirteen check kinds hold or name their difference. No tree runs and no program starts.
+//! its thirteen check kinds hold or name their difference. No tree runs and no program starts,
+//! but in `the_replay_step_runs_and_runbooks_cycles_pass` (`story:tree-replay-command`), which
+//! runs a two-cycle suite on the two-level tree under the `local` runner and is bound by 60 s.
 //!
 //! The end state the checks read is made once per test run, not once per test: it is built in a
 //! temporary directory under `CARGO_TARGET_TMPDIR` and renamed into place, keyed by the SHA-256 of
@@ -1149,14 +1151,14 @@ fn a_refused_suite_names_its_member() {
 fn a_waiting_kind_makes_the_cycle_pending() {
     let started = Instant::now();
     let suite = decode_suite(
-        "format: loom.tree-suite/1\ndefaults: {protocol: tour@1, bindings: b.yaml}\ncycles:\n  - name: replays\n    steps: [{do: open}, {do: run}, {do: replay, name: again}]\n  - name: plain\n",
+        "format: loom.tree-suite/1\ndefaults: {protocol: tour@1, bindings: b.yaml}\ncycles:\n  - name: allows\n    steps: [{do: open}, {do: run}, {do: allow, name: again}]\n  - name: plain\n",
     )
     .unwrap();
     let table = [
         AvailabilityEntry {
             used: KindUse::Step,
-            name: "replay",
-            availability: Availability::Waits("story:tree-replay-command"),
+            name: "allow",
+            availability: Availability::Waits("story:tree-stop-record-and-labels"),
         },
         AvailabilityEntry {
             used: KindUse::Step,
@@ -1167,12 +1169,12 @@ fn a_waiting_kind_makes_the_cycle_pending() {
     let waiting = first_waiting(&suite.cycles[0], &table).unwrap();
     assert_eq!(
         (waiting.story.as_str(), waiting.kind.as_str()),
-        ("story:tree-replay-command", "replay")
+        ("story:tree-stop-record-and-labels", "allow")
     );
     assert_eq!(first_waiting(&suite.cycles[1], &table), None);
     assert_eq!(
         first_waiting(&suite.cycles[0], SUITE_AVAILABILITY).map(|w| w.story),
-        Some("story:tree-replay-command".to_owned())
+        Some("story:tree-stop-record-and-labels".to_owned())
     );
     let report = summarize(vec![waiting_result(&suite.cycles[0], waiting)]);
     assert_eq!(
@@ -1189,7 +1191,7 @@ fn a_waiting_kind_makes_the_cycle_pending() {
         summary_lines(&report),
         [
             "cycles: 0 expected, 0 as expected, 0 failed: none".to_owned(),
-            "pending: 1 (0 still failing: none; passing, move to expected: none; 1 waiting: replays on story:tree-replay-command)".to_owned(),
+            "pending: 1 (0 still failing: none; passing, move to expected: none; 1 waiting: allows on story:tree-stop-record-and-labels)".to_owned(),
         ]
     );
     assert!(started.elapsed() < BOUND);
@@ -1268,11 +1270,114 @@ fn runbooks_cycle_shapes_decode() {
         .filter_map(|cycle| first_waiting(cycle, SUITE_AVAILABILITY))
         .map(|waiting| (waiting.name, waiting.kind))
         .collect();
+    // `replay-unchanged` waited for `story:tree-replay-command`; nothing of these waits now.
+    assert_eq!(waiting, []);
+    assert!(started.elapsed() < BOUND);
+}
+
+/// `story:tree-replay-command`, test 6 (D1 a): a `replay` step takes `case`, and no `principal`,
+/// which an `allow` step still takes.
+#[test]
+fn a_replay_step_takes_case_and_refuses_principal() {
+    let started = Instant::now();
+    let head = "format: loom.tree-suite/1\ndefaults: {protocol: tour@1, bindings: b.yaml}\n";
+    let suite =
+        |step: &str| format!("{head}cycles:\n  - name: one\n    steps: [{{do: open}}, {step}]\n");
+    let decoded = decode_suite(&suite("{do: replay, case: root.first}")).unwrap();
     assert_eq!(
-        waiting,
-        [("replay-unchanged".to_owned(), "replay".to_owned())]
+        decoded.cycles[0].steps[1].case.as_deref(),
+        Some("root.first")
+    );
+    let refused = decode_suite(&suite("{do: replay, principal: person:owner}")).unwrap_err();
+    assert_eq!(
+        (refused.reason(), refused.member()),
+        (
+            SuiteRefusalReason::MemberUndeclared,
+            Some("cycles[0].steps[1].principal")
+        ),
+        "{refused}"
+    );
+    let allowed = decode_suite(&suite(
+        "{do: allow, case: root.first, principal: person:owner}",
+    ))
+    .unwrap();
+    assert_eq!(
+        allowed.cycles[0].steps[1].principal.as_deref(),
+        Some("person:owner")
     );
     assert!(started.elapsed() < BOUND);
+}
+
+/// `story:tree-replay-command`, test 8: `replay` runs, and a cycle of the shape of Runbook's `replay-sibling` (open,
+/// a run that waits, a replay whose every case matches its log) passes on the two-level tree, as
+/// does `replay-unchanged`, the tree run to its end. The suite, its bindings and the stubs are
+/// written into the test's own directory; every program runs under the `local` runner.
+#[test]
+fn the_replay_step_runs_and_runbooks_cycles_pass() {
+    let started = Instant::now();
+    let availability: Vec<Availability> = SUITE_AVAILABILITY
+        .iter()
+        .filter(|entry| entry.used == KindUse::Step && entry.name == "replay")
+        .map(|entry| entry.availability)
+        .collect();
+    assert_eq!(availability, [Availability::Available]);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("suite-replay-{}-{nanos}", std::process::id()));
+    let suite_dir = dir.join("suite");
+    fs::create_dir_all(suite_dir.join("stubs")).unwrap();
+    for file in ["tour.bindings.yaml", "tour-leg.bindings.yaml"] {
+        fs::copy(Path::new(TWO_LEVEL).join(file), suite_dir.join(file)).unwrap();
+    }
+    for entry in fs::read_dir(Path::new(TWO_LEVEL).join("stubs")).unwrap() {
+        let entry = entry.unwrap();
+        fs::copy(
+            entry.path(),
+            suite_dir.join("stubs").join(entry.file_name()),
+        )
+        .unwrap();
+    }
+    let check = "{check: all, name: every-case-matches, select: [{step: replayed}, {path: \"cases[*]\"}], where: {state_matches_log: true, decision_matches_log: true}}";
+    let suite = format!(
+        "format: loom.tree-suite/1\ndefaults:\n  protocol: tour@1\n  bindings: tour.bindings.yaml\n  seed: [{{from: stubs, to: stubs}}]\ncycles:\n  - name: replay-after-wait\n    steps: [{{do: open}}, {{do: run, exit: 3}}, {{do: replay, name: replayed}}]\n    expect:\n      checks:\n        - {check}\n  - name: replay-unchanged\n    decide: [{{take: approve, times: any}}]\n    steps: [{{do: open}}, {{do: run}}, {{do: replay, name: replayed}}]\n    expect:\n      exit: 0\n      checks:\n        - {check}\n"
+    );
+    fs::write(suite_dir.join("replay.suite.yaml"), suite).unwrap();
+    let runner = b10x_loom_tree::EngineRunner::open(&b10x_loom_tree::EngineConfinement {
+        adapter: b10x_loom_tree::ConfinementAdapter::Local,
+        local_reason: Some(b10x_loom_tree::UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    let report = b10x_loom_tree::suite::run_suite(
+        &suite_dir.join("replay.suite.yaml"),
+        &b10x_loom_tree::suite::SuiteSettings::new(
+            Path::new(TWO_LEVEL).join("protocols"),
+            dir.join("scratch"),
+            TreeTime::At(AT.to_owned()),
+            std::sync::Arc::new(runner),
+            Some("local".to_owned()),
+        ),
+        None,
+        None,
+    )
+    .unwrap();
+    for cycle in &report.cycles {
+        assert!(
+            cycle.run && !cycle.pending && cycle.as_expected,
+            "{}: {cycle:?}",
+            cycle.name
+        );
+    }
+    assert_eq!(report.cycles.len(), 2, "{report:?}");
+    let _ = fs::remove_dir_all(&dir);
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]

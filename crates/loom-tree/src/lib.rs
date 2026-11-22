@@ -15,8 +15,10 @@
 //!   ([`StoreLock`]), and [`HOLDER_FILE`], `tree.holder`, the holder's process id while it holds
 //!   it. A second writer is refused `StoreInUse` naming that process id and writes nothing.
 //!
-//! [`tree_status`] and [`verify_tree`] read and never take the store: a live view reads the tree
-//! while a run holds it.
+//! [`tree_status`], [`verify_tree`] and [`replay_tree`] read and never take the store: a live view
+//! reads the tree while a run holds it. [`replay_tree`] (`tree replay`) decides every case again
+//! as of its last `evaluated` line and says whether its state and Canon's decision equal what
+//! that line recorded.
 //!
 //! [`hold`] (`tree hold`) records a principal's hold on the tree as a `stop recorded` line in the
 //! root's run log and [`reopen`] (`tree reopen`) lifts it with a `stop lifted` line; while the tree
@@ -44,6 +46,7 @@ mod open;
 mod person;
 mod protocols;
 mod read;
+mod replay;
 mod run;
 mod status;
 mod stop;
@@ -72,7 +75,7 @@ pub use approvals::{TreeAuthority, approvals_file_name, read_approvals};
 pub use approve::{ApproveRequest, MAX_NAME_BYTES, Reasons, approve, person_program};
 pub use close::{CaseClosed, CloseRequest, close};
 pub use context::derived_uuid;
-pub use encode::{decision_json, refusal_json, run_json, status_json, verify_json};
+pub use encode::{decision_json, refusal_json, replay_json, run_json, status_json, verify_json};
 pub use history::LogHistory;
 pub use lock::{HOLDER_FILE, LOCK_FILE, StoreLock};
 pub use log::{head_file_name, verify_case_log};
@@ -81,6 +84,7 @@ pub use protocols::{
     KeptProtocol, PROTOCOLS_FILE, ProtocolDirectory, read_protocols_directory, stored_catalog,
 };
 pub use read::read_status;
+pub use replay::{RebuiltCase, rebuild_case, replay_difference, replay_tree};
 pub use run::{RunObserver, RunSettings, TREE_PRINCIPAL, run_tree};
 pub use status::{STATUS_FORMAT, tree_status};
 pub use stop::{

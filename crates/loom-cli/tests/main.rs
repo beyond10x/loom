@@ -3,4 +3,5 @@
 
 mod run_holds_the_root;
 mod sync_switch_marker;
+mod tree_replay;
 mod tree_test;
