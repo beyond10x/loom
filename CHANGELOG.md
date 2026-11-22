@@ -14,6 +14,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- `from: runs` (`ResultSource::Runs`, `RUNS_SPENT`): a program entry records `spent` on the run reaching `budget.max_runs` (story:outcome-when-reads-the-run-count)
+- `tree run` holds a writer idle while its only open evidence is its own `from: runs` kinds (story:outcome-when-reads-the-run-count)
 - `loom_governor::durable`: every sync of the tree path's stores through one counted door; its test-only feature `test-unsynced-store` (story:tree-run-tests-fit-the-budget)
 - Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
 - The model retry policy as a parameter, `run::MODEL_RETRY` its default (three attempts, 1 s then 2 s): `RunOptions::model_retry`, `RunOptions::with_context_policy`, `with_context_report` and `with_model_retry`, `Briefing::with_retry` and `selector::send_with_policy` (`b10x-loom-intake-slice`)

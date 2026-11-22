@@ -50,7 +50,7 @@ use b10x_loom_executor::selection::{ActionSelector as _, SelectionContext, StepH
 use b10x_loom_executor::{DeterministicSelector, EmptyObjectArguments, Loom};
 use b10x_loom_intake_slice::confinement::{Cancel, TestRunner};
 use b10x_loom_runlog::{BUDGET_SPENT, budget_name, log_file_name};
-use loom::bindings::{BindingsDocument, Executor};
+use loom::bindings::{BindingsDocument, Executor, ResultSource};
 use loom::runlog::{
     ActionFinished, CaseOpened, ChildClosed, ChildOpened, Evaluated, RunLogEvent, RunLogLine,
     Stopped, Terminated,
@@ -957,7 +957,8 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
 /// What a step of `case` is chosen from: the lines of its log, its revision, its effect port
 /// (every program of it holding `cancel`) and its history, with the actions due again (a writer
 /// with a retry record, a copy whose source holds something new) but those refused since the case
-/// was last evaluated, and the idle copies.
+/// was last evaluated, and the idle actions: the copies whose source holds nothing new and the
+/// writers whose only open evidence is a spent allowance ([`spent_writers_idle`]).
 #[allow(clippy::type_complexity)]
 fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     governor: &'a CanonGovernor<S>,
@@ -1008,8 +1009,57 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
             idle.insert(action);
         }
     }
+    idle.extend(spent_writers_idle(governor, &id, &case.bindings, &due)?);
     let history = LogHistory::new(&lines, revision, due).with_idle(idle);
     Ok((lines, revision, effects, history))
+}
+
+/// The writers idle for this step because only a spent allowance is open
+/// (`story:outcome-when-reads-the-run-count`, D3 a): each action not `due` whose binding has a
+/// `from: runs` entry and whose open evidence is not empty and holds only the kinds those entries
+/// write. Without this the open kind would make the writer useful until its allowance is spent,
+/// and it would run again with nothing to do. An action with no open evidence is left as it was:
+/// the selector finds it useless already, and a wait on its approval is unchanged.
+fn spent_writers_idle<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    case: &CaseId,
+    bindings: &BindingsDocument,
+    due: &BTreeSet<String>,
+) -> Result<BTreeSet<String>, Refused> {
+    let counted: BTreeMap<&str, BTreeSet<&str>> = bindings
+        .actions
+        .iter()
+        .filter_map(|bound| {
+            let kinds: BTreeSet<&str> = bound
+                .evidence
+                .iter()
+                .filter(|entry| entry.from == ResultSource::Runs)
+                .map(|entry| entry.kind.as_str())
+                .collect();
+            (!kinds.is_empty()).then_some((bound.action.as_str(), kinds))
+        })
+        .collect();
+    if counted.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let facts = governor
+        .action_facts(case)
+        .map_err(|error| unreadable(format!("case {}", case.0), format!("{error:?}")))?;
+    Ok(facts
+        .actions
+        .iter()
+        .filter(|facts| !due.contains(&facts.action))
+        .filter(|facts| {
+            counted.get(facts.action.as_str()).is_some_and(|kinds| {
+                !facts.open_evidence.is_empty()
+                    && facts
+                        .open_evidence
+                        .iter()
+                        .all(|kind| kinds.contains(kind.as_str()))
+            })
+        })
+        .map(|facts| facts.action.clone())
+        .collect())
 }
 
 /// The action the deterministic selector takes next in `case`, chosen as a step would choose it

@@ -1,6 +1,8 @@
 //! The load-time check: a decoded document held against the compiled protocol it names.
 
-use crate::{FORMAT, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, Refusal, refuse, workspace_path};
+use crate::{
+    FORMAT, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, RUNS_SPENT, Refusal, refuse, workspace_path,
+};
 use b10x_canon::model::Protocol;
 use loom::bindings::{
     BindingsDocument, BindingsRefusalReason as Reason, BoundAction, Executor, ResultSource,
@@ -22,8 +24,10 @@ use std::collections::BTreeSet;
 /// `outputs` path that is absolute or leaves the workspace, and an `open` executor's `bindings` path
 /// that is absolute, leaves the directory of the bindings file or names no file (`.`, a trailing
 /// `/`);
-/// a `retry_when` kind that is not an evidence kind of the protocol; and an evidence `from` that does
-/// not fit the executor (`effect` on a program, anything but `effect` on a person or an open).
+/// a `retry_when` kind that is not an evidence kind of the protocol; an evidence `from` that does
+/// not fit the executor (`effect` on a program, anything but `effect` on a person or an open,
+/// `runs` on an agent or a copy); and a `from: runs` table that lists anything but
+/// [`RUNS_SPENT`].
 ///
 /// An action the document binds nothing to is not an error; [`unbound`] lists them.
 ///
@@ -137,7 +141,8 @@ pub fn check(
             let source_fits = match kind {
                 Executor::Program => entry.from != ResultSource::Effect,
                 Executor::Person | Executor::Open => entry.from == ResultSource::Effect,
-                Executor::Agent | Executor::Copy => true,
+                // Loom counts the runs of a program alone.
+                Executor::Agent | Executor::Copy => entry.from != ResultSource::Runs,
             };
             if !source_fits {
                 return Err(refuse(
@@ -145,6 +150,24 @@ pub fn check(
                     Some(id),
                     format!("{slot}.from"),
                     format!("{:?} is not a source of a {kind:?} executor", entry.from),
+                ));
+            }
+            if entry.from == ResultSource::Runs
+                && !matches!(entry.results.as_slice(), [only] if only.value == RUNS_SPENT)
+            {
+                let listed: Vec<&str> = entry
+                    .results
+                    .iter()
+                    .map(|rule| rule.value.as_str())
+                    .collect();
+                return Err(refuse(
+                    Reason::InvalidEvidence,
+                    Some(id),
+                    format!("{slot}.results"),
+                    format!(
+                        "lists {}; a from: runs table lists {RUNS_SPENT} and nothing else",
+                        listed.join(", ")
+                    ),
                 ));
             }
             if !produces.contains(&entry.kind) {

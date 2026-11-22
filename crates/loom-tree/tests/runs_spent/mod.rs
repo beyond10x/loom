@@ -153,7 +153,11 @@ impl Tree {
         std::fs::write(workspace.join("work.txt"), "work\n").unwrap();
         std::fs::write(workspace.join("note.txt"), "note\n").unwrap();
         std::fs::write(workspace.join("do.sh"), program).unwrap();
-        std::fs::write(workspace.join("note.sh"), "echo noted >> note.txt\nexit 0\n").unwrap();
+        std::fs::write(
+            workspace.join("note.sh"),
+            "echo noted >> note.txt\nexit 0\n",
+        )
+        .unwrap();
         let file = dir.join("halt.bindings.yaml");
         std::fs::write(&file, bindings).unwrap();
         let directory = read_protocols_directory(&protocols).unwrap();
@@ -258,12 +262,7 @@ fn without_the_runs_entry_the_case_is_stuck() {
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn the_spent_kind_does_not_make_the_writer_useful() {
-    let tree = Tree::open(
-        "runs-spent-idle",
-        IDLE_PROTOCOL,
-        IDLE_BINDINGS,
-        "exit 0\n",
-    );
+    let tree = Tree::open("runs-spent-idle", IDLE_PROTOCOL, IDLE_BINDINGS, "exit 0\n");
     let (run, lines) = tree.run();
     assert_eq!(run.stop, TreeStop::Stuck, "{run:?}\n{lines:#?}");
     assert_eq!(steps_of(&lines, "work.do"), 1, "{lines:#?}");

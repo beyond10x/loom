@@ -195,10 +195,16 @@ actions:
   action, whose value is `performed`, and an effect that was refused or failed records nothing (a
   `person` executor's table may also list named values, never `*`: the result `tree approve
   --result` names);
-  a JSON pointer such as `/summary/state` reads the program's report. A `program` executor's
-  entries read `exit` or a pointer and never `effect`; a `person` or `open` executor's entries read
-  `effect` alone; an `agent` or `copy` executor's are not restricted. `results` maps each value, or
-  `*` for any other, to the evidence result; `null` records no result.
+  a JSON pointer such as `/summary/state` reads the program's report; `from: runs` is Loom's
+  count of the action's runs, whose value is `spent` on the run that reaches `budget.max_runs`
+  and which records nothing on any other run (a cancelled run counts and records nothing, so a
+  cancelled last run writes no `spent` record); its table lists `spent` and nothing else, and the
+  record is written after the run's other records, about the revision the run left. A protocol
+  reads it through a claim over the entry's kind, such as an outcome's `requires`; the kind alone
+  never makes the writer useful again. A `program` executor's entries read `exit`, a pointer or
+  `runs` and never `effect`; a `person` or `open` executor's entries read `effect` alone; an
+  `agent` or `copy` executor's read anything but `runs`. `results` maps each value, or `*` for any
+  other, to the evidence result; `null` records no result.
 - `tools.allow` lists the tool names an `agent` may be offered. An entry is never empty and holds
   no comma and no white space, because the session executor joins the names with commas.
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
@@ -268,7 +274,8 @@ action, an evidence `kind` outside the action's `may_produce`, a `subject`, `ups
 or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 3600, an
 `artifacts`, `inputs`, `outputs` or `open` `bindings` path that is absolute or leaves the
 workspace, a `retry_when` kind the protocol does not declare, an evidence `from` the executor does
-not take, `exits` on an executor that is not a `program`, an exit code in both `exits` lists or in
+not take (`MemberNotForExecutor`), a `from: runs` table that lists anything but `spent`
+(`InvalidEvidence`, naming `evidence[<i>].results`), `exits` on an executor that is not a `program`, an exit code in both `exits` lists or in
 one and as a key of a `from: exit` table (`ExitClassConflict`), and an `independence` dimension the
 protocol does not declare. Decoding also refuses a `program_root` other than `workspace` or
 `bindings` and an `exits` entry that is not a code from 0 to 255. Each refusal names the action and the

@@ -2503,7 +2503,8 @@ fn a_cancel_set_at_the_hand_over_starts_nothing_and_keeps_a_counted_observation(
 
 /// The `from: runs` entry of the run-allowance cases: a `review` about `spec`, `spent` on the run
 /// that reaches `budget.max_runs`.
-const RUNS_ENTRY: &str = "{kind: review, subject: spec, producer: loom, from: runs, results: {spent: spent}}";
+const RUNS_ENTRY: &str =
+    "{kind: review, subject: spec, producer: loom, from: runs, results: {spent: spent}}";
 
 /// The records of the case of `kind`.
 fn records_of<S: FallibleCaseStore>(governor: &CanonGovernor<S>, kind: &str) -> Vec<EvidenceData> {
@@ -2539,7 +2540,8 @@ fn a_runs_entry_writes_spent_on_the_last_run() {
         CHECK,
         &[&program],
         "    budget: {max_runs: 2}\n",
-        &[entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()],
+        // Listed before the `gate` entry: its record still follows the run's other records.
+        &[RUNS_ENTRY.to_owned(), entry("gate", "exit", VALID_TABLE)],
     ));
     let governor = governor();
     let case = CaseId(CASE.to_owned());
@@ -2626,7 +2628,11 @@ fn a_cancelled_last_run_writes_no_spent_record() {
         &[entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()],
     );
     assert_cancelled_within_seven_seconds(&step);
-    assert!(records(&step.governor).is_empty(), "{:#?}", records(&step.governor));
+    assert!(
+        records(&step.governor).is_empty(),
+        "{:#?}",
+        records(&step.governor)
+    );
     let program = step.scratch.marking("program.sh", "exit 0\n");
     std::fs::remove_file(step.scratch.marker()).unwrap();
     let document = document(&bound(
@@ -2646,7 +2652,11 @@ fn a_cancelled_last_run_writes_no_spent_record() {
     let reason = refusal(&drive(&step.governor, &effects, CASE, CHECK, args("{}")));
     assert!(reason.starts_with("RunsSpent"), "{reason}");
     assert!(!step.scratch.marker().exists(), "the spent action started");
-    assert!(records(&step.governor).is_empty(), "{:#?}", records(&step.governor));
+    assert!(
+        records(&step.governor).is_empty(),
+        "{:#?}",
+        records(&step.governor)
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
