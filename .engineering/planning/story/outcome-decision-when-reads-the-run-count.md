@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:outcome-decision-when-reads-the-run-count
 kind: story
-status: proposed
+status: active
 title: 'An outcome''s decision counts only once a writer''s allowance is spent: a when reads the spent claim'
 summary: 'requires: {decision: d, when: {claim: spent}} over the run-count claim; before the spend d is not pending, after it it is; an early decision counts after the spend; an evidence form in when is refused; split out (D131)'
 tags:
@@ -19,9 +19,10 @@ scope:
   path: crates/loom-tree/tests/main.rs
 - confidence: inferred
   path: website/docs/guides/run-a-case-tree.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T13:10:38Z", actor: "agent:loom", revision: 6}
+- {from: "proposed", to: "active", at: "2026-11-22T13:11:07Z", actor: "agent:sdc", revision: 7, executor: "agent:loom", correlation: "runbook-runcount-2026-11-22"}
 ---
 ## Outcome
 
