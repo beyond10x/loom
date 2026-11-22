@@ -32,7 +32,7 @@ CI performs the same setup. `task check` runs, in order:
 | `task commission:deps-guard` | Commission's contracts depend on no Loom executor, no Canon and no model-provider crate |
 | `cargo fmt --all --check`, `cargo clippy … -D warnings`, `loom-xtask test-step` | Format, lint and every test but the slow lane's: `cargo nextest run --workspace --locked` and the doc tests, failing a test over 60 s, the `tree_run` tests of `b10x-loom-cli` over 60 s summed or the step over 120 s, and printing the ten slowest tests. No test makes a model or network call |
 | `task durable-check` | Without the test sync switch every store write syncs: the count tests pass in a build without the switch's feature, a release build with it fails to compile, and the command line's normal dependencies do not hold it |
-| `task docs-check`, `task commission:docs-drift` | The generated documentation pages are current |
+| `task docs-check`, `task commission:docs-drift` | The generated documentation pages are current: Loom's against the committed stamp `website/docs/reference/.generated.json`, without building the generator |
 
 `task check` does not run the slow lane. After a change under `ess/`, write the synthesized suite
 again and run the lane, which synthesizes once more, compares bytes and runs every `slow_` test:
@@ -65,7 +65,12 @@ task docs-generate
 task commission:docs
 ```
 
-`task docs-check` fails on a page that is missing, stale or edited by hand. To build the site as
+`task docs-generate` writes the stamp `website/docs/reference/.generated.json` after the pages: the
+SHA-256 of every input of the generator, the `ess` version and the SHA-256 of every generated file.
+`task docs-check` compares the tree with it and fails on a page that is missing, stale or edited by
+hand, and on an input that changed since the pages were generated. `task docs-slow` regenerates
+every page and compares bytes; CI runs it when the stamp changed and on every push to `main`. To
+build the site as
 CI's `Documentation validation` workflow does:
 
 ```console
