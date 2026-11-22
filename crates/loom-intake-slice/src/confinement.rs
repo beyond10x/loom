@@ -212,10 +212,11 @@ pub struct TestExecution {
 /// cannot be undone.
 ///
 /// A child whose handle is set before it starts is refused [`ConfinementRefusal::Cancelled`] and
-/// nothing starts. One running when it is set is killed with every process it started, at the
-/// next read step under `linux` (at most 1 s) and within 100 ms under `local`, with no grace, and
-/// its run is refused [`ConfinementRefusal::Cancelled`]. A child that ended before the handle was
-/// read set keeps its result.
+/// nothing starts. One running when it is set is killed within 100 ms, with no grace, and its run
+/// is refused [`ConfinementRefusal::Cancelled`]: under `linux` with every process it started (its
+/// cgroup), a write of its input still pending dropped; under `local` with its process group
+/// only, so a process that left the group (`setsid`, a daemon) is not killed and survives the
+/// cancel. A child that ended before the handle was read set keeps its result.
 #[derive(Clone, Default)]
 pub struct Cancel(Arc<std::sync::atomic::AtomicBool>);
 
@@ -273,6 +274,21 @@ fn killed_by_cancel(ran: Duration) -> ConfinementError {
 /// Whether `cancel` is given and set.
 fn is_set(cancel: Option<&Cancel>) -> bool {
     cancel.is_some_and(Cancel::is_cancelled)
+}
+
+/// How often a confined child's wait reads its cancel handle.
+const CANCEL_READ: Duration = Duration::from_millis(100);
+
+/// Ends once `cancel` is set, read every [`CANCEL_READ`]; never without a handle.
+async fn until_cancelled(cancel: Option<&Cancel>) {
+    match cancel {
+        Some(cancel) => {
+            while !cancel.is_cancelled() {
+                tokio::time::sleep(CANCEL_READ).await;
+            }
+        }
+        None => std::future::pending().await,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -666,10 +682,11 @@ impl SubstrateRunner {
     /// whole and apart ([`TestExecution::child_output`]) beside the tail of each in `output`.
     ///
     /// A child given a cancel handle ([`ChildCommand::with_cancel`]) runs as a raw-pipe session,
-    /// its standard input empty unless the host gave it bytes, so the read loop sees the handle:
-    /// one set before the start is refused [`ConfinementRefusal::Cancelled`] before any check or
-    /// driver open, and one set while the child runs kills it, with its whole cgroup, at the next
-    /// read step, its run refused [`ConfinementRefusal::Cancelled`].
+    /// its standard input empty unless the host gave it bytes, so its wait sees the handle: one
+    /// set before the start is refused [`ConfinementRefusal::Cancelled`] before any check or
+    /// driver open, and one set while the child runs kills it, with its whole cgroup, within
+    /// 100 ms, its input still unwritten or not, its run refused
+    /// [`ConfinementRefusal::Cancelled`].
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
         if is_set(child.cancel.as_ref()) {
             return Err(cancelled_before_launch());
@@ -800,9 +817,12 @@ impl SubstrateRunner {
     /// observation, which records both streams whatever was read live. A write the child ended
     /// first is no failure: it read what it read. Every path ends the child before it returns,
     /// killing it when it ran past its timeout and a margin, which leaves it with no exit status
-    /// and so refused. A `cancel` set while the child runs ends the read loop at its next step,
-    /// and a child still running then is killed the same way, at once, and refused
-    /// [`ConfinementRefusal::Cancelled`]; one Substrate already observed ended keeps its result.
+    /// and so refused. A `cancel` set while the child runs is read every [`CANCEL_READ`] beside
+    /// the write and the read loop: both are dropped, a write blocked on a child that reads
+    /// nothing included, the child still running then is killed the same way, at once, and the
+    /// run is refused [`ConfinementRefusal::Cancelled`], even when Substrate observed its end
+    /// first. A child whose input and output were done before the cancel was read keeps its
+    /// result.
     fn launch_with_stdin(
         open: &OpenDriver,
         workspace: &str,
@@ -843,9 +863,6 @@ impl SubstrateRunner {
             };
             let drain = async {
                 loop {
-                    if is_set(cancel) {
-                        return Ok(());
-                    }
                     let step = deadline
                         .saturating_duration_since(tokio::time::Instant::now())
                         .min(READ_STEP);
@@ -860,13 +877,29 @@ impl SubstrateRunner {
                     }
                 }
             };
-            let (written, drained) = tokio::join!(write, drain);
+            // The cancel is watched beside the write and the read loop, never after them: a write
+            // blocked on a child that reads nothing, or a read loop still waiting, is dropped
+            // when the cancel is read, which releases the session's input and output.
+            let (written, drained, by_cancel) = tokio::select! {
+                biased;
+                (written, drained) = async { tokio::join!(write, drain) } => {
+                    (written, drained, false)
+                }
+                () = until_cancelled(cancel) => (Ok(()), Ok(()), true),
+            };
             let observed = match driver.observe_exec(id).await {
-                Ok(observed) if is_terminal(observed.resource.state) => observed,
+                // A child whose cancel was read while it ran is never a result, even when
+                // Substrate observed it ended (at its timeout, say) before the kill below.
+                Ok(observed) if is_terminal(observed.resource.state) => {
+                    if by_cancel {
+                        killed_by_cancel_after = Some(started.elapsed());
+                    }
+                    observed
+                }
                 // Still running past its deadline or after its cancel, or unobservable: it is
                 // ended here, and a child ended so has no exit status.
                 _ => {
-                    let cancelled = is_set(cancel);
+                    let cancelled = by_cancel || is_set(cancel);
                     let killed = driver
                         .signal(
                             id,
@@ -1599,8 +1632,8 @@ impl ChildCommand {
 
     /// The same child holding `cancel`: set before the child starts, [`TestRunner::run_child`]
     /// refuses it [`ConfinementRefusal::Cancelled`] and starts nothing; set while it runs, the
-    /// runner kills it with every process it started, with no grace, and refuses its run
-    /// [`ConfinementRefusal::Cancelled`] (see [`Cancel`] for the bounds). A cancel set after the
+    /// runner kills it, with no grace, and refuses its run [`ConfinementRefusal::Cancelled`]
+    /// (see [`Cancel`] for what is killed under `linux` and `local`, and when). A cancel set after the
     /// child ended changes nothing. A live child ([`SubstrateRunner::spawn_child`]) does not read
     /// it: [`ConfinedChild::signal`] ends one.
     #[must_use]

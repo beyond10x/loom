@@ -172,13 +172,17 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
 
     /// This port with `cancel`: every program a step starts, the `arguments_from` program
     /// included, holds it ([`b10x_loom_intake_slice::confinement::ChildCommand::with_cancel`]).
-    /// Set before a step's first program starts, the step is refused `Cancelled`, ending the run,
-    /// with nothing started and no observation kept. Set while a program runs, the runner kills
-    /// it with every process it started and the step is refused `Cancelled`, ending the run: the
-    /// run's observation is kept (`cancelled: true`, `runner_refusal` naming `Cancelled`) and
-    /// counts against `budget.max_runs`, the placed artifacts' moves are written alone, and no
-    /// evidence record, result table or blob is written. A handle set after the program ended
-    /// changes nothing.
+    /// Read after the run count, a set handle refuses the step `Cancelled`, ending the run, with
+    /// nothing started and no observation kept. A handle set in the window
+    /// after the port read it and before the runner starts the program starts nothing either,
+    /// but the runner refuses that run `Cancelled`, so it is kept and counted as the cancelled
+    /// run below. Set while a program runs, the runner kills it, under `linux` with every
+    /// process it started and under `local` with its process group only
+    /// (a process that left the group survives), and the step is refused `Cancelled`, ending the
+    /// run: the run's observation is kept (`cancelled: true`, `runner_refusal` naming
+    /// `Cancelled`) and counts against `budget.max_runs`, the placed artifacts' moves are written
+    /// alone, and no evidence record, result table or blob is written. A handle set after the
+    /// program ended changes nothing.
     #[must_use]
     pub fn with_cancel(self, cancel: Cancel) -> Self {
         Self {

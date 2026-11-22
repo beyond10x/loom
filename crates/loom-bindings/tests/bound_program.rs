@@ -2479,7 +2479,11 @@ fn a_cancel_set_at_the_hand_over_starts_nothing_and_keeps_a_counted_observation(
         .map(|observation| plain(&observation.payload))
         .collect();
     assert_eq!(observations.len(), 1, "{observations:?}");
-    assert_eq!(observations[0]["cancelled"], json!(true), "{observations:?}");
+    assert_eq!(
+        observations[0]["cancelled"],
+        json!(true),
+        "{observations:?}"
+    );
     assert!(records(&governor).is_empty());
     for path in ["src/program.rs", "../../website/docs/guides/bindings.md"] {
         assert!(

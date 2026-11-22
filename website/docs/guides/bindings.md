@@ -343,10 +343,14 @@ The port is a Commission effect port: it performs the actions bound to `program`
   bound.
 - A port built `with_cancel(cancel)` (`confinement::Cancel`) reads the handle after the run count:
   set then, the step is refused `Cancelled: action <action>: …`, nothing starts and nothing is
-  observed. Every program the step starts, the `arguments_from` program included, holds it. Set
-  while one runs, its runner kills it with every process it started, with no grace (under `linux`
-  at its next read step, at most 1 s; under `local` within 100 ms, then waiting at most
-  `KillBounds::kill_settle`), and `run_child` returns within 7 s. The step is then refused
+  observed. Every program the step starts, the `arguments_from` program included, holds it. A
+  handle set after the port read it and before the runner starts the program starts nothing, but
+  the runner refuses that run `Cancelled`, so it is kept and counted as a cancelled run below. Set
+  while one runs, its runner kills it within 100 ms, with no grace: under `linux` with every
+  process it started (its cgroup), a write of its arguments the program does not read dropped;
+  under `local` with its process group, then waiting at most `KillBounds::kill_settle`, so
+  a process that left the group (`setsid`, a daemon) is not killed and survives the cancel.
+  `run_child` returns within 7 s. The step is then refused
   `Cancelled: action <action>: <program> was ended by its cancel: …`, and the refusal ends the run
   (`EffectRefused`). The run's observation is kept with `cancelled: true`, no `exit` and a
   `runner_refusal` naming `Cancelled`, and counts against `budget.max_runs`; the placed

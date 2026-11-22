@@ -67,8 +67,10 @@ what is decided and the command that decides it.
 
 A host that runs the tree as a library (`run_tree`) can pass a cancel flag and set it from any
 thread. Set between steps, the run stops `Cancelled` before the next one, its `stopped` line
-naming the action that was to be taken next. Set during a step, the step's program is killed with
-every process it started, the step's `action finished` line holds the refusal `Cancelled: …` and
+naming the action that was to be taken next. Set during a step, the step's program is killed,
+under `substrate` with every process it started and under `local` with its process group only (so
+a process that left the group, started with `setsid` or as a daemon, survives the cancel), the
+step's `action finished` line holds the refusal `Cancelled: …` and
 no `exit` or `evidence`, and the run stops `Cancelled` naming that action, within 10 s of the
 flag. `tree status` shows the case's `stop` `Cancelled`, its `stop_next`, and `cancelled: true` on
 the cancelled run; a cancelled run counts against the action's `budget.max_runs`.
