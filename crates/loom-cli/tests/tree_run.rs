@@ -51,6 +51,8 @@ mod person_program;
 mod principal;
 #[path = "tree_run/signals.rs"]
 mod signals;
+#[path = "tree_run/stop.rs"]
+mod stop;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-two-level");
 

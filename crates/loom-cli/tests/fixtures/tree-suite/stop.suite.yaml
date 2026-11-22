@@ -1,0 +1,18 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: tour@1
+  bindings: bindings/tour.bindings.yaml
+  seed: [{from: stubs, to: stubs}, {from: seeds/route.txt, to: route.txt}]
+cycles:
+  - name: run-stop
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: stop, name: stopped}
+      - {do: resume, exit: {not: 0}, refusal: TreeStopped}
+      - {do: reopen, name: reopened}
+      - {do: run, rounds: 1, exit: 3}
+    expect:
+      checks:
+        - {check: count, name: one-stop-recorded, select: [{log: {case: ".", event: StopRecorded}}], is: 1}
+        - {check: count, name: one-stop-lifted, select: [{log: {case: ".", event: StopLifted}}], is: 1}

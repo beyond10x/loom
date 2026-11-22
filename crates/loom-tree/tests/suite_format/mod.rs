@@ -1242,11 +1242,7 @@ fn runbooks_cycle_shapes_decode() {
         .collect();
     assert_eq!(
         waiting,
-        [
-            ("bugfix-full".to_owned(), "StopRecorded".to_owned()),
-            ("run-stop".to_owned(), "stop".to_owned()),
-            ("replay-unchanged".to_owned(), "replay".to_owned()),
-        ]
+        [("replay-unchanged".to_owned(), "replay".to_owned())]
     );
     assert!(started.elapsed() < BOUND);
 }
@@ -1269,4 +1265,56 @@ fn when_reads_the_catalog_and_the_suite() {
         |entry| declared.contains(entry.name) && entry.availability == Availability::Available
     ));
     reading.within_bound();
+}
+
+/// `story:tree-suite-stop-resume-reopen-steps`, test 11: the three hold steps and the two hold
+/// events run; `allow` and `Labelled` still wait; a hold step takes no `case`.
+#[test]
+fn the_stop_kinds_are_available() {
+    let started = Instant::now();
+    let availability = |used: KindUse, name: &str| {
+        SUITE_AVAILABILITY
+            .iter()
+            .find(|entry| entry.used == used && entry.name == name)
+            .unwrap_or_else(|| panic!("{name} is not in the table"))
+            .availability
+    };
+    for step in ["stop", "resume", "reopen"] {
+        assert_eq!(
+            availability(KindUse::Step, step),
+            Availability::Available,
+            "{step}"
+        );
+    }
+    for event in ["StopRecorded", "StopLifted"] {
+        assert_eq!(
+            availability(KindUse::Event, event),
+            Availability::Available,
+            "{event}"
+        );
+    }
+    let waits = Availability::Waits("story:tree-stop-record-and-labels");
+    assert_eq!(availability(KindUse::Step, "allow"), waits);
+    assert_eq!(availability(KindUse::Event, "Labelled"), waits);
+    let head = "format: loom.tree-suite/1\ndefaults: {protocol: tour@1, bindings: b.yaml}\n";
+    for kind in ["stop", "resume", "reopen"] {
+        let refused = decode_suite(&format!(
+            "{head}cycles:\n  - name: one\n    steps: [{{do: open}}, {{do: {kind}, case: x}}]\n"
+        ))
+        .unwrap_err();
+        assert_eq!(
+            (refused.reason(), refused.member()),
+            (
+                SuiteRefusalReason::MemberUndeclared,
+                Some("cycles[0].steps[1].case")
+            ),
+            "{kind}: {refused}"
+        );
+    }
+    let decoded = decode_suite(&format!(
+        "{head}cycles:\n  - name: one\n    steps: [{{do: open}}, {{do: stop, principal: p, reason: why}}, {{do: resume}}, {{do: reopen, principal: p}}]\n"
+    ))
+    .unwrap();
+    assert_eq!(decoded.cycles[0].steps.len(), 4);
+    assert!(started.elapsed() < BOUND);
 }

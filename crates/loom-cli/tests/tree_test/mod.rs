@@ -959,3 +959,52 @@ fn the_help_names_the_workers_the_selection_and_the_refusals() {
     }
     within_bound(started);
 }
+
+/// Acceptance for `story:tree-suite-stop-resume-reopen-steps`: `run_suite` over a suite of the one
+/// cycle `suite`, in process, its report; the scratch directory removed.
+fn ran_alone(suite: &str, label: &str) -> SuiteReport {
+    let scratch = fresh_scratch(label);
+    let report = run_suite(
+        &Path::new(FIXTURE).join(suite),
+        &local_settings(scratch.clone()),
+        None,
+        None,
+    )
+    .unwrap();
+    let _ = fs::remove_dir_all(&scratch);
+    report
+}
+
+/// `story:tree-suite-stop-resume-reopen-steps`, test 8: Runbook's `run-stop` cycle, `stop`,
+/// `resume` refused `TreeStopped`, `reopen` and a run that goes on, passes, with one
+/// `StopRecorded` and one `StopLifted` line in the root's log.
+#[test]
+fn the_stop_steps_run_as_runbooks_cycle() {
+    let started = Instant::now();
+    let suite =
+        b10x_loom_tree::suite::read_suite(&Path::new(FIXTURE).join("stop.suite.yaml")).unwrap();
+    let steps: Vec<String> = suite.cycles[0]
+        .steps
+        .iter()
+        .map(|step| format!("{:?}", step.r#do))
+        .collect();
+    assert_eq!(steps, ["Open", "Run", "Stop", "Resume", "Reopen", "Run"]);
+    let report = ran_alone("stop.suite.yaml", "stop-steps");
+    let cycle = &report.cycles[0];
+    assert_eq!(cycle.waits_for, None, "{report:?}");
+    assert!(cycle.run && cycle.as_expected, "{report:?}");
+    assert_eq!((report.expected, report.as_expected), (1, 1), "{report:?}");
+    within_bound(started);
+}
+
+/// `story:tree-suite-stop-resume-reopen-steps`, test 9: `resume` on a tree no hold was recorded
+/// for is an ordinary `tree run`.
+#[test]
+fn a_resume_of_a_running_tree_runs() {
+    let started = Instant::now();
+    let report = ran_alone("resume.suite.yaml", "resume-runs");
+    let cycle = &report.cycles[0];
+    assert_eq!(cycle.waits_for, None, "{report:?}");
+    assert!(cycle.run && cycle.as_expected, "{report:?}");
+    within_bound(started);
+}
