@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:tree-status-names-what-it-read
 kind: story
-status: proposed
+status: active
 title: tree status lists the protocols it used, says when a case's run log did not verify, and names the budget that ended a run
 summary: protocols[] filled from the catalog with the sha256 of each protocol's own bytes, a log member per case, an optional budget member on the stopped line (Cancel, MaxSteps, MaxWallSeconds); after child-record-in-the-run-log, before concurrent-confined-runs
 tags:
@@ -13,9 +13,10 @@ relations:
 - depends_on: story:tree-run-command
 - depends_on: story:open-children-from-arguments-from
 - depends_on: story:child-record-in-the-run-log
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T04:36:53Z", actor: "agent:loom", revision: 4}
+- {from: "proposed", to: "active", at: "2026-11-22T09:21:00Z", actor: "agent:sdc", revision: 5, executor: "agent:loom", correlation: "runbook-tree-status-2026-11-22"}
 ---
 ## Outcome
 
