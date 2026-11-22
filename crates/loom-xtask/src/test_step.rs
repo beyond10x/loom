@@ -746,15 +746,28 @@ mod tests {
 
     /// A report whose `tree_run` tests take `seconds` each, beside one test of another binary.
     fn tree_run_report(seconds: &[f64]) -> String {
-        let mut xml = String::from(
+        tree_run_report_in("b10x-loom-cli::tree_run", "", seconds)
+    }
+
+    /// A report whose `tree_run` tests take `seconds` each in the test binary `binary`, each named
+    /// `<prefix>case_<n>`, beside one test of another binary and, in `binary`, one test of another
+    /// module that takes 50 s.
+    fn tree_run_report_in(binary: &str, prefix: &str, seconds: &[f64]) -> String {
+        let mut xml = format!(
             r#"<testsuites name="nextest-run">
-    <testsuite name="b10x-loom-cli::tree_run" tests="2">
-"#,
+    <testsuite name="{binary}" tests="2">
+"#
         );
         for (n, time) in seconds.iter().enumerate() {
             xml.push_str(&format!(
-                "        <testcase name=\"case_{n}\" classname=\"b10x-loom-cli::tree_run\" \
+                "        <testcase name=\"{prefix}case_{n}\" classname=\"{binary}\" \
                  timestamp=\"t\" time=\"{time:.3}\"/>\n"
+            ));
+        }
+        if !prefix.is_empty() {
+            xml.push_str(&format!(
+                "        <testcase name=\"run_events::other\" classname=\"{binary}\" \
+                 timestamp=\"t\" time=\"50.000\"/>\n"
             ));
         }
         xml.push_str(
@@ -766,6 +779,109 @@ mod tests {
 "#,
         );
         xml
+    }
+
+    /// A starts file of one line over the bound fails the step, naming `tree_run`, the count and
+    /// the bound; one at the bound passes; and tests of the module that ran with no starts file
+    /// fail it, since then nothing was counted.
+    #[test]
+    fn a_module_over_its_start_budget_fails_the_step() {
+        let budget = &START_BUDGETS[0];
+        assert_eq!(budget.variable, "LOOM_TREE_RUN_STARTS");
+        let ran = parse_junit(&tree_run_report(&[1.0, 2.0]));
+        let lines =
+            |count: usize| -> String { (0..count).map(|n| format!("case_{}\n", n % 2)).collect() };
+        let over = budget.bound + 1;
+        let (text, failure) = start_verdict(budget, &ran, Some(&lines(over)));
+        let failure = failure.expect("a start over the bound fails the step");
+        assert!(
+            failure.contains("tree_run")
+                && failure.contains(&format!("{over} starts"))
+                && failure.contains(&format!("{} ", budget.bound)),
+            "{failure}"
+        );
+        assert!(
+            text.contains("tree_run") && text.contains(&format!("{over} starts")),
+            "{text}"
+        );
+
+        let (text, failure) = start_verdict(budget, &ran, Some(&lines(budget.bound)));
+        assert_eq!(failure, None, "{text}");
+        assert!(text.contains(&format!("{} starts", budget.bound)), "{text}");
+
+        let (_, failure) = start_verdict(budget, &ran, None);
+        assert!(
+            failure.is_some_and(|failure| failure.contains("no start")),
+            "tests that ran counting nothing pass"
+        );
+        let other = parse_junit(REPORT);
+        let (text, failure) = start_verdict(budget, &other, None);
+        assert_eq!((text.as_str(), failure), ("", None));
+    }
+
+    /// The `tree_run` tests are held to their summed budget in both layouts of
+    /// `story:one-test-binary-per-crate`: as the binary `b10x-loom-cli::tree_run`, and as the
+    /// module `tree_run` of `b10x-loom-cli::main`, its tests named `tree_run::…`. Another module of
+    /// `main` is not counted with them.
+    #[test]
+    fn the_budgets_select_tree_run_in_its_own_binary_and_in_main() {
+        for (binary, prefix) in [
+            ("b10x-loom-cli::tree_run", ""),
+            ("b10x-loom-cli::main", "tree_run::"),
+        ] {
+            let over = parse_junit(&tree_run_report_in(binary, prefix, &[30.5, 30.5]));
+            let (text, failures) =
+                verdict(&over, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
+            assert_eq!(failures.len(), 1, "{binary}: {failures:?}");
+            assert!(
+                failures[0].contains("tree_run")
+                    && failures[0].contains("61.0 s")
+                    && failures[0].contains("60 s"),
+                "{binary}: {failures:?}"
+            );
+            assert!(
+                text.contains("61.0 s summed over 2 test(s)"),
+                "{binary}: {text}"
+            );
+
+            let within = parse_junit(&tree_run_report_in(binary, prefix, &[30.0, 29.0]));
+            let (text, failures) =
+                verdict(&within, Some(0), Some(0), Duration::from_secs(70), 1.0, 1.0);
+            assert!(failures.is_empty(), "{binary}: {failures:?}");
+            assert!(
+                text.contains("59.0 s summed over 2 test(s)"),
+                "{binary}: {text}"
+            );
+        }
+    }
+
+    /// The filter of the override that kills a `tree_run` test at 20 s: the binary while it is its
+    /// own, or its module in `b10x-loom-cli::main`; never a `slow_` test, since the default
+    /// profile's overrides apply to the slow profile too.
+    const TREE_RUN_FILTER: &str = "(binary_id(b10x-loom-cli::tree_run) or \
+        (binary_id(b10x-loom-cli::main) and test(/^tree_run::/))) and not test(/(^|::)slow_/)";
+
+    #[test]
+    fn the_tree_run_override_holds_in_both_layouts() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let overrides = config["profile"]["default"]["overrides"]
+            .as_array()
+            .unwrap();
+        let held: Vec<&toml::Value> = overrides
+            .iter()
+            .filter(|table| table["filter"].as_str() == Some(TREE_RUN_FILTER))
+            .collect();
+        assert_eq!(
+            held.len(),
+            1,
+            "one override has the filter {TREE_RUN_FILTER:?}: {overrides:?}"
+        );
+        let limit = &held[0]["slow-timeout"];
+        assert_eq!(limit["period"].as_str(), Some("20s"), "{limit:?}");
+        assert_eq!(limit["terminate-after"].as_integer(), Some(1), "{limit:?}");
     }
 
     #[test]

@@ -3236,3 +3236,217 @@ fn the_tree_run_binary_has_the_20_s_override() {
     });
     assert!(held, "no override kills a test of {id} at 20 s:\n{config}");
 }
+
+// ---- the start budget (story:tree-run-tests-fit-the-test-budget) ---------------------------------
+
+/// The text of this file and of each module of it, by path relative to `tests/`.
+fn test_sources() -> Vec<(String, String)> {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut sources = vec![(
+        "tree_run.rs".to_owned(),
+        fs::read_to_string(tests.join("tree_run.rs")).unwrap(),
+    )];
+    let mut modules: Vec<PathBuf> = fs::read_dir(tests.join("tree_run"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "rs"))
+        .collect();
+    modules.sort();
+    for module in modules {
+        let name = format!("tree_run/{}", module.file_name().unwrap().to_string_lossy());
+        sources.push((name, fs::read_to_string(&module).unwrap()));
+    }
+    assert!(
+        sources.len() >= 5,
+        "{:?}",
+        sources.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    );
+    sources
+}
+
+/// The innermost item of `text` that holds byte `at`, as `fn <name>` or `const <name>`: a function
+/// from its `fn` line to the `}` at that line's indentation, a constant to the end of its line.
+fn item_at(text: &str, at: usize) -> String {
+    let mut offset = 0;
+    let mut holding = String::new();
+    for line in text[..at].split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let item = trimmed.strip_prefix("pub ").unwrap_or(trimmed);
+        for head in ["fn ", "const "] {
+            let Some(rest) = item.strip_prefix(head) else {
+                continue;
+            };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            let end = if head == "fn " {
+                let close = format!("\n{}}}\n", &line[..line.len() - trimmed.len()]);
+                text[offset..]
+                    .find(&close)
+                    .map_or(text.len(), |end| offset + end + close.len())
+            } else {
+                text[offset..]
+                    .find('\n')
+                    .map_or(text.len(), |end| offset + end)
+            };
+            if end > at {
+                holding = format!("{head}{name}");
+            }
+        }
+        offset += line.len();
+    }
+    holding
+}
+
+/// The body of the function or method `name` of `text`: from its `fn` line to the first line that
+/// is `}` alone at the indentation of that line.
+fn body_of<'a>(text: &'a str, name: &str) -> &'a str {
+    let head = format!("fn {name}(");
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed
+            .strip_prefix("pub ")
+            .unwrap_or(trimmed)
+            .starts_with(&head)
+        {
+            let close = format!("\n{}}}\n", &line[..line.len() - trimmed.len()]);
+            let end = text[offset..]
+                .find(&close)
+                .map_or(text.len(), |end| offset + end + close.len());
+            return &text[offset..end];
+        }
+        offset += line.len();
+    }
+    panic!("no function {name}")
+}
+
+/// Every start of `b10x-loom` in these tests goes through [`with_the_switch`], which counts it:
+/// the binary's path is named at three sites only, [`Tree::command`], the `BINARY` of the
+/// delegated module, whose every use that starts it is in a function that calls
+/// `with_the_switch`, and [`ended_digest`], which reads its bytes and starts nothing.
+#[test]
+fn every_start_goes_through_with_the_switch() {
+    let needle = concat!("CARGO_BIN_EXE_", "b10x-loom");
+    let mut sites = Vec::new();
+    for (name, text) in test_sources() {
+        let mut from = 0;
+        while let Some(at) = text[from..].find(needle) {
+            sites.push((name.clone(), item_at(&text, from + at)));
+            from += at + needle.len();
+        }
+        if name == "tree_run/delegated_cgroup.rs" {
+            let mut from = 0;
+            while let Some(at) = text[from..].find("BINARY") {
+                let at = from + at;
+                from = at + "BINARY".len();
+                let line_start = text[..at].rfind('\n').map_or(0, |start| start + 1);
+                let line =
+                    &text[line_start..text[at..].find('\n').map_or(text.len(), |end| at + end)];
+                if line.contains("const BINARY") || line.contains("canonicalize(BINARY)") {
+                    continue;
+                }
+                let item = item_at(&text, at);
+                let function = item
+                    .strip_prefix("fn ")
+                    .unwrap_or_else(|| panic!("{name}: BINARY used outside a function: {line}"));
+                assert!(
+                    body_of(&text, function).contains("with_the_switch"),
+                    "{name}: {item} starts BINARY without with_the_switch: {line}"
+                );
+            }
+        }
+    }
+    sites.sort();
+    assert_eq!(
+        sites,
+        [
+            ("tree_run.rs".to_owned(), "fn command".to_owned()),
+            ("tree_run.rs".to_owned(), "fn ended_digest".to_owned()),
+            (
+                "tree_run/delegated_cgroup.rs".to_owned(),
+                "const BINARY".to_owned()
+            ),
+        ],
+        "the binary is named where no start is counted"
+    );
+    assert!(
+        body_of(&test_sources()[0].1, "command").contains("with_the_switch"),
+        "Tree::command does not count its start"
+    );
+}
+
+/// Each command of `b10x-loom tree` keeps one test that starts it and compares what it printed or
+/// wrote with the library's value: `(test, command, the call that starts it, the library call)`.
+const THROUGH_THE_BINARY: [(&str, &str, &str, &str); 6] = [
+    (
+        "two_opens_with_the_same_at_write_the_same_bytes",
+        "open",
+        ".open_started(",
+        "open_tree(",
+    ),
+    (
+        "a_one_case_tree_runs_through_its_waits_to_its_outcome",
+        "run",
+        ".run_started(",
+        "run_tree(",
+    ),
+    (
+        "the_printed_status_is_the_value_of_tree_status",
+        "status",
+        r#".tree("status")"#,
+        "tree_status(",
+    ),
+    (
+        "a_case_with_two_legitimate_outcomes_waits_for_tree_close",
+        "close",
+        ".printed(",
+        "b10x_loom_tree::close(",
+    ),
+    (
+        "tree_verify_names_the_case_and_line_of_a_changed_byte",
+        "verify",
+        r#".tree("verify")"#,
+        "verify_tree(",
+    ),
+    (
+        "an_approval_is_recorded_for_one_case_one_capability_and_its_revision",
+        "approve",
+        r#""approve""#,
+        "b10x_loom_tree::approve(",
+    ),
+];
+
+/// Each of [`THROUGH_THE_BINARY`] exists, starts its command through [`Tree::command`] or a helper
+/// of it, and calls its library function.
+#[test]
+fn each_command_keeps_one_test_through_the_binary() {
+    let text = &test_sources()[0].1;
+    let mut missing = Vec::new();
+    for (test, command, starts, library) in THROUGH_THE_BINARY {
+        let body = body_of(text, test);
+        if !body.contains(starts) {
+            missing.push(format!("{test} does not start `tree {command}` ({starts})"));
+        } else if let Some(helper) = starts
+            .strip_prefix('.')
+            .and_then(|call| call.strip_suffix('('))
+        {
+            if !body_of(text, helper).contains("self.command()") {
+                missing.push(format!(
+                    "{helper} does not start b10x-loom through Tree::command"
+                ));
+            }
+        } else if !(body.contains(".command()") || body.contains(r#".tree(""#)) {
+            missing.push(format!(
+                "{test} does not start b10x-loom through Tree::command"
+            ));
+        }
+        if !body.contains(library) {
+            missing.push(format!(
+                "{test} does not compare `tree {command}` with the library ({library})"
+            ));
+        }
+    }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
+}
