@@ -45,7 +45,7 @@ scope:
   path: website/docs/guides/run-a-case-tree.md
 - confidence: cited
   path: website/docs/reference/cli.md
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T02:06:20Z", actor: "agent:loom", revision: 6}
 ---
@@ -64,6 +64,13 @@ type for it yet). That value gains two members:
 `b10x-loom tree run` gains `--program-path <dirs>`. The CLI sets both members, the source to
 `command line`, the spelling of the source label that `story:engine-agents-section` uses for a
 flag.
+
+Only the operator sets the value: the `--program-path` flag or the library call that builds the
+run settings. A bindings document, a request's arguments, an `arguments_from` output and a report
+can never add, remove or reorder an entry.
+
+Security-relevant: yes. The value decides which host directories every bound program of the run
+can read and execute from, mounted read-only into the sandbox. The unit gets a security review.
 
 **Where the value goes.** `ProgramEffects::with_program_path(self, path) -> Self` stores the
 checked value on the port. `ProgramEffects::new` (`crates/loom-bindings/src/program.rs:132-150`)
@@ -97,7 +104,15 @@ starts no process and writes no line. The refusal is `ProgramPathUnusable`, a ne
 - an entry is empty (a leading, trailing or doubled `:`);
 - an entry is not absolute;
 - an entry has a `..` component;
-- an entry is not an existing directory.
+- an entry is not an existing directory;
+- an entry is the host's home directory or holds it, or is, holds or lies inside one of the
+  credential locations `story:bound-program-declares-its-environment` refuses as a root (`~/.ssh`,
+  `~/.gnupg`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.docker`, `~/.config/gh`, `~/.config/gcloud`,
+  `~/.netrc`, `~/.git-credentials`, `~/.npmrc`, `~/.pypirc`, `~/.cargo/credentials`,
+  `~/.cargo/credentials.toml`). A `PATH` entry is not exempt: under a runner that is not `local`
+  it is mounted read-only like a declared root, and a program whose input the model chose can
+  read it. Under `local` the same rule holds, so a value has one verdict under both runners. An
+  entry under the home directory that is none of these, such as `~/.cargo/bin`, is admitted.
 
 Under a runner that is not `local`, three more cases are refused, each of which the mount would
 refuse later at launch with `ScopeInvalid` (`confinement.rs:1242-1259`):
@@ -197,6 +212,11 @@ existing files, which become modules of `tests/main.rs` under `story:one-test-bi
 - A request argument, an `arguments_from` output, a report and a bindings document that each
   name `PATH` change nothing: the program's `PATH` is the run's value. Test:
   `nothing_but_the_runs_settings_sets_the_program_path`.
+- With `HOME` set for the test process to a fixture home under `CARGO_TARGET_TMPDIR` holding an
+  `.ssh/x/` and a `.cargo/bin/`, the values `<home>`, `<home>/.ssh`, `<home>/.ssh/x` and `/`
+  (which holds the home) are each refused `ProgramPathUnusable` naming the rule, under `local` and
+  under a runner that is not `local`, with no process started; `<home>/.cargo/bin` is admitted.
+  Test: `a_program_path_entry_at_home_or_a_credential_location_is_refused`.
 - The intake slice's command path keeps the process's `PATH`. Command:
   `git diff --stat $(git merge-base main HEAD)..HEAD -- crates/loom-intake-slice/src/bindings.rs`
   prints nothing.

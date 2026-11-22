@@ -19,10 +19,12 @@ scope:
 - confidence: cited
   path: crates/loom-intake-slice/Cargo.toml
 - confidence: cited
+  path: crates/loom-intake-slice/src/confinement.rs
+- confidence: cited
   path: crates/loom-intake-slice/tests/host_git_hardening.rs
 - confidence: cited
   path: crates/loom-xtask/
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-22T05:46:20Z", actor: "agent:loom", revision: 5}
 - {from: "proposed", to: "active", at: "2026-11-22T05:48:22Z", actor: "agent:sdc", revision: 6, executor: "agent:loom", correlation: "runbook-activation-2026-11-22T0549Z"}

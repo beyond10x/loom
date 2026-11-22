@@ -1,5 +1,5 @@
 use loom_protocols::{
-    InstallStore, ProtocolCatalog, ProtocolSource, SYSTEM_QUERY_YAML, SourceKind,
+    ArgumentSchema, InstallStore, ProtocolCatalog, ProtocolSource, SYSTEM_QUERY_YAML, SourceKind,
 };
 use std::{fs, path::Path, process::Command};
 fn memory() -> ProtocolSource {
@@ -579,6 +579,114 @@ fn concurrent_installations_preserve_complete_atomic_catalog_snapshots() {
     }
     store.remove("seed@1").unwrap();
     assert!(store.catalog().unwrap().get("seed@1").is_none());
+}
+
+/// A one-action protocol whose action `probe.run` declares `arguments` as `schema`, a YAML flow
+/// value; `None` declares none.
+fn with_arguments(schema: Option<&str>) -> String {
+    const PROBE: &str = r"format: protocol/1
+protocol:
+  id: argument.probe
+  revision: 1
+artifacts:
+  item: {}
+evidence_kinds:
+  probed: {}
+claims:
+  item.probed:
+    true_when:
+      evidence:
+        kind: probed
+        subject: item
+actions:
+  probe.run:
+    effect: read
+ARGUMENTS    may_produce:
+      - evidence: probed
+  probe.idle:
+    effect: none
+outcomes:
+  done:
+    requires:
+      claim: item.probed
+";
+    let arguments = schema.map_or_else(String::new, |schema| format!("    arguments: {schema}\n"));
+    PROBE.replace("ARGUMENTS", &arguments)
+}
+
+/// `add_yaml` adds no argument check of its own: Canon's validation refuses a schema whose top
+/// level is not `type: object`, and the refusal names the action.
+#[test]
+fn a_protocol_whose_argument_schema_is_not_an_object_schema_is_refused_naming_the_action() {
+    let mut catalog = ProtocolCatalog::default();
+    let refused = catalog
+        .add_yaml(
+            "argument-probe@1",
+            &with_arguments(Some("{type: string}")),
+            memory(),
+        )
+        .expect_err("a string schema is no object schema");
+    assert!(refused.contains("probe.run"), "{refused}");
+    assert!(refused.contains("ActionArguments"), "{refused}");
+    assert!(catalog.get("argument-probe@1").is_none());
+}
+
+/// A `$ref` under `properties` is outside Canon's dialect: the protocol is refused, naming the
+/// action, and nothing is added.
+#[test]
+fn a_protocol_whose_argument_schema_is_outside_canons_dialect_is_refused_naming_the_action() {
+    let mut catalog = ProtocolCatalog::default();
+    let refused = catalog
+        .add_yaml(
+            "argument-probe@1",
+            &with_arguments(Some(
+                "{type: object, properties: {target: {$ref: '#/defs/target'}}}",
+            )),
+            memory(),
+        )
+        .expect_err("a $ref is outside the dialect");
+    assert!(refused.contains("probe.run"), "{refused}");
+    assert!(refused.contains("$ref"), "{refused}");
+    assert!(catalog.get("argument-probe@1").is_none());
+}
+
+/// `argument_schema` reads the action's declared schema, `Undeclared` for an action that declares
+/// none, and `None` for an action the protocol does not declare; `argument_schemas` lists every
+/// action with its schema in declaration order.
+#[test]
+fn argument_schema_reads_the_declared_schema_and_undeclared_otherwise() {
+    let mut catalog = ProtocolCatalog::default();
+    catalog
+        .add_yaml(
+            "argument-probe@1",
+            &with_arguments(Some(
+                "{type: object, properties: {limit: {type: integer}}, required: [limit]}",
+            )),
+            memory(),
+        )
+        .expect("the probe protocol is valid");
+    let entry = catalog.get("argument-probe@1").unwrap();
+    let declared = serde_json::json!({
+        "type": "object",
+        "properties": {"limit": {"type": "integer"}},
+        "required": ["limit"]
+    });
+    assert_eq!(
+        entry.argument_schema("probe.run"),
+        Some(ArgumentSchema::Declared(declared.clone()))
+    );
+    assert_eq!(
+        entry.argument_schema("probe.idle"),
+        Some(ArgumentSchema::Undeclared)
+    );
+    assert_eq!(entry.argument_schema("probe.unknown"), None);
+    assert_eq!(
+        entry.argument_schemas(),
+        vec![
+            ("probe.run".to_owned(), Some(declared)),
+            ("probe.idle".to_owned(), None),
+        ]
+    );
 }
 
 #[test]
