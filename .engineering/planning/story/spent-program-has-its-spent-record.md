@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:spent-program-has-its-spent-record
 kind: story
-status: draft
+status: active
 title: A bound program whose run allowance is spent for good has its spent record, whatever ended the run that spent it
 summary: 'Runbook: a counted last run that records nothing (cancelled, ResultNotInTable, a timeout outside the table, ReportUnreadable, a signal, a runner refusal, ChangedByNonWriter) leaves runs >= max_runs and no spent record, so the tree stops (exit 4); D1 a: the offer of an allowance spent for good writes the missing from: runs record, starting nothing; under runs_per: rejection only at rework count >= rework_limit, so D10 of the rework story holds'
 tags:
@@ -40,7 +40,10 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/reference/.generated.json
-revision: 22
+revision: 24
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T23:56:34Z", actor: "agent:sdc", revision: 23, executor: "agent:loom", correlation: "wave-2026-11-23-w8-spent-program-has-its-spent-record"}
+- {from: "proposed", to: "active", at: "2026-11-23T23:56:34Z", actor: "agent:sdc", revision: 24, executor: "agent:loom", correlation: "wave-2026-11-23-w8-spent-program-has-its-spent-record"}
 ---
 ## Outcome
 
