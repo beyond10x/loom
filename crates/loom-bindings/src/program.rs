@@ -61,7 +61,9 @@
 //! runner refusal or a blob failure ends the step; then, for
 //! each `evidence` entry, the value its `from` names (the exit code, `timeout` for a run killed at
 //! its timeout, or the JSON pointer into the report, one JSON object within `MAX_REPORT_BYTES`)
-//! looked up in its `results`, falling to `*`. A value neither lists is `ResultNotInTable`, a
+//! looked up in its `results`, falling to `*`, but for a run killed at its timeout only the
+//! `timeout` row matches (`story:wildcard-result-row-does-not-match-timeout`; a `from: runs` entry
+//! is not affected). A value no row matches is `ResultNotInTable`, a
 //! report that cannot be read `ReportUnreadable`; either records nothing. Otherwise one record per
 //! entry is submitted, of the entry's kind about its subject, with the entry's producer, the
 //! observation's instant, and the revisions the case holds for the subject and the `upstream`
@@ -459,16 +461,28 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
                     }
                 }
             };
-            let Some(result) = look_up(entry, value.as_deref()) else {
+            // The run's condition, not the string's: a run killed at its timeout matches only a
+            // `timeout` row. A `from: runs` entry reads the run count, never the run.
+            let timed_out = execution.timed_out && entry.from != ResultSource::Runs;
+            let Some(result) = look_up(entry, value.as_deref(), timed_out) else {
                 self.write(&targets, Vec::new())?;
-                return Ok(refusal(
-                    ProgramRefusalReason::ResultNotInTable,
-                    action,
+                let detail = if timed_out {
+                    format!(
+                        "the run was killed at its timeout_seconds ({} s), and the results of the {} entry name no {TIMEOUT_KEY}; {ANY_KEY} does not match a timeout",
+                        binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS),
+                        entry.kind
+                    )
+                } else {
                     format!(
                         "the value {:?} of the {} entry is not in its results, which list no {ANY_KEY}",
                         value.as_deref().unwrap_or("(none)"),
                         entry.kind
-                    ),
+                    )
+                };
+                return Ok(refusal(
+                    ProgramRefusalReason::ResultNotInTable,
+                    action,
+                    detail,
                 ));
             };
             let revision_of = |artifact: &str| {
@@ -1362,12 +1376,16 @@ fn value_of(
     }
 }
 
-/// The result `entry`'s table gives `value`, falling to its `*` row: `Some(None)` for a row that
-/// names no result, `None` when neither row is there.
-fn look_up(entry: &EvidenceEntry, value: Option<&str>) -> Option<Option<String>> {
+/// The result `entry`'s table gives `value`, falling to its `*` row unless the run was killed at
+/// its timeout (`timed_out`): `Some(None)` for a row that names no result, `None` when no row
+/// matches.
+fn look_up(entry: &EvidenceEntry, value: Option<&str>, timed_out: bool) -> Option<Option<String>> {
     let row = |key: &str| entry.results.iter().find(|rule| rule.value == key);
-    value
-        .and_then(row)
+    let found = value.and_then(row);
+    if timed_out {
+        return found.map(|rule| rule.result.clone());
+    }
+    found
         .or_else(|| row(ANY_KEY))
         .map(|rule| rule.result.clone())
 }

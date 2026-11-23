@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** a program binding's "*" row no longer matches a run killed at its timeout_seconds: such a run is refused ResultNotInTable, records nothing and its action is set aside, so a case that took the "*" result for a timeout and went on (a retry, a given_up outcome) now stops Stuck. Add a "timeout" row (for example "timeout": failed) to every table that relied on "*" for it (story:wildcard-result-row-does-not-match-timeout)
+
 ## [0.60.0] - 2026-11-23
 
 ### Added

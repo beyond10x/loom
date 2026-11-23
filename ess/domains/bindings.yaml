@@ -454,7 +454,8 @@ types:
         type: List<loom.bindings.ArtifactRevision>
 
   # Why the program effect port refuses a step: the value read is a key neither the table nor its
-  # `*` lists (`ResultNotInTable`, a timeout reads the key `timeout`); the report is not one JSON
+  # `*` lists (`ResultNotInTable`, a timeout reads the key `timeout`, and `*` does not match a run
+  # killed at its timeout); the report is not one JSON
   # object within 1 MiB or lacks the pointer (`ReportUnreadable`); the `arguments_from` argv did
   # not exit 0 or printed anything but one JSON object within 1 MiB (`ArgumentsUnreadable`, the
   # bound program is not started); the action has run its `budget.max_runs` times in the case

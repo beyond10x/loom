@@ -458,12 +458,20 @@ fn exit_case(
 /// Runs `body` as the program bound to [`CHECK`] with the table `{"ok": valid, "*": invalid}`
 /// read at the pointer `/status` of its report.
 fn pointer_case(body: &str) -> (CanonGovernor<MemoryCaseStore>, Scratch, LoopEnd) {
+    pointer_case_with(body, "")
+}
+
+/// [`pointer_case`] with the action `members`.
+fn pointer_case_with(
+    body: &str,
+    members: &str,
+) -> (CanonGovernor<MemoryCaseStore>, Scratch, LoopEnd) {
     let scratch = Scratch::new();
     let program = scratch.marking("program.sh", body);
     let document = document(&bound(
         CHECK,
         &[&program],
-        "",
+        members,
         &[entry("gate", "/status", r#"{"ok": valid, "*": invalid}"#)],
     ));
     let governor = governor();
@@ -529,10 +537,16 @@ fn a_timeout_records_the_result_of_the_timeout_key() {
 
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
-fn a_timeout_without_a_timeout_key_falls_to_star() {
+fn a_timeout_is_not_matched_by_star() {
     let (governor, _scratch, end) = exit_case(SLEEPS, ONE_SECOND, VALID_TABLE);
-    assert_performed(&end);
-    assert_eq!(result_of(&record(&governor)), json!("invalid"));
+    let reason = refusal(&end);
+    assert!(reason.starts_with("ResultNotInTable"), "{reason}");
+    assert!(
+        reason.contains("killed at its timeout_seconds (1 s)"),
+        "{reason}"
+    );
+    assert!(reason.contains("* does not match a timeout"), "{reason}");
+    assert!(records(&governor).is_empty(), "{:#?}", records(&governor));
 }
 
 #[test]
@@ -541,7 +555,29 @@ fn a_timeout_with_neither_key_is_refused_result_not_in_table() {
     let (governor, _scratch, end) = exit_case(SLEEPS, ONE_SECOND, r#"{"0": valid}"#);
     let reason = refusal(&end);
     assert!(reason.starts_with("ResultNotInTable"), "{reason}");
+    assert!(
+        reason.contains("killed at its timeout_seconds (1 s)"),
+        "{reason}"
+    );
+    assert!(!reason.contains("which list no *"), "{reason}");
     assert!(records(&governor).is_empty());
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_pointer_entry_times_out_without_star() {
+    let (governor, _scratch, end) = pointer_case_with(SLEEPS, ONE_SECOND);
+    let reason = refusal(&end);
+    assert!(reason.starts_with("ResultNotInTable"), "{reason}");
+    assert!(records(&governor).is_empty(), "{:#?}", records(&governor));
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_report_value_timeout_still_falls_to_star() {
+    let (governor, _scratch, end) = pointer_case("printf '%s' '{\"status\": \"timeout\"}'\n");
+    assert_performed(&end);
+    assert_eq!(result_of(&record(&governor)), json!("invalid"));
 }
 
 #[test]
