@@ -1359,7 +1359,10 @@ fn decoded_one(text: &str) -> loom::bindings::BoundAction {
 #[test]
 fn runs_per_and_rework_limit_decode() {
     use loom::bindings::{RetryCondition, RunsScope};
-    let absent = decoded_one(&implement(Some("{code_review: [rejected]}"), "{max_runs: 2}"));
+    let absent = decoded_one(&implement(
+        Some("{code_review: [rejected]}"),
+        "{max_runs: 2}",
+    ));
     assert_eq!(absent.budget.runs_per, None);
     assert_eq!(absent.budget.rework_limit, None);
     assert_eq!(absent.budget.rework_on, None);
@@ -1465,7 +1468,10 @@ fn runs_per_and_rework_limit_refusals() {
     );
     budget(
         "rework_on",
-        implement(listed, "{max_runs: 1, rework_on: {code_review: [rejected]}}"),
+        implement(
+            listed,
+            "{max_runs: 1, rework_on: {code_review: [rejected]}}",
+        ),
     );
     budget(
         "rework_on",
@@ -1488,7 +1494,10 @@ fn runs_per_and_rework_limit_refusals() {
     for (action, executor) in [
         ("change.implement", "{kind: agent, adapter: a}"),
         ("change.open", "{kind: open, name: n, bindings: c.yaml}"),
-        ("change.copy", "{kind: copy, evidence: imported, from: other@1}"),
+        (
+            "change.copy",
+            "{kind: copy, evidence: imported, from: other@1}",
+        ),
     ] {
         for (member, budget) in members {
             let text = document(&format!(

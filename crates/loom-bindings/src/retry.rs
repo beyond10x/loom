@@ -23,7 +23,7 @@ use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::responsibility::{CaseId, GovernorError};
 use b10x_loom_commission::ports::effect::EffectError;
 use b10x_loom_intake_slice::confinement::ChildCommand;
-use loom::bindings::{BoundAction, RetryFeedback, RetryLog, RetryRecord};
+use loom::bindings::{BoundAction, RetryCondition, RetryFeedback, RetryLog, RetryRecord};
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 use sha2::{Digest as _, Sha256};
 
@@ -194,10 +194,7 @@ pub fn retry_records<S: FallibleCaseStore, T: EvaluationTime>(
         if kind != held.kind {
             continue;
         }
-        let listed = binding.retry_when.iter().any(|condition| {
-            condition.kind == kind && condition.results.iter().any(|listed| listed == result)
-        });
-        if !listed
+        if !lists(&binding.retry_when, kind, result)
             || subject_revision == NO_REVISION
             || revisions.get(subject).map(String::as_str) != Some(subject_revision)
         {
@@ -442,8 +439,17 @@ fn feedback_json(document: &RetryFeedback) -> serde_json::Value {
     })
 }
 
+/// Whether `conditions` (a `retry_when`, or a `budget.rework_on`) list a record of `kind` with
+/// `result`: the one match of [`retry_records`] and of a rejection
+/// (`story:rework-allowance-after-a-rejection`).
+pub(crate) fn lists(conditions: &[RetryCondition], kind: &str, result: &str) -> bool {
+    conditions.iter().any(|condition| {
+        condition.kind == kind && condition.results.iter().any(|listed| listed == result)
+    })
+}
+
 /// The text member `name` of the object `value`, when the object names it exactly once.
-fn only_text<'v>(value: &'v commission_json::Value, name: &str) -> Option<&'v str> {
+pub(crate) fn only_text<'v>(value: &'v commission_json::Value, name: &str) -> Option<&'v str> {
     let commission_json::Value::Object(members) = value else {
         return None;
     };

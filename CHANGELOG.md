@@ -14,6 +14,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Added
 
+- Bindings `budget.runs_per: case | rejection`, `budget.rework_limit` (default 2) and `budget.rework_on`: a rejection gives a `program` or `person` action a fresh `max_runs`; `RunsSpent` names the bound that ended it (story:rework-allowance-after-a-rejection)
+- **Breaking:** `loom::bindings::ActionBudget` gains `runs_per`, `rework_limit` and `rework_on`, and `loom::bindings::RunsScope` is new: a struct literal names the fields (story:rework-allowance-after-a-rejection)
 - `b10x-loom tree hold` and `tree reopen` (`b10x_loom_tree::hold`, `reopen`, `current_hold`): a principal's hold on a tree as a `StopRecorded` line in the root's run log and its lift as a `StopLifted` line naming it, under the store lock; refusals `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable` (story:tree-suite-stop-resume-reopen-steps)
 - `tree run` on a held tree is refused `TreeStopped`, exit 1, naming the hold and the `tree reopen` command, and writes nothing (story:tree-suite-stop-resume-reopen-steps)
 - Suite steps `stop` (member `reason`, default `suite step <label>`), `resume` and `reopen`, and the `log` events `StopRecorded` and `StopLifted`, run; the three steps take no `case` (story:tree-suite-stop-resume-reopen-steps)

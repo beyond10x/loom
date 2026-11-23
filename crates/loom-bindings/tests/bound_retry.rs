@@ -684,7 +684,8 @@ fn hold_citing(
 }
 
 /// Holds in `case` a record numbered `n` of `kind` about `draft` at `revision` with `result`, by
-/// `producer`, citing the observations `cited`; answers its evidence id.
+/// `producer`, citing the observations `cited`, at the instant of the first; answers its evidence
+/// id.
 fn hold_on(
     governor: &CanonGovernor<MemoryCaseStore>,
     case: &str,
@@ -693,6 +694,15 @@ fn hold_on(
     cited: Vec<ObservationId>,
     producer: &str,
 ) -> String {
+    let observed_at = governor
+        .try_observations()
+        .unwrap()
+        .into_iter()
+        .find(|observation| observation.observation_id == cited[0])
+        .expect("the cited observation is held")
+        .observed_at
+        .0
+        .clone();
     let id = Uuid(format!("00000000-0000-4000-9000-{n:012x}"));
     let facts = serde_json::json!({
         "format": "canon-evidence/1",
@@ -700,7 +710,7 @@ fn hold_on(
         "kind": kind,
         "subject": "draft",
         "subject_revision": revision,
-        "observed_at": HELD_AT,
+        "observed_at": observed_at,
         "result": result,
     });
     submit_evidence(
@@ -1946,7 +1956,11 @@ fn records_that_open_no_window() {
         case.run();
         let draft = case.draft();
         case.hold((kind, &draft, result), "checker", true);
-        assert_eq!(case.refused(), max_runs_text(1, None, 1), "{kind}: {result}");
+        assert_eq!(
+            case.refused(),
+            max_runs_text(1, None, 1),
+            "{kind}: {result}"
+        );
     }
     // Listed records citing an observation of another case: no window, one interval.
     let case = Rework::new(&one);
@@ -1954,7 +1968,11 @@ fn records_that_open_no_window() {
     for n in 1..=3 {
         let draft = case.draft();
         case.hold(("draft_check", &draft, "invalid"), "checker", false);
-        assert_eq!(case.refused(), max_runs_text(1, None, 1), "after record {n}");
+        assert_eq!(
+            case.refused(),
+            max_runs_text(1, None, 1),
+            "after record {n}"
+        );
     }
     // A listed record of the writer's own run.
     let case = Rework::with(
@@ -2103,11 +2121,10 @@ fn rework_on_tells_a_failed_check_from_a_rejection() {
         .try_observations()
         .unwrap()
         .into_iter()
-        .filter(|observation| {
+        .rfind(|observation| {
             observation.source == PROGRAM_SOURCE
                 && plain(&observation.payload)["action"] == serde_json::json!(CHECK)
         })
-        .last()
         .expect("the check's run")
         .observation_id;
     let draft = case.draft();

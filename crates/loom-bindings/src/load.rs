@@ -343,6 +343,26 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
             }
         }
     }
+    // A program's runs and a person's program's are counted (`prepare`); nothing else reads the
+    // members of `story:rework-allowance-after-a-rejection`. `runs_per` is named last: the other
+    // two are read only beside it.
+    if !matches!(kind, Executor::Program | Executor::Person) {
+        let budget = &bound.budget;
+        for (member, present) in [
+            ("rework_limit", budget.rework_limit.is_some()),
+            ("rework_on", budget.rework_on.is_some()),
+            ("runs_per", budget.runs_per.is_some()),
+        ] {
+            if present {
+                return Err(refuse(
+                    Reason::MemberNotForExecutor,
+                    id,
+                    format!("budget.{member}"),
+                    format!("belongs to the Program and Person executors, not {kind:?}"),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 

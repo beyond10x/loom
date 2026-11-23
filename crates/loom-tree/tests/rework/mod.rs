@@ -391,7 +391,12 @@ fn runbooks_shape_writes_spent_on_the_last_renewal() {
     }
     // Run 4, after the third rejection: one run in the window, the rework count at 3.
     let (run, lines) = tree.round();
-    assert_ran(&finished(&lines, "change.implement").into_iter().cloned().collect::<Vec<_>>());
+    assert_ran(
+        &finished(&lines, "change.implement")
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+    );
     assert_eq!(tree.records("implement_spent"), 1);
     tree.reject(&run, "change.review", "decider:x");
     assert_rework_spent(&tree, "decider:x", 3);
@@ -497,8 +502,14 @@ fn own_records_alone_open_no_window() {
             "{lines:#?}"
         );
     }
-    let refusal = writer[2].refusal.as_deref().expect("the third step is refused");
-    assert!(refusal.starts_with("RunsSpent: action work.do:"), "{refusal}");
+    let refusal = writer[2]
+        .refusal
+        .as_deref()
+        .expect("the third step is refused");
+    assert!(
+        refusal.starts_with("RunsSpent: action work.do:"),
+        "{refusal}"
+    );
     assert!(refusal.contains("budget.max_runs is 2"), "{refusal}");
     assert_eq!(tree.records("spent"), 0);
     assert_eq!(run.stop, TreeStop::Stuck, "{run:?}\n{lines:#?}");
