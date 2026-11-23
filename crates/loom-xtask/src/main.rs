@@ -64,6 +64,7 @@ mod ess_suite;
 mod linked_libraries;
 mod protocols_vendor;
 mod release;
+mod shared_trees;
 #[path = "../../loom-docs/src/stamp.rs"]
 mod stamp;
 mod test_step;
@@ -144,6 +145,14 @@ enum Command {
         #[arg(short = 'p', long = "package")]
         packages: Vec<String>,
     },
+    /// Build what is missing of the trees the `tree_run` tests share and their installed home,
+    /// under a key over the fixture, the builders, the sources of `b10x-loom` (its dep-info), the
+    /// lock file and the scope in `LOOM_TEST_SCOPE` (else `-p b10x-loom-cli`); remove those of
+    /// another key first; export the key to nextest's `NEXTEST_ENV`. nextest runs it as the setup
+    /// script of `binary_id(b10x-loom-cli::tree_run)`, the test step before its timed run. Run
+    /// after a build of another scope without `LOOM_TEST_SCOPE`, its `cargo test` may build again
+    /// and replace the `b10x-loom` the tests start; the key then names that scope.
+    SharedTrees,
     /// Write `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
     /// `CustomResourceDefinition` projected from `ess generate --kind schema` of `ess/` by
     /// `b10x_loom_resource::crd::manifest`.
@@ -326,6 +335,13 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::TestStep { packages } => test_step::run(&root, &packages),
+        Command::SharedTrees => {
+            let scope =
+                shared_trees::scope_of(std::env::var_os(shared_trees::SCOPE_VARIABLE).as_deref());
+            let made = shared_trees::make(&root, &scope)?;
+            println!("{} (scope {scope})", made.line());
+            Ok(())
+        }
         Command::CrdGenerate { scratch } => crd_generate(&root, &cli.ess, &scratch),
         Command::CrdDrift { scratch } => crd_drift(&root, &cli.ess, &scratch),
         Command::NoHandModel { src, generated } => no_hand_model(

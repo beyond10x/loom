@@ -320,9 +320,20 @@ Before a change is reported done, in this order:
    the library (`b10x_loom_tree`) in process where the binary is not their subject; each command
    keeps one test through the binary (`each_command_keeps_one_test_through_the_binary`) and every
    start goes through `with_the_switch` (`every_start_goes_through_with_the_switch`).
-   Before its timed run it makes the installed home those tests copy and the trees they share
-   (`the_shared_trees_are_made`, an ignored test of `tree_run.rs`), so no test of the run builds
-   one or waits on the lock of another that does. Its summary line counts the tests that printed a line `skipped:` (a missing
+   Before its timed run it builds what is missing of the installed home those tests copy and the
+   trees they share with `loom-xtask shared-trees` (`crates/loom-xtask/src/shared_trees.rs`, which
+   runs `the_shared_trees_are_made`, an ignored test of `tree_run.rs`), so no test of the run builds
+   one or waits on the lock of another that does; nextest runs the same command as the setup script
+   of `binary_id(b10x-loom-cli::tree_run)` (`.config/nextest.toml`, experimental `setup-scripts`),
+   so a plain `cargo nextest run` gets them too, and the step prints the pre-step's time and the
+   setup's on lines of their own. The trees are kept across runs under a key over the fixture, the
+   builders, Loom's sources (each repository file a rustc dep-info file of `target/debug` lists,
+   outside `target/` and `tests`; cargo writes no `target/debug/b10x-loom.d` for a test build),
+   `Cargo.lock` and the scope (`LOOM_TEST_SCOPE`, which the step sets), never an executable; the
+   setup removes those of another key and exports the key as `LOOM_TREE_RUN_KEY`. Each tree is
+   built in an attempt directory of its own and sealed by a file its builder writes last, so a
+   killed builder's attempt is never read. A start while a tree is built counts as
+   `fixture:<tree>`, and such a line in the timed run fails the step. Its summary line counts the tests that printed a line `skipped:` (a missing
    prerequisite; nextest's JUnit report keeps a passing test's output) and names each. Where
    `systemd-run --user --scope -p Delegate=yes true` passes it sets `LOOM_REQUIRE_DELEGATION=1` on
    its run, so a delegated test that would skip fails; CI's step `Probe a delegated user scope`
@@ -413,10 +424,11 @@ dev-dependency of `b10x-loom-cli` alone), under which a process whose own enviro
 counts to the file `B10X_LOOM_TEST_SYNC_COUNTS` names at exit. `tests/tree_run.rs` sets it on
 every `b10x-loom` it starts, and in its own test process before a test's first write for the
 library it runs in process; a bound program never sees it, since its environment is built whole
-(`crates/loom-bindings/src/child.rs`), and no bindings or protocol member sets it. Only
-`durable.rs`, `test_step.rs`, `unsynced_store.rs`, `tests/tree_run.rs` and
-`tests/support/loom.rs` name the variable, and only the last two set it
-(`only_the_allowed_files_name_or_set_the_switch`). The durability tests of the stores run in
+(`crates/loom-bindings/src/child.rs`), and no bindings or protocol member sets it. `tree test`'s
+tests (`tests/tree_test/mod.rs`) set it on every `b10x-loom` they start, so a cycle's tree
+commands wait for no disk sync. Only `durable.rs`, `test_step.rs`, `unsynced_store.rs`,
+`tests/tree_run.rs`, `tests/support/loom.rs` and `tests/tree_test/mod.rs` name the variable, and
+only the last three set it (`only_the_allowed_files_name_or_set_the_switch`). The durability tests of the stores run in
 process and never set it. A build without debug assertions that holds the feature fails to
 compile, `task test-step` refuses to start with the variable in its environment, and
 `binaries.yml` runs `loom-xtask unsynced-store` on the released binary, which fails on the

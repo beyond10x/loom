@@ -357,18 +357,20 @@ actions:
     }
 
     /// The files that may name the test switch's variable.
-    const MAY_NAME: [&str; 5] = [
+    const MAY_NAME: [&str; 6] = [
         "crates/loom-governor/src/durable.rs",
         "crates/loom-xtask/src/test_step.rs",
         "crates/loom-xtask/src/unsynced_store.rs",
         "crates/loom-cli/tests/tree_run.rs",
         "crates/loom-cli/tests/support/loom.rs",
+        "crates/loom-cli/tests/tree_test/mod.rs",
     ];
 
     /// The files that may set it on a process they start.
-    const MAY_SET: [&str; 2] = [
+    const MAY_SET: [&str; 3] = [
         "crates/loom-cli/tests/tree_run.rs",
         "crates/loom-cli/tests/support/loom.rs",
+        "crates/loom-cli/tests/tree_test/mod.rs",
     ];
 
     /// The durability tests: in process, never under the switch.

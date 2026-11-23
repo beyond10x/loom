@@ -120,10 +120,13 @@ fn digest() -> String {
         .collect()
 }
 
-/// `b10x-loom` with `HOME` and `XDG_DATA_HOME` at `home`.
+/// `b10x-loom` with `HOME` and `XDG_DATA_HOME` at `home`, and the test sync switch on, as
+/// `tree_run.rs` starts it: a cycle's tree commands wait for no disk sync (about 2 s of a 2.2 s
+/// cycle on a loaded host), and the durability tests of the stores keep full sync.
 fn command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
     command
+        .env("B10X_LOOM_TEST_UNSYNCED_STORE", "1")
         .env("HOME", home)
         .env("XDG_DATA_HOME", home)
         .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")

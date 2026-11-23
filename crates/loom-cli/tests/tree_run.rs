@@ -44,6 +44,8 @@ use sha2::{Digest as _, Sha256};
 mod delegated_cgroup;
 #[path = "tree_run/handoff_when.rs"]
 mod handoff_when;
+#[path = "tree_run/key.rs"]
+mod key;
 #[path = "tree_run/person_program.rs"]
 mod person_program;
 
@@ -74,7 +76,14 @@ thread_local! {
     static SWITCH_VALUE: RefCell<Option<String>> = RefCell::new(Some("1".to_owned()));
     /// The file each `b10x-loom` the test starts appends its sync counts to, while [`counted`] runs.
     static COUNTS_FILE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    /// The shared tree this thread builds, while [`shared_fixture`] runs its builder: a start of
+    /// `b10x-loom` then counts as `fixture:<name>`, not as the test's.
+    static FIXTURE_BUILD: RefCell<Option<String>> = const { RefCell::new(None) };
 }
+
+/// The variable telling a child process of this binary which shared tree it builds
+/// ([`observed_tree`]), so its starts count as that tree's, as [`FIXTURE_BUILD`] does in process.
+const FIXTURE_VARIABLE: &str = "LOOM_TREE_RUN_FIXTURE";
 
 /// The variable naming the file each start of `b10x-loom` by these tests appends one line to, the
 /// name of the starting thread (its test's): `task test-step` sets it and holds the count to the
@@ -82,14 +91,21 @@ thread_local! {
 /// (`story:tree-run-tests-fit-the-test-budget`).
 const STARTS: &str = "LOOM_TREE_RUN_STARTS";
 
-/// Appends one line, this thread's name, to the file [`STARTS`] names, when it names one.
+/// Appends one line to the file [`STARTS`] names, when it names one: `fixture:<name>` while the
+/// thread or the process builds the shared tree `<name>` ([`FIXTURE_BUILD`], [`FIXTURE_VARIABLE`]),
+/// else this thread's name, its test's. The test step fails on a `fixture:` line of its timed run.
 fn count_a_start() {
     use std::io::Write as _;
     let Some(file) = std::env::var_os(STARTS) else {
         return;
     };
-    let thread = std::thread::current();
-    let line = format!("{}\n", thread.name().unwrap_or("<unnamed>"));
+    let building = FIXTURE_BUILD
+        .with_borrow(Clone::clone)
+        .or_else(|| std::env::var(FIXTURE_VARIABLE).ok());
+    let line = match building {
+        Some(tree) => format!("fixture:{tree}\n"),
+        None => format!("{}\n", std::thread::current().name().unwrap_or("<unnamed>")),
+    };
     let mut opened = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -130,43 +146,19 @@ fn unsynced_in_process() {
     });
 }
 
-/// The protocols each test's user has installed: registration and file of the fixture.
-const INSTALLED: [(&str, &str); 6] = [
-    ("tour@1", "tour.yaml"),
-    ("tour-leg@1", "tour-leg.yaml"),
-    ("fork@1", "../extra/fork.yaml"),
-    ("sign@1", "../extra/sign.yaml"),
-    ("answer@1", "../extra/answer.yaml"),
-    ("review@1", "../extra/review.yaml"),
-];
-
-/// A user's home with [`INSTALLED`] installed, made once per test run under `target/` and keyed by
-/// the protocols' bytes and this test binary, which holds the install's code: an install syncs
-/// each file it writes, ten syncs a tree (17 ms each on a busy disk), so each test copies this one
-/// (`story:tree-run-tests-fit-the-test-budget`). Made in a directory of its own and renamed into
+/// A user's home with [`key::INSTALLED`] installed, made once per key under `target/`: an install
+/// syncs each file it writes, ten syncs a tree (17 ms each on a busy disk), so each test copies
+/// this one (`story:tree-run-tests-fit-the-test-budget`). Keyed by the protocols' bytes and the key
+/// of the shared trees ([`shared_key`]), which covers the install's code
+/// (`story:tree-run-binary-fits-its-start-bound`). Made in a directory of its own and renamed into
 /// place, so a home that is there is whole.
 fn installed_home() -> PathBuf {
-    let mut hasher = Sha256::new();
-    for (name, file) in INSTALLED {
-        hasher.update(name.as_bytes());
-        hasher.update([0]);
-        hasher.update(fs::read(Path::new(FIXTURE).join("protocols").join(file)).unwrap());
-        hasher.update([0]);
-    }
-    let binary = fs::metadata(std::env::current_exe().unwrap()).unwrap();
-    hasher.update(binary.len().to_be_bytes());
-    let built = binary
-        .modified()
-        .unwrap()
-        .duration_since(UNIX_EPOCH)
-        .unwrap();
-    hasher.update(built.as_nanos().to_be_bytes());
-    let key: String = hasher.finalize()[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let home_key = key::home_key(
+        &key::installed_bytes(Path::new(FIXTURE)).unwrap(),
+        &shared_key(),
+    );
     let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let home = base.join(format!("tree-run-home-{key}"));
+    let home = base.join(format!("tree-run-home-{home_key}"));
     if home.is_dir() {
         return home;
     }
@@ -175,11 +167,11 @@ fn installed_home() -> PathBuf {
         .unwrap()
         .as_nanos();
     let making = base.join(format!(
-        "tree-run-home-{key}-{}-{nanos}",
+        "tree-run-home-{home_key}-{}-{nanos}",
         std::process::id()
     ));
     let installed = InstallStore::new(making.join("loom/protocols"));
-    for (name, file) in INSTALLED {
+    for (name, file) in key::INSTALLED {
         installed
             .install_file(
                 name,
@@ -718,7 +710,7 @@ fn tree_verify_names_the_case_and_line_of_a_changed_byte() {
     assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     // What the command prints is the value of `verify_tree`, read with the tree's catalog.
     let library = || verify_json(&verify_tree(&tree.store(), &tree.catalog()).unwrap());
-    let verified = tree.tree("verify");
+    let verified = tree.verified();
     assert_eq!(verified.status.code(), Some(0), "{}", stderr(&verified));
     assert_eq!(json(&verified)["cases"], 1);
     assert_eq!(json(&verified), library());
@@ -850,10 +842,10 @@ fn two_opens_with_the_same_at_write_the_same_bytes() {
     let tree = Tree::new("same-bytes");
     let first = tree.root.join("first");
     let second = tree.root.join("second");
-    for store in [&first, &second] {
-        let opened = tree.open_started(store, "tour@1", "tour.bindings.yaml", None);
-        assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
-    }
+    let opened = tree.open_started(&first, "tour@1", "tour.bindings.yaml", None);
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
+    let opened = tree.opened(&second, "tour@1", "tour.bindings.yaml", None);
+    assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
     let names: Vec<String> = snapshot(&first).into_iter().map(|(name, _)| name).collect();
     assert!(
         names.iter().any(|name| name.starts_with("runlog-")),
@@ -1177,64 +1169,95 @@ struct Ended {
     ended: Value,
 }
 
-/// The SHA-256, as hex, of what the shared ended tree is made from: every file of the fixture
-/// directory (its path, its length and its bytes, in path order), the `b10x-loom` binary and this
-/// test binary, whose helpers drive the run.
-fn ended_digest() -> String {
-    use sha2::{Digest, Sha256};
-    fn files(dir: &Path, found: &mut Vec<PathBuf>) {
-        for entry in fs::read_dir(dir).unwrap() {
-            let entry = entry.unwrap();
-            if entry.file_type().unwrap().is_dir() {
-                files(&entry.path(), found);
-            } else {
-                found.push(entry.path());
-            }
-        }
+/// The key of the shared trees and the installed home of this run: the value of
+/// [`key::KEY_VARIABLE`], which the setup (`loom-xtask shared-trees`) computes over the inputs and
+/// Loom's sources and exports to every test, or, without it, this process's own
+/// ([`key::private_key`]), so no other test reads what this one builds.
+fn shared_key() -> String {
+    match std::env::var(key::KEY_VARIABLE) {
+        Ok(given) if key::is_setup_key(&given) || key::is_private_key(&given) => given,
+        Ok(given) => panic!("{}={given:?} is no key of the setup", key::KEY_VARIABLE),
+        Err(_) => key::private_key(std::process::id()),
     }
-    let mut found = Vec::new();
-    files(Path::new(FIXTURE), &mut found);
-    found.sort();
-    let mut hasher = Sha256::new();
-    for file in &found {
-        let bytes = fs::read(file).unwrap();
-        hasher.update(
-            file.strip_prefix(FIXTURE)
-                .unwrap()
-                .as_os_str()
-                .as_encoded_bytes(),
-        );
-        hasher.update([0]);
-        hasher.update((bytes.len() as u64).to_be_bytes());
-        hasher.update(&bytes);
-    }
-    hasher.update(fs::read(env!("CARGO_BIN_EXE_b10x-loom")).unwrap());
-    hasher.update(fs::read(std::env::current_exe().unwrap()).unwrap());
-    hasher
-        .finalize()
+}
+
+/// The sentinel of the shared tree `name` ([`key::SHARED`]).
+fn sentinel_of(name: &str) -> &'static str {
+    key::SHARED
         .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+        .find(|(tree, _)| *tree == name)
+        .map(|(_, sentinel)| *sentinel)
+        .unwrap_or_else(|| panic!("no shared tree {name}"))
+}
+
+/// Clears [`FIXTURE_BUILD`] when the builder returns or panics.
+struct Building;
+
+impl Drop for Building {
+    fn drop(&mut self) {
+        FIXTURE_BUILD.set(None);
+    }
+}
+
+/// The directory of the shared tree `name` under `key`, built by `build` when no attempt holds it
+/// yet (`story:tree-run-binary-fits-its-start-bound`). Under the lock file of `<name>-<key>`, it
+/// reads an attempt directory `tree-run-<name>-<key>-<pid>-<nanos>` that holds `sentinel`, which a
+/// builder writes as its last act; when none does, `build` makes a new attempt directory, with the
+/// thread's starts of `b10x-loom` counted as `fixture:<name>`. An attempt without the sentinel (a
+/// killed builder's, or one a child of a killed builder still writes) is never read, reused or
+/// removed here; the setup removes the attempts of another key before any test runs. A tree is
+/// built where it stays: its store names its workspace by its absolute path.
+fn shared_fixture(name: &str, sentinel: &str, key: &str, build: impl FnOnce(&Path)) -> PathBuf {
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let lock = fs::File::create(base.join(key::lock_name(name, key))).unwrap();
+    lock.lock().unwrap();
+    if let Some(sealed) = key::sealed_attempt(&base, name, key, sentinel) {
+        lock.unlock().unwrap();
+        return sealed;
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let attempt = base.join(format!(
+        "{}{}-{nanos}",
+        key::attempt_prefix(name, key),
+        std::process::id()
+    ));
+    {
+        FIXTURE_BUILD.set(Some(name.to_owned()));
+        let _building = Building;
+        build(&attempt);
+    }
+    assert!(
+        attempt.join(sentinel).is_file(),
+        "the builder of {name} left no {sentinel} in {}",
+        attempt.display()
+    );
+    lock.unlock().unwrap();
+    attempt
 }
 
 /// The file of the shared ended tree holding the syncs its commands made and skipped, all with the
 /// switch on.
 const SYNCED_FILE: &str = "synced.json";
 
-/// The two-level tree run to its end once per test run (the grant of `ticket.issue` taken twice),
-/// kept under `target/` beside the test scratch directories and keyed by [`ended_digest`]: an
-/// open, eight runs and their decisions cost seconds each, so each status test reads a fresh copy of
-/// this one tree. The first test that asks builds it holding a lock file; the others wait
-/// on the lock and read what it left.
+/// The two-level tree run to its end once per key (the grant of `ticket.issue` taken twice), kept
+/// under `target/` beside the test scratch directories by [`shared_fixture`]: an open, eight runs
+/// and their decisions cost seconds each, so each status test reads a fresh copy of this one tree.
+/// The setup builds it before the tests; a test without the setup's key builds its own.
 fn ended_tree() -> Ended {
-    let key = ended_digest();
+    let root = ended_root();
     let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let root = base.join(format!("tree-run-ended-{}", &key[..16]));
-    let lock = fs::File::create(base.join(format!("tree-run-ended-{}.lock", &key[..16]))).unwrap();
-    lock.lock().unwrap();
-    if !root.join("ended.json").exists() {
-        let _ = fs::remove_dir_all(&root);
-        let mut tree = Tree::at(root.clone());
+    let waits = serde_json::from_slice(&fs::read(root.join("waits.json")).unwrap()).unwrap();
+    let ended = serde_json::from_slice(&fs::read(root.join("ended.json")).unwrap()).unwrap();
+    ended_copy(&root, &base, waits, ended)
+}
+
+/// The directory of the shared ended tree of [`ended_tree`], built when missing.
+fn ended_root() -> PathBuf {
+    shared_fixture("ended", sentinel_of("ended"), &shared_key(), |root| {
+        let mut tree = Tree::at(root.to_owned());
         tree.shared = true;
         let ((waits, ended), synced) =
             counted(Some("1"), || run_to_end_twice(&tree, Some("ticket.issue")));
@@ -1246,10 +1269,11 @@ fn ended_tree() -> Ended {
         )
         .unwrap();
         fs::write(root.join("ended.json"), serde_json::to_vec(&ended).unwrap()).unwrap();
-    }
-    lock.unlock().unwrap();
-    let waits = serde_json::from_slice(&fs::read(root.join("waits.json")).unwrap()).unwrap();
-    let ended = serde_json::from_slice(&fs::read(root.join("ended.json")).unwrap()).unwrap();
+    })
+}
+
+/// A fresh copy of the shared ended tree at `root` under `base`, with what its build read.
+fn ended_copy(root: &Path, base: &Path, waits: Vec<(Value, Value)>, ended: Value) -> Ended {
     // Each test reads a fresh copy; the store names the shared workspace, which nothing writes.
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1259,7 +1283,7 @@ fn ended_tree() -> Ended {
         "tree-run-ended-copy-{}-{nanos}",
         std::process::id()
     ));
-    copy_dir(&root, &copy);
+    copy_dir(root, &copy);
     Ended {
         tree: Tree {
             root: copy,
@@ -1471,21 +1495,35 @@ fn the_printed_status_is_the_value_of_tree_status() {
     assert_eq!(read_status(&printed.stdout).unwrap(), value);
 }
 
-/// The two-level tree after one `tree run --max-steps 1` once per test run, kept as
-/// [`ended_tree`] keeps its tree: under `target/`, keyed by [`ended_digest`], built by the first
-/// test that asks holding a lock file. The run opened the first leg and stopped `BudgetSpent` in
+/// The two-level tree after one `tree run --max-steps 1` once per key, kept as [`ended_tree`]
+/// keeps its tree, by [`shared_fixture`]. The run opened the first leg and stopped `BudgetSpent` in
 /// it before its next step. A fresh copy of the tree and the run's JSON; a test reads the copy with
 /// `tree status` and never runs it, since its store names the shared workspace.
 fn stepped_tree() -> (Tree, Value) {
-    let key = ended_digest();
     let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let root = base.join(format!("tree-run-stepped-{}", &key[..16]));
-    let lock =
-        fs::File::create(base.join(format!("tree-run-stepped-{}.lock", &key[..16]))).unwrap();
-    lock.lock().unwrap();
-    if !root.join("stepped.json").exists() {
-        let _ = fs::remove_dir_all(&root);
-        let mut tree = Tree::at(root.clone());
+    let root = stepped_root();
+    let ran = serde_json::from_slice(&fs::read(root.join("stepped.json")).unwrap()).unwrap();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let copy = base.join(format!(
+        "tree-run-stepped-copy-{}-{nanos}",
+        std::process::id()
+    ));
+    copy_dir(&root, &copy);
+    let tree = Tree {
+        root: copy,
+        started: Instant::now(),
+        shared: false,
+    };
+    (tree, ran)
+}
+
+/// The directory of the shared tree of [`stepped_tree`], built when missing.
+fn stepped_root() -> PathBuf {
+    shared_fixture("stepped", sentinel_of("stepped"), &shared_key(), |root| {
+        let mut tree = Tree::at(root.to_owned());
         tree.shared = true;
         let opened = tree.open();
         assert_eq!(opened.status.code(), Some(0), "{}", stderr(&opened));
@@ -1513,24 +1551,7 @@ fn stepped_tree() -> (Tree, Value) {
             stderr(&ran)
         );
         fs::write(root.join("stepped.json"), &ran.stdout).unwrap();
-    }
-    lock.unlock().unwrap();
-    let ran = serde_json::from_slice(&fs::read(root.join("stepped.json")).unwrap()).unwrap();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let copy = base.join(format!(
-        "tree-run-stepped-copy-{}-{nanos}",
-        std::process::id()
-    ));
-    copy_dir(&root, &copy);
-    let tree = Tree {
-        root: copy,
-        started: Instant::now(),
-        shared: false,
-    };
-    (tree, ran)
+    })
 }
 
 #[test]
@@ -1962,40 +1983,12 @@ fn child_lines_to_end(tree: &Tree) -> Vec<Value> {
     panic!("the tree did not end within 8 runs");
 }
 
-/// The two-level tree run in process to its end once per test run, as [`ended_tree`] keeps its
-/// tree: under `target/`, keyed by [`ended_digest`], built by the first test that asks holding a
-/// lock file. A fresh copy of the tree and each child line the observer was given, as
+/// The two-level tree run in process to its end once per key, as [`ended_tree`] keeps its tree,
+/// by [`shared_fixture`]. A fresh copy of the tree and each child line the observer was given, as
 /// [`child_lines_to_end`] returns them.
 fn observed_tree() -> (Tree, Vec<Value>) {
-    let key = ended_digest();
     let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
-    let root = base.join(format!("tree-run-observed-{}", &key[..16]));
-    let lock =
-        fs::File::create(base.join(format!("tree-run-observed-{}.lock", &key[..16]))).unwrap();
-    lock.lock().unwrap();
-    if !root.join("seen.json").exists() {
-        let _ = fs::remove_dir_all(&root);
-        // `run_tree` writes the store in process: in a process of its own with the switch on, so
-        // those writes do not wait for the disk as the binary's do not.
-        let built = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "the_observed_tree_is_built_with_the_switch_on",
-                "--ignored",
-                "--nocapture",
-            ])
-            .env("B10X_LOOM_TEST_UNSYNCED_STORE", "1")
-            .env(OBSERVED_ROOT, &root)
-            .output()
-            .unwrap();
-        assert!(
-            built.status.success() && root.join("seen.json").exists(),
-            "{}{}",
-            stdout(&built),
-            stderr(&built)
-        );
-    }
-    lock.unlock().unwrap();
+    let root = observed_root();
     let seen = serde_json::from_slice(&fs::read(root.join("seen.json")).unwrap()).unwrap();
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2014,18 +2007,183 @@ fn observed_tree() -> (Tree, Vec<Value>) {
     (tree, seen)
 }
 
-/// Not a test of its own: the test step (`crates/loom-xtask/src/test_step.rs`) runs it after its
-/// build and before its timed run, so the installed home ([`installed_home`]) and the shared trees
-/// ([`ended_tree`], [`stepped_tree`], [`observed_tree`]) are made once and no test of the timed run
-/// makes one or waits on the lock of another that does: a waiter's wait counted in the binary's
-/// summed time, once per waiter.
+/// The directory of the shared tree of [`observed_tree`], built when missing.
+fn observed_root() -> PathBuf {
+    let shared = shared_key();
+    shared_fixture("observed", sentinel_of("observed"), &shared, |root| {
+        // `run_tree` writes the store in process: in a process of its own with the switch on, so
+        // those writes do not wait for the disk as the binary's do not. Its starts of `b10x-loom`
+        // count as this tree's.
+        let built = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "the_observed_tree_is_built_with_the_switch_on",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env("B10X_LOOM_TEST_UNSYNCED_STORE", "1")
+            .env(key::KEY_VARIABLE, &shared)
+            .env(FIXTURE_VARIABLE, "observed")
+            .env(OBSERVED_ROOT, root)
+            .output()
+            .unwrap();
+        assert!(
+            built.status.success() && root.join("seen.json").exists(),
+            "{}{}",
+            stdout(&built),
+            stderr(&built)
+        );
+    })
+}
+
+/// Not a test of its own: the setup of the shared trees (`loom-xtask shared-trees`, as nextest's
+/// setup script of this binary and as the test step's pre-step) runs it under its key when one of
+/// them is missing, so the installed home ([`installed_home`]) and the shared trees
+/// ([`ended_tree`], [`stepped_tree`], [`observed_tree`]) are made once per key, outside every test,
+/// and no test of a run makes one or waits on the lock of another that does: a waiter's wait
+/// counted in the binary's summed time, once per waiter.
 #[test]
-#[ignore = "run by the test step before its timed run"]
+#[ignore = "run by loom-xtask shared-trees before the tests"]
 fn the_shared_trees_are_made() {
     installed_home();
-    drop(ended_tree());
-    drop(stepped_tree());
-    drop(observed_tree());
+    ended_root();
+    stepped_root();
+    observed_root();
+}
+
+/// A key of the shared trees no other test uses: this process's and this instant's.
+fn a_key_of_its_own() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("own{}x{nanos}", std::process::id())
+}
+
+/// The directories of `base` whose names start with the attempt prefix of `name` under `key`.
+fn attempts(base: &Path, name: &str, key: &str) -> Vec<PathBuf> {
+    let prefix = format!("tree-run-{name}-{key}-");
+    let mut found: Vec<PathBuf> = fs::read_dir(base)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&prefix)
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn a_half_built_attempt_is_never_read() {
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let key = a_key_of_its_own();
+    // What a killed builder leaves: an attempt directory of the key, a file, no sentinel.
+    let killed = base.join(format!("tree-run-tiny-{key}-1-0"));
+    fs::create_dir_all(&killed).unwrap();
+    fs::write(killed.join("half.txt"), b"half").unwrap();
+
+    let (building, built) = std::sync::mpsc::channel::<()>();
+    let (go, wait) = std::sync::mpsc::channel::<()>();
+    let first = {
+        let key = key.clone();
+        std::thread::spawn(move || {
+            shared_fixture("tiny", "done.json", &key, |root| {
+                fs::create_dir_all(root).unwrap();
+                fs::write(root.join("made.txt"), b"made").unwrap();
+                building.send(()).unwrap();
+                wait.recv().unwrap();
+                fs::write(root.join("done.json"), b"{}").unwrap();
+            })
+        })
+    };
+    built.recv().unwrap();
+    // While the builder runs, no directory of the key holds the sentinel.
+    for attempt in attempts(&base, "tiny", &key) {
+        assert!(!attempt.join("done.json").exists(), "{}", attempt.display());
+    }
+    let called = Arc::new(AtomicBool::new(false));
+    let second = {
+        let (key, called) = (key.clone(), Arc::clone(&called));
+        std::thread::spawn(move || {
+            shared_fixture("tiny", "done.json", &key, |_| {
+                called.store(true, Ordering::SeqCst);
+            })
+        })
+    };
+    // The second asker reaches the lock and waits on it before the first seals its attempt.
+    std::thread::sleep(Duration::from_millis(200));
+    go.send(()).unwrap();
+    let made = first.join().unwrap();
+    let read = second.join().unwrap();
+
+    assert_eq!(made, read, "the waiter reads the builder's directory");
+    assert!(!called.load(Ordering::SeqCst), "the waiter built again");
+    assert_ne!(made, killed);
+    assert!(made.join("done.json").is_file() && made.join("made.txt").is_file());
+    // The half-built attempt is untouched: not read, not reused, not removed.
+    assert_eq!(fs::read(killed.join("half.txt")).unwrap(), b"half");
+    assert!(!killed.join("done.json").exists());
+    assert_eq!(
+        attempts(&base, "tiny", &key),
+        [killed.clone(), made.clone()]
+    );
+    // Asked again, the sealed attempt is read and the builder is not called.
+    let again = shared_fixture("tiny", "done.json", &key, |_| panic!("built again"));
+    assert_eq!(again, made);
+    for attempt in [killed, made] {
+        fs::remove_dir_all(attempt).unwrap();
+    }
+    let _ = fs::remove_file(base.join(format!("tree-run-tiny-{key}.lock")));
+}
+
+#[test]
+fn a_start_in_a_fixture_build_is_counted_as_the_fixture() {
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let key = a_key_of_its_own();
+    let starts = base.join(format!("tree-run-starts-{key}"));
+    let before = std::env::var_os(STARTS);
+    // SAFETY: nextest runs each test in a process of its own, and this runs before the test
+    // starts a thread or a process; the step's own starts file is not this process's.
+    unsafe { std::env::set_var(STARTS, &starts) };
+    let made = shared_fixture("tiny", "done.json", &key, |root| {
+        let tree = Tree {
+            root: root.to_owned(),
+            started: Instant::now(),
+            shared: true,
+        };
+        fs::create_dir_all(root).unwrap();
+        let version = tree.command().arg("--version").output().unwrap();
+        assert_eq!(version.status.code(), Some(0), "{}", stderr(&version));
+        fs::write(root.join("done.json"), b"{}").unwrap();
+    });
+    let tree = Tree {
+        root: made.clone(),
+        started: Instant::now(),
+        shared: true,
+    };
+    let version = tree.command().arg("--version").output().unwrap();
+    assert_eq!(version.status.code(), Some(0), "{}", stderr(&version));
+    // SAFETY: as above; no thread of this test runs.
+    unsafe {
+        match before {
+            Some(value) => std::env::set_var(STARTS, value),
+            None => std::env::remove_var(STARTS),
+        }
+    }
+    let lines = fs::read_to_string(&starts).unwrap();
+    let lines: Vec<&str> = lines.lines().collect();
+    assert!(lines.contains(&"fixture:tiny"), "{lines:?}");
+    assert!(
+        lines.contains(&"a_start_in_a_fixture_build_is_counted_as_the_fixture"),
+        "{lines:?}"
+    );
+    fs::remove_dir_all(&made).unwrap();
+    let _ = fs::remove_file(&starts);
+    let _ = fs::remove_file(base.join(format!("tree-run-tiny-{key}.lock")));
 }
 
 /// The variable naming the directory [`observed_tree`] has its child process build the tree in.
@@ -3720,9 +3878,10 @@ fn body_of<'a>(text: &'a str, name: &str) -> &'a str {
 }
 
 /// Every start of `b10x-loom` in these tests goes through [`with_the_switch`], which counts it:
-/// the binary's path is named at three sites only, [`Tree::command`], the `BINARY` of the
+/// the binary's path is named at two sites only, [`Tree::command`] and the `BINARY` of the
 /// delegated module, whose every use that starts it is in a function that calls
-/// `with_the_switch`, and [`ended_digest`], which reads its bytes and starts nothing.
+/// `with_the_switch`. No key of the shared trees reads it
+/// (`story:tree-run-binary-fits-its-start-bound`).
 #[test]
 fn every_start_goes_through_with_the_switch() {
     let needle = concat!("CARGO_BIN_EXE_", "b10x-loom");
@@ -3760,7 +3919,6 @@ fn every_start_goes_through_with_the_switch() {
         sites,
         [
             ("tree_run.rs".to_owned(), "fn command".to_owned()),
-            ("tree_run.rs".to_owned(), "fn ended_digest".to_owned()),
             (
                 "tree_run/delegated_cgroup.rs".to_owned(),
                 "const BINARY".to_owned()

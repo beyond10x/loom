@@ -106,10 +106,11 @@ fn the_printed_principal_is_the_one_recorded_and_no_other_is_accepted() {
         .unwrap_or_else(|| panic!("no principal: {decision}"))
         .to_owned();
 
-    // Another principal, the other person of the case or the default, is refused, writing nothing.
+    // Another principal, the other person of the case or the default, is refused, writing nothing:
+    // the library's refusal, in process (`story:tree-run-binary-fits-its-start-bound`).
     for other in ["walker", DEFAULT_PRINCIPAL_TEXT] {
         let before = every_file(&tree.store());
-        let refused = tree.printed(&with_principal(&decision, other));
+        let refused = tree.decided(&with_principal(&decision, other));
         refused_naming(&refused, &["post.seal", &principal]);
         assert_eq!(
             every_file(&tree.store()),
