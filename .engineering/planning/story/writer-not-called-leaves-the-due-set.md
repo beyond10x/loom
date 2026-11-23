@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:writer-not-called-leaves-the-due-set
 kind: story
-status: draft
+status: active
 title: A writer whose program exits not-called leaves the due set until the case is evaluated again
 summary: step_inputs treats an action finished line whose exit the binding lists in exits.not_called like a refusal for the due set until the next evaluated line (its own moves excepted); the run goes on to the next useful action or the handoff check; one start per evaluation; log line, max_runs and replay unchanged
 tags:
@@ -25,7 +25,10 @@ scope:
   path: crates/loom-tree/tests/not_called
 - confidence: cited
   path: crates/loom-tree/tests/suite_format/mod.rs
-revision: 11
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T01:26:51Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "runbook-writer-not-called-2026-11-23"}
+- {from: "proposed", to: "active", at: "2026-11-23T01:26:53Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "runbook-writer-not-called-2026-11-23"}
 ---
 ## Outcome
 
