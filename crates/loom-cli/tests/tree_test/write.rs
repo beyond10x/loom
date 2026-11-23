@@ -91,7 +91,7 @@ impl Copied {
 
     /// The path `name` of cycle `n`'s workspace.
     fn work(&self, n: usize, name: &str) -> PathBuf {
-        self.scratch().join(n.to_string()).join("work").join(name)
+        self.scratch().join("work").join(n.to_string()).join(name)
     }
 }
 
@@ -171,7 +171,7 @@ fn a_write_between_two_runs_is_read_by_the_second() {
     assert!(decided.as_expected, "{report:?}");
     assert_eq!(decided.exit, Some(0), "{report:?}");
     assert_eq!(
-        fs::read(scratch.join("1/work/findings.yaml")).unwrap(),
+        fs::read(scratch.join("work/1/findings.yaml")).unwrap(),
         decided_bytes()
     );
     let _ = fs::remove_dir_all(&scratch);
@@ -186,12 +186,12 @@ fn a_write_makes_a_new_file_and_its_directories() {
     let (report, scratch) = run_fixture("modes.suite.yaml", "write-modes", 1);
     assert!(cycle(&report, "makes").as_expected, "{report:?}");
     for name in ["a/b/new.txt", "old.txt"] {
-        let path = scratch.join("1/work").join(name);
+        let path = scratch.join("work/1").join(name);
         assert_eq!(fs::read(&path).unwrap(), decided_bytes(), "{name}");
         let mode = fs::symlink_metadata(&path).unwrap().permissions().mode() & 0o7777;
         assert_eq!(mode, 0o644, "{name}: {mode:o}");
     }
-    assert!(scratch.join("1/work/a/b").is_dir());
+    assert!(scratch.join("work/1/a/b").is_dir());
     let _ = fs::remove_dir_all(&scratch);
     within_bound(started);
 }
@@ -231,8 +231,8 @@ fn a_write_never_follows_a_link() {
         fs::read_to_string(copied.dir.join("outside/f")).unwrap(),
         "outside, unchanged\n"
     );
-    // `up` is `..` of cycle 2's workspace: its cycle directory, which holds no `x`.
-    assert!(fs::symlink_metadata(copied.scratch().join("2/x")).is_err());
+    // `up` is `..` of cycle 2's workspace: the directory of every workspace, which holds no `x`.
+    assert!(fs::symlink_metadata(copied.scratch().join("work/x")).is_err());
     assert!(
         fs::symlink_metadata(copied.work(1, "out"))
             .unwrap()
@@ -268,14 +268,14 @@ fn a_write_onto_what_is_no_file_fails_the_step() {
             Some(found),
         );
     }
-    assert!(scratch.join("1/work/target").is_dir());
+    assert!(scratch.join("work/1/target").is_dir());
     assert!(
-        fs::symlink_metadata(scratch.join("2/work/target"))
+        fs::symlink_metadata(scratch.join("work/2/target"))
             .unwrap()
             .file_type()
             .is_fifo()
     );
-    assert_eq!(fs::read_dir(scratch.join("3/work/ro")).unwrap().count(), 0);
+    assert_eq!(fs::read_dir(scratch.join("work/3/ro")).unwrap().count(), 0);
     never_shows_the_canary(&report);
     let _ = fs::remove_dir_all(&scratch);
     within_bound(started);
@@ -389,13 +389,13 @@ fn a_write_leaves_the_store_and_the_log_alone() {
     let (report, scratch) = run_fixture("store.suite.yaml", "write-store", 1);
     assert!(cycle(&report, "alone").as_expected, "{report:?}");
     assert_eq!(
-        fs::read(scratch.join("1/work/findings.yaml")).unwrap(),
+        fs::read(scratch.join("work/1/findings.yaml")).unwrap(),
         decided_bytes()
     );
     let catalog = read_protocols_directory(&Path::new(WRITE).join("protocols"))
         .unwrap()
         .catalog;
-    let verified = verify_tree(&scratch.join("1/store"), &catalog).unwrap();
+    let verified = verify_tree(&scratch.join("store/1"), &catalog).unwrap();
     assert!(verified.failure.is_none(), "{verified:?}");
     let _ = fs::remove_dir_all(&scratch);
     within_bound(started);
@@ -427,8 +427,8 @@ fn a_write_keeps_the_instants_of_later_steps() {
     let started = Instant::now();
     let (report, scratch) = run_fixture("instants.suite.yaml", "write-instants", 2);
     assert!(report.failed.is_empty(), "{report:?}");
-    let with = second_run_at(&scratch.join("1/store"));
-    let without = second_run_at(&scratch.join("2/store"));
+    let with = second_run_at(&scratch.join("store/1"));
+    let without = second_run_at(&scratch.join("store/2"));
     assert_eq!(with, without);
     assert_eq!(with, "2026-11-22T08:02:00Z");
     let _ = fs::remove_dir_all(&scratch);

@@ -17,6 +17,11 @@
 //! its own directory and writes the barrier directory's path into the copy (see [`Parallel`]).
 //!
 //! Acceptance for `story:suite-cycle-writes-a-workspace-file`, the step `write`, is in `write.rs`.
+//!
+//! Acceptance for `story:suite-runs-cycles-under-one-cgroup-root` is at the end: the layout
+//! `<scratch>/work/<n>/` and `<scratch>/store/<n>/`, cycles side by side under `substrate` on one
+//! held cgroup root, and the refusals of `tree test`'s placement. Its fixtures are
+//! `fixtures/tree-suite/substrate/`; its delegated tests use `tests/common/delegated_cgroup.rs`.
 
 mod substrate;
 mod write;
@@ -32,8 +37,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
 use b10x_loom_tree::model::{CycleResult, DifferenceReason, SuiteReport};
-use b10x_loom_tree::suite::{SuiteSettings, report_json, run_suite};
+use b10x_loom_tree::embed::TreeRunner;
+use b10x_loom_tree::suite::{SuiteSettings, report_json, run_suite, workers_served};
 use b10x_loom_tree::{TreeTime, read_protocols_directory, verify_tree};
+
+use crate::common::delegated_cgroup::{DELEGATED, Scope, delegation_present};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
@@ -125,13 +133,19 @@ fn digest() -> String {
 /// cycle on a loaded host), and the durability tests of the stores keep full sync.
 fn command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_b10x-loom"));
+    switched(&mut command, home);
+    command
+}
+
+/// `command`, which starts `b10x-loom` itself or through `enter.sh`, with the environment
+/// [`command`] gives it.
+fn switched<'c>(command: &'c mut Command, home: &Path) -> &'c mut Command {
     command
         .env("B10X_LOOM_TEST_UNSYNCED_STORE", "1")
         .env("HOME", home)
         .env("XDG_DATA_HOME", home)
         .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")
-        .env_remove("RUST_LOG");
-    command
+        .env_remove("RUST_LOG")
 }
 
 fn text(bytes: &[u8]) -> String {
@@ -277,8 +291,8 @@ fn the_first_runner_stays_in_scratch() {
         .unwrap()
         .catalog;
     let mut stores = 0;
-    for cycle in fs::read_dir(ran.root.join("scratch")).unwrap() {
-        let store = cycle.unwrap().path().join("store");
+    for cycle in fs::read_dir(ran.root.join("scratch/store")).unwrap() {
+        let store = cycle.unwrap().path();
         let verified = verify_tree(&store, &catalog).unwrap();
         assert!(
             verified.failure.is_none(),
@@ -330,7 +344,7 @@ fn program_output_never_enters_the_summary() {
     let ran = ran();
     let started = Instant::now();
     // The route check of `later` (cycle 4) ran, and its canary is in the file its check reads.
-    let kept = fs::read_to_string(ran.root.join("scratch/4/work/check.log")).unwrap();
+    let kept = fs::read_to_string(ran.root.join("scratch/work/4/check.log")).unwrap();
     assert!(kept.contains(CANARY), "{kept}");
     let later = ran.line("later");
     assert!(later.contains(", found 26 bytes, sha256 "), "{later}");
@@ -384,7 +398,7 @@ fn run_suite_runs_a_suite_without_the_command() {
     assert_eq!((report.expected, report.as_expected), (1, 1), "{report:?}");
     // No `run` step: no exit of one.
     assert_eq!(report.cycles[0].exit, None, "{report:?}");
-    assert!(scratch.join("1/store/tree.json").is_file());
+    assert!(scratch.join("store/1/tree.json").is_file());
     let _ = fs::remove_dir_all(&scratch);
     within_bound(started);
 }
@@ -402,7 +416,8 @@ fn a_set_cancel_flag_runs_no_cycle() {
     )
     .unwrap();
     assert!(report.cycles.is_empty(), "{report:?}");
-    assert!(!scratch.join("1").exists());
+    assert!(!scratch.join("work/1").exists());
+    assert!(!scratch.join("store/1").exists());
     let _ = fs::remove_dir_all(&scratch);
     within_bound(started);
 }
@@ -521,7 +536,7 @@ impl Parallel {
 
     /// The file `name` of cycle `n`'s workspace.
     fn work(&self, n: usize, name: &str) -> String {
-        let path = self.scratch().join(n.to_string()).join("work").join(name);
+        let path = self.scratch().join("work").join(n.to_string()).join(name);
         fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
     }
 }
@@ -531,6 +546,20 @@ impl Drop for Parallel {
         let _ = fs::remove_dir_all(&self.dir);
         let _ = fs::remove_dir_all(&self.suite);
     }
+}
+
+/// The names of the entries of `dir`, sorted; each must be a directory.
+fn directories(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("{}: {error}", dir.display()))
+        .map(|entry| {
+            let entry = entry.unwrap();
+            assert!(entry.file_type().unwrap().is_dir(), "{entry:?}");
+            entry.file_name().to_string_lossy().into_owned()
+        })
+        .collect();
+    names.sort();
+    names
 }
 
 fn cycle_names(report: &SuiteReport) -> Vec<&str> {
@@ -651,7 +680,7 @@ fn a_failing_cycle_does_not_stop_the_others_at_once() {
 }
 
 /// Test 5: three cycles started together end in reverse suite order, and each leaves its own
-/// name in its own `<n>/`.
+/// name in its own `work/<n>/`.
 #[test]
 fn each_cycle_keeps_to_its_own_directory_at_once() {
     let started = Instant::now();
@@ -669,16 +698,14 @@ fn each_cycle_keeps_to_its_own_directory_at_once() {
     for (n, name) in [(1, "late"), (2, "middle"), (3, "early")] {
         assert_eq!(run.work(n, "own.txt").trim(), name, "cycle {n}");
     }
-    let mut top: Vec<String> = fs::read_dir(run.scratch())
-        .unwrap()
-        .map(|entry| {
-            let entry = entry.unwrap();
-            assert!(entry.file_type().unwrap().is_dir(), "{entry:?}");
-            entry.file_name().to_string_lossy().into_owned()
-        })
-        .collect();
-    top.sort();
-    assert_eq!(top, ["1", "2", "3"]);
+    assert_eq!(directories(&run.scratch()), ["store", "work"]);
+    for shared in ["store", "work"] {
+        assert_eq!(
+            directories(&run.scratch().join(shared)),
+            ["1", "2", "3"],
+            "{shared}"
+        );
+    }
     let mut left: Vec<String> = fs::read_dir(&run.dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -722,7 +749,8 @@ fn cancel_starts_no_further_cycle() {
         assert_eq!(difference.found.as_deref(), Some(CANCELLED), "{cycle:?}");
         assert_eq!(difference.reason, DifferenceReason::StepFailed, "{cycle:?}");
     }
-    assert!(!run.scratch().join("3").exists());
+    assert!(!run.scratch().join("work/3").exists());
+    assert!(!run.scratch().join("store/3").exists());
     within_bound(started);
 }
 
@@ -773,7 +801,7 @@ fn only_runs_the_named_cycles() {
         "{stdout}{}",
         text(&tested.stderr)
     );
-    let mut made: Vec<String> = fs::read_dir(dir.join("scratch"))
+    let mut made: Vec<String> = fs::read_dir(dir.join("scratch/work"))
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
@@ -880,40 +908,40 @@ fn workers_out_of_range_is_a_usage_error() {
     within_bound(started);
 }
 
-/// Test 12: more than one worker under `substrate` is refused before any cycle, by the command
-/// and by `run_suite`; one worker keeps the refusal of the missing root.
+/// `story:suite-runs-cycles-under-one-cgroup-root`, test 7 (replacing the parallel story's test
+/// 12): more than 16 workers under `substrate` are refused before any cycle, by the command before
+/// it places a program (its `PATH` holds no `systemd-run`, so a start again would be refused
+/// otherwise) and by `run_suite`; 16 are served.
 #[test]
-fn workers_above_one_under_substrate_is_refused() {
-    let started = Instant::now();
+fn workers_above_sixteen_under_substrate_are_refused() {
     let dir = fresh_scratch("substrate-workers");
     fs::create_dir_all(dir.join("home")).unwrap();
-    let substrate = |workers: &str| {
-        command(&dir.join("home"))
-            .args(["tree", "test", "--confinement", "substrate"])
-            .args(["--workers", workers, "--at", AT])
-            .arg("--suite")
-            .arg(Path::new(FIXTURE).join("one.suite.yaml"))
-            .arg("--protocols")
-            .arg(PROTOCOLS)
-            .arg("--scratch")
-            .arg(dir.join("scratch"))
-            .output()
-            .unwrap()
-    };
-    let two = substrate("2");
-    let said = text(&two.stderr);
-    assert_eq!(two.status.code(), Some(2), "{said}");
-    assert!(said.contains("SubstrateWorkersUnserved"), "{said}");
+    fs::create_dir_all(dir.join("no-programs")).unwrap();
+    let seventeen = command(&dir.join("home"))
+        .env("PATH", dir.join("no-programs"))
+        .args(["tree", "test", "--confinement", "substrate"])
+        .args(["--workers", "17", "--at", AT])
+        .arg("--suite")
+        .arg(Path::new(FIXTURE).join("one.suite.yaml"))
+        .arg("--protocols")
+        .arg(PROTOCOLS)
+        .arg("--scratch")
+        .arg(dir.join("scratch"))
+        .output()
+        .unwrap();
+    let said = text(&seventeen.stderr);
+    assert_eq!(seventeen.status.code(), Some(2), "{said}");
     assert!(
-        said.contains("story:suite-runs-cycles-under-one-cgroup-root"),
+        said.starts_with("b10x-loom: tree test refused: SubstrateWorkersUnserved: "),
         "{said}"
     );
-    assert!(two.stdout.is_empty());
+    assert!(said.contains(SUBSTRATE_WORKERS_DETAIL), "{said}");
+    assert!(seventeen.stdout.is_empty());
     assert!(!dir.join("scratch").exists());
 
     let mut settings = local_settings(dir.join("scratch"));
     settings.confinement = Some("substrate".to_owned());
-    settings.workers = NonZeroUsize::new(2).unwrap();
+    settings.workers = NonZeroUsize::new(17).unwrap();
     let refused = run_suite(
         &Path::new(FIXTURE).join("one.suite.yaml"),
         &settings,
@@ -927,22 +955,23 @@ fn workers_above_one_under_substrate_is_refused() {
         "{refused}"
     );
     assert!(
-        refused
-            .to_string()
-            .contains("story:suite-runs-cycles-under-one-cgroup-root"),
+        refused.to_string().contains(SUBSTRATE_WORKERS_DETAIL),
         "{refused}"
     );
     assert!(!dir.join("scratch").exists());
 
-    let one = substrate("1");
-    let said = text(&one.stderr);
-    assert_eq!(one.status.code(), Some(2), "{said}");
-    assert!(said.contains("ConfinementRefused"), "{said}");
-    assert!(!said.contains("SubstrateWorkersUnserved"), "{said}");
-    assert!(!dir.join("scratch").exists());
+    for workers in [1, 2, 16] {
+        assert!(
+            workers_served(Some("substrate"), NonZeroUsize::new(workers).unwrap()).is_ok(),
+            "{workers} workers under substrate"
+        );
+    }
     let _ = fs::remove_dir_all(&dir);
-    within_bound(started);
 }
+
+/// The detail of `SubstrateWorkersUnserved` the story names.
+const SUBSTRATE_WORKERS_DETAIL: &str = "a Substrate driver runs at most 16 executions at once; \
+--workers above 16 under --confinement substrate is refused";
 
 /// `tree test --help` shows the two flags, the selection line and the two refusals.
 #[test]
@@ -1085,7 +1114,7 @@ fn the_approve_step_records_a_named_result() {
     as_expected(&report, "step-result", &said);
     assert_eq!(cycle_of(&report, "step-result")["exit"], 0, "{report}");
     // The store keeps the reasons as written, joined by one line feed, as a blob.
-    let blobs = dir.join("scratch/1/store/blobs");
+    let blobs = dir.join("scratch/store/1/blobs");
     let kept = fs::read_dir(&blobs)
         .unwrap()
         .any(|blob| fs::read(blob.unwrap().path()).unwrap() == b"one\ntwo");
@@ -1159,4 +1188,552 @@ fn the_reasons_limit_counts_lines() {
     as_expected(&report, "reasons-over-the-limit", &said);
     let _ = fs::remove_dir_all(&dir);
     within_bound(started);
+}
+
+// Acceptance for `story:suite-runs-cycles-under-one-cgroup-root`: every cycle works in
+// `<scratch>/work/<n>/` and keeps its tree in `<scratch>/store/<n>/`, so all workspaces have one
+// parent and every confined launch of every cycle shares one Substrate driver under one held,
+// delegated cgroup root. The suites and POSIX sh stubs are `fixtures/tree-suite/substrate/`; a
+// Substrate-confined program writes only `target/` of its workspace, so the stubs write there.
+//
+// The delegated tests need bubblewrap and a user systemd manager that starts a delegated scope;
+// they print `skipped: missing prerequisite: …` without them unless `LOOM_REQUIRE_DELEGATION` is
+// set. Each starts `tree test` through `enter.sh <scope>/run`, so the command runs in a child of
+// the scope `Scope::start` holds, and gives it the scope as `--cgroup-root`. The gated stubs write
+// `target/started`, then poll their own `target/release` every 0.1 s for at most 10 s; the test
+// polls every cycle's `started` from the host and writes each `release` once all exist, so all
+// the `started` files existing at once, before any `release`, is the overlap.
+
+const SUBSTRATE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/tree-suite/substrate"
+);
+
+/// The `b10x-loom` these tests start.
+const BINARY: &str = env!("CARGO_BIN_EXE_b10x-loom");
+
+/// Set in the test binary [`run_suite_takes_the_runner_that_holds_the_root`] starts again in a
+/// child of its scope.
+const IN_SCOPE: &str = "LOOM_SUITE_IN_SCOPE";
+
+/// The scope's directory, for the test binary started again.
+const SUITE_ROOT: &str = "LOOM_SUITE_ROOT";
+
+/// The prefix every refusal of `tree test` starts with.
+const TEST_REFUSED: &str = "b10x-loom: tree test refused: ";
+
+/// `tree test --at AT` with `HOME` at `dir/home`, started in the cgroup `cgroup` (made when absent)
+/// through `enter.sh` when given.
+fn tree_test_command(dir: &Path, cgroup: Option<&Path>) -> Command {
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let mut command = match cgroup {
+        Some(cgroup) => {
+            let mut command = Command::new("sh");
+            command
+                .arg(Path::new(DELEGATED).join("enter.sh"))
+                .arg(cgroup)
+                .arg(BINARY);
+            command
+        }
+        None => Command::new(BINARY),
+    };
+    switched(&mut command, &home);
+    command.args(["tree", "test", "--at", AT]);
+    command
+}
+
+/// [`tree_test_command`] of the substrate suite file `suite` of `suite_dir`, its protocols, and
+/// `--scratch dir/scratch`.
+fn substrate_suite(dir: &Path, cgroup: Option<&Path>, suite_dir: &Path, suite: &str) -> Command {
+    let mut command = tree_test_command(dir, cgroup);
+    command
+        .arg("--suite")
+        .arg(suite_dir.join(suite))
+        .arg("--protocols")
+        .arg(suite_dir.join("protocols"))
+        .arg("--scratch")
+        .arg(dir.join("scratch"));
+    command
+}
+
+/// `target/<name>` of cycle `n`'s workspace under `dir/scratch`.
+fn cycle_target(dir: &Path, n: usize, name: &str) -> PathBuf {
+    dir.join("scratch/work")
+        .join(n.to_string())
+        .join("target")
+        .join(name)
+}
+
+/// A `tree test` the test started, killed when the test ends before it did.
+struct Spawned(Option<std::process::Child>);
+
+impl Spawned {
+    fn spawn(mut command: Command) -> Self {
+        Self(Some(
+            command
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ))
+    }
+
+    /// Waits, polling every 50 ms, until every one of `paths` exists; fails when the command ends
+    /// first or after 30 s.
+    fn wait_for(&mut self, paths: &[PathBuf]) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !paths.iter().all(|path| path.exists()) {
+            let child = self.0.as_mut().unwrap();
+            if child.try_wait().unwrap().is_some() {
+                let ended = self.finish();
+                panic!(
+                    "tree test ended before {paths:?} existed: {:?}\n{}{}",
+                    ended.status,
+                    text(&ended.stdout),
+                    text(&ended.stderr)
+                );
+            }
+            assert!(
+                Instant::now() < deadline,
+                "{paths:?} do not all exist after 30 s"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    fn finish(&mut self) -> Output {
+        self.0.take().unwrap().wait_with_output().unwrap()
+    }
+}
+
+impl Drop for Spawned {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Asserts `output` ended 0, every cycle as expected.
+fn passed(output: &Output) {
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}{}",
+        text(&output.stdout),
+        text(&output.stderr)
+    );
+}
+
+/// The processes in every cgroup below `root` but `keeper/`, each `(cgroup, pid)`.
+fn processes_below(root: &Path) -> Vec<(PathBuf, String)> {
+    fn walk(dir: &Path, root: &Path, found: &mut Vec<(PathBuf, String)>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() || path == root.join("keeper") {
+                continue;
+            }
+            for pid in fs::read_to_string(path.join("cgroup.procs"))
+                .unwrap_or_default()
+                .lines()
+            {
+                found.push((path.clone(), pid.to_owned()));
+            }
+            walk(&path, root, found);
+        }
+    }
+    let mut found = Vec::new();
+    walk(root, root, &mut found);
+    found
+}
+
+/// Test 1: a two-cycle run leaves `work/1`, `work/2`, `store/1` and `store/2` and nothing else
+/// under `--scratch`, and each cycle's program copied its own seeded name into its own workspace.
+#[test]
+fn cycles_work_in_one_shared_directory() {
+    let scratch = fresh_scratch("shared-directory");
+    let mut settings = local_settings(scratch.clone());
+    settings.protocols = Path::new(SUBSTRATE).join("protocols");
+    settings.workers = NonZeroUsize::new(2).unwrap();
+    let report = run_suite(
+        &Path::new(SUBSTRATE).join("own.suite.yaml"),
+        &settings,
+        None,
+        None,
+    )
+    .unwrap();
+    assert!(report.failed.is_empty(), "{report:?}");
+    assert_eq!(report.as_expected, 2, "{report:?}");
+    assert_eq!(directories(&scratch), ["store", "work"]);
+    assert_eq!(directories(&scratch.join("work")), ["1", "2"]);
+    assert_eq!(directories(&scratch.join("store")), ["1", "2"]);
+    for (n, name) in [(1, "one"), (2, "two")] {
+        let own = scratch.join("work").join(n.to_string()).join("own.txt");
+        assert_eq!(
+            fs::read_to_string(&own).unwrap().trim(),
+            name,
+            "{}",
+            own.display()
+        );
+        assert!(scratch.join(format!("store/{n}/tree.json")).is_file());
+    }
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// Test 2: `--cgroup-root <scope> --workers 2` runs two gated cycles at once under the scope;
+/// each copies its own name, the run ends 0, and no process is left below the root but the
+/// scope's keeper.
+#[test]
+fn substrate_runs_cycles_side_by_side_under_a_given_root() {
+    let Some(scope) = Scope::start() else {
+        return;
+    };
+    let dir = fresh_scratch("substrate-side-by-side");
+    let mut command = substrate_suite(
+        &dir,
+        Some(&scope.root.join("run")),
+        Path::new(SUBSTRATE),
+        "gated.suite.yaml",
+    );
+    command
+        .arg("--cgroup-root")
+        .arg(&scope.root)
+        .args(["--workers", "2"]);
+    let mut running = Spawned::spawn(command);
+    running.wait_for(&[
+        cycle_target(&dir, 1, "started"),
+        cycle_target(&dir, 2, "started"),
+    ]);
+    for n in 1..=2 {
+        assert!(!cycle_target(&dir, n, "release").exists());
+    }
+    for n in 1..=2 {
+        fs::write(cycle_target(&dir, n, "release"), "").unwrap();
+    }
+    let output = running.finish();
+    passed(&output);
+    for (n, name) in [(1, "one"), (2, "two")] {
+        assert_eq!(
+            fs::read_to_string(cycle_target(&dir, n, "own.txt"))
+                .unwrap()
+                .trim(),
+            name,
+            "cycle {n}"
+        );
+    }
+    // Substrate ends a launch's cgroup after its program; wait up to 10 s for it to empty.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut left = processes_below(&scope.root);
+    while !left.is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+        left = processes_below(&scope.root);
+    }
+    assert!(left.is_empty(), "processes left below the root: {left:?}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// A copy of the substrate fixture in a fresh directory, whose `peers/one/host.txt` and
+/// `peers/two/host.txt` name the host path of the other cycle's `target/marker` under
+/// `dir/scratch`.
+fn looking_suite(label: &str, dir: &Path) -> PathBuf {
+    let suite = fresh_scratch(label);
+    copy_dir(Path::new(SUBSTRATE), &suite);
+    for (peer, other) in [("one", 2), ("two", 1)] {
+        fs::write(
+            suite.join("peers").join(peer).join("host.txt"),
+            cycle_target(dir, other, "marker")
+                .as_os_str()
+                .as_encoded_bytes(),
+        )
+        .unwrap();
+    }
+    suite
+}
+
+/// Test 3: a confined program of one cycle reads the other cycle's marker neither by its host
+/// path nor as `../<n>/target/marker`, while both markers exist on the host.
+#[test]
+fn a_cycle_sees_no_workspace_of_another() {
+    let Some(scope) = Scope::start() else {
+        return;
+    };
+    let dir = fresh_scratch("substrate-no-workspace");
+    let suite = looking_suite("substrate-no-workspace-suite", &dir);
+    let mut command = substrate_suite(
+        &dir,
+        Some(&scope.root.join("run")),
+        &suite,
+        "look.suite.yaml",
+    );
+    command
+        .arg("--cgroup-root")
+        .arg(&scope.root)
+        .args(["--workers", "2"]);
+    let mut running = Spawned::spawn(command);
+    running.wait_for(&[
+        cycle_target(&dir, 1, "started"),
+        cycle_target(&dir, 2, "started"),
+    ]);
+    // The positive control: each marker exists on the host before the other cycle reads it.
+    for n in 1..=2 {
+        assert!(cycle_target(&dir, n, "marker").is_file(), "cycle {n}");
+    }
+    for n in 1..=2 {
+        fs::write(cycle_target(&dir, n, "release"), "").unwrap();
+    }
+    let output = running.finish();
+    passed(&output);
+    for n in 1..=2 {
+        assert!(
+            cycle_target(&dir, n, "unseen").is_file(),
+            "cycle {n} read the other cycle's marker by: {}",
+            fs::read_to_string(cycle_target(&dir, n, "seen")).unwrap_or_default()
+        );
+    }
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&suite);
+}
+
+/// Test 4: cycle 2's confined program sees its own process in `/proc` and not cycle 1's, which
+/// runs at the same time.
+#[test]
+fn a_cycle_sees_no_process_of_another() {
+    let Some(scope) = Scope::start() else {
+        return;
+    };
+    let dir = fresh_scratch("substrate-no-process");
+    let mut command = substrate_suite(
+        &dir,
+        Some(&scope.root.join("run")),
+        Path::new(SUBSTRATE),
+        "procs.suite.yaml",
+    );
+    command
+        .arg("--cgroup-root")
+        .arg(&scope.root)
+        .args(["--workers", "2"]);
+    let mut running = Spawned::spawn(command);
+    running.wait_for(&[
+        cycle_target(&dir, 1, "started"),
+        cycle_target(&dir, 2, "started"),
+    ]);
+    for n in 1..=2 {
+        fs::write(cycle_target(&dir, n, "release"), "").unwrap();
+    }
+    running.wait_for(&[cycle_target(&dir, 2, "procs.txt")]);
+    fs::write(cycle_target(&dir, 1, "done"), "").unwrap();
+    let output = running.finish();
+    passed(&output);
+    assert_eq!(
+        fs::read_to_string(cycle_target(&dir, 2, "procs.txt")).unwrap(),
+        "self: seen\nother: unseen\n"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Test 5: with no `--cgroup-root`, `tree test` under `substrate` starts itself again in a
+/// delegated scope and exits with that run's status: 0 for a passing suite, 1 for a failing one.
+#[test]
+fn substrate_starts_itself_again() {
+    if !delegation_present() {
+        return;
+    }
+    let dir = fresh_scratch("substrate-again");
+    let passing = substrate_suite(&dir, None, Path::new(SUBSTRATE), "kept.suite.yaml")
+        .output()
+        .unwrap();
+    passed(&passing);
+    assert!(
+        text(&passing.stdout).contains("one: as expected ("),
+        "{}",
+        text(&passing.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(cycle_target(&dir, 2, "own.txt"))
+            .unwrap()
+            .trim(),
+        "two"
+    );
+    let failing_dir = fresh_scratch("substrate-again-failing");
+    let failing = substrate_suite(
+        &failing_dir,
+        None,
+        Path::new(SUBSTRATE),
+        "failing.suite.yaml",
+    )
+    .output()
+    .unwrap();
+    let said = format!("{}{}", text(&failing.stdout), text(&failing.stderr));
+    assert_eq!(failing.status.code(), Some(1), "{said}");
+    assert!(said.contains("fails: FAILED: "), "{said}");
+    assert!(said.contains("one: as expected ("), "{said}");
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&failing_dir);
+}
+
+/// Test 6: `run_suite` takes the runner `TreeRunner::on_root` builds, in a test process in a
+/// child of the root: two suites, one after the other, under the one hold; once the runner and
+/// the settings are dropped, the same process holds the root again. The test starts its own
+/// binary again in `<scope>/run`, which does the work.
+#[test]
+fn run_suite_takes_the_runner_that_holds_the_root() {
+    if let Some(root) = std::env::var_os(SUITE_ROOT).filter(|_| std::env::var_os(IN_SCOPE).is_some())
+    {
+        run_suite_on_the_held_root(Path::new(&root));
+        return;
+    }
+    let Some(scope) = Scope::start() else {
+        return;
+    };
+    let name = format!(
+        "{}::run_suite_takes_the_runner_that_holds_the_root",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, path)| path)
+    );
+    let output = Command::new("sh")
+        .arg(Path::new(DELEGATED).join("enter.sh"))
+        .arg(scope.root.join("run"))
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", &name, "--nocapture"])
+        .env(IN_SCOPE, "1")
+        .env(SUITE_ROOT, &scope.root)
+        .output()
+        .unwrap();
+    let said = format!("{}{}", text(&output.stdout), text(&output.stderr));
+    assert_eq!(output.status.code(), Some(0), "{said}");
+    assert!(said.contains(&format!("test {name} ... ok")), "{said}");
+    assert!(said.contains("1 passed"), "{said}");
+}
+
+/// The work of [`run_suite_takes_the_runner_that_holds_the_root`], in a child of `root`.
+fn run_suite_on_the_held_root(root: &Path) {
+    let held = TreeRunner::on_root(root).unwrap();
+    let mut settings = SuiteSettings::new(
+        Path::new(SUBSTRATE).join("protocols"),
+        PathBuf::new(),
+        TreeTime::At(AT.to_owned()),
+        held.runner(),
+        Some("substrate".to_owned()),
+    );
+    settings.workers = NonZeroUsize::new(2).unwrap();
+    for label in ["held-first", "held-second"] {
+        let scratch = fresh_scratch(label);
+        settings.scratch = scratch.clone();
+        let report = run_suite(
+            &Path::new(SUBSTRATE).join("kept.suite.yaml"),
+            &settings,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(report.failed.is_empty(), "{label}: {report:?}");
+        assert_eq!(report.as_expected, 2, "{label}: {report:?}");
+        for (n, name) in [(1, "one"), (2, "two")] {
+            let own = scratch.join(format!("work/{n}/target/own.txt"));
+            assert_eq!(fs::read_to_string(&own).unwrap().trim(), name, "{label}");
+        }
+        let _ = fs::remove_dir_all(&scratch);
+    }
+    // While the runner lives the root is held: this process cannot hold it a second time.
+    let twice = TreeRunner::on_root(root);
+    assert!(twice.is_err(), "the root was held twice: {twice:?}");
+    drop(settings);
+    drop(held);
+    let again = TreeRunner::on_root(root);
+    assert!(
+        again.is_ok(),
+        "the hold outlived its runner: {:?}",
+        again.err()
+    );
+}
+
+/// Test 8: `--confinement local --cgroup-root <dir>` is refused `ConfinementRefused`, exit 2.
+#[test]
+fn local_with_a_cgroup_root_is_refused() {
+    let dir = fresh_scratch("local-root");
+    fs::create_dir_all(dir.join("plain")).unwrap();
+    let output = substrate_suite(&dir, None, Path::new(SUBSTRATE), "own.suite.yaml")
+        .args(["--confinement", "local", "--cgroup-root"])
+        .arg(dir.join("plain"))
+        .output()
+        .unwrap();
+    let said = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{said}");
+    assert!(
+        said.starts_with(&format!("{TEST_REFUSED}ConfinementRefused: ")),
+        "{said}"
+    );
+    assert!(said.contains("--cgroup-root"), "{said}");
+    assert!(output.stdout.is_empty(), "{}", text(&output.stdout));
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Test 9: a `--cgroup-root` that is a plain directory, no cgroup, is a refused hold: exit 2,
+/// naming `CgroupUndelegated` and the directory, before any cycle.
+#[test]
+fn a_refused_hold_exits_2() {
+    let dir = fresh_scratch("refused-hold");
+    let plain = dir.join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    let output = substrate_suite(&dir, None, Path::new(SUBSTRATE), "kept.suite.yaml")
+        .arg("--cgroup-root")
+        .arg(&plain)
+        .output()
+        .unwrap();
+    let said = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{said}");
+    assert!(said.starts_with(TEST_REFUSED), "{said}");
+    assert!(said.contains("CgroupUndelegated"), "{said}");
+    assert!(said.contains(&plain.display().to_string()), "{said}");
+    assert!(output.stdout.is_empty(), "{}", text(&output.stdout));
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Test 10: with no `--cgroup-root` and no `systemd-run` on `PATH`, the start again fails: exit 2.
+#[test]
+fn a_failed_start_again_exits_2() {
+    let dir = fresh_scratch("failed-start-again");
+    fs::create_dir_all(dir.join("no-programs")).unwrap();
+    let output = substrate_suite(&dir, None, Path::new(SUBSTRATE), "kept.suite.yaml")
+        .env("PATH", dir.join("no-programs"))
+        .output()
+        .unwrap();
+    let said = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{said}");
+    assert!(said.starts_with(TEST_REFUSED), "{said}");
+    assert!(
+        said.contains("tree test could not start itself again"),
+        "{said}"
+    );
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// Test 11: a `tree test` marked started again (`B10X_LOOM_CONFINEMENT_REEXEC`) without the
+/// handshake path (`B10X_LOOM_CONFINEMENT_READY`) is refused: exit 2.
+#[test]
+fn a_refused_handshake_exits_2() {
+    let dir = fresh_scratch("refused-handshake");
+    let output = substrate_suite(&dir, None, Path::new(SUBSTRATE), "kept.suite.yaml")
+        .env("B10X_LOOM_CONFINEMENT_REEXEC", "1")
+        .env_remove("B10X_LOOM_CONFINEMENT_READY")
+        .output()
+        .unwrap();
+    let said = text(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "{said}");
+    assert!(said.starts_with(TEST_REFUSED), "{said}");
+    assert!(
+        said.contains("the delegation handshake path is missing"),
+        "{said}"
+    );
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
 }

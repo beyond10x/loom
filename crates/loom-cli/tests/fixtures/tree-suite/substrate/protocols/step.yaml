@@ -1,0 +1,22 @@
+format: protocol/1
+protocol:
+  id: step
+  revision: 1
+  description: >-
+    One program step. The case is done once its program ran and exited 0.
+artifacts:
+  work: {}
+evidence_kinds:
+  step_ran: {}
+claims:
+  step.ran:
+    true_when:
+      evidence: {kind: step_ran, subject: work, result: ran}
+actions:
+  step.run:
+    effect: write
+    may_produce:
+      - evidence: step_ran
+outcomes:
+  done:
+    requires: {claim: step.ran}
