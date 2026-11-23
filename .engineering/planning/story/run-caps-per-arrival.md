@@ -15,6 +15,7 @@ relations:
 - depends_on: story:bound-artifact-revisions
 - depends_on: story:tree-run-command
 - depends_on: story:standing-tree-rests-quiescent
+- depends_on: story:rework-allowance-after-a-rejection
 scope:
 - confidence: cited
   path: crates/loom-bindings/src/decode.rs
