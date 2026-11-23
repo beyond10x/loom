@@ -224,7 +224,8 @@ types:
 
   # One action's binding: the action id of the protocol, its executor, the arguments (a literal
   # JSON object, or `arguments_from`, an argv whose standard output is the object), the records it
-  # writes, the tools an Agent may be offered, budget and timeout (1 to 3600 seconds), the retry
+  # writes, the tools an Agent may be offered, budget and timeout (1 to 14400 seconds on a
+  # Program executor, 1 to 3600 on any other), the retry
   # conditions, the handoff text a run shows when this writer has done what it may and a person
   # continues, and a Program executor's exit classes. `handoff_when` (story
   # handoff-when-a-program-decides) is the argv of a Program executor's check, held to the

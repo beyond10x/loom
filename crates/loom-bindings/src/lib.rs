@@ -84,8 +84,23 @@ pub const DEFAULT_AGENT_MODEL: &str = "claude-haiku-5-5";
 pub const DEFAULT_MAX_RUNS: i64 = 8;
 /// The shortest `timeout_seconds` an action may name.
 pub const MIN_TIMEOUT_SECONDS: i64 = 1;
-/// The longest `timeout_seconds` an action may name.
+/// The longest `timeout_seconds` an action may name, but for a `program` executor's own program
+/// ([`MAX_PROGRAM_TIMEOUT_SECONDS`]); a `handoff_when` check and an `arguments_from` program run
+/// under at most this.
 pub const MAX_TIMEOUT_SECONDS: i64 = 3600;
+/// The longest `timeout_seconds` a `program` executor may name, for its own program alone
+/// (story:bound-program-timeout-above-an-hour).
+pub const MAX_PROGRAM_TIMEOUT_SECONDS: i64 = 14400;
+
+/// The seconds a helper program of `binding` (its `handoff_when` check, its `arguments_from`
+/// program) runs under: the binding's `timeout_seconds`, else 60, at most
+/// [`MAX_TIMEOUT_SECONDS`].
+pub(crate) fn helper_timeout_seconds(binding: &loom::bindings::BoundAction) -> i64 {
+    binding
+        .timeout_seconds
+        .unwrap_or(b10x_loom_intake_slice::bindings::DEFAULT_TIMEOUT_SECONDS)
+        .min(MAX_TIMEOUT_SECONDS)
+}
 /// The deepest nesting [`decode`] reads, counted on the decoded values.
 pub const MAX_NESTING: usize = 64;
 /// The most flow openers (`[` and `{`) net of closers [`decode`] lets the text hold before it is
