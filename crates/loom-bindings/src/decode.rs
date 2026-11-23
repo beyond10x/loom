@@ -922,7 +922,8 @@ fn rework_on(value: &Value, action: Option<&str>) -> Decoded<Vec<RetryCondition>
 
 /// The rework members against `runs_per` and the decoded `retry_when`: `rework_limit` and
 /// `rework_on` are read only under `runs_per: rejection`, which needs a `retry_when` to name a
-/// rejection, and each pair `rework_on` lists is one `retry_when` lists.
+/// rejection (a kind with no result names none), and each pair `rework_on` lists is one
+/// `retry_when` lists.
 fn rework(
     budget: &ActionBudget,
     retry_when: &[RetryCondition],
@@ -944,12 +945,15 @@ fn rework(
         }
         return Ok(());
     }
-    if retry_when.is_empty() {
+    if retry_when
+        .iter()
+        .all(|condition| condition.results.is_empty())
+    {
         return Err(refuse(
             Reason::InvalidBudget,
             action,
             "budget.runs_per",
-            "is rejection and retry_when lists nothing, so no record could open an allowance",
+            "is rejection and retry_when lists no result, so no record could open an allowance",
         ));
     }
     for condition in budget.rework_on.iter().flatten() {

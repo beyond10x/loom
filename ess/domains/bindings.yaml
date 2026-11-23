@@ -129,9 +129,11 @@ types:
   # `PROGRAM_SOURCE` observation naming the case and the action, but a run in an `exits` class.
   # `Rejection`: the same runs, those after the latest rejection only; a rejection is a case record
   # whose kind and result `rework_on` lists (else `retry_when`), at any subject revision, by any
-  # producer, but a record citing the action's own run, placed at the latest observation of the
-  # case it cites. The rejections, at most one in each interval between two runs, are bounded by
-  # `rework_limit`.
+  # producer, but a record citing the action's own run or person approval, placed at the latest
+  # observation of the case it cites. The rejections, at most one in each interval between two
+  # runs, are bounded by `rework_limit`; one citing no observation of the case counts with a
+  # rejection it may lie beside, never alone in an interval it may not lie in. `Rejection` needs a
+  # `retry_when` that lists at least one result.
   - name: loom.bindings.RunsScope
     kind: enum
     variants: [Case, Rejection]

@@ -1489,17 +1489,21 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `budget.rework_on` lists (same shape as `retry_when`, each pair also in `retry_when`, never
   empty), else `retry_when`; at any subject revision (`none` included) and by any producer (a
   person, `decider:<kind>`, `rule:<name>`, a program check), but never a record citing the
-  action's own run. It is placed at the latest observation of the case it cites; one that cites
-  none opens no window. The rework count counts at most one rejection in each interval between
-  two runs. `prepare` (through `allowance` in `program.rs`, the one count of the runs, which
+  action's own run or its own person approval (a `PERSON_SOURCE` observation naming the case and
+  the action). It is placed at the latest observation of the case it cites; one that cites none
+  opens no window. The rework count counts at most one rejection in each interval between two
+  runs. One that cites no observation of the case lies from the interval of the latest
+  observation it or an earlier record cites to the one after the last run: it counts with a
+  placed rejection in that span, and all such records that meet none count once, at the latest
+  of their first intervals (fewer counts, never more). `prepare` (through `allowance` in `program.rs`, the one count of the runs, which
   the `from: runs` entry reads too) refuses `RunsSpent`
   with `"{action} was rejected {k} times in case {case}, the latest {id} by {producer}; its
   budget.rework_limit is {n}"` when the count is over the limit, else with `"{action} has run
   {runs} times in case {case} since the rejection {id} by {producer}, its budget.max_runs is
   {n}"` (today's text with no placed rejection, and byte for byte under `case`). Under
   `rejection` a `from: runs` entry writes `spent` once, on the first run made at a rework count
-  equal to `rework_limit`, never on a full window alone. `runs_per: rejection` with an empty
-  `retry_when`, `rework_limit` or `rework_on` without it, and a `rework_on` pair outside
+  equal to `rework_limit`, never on a full window alone. `runs_per: rejection` with a
+  `retry_when` that lists no result (empty, or each kind `[]`), `rework_limit` or `rework_on` without it, and a `rework_on` pair outside
   `retry_when` are `InvalidBudget`; the three on an `agent`, `open` or `copy` binding are
   `MemberNotForExecutor`. No run-log kind is added. Held by `crates/loom-tree/tests/rework/`,
   `bound_retry.rs` and `bindings_document.rs`.

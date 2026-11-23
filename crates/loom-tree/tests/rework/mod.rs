@@ -401,8 +401,13 @@ fn runbooks_shape_writes_spent_on_the_last_renewal() {
     tree.reject(&run, "change.review", "decider:x");
     assert_rework_spent(&tree, "decider:x", 3);
     assert_eq!(tree.records("implement_spent"), 1);
+}
 
-    // An outcome over the spent claim ends the case right after run 4, with no fourth review.
+/// Runbook's budget with an outcome over the spent claim: the case ends right after run 4, with no
+/// fourth review.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn runbooks_shape_gives_up_after_the_last_renewal() {
     let tree = Tree::open(
         "rework-spent-given-up",
         &protocol(true),
