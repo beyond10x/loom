@@ -1116,8 +1116,8 @@ types:
   # `write` step's `from` that is a link, is behind a link, is absent, is not a regular file or is
   # over 1 MiB.
   # `CycleUnknown`: an `--only` name that is no cycle of the suite. `SubstrateWorkersUnserved`:
-  # more than one worker under `--confinement substrate`, which waits for
-  # story:suite-runs-cycles-under-one-cgroup-root.
+  # more than 16 workers under `--confinement substrate`: the cycles share one Substrate driver,
+  # which runs at most 16 executions at once.
   - name: loom.tree.SuiteRefusalReason
     kind: enum
     variants:
