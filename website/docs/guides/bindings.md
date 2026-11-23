@@ -216,11 +216,12 @@ actions:
   number from 1, 2 when absent) bounds how many rejections it answers. A rejection is a record of
   the case whose kind and result `budget.rework_on` lists, or `retry_when` when `rework_on` is
   absent, whoever wrote it (a person, `decider:<kind>`, `rule:<name>`, a program check) and about
-  any revision, but never a record of the action's own run. `rework_on` has the shape of
+  any revision, but never a record of the action's own run or of its own person approval. `rework_on` has the shape of
   `retry_when`, every pair also in `retry_when`, and is never empty: a record `retry_when` lists
   and `rework_on` does not, such as a failed check, still sends the action back and counts its run
   in the current window. Two rejections between the same two runs count once, and a rejection
-  that cites no observation of the case counts but gives no run. The step past either bound is
+  that cites no observation of the case counts but gives no run; beside a rejection it may lie
+  next to, it counts no more. The step past either bound is
   refused `RunsSpent`, naming the bound:
 
   ```text
@@ -229,8 +230,8 @@ actions:
   ```
 
   Under `rejection` a `from: runs` entry writes `spent` once, on the first run made at a rework
-  count equal to `rework_limit`, never because a window is full. `runs_per: rejection` with an
-  empty `retry_when`, `rework_limit` or `rework_on` without it, and a `rework_on` pair that
+  count equal to `rework_limit`, never because a window is full. `runs_per: rejection` with a
+  `retry_when` that lists no result, `rework_limit` or `rework_on` without it, and a `rework_on` pair that
   `retry_when` does not list are refused `InvalidBudget`; any of the three on an `agent`, an
   `open` or a `copy` is refused `MemberNotForExecutor`.
 - `exits`, on a `program` alone, holds `error` and `not_called`, each a list of exit codes from 0

@@ -1516,3 +1516,20 @@ fn runs_per_and_rework_limit_refusals() {
     assert!(refused(&implement(Some("{}"), "{max_runs: 1}")).is_none());
     assert!(refused(&implement(Some("{code_review: []}"), "{max_runs: 1}")).is_none());
 }
+
+/// Security review of unit RW (wave 7), boundary of "runs_per: rejection on an action whose
+/// retry_when is empty": a `retry_when` whose every kind lists no result names no record either,
+/// so no record could open an allowance; refused at `budget.runs_per` as `retry_when: {}` is, and
+/// as D16 refuses `rework_on: {code_review: []}`.
+#[test]
+fn security_rw_rejection_beside_a_retry_when_listing_no_result_is_refused() {
+    assert_refused(
+        &implement(
+            Some("{code_review: []}"),
+            "{max_runs: 1, runs_per: rejection}",
+        ),
+        Reason::InvalidBudget,
+        Some("change.implement"),
+        "budget.runs_per",
+    );
+}

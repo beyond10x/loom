@@ -133,7 +133,7 @@ use sha2::{Digest as _, Sha256};
 use crate::arguments::{NotPrinted, case_names, one_object, run_arguments_from};
 use crate::handoff::SIGNAL_EXITS;
 use crate::resolve::beside;
-use crate::retry::{lists, only_text};
+use crate::retry::{PERSON_SOURCE, lists, only_text};
 use crate::{CaseNames, bound_case_child};
 
 /// The `source` of every observation the port keeps: one per run of a bound program. The run count
@@ -1044,13 +1044,17 @@ type Rejection = (String, String);
 /// Under `runs_per: case` (or none) the window is all of them and there is no rejection. Under
 /// `rejection`, a rejection is a held record of the case whose `kind` member is its kind and whose
 /// kind and result `budget.rework_on` lists, else `retry_when` ([`lists`]), at any subject
-/// revision and by any producer, but a record citing a [`PROGRAM_SOURCE`] observation naming the
-/// case and the action (the action's own run). It is placed at the latest position, in the order
-/// the governor received its observations, of an observation it cites that names the case. The
-/// window is the runs after the latest placed rejection, all of them with none. The rework count
-/// is the number of intervals between the runs (before the first, between two, after the last)
-/// that hold a rejection: a placed one by its position, one placed nowhere by its order among the
-/// records citing a counted run of the action, in the order the case received them.
+/// revision and by any producer, but a record citing a [`PROGRAM_SOURCE`] or [`PERSON_SOURCE`]
+/// observation naming the case and the action (the action's own step). It is placed at the latest
+/// position, in the order the governor received its observations, of an observation it cites that
+/// names the case. The window is the runs after the latest placed rejection, all of them with
+/// none. The rework count is the number of intervals between the runs (before the first, between
+/// two, after the last) that hold a rejection. A placed one lies in the interval its position
+/// gives. One placed nowhere lies at or after the interval of the latest observation cited by it
+/// or by a record the case received before it, and at or before the interval after the last run:
+/// it counts with a placed rejection in that span, and those that meet none count once, at the
+/// latest of their first intervals. So they count the fewest intervals they can lie in, never more
+/// than they do.
 struct Allowance {
     /// The runs counted against `budget.max_runs` now.
     window: i64,
@@ -1136,46 +1140,50 @@ fn allowance<S: FallibleCaseStore, T: EvaluationTime>(
         .as_deref()
         .unwrap_or(&binding.retry_when);
     let id = |position: usize| observations[position].observation_id.0.0.as_str();
-    // Each observation naming the case by its position; each of the action's own runs (counted
-    // or not); each counted run by the number of runs up to it.
+    // Each observation by its position, and each naming the case; each of the action's own steps
+    // (runs, counted or not, and person approvals).
+    let received: BTreeMap<&str, usize> = (0..observations.len())
+        .map(|position| (id(position), position))
+        .collect();
     let placed: BTreeMap<&str, usize> = observations
         .iter()
         .enumerate()
         .filter(|(_, observation)| of_case(&observation.payload))
         .map(|(position, _)| (id(position), position))
         .collect();
-    let own_runs: BTreeSet<&str> = observations
+    let own_steps: BTreeSet<&str> = observations
         .iter()
         .enumerate()
-        .filter(|(_, observation)| own(&observation.source, &observation.payload))
+        .filter(|(_, observation)| {
+            own(&observation.source, &observation.payload)
+                || (observation.source == PERSON_SOURCE
+                    && of_case(&observation.payload)
+                    && text_member(&observation.payload, "action") == Some(action))
+        })
         .map(|(position, _)| id(position))
-        .collect();
-    let numbered: BTreeMap<&str, usize> = positions
-        .iter()
-        .enumerate()
-        .map(|(index, position)| (id(*position), index + 1))
         .collect();
     let held = governor
         .evidence(case)
         .map_err(|error| EffectError::new(format!("the evidence of case {}: {error:?}", case.0)))?;
-    // The interval a record placed nowhere lies in: after the latest run a record received
-    // before it cites.
-    let mut anchor = 0;
+    // The first interval a record placed nowhere can lie in: the latest one an observation cited
+    // by it or by a record received before it lies in. One such first interval per rejection.
+    let mut earliest = 0;
+    let mut unplaced: Vec<usize> = Vec::new();
     let mut opened: Option<(usize, Rejection)> = None;
     for record in &held {
-        if record.case_id != *case {
-            continue;
-        }
         let cited = || {
             record
                 .observation_ids
                 .iter()
                 .map(|cited| cited.0.0.as_str())
         };
-        if let Some(run) = cited().filter_map(|cited| numbered.get(cited)).max() {
-            anchor = anchor.max(*run);
+        if let Some(at) = cited().filter_map(|cited| received.get(cited)).max() {
+            earliest = earliest.max(positions.partition_point(|position| position <= at));
         }
-        if cited().any(|cited| own_runs.contains(cited)) {
+        if record.case_id != *case {
+            continue;
+        }
+        if cited().any(|cited| own_steps.contains(cited)) {
             continue;
         }
         let (Some(kind), Some(result)) = (
@@ -1189,16 +1197,27 @@ fn allowance<S: FallibleCaseStore, T: EvaluationTime>(
         }
         let rejection = (record.evidence_id.0.0.clone(), record.producer.clone());
         let at = cited().filter_map(|cited| placed.get(cited).copied()).max();
-        allowance.intervals.insert(at.map_or(anchor, |at| {
-            positions.partition_point(|position| *position < at)
-        }));
-        if let Some(at) = at
-            && opened.as_ref().is_none_or(|(before, _)| at >= *before)
-        {
-            opened = Some((at, rejection.clone()));
+        match at {
+            Some(at) => {
+                allowance
+                    .intervals
+                    .insert(positions.partition_point(|position| *position < at));
+                if opened.as_ref().is_none_or(|(before, _)| at >= *before) {
+                    opened = Some((at, rejection.clone()));
+                }
+            }
+            None => unplaced.push(earliest),
         }
         allowance.latest = Some(rejection);
     }
+    // A record placed nowhere lies from its first interval to the one after the last run. Those
+    // whose span holds a placed rejection count with it; the rest can all lie in the latest of
+    // their first intervals, and count once there.
+    let alone = unplaced
+        .into_iter()
+        .filter(|first| allowance.intervals.range(first..).next().is_none())
+        .max();
+    allowance.intervals.extend(alone);
     if let Some((at, rejection)) = opened {
         allowance.window = count(positions.iter().filter(|position| **position > at).count());
         allowance.opened_by = Some(rejection);

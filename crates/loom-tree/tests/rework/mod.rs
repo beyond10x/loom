@@ -401,8 +401,13 @@ fn runbooks_shape_writes_spent_on_the_last_renewal() {
     tree.reject(&run, "change.review", "decider:x");
     assert_rework_spent(&tree, "decider:x", 3);
     assert_eq!(tree.records("implement_spent"), 1);
+}
 
-    // An outcome over the spent claim ends the case right after run 4, with no fourth review.
+/// Runbook's budget with an outcome over the spent claim: the case ends right after run 4, with no
+/// fourth review.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn runbooks_shape_gives_up_after_the_last_renewal() {
     let tree = Tree::open(
         "rework-spent-given-up",
         &protocol(true),
@@ -524,4 +529,133 @@ fn runbooks_merge_approval_opens_a_window() {
     assert_ran(&writer);
     tree.reject(&run, "change.merge", "decider:x");
     assert_rework_spent(&tree, "decider:x", 3);
+}
+
+// Adversary (wave 7, unit rw): Runbook's two suite entries (`runbook/cycles/tree-suite.yaml`
+// `decider-rework-spent` and `rework-fresh-allowance`) driven on Runbook's `change.implement`
+// shape with `rework_limit: 2`, the bound those two entries hold (the coordinator, correction round of
+// unit rw): the third rejection ends the writer, and two rejections leave it its fourth run.
+
+/// [`RUNBOOK_BINDINGS`] with `rework_limit: 2`.
+fn runbook_bindings_limit_two() -> String {
+    assert!(RUNBOOK_BINDINGS.contains("rework_limit: 3"));
+    RUNBOOK_BINDINGS.replace("rework_limit: 3", "rework_limit: 2")
+}
+
+/// [`Tree::open`] with `implement` as the writer's program.
+fn open_with(label: &str, protocol: &str, bindings: &str, implement: &str) -> Tree {
+    let dir = super::scratch(label);
+    let protocols = dir.join("protocols");
+    let workspace = dir.join("workspace");
+    std::fs::create_dir_all(&protocols).unwrap();
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::write(protocols.join("rework.yaml"), protocol).unwrap();
+    std::fs::write(workspace.join("change.txt"), "change\n").unwrap();
+    std::fs::write(workspace.join("implement.sh"), implement).unwrap();
+    let file = dir.join("rework.bindings.yaml");
+    std::fs::write(&file, bindings).unwrap();
+    let directory = read_protocols_directory(&protocols).unwrap();
+    let store = dir.join("store");
+    open_tree(&OpenRequest {
+        store: store.clone(),
+        workspace,
+        protocol: "rework@1".into(),
+        bindings: file,
+        revisions: Vec::new(),
+        case: "root".into(),
+        time: TreeTime::At(AT.into()),
+        catalog: &directory.catalog,
+        protocols: directory.kept,
+    })
+    .unwrap();
+    Tree {
+        store,
+        catalog: directory.catalog,
+    }
+}
+
+/// The results of the root's records of `kind`, in the order held.
+fn results(tree: &Tree, kind: &str) -> Vec<String> {
+    CanonGovernor::new(FileCaseStore::open(tree.store.clone()).unwrap())
+        .with_catalog(&tree.catalog)
+        .unwrap()
+        .evidence(&CaseId("root".into()))
+        .unwrap()
+        .iter()
+        .filter(|held| held.kind == kind)
+        .map(|held| match &held.facts {
+            b10x_loom_commission::model::json::Value::Object(members) => members
+                .iter()
+                .find(|(name, _)| name == "result")
+                .map(|(_, value)| format!("{value:?}"))
+                .unwrap_or_default(),
+            other => format!("{other:?}"),
+        })
+        .collect()
+}
+
+/// Runbook `decider-rework-spent`: a decider rejects the merge every time it is asked; the run
+/// ends `Stuck` (Runbook exit 4) with three `merge_approval: rejected` records.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn adv_runbook_decider_rework_spent_after_three_rejections() {
+    let tree = Tree::open(
+        "adv-decider-rework-spent",
+        RUNBOOK_PROTOCOL,
+        &runbook_bindings_limit_two(),
+    );
+    let (writer, run) = rejected(&tree, "change.merge", "decider:x", 2);
+    assert_eq!(writer.len(), 3, "{writer:#?}");
+    tree.reject(&run, "change.merge", "decider:x");
+    assert_eq!(results(&tree, "merge_approval").len(), 3);
+    // The suite's expectation: after the third rejection the run stops, the writer refused
+    // RunsSpent on its rework bound, without a fourth run and a fourth review.
+    assert_rework_spent(&tree, "decider:x", 2);
+}
+
+/// Runbook `rework-fresh-allowance`: four `change.implement` runs, the merge rejected, rejected,
+/// approved; the case ends `merged`. The first run is sent back by its own `coverage_refused`
+/// (exit 8, D12: counted inside the window, opens none).
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn adv_runbook_rework_fresh_allowance() {
+    let implement = "if [ -f ../first-done ]; then echo implemented >> change.txt; exit 0; fi\n\
+                     : > ../first-done\nexit 8\n";
+    let tree = open_with(
+        "adv-rework-fresh",
+        RUNBOOK_PROTOCOL,
+        &runbook_bindings_limit_two(),
+        implement,
+    );
+    let (writer, run) = rejected(&tree, "change.merge", "decider:x", 2);
+    let exits: Vec<Option<i64>> = writer.iter().map(|line| line.exit).collect();
+    assert_eq!(exits, [Some(8), Some(0), Some(0), Some(0)], "{writer:#?}");
+    assert!(
+        writer.iter().all(|line| line.refusal.is_none()),
+        "{writer:#?}"
+    );
+    assert_waits_on(&run, "change.merge", "decider:x");
+    let decision = &run.decisions[0];
+    approve(&ApproveRequest {
+        store: &tree.store,
+        case: &decision.case,
+        capability: decision.capability.as_deref(),
+        principal: "decider:x",
+        decision: ApprovalDecision::Allow,
+        action: Some("change.merge"),
+        result: Some("accepted"),
+        reasons: None,
+        time: TreeTime::At(AT.into()),
+        catalog: &tree.catalog,
+        runner: Some(Tree::runner()),
+    })
+    .unwrap_or_else(|refused| panic!("the approval is taken: {refused}"));
+    let (run, lines) = tree.round();
+    assert!(
+        finished(&lines, "change.implement").is_empty(),
+        "{lines:#?}"
+    );
+    assert_eq!(run.stop, TreeStop::Terminal, "{run:?}\n{lines:#?}");
+    assert_eq!(run.detail.as_deref(), Some("merged"), "{run:?}");
+    assert_eq!(results(&tree, "merge_approval").len(), 3);
 }
