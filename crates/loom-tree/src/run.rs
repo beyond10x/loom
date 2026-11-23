@@ -972,10 +972,10 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
 /// What a step of `case` is chosen from: the lines of its log, its revision, its effect port
 /// (every program of it holding `cancel`) and its history, with the actions due again (a writer
 /// with a retry record, a copy whose source holds something new) but those [`set_aside`]: refused
-/// (a cancel is no such refusal) or not called since the case was last evaluated for a reason
-/// other than a not-called run's own moves. And the idle actions: the copies whose source holds
-/// nothing new and the writers whose only open evidence is a spent allowance
-/// ([`spent_writers_idle`]).
+/// since the case was last evaluated (a cancel is no such refusal), or not called since it was
+/// last evaluated for a reason other than a not-called run's own moves. And the idle actions: the
+/// copies whose source holds nothing new and the writers whose only open evidence is a spent
+/// allowance ([`spent_writers_idle`]).
 #[allow(clippy::type_complexity)]
 fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     governor: &'a CanonGovernor<S>,
@@ -1025,11 +1025,14 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
 /// (`story:writer-not-called-leaves-the-due-set`, D1 a). Such an action is set aside until the
 /// case changes, so a not-called writer starts once per evaluation.
 ///
-/// An `evaluated` line does not end the set-aside when the interval it closes holds only
-/// not-called lines, at least one of them names a move, and those moves account for its revision
-/// ([`crate::history::accounted`]): that line is the not-called runs' own writing (D4 a). The lines
-/// of that interval are then read too, and so on back. A record received outside the log in such
-/// an interval does not end it either; the next change does.
+/// An `evaluated` line does not end a not-called writer's set-aside when it is the not-called
+/// runs' own writing (D4 a): in the interval it closes, at least one not-called line names a move,
+/// every other line is neutral, and the moves account for its revision
+/// ([`crate::history::accounted`]). A line is neutral when it names no move and records no
+/// evidence, as a refused line does: it changed neither the revision nor the decision. The
+/// not-called lines of that interval are then read too, and so on back; a refusal there still
+/// ends at that `evaluated` line, as before. A record received outside the log in such an
+/// interval does not end the set-aside either; the next change does.
 fn set_aside(lines: &[RunLogLine], bindings: &BindingsDocument) -> BTreeSet<String> {
     let opening = |end: usize| {
         lines[..end]
@@ -1052,12 +1055,13 @@ fn set_aside(lines: &[RunLogLine], bindings: &BindingsDocument) -> BTreeSet<Stri
     };
     let mut aside = BTreeSet::new();
     let mut end = lines.len();
+    let mut latest = true;
     loop {
         let start = opening(end);
         for finished in finished(start, end) {
-            if (finished.refusal.is_some() && !crate::history::cancelled(finished))
-                || not_called(finished, bindings)
-            {
+            let refused =
+                latest && finished.refusal.is_some() && !crate::history::cancelled(finished);
+            if refused || not_called(finished, bindings) {
                 aside.insert(finished.action.clone());
             }
         }
@@ -1067,14 +1071,17 @@ fn set_aside(lines: &[RunLogLine], bindings: &BindingsDocument) -> BTreeSet<Stri
         let previous = opening(start);
         let mut moves = 0i64;
         let mut named = false;
-        let mut only_not_called = true;
+        let mut other = false;
         for finished in finished(previous, start) {
             let moved = i64::try_from(finished.revisions.len()).unwrap_or(i64::MAX);
             moves = moves.saturating_add(moved);
-            named |= moved > 0;
-            only_not_called &= not_called(finished, bindings);
+            if not_called(finished, bindings) {
+                named |= moved > 0;
+            } else {
+                other |= moved > 0 || !finished.evidence.is_empty();
+            }
         }
-        let own = only_not_called
+        let own = !other
             && named
             && revision(start).is_some_and(|closing| {
                 crate::history::accounted(previous.and_then(revision), moves, closing)
@@ -1083,6 +1090,7 @@ fn set_aside(lines: &[RunLogLine], bindings: &BindingsDocument) -> BTreeSet<Stri
             break;
         }
         end = start;
+        latest = false;
     }
     aside
 }
