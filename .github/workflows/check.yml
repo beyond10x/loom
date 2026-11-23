@@ -103,12 +103,21 @@ jobs:
       - name: Probe a delegated user scope
         run: |
           set -u
-          if probe=$(systemd-run --user --scope -p Delegate=yes true 2>&1); then
-            echo "delegation probe passed: LOOM_REQUIRE_DELEGATION=1 for task check"
-            echo "LOOM_REQUIRE_DELEGATION=1" >> "$GITHUB_ENV"
-          else
-            echo "delegation probe failed, LOOM_REQUIRE_DELEGATION not set, the delegated tests skip and the test step names them: $probe"
-          fi
+          status=0
+          probe=$(cargo run -q --locked -p loom-xtask -- delegation-probe 2>&1) || status=$?
+          case "$status" in
+            0)
+              echo "delegation probe passed: LOOM_REQUIRE_DELEGATION=1 for task check: $probe"
+              echo "LOOM_REQUIRE_DELEGATION=1" >> "$GITHUB_ENV"
+              ;;
+            1)
+              echo "delegation probe failed, LOOM_REQUIRE_DELEGATION not set, the delegated tests skip and the test step names them: $probe"
+              ;;
+            *)
+              echo "delegation probe could not run (exit $status): $probe"
+              exit "$status"
+              ;;
+          esac
 
       - name: task check
         run: task check

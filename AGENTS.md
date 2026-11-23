@@ -335,9 +335,17 @@ Before a change is reported done, in this order:
    killed builder's attempt is never read. A start while a tree is built counts as
    `fixture:<tree>`, and such a line in the timed run fails the step. Its summary line counts the tests that printed a line `skipped:` (a missing
    prerequisite; nextest's JUnit report keeps a passing test's output) and names each. Where
-   `systemd-run --user --scope -p Delegate=yes true` passes it sets `LOOM_REQUIRE_DELEGATION=1` on
-   its run, so a delegated test that would skip fails; CI's step `Probe a delegated user scope`
-   sets it for `task check` when the same probe passes there.
+   `loom-xtask delegation-probe` passes it sets `LOOM_REQUIRE_DELEGATION=1` on its run, so a
+   delegated test that would skip fails; CI's step `Probe a delegated user scope` sets it for
+   `task check` when the same probe passes there (exit 1 leaves it unset, any other exit fails the
+   step). The probe checks what the delegated tests need, in order, and stops at the first
+   missing: `/usr/bin/bwrap`; `scope.sh` of `crates/loom-cli/tests/fixtures/tree-delegated/`
+   holding a scope of `systemd-run --user --scope -p Delegate=yes`; `enter.sh`, started by the
+   probing process, moving a process into a child of that scope; and the example
+   `delegation_probe` of `b10x-loom-intake-slice`, in a delegated scope of its own, opening
+   Substrate's driver with every family Loom needs (`crates/loom-xtask/src/delegation.rs`). A
+   scope that only starts is not enough: CI run 45194449550's runner started one, could not move a
+   process into it and got no `limits` from Substrate, and so does a plain login session here.
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds

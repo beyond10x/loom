@@ -11,9 +11,9 @@
 //! [`START_BUDGETS`] started `b10x-loom` more often than their bound (each start a line of the file
 //! the budget's variable names, which the step sets on its nextest run), or the step longer than
 //! [`STEP_BUDGET`]. Its summary line counts the tests that skipped for a missing
-//! prerequisite (a line `skipped:` in their output), and it names each; where a delegated user
-//! scope starts it sets [`REQUIRE_DELEGATION`] on its nextest run, so a delegated test that would
-//! skip fails instead ([`require_delegation`]). It refuses to start while the test sync switch
+//! prerequisite (a line `skipped:` in their output), and it names each; where the delegated tests
+//! can run (`loom-xtask delegation-probe`, [`crate::delegation`]) it sets [`REQUIRE_DELEGATION`]
+//! on its nextest run, so a delegated test that would skip fails instead ([`require_delegation`]). It refuses to start while the test sync switch
 //! (`B10X_LOOM_TEST_UNSYNCED_STORE`) is in its own environment. The wall time is taken inside the
 //! step, so a wait for a build slot before it starts does not count, and it starts once the test
 //! binaries are built (`cargo test --workspace --locked --no-run`, which nextest reuses), so a
@@ -63,8 +63,8 @@ pub const REQUIRE_DELEGATION: &str = "LOOM_REQUIRE_DELEGATION";
 
 /// Whether the step sets [`REQUIRE_DELEGATION`] to `1` on its nextest run, and the line it prints
 /// about it. A value the caller set stays as it is and `probe` is not run; otherwise the step sets
-/// it when `probe` (a delegated user scope starts here) passes, so a delegated test that skips
-/// fails the step, and leaves it unset, saying why, when the probe fails.
+/// it when `probe` ([`DELEGATION_PROBE`]: the delegated tests can run here) passes, so a
+/// delegated test that skips fails the step, and leaves it unset, saying why, when the probe fails.
 pub fn require_delegation(
     set: Option<&std::ffi::OsStr>,
     probe: impl FnOnce() -> Result<(), String>,
@@ -79,39 +79,22 @@ pub fn require_delegation(
         Ok(()) => (
             true,
             format!(
-                "test step: a delegated user scope starts here, so {REQUIRE_DELEGATION}=1: a \
-                 delegated test that skips fails"
+                "test step: {DELEGATION_PROBE} passed, so {REQUIRE_DELEGATION}=1: a delegated \
+                 test that skips fails"
             ),
         ),
         Err(why) => (
             false,
             format!(
-                "test step: {REQUIRE_DELEGATION} not set: no delegated user scope starts here \
-                 ({DELEGATION_PROBE}: {why}); the tests that need one skip and are named below"
+                "test step: {REQUIRE_DELEGATION} not set: the delegated tests cannot run here \
+                 ({DELEGATION_PROBE}: {why}); they skip and are named below"
             ),
         ),
     }
 }
 
-/// The probe of a delegated user scope, as the tests that need one start it.
-const DELEGATION_PROBE: &str = "systemd-run --user --scope --quiet -p Delegate=yes true";
-
-/// Runs [`DELEGATION_PROBE`]: `Ok` when it exits 0, else what it said.
-fn probe_delegation() -> Result<(), String> {
-    let output = Command::new("systemd-run")
-        .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "true"])
-        .output()
-        .map_err(|e| format!("cannot start: {e}"))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "{}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
-}
+/// The one probe of what the delegated tests need ([`crate::delegation`]), as CI runs it too.
+const DELEGATION_PROBE: &str = "loom-xtask delegation-probe";
 
 /// The tests of one test module of a package, wherever they run: in a test binary of their own, or
 /// as a module of the package's one test binary `main` (`story:one-test-binary-per-crate`), their
@@ -330,10 +313,22 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
         .join("nextest")
         .join(crate::shared_trees::REPORT);
     let _ = fs::remove_file(&setup_report);
-    let (require, said) = require_delegation(
-        std::env::var_os(REQUIRE_DELEGATION).as_deref(),
-        probe_delegation,
-    );
+    let mut broken = None;
+    let (require, said) =
+        require_delegation(std::env::var_os(REQUIRE_DELEGATION).as_deref(), || {
+            match crate::delegation::probe(root) {
+                Ok(record) => crate::delegation::decide(&record),
+                Err(error) => {
+                    broken = Some(error.clone());
+                    Err(error)
+                }
+            }
+        });
+    if let Some(error) = broken {
+        return Err(format!(
+            "test step: {DELEGATION_PROBE} could not run: {error}"
+        ));
+    }
     println!("{said}");
 
     let started = Instant::now();
