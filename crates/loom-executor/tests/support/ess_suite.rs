@@ -725,7 +725,82 @@ pub fn drop_decision(spec: &Path) -> Result<(), String> {
     keep("ess-inputs.yaml", &|line| {
         line == "  - domains/decision.yaml" || line.starts_with("  - scenarios/decision/")
     })?;
-    keep("system.yaml", &|line| line == "  - loom.decision")
+    keep("system.yaml", &|line| line == "  - loom.decision")?;
+    drop_types_of_decision(spec)
+}
+
+/// Removes from every other domain file the declarations under its `types:` list that name a
+/// `loom.decision.` type or a declaration removed before (to a fixpoint), so a copy without the
+/// decision domain still validates (`loom.governor.StoredDecisionRequest`, story
+/// decision-request-file-store, is typed by that domain).
+fn drop_types_of_decision(spec: &Path) -> Result<(), String> {
+    let dir = spec.join("domains");
+    let mut files: Vec<PathBuf> = match fs::read_dir(&dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+            .collect(),
+        Err(_) => return Ok(()),
+    };
+    files.sort();
+    let mut texts: Vec<String> = Vec::new();
+    for path in &files {
+        texts.push(fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?);
+    }
+    let mut names: Vec<String> = vec!["loom.decision.".to_owned()];
+    loop {
+        let mut more = false;
+        for text in &mut texts {
+            let mut kept = String::with_capacity(text.len());
+            let mut block = String::new();
+            let mut in_types = false;
+            let flush = |block: &mut String, kept: &mut String, names: &mut Vec<String>| -> bool {
+                let named = block
+                    .lines()
+                    .skip(1)
+                    .any(|line| names.iter().any(|name| line.contains(name.as_str())));
+                let dropped = named && !block.is_empty();
+                if dropped {
+                    if let Some(name) = block
+                        .lines()
+                        .next()
+                        .and_then(|l| l.strip_prefix("  - name: "))
+                    {
+                        names.push(name.trim().to_owned());
+                    }
+                } else {
+                    kept.push_str(block);
+                }
+                block.clear();
+                dropped
+            };
+            for line in text.split_inclusive('\n') {
+                let bare = line.trim_end();
+                if !bare.starts_with(' ') && !bare.is_empty() {
+                    more |= flush(&mut block, &mut kept, &mut names);
+                    in_types = bare == "types:";
+                    kept.push_str(line);
+                } else if in_types && bare.starts_with("  - name: ") {
+                    more |= flush(&mut block, &mut kept, &mut names);
+                    block.push_str(line);
+                } else if in_types && !block.is_empty() && !bare.starts_with("  #") {
+                    block.push_str(line);
+                } else {
+                    more |= flush(&mut block, &mut kept, &mut names);
+                    kept.push_str(line);
+                }
+            }
+            more |= flush(&mut block, &mut kept, &mut names);
+            *text = kept;
+        }
+        if !more {
+            break;
+        }
+    }
+    for (path, text) in files.iter().zip(&texts) {
+        fs::write(path, text).map_err(|e| format!("write {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// `sha256:<hex>` of `bytes`.
