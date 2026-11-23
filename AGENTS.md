@@ -1618,9 +1618,11 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   being `history::accounted`; a refused line or one that names no move and records nothing is no
   other reason): `tree run` starts it once per evaluation and goes on to the next useful action
   or the handoff check, and its `action finished` line, `max_runs` and the replay are unchanged.
-  Any other change ends the set-aside, so a not-called writer that moves an artifact and a writer
-  of evidence on that artifact alternate, each one's line ending the other's wait, and only the
-  driving loop's step budget bounds them (`max_steps`; in a suite cycle, its 60 s wall bound).
+  While set aside it is idle in the history (never useful), so several moving not-called writers
+  each start once. Any other change ends the set-aside; the one pair it does not bound is a
+  not-called writer that moves an artifact and a writer of evidence on that artifact: they
+  alternate, each one's line ending the other's wait, and only the driving loop's step budget
+  bounds them (`max_steps`; in a suite cycle, its 60 s wall bound).
   Held by `crates/loom-bindings/tests/program_contract.rs` and `crates/loom-tree/tests/not_called/`.
 - A signalled run (`story:bound-program-signal-exit-is-refused`, `program.rs`): Substrate reports
   a child a signal ended as exit 128 plus the signal (137 for SIGKILL). A run with an exit in
