@@ -12,49 +12,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
-### Added
-
-- Bindings `budget.runs_per: case | rejection`, `budget.rework_limit` (default 2) and `budget.rework_on`: a rejection gives a `program` or `person` action a fresh `max_runs`; `RunsSpent` names the bound that ended it (story:rework-allowance-after-a-rejection)
-- **Breaking:** `loom::bindings::ActionBudget` gains `runs_per`, `rework_limit` and `rework_on`, and `loom::bindings::RunsScope` is new: a struct literal names the fields (story:rework-allowance-after-a-rejection)
-- `b10x-loom tree hold` and `tree reopen` (`b10x_loom_tree::hold`, `reopen`, `current_hold`): a principal's hold on a tree as a `StopRecorded` line in the root's run log and its lift as a `StopLifted` line naming it, under the store lock; refusals `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable` (story:tree-suite-stop-resume-reopen-steps)
-- `tree run` on a held tree is refused `TreeStopped`, exit 1, naming the hold and the `tree reopen` command, and writes nothing (story:tree-suite-stop-resume-reopen-steps)
-- Suite steps `stop` (member `reason`, default `suite step <label>`), `resume` and `reopen`, and the `log` events `StopRecorded` and `StopLifted`, run; the three steps take no `case` (story:tree-suite-stop-resume-reopen-steps)
-- **Breaking:** `loom::runlog::RunLogEvent` gains `StopRecorded` and `StopLifted`, `TreeRefusalReason` gains `TreeStopped`, `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable`, and `CycleStep` gains `reason`: an exhaustive `match` needs the arms and a struct literal names the field; an older reader refuses the two kinds; a `stop`, `resume` or `reopen` step naming `case` is refused `MemberUndeclared` (story:tree-suite-stop-resume-reopen-steps)
-- `tree test`: the suite step `write` copies a regular file of the suite's directory, at most `suite::MAX_WRITE_BYTES` (1 MiB), to a path of plain names in the cycle's workspace between two steps, never following a link (story:suite-cycle-writes-a-workspace-file)
-- **Breaking:** `loom::tree::CycleStep` gains `from` and `to`, a literal names them; `StepKind` gains `Write`, an exhaustive `match` needs the arm (story:suite-cycle-writes-a-workspace-file)
-- `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
-- `b10x-loom tree replay --store S [--case C]` (`b10x_loom_tree::replay_tree`, `rebuild_case`, `replay_difference`, `replay_json`; ESS `loom.tree.TreeReplay`, `CaseReplay`): decides every case again as of its last `evaluated` line and prints per case whether its state and Canon's decision equal that line; reads only, takes no lock; exit 0, 3 when a case differs (first one on stderr), 1 refused `NotATree`, `CaseNotInTree` or `LogRefused` (story:tree-replay-command)
-- `tree test`: the suite step `replay` runs `tree replay`, its JSON output given to `{step: <name>}` (story:tree-replay-command)
-- `tree test --confinement substrate` (the default) runs: `--cgroup-root DIR` is held through `embed::TreeRunner::on_root`, without it the command starts itself again in a delegated scope; `--workers` 2 to 16 share one driver (story:suite-runs-cycles-under-one-cgroup-root)
-- `tree test --cycle-timeout <1..60>` (`SuiteSettings::cycle_timeout`, default 60): a cycle past it has its program killed and ends `CycleTimedOut` (story:tree-test-command)
-- `tree test` prints `slowest: <name> (<s> s), …` after the summary, up to ten cycles slowest first (`suite::slowest_line`) (story:tree-test-command)
-- `tree test --list` prints one line per cycle and runs nothing, reading the suite alone (`suite::list_suite`) (story:tree-test-command)
-- **Breaking:** `loom::tree::DifferenceReason` gains `CycleTimedOut`, `SuiteSettings` gains `cycle_timeout` (story:tree-test-command)
-
-### Changed
-
-- Every `action finished` line names the artifact revisions its step moved in `revisions`, also when the step was refused or a person's program ended badly; before, the list was always empty (story:tree-replay-command)
-- **Breaking:** a suite step `replay` that gives `principal` is refused `MemberUndeclared`; `case` is its one member (story:tree-replay-command)
-- **Breaking:** `tree test` and `suite::run_suite` put cycle `n` in `<scratch>/work/<n>/` and `<scratch>/store/<n>/`, no longer `<scratch>/<n>/{work,store}/` (story:suite-runs-cycles-under-one-cgroup-root)
-- `SubstrateWorkersUnserved` refuses more than 16 workers under `substrate`, not more than 1; a refused hold, start again or handshake ends `tree test` with exit 2 (story:suite-runs-cycles-under-one-cgroup-root)
-- `tree test`: the `decide` step and entry and the `requests` source wait for `story:tree-test-decide-and-requests` (story:tree-test-command)
-- `tree run`: a writer whose program exits a code its binding lists in `exits.not_called` is not due again until the case is evaluated again for a reason other than its own moves (a refused line or one that names no move and records nothing is no other reason), and is idle (never useful) meanwhile, so it starts once per evaluation, several moving not-called writers each start once, and the run goes on to the next useful action or the handoff check; before, it was taken again at once until the step or wall bound; only a not-called writer that moves an artifact and a writer of evidence on that artifact still alternate until `max_steps` (in a suite cycle, its 60 s wall bound); the log line, `max_runs` and the replay are unchanged (story:writer-not-called-leaves-the-due-set)
-
-- ESS 0.97.4 (format unchanged)
-- `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)
-
-### Fixed
-
-- `LogHistory` dates an action by the moves its `action finished` line names, so a step a later step's write follows is taken again; older logs read as before (story:action-dated-by-revisions-its-step-left)
-- `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
-- The `tree_run` tests start `b10x-loom` 66 times, not 71, and `loom-xtask shared-trees` builds their trees once per source key (story:tree-run-binary-fits-its-start-bound)
-- The `tree test` tests start `b10x-loom` with the test sync switch on (`tests/tree_test/mod.rs`, D138)
-
-### Security
-
-- `b10x-loom run --cgroup-root` and `resume` hold the root before any model call; one another run or `tree run` holds is refused, never re-executed (story:run-cgroup-root-holds-the-root)
-
-## [0.59.0] - 2026-11-22
+## [0.60.0] - 2026-11-23
 
 ### Added
 
@@ -64,7 +22,6 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Seconds-long bounds as parameters, the crate constants their defaults: `A2aServer::with_deadlines` and `Deadlines` (`b10x-loom-a2a`), `ConnectorsRelay::with_bounds` and `RelayBounds` (`b10x-loom-connectors`), `EngineRunner::with_kill_bounds` and `KillBounds` (`b10x-loom-intake-slice`)
 - The model retry policy as a parameter, `run::MODEL_RETRY` its default (three attempts, 1 s then 2 s): `RunOptions::model_retry`, `RunOptions::with_context_policy`, `with_context_report` and `with_model_retry`, `Briefing::with_retry` and `selector::send_with_policy` (`b10x-loom-intake-slice`)
 - How long a host waits for a held state directory as a parameter, `state::LOCK_WAIT` (2 s) its default: `Host::with_lock_wait` and `StateDir::open_waiting`; a turn's model retry policy, `run::MODEL_RETRY` its default: `Host::with_model_retry` and `Host::model_retry` (`b10x-loom-plugin`); `run::RetryPolicy` (`b10x-loom-intake-slice`)
-- `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
 - `bindings::admit_bound_program_runner` and `bindings::bound_program_child`: a bound program's runner admission and child (story:bound-program-result-table)
 - `b10x_loom_bindings::ProgramEffects` runs a `program` binding through the host's runner; its result table alone makes evidence, every call of the runner counts against `budget.max_runs`, and a case of another protocol is refused `CaseOfAnotherProtocol` (story:bound-program-result-table)
 - `b10x-loom-decision`: the eight `loom.decision` commands over a `DecisionStore` port, `InMemoryDecisionStore` and the decision views (story:decision-request-entity)
@@ -118,6 +75,22 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree test --only NAME[,NAME]` and `SuiteSettings::only` run the named cycles alone; the summary says `cycles: selected <S> of <C>, …` (story:suite-runs-cycles-in-parallel)
 - `run_suite` and `tree test` refuse `CycleUnknown` and `SubstrateWorkersUnserved` before any cycle; `suite::workers_served` (story:suite-runs-cycles-in-parallel)
 - **Breaking:** `SuiteReport` gains `only` and `suite_cycles`, `SuiteSettings` gains `workers` and `only`, `SuiteRefusalReason` gains two variants (story:suite-runs-cycles-in-parallel)
+- Bindings `budget.runs_per: case | rejection`, `budget.rework_limit` (default 2) and `budget.rework_on`: a rejection gives a `program` or `person` action a fresh `max_runs`; `RunsSpent` names the bound that ended it (story:rework-allowance-after-a-rejection)
+- **Breaking:** `loom::bindings::ActionBudget` gains `runs_per`, `rework_limit` and `rework_on`, and `loom::bindings::RunsScope` is new: a struct literal names the fields (story:rework-allowance-after-a-rejection)
+- `b10x-loom tree hold` and `tree reopen` (`b10x_loom_tree::hold`, `reopen`, `current_hold`): a principal's hold on a tree as a `StopRecorded` line in the root's run log and its lift as a `StopLifted` line naming it, under the store lock; refusals `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable` (story:tree-suite-stop-resume-reopen-steps)
+- `tree run` on a held tree is refused `TreeStopped`, exit 1, naming the hold and the `tree reopen` command, and writes nothing (story:tree-suite-stop-resume-reopen-steps)
+- Suite steps `stop` (member `reason`, default `suite step <label>`), `resume` and `reopen`, and the `log` events `StopRecorded` and `StopLifted`, run; the three steps take no `case` (story:tree-suite-stop-resume-reopen-steps)
+- **Breaking:** `loom::runlog::RunLogEvent` gains `StopRecorded` and `StopLifted`, `TreeRefusalReason` gains `TreeStopped`, `TreeAlreadyStopped`, `TreeNotStopped` and `StopUnusable`, and `CycleStep` gains `reason`: an exhaustive `match` needs the arms and a struct literal names the field; an older reader refuses the two kinds; a `stop`, `resume` or `reopen` step naming `case` is refused `MemberUndeclared` (story:tree-suite-stop-resume-reopen-steps)
+- `tree test`: the suite step `write` copies a regular file of the suite's directory, at most `suite::MAX_WRITE_BYTES` (1 MiB), to a path of plain names in the cycle's workspace between two steps, never following a link (story:suite-cycle-writes-a-workspace-file)
+- **Breaking:** `loom::tree::CycleStep` gains `from` and `to`, a literal names them; `StepKind` gains `Write`, an exhaustive `match` needs the arm (story:suite-cycle-writes-a-workspace-file)
+- `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
+- `b10x-loom tree replay --store S [--case C]` (`b10x_loom_tree::replay_tree`, `rebuild_case`, `replay_difference`, `replay_json`; ESS `loom.tree.TreeReplay`, `CaseReplay`): decides every case again as of its last `evaluated` line and prints per case whether its state and Canon's decision equal that line; reads only, takes no lock; exit 0, 3 when a case differs (first one on stderr), 1 refused `NotATree`, `CaseNotInTree` or `LogRefused` (story:tree-replay-command)
+- `tree test`: the suite step `replay` runs `tree replay`, its JSON output given to `{step: <name>}` (story:tree-replay-command)
+- `tree test --confinement substrate` (the default) runs: `--cgroup-root DIR` is held through `embed::TreeRunner::on_root`, without it the command starts itself again in a delegated scope; `--workers` 2 to 16 share one driver (story:suite-runs-cycles-under-one-cgroup-root)
+- `tree test --cycle-timeout <1..60>` (`SuiteSettings::cycle_timeout`, default 60): a cycle past it has its program killed and ends `CycleTimedOut` (story:tree-test-command)
+- `tree test` prints `slowest: <name> (<s> s), …` after the summary, up to ten cycles slowest first (`suite::slowest_line`) (story:tree-test-command)
+- `tree test --list` prints one line per cycle and runs nothing, reading the suite alone (`suite::list_suite`) (story:tree-test-command)
+- **Breaking:** `loom::tree::DifferenceReason` gains `CycleTimedOut`, `SuiteSettings` gains `cycle_timeout` (story:tree-test-command)
 
 ### Changed
 
@@ -127,21 +100,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** a `run_tree` whose cancel flag is set before a step stops `Cancelled` (`TreeStop::Cancelled`, new), its `stopped` line naming the action that was to be taken next, no longer `BudgetSpent` with no `next`; a step its cancel ended stops `Cancelled` naming its action; `b10x-loom tree run` still exits 5 (story:cancel-a-running-bound-program)
 - **Breaking:** `ConfinementRefusal` and `ProgramRefusalReason` gain `Cancelled`; `ProgramRun` gains `cancelled`, `StatusRun` gains `cancelled` (story:cancel-a-running-bound-program)
 - **Breaking:** `run_handoff_check` takes `cancel: Option<&Cancel>`, and `HandoffCheck` gains `cancelled` (story:handoff-check-holds-the-cancel)
-
 - **Breaking:** `RunOptions` gains the public field `model_retry`: a literal names it or ends in `..RunOptions::default()`
-- `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
-- ESS moves from 0.96.0 to 0.97.3 (`ess-conformance`, `ess-primitives`, `requires: ess 0.97.3`, the CLI CI installs); generated Rust is unchanged
-- A namespace egress entry beside `spec.boundary` is admitted when the chart's `allowedBoundaryHttpEgress` allows it, outside every allowed upstream's and the model route's namespace (story:boundary-admits-declared-http-egress)
-- **Breaking:** `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`; operator `Config` gains `allowed_boundary_http_egress` (story:boundary-admits-declared-http-egress)
-- **Breaking:** the operator refuses a configuration whose `allowedBoundaryUpstreams` or `modelRoute` URL has a host other than `<service>.<namespace>.svc[.cluster.local]`, such as a short service name or an IP address; admission, given such a URL on a `Config` built without `Config::parse`, admits no namespace egress entry beside `spec.boundary` (story:boundary-admits-declared-http-egress)
-- **Breaking:** `ConfinementRefusal` gains `NoRunner`, bindings with no runner to start them (story:bound-commands-run-confined)
-- **Breaking:** bound commands start only through `IntentRequest.runner`; an opt-in selects `local` (story:bound-commands-run-confined)
-- **Breaking:** `b10x-loom run --action-bindings` with no opt-in runs its commands under Substrate's `linux` adapter instead of stopping `ConfinementUnavailable (CommandUnconfined)`, exit 3; with `--confinement none` or `local` it still stops so (story:bound-commands-run-confined)
-- **Breaking:** `b10x-loom run --unconfined-bindings` with `--state` is refused, exit 2 (story:bound-commands-run-confined)
-- A bound program ended by a signal reads `<program> was refused by its runner: CapabilityUnserved: …`, no longer `<program> ended signal: …`; under `local`, one whose output a process that left its group holds past the timeout reads the same refusal, no longer `was killed after N s` (story:bound-commands-run-confined)
-- Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
-- **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
-- A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
 - `task check` tests with `cargo nextest` (60 s a test, 120 s the step) and reads the committed `generated/ess/loom/` suite; `task slow` resynthesizes; dev and test builds carry no debug info (`[profile.dev] debug = false`); `.cargo/config.toml` builds dependencies and `b10x-loom-governor` at `opt-level = 2` in dev and test builds; `task test-step` runs the tests on 4 threads, as CI's runner has
 - **Breaking:** `ProgramRefusalReason` gains `ArtifactUnreadable`, a placed path that is not digested (story:bound-artifact-revisions)
 - **Breaking:** after a `program` step each placed artifact moves to its content digest, and its records name that revision (story:bound-artifact-revisions)
@@ -182,6 +141,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Substrate 0.24.0 (`b10x-substrate-host`, `-wire`); its executable deny-list is not yet reachable from Loom (story:substrate-0-24-0-pin)
 - `MAX_EGRESS_APERTURES` and `ChildCommand::MAX_READ_ONLY_ROOTS` rise from 4 to 8, Substrate 0.22.0's bounds (story:substrate-0-24-0-pin)
 - A suite cycle whose `run` step the suite's cancel ended has the difference `StepFailed`, found "the suite was cancelled", not `ExitDiffers` (story:suite-runs-cycles-in-parallel)
+- Every `action finished` line names the artifact revisions its step moved in `revisions`, also when the step was refused or a person's program ended badly; before, the list was always empty (story:tree-replay-command)
+- **Breaking:** a suite step `replay` that gives `principal` is refused `MemberUndeclared`; `case` is its one member (story:tree-replay-command)
+- **Breaking:** `tree test` and `suite::run_suite` put cycle `n` in `<scratch>/work/<n>/` and `<scratch>/store/<n>/`, no longer `<scratch>/<n>/{work,store}/` (story:suite-runs-cycles-under-one-cgroup-root)
+- `SubstrateWorkersUnserved` refuses more than 16 workers under `substrate`, not more than 1; a refused hold, start again or handshake ends `tree test` with exit 2 (story:suite-runs-cycles-under-one-cgroup-root)
+- `tree test`: the `decide` step and entry and the `requests` source wait for `story:tree-test-decide-and-requests` (story:tree-test-command)
+- `tree run`: a writer that exits a code of its `exits.not_called` is idle, not due, until the case is evaluated again for another reason; before, it was taken again at once until the step or wall bound (story:writer-not-called-leaves-the-due-set)
+- ESS moves from 0.97.3 to 0.97.4 (`requires: ess 0.97.4`, `ess-conformance`, `ess-primitives`, the CLI CI installs); the format is unchanged
+- `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)
 
 ### Removed
 
@@ -196,6 +163,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `run_tree` takes over a run stopped between a child's line and its parent's: a missing `case opened`, `child opened`, `terminated` or `child closed` line is written once
 - A `tree test` selection refuses a named pipe or other non-regular file `StepFailed` and never waits on it; `b10x-loom-tree` links `libc`
 - **Breaking:** `RunSettings` (`b10x_loom_tree`) gains `cgroup_root`, a literal names it; a handoff's printed `tree run` carries the run's `--cgroup-root`
+- `LogHistory` dates an action by the moves its `action finished` line names, so a step a later step's write follows is taken again; older logs read as before (story:action-dated-by-revisions-its-step-left)
+- `ProtocolCatalog::add_yaml` names Canon's code of each problem, such as `evidence-in-decision-condition` (story:outcome-decision-when-reads-the-run-count)
+- The `tree_run` tests start `b10x-loom` 66 times, not 71, and `loom-xtask shared-trees` builds their trees once per source key (story:tree-run-binary-fits-its-start-bound)
+- The `tree test` tests start `b10x-loom` with the test sync switch on (`tests/tree_test/mod.rs`, D138)
 
 ### Security
 
@@ -206,6 +177,29 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `url` 2.5.9, for RUSTSEC-2026-0592 (story:substrate-0-24-0-pin)
 - A terminated case answers its stored outcome from `completion` and a frontier blocking every action at any later trusted time: Canon judges the termination once, in `terminate`, and is handed no termination after it (story:governor-keeps-a-terminated-case-terminated)
 - **Breaking:** a write to a terminated case is refused and writes nothing: `UpdateError`, `StepError` and `DecisionError` gain `Terminated { outcome }`, which `update_revision`, `record_step` and `decide` answer; `receive` answers `GovernorUnavailable` (story:governor-keeps-a-terminated-case-terminated)
+- `b10x-loom run --cgroup-root` and `resume` hold the root before any model call; one another run or `tree run` holds is refused, never re-executed (story:run-cgroup-root-holds-the-root)
+
+## [0.59.0] - 2026-11-22
+
+### Added
+
+- `TestRunner::run_child` and `preflight_child`; `bindings::UNCONFINED_FLAG_REASON` and `UNCONFINED_FILE_REASON` (story:bound-commands-run-confined)
+
+### Changed
+
+- `ess/system.yaml` declares format `ess/37` instead of `ess/31` on the pinned `ess` 0.96.0; the regenerated `loom` model answers as before (story:ess-format-37)
+- ESS moves from 0.96.0 to 0.97.3 (`ess-conformance`, `ess-primitives`, `requires: ess 0.97.3`, the CLI CI installs); generated Rust is unchanged
+- A namespace egress entry beside `spec.boundary` is admitted when the chart's `allowedBoundaryHttpEgress` allows it, outside every allowed upstream's and the model route's namespace (story:boundary-admits-declared-http-egress)
+- **Breaking:** `AdmissionRefusalReason` gains `BoundaryEgressUnbound` and `BoundaryEgressNotAllowed`; operator `Config` gains `allowed_boundary_http_egress` (story:boundary-admits-declared-http-egress)
+- **Breaking:** the operator refuses a configuration whose `allowedBoundaryUpstreams` or `modelRoute` URL has a host other than `<service>.<namespace>.svc[.cluster.local]`, such as a short service name or an IP address; admission, given such a URL on a `Config` built without `Config::parse`, admits no namespace egress entry beside `spec.boundary` (story:boundary-admits-declared-http-egress)
+- **Breaking:** `ConfinementRefusal` gains `NoRunner`, bindings with no runner to start them (story:bound-commands-run-confined)
+- **Breaking:** bound commands start only through `IntentRequest.runner`; an opt-in selects `local` (story:bound-commands-run-confined)
+- **Breaking:** `b10x-loom run --action-bindings` with no opt-in runs its commands under Substrate's `linux` adapter instead of stopping `ConfinementUnavailable (CommandUnconfined)`, exit 3; with `--confinement none` or `local` it still stops so (story:bound-commands-run-confined)
+- **Breaking:** `b10x-loom run --unconfined-bindings` with `--state` is refused, exit 2 (story:bound-commands-run-confined)
+- A bound program ended by a signal reads `<program> was refused by its runner: CapabilityUnserved: …`, no longer `<program> ended signal: …`; under `local`, one whose output a process that left its group holds past the timeout reads the same refusal, no longer `was killed after N s` (story:bound-commands-run-confined)
+- Each bound command's step prints the confinement it ran under, `  confinement: <label>` (story:bound-commands-run-confined)
+- **Breaking:** a bound program starts in `--workspace`, or in a private temporary directory removed after the run, no longer in the directory `b10x-loom` ran in: a relative `argv` and a relative output path no longer resolve from that directory (story:bound-commands-run-confined)
+- A bound program that cannot be started reads `<program> was refused by its runner: …`, no longer `<program> did not start: …` (story:bound-commands-run-confined)
 
 ## [0.58.0] - 2026-11-21
 
@@ -1646,7 +1640,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.59.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.60.0...HEAD
+[0.60.0]: https://github.com/beyond10x/loom/releases/tag/0.60.0
 [0.59.0]: https://github.com/beyond10x/loom/releases/tag/0.59.0
 [0.58.0]: https://github.com/beyond10x/loom/releases/tag/0.58.0
 [0.57.2]: https://github.com/beyond10x/loom/releases/tag/0.57.2

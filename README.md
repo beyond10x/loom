@@ -45,9 +45,9 @@ draws the whole boundary.
 
 ## Status
 
-Version `0.59.0`, released from source at the tag `0.59.0`
-([release](https://github.com/beyond10x/loom/releases/tag/0.59.0)). No crate is on a registry: you
-install from the tag or depend on it with `tag = "0.59.0"`. `b10x-loom run` completed a live run
+Version `0.60.0`, released from source at the tag `0.60.0`
+([release](https://github.com/beyond10x/loom/releases/tag/0.60.0)). No crate is on a registry: you
+install from the tag or depend on it with `tag = "0.60.0"`. `b10x-loom run` completed a live run
 against a hosted model on 2026-10-05
 ([record](docs/qualification/2026-10-05-b10x-loom-live-run.md)). The
 [status page](https://beyond10x.github.io/loom/docs/status) marks every capability shipped,
@@ -167,22 +167,22 @@ It keeps typed working state and a recent event tail, with retrievable run-local
 64 KiB serialized request ceiling. The default remains `legacy`; recorded byte reductions do not
 establish live quality or cost savings. See [working context](website/docs/concepts/working-context.md).
 
-Each release from `0.59.0` on carries `b10x-loom` for Linux on x86-64 as a release asset, with
+Each release from `0.60.0` on carries `b10x-loom` for Linux on x86-64 as a release asset, with
 its SHA-256 checksum beside it (an earlier release has none: build it from source below). It
 links the glibc of Debian bookworm (2.36) or newer, and the libraries the `loom-agent` image
 installs for it (`libssl3`, `libcurl4`, `ca-certificates`):
 
 ```console
-curl -fLO https://github.com/beyond10x/loom/releases/download/0.58.0/b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/beyond10x/loom/releases/download/0.58.0/b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz
-./b10x-loom-0.58.0-x86_64-unknown-linux-gnu/b10x-loom --version
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.60.0/b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.60.0/b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz
+./b10x-loom-0.60.0-x86_64-unknown-linux-gnu/b10x-loom --version
 ```
 
 ```text
-b10x-loom-0.58.0-x86_64-unknown-linux-gnu.tar.gz: OK
-b10x-loom 0.58.0
+b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz: OK
+b10x-loom 0.60.0
 ```
 
 The checksum file comes from the same place as the archive. A CI that installs Loom keeps the
@@ -192,14 +192,14 @@ version and the digest in its own repository and checks the download against tha
 To build from source you need a Rust toolchain that builds edition 2024, and `git`.
 
 ```console
-git clone --branch 0.59.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.60.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.59.0
+b10x-loom 0.60.0
 ```
 
 On a development checkout, `task install` rebuilds the checked-out source and replaces
@@ -425,8 +425,8 @@ Helm installs the chart's `crds/` once and never upgrades it, so an upgrade firs
 of the new release tag and then upgrades the release with the values it was installed with:
 
 ```console
-$ kubectl apply --server-side -f https://raw.githubusercontent.com/beyond10x/loom/0.59.0/deploy/crd/loomagents.loom.beyond10x.dev.yaml
-$ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 0.59.0 --namespace agents \
+$ kubectl apply --server-side -f https://raw.githubusercontent.com/beyond10x/loom/0.60.0/deploy/crd/loomagents.loom.beyond10x.dev.yaml
+$ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 0.60.0 --namespace agents \
     --set modelRoute.url=http://model-route.agents.svc:8080/v1 \
     --set modelRoute.protocol=messages --set modelRoute.model=small-model
 ```
@@ -434,7 +434,7 @@ $ helm upgrade loom-agents oci://ghcr.io/beyond10x/charts/loom-agents --version 
 Add `--force-conflicts` to the apply when it reports a conflict because another field manager
 owns fields of the CRD, such as Helm, which created it, or an earlier `kubectl apply` without
 `--server-side`. `b10x-loom-operator crd` prints the CRD of its own version, so
-`docker run --rm ghcr.io/beyond10x/loom-operator:0.59.0 crd | kubectl apply --server-side -f -`
+`docker run --rm ghcr.io/beyond10x/loom-operator:0.60.0 crd | kubectl apply --server-side -f -`
 applies the same CRD from the release's image.
 
 For each resource the controller first runs the check of
@@ -600,7 +600,7 @@ $ b10x-loom-operator render --resource platform-operator.yaml
 b10x-loom-operator: refused: NoModelRoute at spec.routes: it is empty and the controller configures no model route
 $ cat operator.yaml
 namespace: agents
-defaultImage: {repository: registry.example/loom-agent, tag: '0.59.0'}
+defaultImage: {repository: registry.example/loom-agent, tag: '0.60.0'}
 defaultResources: {cpu: 250m, memory: 256Mi}
 defaultCommandResources: {cpu: '4', memory: 8Gi}
 modelRoute: {url: 'http://model-route.agents.svc:8080/v1', protocol: messages, model: small-model}
@@ -674,7 +674,7 @@ on a held case ([the governor](https://beyond10x.github.io/loom/docs/concepts/go
 
 ```toml
 [dependencies]
-b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.59.0" }
+b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.60.0" }
 ```
 
 The example below
