@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:wildcard-result-row-does-not-match-timeout
 kind: story
-status: draft
+status: active
 title: A program binding's * result row does not match a run killed at its timeout; only a timeout row does
 summary: 'Runbook D709, option a: look_up skips * for the value timeout; a timed-out run with no timeout row is refused ResultNotInTable and records nothing; no load refusal; Breaking in 0.61.0 for a binding that relied on * for timeout, named in CHANGELOG and the release notes'
 tags:
@@ -30,7 +30,10 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/reference/.generated.json
-revision: 11
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T21:45:32Z", actor: "agent:sdc", revision: 12, executor: "agent:loom", correlation: "runbook-wildcard-not-timeout-2026-11-23"}
+- {from: "proposed", to: "active", at: "2026-11-23T21:45:33Z", actor: "agent:sdc", revision: 13, executor: "agent:loom", correlation: "runbook-wildcard-not-timeout-2026-11-23"}
 ---
 ## Outcome
 
