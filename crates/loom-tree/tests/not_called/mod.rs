@@ -11,6 +11,8 @@
 //! `work.look` records first) and hands off when `target/called` exists, a check that runs only
 //! when nothing is useful. No network, no model, no credential.
 
+mod beside;
+
 use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json as commission_json;
