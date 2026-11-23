@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T13:21:03Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-program-result-table",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "story revision 16, on the ruling of session sdc of 2026-11-21 (option B): loom-intake-slice makes the admission of a host runner and the build of a bound program's ChildCommand public and CommandRunner uses both; Outcome states construction per case, preflight_child on the workspace root, start directory and mount; Would collide with names both siblings; all three findings read as closed by the critic in round 2",
+    "review": "review-result:bound-program-result-table-w7-design-1",
+    "outcome": "fixed"
+  }
+}

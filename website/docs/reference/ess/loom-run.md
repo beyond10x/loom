@@ -138,21 +138,34 @@ It references at most one [`Selection`](#selection), as `selection`, carried by 
 
 No invariant is declared, so nothing here constrains an instance at rest.
 
-Its state is a `loom.run.ArgumentRequest.State`, one of `Requested`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+Its state is a `loom.run.ArgumentRequest.State`, one of `Matched`, `Mismatched` and `Requested`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
 
-An instance is created in `Requested`. `Requested` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+An instance is created in `Requested`. `Matched` and `Mismatched` are terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Requested
-    Requested --> [*]
+    Requested --> Matched: match (CheckArguments)
+    Requested --> Mismatched: mismatch (CheckArguments)
+    Matched --> [*]
+    Mismatched --> [*]
 ```
 
-It declares no moves, so nothing changes its state once it exists.
+Each move is taken by a declared command outcome, and a move nothing takes is refused as `missing_causation` rather than left as a state change nobody can trigger:
 
-It has one state, so there is no move to permit or to forbid.
+- `match` — taken by `loom.run.CheckArguments` on its `matched` outcome
+- `mismatch` — taken by `loom.run.CheckArguments` on its `undeclared-not-empty` outcome and `loom.run.CheckArguments` on its `mismatched` outcome
 
-No view projects it, so nothing outside this context is promised a way to observe one.
+An instance is brought into existence by `loom.run.RequestArguments` on its `requested` outcome.
+
+Illegal transitions are illegal by absence: no rule forbids them, there is simply no arrow, because a rule would be a second place for the same truth to live. A diagram cannot show an absence, so the pairs it does not connect are listed here, derived from the same transitions — anything named below is a move this specification does not permit.
+
+- `Matched` may not become `Mismatched`
+- `Matched` may not become `Requested`
+- `Mismatched` may not become `Matched`
+- `Mismatched` may not become `Requested`
+
+One view projects it: [`ArgumentRequests`](#argumentrequests).
 
 ### `Selection`
 
@@ -252,6 +265,26 @@ One view projects it: [`SelectionRecords`](#selectionrecords).
 
 A view is what the outside world is promised it can observe. Each one says which instances it contains and how soon it reflects a command that has already returned, because "you can read this" without "how soon" is the promise every flaky suite is built on.
 
+### `ArgumentRequests`
+
+`loom.run.ArgumentRequests`.
+
+It reads [`ArgumentRequest`](#argumentrequest).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+- `selection_id` — `loom.run.SelectionId`
+- `state` — `loom.run.ArgumentRequest.State`
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Read-your-writes**: it is current the moment the command that changed it returns. A caller that has just created an invoice and cannot see it in here has been told a lie about what it did.
+
+A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
+
 ### `Catalogues`
 
 `loom.run.Catalogues`.
@@ -324,6 +357,25 @@ It declares no order, so the rows come back in whatever order the implementation
 A generated scenario asserts it once, immediately after the command: a view promising this and not keeping the promise has to fail the suite rather than be retried until it passes.
 
 ## Commands
+
+### `CheckArguments`
+
+`loom.run.CheckArguments`.
+
+It takes:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+- `action` — `String`
+
+It has four outcomes.
+
+**`undeclared-not-empty`** — Decided outside the input: the protocol declares no argument schema for the action and the arguments are not the empty object. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. It moves a `loom.run.ArgumentRequest` from `Requested` to `Mismatched`, along the declared move `mismatch`. The instance is the one named by the input field `argument_request_id`. It emits `loom.run.ArgumentsMismatched`. A test reaches it by injecting the declared fault, because no input can.
+
+**`mismatched`** — Decided outside the input: the arguments do not satisfy the argument schema the protocol declares for the action. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. It moves a `loom.run.ArgumentRequest` from `Requested` to `Mismatched`, along the declared move `mismatch`. The instance is the one named by the input field `argument_request_id`. It emits `loom.run.ArgumentsMismatched`. A test reaches it by injecting the declared fault, because no input can.
+
+**`matched`** — The default branch, taken when no other outcome's condition matched. It moves a `loom.run.ArgumentRequest` from `Requested` to `Matched`, along the declared move `match`. The instance is the one named by the input field `argument_request_id`. It emits `loom.run.ArgumentsMatched`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — Taken when the subject is resting in a state none of this command's moves start from — a `loom.run.ArgumentRequest` in `Matched` and `Mismatched`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `loom.run.ArgumentRequestStateConflict`, carrying `argument_request_id`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `OverruleSelection`
 
@@ -461,6 +513,33 @@ Emitted by `loom.run.SelectAction` on its `selected` outcome.
 
 Nothing in this system reacts to it.
 
+### `ArgumentsMatched`
+
+`loom.run.ArgumentsMatched`.
+
+It carries:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+
+Emitted by `loom.run.CheckArguments` on its `matched` outcome.
+
+Nothing in this system reacts to it.
+
+### `ArgumentsMismatched`
+
+`loom.run.ArgumentsMismatched`.
+
+It carries:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+- `action` — `String`
+- `declared` — `Boolean`
+- `reason` — `String`
+
+Emitted by `loom.run.CheckArguments` on its `undeclared-not-empty` and `mismatched` outcomes.
+
+Nothing in this system reacts to it.
+
 ### `ArgumentsRequested`
 
 `loom.run.ArgumentsRequested`.
@@ -565,6 +644,14 @@ It carries:
 
 Reported by `loom.run.SelectAction` on its `not-in-catalogue` outcome.
 
+### `ArgumentRequestStateConflict`
+
+It carries:
+
+- `argument_request_id` — `loom.run.ArgumentRequestId`
+
+Reported by `loom.run.CheckArguments` on its `wrong-state` outcome.
+
 ### `CatalogueExists`
 
 It carries:
@@ -638,4 +725,4 @@ Reported by `loom.run.RevalidateSelection` on its `wrong-state` outcome.
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:07d44adc566f320ca7c76c0e092321f550a70ad9766224bb0d233f6320e7083f`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:da9db63cccb4bead6d23bdf1057f3d978168e0358a9e8fd03f33104f83bac6f2`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

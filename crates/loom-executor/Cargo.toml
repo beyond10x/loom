@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.11.0" }
 b10x-loom-commission = { path = "../loom-commission" }
 llm-core = { package = "b10x-llm-core", git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 loom = { path = "../../generated/rust/loom" }

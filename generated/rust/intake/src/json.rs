@@ -1,5 +1,5 @@
 // generated from intake v1
-// contract digest 580c92e6eb1d15ced150fd8c74b88b52f6a70116a600645f3a0299a0c5b3b9c5
+// contract digest 72297b4d0dc5170238fdcd498f864a8257aede819b2b7916e0e4b356ff99f220
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! JSON at this system's boundary: a reader, a writer, and the base64 codec `Bytes` needs.

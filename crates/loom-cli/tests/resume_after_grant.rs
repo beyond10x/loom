@@ -40,6 +40,9 @@ use b10x_loom_intake_slice::resume::ResumeContextStore;
 use loom_governor::FileSuspensionStore;
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 const CATALOG: &str = include_str!("fixtures/catalog-route/catalog.toml");
 const INTENT: &str = "Make the failing check pass.";
 const TEST_CMD: &str = "grep -qx fixed check.txt";
@@ -1172,7 +1175,7 @@ impl Scratch {
 
     fn command<A: AsRef<std::ffi::OsStr>>(&self, args: &[A]) -> Output {
         let home = self.root.join("home");
-        Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        loom_bin::loom()
             .args(args)
             .env("HOME", &home)
             .env("CODEX_HOME", &home)

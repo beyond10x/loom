@@ -15,12 +15,12 @@ use std::thread;
 use std::time::Duration;
 
 use b10x_loom_commission::model::responsibility::CaseId;
-use b10x_loom_runlog::{AppendStep, RunLog, RunLogError, log_file_name, verify};
+use b10x_loom_runlog::{AppendStep, RunLog, RunLogError, encode, log_file_name, verify};
 use loom::primitives::Timestamp;
 use loom::runlog::{
     ActionFinished, ActionStarted, AuthorityRecorded, CaseOpened, ChildClosed, ChildOpened,
-    Discarded, Evaluated, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal, RunLogRefused,
-    Stopped, Terminated,
+    Discarded, Evaluated, HandoffChecked, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal,
+    RunLogRefused, Stopped, Terminated,
 };
 use loom_governor::{
     CaseIndependence, CaseInputs, CaseState, FallibleCaseStore as _, FileCaseStore, LockedDir,
@@ -29,13 +29,14 @@ use sha2::{Digest as _, Sha256};
 
 const CASE: &str = "chg-1842";
 
+/// The evidence id of a child's `case_outcome` record in these tests' child lines.
+const RECORD: &str = "5842f400-803c-84aa-847f-3704886e183b";
+
 /// The environment variable that makes the two-process test's binary an appender over the
 /// directory it names.
 const APPENDER_DIR: &str = "LOOM_RUNLOG_APPENDER_DIR";
 /// The name each appender child writes into its events.
 const APPENDER_NAME: &str = "LOOM_RUNLOG_APPENDER_NAME";
-const TWO_PROCESSES: &str = "two_processes_appending_200_lines_each_leave_400_that_verify";
-const LINES_PER_PROCESS: usize = 200;
 
 /// A fresh directory for one test under cargo's per-target temporary directory.
 fn store_dir(name: &str) -> PathBuf {
@@ -109,10 +110,16 @@ fn event(index: usize) -> RunLogEvent {
         5 => RunLogEvent::ChildOpened(ChildOpened {
             child: format!("child-{marker}"),
             protocol: "review@1".to_owned(),
+            record: (index % 20 == 5).then(|| RECORD.to_owned()),
+            record_digest: (index % 20 == 5)
+                .then(|| sha256_hex(format!("open {marker}").as_bytes())),
         }),
         6 => RunLogEvent::ChildClosed(ChildClosed {
             child: format!("child-{marker}"),
             outcome: (index % 20 == 6).then(|| "approved".to_owned()),
+            record: (index % 20 == 6).then(|| RECORD.to_owned()),
+            record_digest: (index % 20 == 6)
+                .then(|| sha256_hex(format!("close {marker}").as_bytes())),
         }),
         7 => RunLogEvent::AuthorityRecorded(AuthorityRecorded {
             capability: "repository.merge".to_owned(),
@@ -122,6 +129,7 @@ fn event(index: usize) -> RunLogEvent {
         8 => RunLogEvent::Stopped(Stopped {
             stop: format!("approval-{marker}"),
             next: vec!["approve".to_owned(), "decline".to_owned()],
+            budget: None,
         }),
         _ => RunLogEvent::Terminated(Terminated {
             reason: format!("completed-{marker}"),
@@ -190,9 +198,11 @@ fn temporaries(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
-    let (log, path) = log_with("fifty", 50);
+/// `count` events appended to one log: one JSON line each, `seq` gapless from 0, each `prev` the
+/// SHA-256 of the line before, read back and verified. Each append syncs, so the count sets the
+/// time.
+fn events_verify_with_a_gapless_seq(label: &str, count: usize) {
+    let (log, path) = log_with(label, count);
     assert_eq!(
         path.file_name().and_then(|name| name.to_str()),
         Some(format!("runlog-case-{}.jsonl", hex(CASE.as_bytes())).as_str()),
@@ -200,7 +210,7 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     );
     let bytes = fs::read(&path).expect("the log file reads");
     let raw = lines(&bytes);
-    assert_eq!(raw.len(), 50, "one line per event");
+    assert_eq!(raw.len(), count, "one line per event");
     assert!(bytes.ends_with(b"\n"), "every line ends with a line feed");
     for (index, line) in raw.iter().enumerate() {
         let value: serde_json::Value =
@@ -229,7 +239,7 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
     let read = log.read(CASE).expect("the log verifies");
     let verified = verify(&bytes).expect("the bytes verify");
     assert_eq!(read, verified);
-    assert_eq!(read.len(), 50);
+    assert_eq!(read.len(), count);
     for (index, line) in read.iter().enumerate() {
         assert_eq!(line.seq, i64::try_from(index).expect("small"));
         assert_eq!(line.at, at(index));
@@ -241,6 +251,19 @@ fn fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_b
         let prev = (index > 0).then(|| sha256_hex(&raw[index - 1]));
         assert_eq!(line.prev, prev);
     }
+}
+
+/// [`events_verify_with_a_gapless_seq`] with 20 events.
+#[test]
+fn twenty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
+    events_verify_with_a_gapless_seq("twenty", 20);
+}
+
+/// [`events_verify_with_a_gapless_seq`] with 50 events, the count the case held before, in the
+/// slow lane (`task slow`): about 8 s on a loaded host.
+#[test]
+fn slow_fifty_events_verify_with_a_gapless_seq_and_each_prev_the_digest_of_the_line_before() {
+    events_verify_with_a_gapless_seq("fifty", 50);
 }
 
 #[test]
@@ -448,12 +471,28 @@ fn an_append_to_a_log_that_does_not_verify_is_refused_and_changes_no_byte() {
     }
 }
 
-#[test]
-fn two_processes_appending_200_lines_each_leave_400_that_verify() {
+/// Two processes over one store, each appending `per_process` lines: the log holds every line once,
+/// each a whole JSON document, each process's in its order, and it verifies.
+///
+/// The test binary is each appender: `test` (the calling test's own name) runs again in a child
+/// with [`APPENDER_DIR`] set, and that run appends instead of starting children. Both children
+/// open the store and then wait for the parent's start file, so their appends overlap from the
+/// first one on, whatever the count.
+fn two_processes_append(test: &str, per_process: usize) {
+    let start_file = |dir: &Path| dir.with_extension("start");
     if let Ok(dir) = std::env::var(APPENDER_DIR) {
         let name = std::env::var(APPENDER_NAME).expect("the parent names the appender");
-        let log = RunLog::open(PathBuf::from(dir)).expect("the store opens in the child");
-        for index in 0..LINES_PER_PROCESS {
+        let dir = PathBuf::from(dir);
+        let log = RunLog::open(&dir).expect("the store opens in the child");
+        let waited = std::time::Instant::now();
+        while !start_file(&dir).exists() {
+            assert!(
+                waited.elapsed() < Duration::from_secs(30),
+                "the parent never wrote the start file"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        for index in 0..per_process {
             log.append(
                 CASE,
                 at(index),
@@ -466,11 +505,12 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
         return;
     }
 
-    let dir = store_dir("two-processes");
+    let dir = store_dir(test);
     let log = RunLog::open(&dir).expect("the store opens");
+    let _ = fs::remove_file(start_file(&dir));
     let spawn = |name: &str| -> Child {
         Command::new(std::env::current_exe().expect("the test binary"))
-            .args([TWO_PROCESSES, "--exact", "--nocapture", "--test-threads=1"])
+            .args([test, "--exact", "--nocapture", "--test-threads=1"])
             .env(APPENDER_DIR, &dir)
             .env(APPENDER_NAME, name)
             .stdout(std::process::Stdio::piped())
@@ -479,6 +519,7 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
             .expect("the child starts")
     };
     let children = [("first", spawn("first")), ("second", spawn("second"))];
+    fs::write(start_file(&dir), b"").expect("the start file is written");
     for (name, child) in children {
         let output = child.wait_with_output().expect("the child ends");
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -492,7 +533,7 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
 
     let bytes = fs::read(log.path(CASE)).expect("the log reads");
     let raw = lines(&bytes);
-    assert_eq!(raw.len(), 2 * LINES_PER_PROCESS, "every append is one line");
+    assert_eq!(raw.len(), 2 * per_process, "every append is one line");
     for line in &raw {
         let value: serde_json::Value =
             serde_json::from_slice(line).expect("each line is a complete JSON document");
@@ -509,7 +550,7 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
             .or_default()
             .push(index.parse().expect("an index"));
     }
-    let expected: Vec<usize> = (0..LINES_PER_PROCESS).collect();
+    let expected: Vec<usize> = (0..per_process).collect();
     assert_eq!(
         seen.get("first"),
         Some(&expected),
@@ -520,6 +561,41 @@ fn two_processes_appending_200_lines_each_leave_400_that_verify() {
         Some(&expected),
         "each process's lines in its order"
     );
+}
+
+/// The default lane's count: 25 lines a process, overlapping from the start file on.
+#[test]
+fn two_processes_appending_25_lines_each_leave_50_that_verify() {
+    two_processes_append(
+        "two_processes_appending_25_lines_each_leave_50_that_verify",
+        25,
+    );
+}
+
+/// The same with 200 lines a process, in the slow lane (`task slow`): about 50 s on 4 busy
+/// threads, since every append syncs.
+#[test]
+fn slow_two_processes_appending_200_lines_each_leave_400_that_verify() {
+    two_processes_append(
+        "slow_two_processes_appending_200_lines_each_leave_400_that_verify",
+        200,
+    );
+}
+
+/// story:tree-run-tests-fit-the-budget: an append syncs its file and the directory, through the
+/// door of `loom_governor::durable`, counted on this thread alone.
+#[test]
+fn a_run_log_append_syncs_its_file_and_directory() {
+    let dir = store_dir("synced-append");
+    let log = RunLog::open(&dir).expect("the store opens");
+    let before = loom_governor::durable::counts_on_this_thread();
+    log.append(CASE, at(0), event(0)).expect("appended");
+    let after = loom_governor::durable::counts_on_this_thread();
+    assert_eq!(
+        (after.synced - before.synced, after.skipped - before.skipped),
+        (2, 0)
+    );
+    assert_eq!(loom_governor::durable::counts().skipped, 0);
 }
 
 #[test]
@@ -644,6 +720,9 @@ fn the_log_of_a_case_id_over_100_bytes_sits_beside_its_case_sha256_file() {
             independence: CaseIndependence::none(),
             evidence: Vec::new(),
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("the run log opens over the same directory");
@@ -718,4 +797,608 @@ fn two_unreadable_lines_in_a_row_are_named_by_the_second() {
         (RunLogRefusal::BrokenChain, 2),
         "line 2 does not read, so it names no line before it: the break is line 2"
     );
+}
+
+// Story `child-record-in-the-run-log`: a child line names the child's `case_outcome` record in the
+// parent, `record` and `record_digest`, both or neither.
+
+/// The members of a `child opened` line of these tests, beside its `kind`.
+const OPENED: &str = r#""kind":"ChildOpened","child":"chg-1842.review","protocol":"review@1""#;
+/// The members of a `child closed` line of these tests, beside its `kind`.
+const CLOSED: &str = r#""kind":"ChildClosed","child":"chg-1842.review","outcome":"approved""#;
+/// A line before the child line and one after it, so the child line is never the last.
+const FIRST: &str = r#""kind":"CaseOpened","case":"chg-1842","protocol":"software-change@1""#;
+const LAST: &str = r#""kind":"Stopped","stop":"AwaitingPerson","next":[]"#;
+
+/// A log of one line per body (`kind` and the event's members), each with its `seq`, `at` and the
+/// `prev` this test computes: the chain holds whatever the members are.
+fn chain(bodies: &[String]) -> Vec<u8> {
+    let mut lines: Vec<Vec<u8>> = Vec::new();
+    for (index, body) in bodies.iter().enumerate() {
+        let prev = lines
+            .last()
+            .map(|line| format!("\"prev\":\"{}\",", sha256_hex(line)))
+            .unwrap_or_default();
+        let line = format!(
+            "{{\"seq\":{index},{prev}\"at\":\"{}\",{body}}}",
+            at(index).0
+        );
+        lines.push(line.into_bytes());
+    }
+    joined(&lines)
+}
+
+/// The log `FIRST`, the child line `child` with `members` after its own, `LAST`.
+fn child_log(child: &str, members: &str) -> Vec<u8> {
+    chain(&[
+        FIRST.to_owned(),
+        format!("{child}{members}"),
+        LAST.to_owned(),
+    ])
+}
+
+fn refusal(bytes: &[u8]) -> RunLogRefused {
+    match verify(bytes) {
+        Ok(lines) => panic!("the log verified as {} lines: {lines:?}", lines.len()),
+        Err(refused) => refused,
+    }
+}
+
+/// The child line of `kind` (`ChildOpened` or `ChildClosed`) holding `record` and `record_digest`.
+fn child_event(kind: &str, record: Option<&str>, record_digest: Option<&str>) -> RunLogEvent {
+    let record = record.map(str::to_owned);
+    let record_digest = record_digest.map(str::to_owned);
+    if kind == "ChildOpened" {
+        RunLogEvent::ChildOpened(ChildOpened {
+            child: "chg-1842.review".to_owned(),
+            protocol: "review@1".to_owned(),
+            record,
+            record_digest,
+        })
+    } else {
+        RunLogEvent::ChildClosed(ChildClosed {
+            child: "chg-1842.review".to_owned(),
+            outcome: Some("approved".to_owned()),
+            record,
+            record_digest,
+        })
+    }
+}
+
+/// An append of `event` after one line is refused as a line that would not read back, and no
+/// byte of the log changes.
+fn append_is_refused(label: &str, event: RunLogEvent) {
+    let (log, path) = log_with(label, 1);
+    let before = fs::read(&path).expect("reads");
+    let result = log.append(CASE, at(1), event);
+    assert!(
+        matches!(result, Err(RunLogError::Store(_))),
+        "{label}: the append is refused: {result:?}"
+    );
+    assert_eq!(
+        fs::read(&path).expect("reads"),
+        before,
+        "{label}: no byte changed"
+    );
+}
+
+#[test]
+fn a_child_line_with_record_but_no_record_digest_is_refused() {
+    let digest = sha256_hex(b"facts");
+    for (kind, child) in [("ChildOpened", OPENED), ("ChildClosed", CLOSED)] {
+        // With both members the line reads: the refusal below is the missing member's.
+        let whole = child_log(
+            child,
+            &format!(",\"record\":\"{RECORD}\",\"record_digest\":\"{digest}\""),
+        );
+        let lines = verify(&whole).unwrap_or_else(|refused| panic!("{kind}: {refused:?}"));
+        assert_eq!(
+            lines[1].event,
+            child_event(kind, Some(RECORD), Some(&digest))
+        );
+
+        let refused = refusal(&child_log(child, &format!(",\"record\":\"{RECORD}\"")));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (RunLogRefusal::BrokenChain, 1),
+            "{kind}: {refused:?}"
+        );
+        assert!(
+            refused.detail.contains("record_digest:"),
+            "{kind}: the detail names the missing member: {}",
+            refused.detail
+        );
+        append_is_refused(
+            &format!("record-alone-{kind}"),
+            child_event(kind, Some(RECORD), None),
+        );
+    }
+}
+
+#[test]
+fn a_child_line_with_record_digest_but_no_record_is_refused() {
+    let digest = sha256_hex(b"facts");
+    for (kind, child) in [("ChildOpened", OPENED), ("ChildClosed", CLOSED)] {
+        let refused = refusal(&child_log(
+            child,
+            &format!(",\"record_digest\":\"{digest}\""),
+        ));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (RunLogRefusal::BrokenChain, 1),
+            "{kind}: {refused:?}"
+        );
+        assert!(
+            refused.detail.contains("record:"),
+            "{kind}: the detail names the missing member: {}",
+            refused.detail
+        );
+        append_is_refused(
+            &format!("digest-alone-{kind}"),
+            child_event(kind, None, Some(&digest)),
+        );
+    }
+}
+
+#[test]
+fn a_record_digest_that_is_no_sha256_is_refused() {
+    let digest = sha256_hex(b"facts");
+    let not_sha256 = [
+        ("upper case", digest.to_uppercase()),
+        ("63 digits", digest[..63].to_owned()),
+        ("65 digits", format!("{digest}0")),
+        ("no hex digit", format!("g{}", &digest[1..])),
+        ("empty", String::new()),
+    ];
+    for (kind, child) in [("ChildOpened", OPENED), ("ChildClosed", CLOSED)] {
+        for (what, bad) in &not_sha256 {
+            let refused = refusal(&child_log(
+                child,
+                &format!(",\"record\":\"{RECORD}\",\"record_digest\":\"{bad}\""),
+            ));
+            assert_eq!(
+                (refused.refusal, refused.line),
+                (RunLogRefusal::BrokenChain, 1),
+                "{kind}, {what}: {refused:?}"
+            );
+            assert!(
+                refused.detail.contains("record_digest:"),
+                "{kind}, {what}: the detail names the member: {}",
+                refused.detail
+            );
+            append_is_refused(
+                &format!("bad-digest-{kind}-{}", what.replace(' ', "-")),
+                child_event(kind, Some(RECORD), Some(bad)),
+            );
+        }
+    }
+}
+
+/// The first six lines of a root case's log as Loom wrote it before this change (the stub cycle
+/// of 2026-11-22 under the tree commands at `2c0a6f48`): no child line names a record.
+const OLD_LOG: &str = concat!(
+    "{\"seq\":0,\"at\":\"2026-11-22T10:00:00Z\",\"kind\":\"CaseOpened\",\"case\":\"IDEA-1\",\"protocol\":\"sdc@8\"}\n",
+    "{\"seq\":1,\"prev\":\"894ae22a948ec27be07abe7c28116b52eaeb824dc6d0490b73876a139a1d114e\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"Evaluated\",\"case_revision\":1,\"frontier\":\"0eacfce8-16f1-8d0c-99c3-260dee165509\",\"decision_digest\":\"9142a67e29fab11e18bc167b7f6bd3556cfcd4f9cde7a3ff0d0eabcb295707d3\"}\n",
+    "{\"seq\":2,\"prev\":\"3267a9b8e964a514e88aac74ef38bb325e79d80e90bddab519c587eca2519720\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"ActionFinished\",\"action\":\"intake.open\",\"exit\":0,\"evidence\":[\"194fee46-1446-8629-9928-392f08baa58b\"],\"revisions\":[]}\n",
+    "{\"seq\":3,\"prev\":\"93b6b338daa67364967efbf2a02c10e6e8f01989ca441cccdfca19e0a7e7711c\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"ChildOpened\",\"child\":\"IDEA-1.intake\",\"protocol\":\"sdc-intake@9\"}\n",
+    "{\"seq\":4,\"prev\":\"12ec10b922354cb87a13d69c82436827a4659de798c2f8200fdd79c9948c2eeb\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"ChildClosed\",\"child\":\"IDEA-1.intake\",\"outcome\":\"passed\"}\n",
+    "{\"seq\":5,\"prev\":\"1a25c9b872567de9e230391b31fd61aee862a85f8a1d1e14a4eb3d209f0efaa5\",\"at\":\"2026-11-22T10:02:00Z\",\"kind\":\"Evaluated\",\"case_revision\":1,\"frontier\":\"9dacb14c-3f3e-8f49-9323-5ec83150bd94\",\"decision_digest\":\"8eee3bcc0b231fb214b8fd53070e999665ad05c52c461704671c25125c982b62\"}\n",
+);
+
+#[test]
+fn an_old_log_without_the_record_members_still_verifies() {
+    let read = verify(OLD_LOG.as_bytes()).expect("a log written before the change verifies");
+    assert_eq!(read.len(), 6);
+    assert_eq!(
+        read[3].event,
+        RunLogEvent::ChildOpened(ChildOpened {
+            child: "IDEA-1.intake".to_owned(),
+            protocol: "sdc-intake@9".to_owned(),
+            record: None,
+            record_digest: None,
+        })
+    );
+    assert_eq!(
+        read[4].event,
+        RunLogEvent::ChildClosed(ChildClosed {
+            child: "IDEA-1.intake".to_owned(),
+            outcome: Some("passed".to_owned()),
+            record: None,
+            record_digest: None,
+        })
+    );
+    // Each line reads back as the bytes it was read from.
+    for (line, raw) in read.iter().zip(lines(OLD_LOG.as_bytes())) {
+        assert_eq!(encode(line).as_bytes(), raw.as_slice());
+    }
+}
+
+/// A log of `CaseOpened`, a `child opened` and a `child closed` line naming [`RECORD`] with two
+/// digests, and a `stopped` line.
+fn log_with_records(label: &str) -> (RunLog, PathBuf, [String; 2]) {
+    let digests = [sha256_hex(b"opened facts"), sha256_hex(b"closed facts")];
+    let dir = store_dir(label);
+    let log = RunLog::open(&dir).expect("the store opens");
+    let events = [
+        RunLogEvent::CaseOpened(CaseOpened {
+            case: CASE.to_owned(),
+            protocol: "software-change@1".to_owned(),
+        }),
+        child_event("ChildOpened", Some(RECORD), Some(&digests[0])),
+        child_event("ChildClosed", Some(RECORD), Some(&digests[1])),
+        RunLogEvent::Stopped(Stopped {
+            stop: "AwaitingPerson".to_owned(),
+            next: Vec::new(),
+            budget: None,
+        }),
+    ];
+    for (index, event) in events.into_iter().enumerate() {
+        log.append(CASE, at(index), event)
+            .unwrap_or_else(|error| panic!("line {index} is taken: {error}"));
+    }
+    let path = log.path(CASE);
+    (log, path, digests)
+}
+
+#[test]
+fn the_hash_chain_verifies_over_child_lines_with_a_record() {
+    let (log, path, digests) = log_with_records("chain-records");
+    let read = log.read(CASE).expect("the log verifies");
+    assert_eq!(read.len(), 4);
+    assert_eq!(
+        read[1].event,
+        child_event("ChildOpened", Some(RECORD), Some(&digests[0]))
+    );
+    assert_eq!(
+        read[2].event,
+        child_event("ChildClosed", Some(RECORD), Some(&digests[1]))
+    );
+
+    let raw = lines(&fs::read(&path).expect("reads"));
+    for (index, digest) in [(1usize, &digests[0]), (2, &digests[1])] {
+        // One hex digit of the digest changed to another: the line still reads, the next line
+        // no longer names it.
+        let mut changed = raw.clone();
+        let text = String::from_utf8(changed[index].clone()).expect("utf-8");
+        let first = digest.as_bytes()[0];
+        let other = if first == b'0' { "1" } else { "0" };
+        let tampered = format!("{other}{}", &digest[1..]);
+        assert!(
+            text.contains(digest.as_str()),
+            "line {index} holds its digest"
+        );
+        changed[index] = text.replacen(digest.as_str(), &tampered, 1).into_bytes();
+        let refused = refusal(&joined(&changed));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (
+                RunLogRefusal::BrokenChain,
+                i64::try_from(index + 1).expect("small")
+            ),
+            "a changed byte in line {index}'s record_digest: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn a_child_line_with_a_record_round_trips_byte_for_byte() {
+    let (_log, path, digests) = log_with_records("round-trip-records");
+    let bytes = fs::read(&path).expect("reads");
+    let raw = lines(&bytes);
+    // The members after the line's own, in declaration order: `record`, then `record_digest`.
+    let expected = [
+        format!(
+            "{{\"seq\":1,\"prev\":\"{}\",\"at\":\"{}\",{OPENED},\"record\":\"{RECORD}\",\"record_digest\":\"{}\"}}",
+            sha256_hex(&raw[0]),
+            at(1).0,
+            digests[0]
+        ),
+        format!(
+            "{{\"seq\":2,\"prev\":\"{}\",\"at\":\"{}\",{CLOSED},\"record\":\"{RECORD}\",\"record_digest\":\"{}\"}}",
+            sha256_hex(&raw[1]),
+            at(2).0,
+            digests[1]
+        ),
+    ];
+    assert_eq!(String::from_utf8_lossy(&raw[1]), expected[0]);
+    assert_eq!(String::from_utf8_lossy(&raw[2]), expected[1]);
+    let read = verify(&bytes).expect("verifies");
+    for index in [1, 2] {
+        assert_eq!(
+            encode(&read[index]).as_bytes(),
+            raw[index].as_slice(),
+            "line {index} encodes to the bytes it was read from"
+        );
+    }
+}
+
+/// What a reader written against the shape of the child lines before this change reads from a
+/// line: the members it knows, by name, every other member ignored.
+fn old_shape(line: &[u8]) -> (String, String, Option<String>, Option<String>) {
+    let value: serde_json::Value = serde_json::from_slice(line).expect("a JSON line");
+    let text = |name: &str| {
+        value
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    (
+        text("kind").expect("a kind"),
+        text("child").expect("a child"),
+        text("protocol"),
+        text("outcome"),
+    )
+}
+
+#[test]
+fn a_reader_that_ignores_unknown_members_reads_the_new_child_lines() {
+    let (_log, path, _) = log_with_records("old-shape-reader");
+    let raw = lines(&fs::read(&path).expect("reads"));
+    assert_eq!(
+        old_shape(&raw[1]),
+        (
+            "ChildOpened".to_owned(),
+            "chg-1842.review".to_owned(),
+            Some("review@1".to_owned()),
+            None
+        )
+    );
+    assert_eq!(
+        old_shape(&raw[2]),
+        (
+            "ChildClosed".to_owned(),
+            "chg-1842.review".to_owned(),
+            None,
+            Some("approved".to_owned())
+        )
+    );
+    // The new lines hold the old members unchanged; only `record` and `record_digest` are new.
+    let old_members: [&[&str]; 2] = [&["child", "protocol"], &["child", "outcome"]];
+    for (line, old) in raw[1..3].iter().zip(old_members) {
+        let value: serde_json::Value = serde_json::from_slice(line).expect("a JSON line");
+        let added: Vec<&str> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .filter(|name| !["seq", "prev", "at", "kind"].contains(name) && !old.contains(name))
+            .collect();
+        assert_eq!(added, ["record", "record_digest"]);
+    }
+}
+
+/// The log `FIRST`, a `stopped` line with `stop`, no decision and `members` after its own, `LAST`.
+fn stopped_log(stop: &str, members: &str) -> Vec<u8> {
+    chain(&[
+        FIRST.to_owned(),
+        format!(r#""kind":"Stopped","stop":"{stop}","next":[]{members}"#),
+        LAST.to_owned(),
+    ])
+}
+
+/// The `stopped` line of `stop` naming `budget`.
+fn stopped(stop: &str, budget: Option<&str>) -> RunLogEvent {
+    RunLogEvent::Stopped(Stopped {
+        stop: stop.to_owned(),
+        next: Vec::new(),
+        budget: budget.map(str::to_owned),
+    })
+}
+
+/// Asserts the log `bytes` is refused `BrokenChain` at its line 1, the detail naming `budget`.
+fn refused_at_the_budget(bytes: &[u8], what: &str) {
+    let refused = refusal(bytes);
+    assert_eq!(
+        (refused.refusal, refused.line),
+        (RunLogRefusal::BrokenChain, 1),
+        "{what}: {refused:?}"
+    );
+    assert!(
+        refused.detail.contains("budget:"),
+        "{what}: the detail names the member: {}",
+        refused.detail
+    );
+}
+
+#[test]
+fn a_stopped_line_with_a_budget_and_another_stop_is_refused() {
+    // On a `BudgetSpent` stop the line reads: the refusals below are the other stops'.
+    let whole = stopped_log("BudgetSpent", r#","budget":"MaxSteps""#);
+    let lines = verify(&whole).unwrap_or_else(|refused| panic!("{refused:?}"));
+    assert_eq!(lines[1].event, stopped("BudgetSpent", Some("MaxSteps")));
+    for (index, stop) in [
+        "AwaitingPerson",
+        "AwaitingAuthority",
+        "Stuck",
+        "Terminal",
+        "budgetspent",
+        "",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        refused_at_the_budget(
+            &stopped_log(stop, r#","budget":"MaxSteps""#),
+            &format!("stop {stop:?}"),
+        );
+        append_is_refused(
+            &format!("budget-beside-stop-{index}"),
+            stopped(stop, Some("MaxSteps")),
+        );
+    }
+}
+
+#[test]
+fn a_stopped_line_with_an_unknown_budget_is_refused() {
+    for (index, budget) in [
+        "cancel",
+        "max_steps",
+        "maxWallSeconds",
+        "MaxRuns",
+        "MaxTurns",
+        "MaxTokens",
+        "Steps",
+        "MaxSteps ",
+        "",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        refused_at_the_budget(
+            &stopped_log("BudgetSpent", &format!(r#","budget":"{budget}""#)),
+            &format!("budget {budget:?}"),
+        );
+        append_is_refused(
+            &format!("unknown-budget-{index}"),
+            stopped("BudgetSpent", Some(budget)),
+        );
+    }
+    refused_at_the_budget(
+        &stopped_log("BudgetSpent", r#","budget":1"#),
+        "a budget that is no string",
+    );
+}
+
+/// A one-leg case's log as Loom wrote it before `budget` existed: two `BudgetSpent` stops, the
+/// last line one of them, and another stop between.
+const OLD_STOPPED_LOG: &str = concat!(
+    "{\"seq\":0,\"at\":\"2026-11-22T08:00:00Z\",\"kind\":\"CaseOpened\",\"case\":\"root\",\"protocol\":\"tour-leg@1\"}\n",
+    "{\"seq\":1,\"prev\":\"a0a4172d05916fef90ac7ea88c28ee4db19e9f90c986bc1a5a97e61c6229422e\",\"at\":\"2026-11-22T08:00:00Z\",\"kind\":\"Stopped\",\"stop\":\"BudgetSpent\",\"next\":[]}\n",
+    "{\"seq\":2,\"prev\":\"dda9cc2f78d2901217d8a8c88e74d31f2e109b829a0baf618c1e5c980f0dc552\",\"at\":\"2026-11-22T08:00:01Z\",\"kind\":\"Stopped\",\"stop\":\"AwaitingPerson\",\"next\":[\"the guide approves the route\"]}\n",
+    "{\"seq\":3,\"prev\":\"1f4b9b9bec6db1dbb4e638cd8327996b7a7524f5d25cc5a3ae884a0f3324c91a\",\"at\":\"2026-11-22T08:00:02Z\",\"kind\":\"Stopped\",\"stop\":\"BudgetSpent\",\"next\":[]}\n",
+);
+
+#[test]
+fn an_old_log_without_a_budget_still_verifies() {
+    let read =
+        verify(OLD_STOPPED_LOG.as_bytes()).expect("a log written before the change verifies");
+    assert_eq!(read.len(), 4);
+    assert_eq!(read[1].event, stopped("BudgetSpent", None));
+    assert_eq!(
+        read[2].event,
+        RunLogEvent::Stopped(Stopped {
+            stop: "AwaitingPerson".to_owned(),
+            next: vec!["the guide approves the route".to_owned()],
+            budget: None,
+        })
+    );
+    assert_eq!(read[3].event, stopped("BudgetSpent", None));
+    // Each line reads back as the bytes it was read from: an absent budget is left out.
+    for (line, raw) in read.iter().zip(lines(OLD_STOPPED_LOG.as_bytes())) {
+        assert_eq!(encode(line).as_bytes(), raw.as_slice());
+    }
+}
+
+#[test]
+fn the_budget_spellings_are_the_three_of_the_story() {
+    use loom::tree::SpentBudget;
+    // The story's list, in the order a run asks the budgets before a step.
+    let story = ["Cancel", "MaxSteps", "MaxWallSeconds"];
+    // Every variant, by an exhaustive match: a fourth one does not compile here.
+    let spelled = |budget: SpentBudget| match budget {
+        SpentBudget::Cancel => "Cancel",
+        SpentBudget::MaxSteps => "MaxSteps",
+        SpentBudget::MaxWallSeconds => "MaxWallSeconds",
+    };
+    let variants = [
+        SpentBudget::Cancel,
+        SpentBudget::MaxSteps,
+        SpentBudget::MaxWallSeconds,
+    ];
+    for (index, (budget, name)) in variants.into_iter().zip(story).enumerate() {
+        assert_eq!(spelled(budget), name);
+        assert_eq!(format!("{budget:?}"), name, "the variant is the spelling");
+        let bytes = stopped_log("BudgetSpent", &format!(r#","budget":"{name}""#));
+        let read = verify(&bytes).unwrap_or_else(|refused| panic!("{name}: {refused:?}"));
+        assert_eq!(read[1].event, stopped("BudgetSpent", Some(name)));
+        assert_eq!(encode(&read[1]).as_bytes(), lines(&bytes)[1].as_slice());
+        let (log, _) = log_with(&format!("budget-spelling-{index}"), 1);
+        log.append(CASE, at(1), stopped("BudgetSpent", Some(name)))
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        let written = log.read(CASE).expect("the log verifies");
+        assert_eq!(written[1].event, stopped("BudgetSpent", Some(name)));
+    }
+}
+
+/// A `handoff checked` line of `amend.upstream` with `exit` or `refusal`.
+fn handoff_checked(exit: Option<i64>, refusal: Option<&str>) -> RunLogEvent {
+    RunLogEvent::HandoffChecked(HandoffChecked {
+        action: "amend.upstream".to_owned(),
+        exit,
+        refusal: refusal.map(str::to_owned),
+        blob_digest: Some(sha256_hex(b"findings")),
+    })
+}
+
+#[test]
+fn handoff_checked_lines_verify_in_the_chain() {
+    // Appended between other lines, an exit and a refusal each read back as written, and the
+    // chain verifies.
+    let (log, path) = log_with("handoff-checked", 2);
+    let checks = [
+        handoff_checked(Some(0), None),
+        handoff_checked(Some(1), None),
+        handoff_checked(None, Some("the check was killed at its timeout of 1 s")),
+    ];
+    for (index, event) in checks.iter().enumerate() {
+        log.append(CASE, at(2 + index), event.clone())
+            .unwrap_or_else(|error| panic!("{event:?}: {error}"));
+    }
+    log.append(CASE, at(5), event(3))
+        .expect("a step after them");
+    let bytes = fs::read(&path).expect("reads");
+    let read = verify(&bytes).expect("a log with handoff checked lines verifies");
+    assert_eq!(read.len(), 6);
+    for (line, event) in read[2..5].iter().zip(&checks) {
+        assert_eq!(&line.event, event);
+    }
+    let raw = lines(&bytes);
+    assert!(
+        String::from_utf8_lossy(&raw[2]).contains(
+            r#""kind":"HandoffChecked","action":"amend.upstream","exit":0,"blob_digest":"#
+        ),
+        "{}",
+        String::from_utf8_lossy(&raw[2])
+    );
+    for (line, raw) in read.iter().zip(&raw) {
+        assert_eq!(encode(line).as_bytes(), raw.as_slice());
+    }
+
+    // A changed byte in one is named by the line after it, as in any line.
+    let mut changed = raw.clone();
+    changed[3] = String::from_utf8(changed[3].clone())
+        .unwrap()
+        .replace(r#""exit":1"#, r#""exit":0"#)
+        .into_bytes();
+    assert_eq!(
+        refused(verify(&joined(&changed))),
+        (RunLogRefusal::BrokenChain, 4)
+    );
+
+    // Exactly one of an exit and a refusal, as on `ActionFinished`.
+    for (what, members) in [
+        ("both", r#","exit":0,"refusal":"timed out""#),
+        ("neither", ""),
+    ] {
+        let refused = refusal(&chain(&[
+            FIRST.to_owned(),
+            format!(r#""kind":"HandoffChecked","action":"amend.upstream"{members}"#),
+            LAST.to_owned(),
+        ]));
+        assert_eq!(
+            (refused.refusal, refused.line),
+            (RunLogRefusal::BrokenChain, 1),
+            "{what}: {refused:?}"
+        );
+        assert!(
+            refused.detail.contains("exit:"),
+            "{what}: {}",
+            refused.detail
+        );
+    }
+    append_is_refused("handoff-checked-both", handoff_checked(Some(0), Some("x")));
+    append_is_refused("handoff-checked-neither", handoff_checked(None, None));
+
+    // An old log, written before the kind existed, verifies as it did.
+    assert_eq!(verify(OLD_LOG.as_bytes()).expect("verifies").len(), 6);
 }

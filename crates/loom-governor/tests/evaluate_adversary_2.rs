@@ -5,7 +5,6 @@
 //! set-aside path at 2000 records against deciding them.
 
 use std::collections::BTreeMap;
-use std::time::Instant;
 
 use b10x_loom_commission::model::json as commission_json;
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
@@ -368,7 +367,14 @@ fn adversary2_set_aside_and_reordered_records_report_what_the_governor_reports()
 /// The set-aside path judges each record once against the snapshot: at 2000 records with one set
 /// aside it costs a bounded multiple of deciding the 2000 records. A governor-style cumulative
 /// filter (each record judged with every earlier applying record) is quadratic and breaks the
-/// bound by orders of magnitude; nothing else in the suite measures this path.
+/// bound by orders of magnitude; nothing else in the suite measures this path. Each path counts
+/// with its least CPU time over [`ROUNDS`] rounds back to back in one process. The time is the
+/// process's (`CLOCK_PROCESS_CPUTIME_ID`), every thread's included: Canon evaluates each call on a
+/// thread of its own, which the calling thread's CPU time would not count. Wall time is not the
+/// measure: every Canon call starts and joins that thread, and in the build pool's cgroup a new
+/// thread waits for the scheduler, so the wall time of the set-aside path's n calls followed the
+/// pool's load (wall-time ratio 19 to 74 in three runs of one build) while its CPU time did not
+/// (story:canon-0-10-0-pin).
 #[test]
 fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
     let catalog = ProtocolCatalog::bundled().expect("the bundled catalog");
@@ -394,14 +400,21 @@ fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
         record("stray", "undeclared_kind", "observed", "intent", "query-1"),
     );
     let set_aside = request("system-query@1", &case, &records);
-    let start = Instant::now();
-    let fast = evaluate(&catalog, &decided).expect("decided");
-    let decide = start.elapsed().as_secs_f64();
-    let start = Instant::now();
-    let slow = evaluate(&catalog, &set_aside).expect("decided with one set aside");
-    let filter = start.elapsed().as_secs_f64();
+    // Each path's least CPU time over three rounds, taken back to back: a round in which another
+    // test of this process ran beside it counts only when every round did.
+    let (mut decide, mut filter) = (f64::INFINITY, f64::INFINITY);
+    let (mut fast, mut slow) = (None, None);
+    for _ in 0..ROUNDS {
+        let start = process_cpu_seconds();
+        fast = Some(evaluate(&catalog, &decided).expect("decided"));
+        decide = decide.min(process_cpu_seconds() - start);
+        let start = process_cpu_seconds();
+        slow = Some(evaluate(&catalog, &set_aside).expect("decided with one set aside"));
+        filter = filter.min(process_cpu_seconds() - start);
+    }
+    let (fast, slow) = (fast.expect("a round"), slow.expect("a round"));
     eprintln!(
-        "n={n}: decide {decide:.4}s, set aside {filter:.4}s, ratio {:.1}",
+        "n={n}: decide {decide:.4}s, set aside {filter:.4}s CPU (least of {ROUNDS}), ratio {:.1}",
         filter / decide
     );
     assert_eq!(slow.outcome, fast.outcome);
@@ -411,8 +424,18 @@ fn adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding() {
     );
     assert!(
         filter <= 40.0 * decide + 0.25,
-        "setting one record aside among {n} took {filter:.3}s against {decide:.3}s to decide them"
+        "setting one record aside among {n} took {filter:.3}s of CPU against {decide:.3}s to decide \
+         them"
     );
+}
+
+/// How often `adversary2_the_set_aside_path_costs_a_bounded_multiple_of_deciding` times each path.
+const ROUNDS: usize = 3;
+
+/// The CPU time this process has used, every thread's included, in seconds.
+fn process_cpu_seconds() -> f64 {
+    let time = rustix::time::clock_gettime(rustix::time::ClockId::ProcessCPUTime);
+    time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9
 }
 
 /// The case inputs a `software-change@1` case opens with here: Loom's run defaults.

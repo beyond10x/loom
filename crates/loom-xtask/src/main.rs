@@ -38,6 +38,13 @@
 //! `protocols-vendor --checkout <dir> --tag <tag>` rewrites `protocols/engineering/` and its
 //! `lock.json` from a local engineering-protocols checkout at a tag, reading Git objects only
 //! (see `protocols_vendor`).
+//!
+//! `linked-libraries <binary>` runs `ldd` on a built binary and fails, naming the library, when it
+//! links `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz` (see `linked_libraries`).
+//!
+//! `docs-stamp --check` (`task docs-check`) compares the working tree with the stamp of the
+//! generated documentation and builds nothing; `docs-stamp --slow-needed` decides whether CI runs
+//! `task docs-slow` (see `docs_stamp`).
 
 use b10x_loom_resource::crd;
 use clap::{Parser, Subcommand};
@@ -45,13 +52,24 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command as Process, ExitCode};
+use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+mod delegation;
+mod docs_stamp;
+mod durable_check;
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
+mod linked_libraries;
 mod protocols_vendor;
 mod release;
+mod shared_trees;
+#[path = "../../loom-docs/src/stamp.rs"]
+mod stamp;
+mod test_step;
+mod unsynced_store;
 
 /// Where the generated crate is committed, relative to the repository root.
 const GENERATED: &str = "generated/rust/loom";
@@ -107,6 +125,42 @@ enum Command {
         #[arg(long)]
         generated: Option<PathBuf>,
     },
+    /// Write `generated/ess/loom/suite.json`, the conformance suite `ess verify conform
+    /// synthesize --suite-format 5` synthesizes from `ess/`, and `generated/ess/loom/synthesis.txt`,
+    /// the digest of its inputs, the suite's digest and synthesize's output. Takes minutes.
+    SuiteGenerate {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
+    /// Fail when `generated/ess/loom/` differs by one byte from a fresh synthesis of `ess/`,
+    /// naming the file. The slow lane (`task slow`) runs it.
+    SuiteCheck {
+        #[command(flatten)]
+        scratch: Scratch,
+    },
+    /// The test step of `task check`: `cargo nextest run --workspace --locked` and
+    /// `cargo test --doc --workspace --locked`, failing when a test runs past 60 s or the step
+    /// past 120 s, and printing the ten slowest tests, green or red.
+    TestStep {
+        /// Run the tests of these packages in place of `--workspace` (repeatable).
+        #[arg(short = 'p', long = "package")]
+        packages: Vec<String>,
+    },
+    /// Build what is missing of the trees the `tree_run` tests share and their installed home,
+    /// under a key over the fixture, the builders, the sources of `b10x-loom` (its dep-info), the
+    /// lock file and the scope in `LOOM_TEST_SCOPE` (else `-p b10x-loom-cli`); remove those of
+    /// another key first; export the key to nextest's `NEXTEST_ENV`. nextest runs it as the setup
+    /// script of `binary_id(b10x-loom-cli::tree_run)`, the test step before its timed run. Run
+    /// after a build of another scope without `LOOM_TEST_SCOPE`, its `cargo test` may build again
+    /// and replace the `b10x-loom` the tests start; the key then names that scope.
+    SharedTrees,
+    /// Whether the tests that need a delegated user scope can run here, so the test step and CI
+    /// set `LOOM_REQUIRE_DELEGATION=1`: bubblewrap, a scope of `systemd-run --user --scope -p
+    /// Delegate=yes` this process may move a process into, and Substrate's driver serving every
+    /// family Loom needs in such a scope (it builds the example `delegation_probe` of
+    /// `b10x-loom-intake-slice`). Exits 0 when they can, 1 naming the first missing prerequisite,
+    /// 2 when the probe cannot run.
+    DelegationProbe,
     /// Write `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
     /// `CustomResourceDefinition` projected from `ess generate --kind schema` of `ess/` by
     /// `b10x_loom_resource::crd::manifest`.
@@ -158,6 +212,50 @@ enum Command {
         #[arg(long)]
         tag: String,
     },
+    /// Run `ldd` on a built binary and fail, naming each library, when it links `libgit2`,
+    /// `libssh2`, `libssl`, `libcrypto` or `libz`. Needs no repository root.
+    LinkedLibraries {
+        /// The binary, e.g. `target/release/b10x-loom`.
+        binary: PathBuf,
+    },
+    /// Fail, naming the binary, when it holds the marker of the test sync switch (the feature
+    /// `test-unsynced-store` of `b10x-loom-governor`): a released binary syncs every durable
+    /// write. Needs no repository root.
+    UnsyncedStore {
+        /// The binary, e.g. `target/release/b10x-loom`.
+        binary: PathBuf,
+    },
+    /// The lane `task durable-check`: the count tests of the tree path's stores run once each and
+    /// pass without the test sync switch's feature, a release build of `b10x-loom-governor` with it
+    /// fails to compile, and `b10x-loom-cli`'s normal dependencies do not hold it.
+    DurableCheck,
+    /// The stamp of the generated documentation, `website/docs/reference/.generated.json`.
+    /// `--check` (`task docs-check`) fails, naming the first input, the `ess` version or the
+    /// generated file that differs from the stamp, or a raw admonition title under
+    /// `website/docs`; it builds nothing. `--slow-needed` prints `run` or `skip`: whether CI runs
+    /// `task docs-slow`.
+    DocsStamp {
+        /// Compare the working tree with the stamp.
+        #[arg(
+            long,
+            conflicts_with = "slow_needed",
+            required_unless_present = "slow_needed"
+        )]
+        check: bool,
+        /// Print `run` for a push to `refs/heads/main` or a stamp that differs from `--base`,
+        /// else `skip`.
+        #[arg(long, requires_all = ["base", "event", "git_ref"])]
+        slow_needed: bool,
+        /// The base branch's stamp; an empty or missing file is a base without one.
+        #[arg(long)]
+        base: Option<PathBuf>,
+        /// The event that started the run, as `github.event_name` gives it.
+        #[arg(long)]
+        event: Option<String>,
+        /// The ref the run is for, as `github.ref` gives it.
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+    },
 }
 
 #[derive(Debug, clap::Args)]
@@ -170,6 +268,9 @@ struct Scratch {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::DelegationProbe = cli.command {
+        return delegation_probe(cli.root);
+    }
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -179,7 +280,40 @@ fn main() -> ExitCode {
     }
 }
 
+/// `delegation-probe`: 0 when the delegated tests can run here, 1 naming the first missing
+/// prerequisite, 2 when the probe cannot run.
+fn delegation_probe(root: Option<PathBuf>) -> ExitCode {
+    let probed = match root {
+        Some(root) => Ok(root),
+        None => find_root(),
+    }
+    .and_then(|root| delegation::probe(&root));
+    match probed.map(|record| delegation::decide(&record)) {
+        Ok(Ok(())) => {
+            println!(
+                "delegation probe passed: bubblewrap, a delegated scope a process may enter, and \
+                 Substrate's driver serving every family Loom needs"
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(Err(missing)) => {
+            println!("delegation probe failed: {missing}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("delegation probe could not run: {error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 fn run(cli: Cli) -> Result<(), String> {
+    if let Command::LinkedLibraries { binary } = &cli.command {
+        return linked_libraries::linked_libraries(binary);
+    }
+    if let Command::UnsyncedStore { binary } = &cli.command {
+        return unsynced_store::unsynced_store(binary);
+    }
     let root = match cli.root {
         Some(root) => root,
         None => find_root()?,
@@ -209,6 +343,46 @@ fn run(cli: Cli) -> Result<(), String> {
             &generated.unwrap_or_else(|| root.join(GENERATED)),
             SPECIFICATION,
         ),
+        Command::SuiteGenerate { scratch } => {
+            let dir = suite_scratch(&root, &scratch);
+            let record = ess_suite::generate(&root, &ess_suite::Ess::new(&cli.ess, &root), &dir);
+            let _ = fs::remove_dir_all(&dir);
+            let record = record?;
+            println!(
+                "{}, {}: synthesized from ess/ with {} ({})",
+                ess_suite::SUITE,
+                ess_suite::RECORD,
+                record.ess,
+                record.inputs
+            );
+            Ok(())
+        }
+        Command::SuiteCheck { scratch } => {
+            let dir = suite_scratch(&root, &scratch);
+            let record =
+                ess_suite::compare_fresh(&root, &ess_suite::Ess::new(&cli.ess, &root), &dir);
+            let _ = fs::remove_dir_all(&dir);
+            let record = record?;
+            println!(
+                "{}, {}: equal to a fresh synthesis of ess/ with {} ({})",
+                ess_suite::SUITE,
+                ess_suite::RECORD,
+                record.ess,
+                record.inputs
+            );
+            Ok(())
+        }
+        Command::TestStep { packages } => test_step::run(&root, &packages),
+        Command::DelegationProbe => {
+            delegation::probe(&root).and_then(|record| delegation::decide(&record))
+        }
+        Command::SharedTrees => {
+            let scope =
+                shared_trees::scope_of(std::env::var_os(shared_trees::SCOPE_VARIABLE).as_deref());
+            let made = shared_trees::make(&root, &scope)?;
+            println!("{} (scope {scope})", made.line());
+            Ok(())
+        }
         Command::CrdGenerate { scratch } => crd_generate(&root, &cli.ess, &scratch),
         Command::CrdDrift { scratch } => crd_drift(&root, &cli.ess, &scratch),
         Command::NoHandModel { src, generated } => no_hand_model(
@@ -228,6 +402,23 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::ProtocolsVendor { checkout, tag } => {
             protocols_vendor::protocols_vendor(&root, &checkout, &tag)
         }
+        Command::LinkedLibraries { binary } => linked_libraries::linked_libraries(&binary),
+        Command::UnsyncedStore { binary } => unsynced_store::unsynced_store(&binary),
+        Command::DurableCheck => durable_check::durable_check(&root),
+        Command::DocsStamp { check: true, .. } => {
+            docs_stamp::check(&root, &ess_suite::Ess::new(&cli.ess, &root))
+        }
+        Command::DocsStamp {
+            base,
+            event,
+            git_ref,
+            ..
+        } => docs_stamp::print_slow_needed(
+            &root,
+            &base.unwrap_or_default(),
+            event.as_deref().unwrap_or_default(),
+            git_ref.as_deref().unwrap_or_default(),
+        ),
     }
 }
 
@@ -407,7 +598,8 @@ impl Regeneration {
         let regeneration = Self {
             dir: scratch.join(format!("{prefix}-{}-{nanos}", std::process::id())),
         };
-        let output = Process::new(ess)
+        let output = ess_suite::Ess::new(ess, root)
+            .command()
             .args(verb)
             .arg("--path")
             .arg(root.join(specification))
@@ -483,6 +675,19 @@ impl Drop for Regeneration {
             let _ = fs::remove_dir_all(&self.dir);
         }
     }
+}
+
+/// A fresh directory for one synthesis of the conformance suite.
+fn suite_scratch(root: &Path, scratch: &Scratch) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    scratch
+        .scratch
+        .clone()
+        .unwrap_or_else(|| default_scratch(root))
+        .join(format!("suite-{}-{nanos}", std::process::id()))
 }
 
 fn default_scratch(root: &Path) -> PathBuf {
@@ -595,7 +800,8 @@ fn parse(path: &Path, text: &str) -> Result<syn::File, String> {
 
 /// The names `ess/` declares, read from `ess specify compile --format json`.
 fn specified_type_names(root: &Path, ess: &Path) -> Result<BTreeSet<String>, String> {
-    let output = Process::new(ess)
+    let output = ess_suite::Ess::new(ess, root)
+        .command()
         .args(["specify", "compile", "--path"])
         .arg(root.join(SPECIFICATION))
         .args(["--format", "json"])
@@ -980,6 +1186,40 @@ mod tests {
 
     fn names(list: &[&str]) -> BTreeSet<String> {
         list.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// The digest of the committed suite is SHA-256: the FIPS 180-4 examples, and a message that
+    /// spans two blocks with its length.
+    #[test]
+    fn the_suite_digest_is_sha_256() {
+        assert_eq!(
+            ess_suite::digest(b""),
+            "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            ess_suite::digest(b"abc"),
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            ess_suite::digest(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+            "sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
+        );
+    }
+
+    /// A record reads back as written, its output verbatim.
+    #[test]
+    fn a_synthesis_record_reads_back_as_written() {
+        let record = ess_suite::Record {
+            ess: "ess 0.96.0".to_owned(),
+            inputs: ess_suite::digest(b"inputs"),
+            exit: "0".to_owned(),
+            suite: ess_suite::digest(b"suite"),
+            stdout: "refused[ESS-SYNTH-003]: x\nstdout: y\n1 refusal occurrence(s)\n".to_owned(),
+        };
+        assert_eq!(
+            ess_suite::Record::parse(&record.render()).as_ref(),
+            Ok(&record)
+        );
     }
 
     fn found(text: &str, list: &[&str]) -> Vec<(usize, String)> {

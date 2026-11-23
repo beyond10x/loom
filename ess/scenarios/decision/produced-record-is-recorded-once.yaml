@@ -1,0 +1,111 @@
+# story decision-request-entity: a person decides an approval at a case revision, and the Canon
+# record it produced is recorded once: the same record again changes nothing, another is refused.
+# ESS-SYNTH-003 x6: ess 0.96.0 does reach a Decided request (RecordProduced/option-produces-none
+# is synthesized), but none whose produced record selects recorded, already-recorded or
+# produced-conflict. For each of the six (recorded and its transition, already-recorded,
+# produced-conflict, the invariant after recorded and after already-recorded) synthesize prints:
+# no candidate of the 11 tried satisfies `loom.decision.DecisionRequest` stored
+# decided_option,options,produced_record selecting this branch. Before kind-not-principal
+# (security review F1) the two recorded ids were ESS-SYNTH-001, a second row under a held DecisionRequestId (ess repeated_identity.rs:28-31), as
+# in the SDC's unmodified domain, and the other four were synthesized. No change of the
+# specification that keeps the behaviour removes them, so this authored scenario covers them.
+type: ess-scenario/7
+covers:
+  - loom.decision.RecordProduced/outcome/recorded
+  - loom.decision.DecisionRequest/transition/record_produced/by/loom.decision.RecordProduced/recorded
+  - loom.decision.RecordProduced/outcome/already-recorded
+  - loom.decision.RecordProduced/outcome/produced-conflict
+  - loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/recorded
+  - loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/already-recorded
+domain: loom.decision
+scenario: produced-record-is-recorded-once
+summary: "A decided approval records its entry once and refuses another; authored: no synthesized Decided request selects recorded, already-recorded or produced-conflict (ESS-SYNTH-003)."
+
+timeline:
+  - at: 2026-11-21T12:00:00Z
+    command: loom.decision.Request
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.release-change.release-1"
+      case_id: "IDEA-1.release"
+      question_key: "IDEA-1.release|change.release|"
+      record_key: "change.release@r7"
+      unblocks: {kind: approval, action: "change.release", capability: "change.release"}
+      subject_artifact: "release"
+      subject_revision: "tl0001"
+      question: "Release the change at revision tl0001?"
+      options:
+        - letter: "A"
+          does: "Grant change.release at this case revision."
+          cost: "None beyond the release."
+          consequence: {admits: ["change.release"], blocks: [], grant: granted, produces: canon_authority}
+        - letter: "B"
+          does: "Deny change.release."
+          cost: "The release waits."
+          consequence: {admits: [], blocks: ["change.release"], grant: denied, produces: canon_authority}
+      autonomy_level: A4
+      decision_class: release
+      holder: person
+      eligible: ["operator"]
+      addressed_to: "operator"
+      opened_at: 2026-11-21T12:00:00Z
+    outcome: requested
+    events:
+      - event: loom.decision.DecisionRequested
+        payload:
+          request_id: "DR-IDEA-1.release-change.release-1"
+          case_id: "IDEA-1.release"
+          subject_artifact: "release"
+          subject_revision: "tl0001"
+
+  - at: 2026-11-21T12:01:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Person
+    input:
+      request_id: "DR-IDEA-1.release-change.release-1"
+      option: "A"
+      principal: "operator"
+      principal_kind: person
+      decided_at: 2026-11-21T12:01:00Z
+      case_revision: "r7"
+      reasons: ["The release checks are green."]
+    outcome: decided
+    events:
+      - event: loom.decision.DecisionTaken
+        payload:
+          request_id: "DR-IDEA-1.release-change.release-1"
+          option: "A"
+          principal: "operator"
+
+  - at: 2026-11-21T12:02:00Z
+    command: loom.decision.RecordProduced
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.release-change.release-1"
+      produced: {document: canon_authority, record: "change.release@r7", case_revision: "r7"}
+    outcome: recorded
+    events:
+      - event: loom.decision.ProducedRecordRecorded
+        payload:
+          request_id: "DR-IDEA-1.release-change.release-1"
+          produced: {document: canon_authority, record: "change.release@r7", case_revision: "r7"}
+
+  - at: 2026-11-21T12:03:00Z
+    command: loom.decision.RecordProduced
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.release-change.release-1"
+      produced: {document: canon_authority, record: "change.release@r7", case_revision: "r7"}
+    outcome: already-recorded
+
+  - at: 2026-11-21T12:04:00Z
+    command: loom.decision.RecordProduced
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.release-change.release-1"
+      produced: {document: canon_authority, record: "change.release@r8", case_revision: "r8"}
+    outcome: produced-conflict
+
+assert:
+  - view: loom.decision.DecisionRequests
+    contains: {request_id: "DR-IDEA-1.release-change.release-1", state: Decided, record_key: "change.release@r7", decided_option: "A", decided_case_revision: "r7", produced_record: {document: canon_authority, record: "change.release@r7", case_revision: "r7"}}

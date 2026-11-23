@@ -68,11 +68,31 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
+
+/// The `ess` the generator runs here: a stand-in that answers the synthesis of the repository's
+/// `ess/commission/` from a copy made once a test run (`ess_suite::synthesis_stand_in`, which `task
+/// test-step` fills before the tests), and runs `ess` itself for any other call.
+fn stand_in() -> PathBuf {
+    let root = repo_root();
+    ess_suite::synthesis_stand_in(
+        &ess_suite::ess_program(&root),
+        &root.join("ess/commission"),
+        &ess_suite::RUST_CRATE,
+        &Path::new(env!("CARGO_TARGET_TMPDIR")).join(ess_suite::STAND_IN_CACHE),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The program run with `args`; a `drift` or `generate` runs on [`stand_in`].
 fn xtask(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_loom-commission-xtask"))
-        .args(args)
-        .output()
-        .expect("run loom-commission-xtask")
+    let mut command = Command::new(env!("CARGO_BIN_EXE_loom-commission-xtask"));
+    command.args(args);
+    if args.iter().any(|arg| matches!(*arg, "drift" | "generate")) {
+        command.arg("--ess").arg(stand_in());
+    }
+    command.output().expect("run loom-commission-xtask")
 }
 
 /// `b10x-loom-commission` re-exports some other crate as `model`, while the manifest still carries the
@@ -143,7 +163,7 @@ fn adversary2_no_hand_model_refuses_a_rename_to_a_generated_name() {
 /// does not name the file. The assertion pins that the change is still caught; once drift runs
 /// before cargo's lock check, this case should also assert that the step names `Cargo.toml`.
 #[test]
-fn adversary2_known_limit_drift_step_fails_on_a_changed_generated_manifest() {
+fn slow_adversary2_known_limit_drift_step_fails_on_a_changed_generated_manifest() {
     let case = case_dir("drift_step_names_a_changed_byte_in_the_generated_manifest");
     let root = repo_copy(&case);
     let manifest = root.join("generated/rust/commission/Cargo.toml");

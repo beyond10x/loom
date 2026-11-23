@@ -1,8 +1,8 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
 use std::io::{Read as _, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command as Process, ExitCode};
+use std::path::Path;
+use std::process::ExitCode;
 use std::sync::Arc;
 
 use b10x_llm_tool_call::codex_model;
@@ -18,13 +18,14 @@ use b10x_loom_cli::{
     Confinement, DEFAULT_MODEL, EvaluateArgs, Output, PluginCommand, PluginName, ProtocolCommand,
     ResumeArgs, RunArgs, approve_exit_status, resume_exit_status, run_exit_status,
 };
-use b10x_loom_cli::{a2a, agent};
+use b10x_loom_cli::{REEXEC_MARKER, REEXEC_READY, a2a, agent, start_delegated};
 use b10x_loom_intake_slice::bindings::{ActionBindings, UNCONFINED_FLAG_REASON};
 use b10x_loom_intake_slice::case;
 use b10x_loom_intake_slice::clock::HostClock;
 use b10x_loom_intake_slice::confinement::{
-    ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement, EngineRunner,
-    SubstrateRunner, TestRunner, local_label, prepare_delegated_cgroup,
+    CgroupRootHold, ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement,
+    EngineRunner, SubstrateRunner, TestRunner, hold_cgroup_root, local_label,
+    prepare_delegated_cgroup,
 };
 use b10x_loom_intake_slice::context_metrics::ContextMetrics;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -55,11 +56,18 @@ use loom_sdk::models::{ModelRole, Models};
 use serde_json::{Value, json};
 use std::sync::atomic::AtomicBool;
 
-const REEXEC_MARKER: &str = "B10X_LOOM_CONFINEMENT_REEXEC";
-const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
 const REEXEC_HANDOFF: &str = "B10X_LOOM_CONFINEMENT_HANDOFF";
 
+/// Runs the command, then writes the store's sync counts (`loom_governor::durable::write_counts`,
+/// which only a test build does) on every way out: each arm returns here, and the one
+/// `process::exit` (`agent serve` on its second signal) writes them first.
 fn main() -> ExitCode {
+    let code = dispatch();
+    loom_governor::durable::write_counts();
+    code
+}
+
+fn dispatch() -> ExitCode {
     match Cli::parse().command {
         Command::Run(arguments) => run_command(*arguments),
         Command::Protocols(arguments) => match protocols(arguments.command) {
@@ -83,6 +91,9 @@ fn main() -> ExitCode {
         },
         Command::Approve(arguments) => approve_command(&arguments),
         Command::Resume(arguments) => resume_command(&arguments),
+        Command::Tree(arguments) => {
+            ExitCode::from(b10x_loom_cli::tree::command(&arguments.command))
+        }
     }
 }
 
@@ -648,6 +659,15 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
     // The context is read only for a commission that holds a Suspension; nothing else is opened,
     // and no model is called, before.
     let context = held_resume_context(&state, &arguments.commission)?;
+    // A root the kept context names is held for the whole resume, before any model call and any
+    // runner, as `run --cgroup-root` holds it: one another process holds is refused.
+    let hold = match (&context.confinement, &context.cgroup_root) {
+        (Backend::Substrate, Some(root)) => Some(
+            hold_cgroup_root(Path::new(root))
+                .map_err(|e| SliceError::Context(format!("confinement unavailable: {e}")))?,
+        ),
+        _ => None,
+    };
     let catalog = InstallStore::user()
         .and_then(|store| store.catalog())
         .map_err(SliceError::Context)?;
@@ -670,7 +690,7 @@ fn resume(arguments: &ResumeArgs, out: &mut dyn Write) -> Result<SliceRun, Slice
     let runner: Arc<dyn TestRunner> = match context.confinement {
         Backend::None => Arc::new(UnconfinedRunner),
         Backend::Substrate => {
-            let runner = SubstrateRunner::new(context.cgroup_root.as_ref().map(PathBuf::from));
+            let runner = SubstrateRunner::new(hold.as_ref().map(|hold| hold.root().to_owned()));
             if let Some(workspace) = &context.workspace {
                 runner
                     .preflight(Path::new(workspace))
@@ -776,6 +796,7 @@ fn stop_on_signals(stop: Arc<AtomicBool>) -> Result<(), String> {
                 _ = terminate.recv() => {}
                 _ = interrupt.recv() => {}
             }
+            loom_governor::durable::write_counts();
             std::process::exit(130);
         });
     });
@@ -935,6 +956,7 @@ fn run_command(arguments: RunArgs) -> ExitCode {
     let options = RunOptions {
         context_policy: arguments.context_policy,
         context_report: arguments.context_report.clone(),
+        ..RunOptions::default()
     };
     let stream = (arguments.output == Output::Jsonl).then(|| EventStream::new(std::io::stdout()));
     let mut metrics = ContextMetrics::new(options.context_policy);
@@ -1030,10 +1052,14 @@ fn execute(
     }
     let models = (classifier_route.take(), agent_route.take());
     let Some(dir) = &arguments.state else {
+        let hold = match hold_named_root(arguments)? {
+            Held::Root(hold) => hold,
+            Held::Refused(ending) => return Ok(ending),
+        };
         let governor =
             slice_governor(MemoryCaseStore::default(), &catalog).map_err(|e| e.to_string())?;
         return execute_on(
-            arguments, options, metrics, out, stream, &catalog, &governor, None, models,
+            arguments, options, metrics, out, stream, &catalog, &governor, None, models, hold,
         );
     };
     // Everything below happens before any model call. First, what the resume context keeps as
@@ -1055,6 +1081,11 @@ fn execute(
     };
     host.check(&intent_request(arguments)?)
         .map_err(|e| e.to_string())?;
+    // Then the named root is held, before any store writes the directory.
+    let hold = match hold_named_root(arguments)? {
+        Held::Root(hold) => hold,
+        Held::Refused(ending) => return Ok(ending),
+    };
     // Then each store opens the directory, creating it and its lock when missing, and proves it
     // takes a write: holding the lock, it writes, syncs and removes a temporary file. A directory
     // that cannot be created, locked or written, a read-only one an earlier run used included,
@@ -1082,7 +1113,49 @@ fn execute(
         &governor,
         Some(&state),
         models,
+        hold,
     )
+}
+
+/// What [`hold_named_root`] found: the root `run --cgroup-root` names, held, or none to hold; or
+/// the run's stop on a root it may not hold.
+enum Held {
+    Root(Option<CgroupRootHold>),
+    Refused(Ending),
+}
+
+/// Holds the root `run --cgroup-root` names under `--confinement substrate` for the whole run
+/// ([`hold_cgroup_root`]), before any model call, as `tree run` holds its root: a root another
+/// process holds, or one that does not qualify, stops the run `ConfinementUnavailable` naming it,
+/// and such a root is never re-executed. Under the re-exec marker the child reads its handoff
+/// first, so the caller holds the root after it; here nothing is held then.
+fn hold_named_root(arguments: &RunArgs) -> Result<Held, String> {
+    let Some(root) = &arguments.cgroup_root else {
+        return Ok(Held::Root(None));
+    };
+    if arguments.confinement != Confinement::Substrate || std::env::var_os(REEXEC_MARKER).is_some()
+    {
+        return Ok(Held::Root(None));
+    }
+    held_root(arguments, root)
+}
+
+/// [`hold_named_root`]'s hold of `root`, whatever the re-exec marker says.
+fn held_root(arguments: &RunArgs, root: &Path) -> Result<Held, String> {
+    match hold_cgroup_root(root) {
+        Ok(hold) => Ok(Held::Root(Some(hold))),
+        Err(error) => {
+            let protocol = intent_request(arguments)?
+                .bindings
+                .map(|bindings| bindings.protocol)
+                .unwrap_or_default();
+            Ok(Held::Refused(confinement_stopped(
+                &protocol,
+                "substrate",
+                &error.to_string(),
+            )))
+        }
+    }
 }
 
 /// The intent request `run`'s arguments make, with no test runner yet; refused when the
@@ -1134,9 +1207,29 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
     governor: &CanonGovernor<S, T>,
     state: Option<&RunState<'_>>,
     (mut classifier_route, mut agent_route): SettledModels,
+    hold: Option<CgroupRootHold>,
 ) -> Result<Ending, String> {
     let program = arguments.test_cmd.split_whitespace().next().unwrap_or("");
     let mut request = intent_request(arguments)?;
+    let reexecuted = std::env::var_os(REEXEC_MARKER).is_some();
+    // Under the re-exec marker the child reads its handoff first, and only then holds the root
+    // its command line names ([`hold_named_root`] held it before for any other run). The hold
+    // lives until the run returns, and every runner below runs on the root it holds.
+    let handoff = if reexecuted {
+        Some(read_handoff()?)
+    } else {
+        None
+    };
+    let hold = match (&arguments.cgroup_root, reexecuted) {
+        (Some(root), true) if arguments.confinement == Confinement::Substrate => {
+            match held_root(arguments, root)? {
+                Held::Root(hold) => hold,
+                Held::Refused(ending) => return Ok(ending),
+            }
+        }
+        _ => hold,
+    };
+    let held = hold.as_ref().map(|hold| hold.root().to_owned());
     // The runner the bound commands start through, which the library checks before any model
     // call: the flag's `local` runner, none for the file's opt-in (the library opens its own),
     // and otherwise Substrate's linux adapter.
@@ -1160,14 +1253,10 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
         } else if bindings.unconfined_bindings == Some(true) {
             None
         } else {
-            Some(
-                Arc::new(SubstrateRunner::new(arguments.cgroup_root.clone()))
-                    as Arc<dyn TestRunner>,
-            )
+            Some(Arc::new(SubstrateRunner::new(held.clone())) as Arc<dyn TestRunner>)
         };
     }
-    let prepared = if std::env::var_os(REEXEC_MARKER).is_some() {
-        let handoff = read_handoff()?;
+    let prepared = if let Some(handoff) = handoff {
         *metrics = ContextMetrics::restore(&handoff["metrics"], options.context_policy)?;
         PreparedIntent::restore(&handoff["route"], &request, catalog, options)
             .map_err(|e| e.to_string())?
@@ -1224,9 +1313,7 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
                 }
             }
             Confinement::Substrate => {
-                let root = if std::env::var_os(REEXEC_MARKER).is_some()
-                    && arguments.cgroup_root.is_none()
-                {
+                let root = if reexecuted && arguments.cgroup_root.is_none() {
                     match prepare_delegated_cgroup() {
                         Ok(root) => Some(root),
                         Err(error) => {
@@ -1238,12 +1325,15 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
                         }
                     }
                 } else {
-                    arguments.cgroup_root.clone()
+                    held.clone()
                 };
                 let runner = SubstrateRunner::new(root);
                 if let Err(error) = runner.preflight(workspace) {
+                    // A root named on the command line is never re-executed: its refusal is
+                    // final.
                     if error.reason == ConfinementRefusal::CgroupUndelegated
-                        && std::env::var_os(REEXEC_MARKER).is_none()
+                        && !reexecuted
+                        && arguments.cgroup_root.is_none()
                     {
                         out.flush().map_err(|e| e.to_string())?;
                         // Preserve classification even if systemd cannot start the delegated process.
@@ -1262,7 +1352,7 @@ fn execute_on<S: FallibleCaseStore, T: EvaluationTime>(
             }
         });
     }
-    if std::env::var_os(REEXEC_MARKER).is_some() {
+    if reexecuted {
         let ready = std::env::var_os(REEXEC_READY).ok_or("delegation handshake path is missing")?;
         std::fs::OpenOptions::new()
             .write(true)
@@ -1495,15 +1585,14 @@ fn reexec(prepared: &PreparedIntent, metrics: &ContextMetrics) -> Ending {
         )
         .map_err(|e| e.to_string())?;
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-        let status = Process::new("systemd-run")
-            .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
-            .arg(executable)
-            .args(std::env::args_os().skip(1))
-            .env(REEXEC_MARKER, "1")
-            .env(REEXEC_READY, &ready)
-            .env(REEXEC_HANDOFF, &handoff)
-            .status()
-            .map_err(|e| format!("systemd-run unavailable: {e}"))?;
+        let status = start_delegated(
+            &executable,
+            &[
+                (REEXEC_READY, ready.as_os_str()),
+                (REEXEC_HANDOFF, handoff.as_os_str()),
+            ],
+        )
+        .map_err(|e| format!("systemd-run unavailable: {e}"))?;
         // Consumption proves the child received the route, even if its later preflight failed.
         if !handoff.exists() {
             return Ok(Ending::Delegated(ExitCode::from(

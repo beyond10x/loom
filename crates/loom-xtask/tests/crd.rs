@@ -65,8 +65,10 @@ fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// In the slow lane (`task slow`): five projections of `ess/`, each an `ess generate --kind
+/// schema` of 5 to 18 s, pass the 60 s a test of `task check` may take.
 #[test]
-fn crd_drift_names_a_changed_or_missing_manifest_and_crd_generate_restores_it() {
+fn slow_crd_drift_names_a_changed_or_missing_manifest_and_crd_generate_restores_it() {
     let root = copy_of_repository();
     let file = root.join(FILE);
     let committed = fs::read(&file).unwrap_or_else(|e| panic!("read {}: {e}", file.display()));

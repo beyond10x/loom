@@ -1,0 +1,27 @@
+[package]
+name = "b10x-loom-tree"
+description = "Runs a tree of protocol cases from a case store: opens the root case from a registered protocol and a bindings file, keeps one run log per case with the head of each log, holds the store for one writer at a time, and prints the tree's status and the verdict on its run logs."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "b10x_loom_tree"
+
+[dependencies]
+b10x-canon = { git = "https://github.com/beyond10x/canon", tag = "0.11.0" }
+b10x-loom-bindings = { path = "../loom-bindings" }
+b10x-loom-commission = { path = "../loom-commission" }
+b10x-loom-executor = { path = "../loom-executor" }
+b10x-loom-governor = { path = "../loom-governor" }
+b10x-loom-intake-slice = { path = "../loom-intake-slice" }
+b10x-loom-protocols = { path = "../loom-protocols" }
+b10x-loom-runlog = { path = "../loom-runlog" }
+libc = "0.2"
+loom = { path = "../../generated/rust/loom" }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+regex = { version = "1", default-features = false, features = ["std", "unicode-gencat", "unicode-perl"] }
+sha2 = "0.11.0"

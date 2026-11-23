@@ -1,0 +1,45 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: tour@1
+  bindings: bindings/tour.bindings.yaml
+  seed: [{from: stubs, to: stubs}, {from: seeds/route.txt, to: route.txt}]
+cycles:
+  - name: result-on-a-capability-wait
+    decide:
+      - {take: approve, capability: guide.approve}
+      - {take: approve, capability: guide.issue, result: rejected}
+    expect:
+      exit: 0
+      outcome: arrived
+
+  - name: result-on-guide-approve
+    decide:
+      - {take: approve, capability: guide.approve, result: rejected}
+    expect:
+      exit: 0
+      outcome: arrived
+
+  - name: denial
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: approve, case: root.first, capability: guide.approve, deny: true, exit: 0}
+      - {do: status, name: denied}
+    expect:
+      exit: 3
+      checks:
+        - check: count
+          name: one-denial-logged
+          select: [{log: {case: first, event: AuthorityRecorded}}, {where: {decision: Deny}}]
+          is: 1
+        - check: count
+          name: no-allow-logged
+          select: [{log: {case: first, event: AuthorityRecorded}}, {where: {decision: Allow}}]
+          is: 0
+        - check: count
+          name: status-answers-deny
+          select:
+            - {step: denied}
+            - {path: "cases[*].approvals[*]"}
+            - {where: {capability: guide.approve, answer: Deny}}
+          is: 1

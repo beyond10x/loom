@@ -543,8 +543,8 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         );
     }
 
-    // Substrate's pinned host driver implements its own Git source service. Loom never
-    // enables that service. Every dependency path outside that exact foundation still
+    // Loom builds Substrate's pinned host driver without its `git` feature, so the driver serves
+    // no Git source and links no Git library. Every dependency path, the host driver's included,
     // must be free of a Git library, including renamed and transitive dependencies.
     let metadata = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--locked", "--offline"])
@@ -566,6 +566,10 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         .map(|id| id.as_str().unwrap().to_owned())
         .collect();
     let mut seen = std::collections::BTreeSet::new();
+    let mut host_walked = false;
+    // story:substrate-0-24-0-pin: each Substrate crate Loom reaches is one copy, at the tag
+    // `0.24.0`'s commit.
+    let mut substrate = std::collections::BTreeMap::<String, Vec<(String, String)>>::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id.clone()) {
             continue;
@@ -573,16 +577,17 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         let package = packages.iter().find(|package| package["id"] == id).unwrap();
         let name = package["name"].as_str().unwrap();
         if name == "b10x-substrate-host" {
-            assert_eq!(package["version"], "0.21.0");
-            assert_eq!(
-                package["source"],
-                "git+https://github.com/beyond10x/substrate?rev=adfde4020b14741b167532f46c7a0e9cebf2b3d3#adfde4020b14741b167532f46c7a0e9cebf2b3d3"
-            );
-            continue;
+            host_walked = true;
+        }
+        if name.starts_with("b10x-substrate-") {
+            substrate.entry(name.to_owned()).or_default().push((
+                package["version"].as_str().unwrap().to_owned(),
+                package["source"].as_str().unwrap().to_owned(),
+            ));
         }
         assert!(
             git_library(&format!("name = \"{name}\"")).is_none(),
-            "{name} is reachable outside the pinned Substrate host"
+            "{name} is reachable from the workspace"
         );
         let node = nodes.iter().find(|node| node["id"] == id).unwrap();
         pending.extend(
@@ -591,6 +596,27 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
                 .unwrap()
                 .iter()
                 .map(|id| id.as_str().unwrap().to_owned()),
+        );
+    }
+    assert!(
+        host_walked,
+        "the dependency walk reaches `b10x-substrate-host` and descends into it"
+    );
+    for name in [
+        "b10x-substrate-host",
+        "b10x-substrate-wire",
+        "b10x-substrate-guarded",
+    ] {
+        assert_eq!(
+            substrate.get(name).map(Vec::as_slice),
+            Some(
+                [(
+                    "0.24.0".to_owned(),
+                    "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774".to_owned()
+                )]
+                .as_slice()
+            ),
+            "one copy of {name}, at Substrate 0.24.0: {substrate:?}"
         );
     }
     let mut manifests = vec![root.join("Cargo.toml")];
@@ -644,6 +670,65 @@ fn git_library(line: &str) -> Option<&str> {
     };
     let git = matches!(name, "git2" | "libgit2-sys" | "gix") || name.starts_with("gix-");
     git.then_some(name)
+}
+
+/// Loom builds `b10x-substrate-host` without its `git` feature, so the lock file holds no Git
+/// library and none of the C libraries that feature brought: `curl`, `curl-sys`, `openssl-sys` and
+/// `libz-sys`. A package planted in a copy of the lock is found.
+#[test]
+fn the_lock_file_holds_no_git_library_and_no_curl() {
+    let lock =
+        std::fs::read_to_string(workspace_root().join("Cargo.lock")).expect("read Cargo.lock");
+    assert!(
+        lock.contains("\nname = \"b10x-substrate-host\"\n"),
+        "the scan reads the workspace's lock file, which holds the host driver"
+    );
+    let found = locked_git_or_curl(&lock);
+    assert!(
+        found.is_empty(),
+        "Cargo.lock holds {found:?}; Loom builds `b10x-substrate-host` without its `git` feature"
+    );
+    for planted in [
+        "git2",
+        "libgit2-sys",
+        "gix",
+        "gix-features",
+        "curl",
+        "curl-sys",
+        "openssl-sys",
+        "libz-sys",
+    ] {
+        let copy = lock.replacen(
+            "[[package]]\n",
+            &format!("[[package]]\nname = \"{planted}\"\nversion = \"0.1.0\"\n\n[[package]]\n"),
+            1,
+        );
+        assert_eq!(
+            locked_git_or_curl(&copy),
+            [planted],
+            "a `{planted}` planted in a copy of the lock is found"
+        );
+    }
+    for kept in ["digest", "zlib-rs", "libc", "curl-parser", "openssl-probe"] {
+        let line = format!("name = \"{kept}\"");
+        assert!(
+            locked_git_or_curl(&line).is_empty(),
+            "the scan flags `{line}`"
+        );
+    }
+}
+
+/// The packages a lock file names that are a Git library ([`git_library`]) or `curl`, `curl-sys`,
+/// `openssl-sys` or `libz-sys`, in the lock's order.
+fn locked_git_or_curl(lock: &str) -> Vec<&str> {
+    lock.lines()
+        .filter_map(|line| line.strip_prefix("name = \""))
+        .filter_map(|rest| rest.split('"').next())
+        .filter(|name| {
+            git_library(&format!("name = \"{name}\"")).is_some()
+                || matches!(*name, "curl" | "curl-sys" | "openssl-sys" | "libz-sys")
+        })
+        .collect()
 }
 
 fn workspace_root() -> PathBuf {

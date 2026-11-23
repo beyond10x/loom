@@ -1,10 +1,16 @@
 //! Adversary pass 2 for `tests/ess_gate.rs` (story:ess-hard-gate, Atlas ADR 0076).
 //!
 //! Each case builds a std-only replica of the repository under `CARGO_TARGET_TMPDIR` (the root
-//! `Cargo.toml`, `AGENTS.md`, `Taskfile.yml`, `ess/` and `crates/loom-executor/tests/ess_gate.rs` copied
-//! verbatim, an empty library in place of `crates/loom-executor/src`), applies one mutant to the replica,
-//! and runs the real gate suite there with `cargo test --test ess_gate`. A mutant of the gate code
-//! is applied to the replica's copy of `ess_gate.rs`; the file under review is never edited.
+//! `Cargo.toml`, `AGENTS.md`, `Taskfile.yml`, `ess/` and `crates/loom-executor/tests/ess_gate.rs`
+//! with its `support/ess_suite.rs` copied verbatim, an empty library in place of
+//! `crates/loom-executor/src`), applies one mutant to the replica, and runs the real gate suite
+//! there with `cargo test --test ess_gate -- --skip slow_`, as `task ess-gate` does. A mutant of
+//! the gate code is applied to the replica's copy of `ess_gate.rs`; the file under review is never
+//! edited.
+//!
+//! As in `adversary_ess_gate.rs`, the replica's `ess/` leaves out the decision domain, its
+//! committed synthesis is written again after the mutant, and every synthesis is made once per
+//! distinct input through one shared cache.
 //!
 //! The repository root is read from `CARGO_MANIFEST_DIR` at run time, and the scratch directory is
 //! keyed by that root, so a binary another worktree built into a shared build directory still
@@ -15,6 +21,14 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+#[path = "support/ess_suite.rs"]
+mod ess_suite;
+
+/// The synthesis cache every replica, and every suite run in one, shares.
+fn synthesis_cache() -> PathBuf {
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("ess-synthesis-cache")
+}
 
 /// A command whose `never` outcome no input satisfies. ess 0.69.0 validates and compiles it, and
 /// `ess verify conform synthesize` refuses the outcome (`ESS-SYNTH-003`) and still exits 0, so the
@@ -103,11 +117,16 @@ fn replica(at: &Path) {
         fs::copy(root.join(file), at.join(file)).expect("copy root file");
     }
     copy_dir(&root.join("ess"), &at.join("ess"));
-    fs::copy(
-        root.join("crates/loom-executor/tests/ess_gate.rs"),
-        at.join("crates/loom-executor/tests/ess_gate.rs"),
-    )
-    .expect("copy ess_gate.rs");
+    ess_suite::drop_decision(&at.join("ess")).unwrap_or_else(|detail| panic!("{detail}"));
+    fs::create_dir_all(at.join("crates/loom-executor/tests/support"))
+        .expect("create replica support");
+    for file in ["ess_gate.rs", "support/ess_suite.rs"] {
+        fs::copy(
+            root.join("crates/loom-executor/tests").join(file),
+            at.join("crates/loom-executor/tests").join(file),
+        )
+        .unwrap_or_else(|e| panic!("copy {file}: {e}"));
+    }
     fs::write(
         at.join("crates/loom-executor/Cargo.toml"),
         "[package]\nname = \"b10x-loom-executor\"\nversion.workspace = true\nedition.workspace = true\n\
@@ -117,11 +136,40 @@ fn replica(at: &Path) {
     fs::write(at.join("crates/loom-executor/src/lib.rs"), "").expect("write replica lib");
 }
 
+/// Writes the replica's committed synthesis from its `ess/` as it is now.
+fn regenerate(tree: &Path) {
+    let ess = ess_program();
+    let run = ess_suite::synthesize_once(&ess, &tree.join("ess"), &synthesis_cache())
+        .unwrap_or_else(|detail| panic!("synthesize the replica: {detail}"));
+    ess_suite::write_generated(tree, &ess, None, &run)
+        .unwrap_or_else(|detail| panic!("write the replica's synthesis: {detail}"));
+}
+
+/// The `ess` of this repository, asking for the release its own `ess/ess-inputs.yaml` requires: a
+/// mutant of the replica's `requires` line never chooses the release that judges it.
+fn ess_program() -> ess_suite::Ess {
+    ess_suite::ess_program(&repo_root())
+}
+
 fn gate_suite(tree: &Path, target: &Path) -> Output {
-    Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()))
-        .args(["test", "--offline", "--test", "ess_gate"])
+    regenerate(tree);
+    let mut command = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()));
+    if let Some(toolchain) = ess_program().toolchain {
+        command.env("ESS_TOOLCHAIN", toolchain);
+    }
+    command
+        .args([
+            "test",
+            "--offline",
+            "--test",
+            "ess_gate",
+            "--",
+            "--skip",
+            "slow_",
+        ])
         .current_dir(tree)
         .env("CARGO_TARGET_DIR", target)
+        .env("LOOM_ESS_SYNTHESIS_CACHE", synthesis_cache())
         .env("CARGO_INCREMENTAL", "0")
         .env_remove("CARGO_MAKEFLAGS")
         .env_remove("MAKEFLAGS")
@@ -181,22 +229,22 @@ fn mutant_is_killed(name: &str, mutate: impl FnOnce(&Path), expect: &[&str]) {
     }
 }
 
-// Gate code mutant, step 3. ess 0.69.0 exits 0 while refusing (see UNSATISFIABLE_COMMAND), so the
-// refusal count is what holds step 3 for every refusal that is not an admission error. No case in
-// ess_gate.rs runs the gate over a specification that synthesize refuses with exit 0: the only
-// refusing copy (an empty scenarios list) exits 1. A gate that accepts any count passes the suite.
+// Gate code mutant, step 3. ess 0.69.0 exited 0 while refusing (see UNSATISFIABLE_COMMAND), so the
+// refusal count is what holds step 3 for a refusal synthesize does not exit 1 on. ess 0.96.0 exits
+// 1 on an uncovered refusal, so no specification reaches the count; `ess_gate.rs` feeds the count
+// check that run directly. A gate whose count arm accepts any count fails that case.
 #[test]
-fn mutant_gate_accepting_any_refusal_count_is_killed() {
+fn slow_mutant_gate_accepting_any_refusal_count_is_killed() {
     mutant_is_killed(
         "accept_any_refusal_count",
         |tree| {
             replace(
                 &tree.join("crates/loom-executor/tests/ess_gate.rs"),
-                "        Some(0) => {}\n",
-                "        Some(_) => {}\n",
+                "        }) if covered >= occurrences => Ok(()),\n",
+                "        }) => Ok(()),\n",
             );
         },
-        &["refusal(s)"],
+        &["synthesize_exiting_0_with_an_uncovered_occurrence_fails_step_3 ... FAILED"],
     );
 }
 
@@ -204,7 +252,7 @@ fn mutant_gate_accepting_any_refusal_count_is_killed() {
 // the gate over a specification whose `requires` differs from the ess on PATH, so dropping the flag
 // passes the suite: without it ess 0.69.0 warns about `requires: ess 0.51.0` and exits 0.
 #[test]
-fn mutant_validate_without_strict_requires_is_killed() {
+fn slow_mutant_validate_without_strict_requires_is_killed() {
     mutant_is_killed(
         "validate_without_strict_requires",
         |tree| {
@@ -221,13 +269,13 @@ fn mutant_validate_without_strict_requires_is_killed() {
 // Specification mutant, step 3: the unchanged gate holds a specification synthesize refuses with
 // exit 0. Pins the behaviour the code mutant above removes.
 #[test]
-fn mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
+fn slow_mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
     mutant_is_killed(
         "spec_refused_exit_0",
         add_unsatisfiable_command,
         &[
             "gate_holds_on_the_specification ... FAILED",
-            "1 refusal(s)",
+            "loom.run.Probe/outcome/never",
             "ESS-SYNTH-003",
         ],
     );
@@ -235,13 +283,13 @@ fn mutant_spec_refused_by_synthesize_with_exit_0_is_killed() {
 
 // Specification mutant, step 1: the unchanged gate holds a `requires` older than the ess on PATH.
 #[test]
-fn mutant_spec_requiring_an_older_ess_is_killed() {
+fn slow_mutant_spec_requiring_an_older_ess_is_killed() {
     mutant_is_killed(
         "spec_requires_older_ess",
         |tree| {
             replace(
                 &tree.join("ess/ess-inputs.yaml"),
-                "requires: ess 0.97.3",
+                "requires: ess 0.98.0",
                 "requires: ess 0.51.0",
             );
         },

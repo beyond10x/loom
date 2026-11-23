@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 03a4fc948ecc8c56f554376674e3477aca9cfb4b05fd51d3cae6948310aa1cc1
+// contract digest b1059a76e03d9c610f8ec466fc4753d09ac15c538c99fdd88c3e19cd41529600
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Semantic types synthesised from the `loom` specification, v1.
@@ -16,11 +16,13 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod actor;
 pub mod agent;
 pub mod authority;
 pub mod behaviour;
 pub mod bindings;
 pub mod datasource;
+pub mod decision;
 pub mod evaluation;
 pub mod governor;
 pub mod json;
@@ -34,5 +36,6 @@ pub mod run;
 pub mod runlog;
 pub mod session;
 pub mod slack;
+pub mod tree;
 pub mod workflow;
 

@@ -1,0 +1,95 @@
+# story decision-request-entity, security review F1: with kind-not-principal, Decide's other kind
+# guards need a principal whose name has the kind (decider:<kind>, rule:<name>, silence) and that
+# the stored eligible list holds. ESS-SYNTH-003 x3: ess 0.96.0 synthesizes the eligible list and
+# the principal from its own placeholder text (eligible.0), never a prefixed name, so no candidate
+# reaches decider-under-rule, rule-not-holder or silence-takes-recommendation. No change of the
+# specification that keeps the behaviour gives synthesis such a name (an input example on eligible
+# was tried and refuses one more), so this authored scenario covers the three.
+type: ess-scenario/7
+covers:
+  - loom.decision.Decide/outcome/decider-under-rule
+  - loom.decision.Decide/outcome/rule-not-holder
+  - loom.decision.Decide/outcome/silence-takes-recommendation
+domain: loom.decision
+scenario: decide-kind-guards-under-a-rule
+summary: "Under rule_and_decider: decider:model, rule:merge and silence are refused by Decide's kind guards; authored: synthesis has no prefixed principal (ESS-SYNTH-003)."
+
+timeline:
+  - at: 2026-11-21T12:00:00Z
+    command: loom.decision.Request
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing-change.merge-1"
+      case_id: "IDEA-1.billing"
+      question_key: "IDEA-1.billing|change.merge|"
+      record_key: "change.merge@r9"
+      unblocks: {kind: approval, action: "change.merge", capability: "change.merge"}
+      subject_artifact: "change"
+      subject_revision: "t0r1"
+      question: "Merge the change at revision t0r1?"
+      options:
+        - letter: "A"
+          does: "Merge the change."
+          cost: "None."
+          consequence: {admits: ["change.merge"], blocks: [], grant: granted, produces: canon_authority}
+        - letter: "B"
+          does: "Do not merge."
+          cost: "The change waits."
+          consequence: {admits: [], blocks: ["change.merge"], grant: denied, produces: canon_authority}
+      autonomy_level: A4
+      decision_class: merge
+      holder: rule_and_decider
+      eligible: ["decider:model", "rule:merge", "operator"]
+      addressed_to: "decider:model"
+      opened_at: 2026-11-21T12:00:00Z
+    outcome: requested
+    events:
+      - event: loom.decision.DecisionRequested
+        payload:
+          request_id: "DR-IDEA-1.billing-change.merge-1"
+          case_id: "IDEA-1.billing"
+          subject_artifact: "change"
+          subject_revision: "t0r1"
+
+  - at: 2026-11-21T12:01:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing-change.merge-1"
+      option: "A"
+      principal: "decider:model"
+      principal_kind: decider
+      decided_at: 2026-11-21T12:01:00Z
+      case_revision: "r9"
+      reasons: ["Merge it."]
+    outcome: decider-under-rule
+
+  - at: 2026-11-21T12:02:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing-change.merge-1"
+      option: "A"
+      principal: "rule:merge"
+      principal_kind: rule
+      decided_at: 2026-11-21T12:02:00Z
+      case_revision: "r9"
+      reasons: ["The rule holds."]
+    outcome: rule-not-holder
+
+  - at: 2026-11-21T12:03:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Decider
+    input:
+      request_id: "DR-IDEA-1.billing-change.merge-1"
+      option: "A"
+      principal: "silence"
+      principal_kind: silence
+      decided_at: 2026-11-21T12:03:00Z
+      case_revision: "r9"
+      reasons: ["Nobody answered."]
+    outcome: silence-takes-recommendation
+
+assert:
+  - view: loom.decision.DecisionRequests
+    contains: {request_id: "DR-IDEA-1.billing-change.merge-1", state: Open}

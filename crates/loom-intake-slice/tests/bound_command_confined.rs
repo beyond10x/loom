@@ -19,12 +19,14 @@ use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings};
+use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings, bound_program_child};
 use b10x_loom_intake_slice::clock::SystemClock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, ChildCommand, ChildOutput, ConfinementAdapter, ConfinementError,
-    ConfinementRefusal, EngineConfinement, EngineRunner, TestExecution, TestRunner,
+    ConfinementRefusal, EngineConfinement, EngineRunner, KillBounds, SIGNAL_GRACE, TestExecution,
+    TestRunner,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner};
@@ -259,7 +261,8 @@ fn the_flags_runner_selects_local_with_the_flags_reason_and_wins_over_the_file()
 
 /// Under `local` a command that ends while a process it started in a session of its own holds its
 /// output is sent one `Kill` at its timeout and is then refused by its runner, named so: the step
-/// never says it was killed.
+/// never says it was killed. The runner is the one `--unconfined-bindings` gives, which the run
+/// takes before the file's opt-in, with a kill settle of 1 s in place of a host's 5 s.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn under_local_a_command_whose_output_outlives_its_group_is_refused_by_its_runner_never_killed() {
@@ -273,7 +276,23 @@ fn under_local_a_command_whose_output_outlives_its_group_is_refused_by_its_runne
             held.0.display()
         ),
     );
-    let (result, output) = case.run(None, Some(true), &script, pick(), select());
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .expect("local opens with the flag's reason")
+    .with_kill_bounds(KillBounds {
+        signal_grace: SIGNAL_GRACE,
+        kill_settle: Duration::from_secs(1),
+    });
+    let (result, output) = case.run(
+        Some(Arc::new(runner) as Arc<dyn TestRunner>),
+        Some(true),
+        &script,
+        pick(),
+        select(),
+    );
     let run = result.unwrap_or_else(|error| panic!("{error}\n{output}"));
     assert_eq!(run.steps, 1, "{output}");
     assert!(
@@ -445,6 +464,313 @@ fn under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace() {
     );
 }
 
+/// The program that moves a file's blocks (`EXT4_IOC_MOVE_EXT`), found by [`e4defrag`].
+const E4DEFRAG: &str = "e4defrag";
+
+/// story:substrate-0-24-0-pin, the ioctl floor of Substrate 0.24.0 (its ADR 0050): a confined
+/// bound program cannot move the blocks of a file in its ext4 workspace, and the same call on the
+/// same file without confinement can.
+///
+/// The confined program writes a 1 MiB file in 16 pieces, interleaved with a second file and each
+/// synced, so the file holds several extents and `e4defrag` calls `EXT4_IOC_MOVE_EXT` (a file of
+/// one extent is left alone). The seccomp program answers it `EACCES`: `e4defrag -v` names the
+/// failed call and exits 1. e4defrag 1.47.4 prints the call's `errno` after it was overwritten
+/// (`ioctl:Success`), so the case reads the refusal, not `Permission denied`.
+///
+/// The control: the same program, without writing the file again, runs `e4defrag -v` on the same
+/// file through Substrate's `local` adapter, which installs no seccomp program. There it exits 0,
+/// `[ OK ]`, and moves the file from more extents to fewer, so the file system serves the call,
+/// the file was still fragmented after the confined call, and the confined refusal is the floor's.
+/// Both calls leave the file's SHA-256 as it was.
+///
+/// The confined child is the one `bindings::bound_program_child` builds for the program, with one
+/// read-only file beside it: `e4defrag` reads the mount table at `/etc/mtab`, which Substrate's
+/// view does not hold, so the case mounts one naming `/workspace` as ext4; the control reads the
+/// host's. `e4defrag` is located on `PATH` and in `/usr/sbin`, `/sbin`, `/usr/bin` and `/bin`
+/// ([`e4defrag`], links resolved; Ubuntu keeps it in `/usr/sbin`), and both calls run it at that
+/// path; one outside the directories Substrate binds is mounted read-only at its own path. The case
+/// skips naming what is missing without `e4defrag`, an ext4 workspace or delegation, and fails
+/// instead where `LOOM_REQUIRE_DELEGATION` is set.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn under_linux_a_bound_program_cannot_move_file_blocks() {
+    support::delegated(
+        "under_linux_a_bound_program_cannot_move_file_blocks",
+        &[],
+        |runner, workspace| {
+            let tool = match ioctl_prerequisite(workspace) {
+                Ok(tool) => tool,
+                Err(missing) => {
+                    assert!(
+                        std::env::var_os("LOOM_REQUIRE_DELEGATION").is_none(),
+                        "LOOM_REQUIRE_DELEGATION is set and a prerequisite is missing: {missing}"
+                    );
+                    return support::skip(&missing);
+                }
+            };
+            let shown = tool.display().to_string();
+            let case = Case::new("linux_move_ext");
+            let mtab = case.root.join("mtab");
+            std::fs::write(&mtab, "/dev/root /workspace ext4 rw 0 0\n").unwrap();
+            let script = case.script(
+                "move-blocks",
+                &format!(
+                    "f=target/blob\n\
+                     if [ \"$1\" = make ]; then\n\
+                     s=target/spacer\n\
+                     i=0\n\
+                     while [ \"$i\" -lt 16 ]; do\n\
+                     /usr/bin/dd if=/dev/urandom of=\"$f\" bs=65536 count=1 seek=\"$i\" conv=notrunc,fsync status=none || exit 3\n\
+                     /usr/bin/dd if=/dev/urandom of=\"$s\" bs=65536 count=1 seek=\"$i\" conv=notrunc,fsync status=none || exit 3\n\
+                     i=$((i + 1))\n\
+                     done\n\
+                     /usr/bin/rm -f \"$s\"\n\
+                     fi\n\
+                     before=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
+                     size=$(/usr/bin/stat -c %s \"$f\")\n\
+                     '{shown}' -v \"$f\" >target/e4defrag.out 2>target/e4defrag.err\n\
+                     status=$?\n\
+                     after=$(/usr/bin/sha256sum \"$f\" | /usr/bin/cut -d ' ' -f 1)\n\
+                     printf 'dir=%s\\nstatus=%s\\nsize=%s\\nbefore=%s\\nafter=%s\\n' \"$(pwd)\" \"$status\" \"$size\" \"$before\" \"$after\"\n\
+                     /usr/bin/cat target/e4defrag.out\n\
+                     printf '\\nstderr:\\n'\n\
+                     /usr/bin/cat target/e4defrag.err\n"
+                ),
+            );
+            let argv = |mode: &str| [script.display().to_string(), mode.to_owned()];
+
+            // Confined: Substrate's `linux` adapter, its seccomp floor installed.
+            let child = bound_program_child(
+                &argv("make"),
+                "{}",
+                Duration::from_secs(30),
+                workspace,
+                None,
+            )
+            .expect("the bound program's child")
+            .with_read_only_file(&mtab, "/etc/mtab");
+            // A tool outside the directories Substrate binds is given read-only at its own path;
+            // its libraries are then still the system view's.
+            let child = if SYSTEM_VIEW.iter().any(|system| tool.starts_with(system)) {
+                child
+            } else {
+                child.with_read_only_file(&tool, &shown)
+            };
+            assert_eq!(child.sandbox_path(&script), Some(script.clone()));
+            let confined = runner.run_child(&child).expect("the program runs confined");
+            assert_eq!(confined.applied.backend, Backend::Substrate);
+            let confined = MoveBlocks::read("confined", &confined);
+
+            // The control: the same call on the same file, through `local`, which installs no
+            // seccomp program.
+            let control_runner = EngineRunner::open(&EngineConfinement {
+                adapter: ConfinementAdapter::Local,
+                local_reason: Some(FLAG_REASON.to_owned()),
+                cgroup_root: None,
+            })
+            .expect("local opens with a reason");
+            let child = bound_program_child(
+                &argv("again"),
+                "{}",
+                Duration::from_secs(30),
+                workspace,
+                control_runner.local_reason(),
+            )
+            .expect("the control's child");
+            let control = control_runner
+                .run_child(&child)
+                .expect("the control runs unconfined");
+            assert_eq!(control.applied.backend, Backend::None);
+            let control = MoveBlocks::read("control", &control);
+            let kept = format!("e4defrag: {shown}\n{}\n{}", confined.kept, control.kept);
+            eprintln!("{kept}");
+
+            assert_eq!(confined.status, "1", "the confined call fails: {kept}");
+            assert!(
+                confined
+                    .stderr
+                    .contains("Failed to defrag with EXT4_IOC_MOVE_EXT ioctl"),
+                "EXT4_IOC_MOVE_EXT is refused under confinement: {kept}"
+            );
+            assert!(!confined.stdout.contains("[ OK ]"), "{kept}");
+            assert_eq!(confined.before, confined.after, "{kept}");
+
+            assert_eq!(control.status, "0", "the control succeeds: {kept}");
+            assert!(control.stdout.contains("[ OK ]"), "{kept}");
+            let (from, to) = control
+                .extents()
+                .unwrap_or_else(|| panic!("the control names its extents: {kept}"));
+            assert!(
+                from > to,
+                "the control moved the blocks of a fragmented file ({from} -> {to}): {kept}"
+            );
+            assert_eq!(
+                control.before, control.after,
+                "a move of blocks keeps the content: {kept}"
+            );
+
+            // Both calls ran on one file: the confined one in `/workspace`, the control in the
+            // same workspace at its host path, reading what the confined call left.
+            assert_eq!(confined.dir, "/workspace", "{kept}");
+            assert_eq!(
+                Path::new(&control.dir).canonicalize().ok(),
+                workspace.canonicalize().ok(),
+                "the control runs in the same workspace: {kept}"
+            );
+            assert_eq!(confined.size, "1048576", "{kept}");
+            assert_eq!(confined.before.len(), 64, "{kept}");
+            assert_eq!(
+                control.before, confined.after,
+                "the control reads the file the confined call left: {kept}"
+            );
+        },
+    );
+}
+
+/// What one run of the `move-blocks` program reported.
+struct MoveBlocks {
+    dir: String,
+    status: String,
+    size: String,
+    before: String,
+    after: String,
+    stdout: String,
+    stderr: String,
+    kept: String,
+}
+
+impl MoveBlocks {
+    fn read(label: &str, result: &TestExecution) -> Self {
+        let output = String::from_utf8_lossy(&result.child_output.stdout).into_owned();
+        let kept = format!("{label}: exit {:?}\n{output}", result.exit_code);
+        assert_eq!(result.exit_code, Some(0), "{kept}");
+        let (head, stderr) = output
+            .split_once("\nstderr:\n")
+            .unwrap_or_else(|| panic!("no stderr: {kept}"));
+        let reported = |name: &str| -> String {
+            head.lines()
+                .find_map(|line| line.strip_prefix(&format!("{name}=")))
+                .unwrap_or_else(|| panic!("no {name}: {kept}"))
+                .to_owned()
+        };
+        Self {
+            dir: reported("dir"),
+            status: reported("status"),
+            size: reported("size"),
+            before: reported("before"),
+            after: reported("after"),
+            stdout: head.to_owned(),
+            stderr: stderr.to_owned(),
+            kept,
+        }
+    }
+
+    /// The `extents: <from> -> <to>` `e4defrag -v` prints for a file it moved.
+    fn extents(&self) -> Option<(u64, u64)> {
+        let rest = self.stdout.split("extents: ").nth(1)?;
+        let (from, rest) = rest.split_once(" -> ")?;
+        let to: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        Some((from.trim().parse().ok()?, to.parse().ok()?))
+    }
+}
+
+/// The directories a tool of the ioctl case is looked for in: `PATH`, then `/usr/sbin`, `/sbin`,
+/// `/usr/bin` and `/bin`, which a test's `PATH` may leave out (Ubuntu's e2fsprogs puts
+/// `e4defrag` in `/usr/sbin`).
+fn program_search_path() -> Vec<PathBuf> {
+    let mut search: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    search.extend(["/usr/sbin", "/sbin", "/usr/bin", "/bin"].map(PathBuf::from));
+    search
+}
+
+/// Where the tool `name` is: the first absolute directory of `search` holding an executable
+/// regular file of that name, answered with every link resolved.
+fn locate_program(name: &str, search: &[PathBuf]) -> Option<PathBuf> {
+    search
+        .iter()
+        .filter(|directory| directory.is_absolute())
+        .filter_map(|directory| directory.join(name).canonicalize().ok())
+        .find(|path| {
+            std::fs::metadata(path)
+                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        })
+}
+
+/// `e4defrag`, wherever this host keeps it.
+fn e4defrag() -> Option<PathBuf> {
+    locate_program(E4DEFRAG, &program_search_path())
+}
+
+/// The directories Substrate binds into every view at their host paths.
+const SYSTEM_VIEW: [&str; 4] = ["/usr", "/bin", "/lib", "/lib64"];
+
+/// The locator finds a tool that only a later directory of its search holds, past a relative
+/// entry and a non-executable file of the same name, and answers the file a link there names.
+/// Its search covers `/usr/sbin` and `/sbin`, where Ubuntu's e2fsprogs puts `e4defrag`.
+#[test]
+fn the_locator_finds_a_tool_only_in_a_second_directory() {
+    let root = tempfile::Builder::new()
+        .prefix("locator-")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let [first, second, third] = ["first", "second", "third"].map(|name| root.join(name));
+    for directory in [&first, &second, &third] {
+        std::fs::create_dir(directory).unwrap();
+    }
+    let name = "loom-locator-probe-tool";
+    std::fs::write(first.join(name), "not executable").unwrap();
+    let tool = third.join("real-tool");
+    std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::os::unix::fs::symlink(&tool, second.join(name)).unwrap();
+
+    let search = [PathBuf::from("relative"), first.clone(), second.clone()];
+    assert_eq!(locate_program(name, &search), Some(tool.clone()));
+    assert_eq!(locate_program(name, std::slice::from_ref(&first)), None);
+    assert_eq!(locate_program(name, &[]), None);
+
+    let search = program_search_path();
+    for directory in ["/usr/sbin", "/sbin", "/usr/bin", "/bin"] {
+        assert!(
+            search.iter().any(|entry| entry == Path::new(directory)),
+            "{directory}: {search:?}"
+        );
+    }
+}
+
+/// The located `e4defrag`, or what this host lacks for the ioctl case: `e4defrag` in
+/// [`program_search_path`], or an ext4 workspace.
+fn ioctl_prerequisite(workspace: &Path) -> Result<PathBuf, String> {
+    let tool = e4defrag().ok_or_else(|| {
+        format!(
+            "executable {E4DEFRAG} in {}",
+            std::env::join_paths(program_search_path())
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        )
+    })?;
+    let kind = std::process::Command::new("/usr/bin/stat")
+        .args(["-f", "-c", "%T"])
+        .arg(workspace)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
+    match kind.as_deref() {
+        Some("ext2/ext3") => Ok(tool),
+        other => Err(format!(
+            "an ext4 workspace ({} is on {other:?})",
+            workspace.display()
+        )),
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Fixtures
 
@@ -561,6 +887,7 @@ impl Case {
             &RunOptions {
                 context_policy: ContextPolicy::Legacy,
                 context_report: None,
+                ..RunOptions::default()
             },
         );
         (result, String::from_utf8_lossy(&output).into_owned())

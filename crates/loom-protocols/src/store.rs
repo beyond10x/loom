@@ -293,9 +293,21 @@ fn validate_installed_source(source: &ProtocolSource) -> Result<(), String> {
         _ => Err("invalid installed protocol provenance".into()),
     }
 }
+/// The name a record gives `kind`. Only `local` and `git` are read back ([`read_record`]); the
+/// install store writes no other, and a record of another kind is refused when read.
+fn source_kind_name(kind: SourceKind) -> &'static str {
+    match kind {
+        SourceKind::Engineering => "engineering",
+        SourceKind::Loom => "loom",
+        SourceKind::Local => "local",
+        SourceKind::Git => "git",
+        SourceKind::Memory => "memory",
+        SourceKind::Directory => "directory",
+    }
+}
 fn record_value(record: &ProtocolDefinition) -> Value {
     json!({"format":"loom.protocol-install/1", "name":record.name,"yaml":record.yaml,"sha256":record.sha256,"source":{
-        "kind":match record.source.kind { SourceKind::Local=>"local", SourceKind::Git=>"git", _=>unreachable!("installation sources are local or Git") },
+        "kind":source_kind_name(record.source.kind),
         "location":record.source.location,"revision":record.source.revision,"path":record.source.path
     }})
 }
@@ -351,4 +363,29 @@ fn read_regular(path: &Path, max: usize) -> Result<String, String> {
         return Err("protocol file exceeds size limit".into());
     }
     String::from_utf8(bytes).map_err(|_| "protocol file is not UTF-8".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A source the install store never writes (here a protocols directory's) is written with its
+    /// own kind, never a panic, and read back refused: only local and Git installations are held.
+    #[test]
+    fn a_record_of_a_source_not_installed_is_named_and_refused_on_reading() {
+        let record = ProtocolDefinition {
+            name: "tour@1".into(),
+            yaml: String::new(),
+            sha256: String::new(),
+            source: ProtocolSource {
+                kind: SourceKind::Directory,
+                location: "/products/tour/protocols".into(),
+                revision: String::new(),
+                path: "tour.yaml".into(),
+            },
+        };
+        let value = record_value(&record);
+        assert_eq!(value["source"]["kind"], "directory");
+        assert!(read_record(&value).is_err());
+    }
 }

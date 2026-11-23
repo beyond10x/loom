@@ -1,0 +1,44 @@
+format: protocol/1
+protocol:
+  id: epic
+  revision: 1
+  description: >-
+    The second level: stories.open opens one story case per name its arguments_from program
+    prints. An epic ends passed by its verdict.
+artifacts:
+  epic: {}
+evidence_kinds:
+  case_outcome: {}
+  stories_opened: {}
+  verdict: {}
+claims:
+  epic.passed:
+    true_when:
+      evidence: {kind: verdict, subject: epic, result: passed}
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  stories.open:
+    effect: write
+    case_open: {protocol: story, subject: epic}
+    may_produce:
+      - evidence: stories_opened
+    arguments:
+      type: object
+      properties:
+        stories:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+      required: [stories]
+      additionalProperties: false
+  epic.judge:
+    effect: write
+    may_produce:
+      - evidence: verdict
+outcomes:
+  passed:
+    requires: {claim: epic.passed}

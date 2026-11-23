@@ -1,0 +1,50 @@
+format: protocol/1
+protocol:
+  id: epic
+  revision: 1
+  description: >-
+    The middle of a three-level tree of story child-case-runtime: it opens child cases about its
+    spec, and its release and its outcome passed need the roadmap approved, the gate passed on
+    the spec and every child ended passed, all three.
+artifacts:
+  roadmap: {}
+  spec: {}
+evidence_kinds:
+  case_outcome: {}
+  child_opened: {}
+  approval: {}
+  gate: {}
+claims:
+  roadmap.approved:
+    true_when:
+      evidence: {kind: approval, subject: roadmap, result: approved}
+  gate.passed:
+    true_when:
+      evidence: {kind: gate, subject: spec, result: passed}
+  children.passed:
+    true_when:
+      children: {in: [passed]}
+actions:
+  story.open:
+    effect: write
+    case_open: {protocol: child, subject: spec}
+    may_produce:
+      - evidence: child_opened
+  spec.gate:
+    effect: read
+    may_produce:
+      - evidence: gate
+  release:
+    effect: write
+    precondition:
+      all:
+        - claim: roadmap.approved
+        - claim: gate.passed
+        - claim: children.passed
+outcomes:
+  passed:
+    requires:
+      all:
+        - claim: roadmap.approved
+        - claim: gate.passed
+        - claim: children.passed

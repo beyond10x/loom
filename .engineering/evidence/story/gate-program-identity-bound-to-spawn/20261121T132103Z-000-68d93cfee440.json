@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-21T13:21:03Z",
+  "actor": "agent:loom",
+  "artifact": "story:gate-program-identity-bound-to-spawn",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "story:gate-program-identity-bound-to-spawn revision 16: the open point is written at the end of Waits on with its two ways, the file is in the typed scope as inferred; the planner session sdc decides before the story enters a wave",
+    "review": "review-result:bound-program-result-table-w7-design-2",
+    "outcome": "escalated"
+  }
+}

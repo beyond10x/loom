@@ -28,14 +28,16 @@
 //!   the projected `openAPIV3Schema` as JSON Schema (no cluster), and resources the schema must
 //!   refuse do not.
 //!
-//! The specification is read with the `ess` binary on `PATH`, as `task conform` reads it.
+//! The specification is read with the `ess` binary on `PATH`, as `task conform` reads it, with the
+//! `ESS_TOOLCHAIN` of `ess/ess-inputs.yaml` unless the caller set one.
+
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use b10x_loom_resource::crd::{self, CrdError};
 use serde_json::{Value, json};
@@ -65,19 +67,8 @@ fn root() -> PathBuf {
     root.canonicalize().unwrap_or(root)
 }
 
-fn scratch(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("crd-{name}-{}-{nanos}", std::process::id()));
-    fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
-    dir
-}
-
 fn ess(args: &[&str], out: Option<&Path>) -> Vec<u8> {
-    let mut command = Command::new("ess");
+    let mut command = ess_suite::ess_program(&root()).command();
     command.current_dir(root()).args(args);
     if let Some(out) = out {
         command.arg(out);
@@ -102,21 +93,32 @@ fn read_json(path: &Path) -> Value {
 }
 
 /// The two documents `ess generate --kind schema` writes for `ess/`: the spec type's and the
-/// entity's.
+/// entity's. The generation takes about 16 s, so it runs once for every test process of this
+/// binary and input: kept under `CARGO_TARGET_TMPDIR` by the digest of `ess/` and the `ess`
+/// version. `task test-step` fills the same entry beside its build, so its tests find it made; a
+/// run without it makes it in the first test and the others wait.
 fn schemas() -> &'static (Value, Value) {
     static SCHEMAS: OnceLock<(Value, Value)> = OnceLock::new();
     SCHEMAS.get_or_init(|| {
-        let out = scratch("schema");
-        ess(
-            &["generate", "--path", "ess", "--kind", "schema", "--out"],
-            Some(&out),
-        );
-        let pair = (
+        let program = ess_suite::ess_program(&root());
+        let version =
+            ess_suite::ess_version(&program, Some(&root())).unwrap_or_else(|e| panic!("{e}"));
+        let inputs = ess_suite::inputs_digest(&root().join("ess"), &version)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let key = format!("schema-{}", inputs.trim_start_matches("sha256:"));
+        let cache = Path::new(env!("CARGO_TARGET_TMPDIR")).join("ess-schema-cache");
+        let out = ess_suite::made_once(&cache, &key, |out| {
+            ess(
+                &["generate", "--path", "ess", "--kind", "schema", "--out"],
+                Some(out),
+            );
+            Ok(())
+        })
+        .unwrap_or_else(|e| panic!("{e}"));
+        (
             read_json(&out.join(crd::SPEC_SCHEMA)),
             read_json(&out.join(crd::ENTITY_SCHEMA)),
-        );
-        let _ = fs::remove_dir_all(&out);
-        pair
+        )
     })
 }
 

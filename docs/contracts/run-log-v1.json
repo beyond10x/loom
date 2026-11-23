@@ -90,6 +90,14 @@
         "outcome": {
           "optional": true,
           "type": "String"
+        },
+        "record": {
+          "optional": true,
+          "type": "String"
+        },
+        "record_digest": {
+          "optional": true,
+          "type": "String"
         }
       }
     },
@@ -101,6 +109,14 @@
         },
         "protocol": {
           "optional": false,
+          "type": "String"
+        },
+        "record": {
+          "optional": true,
+          "type": "String"
+        },
+        "record_digest": {
+          "optional": true,
           "type": "String"
         }
       }
@@ -133,8 +149,56 @@
         }
       }
     },
+    "HandoffChecked": {
+      "fields": {
+        "action": {
+          "optional": false,
+          "type": "String"
+        },
+        "blob_digest": {
+          "optional": true,
+          "type": "String"
+        },
+        "exit": {
+          "optional": true,
+          "type": "Integer"
+        },
+        "refusal": {
+          "optional": true,
+          "type": "String"
+        }
+      }
+    },
+    "StopLifted": {
+      "fields": {
+        "principal": {
+          "optional": false,
+          "type": "String"
+        },
+        "stop": {
+          "optional": false,
+          "type": "Integer"
+        }
+      }
+    },
+    "StopRecorded": {
+      "fields": {
+        "principal": {
+          "optional": false,
+          "type": "String"
+        },
+        "reason": {
+          "optional": false,
+          "type": "String"
+        }
+      }
+    },
     "Stopped": {
       "fields": {
+        "budget": {
+          "optional": true,
+          "type": "String"
+        },
         "next": {
           "optional": false,
           "type": "List<String>"

@@ -1,0 +1,9 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: step@1
+  bindings: bindings/step.bindings.yaml
+cycles:
+  - name: sleeps
+    seed: [{from: stubs/sleeps.sh, to: stubs/program.sh}, {from: names/one.txt, to: name.txt}]
+  - name: brief
+    seed: [{from: stubs/brief.sh, to: stubs/program.sh}, {from: names/two.txt, to: name.txt}]

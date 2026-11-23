@@ -1,0 +1,49 @@
+format: protocol/1
+protocol:
+  id: sign
+  revision: 1
+  description: >-
+    A signpost a walker signs, a clerk seals and a stamp marks. Signing is a person's action
+    that needs no capability, sealing a person's action under the capability clerk.seal, and
+    stamping a program's under clerk.stamp. The case is done once the post is signed, sealed
+    and stamped; until then all three wait at once.
+artifacts:
+  post: {}
+evidence_kinds:
+  post_signed: {}
+  post_sealed: {}
+  post_stamped: {}
+claims:
+  post.signed:
+    true_when:
+      evidence: {kind: post_signed, subject: post, result: signed}
+  post.sealed:
+    true_when:
+      evidence: {kind: post_sealed, subject: post, result: sealed}
+  post.stamped:
+    true_when:
+      evidence: {kind: post_stamped, subject: post, result: stamped}
+actions:
+  post.sign:
+    effect: write
+    may_produce:
+      - evidence: post_signed
+  post.seal:
+    effect: write
+    requires:
+      - capability: clerk.seal
+    may_produce:
+      - evidence: post_sealed
+  post.stamp:
+    effect: write
+    requires:
+      - capability: clerk.stamp
+    may_produce:
+      - evidence: post_stamped
+outcomes:
+  done:
+    requires:
+      all:
+        - {claim: post.signed}
+        - {claim: post.sealed}
+        - {claim: post.stamped}

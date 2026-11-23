@@ -8,11 +8,11 @@ source: crates/loom-sdk/src/models.rs, crates/loom-cli/src/lib.rs, crates/loom-d
 
 # Configure model routes
 
-Loom takes its models from an [llm](https://beyond10x.github.io/llm/) `llm.routes/1` document: it
-declares endpoints (where, which wire, how to authenticate) and routes (a name for one
-`<endpoint>/<model-id>`). llm's own guide,
+Loom takes its models from an [llm](https://beyond10x.github.io/llm/) `llm.routes/1` document.
+It declares endpoints and routes. An endpoint gives where to connect, which wire to speak and how
+to authenticate. A route is a name for one `<endpoint>/<model-id>`. llm's own guide,
 [Configure model routes](https://beyond10x.github.io/llm/docs/guides/configure-model-routes),
-holds the full format; this page shows the document Loom reads and how Loom names a model from it.
+holds the full format.
 
 ## The routes document
 
@@ -45,8 +45,8 @@ routes:
   open: gateway-open/qwen
 ```
 
-A `secret` is a reference, never a value: `env:<VARIABLE>` or `file:<absolute path or ~/path>`.
-Loom reads nothing itself; the variable or file is read when the first turn prepares its
+A `secret` is a reference, not a value: `env:<VARIABLE>` or `file:<absolute path or ~/path>`.
+Loom does not read it itself. The variable or file is read when the first turn prepares its
 credential, and one that is missing is refused as `unauthorized` before any request is sent.
 Loom's build does not enable llm's `keychain:` source, so a `keychain:` reference is refused.
 
@@ -70,7 +70,7 @@ roles:
 
 The roles are `agent`, the model that chooses each action, and `classifier`, the model that routes
 the intent. A field other than `routes` and `roles`, a role other than these two, and a role listed
-twice are refused, naming the file and the role.
+twice are refused. The message gives the file and the role.
 
 ## Run with it
 
@@ -90,12 +90,13 @@ A role that is neither configured nor given, and a model that cannot take a forc
 the run before any model call. `--config` does not take `--catalog`.
 
 With `--state <DIR>`, the commission's resume context keeps the configuration's absolute path and
-the name that serves the role `agent` (`--model`, when given). A later `resume <COMMISSION> --state
-<DIR>`, from any directory, loads that configuration again and continues on the same route, with
-the credential its routes document names. A configuration that is gone, a routes document that no
-longer serves the name, or a secret that does not resolve stops the resume, exit status 1, naming
-the file and the role `agent`, before any model call. See [Run an intent](run-an-intent.md) for
-the rest of the command.
+the name that serves the role `agent` (`--model`, when given).
+
+A later `resume <COMMISSION> --state <DIR>`, from any directory, loads that configuration again
+and continues on the same route, with the credential its routes document declares. A configuration that is gone, a routes document that
+no longer serves the name, or a secret that does not resolve stops the resume before any model
+call, with exit status 1 and a message that gives the file and the role `agent`. See
+[Run an intent](run-an-intent.md) for the rest of the command.
 
 ## Load the models from the SDK
 
@@ -114,13 +115,13 @@ let another = models.model("anthropic/claude-opus-4-1")?;
 let model = models::from_routes(Path::new("routes.yaml"), "agent")?;
 ```
 
-`loom_sdk::models::from_config` returns the model of each declared role; `loom_sdk::models::from_routes` returns the
-model one name of a routes document serves. Both refuse with a message that names the file and
+`loom_sdk::models::from_config` returns the model of each declared role, and
+`loom_sdk::models::from_routes` returns the model one name of a routes document serves. Both refuse with a message that gives the file and
 the role or name.
 
 ## Current limit
 
-Every endpoint of the routes document must resolve, including one no role uses: llm builds the
+Every endpoint of the routes document must resolve, including one no role uses. llm builds the
 secret resolvers for all endpoints at once, so a `file:~/` secret without `HOME`, or a `keychain:`
 secret, refuses the whole document even when no role is served by that endpoint. Declare only
 endpoints you can resolve. The limit is tracked at

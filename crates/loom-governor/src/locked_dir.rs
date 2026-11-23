@@ -2,12 +2,13 @@
 //! held for each operation, and every write made to a fresh temporary file in the same directory,
 //! synced, and renamed over its target.
 //!
-//! [`FileCaseStore`](crate::FileCaseStore), [`FileSuspensionStore`](crate::FileSuspensionStore)
-//! and [`FileWorkflowRunStore`](crate::FileWorkflowRunStore) all keep their files through a
+//! [`FileCaseStore`](crate::FileCaseStore), [`FileSuspensionStore`](crate::FileSuspensionStore),
+//! [`FileWorkflowRunStore`](crate::FileWorkflowRunStore) and
+//! [`FileDecisionStore`](crate::FileDecisionStore) all keep their files through a
 //! [`LockedDir`], so any of them opened over one directory, in one process or in two, take the same
 //! lock and never interleave a read and a write; their file names never meet (`case-…`,
-//! `observations.json`, `suspension-…`, `workflow-run-…`, and the run logs `b10x-loom-runlog`
-//! keeps through this type, `runlog-…`). Temporary files are named
+//! `observations.json`, `suspension-…`, `workflow-run-…`, `decision-…`, and the run logs
+//! `b10x-loom-runlog` keeps through this type, `runlog-…`). Temporary files are named
 //! `.tmp-<process id>-<counter>` from one counter for the whole process, and a store that opens
 //! removes the ones a dead process left, holding the lock, so it never removes one a live write
 //! is using.
@@ -23,6 +24,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::FileStoreError;
+use crate::durable;
 
 const LOCK: &str = ".lock";
 const TEMPORARY: &str = ".tmp-";
@@ -74,7 +76,7 @@ impl LockedDir {
         let (temporary, mut file) = self.temporary()?;
         let written = file
             .write_all(b"probe\n")
-            .and_then(|()| file.sync_all())
+            .and_then(|()| durable::sync_file(&file))
             .map_err(|error| failed(&temporary, error));
         drop(file);
         let removed = fs::remove_file(&temporary).map_err(|error| failed(&temporary, error));
@@ -127,7 +129,7 @@ impl LockedDir {
         let (temporary, mut file) = self.temporary()?;
         let written = (|| -> io::Result<()> {
             file.write_all(text.as_bytes())?;
-            file.sync_all()
+            durable::sync_file(&file)
         })()
         .map_err(|error| failed(&temporary, error))
         .and_then(|()| fs::rename(&temporary, path).map_err(|error| failed(path, error)));
@@ -181,9 +183,7 @@ impl LockedDir {
     }
 
     fn sync(&self) {
-        if let Ok(dir) = File::open(&self.dir) {
-            let _ = dir.sync_all();
-        }
+        durable::sync_dir(&self.dir);
     }
 }
 

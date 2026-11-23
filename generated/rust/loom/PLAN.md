@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 03a4fc948ecc8c56f554376674e3477aca9cfb4b05fd51d3cae6948310aa1cc1
+  contract digest b1059a76e03d9c610f8ec466fc4753d09ac15c538c99fdd88c3e19cd41529600
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-327 capabilities: **322 generated**, **5 obligations**, **0 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+525 capabilities: **509 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -63,17 +63,44 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.authority.Outcome` |
 | domain type | `loom.bindings.ActionBudget` |
 | domain type | `loom.bindings.ArtifactPath` |
+| domain type | `loom.bindings.ArtifactPlacement` |
+| domain type | `loom.bindings.ArtifactRevision` |
 | domain type | `loom.bindings.BindingsDocument` |
 | domain type | `loom.bindings.BindingsRefusal` |
 | domain type | `loom.bindings.BindingsRefusalReason` |
 | domain type | `loom.bindings.BoundAction` |
+| domain type | `loom.bindings.BoundStep` |
+| domain type | `loom.bindings.ChildNameSource` |
+| domain type | `loom.bindings.ChildNames` |
+| domain type | `loom.bindings.CopiedRecord` |
+| domain type | `loom.bindings.CopyRefusal` |
+| domain type | `loom.bindings.CopyRefusalReason` |
+| domain type | `loom.bindings.DiscardReason` |
 | domain type | `loom.bindings.EvidenceEntry` |
 | domain type | `loom.bindings.Executor` |
 | domain type | `loom.bindings.ExecutorSpec` |
+| domain type | `loom.bindings.ExitClass` |
+| domain type | `loom.bindings.ExitClasses` |
+| domain type | `loom.bindings.OpenRefusal` |
+| domain type | `loom.bindings.OpenRefusalReason` |
 | domain type | `loom.bindings.ProducerIndependence` |
+| domain type | `loom.bindings.ProgramEnvironment` |
+| domain type | `loom.bindings.ProgramRefusal` |
+| domain type | `loom.bindings.ProgramRefusalReason` |
+| domain type | `loom.bindings.ProgramRoot` |
+| domain type | `loom.bindings.ProgramRun` |
+| domain type | `loom.bindings.RecordedEvidence` |
 | domain type | `loom.bindings.ResultRule` |
 | domain type | `loom.bindings.ResultSource` |
 | domain type | `loom.bindings.RetryCondition` |
+| domain type | `loom.bindings.RetryFeedback` |
+| domain type | `loom.bindings.RetryLog` |
+| domain type | `loom.bindings.RetryRecord` |
+| domain type | `loom.bindings.RevisionMove` |
+| domain type | `loom.bindings.RevisionRefusal` |
+| domain type | `loom.bindings.RevisionRefusalReason` |
+| domain type | `loom.bindings.RunsScope` |
+| domain type | `loom.bindings.StepOutcome` |
 | domain type | `loom.bindings.ToolAllowList` |
 | domain type | `loom.datasource.AdapterAlias` |
 | domain type | `loom.datasource.ConnectionId` |
@@ -90,6 +117,39 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.datasource.WriteOperation` |
 | domain type | `loom.datasource.WriteRefusal` |
 | domain type | `loom.datasource.WriteResult` |
+| domain type | `loom.decision.ActionId` |
+| domain type | `loom.decision.ArtifactId` |
+| domain type | `loom.decision.ArtifactRevisionCitation` |
+| domain type | `loom.decision.AutonomyLevel` |
+| domain type | `loom.decision.CapabilityId` |
+| domain type | `loom.decision.CaseId` |
+| domain type | `loom.decision.CheckVerdict` |
+| domain type | `loom.decision.Citation` |
+| domain type | `loom.decision.Consequence` |
+| domain type | `loom.decision.DecisionClassId` |
+| domain type | `loom.decision.DecisionOption` |
+| domain type | `loom.decision.DecisionRequest.State` |
+| domain type | `loom.decision.DecisionRequestId` |
+| domain type | `loom.decision.EscalationSuppressedRecord` |
+| domain type | `loom.decision.Grant` |
+| domain type | `loom.decision.Ground` |
+| domain type | `loom.decision.GroundSource` |
+| domain type | `loom.decision.Holder` |
+| domain type | `loom.decision.OptionLetter` |
+| domain type | `loom.decision.OutcomeId` |
+| domain type | `loom.decision.PathLineCitation` |
+| domain type | `loom.decision.Principal` |
+| domain type | `loom.decision.PrincipalKind` |
+| domain type | `loom.decision.ProducedDocument` |
+| domain type | `loom.decision.ProducedRecord` |
+| domain type | `loom.decision.ProposerKind` |
+| domain type | `loom.decision.RecordCitation` |
+| domain type | `loom.decision.RecordStore` |
+| domain type | `loom.decision.Revision` |
+| domain type | `loom.decision.Strength` |
+| domain type | `loom.decision.SuppressionCause` |
+| domain type | `loom.decision.UnblockKind` |
+| domain type | `loom.decision.Unblocks` |
 | domain type | `loom.evaluation.ActionStatus` |
 | domain type | `loom.evaluation.CaseSnapshot` |
 | domain type | `loom.evaluation.ClaimValue` |
@@ -103,10 +163,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.evaluation.EvidenceRecord` |
 | domain type | `loom.evaluation.ExplicitDecision` |
 | domain type | `loom.evaluation.ProtocolName` |
+| domain type | `loom.governor.CaseLink` |
+| domain type | `loom.governor.CaseTermination` |
 | domain type | `loom.governor.CompletionRule` |
 | domain type | `loom.governor.StoredArtifact` |
 | domain type | `loom.governor.StoredCase` |
 | domain type | `loom.governor.StoredCaseId` |
+| domain type | `loom.governor.StoredDecisionRequest` |
+| domain type | `loom.governor.StoredDecisionRequestData` |
 | domain type | `loom.governor.StoredEvidence` |
 | domain type | `loom.governor.StoredEvidenceData` |
 | domain type | `loom.governor.StoredIndependence` |
@@ -196,11 +260,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.runlog.ChildOpened` |
 | domain type | `loom.runlog.Discarded` |
 | domain type | `loom.runlog.Evaluated` |
+| domain type | `loom.runlog.HandoffChecked` |
 | domain type | `loom.runlog.RevisionMove` |
 | domain type | `loom.runlog.RunLogEvent` |
 | domain type | `loom.runlog.RunLogLine` |
 | domain type | `loom.runlog.RunLogRefusal` |
 | domain type | `loom.runlog.RunLogRefused` |
+| domain type | `loom.runlog.StopLifted` |
+| domain type | `loom.runlog.StopRecorded` |
 | domain type | `loom.runlog.Stopped` |
 | domain type | `loom.runlog.Terminated` |
 | domain type | `loom.session.AgentSession.State` |
@@ -217,6 +284,80 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.session.ToolDecision` |
 | domain type | `loom.slack.ChannelObjectives` |
 | domain type | `loom.slack.SlackConfig` |
+| domain type | `loom.tree.ApprovalDecision` |
+| domain type | `loom.tree.ArtifactRevision` |
+| domain type | `loom.tree.CaseApproval` |
+| domain type | `loom.tree.CaseReplay` |
+| domain type | `loom.tree.CaseSelector` |
+| domain type | `loom.tree.CaseSource` |
+| domain type | `loom.tree.CaseStatus` |
+| domain type | `loom.tree.CasesSource` |
+| domain type | `loom.tree.CheckDifference` |
+| domain type | `loom.tree.CheckKind` |
+| domain type | `loom.tree.CompareOp` |
+| domain type | `loom.tree.Condition` |
+| domain type | `loom.tree.ConditionGroup` |
+| domain type | `loom.tree.Conditions` |
+| domain type | `loom.tree.CycleArea` |
+| domain type | `loom.tree.CycleCondition` |
+| domain type | `loom.tree.CycleExpectation` |
+| domain type | `loom.tree.CycleResult` |
+| domain type | `loom.tree.CycleStep` |
+| domain type | `loom.tree.DecisionKind` |
+| domain type | `loom.tree.DeclaredName` |
+| domain type | `loom.tree.DifferenceReason` |
+| domain type | `loom.tree.DocSource` |
+| domain type | `loom.tree.ExitExpectation` |
+| domain type | `loom.tree.FilesSource` |
+| domain type | `loom.tree.Follow` |
+| domain type | `loom.tree.FollowTarget` |
+| domain type | `loom.tree.LengthBound` |
+| domain type | `loom.tree.LogFailure` |
+| domain type | `loom.tree.LogSource` |
+| domain type | `loom.tree.NextDecision` |
+| domain type | `loom.tree.Operand` |
+| domain type | `loom.tree.OperandTake` |
+| domain type | `loom.tree.PickPosition` |
+| domain type | `loom.tree.ReadAs` |
+| domain type | `loom.tree.RecordsSource` |
+| domain type | `loom.tree.ScriptedApproval` |
+| domain type | `loom.tree.ScriptedChoice` |
+| domain type | `loom.tree.ScriptedClose` |
+| domain type | `loom.tree.ScriptedDecision` |
+| domain type | `loom.tree.SeedEntry` |
+| domain type | `loom.tree.SelectItem` |
+| domain type | `loom.tree.SelectPick` |
+| domain type | `loom.tree.SourceKind` |
+| domain type | `loom.tree.SpentBudget` |
+| domain type | `loom.tree.StatusApproval` |
+| domain type | `loom.tree.StatusCopy` |
+| domain type | `loom.tree.StatusEvidence` |
+| domain type | `loom.tree.StatusLog` |
+| domain type | `loom.tree.StatusRun` |
+| domain type | `loom.tree.StepKind` |
+| domain type | `loom.tree.StopExpectation` |
+| domain type | `loom.tree.SuiteCheck` |
+| domain type | `loom.tree.SuiteCycle` |
+| domain type | `loom.tree.SuiteDefaults` |
+| domain type | `loom.tree.SuiteRefusal` |
+| domain type | `loom.tree.SuiteRefusalReason` |
+| domain type | `loom.tree.SuiteReport` |
+| domain type | `loom.tree.TreeBudget` |
+| domain type | `loom.tree.TreeCatalog` |
+| domain type | `loom.tree.TreeLogHead` |
+| domain type | `loom.tree.TreeManifest` |
+| domain type | `loom.tree.TreeProtocol` |
+| domain type | `loom.tree.TreeRefusal` |
+| domain type | `loom.tree.TreeRefusalReason` |
+| domain type | `loom.tree.TreeReplay` |
+| domain type | `loom.tree.TreeRun` |
+| domain type | `loom.tree.TreeStatus` |
+| domain type | `loom.tree.TreeStop` |
+| domain type | `loom.tree.TreeSuite` |
+| domain type | `loom.tree.TreeVerify` |
+| domain type | `loom.tree.UseBound` |
+| domain type | `loom.tree.ValueType` |
+| domain type | `loom.tree.WaitingCycle` |
 | domain type | `loom.workflow.DeterministicStep` |
 | domain type | `loom.workflow.JudgementStep` |
 | domain type | `loom.workflow.OutputReference` |
@@ -231,6 +372,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.workflow.WorkflowDefinition` |
 | domain type | `loom.workflow.WorkflowRunRecord` |
 | domain type | `loom.workflow.WorkflowStep` |
+| entity lifecycle | `loom.decision.DecisionRequest` |
 | entity lifecycle | `loom.resource.LoomAgent` |
 | entity lifecycle | `loom.run.ActionCatalogue` |
 | entity lifecycle | `loom.run.ArgumentRequest` |
@@ -254,6 +396,14 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command behaviour | `loom.agent.RecordA2aTurn` |
 | command contract | `loom.agent.RunOnce` |
 | command behaviour | `loom.agent.RunOnce` |
+| command contract | `loom.decision.Decide` |
+| command contract | `loom.decision.Escalate` |
+| command contract | `loom.decision.Expire` |
+| command contract | `loom.decision.Recommend` |
+| command contract | `loom.decision.RecordProduced` |
+| command contract | `loom.decision.Request` |
+| command contract | `loom.decision.Supersede` |
+| command contract | `loom.decision.TakeRecommendation` |
 | command contract | `loom.resource.AdmitLoomAgent` |
 | command contract | `loom.resource.ApplyLoomAgent` |
 | command behaviour | `loom.resource.ApplyLoomAgent` |
@@ -268,6 +418,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.resource.RecordCheck` |
 | command behaviour | `loom.resource.RecordCheck` |
 | command contract | `loom.resource.StageFiles` |
+| command contract | `loom.run.CheckArguments` |
+| command behaviour | `loom.run.CheckArguments` |
 | command contract | `loom.run.OverruleSelection` |
 | command behaviour | `loom.run.OverruleSelection` |
 | command contract | `loom.run.ProjectCatalogue` |
@@ -282,6 +434,15 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | command contract | `loom.session.ProposeSessionChange` |
 | command behaviour | `loom.session.ProposeSessionChange` |
 | command contract | `loom.session.RecordFailedSession` |
+| event type | `loom.decision.DecisionEscalated` |
+| event type | `loom.decision.DecisionExpired` |
+| event type | `loom.decision.DecisionRequested` |
+| event type | `loom.decision.DecisionSuperseded` |
+| event type | `loom.decision.DecisionTaken` |
+| event type | `loom.decision.ProducedRecordRecorded` |
+| event type | `loom.decision.RecommendationRecorded` |
+| event type | `loom.decision.RecommendationTaken` |
+| event type | `loom.decision.RecommendationWithheld` |
 | event type | `loom.resource.LoomAgentApplied` |
 | event type | `loom.resource.LoomAgentCompleted` |
 | event type | `loom.resource.LoomAgentDegraded` |
@@ -294,6 +455,8 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | event type | `loom.resource.LoomAgentRunObserved` |
 | event type | `loom.resource.LoomAgentRunning` |
 | event type | `loom.run.ActionSelected` |
+| event type | `loom.run.ArgumentsMatched` |
+| event type | `loom.run.ArgumentsMismatched` |
 | event type | `loom.run.ArgumentsRequested` |
 | event type | `loom.run.CatalogueProjected` |
 | event type | `loom.run.SelectionAdmitted` |
@@ -310,12 +473,28 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.agent.SendRefused` |
 | error type | `loom.agent.ServeRefused` |
 | error type | `loom.agent.SpecRefused` |
+| error type | `loom.decision.AnswerNotAllowed` |
+| error type | `loom.decision.DecisionStateConflict` |
+| error type | `loom.decision.EscalationSuppressed` |
+| error type | `loom.decision.NoDefaultOnSilence` |
+| error type | `loom.decision.NoRecordToProduce` |
+| error type | `loom.decision.NoSuchRequest` |
+| error type | `loom.decision.NotARequestClass` |
+| error type | `loom.decision.NotDue` |
+| error type | `loom.decision.NotEligible` |
+| error type | `loom.decision.OptionOrAnswer` |
+| error type | `loom.decision.ProducedRecordConflict` |
+| error type | `loom.decision.RecordKeyOpen` |
+| error type | `loom.decision.SilenceHasDefault` |
+| error type | `loom.decision.TooFewOptions` |
+| error type | `loom.decision.UngroundedRecommendation` |
 | error type | `loom.resource.AdmissionRefused` |
 | error type | `loom.resource.LoomAgentNotFound` |
 | error type | `loom.resource.LoomAgentStateConflict` |
 | error type | `loom.resource.StageRefused` |
 | error type | `loom.resource.StaleGeneration` |
 | error type | `loom.run.ActionNotInCatalogue` |
+| error type | `loom.run.ArgumentRequestStateConflict` |
 | error type | `loom.run.CatalogueExists` |
 | error type | `loom.run.CatalogueNotFound` |
 | error type | `loom.run.CatalogueRevisionMismatch` |
@@ -325,8 +504,16 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | error type | `loom.run.SelectionRecordExists` |
 | error type | `loom.run.SelectionStateConflict` |
 | error type | `loom.session.FailureRefused` |
+| view type | `loom.decision.ArtifactDecisionHistory` |
+| view query | `loom.decision.ArtifactDecisionHistory` |
+| view type | `loom.decision.DecisionRequests` |
+| view query | `loom.decision.DecisionRequests` |
+| view type | `loom.decision.OpenDecisionsForPrincipal` |
+| view query | `loom.decision.OpenDecisionsForPrincipal` |
 | view type | `loom.resource.LoomAgents` |
 | view query | `loom.resource.LoomAgents` |
+| view type | `loom.run.ArgumentRequests` |
+| view query | `loom.run.ArgumentRequests` |
 | view type | `loom.run.Catalogues` |
 | view query | `loom.run.Catalogues` |
 | view type | `loom.run.SelectionRecords` |
@@ -350,6 +537,14 @@ What the specification fully determines is generated; what it cannot determine i
 | capability | source | why not generated | contract |
 | --- | --- | --- | --- |
 | command behaviour | `loom.agent.CheckAgentSpec` | kept an obligation by the fields of error `loom.agent.SpecRefused`, which the specification gives no source, in `malformed` | given `loom.agent.CheckAgentSpec` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (the document at the path does not decode as a loom.agent/1 document), error `loom.agent.SpecRefused`; `secret-literal` externally decided (a string of the document holds a credential), error `loom.agent.SpecRefused`; `unknown-format` externally decided (the document's format is not loom.agent/1), error `loom.agent.SpecRefused`; `blank-text` externally decided (a text member of the document is empty or only whitespace), error `loom.agent.SpecRefused`; `not-a-variable-name` externally decided (a bearer_env of the document is not an environment variable name), error `loom.agent.SpecRefused`; `port-out-of-range` externally decided (a port of the document is outside 1 to 65535), error `loom.agent.SpecRefused`; `not-a-plain-path` externally decided (an allow_paths entry of an http binding is not a plain path), error `loom.agent.SpecRefused`; `not-an-instant` externally decided (a Timestamp member of the document is not an RFC 3339 instant), error `loom.agent.SpecRefused`; `unknown-protocol` externally decided (the inner loop names a protocol the plugin catalog does not hold, or a spec with no loops declares states inbound-answer@1 does not admit), error `loom.agent.SpecRefused`; `unknown-action` externally decided (a state names an action the inner loop's protocol does not declare), error `loom.agent.SpecRefused`; `unbound-source` externally decided (a state, the outer loop or the channel names a source no binding declares), error `loom.agent.SpecRefused`; `http-method` externally decided (an http binding's method is not GET), error `loom.agent.SpecRefused`; `send-without-writes` externally decided (reply.send is a capability while writes are none or undeclared), error `loom.agent.SpecRefused`; `empty-channel-allow` externally decided (the channel's allow list is empty), error `loom.agent.SpecRefused`; `serveable` otherwise |
+| command behaviour | `loom.decision.Decide` | kept an obligation by the fields of error `loom.decision.NotEligible`, which the specification gives no source, in `kind-not-principal` | given `loom.decision.Decide` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `kind-not-principal` when `((principal_kind == decider and not (principal starts_with "decider:")) or (principal_kind == rule and not (principal starts_with "rule:")) or (principal_kind == silence and principal != silence) or (principal_kind == person and (principal starts_with "decider:" or principal starts_with "rule:" or principal == silence)))`, error `loom.decision.NotEligible`; `silence-takes-recommendation` when `principal_kind == silence`, error `loom.decision.NotEligible`; `option-or-answer` when `((defined(option) and defined(answer)) or (not (defined(option)) and not (defined(answer))))`, error `loom.decision.OptionOrAnswer`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `answer-not-allowed` when the existing subject's stored fields satisfy `unblocks.kind != question` and `defined(answer)`, error `loom.decision.AnswerNotAllowed`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `principal_kind != person`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))`, error `loom.decision.NotEligible`; `decider-under-rule` when the existing subject's stored fields satisfy `(holder == rule or holder == rule_final or holder == rule_and_decider or (holder == rule_and_decider_final and not (exists o in options: ((o.letter == input.option and o.consequence.grant == denied)))))` and `principal_kind == decider`, error `loom.decision.NotEligible`; `rule-not-holder` when the existing subject's stored fields satisfy `not ((holder == rule or holder == rule_final))` and `principal_kind == rule`, error `loom.decision.NotEligible`; `decided` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
+| command behaviour | `loom.decision.Escalate` | kept an obligation by the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request` | given `loom.decision.Escalate` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `suppressed` when the existing subject's stored fields satisfy `(holder == decider_final or holder == rule_final or holder == rule_and_decider_final)`, error `loom.decision.EscalationSuppressed`; `escalated` otherwise, takes `escalate` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionEscalated`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
+| command behaviour | `loom.decision.Expire` | kept an obligation by the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request` | given `loom.decision.Expire` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `not-due` when the existing subject's stored fields satisfy `(not (defined(expires_at)) or expires_at > input.at as timestamp)`, error `loom.decision.NotDue`; `has-default` when the existing subject's stored fields satisfy `default_on_silence == true`, error `loom.decision.SilenceHasDefault`; `expired` otherwise, takes `expire` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionExpired`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
+| command behaviour | `loom.decision.Recommend` | kept an obligation by the fields of error `loom.decision.UngroundedRecommendation`, which the specification gives no source, in `ungrounded` | given `loom.decision.Recommend` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `ungrounded` when `(check_verdict == verified and (grounds.count < 1 or strength == none))`, error `loom.decision.UngroundedRecommendation`; `silence-needs-strong` when `(check_verdict == verified and default_on_silence == true and strength != strong)`, error `loom.decision.NoDefaultOnSilence`; `option-or-answer` when `(check_verdict == verified and ((defined(recommended_option) and defined(recommended_answer)) or (not (defined(recommended_option)) and not (defined(recommended_answer)))))`, error `loom.decision.OptionOrAnswer`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `answer-not-allowed` when the existing subject's stored fields satisfy `unblocks.kind != question` and `(check_verdict == verified and defined(recommended_answer))`, error `loom.decision.AnswerNotAllowed`; `withheld` when `check_verdict == refused`, takes `recommend` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationWithheld`; `recommended` otherwise, takes `recommend` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationRecorded`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
+| command behaviour | `loom.decision.RecordProduced` | kept an obligation by the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request` | given `loom.decision.RecordProduced` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `already-recorded` when the existing subject's stored fields satisfy `{expr: "coalesce(produced_record.record, "")"} == input.produced.record`, preserves `loom.decision.DecisionRequest`; `produced-conflict` when the existing subject's stored fields satisfy `defined(produced_record)`, error `loom.decision.ProducedRecordConflict`; `option-produces-none` when the existing subject's stored fields satisfy `(defined(decided_option) and not (exists o in options: ((o.letter == {fact: decided_option} and defined(o.consequence.produces)))))`, error `loom.decision.NoRecordToProduce`; `recorded` otherwise, takes `record_produced` of `loom.decision.DecisionRequest`, emits `loom.decision.ProducedRecordRecorded`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
+| command behaviour | `loom.decision.Request` | kept an obligation by the fields of error `loom.decision.NotARequestClass`, which the specification gives no source, in `escalation-is-not-a-class` | given `loom.decision.Request` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `escalation-is-not-a-class` when `decision_class == escalation`, error `loom.decision.NotARequestClass`; `too-few-options` when `options.count < 2`, error `loom.decision.TooFewOptions`; `record-key-open` when `defined(open_for_record)`, error `loom.decision.RecordKeyOpen`; `requested` otherwise, creates `loom.decision.DecisionRequest`, emits `loom.decision.DecisionRequested` |
+| command behaviour | `loom.decision.Supersede` | kept an obligation by the fields of error `loom.decision.NoSuchRequest`, which the specification gives no source, in `no-request` | given `loom.decision.Supersede` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `superseded` otherwise, takes `supersede` of `loom.decision.DecisionRequest`, emits `loom.decision.DecisionSuperseded`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
+| command behaviour | `loom.decision.TakeRecommendation` | kept an obligation by the fields of error `loom.decision.NotEligible`, which the specification gives no source, in `kind-not-principal` | given `loom.decision.TakeRecommendation` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `kind-not-principal` when `((principal_kind == decider and not (principal starts_with "decider:")) or (principal_kind == rule and not (principal starts_with "rule:")) or (principal_kind == silence and principal != silence) or (principal_kind == person and (principal starts_with "decider:" or principal starts_with "rule:" or principal == silence)))`, error `loom.decision.NotEligible`; `no-request` for an identity no record carries, error `loom.decision.NoSuchRequest`; `person-only` when the existing subject's stored fields satisfy `(holder == person or holder == advised)` and `(principal_kind == decider or principal_kind == rule)`, error `loom.decision.NotEligible`; `not-listed` when the existing subject's stored fields satisfy `not (exists p in eligible: (p == input.principal))` and `principal_kind != silence`, error `loom.decision.NotEligible`; `not-strong` when the existing subject's stored fields satisfy `recommendation_strength != strong`, error `loom.decision.NotEligible`; `silence-without-default` when the existing subject's stored fields satisfy `default_on_silence == false` and `principal_kind == silence`, error `loom.decision.NoDefaultOnSilence`; `silence-not-due` when the existing subject's stored fields satisfy `(not (defined(expires_at)) or expires_at > input.decided_at as timestamp)` and `principal_kind == silence`, error `loom.decision.NotDue`; `taken` otherwise, takes `decide` of `loom.decision.DecisionRequest`, emits `loom.decision.RecommendationTaken`; `wrong-state` from a state no declared move starts in, error `loom.decision.DecisionStateConflict` |
 | command behaviour | `loom.resource.AdmitLoomAgent` | kept an obligation by the fields of error `loom.resource.AdmissionRefused`, which the specification gives no source, in `malformed` | given `loom.resource.AdmitLoomAgent` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `malformed` externally decided (a member of the resource does not decode, or breaks a rule no other reason names), error `loom.resource.AdmissionRefused`; `secret-literal` externally decided (a member of the resource holds a credential), error `loom.resource.AdmissionRefused`; `unknown-format` externally decided (spec.agent's format is not loom.agent/1), error `loom.resource.AdmissionRefused`; `blank-text` externally decided (a text member of spec.agent is empty or only whitespace), error `loom.resource.AdmissionRefused`; `not-a-variable-name` externally decided (a bearer_env of spec.agent, or a spec.env name, is not an environment variable name), error `loom.resource.AdmissionRefused`; `port-out-of-range` externally decided (a port of spec.agent is outside 1 to 65535), error `loom.resource.AdmissionRefused`; `not-a-plain-path` externally decided (an allow_paths entry of an http binding of spec.agent is not a plain path), error `loom.resource.AdmissionRefused`; `not-an-instant` externally decided (a Timestamp member of spec.agent is not an RFC 3339 instant), error `loom.resource.AdmissionRefused`; `unknown-protocol` externally decided (the inner loop of an AgentServe resource's spec.agent names a protocol the plugin catalog does not hold), error `loom.resource.AdmissionRefused`; `unknown-action` externally decided (a state of an AgentServe resource's spec.agent names an action its protocol does not declare), error `loom.resource.AdmissionRefused`; `unbound-source` externally decided (a state, the outer loop or the channel of an AgentServe resource's spec.agent names a source no binding declares), error `loom.resource.AdmissionRefused`; `http-method` externally decided (an http binding of an AgentServe resource's spec.agent has a method other than GET), error `loom.resource.AdmissionRefused`; `send-without-writes` externally decided (an AgentServe resource's spec.agent has reply.send among its capabilities while writes are none or undeclared), error `loom.resource.AdmissionRefused`; `empty-channel-allow` externally decided (the channel of an AgentServe resource's spec.agent allows no channel id), error `loom.resource.AdmissionRefused`; `no-model-route` externally decided (spec.routes is empty and the pod would reach no model), error `loom.resource.AdmissionRefused`; `too-large` externally decided (a member is beyond what the credential walk reads, or the ConfigMap beyond 1 MiB), error `loom.resource.AdmissionRefused`; `boundary-with-secret` externally decided (spec.boundary stands beside spec.secretRef or spec.secretFiles), error `loom.resource.AdmissionRefused`; `boundary-upstream-invalid` externally decided (a boundary upstream is no plain http URL of a cluster service), error `loom.resource.AdmissionRefused`; `boundary-upstream-not-allowed` externally decided (no allowedBoundaryUpstreams entry gives a boundary upstream's kind, URL and audience exactly), error `loom.resource.AdmissionRefused`; `boundary-egress-host` externally decided (beside spec.boundary, an egress entry of spec.agent names a host), error `loom.resource.AdmissionRefused`; `boundary-egress-namespace` externally decided (beside spec.boundary, an egress entry of spec.agent names the namespace of an allowedBoundaryUpstreams upstream or of the modelRoute, names no namespace, or gives no pod selector), error `loom.resource.AdmissionRefused`; `boundary-egress-unbound` externally decided (beside spec.boundary, no GET http binding of spec.agent without a bearer_env has a base_url that is a cluster service in the namespace an egress entry names), error `loom.resource.AdmissionRefused`; `boundary-egress-not-allowed` externally decided (beside spec.boundary, no allowedBoundaryHttpEgress entry equals a namespace egress entry of spec.agent in namespace, selector and port), error `loom.resource.AdmissionRefused`; `secret-not-allowed` externally decided (spec.secretRef or spec.secretFiles names a Secret outside allowedSecretNames), error `loom.resource.AdmissionRefused`; `namespace-mismatch` externally decided (spec.agent's deploy.kubernetes.namespace is not the resource's namespace), error `loom.resource.AdmissionRefused`; `egress-host-not-allowed` externally decided (an egress entry of spec.agent names no destination, or a host outside allowedEgressHosts), error `loom.resource.AdmissionRefused`; `env-name-conflict` externally decided (a spec.env name is one the controller sets, or one an earlier entry gives), error `loom.resource.AdmissionRefused`; `config-file-invalid` externally decided (a spec.configFiles name is no plain file name), error `loom.resource.AdmissionRefused`; `config-file-conflict` externally decided (a spec.configFiles name is one an earlier entry gives, or one the ConfigMap already holds), error `loom.resource.AdmissionRefused`; `mount-path-invalid` externally decided (a workspace or Secret mount path is not absolute and plain, or overlaps a mount the controller makes or the other one), error `loom.resource.AdmissionRefused`; `claim-not-allowed` externally decided (spec.workspace names a claim outside allowedClaimNames), error `loom.resource.AdmissionRefused`; `profile-invalid` externally decided (a seccomp or AppArmor profile is out of form), error `loom.resource.AdmissionRefused`; `profile-not-allowed` externally decided (a seccomp or AppArmor profile is Unconfined or Localhost without the configuration allowing it), error `loom.resource.AdmissionRefused`; `resources-required` externally decided (a Command resource declares no size and the configuration gives no defaultCommandResources), error `loom.resource.AdmissionRefused`; `admitted` otherwise |
 | command behaviour | `loom.resource.StageFiles` | kept an obligation by a typed response (`response:`) | given `loom.resource.StageFiles` input, decide and enact exactly one outcome. Declared outcomes (declaration order, not selection precedence): `destination-is-a-link` when `destination == Link`, error `loom.resource.StageRefused`; `destination-not-a-directory` when `destination == Other`, error `loom.resource.StageRefused`; `name-not-utf8` when `names_utf8 == false`, error `loom.resource.StageRefused`; `key-outside-volume` when `keys_inside == false`, error `loom.resource.StageRefused`; `stale-directory` when `stale_directory == true`, error `loom.resource.StageRefused`; `staged` otherwise |
 | command behaviour | `loom.run.SelectAction` | kept an obligation by the guard `exists entry in entries: (entry.action == input.action)`, in `not-in-catalogue` | given `loom.run.SelectAction` input, decide and enact exactly one outcome. Selection precedence: on commands with `when_related:`, check `existing_instance` then `exists: false` before input-guarded refusals; choose the first declared input refusal whose guard holds; then check addressed-row existence (`unknown_instance`, and `existing_instance` on commands without `when_related:`); then the held state (`when_subject_state` and `when_subject`), with `wrong_state` only if the selected branch moves from a state the row does not hold; then choose the present `when_related:` predicate refusal whose predicate and optional input guard hold; then accepting and external branches in declaration order. An accepting branch that moves nothing answers in every state. Related-presence predicates do not precede input-guarded refusals. Declared outcomes (declaration order, not selection precedence): `selection-exists` for an identity a record already carries, error `loom.run.SelectionExists`; `catalogue-unknown` when no `loom.run.ActionCatalogue` carries the identity `input.catalogue_id` names, error `loom.run.CatalogueNotFound`; `not-in-catalogue` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `not (exists entry in entries: (entry.action == input.action))`, error `loom.run.ActionNotInCatalogue`; `revision-mismatch` when the `loom.run.ActionCatalogue` that `input.catalogue_id` names satisfies `case_revision != input.case_revision`, error `loom.run.CatalogueRevisionMismatch`; `selected` otherwise, creates `loom.run.Selection`, emits `loom.run.ActionSelected` |
@@ -359,3 +554,6 @@ What the specification fully determines is generated; what it cannot determine i
 
 | capability | source | stage | why |
 | --- | --- | --- | --- |
+| actor grants | `loom.decision.Decider` | planning | may invoke `loom.decision.Decide`, `loom.decision.Escalate`, `loom.decision.TakeRecommendation`; generated as data, not enforced: the grant is available as the declared actors and the qualified commands each may invoke, and enforcement stays with the caller, because a grant is checked against a caller identity, which types do not carry |
+| actor grants | `loom.decision.Person` | planning | may invoke `loom.decision.Decide`, `loom.decision.Escalate`, `loom.decision.TakeRecommendation`; generated as data, not enforced: the grant is available as the declared actors and the qualified commands each may invoke, and enforcement stays with the caller, because a grant is checked against a caller identity, which types do not carry |
+| actor grants | `loom.decision.Runtime` | planning | may invoke `loom.decision.Expire`, `loom.decision.Recommend`, `loom.decision.RecordProduced`, `loom.decision.Request`, `loom.decision.Supersede`, `loom.decision.TakeRecommendation`; generated as data, not enforced: the grant is available as the declared actors and the qualified commands each may invoke, and enforcement stays with the caller, because a grant is checked against a caller identity, which types do not carry |

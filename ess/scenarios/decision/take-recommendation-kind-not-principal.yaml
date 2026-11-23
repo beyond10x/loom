@@ -1,0 +1,61 @@
+# story decision-request-entity, security review F1 (session sdc, 2026-11-21): principal_kind is
+# the command's claim, so it must be the kind the principal's name has. A listed person that sends
+# TakeRecommendation with kind decider is refused kind-not-principal before the holder is read;
+# the request stays Open.
+type: ess-scenario/7
+domain: loom.decision
+scenario: take-recommendation-kind-not-principal
+summary: "A listed person, operator, that sends TakeRecommendation with kind decider is refused kind-not-principal; the request stays Open."
+
+timeline:
+  - at: 2026-11-21T12:00:00Z
+    command: loom.decision.Request
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.billing-change.merge-1"
+      case_id: "IDEA-1.billing"
+      question_key: "IDEA-1.billing|change.merge|"
+      record_key: "change.merge@r9"
+      unblocks: {kind: approval, action: "change.merge", capability: "change.merge"}
+      subject_artifact: "change"
+      subject_revision: "t0r1"
+      question: "Merge the change at revision t0r1?"
+      options:
+        - letter: "A"
+          does: "Merge the change."
+          cost: "None."
+          consequence: {admits: ["change.merge"], blocks: [], grant: granted, produces: canon_authority}
+        - letter: "B"
+          does: "Do not merge."
+          cost: "The change waits."
+          consequence: {admits: [], blocks: ["change.merge"], grant: denied, produces: canon_authority}
+      autonomy_level: A4
+      decision_class: merge
+      holder: decider
+      eligible: ["decider:model", "operator"]
+      addressed_to: "decider:model"
+      opened_at: 2026-11-21T12:00:00Z
+    outcome: requested
+    events:
+      - event: loom.decision.DecisionRequested
+        payload:
+          request_id: "DR-IDEA-1.billing-change.merge-1"
+          case_id: "IDEA-1.billing"
+          subject_artifact: "change"
+          subject_revision: "t0r1"
+
+  - at: 2026-11-21T12:01:00Z
+    command: loom.decision.TakeRecommendation
+    actor: loom.decision.Person
+    input:
+      request_id: "DR-IDEA-1.billing-change.merge-1"
+      principal: "operator"
+      principal_kind: decider
+      decided_at: 2026-11-21T12:01:00Z
+      case_revision: "r9"
+      reasons: ["Take it."]
+    outcome: kind-not-principal
+
+assert:
+  - view: loom.decision.DecisionRequests
+    contains: {request_id: "DR-IDEA-1.billing-change.merge-1", state: Open}

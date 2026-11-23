@@ -3,8 +3,9 @@
 //! `systemd-run --user --scope -p Delegate=yes`, as `b10x-loom` starts itself, and runs the case
 //! there. Where bubblewrap, a user systemd manager or the Substrate driver is absent, the case
 //! prints `skipped: missing prerequisite: …` and returns; such a skip establishes no
-//! qualification. Anything else fails the parent: a refusal that names no missing prerequisite,
-//! a delegated binary that fails, or one that never ran exactly the case.
+//! qualification. With `LOOM_REQUIRE_DELEGATION` set, each of those skips fails the test instead.
+//! Anything else fails the parent: a refusal that names no missing prerequisite, a delegated binary
+//! that fails, or one that never ran exactly the case.
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
@@ -24,6 +25,17 @@ const REPORT: &str = "LOOM_DELEGATED_CASE_REPORT";
 const MISSING: &str = "missing: ";
 pub const BUBBLEWRAP: &str = "/usr/bin/bwrap";
 const SYSTEMD_RUN: [&str; 6] = ["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"];
+/// Set, a missing prerequisite fails the test instead of skipping it.
+const REQUIRE: &str = "LOOM_REQUIRE_DELEGATION";
+
+/// The test skips naming `missing`, or fails when [`REQUIRE`] is set.
+fn skipped(missing: &str) {
+    assert!(
+        std::env::var_os(REQUIRE).is_none(),
+        "{REQUIRE} is set and a prerequisite is missing: {missing}"
+    );
+    eprintln!("skipped: missing prerequisite: {missing}");
+}
 
 pub fn bubblewrap_present() -> bool {
     use std::os::unix::fs::PermissionsExt as _;
@@ -58,8 +70,7 @@ pub fn delegated(
         return;
     }
     if !bubblewrap_present() {
-        eprintln!("skipped: missing prerequisite: executable {BUBBLEWRAP}");
-        return;
+        return skipped(&format!("executable {BUBBLEWRAP}"));
     }
     let state = tempfile::tempdir().unwrap();
     let report = state.path().join("report");
@@ -73,10 +84,7 @@ pub fn delegated(
         .output();
     let output = match started {
         Ok(output) => output,
-        Err(error) => {
-            eprintln!("skipped: missing prerequisite: systemd-run ({error})");
-            return;
-        }
+        Err(error) => return skipped(&format!("systemd-run ({error})")),
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -101,11 +109,11 @@ pub fn delegated(
                     output.status
                 );
             }
-            eprintln!(
-                "skipped: missing prerequisite: a user systemd manager that starts a delegated scope (systemd-run {}: {})",
+            skipped(&format!(
+                "a user systemd manager that starts a delegated scope (systemd-run {}: {})",
                 output.status,
                 stderr.trim()
-            );
+            ));
         }
         Some("started") => panic!(
             "the delegated case {name} stopped before it ran or named a missing prerequisite: {}\n{stdout}{stderr}",
@@ -120,7 +128,7 @@ pub fn delegated(
                 panic!("the delegated case {name} wrote no report the harness reads: {report:?}");
             };
             ran_exactly(name, &output);
-            eprintln!("skipped: missing prerequisite: {missing}");
+            skipped(missing);
         }
     }
 }

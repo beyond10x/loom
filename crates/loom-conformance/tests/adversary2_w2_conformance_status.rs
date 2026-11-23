@@ -12,9 +12,10 @@
 //! The case builds that report the documented way: a copy of `ess/` whose `OverruleSelection` is
 //! sent by an actor with an attribute (so every step invoking it carries a caller, which `LoomTarget`
 //! answers `unsupported`), and an `ess/SKIPPED.md` naming each such scenario with a reason. It
-//! checks that ESS's report rates that run `failed`, then runs the real `conform` test binary
-//! against the copy, by pointing `CARGO_MANIFEST_DIR` (read at run time, `conform.rs` `root()`) at
-//! it, and requires the check to fail naming `conformance_status`.
+//! checks that ESS's report rates that run `failed`, then writes the copy's committed synthesis
+//! from that one run and runs the real `conform` test binary against the copy, by pointing
+//! `CARGO_MANIFEST_DIR` (read at run time, `conform.rs` `root()`) at it, and requires the check to
+//! fail naming `conformance_status`.
 
 use b10x_loom_conformance::run_suite;
 use serde_json::Value;
@@ -22,6 +23,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[path = "../../loom-executor/tests/support/ess_suite.rs"]
+mod ess_suite;
 
 /// The actor block inserted ahead of `commands:` in the copy's `ess/domains/run.yaml`.
 const ACTOR: &str = "actors:\n  - name: loom.run.Overruler\n    attributes:\n      - {name: overruler, type: String}\n    may: [loom.run.OverruleSelection]\n\n";
@@ -88,8 +92,10 @@ fn conform_binary() -> PathBuf {
         })
 }
 
+/// Slow lane (`task slow`): the copy keeps the decision domain, since `task conform` holds the
+/// suite to the decision covers of its pinned table, so its one synthesis takes minutes.
 #[test]
-fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_status() {
+fn slow_adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_status() {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -116,28 +122,17 @@ fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_st
     )
     .expect("write the copy's run.yaml");
 
-    let suite_path = fake.join("suite.json");
-    let synthesized = Command::new("ess")
-        .current_dir(&fake)
-        .args([
-            "verify",
-            "conform",
-            "synthesize",
-            "--path",
-            "ess",
-            "--suite-format",
-            "5",
-            "--out",
-        ])
-        .arg(&suite_path)
-        .output()
-        .expect("`ess` on PATH");
+    let ess = ess_suite::ess_program(&root());
+    let synthesized =
+        ess_suite::synthesize(&ess, None, &fake.join("ess"), &fake.join("suite.json"))
+            .unwrap_or_else(|detail| panic!("synthesize the copy: {detail}"));
     assert!(
-        synthesized.status.success(),
+        synthesized.success(),
         "synthesize the copy: {}",
-        String::from_utf8_lossy(&synthesized.stderr)
+        synthesized.describe()
     );
-    let suite = fs::read_to_string(&suite_path).expect("read the copy's suite");
+    let suite = String::from_utf8(synthesized.suite.clone().expect("the copy's suite"))
+        .expect("the suite is UTF-8");
     let report: Value = serde_json::from_str(
         &run_suite(&suite)
             .unwrap_or_else(|error| panic!("the copy's suite did not run: {error}"))
@@ -169,6 +164,10 @@ fn adversary2_w2_named_unsupported_scenarios_fail_task_conform_on_conformance_st
         ));
     }
     fs::write(fake.join("ess/SKIPPED.md"), skipped).expect("write the copy's SKIPPED.md");
+    // The copy's committed synthesis, which `task conform` reads once its input digest matches the
+    // copy's `ess/`, `SKIPPED.md` included (synthesize does not read it).
+    ess_suite::write_generated(&fake, &ess, None, &synthesized)
+        .unwrap_or_else(|detail| panic!("write the copy's synthesis: {detail}"));
 
     let ran = Command::new(conform_binary())
         .args(["--exact", "ess_conformance_report", "--test-threads=1"])

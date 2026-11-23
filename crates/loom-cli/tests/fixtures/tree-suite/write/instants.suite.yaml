@@ -1,0 +1,25 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: finding@1
+  bindings: bindings/finding.bindings.yaml
+  seed:
+    - {from: stubs/quick.sh, to: stubs/first.sh}
+    - {from: stubs/apply.sh, to: stubs/apply.sh}
+    - {from: seeds/ledger.txt, to: ledger.txt}
+  decide:
+    - {take: approve, capability: owner.decide}
+cycles:
+  - name: with-write
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: write, from: seeds/findings-decided.yaml, to: findings.yaml}
+      - {do: run}
+    expect:
+      exit: 0
+      outcome: done
+  - name: without-write
+    steps:
+      - {do: open}
+      - {do: run, rounds: 1, exit: 3}
+      - {do: run, exit: {not: 0}}

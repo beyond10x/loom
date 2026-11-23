@@ -19,6 +19,7 @@ b10x-loom-intake-router = { path = "../loom-intake-router" }
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 b10x-loom-executor = { path = "../loom-executor" }
 b10x-loom-session-executor = { path = "../loom-session-executor" }
+b10x-loom-tree = { path = "../loom-tree" }
 b10x-llm-core = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
 b10x-llm-models = { git = "https://github.com/beyond10x/llm", tag = "0.8.1", features = ["environment", "file"] }
 b10x-llm-credentials = { git = "https://github.com/beyond10x/llm", tag = "0.8.1" }
@@ -32,4 +33,5 @@ serde_json = "1"
 tokio = { version = "1.53", features = ["rt"] }
 
 [dev-dependencies]
+b10x-loom-intake-slice = { path = "../loom-intake-slice", features = ["test-clock"] }
 tempfile = "3"

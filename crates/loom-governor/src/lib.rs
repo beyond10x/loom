@@ -110,6 +110,25 @@
 //! Observations are kept apart, in the order received ([`CanonGovernor::observations`]), and are
 //! never evidence (Atlas ADR 0074).
 //!
+//! # Child cases
+//!
+//! An action that declares Canon's `case_open` is performed by [`CanonGovernor::open_children`]:
+//! it opens each child under the protocol `case_open` names, `<parent>.<name>` (then
+//! `<parent>.<name>.2`, `.3`), holds the link ([`CaseLink`]) on both sides, and writes into the
+//! parent, in the one write that records the links, one `case_outcome` record per child with result
+//! `open`. [`CanonGovernor::terminate`] terminates a case through an outcome Canon judges
+//! legitimate and, for a child, replaces that record with the child's outcome. A terminated case
+//! is evaluated with its termination, its frontier admits no action and it completes with the
+//! stored outcome, at any later trusted time: Canon judges the termination once, in `terminate`,
+//! and is handed the case without it afterwards. A public write to a terminated case
+//! ([`CanonGovernor::update_revision`], [`CanonGovernor::record_step`], [`CanonGovernor::decide`],
+//! a record the evidence port receives) is refused and writes nothing (see
+//! [`CanonGovernor::terminate`], "After the termination"). A `case_outcome` record
+//! submitted through the evidence port is refused for a case that opened a child or was opened as
+//! one, and whenever it names a case the store holds: a child's outcome is the governor's to write.
+//! [`CanonGovernor::tree`] lists a tree of cases. A catalog or registration whose `case_open`
+//! openings form a cycle is refused, as Canon's `check_openings` names it.
+//!
 //! # Stateless evaluation
 //!
 //! [`evaluate`] is the same evaluation for a caller that keeps its own case record: it takes an
@@ -131,7 +150,8 @@
 //! `Cargo.lock`, and compiles the catalog's engineering protocols. Commission is the path
 //! dependency `b10x-loom-commission`, built from this repository's own tree. The engineering
 //! protocols are the files `b10x-loom-protocols` vendors under `protocols/engineering/`, held to
-//! their lock.
+//! their lock. Decision requests are `b10x-loom-decision`'s, a path dependency whose
+//! `DecisionStore` port [`FileDecisionStore`] implements in a directory.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -146,6 +166,10 @@ pub use loom as model;
 /// (`loom.governor.CompletionRule`, [`CanonGovernor::with_completion_rule`]).
 pub use loom::governor::CompletionRule;
 
+/// The link between a parent case and a child it opened, and how a case terminated
+/// (`loom.governor.CaseLink`, `loom.governor.CaseTermination`; see "Child cases").
+pub use loom::governor::{CaseLink, CaseTermination};
+
 use loom::evaluation::{
     ActionStatus as DecidedStatus, ClaimValue, DecidedAction, DecidedClaim, DecidedObligation,
     EvaluationDecision, EvaluationInput, EvaluationRefusal, EvaluationRequest, ExplicitDecision,
@@ -158,7 +182,7 @@ use b10x_canon::ir::{Ir, compile};
 use b10x_canon::model::{
     ArtifactId, CASE_FORMAT, CASE_OUTCOME, Case, CaseArtifact, Decision, Declarations,
     EvidenceKindId, EvidenceRecord, ExclusionReason, IndependenceDimensionId, InputId, InputValue,
-    Instant as CanonInstant, OutcomeRequirement, Predicate, Principal, Revision,
+    Instant as CanonInstant, OutcomeId, OutcomeRequirement, Predicate, Principal, Revision,
     Truth as CanonTruth, is_identifier,
 };
 use b10x_loom_commission::model::json;
@@ -173,12 +197,21 @@ use b10x_loom_commission::ports::governor::Governor;
 use b10x_loom_executor::{ActionFactsPort, CaseFacts};
 use loom::run::ActionFacts;
 
+mod children;
+pub mod durable;
+mod file_decision;
 mod file_run_store;
 mod file_store;
 mod file_suspension;
 mod locked_dir;
 
+pub use children::{
+    CHILD_OUTCOME_PRODUCER, ChildError, ChildOpening, TerminateError, TreeCase, UNREVISED,
+    plain_child_name,
+};
+pub use file_decision::FileDecisionStore;
 pub use file_run_store::{FileWorkflowRunStore, LONGEST_RUN_ID};
+pub use file_store::WriteStep;
 pub use file_store::{FileCaseStore, FileStoreError, case_file_stem};
 pub use file_suspension::{FileSuspensionStore, LONGEST_COMMISSION_ID};
 pub use locked_dir::LockedDir;
@@ -205,6 +238,13 @@ pub struct CaseState {
     /// Every explicit decision recorded for the case ([`CanonGovernor::decide`]), in the order
     /// recorded, each at the Canon case revision (`r<revision>`) it was taken at.
     pub decisions: Vec<ExplicitDecision>,
+    /// The link to the case that opened this one through a `case_open` action; `None` for a root
+    /// (see the crate documentation, "Child cases").
+    pub parent: Option<CaseLink>,
+    /// The link to every child case this one opened, in the order opened.
+    pub children: Vec<CaseLink>,
+    /// The outcome the case terminated through and when; `None` while it is open.
+    pub termination: Option<CaseTermination>,
 }
 
 /// The value of each case input a case opens with, keyed by input id (`risk` → `standard`): the
@@ -604,6 +644,8 @@ pub enum UpdateError {
     UndeclaredArtifact { artifact: String },
     /// The revision is not an identifier.
     InvalidRevision { artifact: String },
+    /// The case is terminated through `outcome` and takes no write ([`CanonGovernor::terminate`]).
+    Terminated { outcome: String },
 }
 
 impl fmt::Display for UpdateError {
@@ -620,6 +662,7 @@ impl fmt::Display for UpdateError {
                     "the revision of artifact `{artifact}` is not an identifier"
                 )
             }
+            Self::Terminated { outcome } => terminated(f, outcome),
         }
     }
 }
@@ -636,6 +679,8 @@ pub enum DecisionError {
     /// Canon refuses the decision for the case: `code` is Canon's refusal code
     /// (`undeclared-outcome`, `undeclared-decision`, `invalid-identifier`, ...).
     Refused { code: String, message: String },
+    /// The case is terminated through `outcome` and takes no write ([`CanonGovernor::terminate`]).
+    Terminated { outcome: String },
 }
 
 impl fmt::Display for DecisionError {
@@ -644,11 +689,29 @@ impl fmt::Display for DecisionError {
             Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
             Self::UnknownCase => f.write_str("the governor does not hold the case"),
             Self::Refused { code, message } => write!(f, "{code}: {message}"),
+            Self::Terminated { outcome } => terminated(f, outcome),
         }
     }
 }
 
 impl std::error::Error for DecisionError {}
+
+/// The outcome `state` is terminated through, when it is terminated: a public write to it is
+/// refused ([`CanonGovernor::terminate`]).
+fn terminated_outcome(state: &CaseState) -> Option<String> {
+    state
+        .termination
+        .as_ref()
+        .map(|termination| termination.outcome.clone())
+}
+
+/// The text of every refusal of a write to a terminated case.
+fn terminated(f: &mut fmt::Formatter<'_>, outcome: &str) -> fmt::Result {
+    write!(
+        f,
+        "the case is terminated through outcome `{outcome}` and takes no write"
+    )
+}
 
 /// Why the governor refuses an evidence record's `observed_at` ([`CanonGovernor::check_evidence`]),
 /// naming the record by its evidence id. A refused record is not kept.
@@ -717,6 +780,9 @@ pub struct CanonGovernor<S, T = NoEvaluationTime> {
     /// The documents behind the frontiers this governor issued, keyed by case id
     /// ([`CanonGovernor::decision_document`]).
     kept: Mutex<BTreeMap<String, KeptDocuments>>,
+    /// Whether the evidence port receives a `case_outcome` record for a case whose protocol declares
+    /// `case_open` ([`CanonGovernor::with_host_case_outcomes`]); host code alone sets it.
+    host_case_outcomes: bool,
 }
 
 impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
@@ -729,6 +795,7 @@ impl<S: Default, T: Default> Default for CanonGovernor<S, T> {
             time: T::default(),
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
+            host_case_outcomes: false,
         }
     }
 }
@@ -760,6 +827,7 @@ impl<S: FallibleCaseStore> CanonGovernor<S> {
             time: NoEvaluationTime,
             completion_rule: CompletionRule::ExactlyOne,
             kept: Mutex::default(),
+            host_case_outcomes: false,
         }
     }
 }
@@ -793,6 +861,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             protocols.insert(name.to_owned(), ir);
             outcome_orders.insert(name.to_owned(), declared_outcomes(&entry.model));
         }
+        children::no_opening_cycle("catalog", protocols.values())?;
         self.protocols = protocols;
         self.outcome_orders = outcome_orders;
         self.catalog_definitions = Some(
@@ -870,6 +939,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             )
         })?;
         representable(name, &ir)?;
+        children::no_opening_cycle(name, self.protocols.values().chain([&ir]))?;
         self.protocols.insert(name.to_owned(), ir);
         self.outcome_orders
             .insert(name.to_owned(), declared_outcomes(model));
@@ -886,6 +956,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
             time,
             completion_rule: self.completion_rule,
             kept: self.kept,
+            host_case_outcomes: self.host_case_outcomes,
         }
     }
 
@@ -1019,6 +1090,9 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// Records `revision` as the current revision of `artifact` and raises the case revision by
     /// one; returns the new case revision. When `artifact` already holds `revision` nothing
     /// changes, and the current case revision is returned.
+    ///
+    /// A terminated case is refused, [`UpdateError::Terminated`] naming its outcome, and nothing is
+    /// written ([`CanonGovernor::terminate`]).
     pub fn update_revision(
         &self,
         case: &CaseId,
@@ -1032,6 +1106,9 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         }
         self.store
             .update(case, |state| {
+                if let Some(outcome) = terminated_outcome(state) {
+                    return Err(UpdateError::Terminated { outcome });
+                }
                 let current = state.artifacts.get_mut(artifact).ok_or_else(|| {
                     UpdateError::UndeclaredArtifact {
                         artifact: artifact.to_owned(),
@@ -1053,7 +1130,9 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// Records the explicit decision `decision`, taken for `outcome` by `principal`, on the case at
     /// its current revision, so later `frontier` and `completion` calls evaluate with it until the
     /// case moves. Recording a decision already held at that revision changes nothing. Canon judges
-    /// it first: one it refuses for the case is [`DecisionError::Refused`] and nothing is kept.
+    /// it first: one it refuses for the case is [`DecisionError::Refused`] and nothing is kept. A
+    /// terminated case is refused before Canon is asked, [`DecisionError::Terminated`] naming its
+    /// outcome, and nothing is kept ([`CanonGovernor::terminate`]).
     pub fn decide(
         &self,
         case: &CaseId,
@@ -1061,14 +1140,21 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
         decision: &str,
         principal: &str,
     ) -> Result<(), DecisionError> {
-        let (_, ir) = self.held_with_ir(case).map_err(|error| match error {
+        let (held, ir) = self.held_with_ir(case).map_err(|error| match error {
             GovernorError::UnknownCase => DecisionError::UnknownCase,
             _ => DecisionError::StoreUnavailable {
                 problem: "the held case cannot be read under its protocol".into(),
             },
         })?;
+        if let Some(outcome) = terminated_outcome(&held) {
+            return Err(DecisionError::Terminated { outcome });
+        }
         self.store
             .update(case, |state| {
+                // Again under the store's write: a termination stored since the read above.
+                if let Some(outcome) = terminated_outcome(state) {
+                    return Err(DecisionError::Terminated { outcome });
+                }
                 let taken = ExplicitDecision {
                     decision: decision.to_owned(),
                     outcome: outcome.to_owned(),
@@ -1331,6 +1417,17 @@ impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
     /// [`Self::decided`], and the trusted time the decision was made at, when one was given.
     fn decided_at(&self, case: &CaseId) -> Result<Decided, GovernorError> {
         let (state, ir) = self.held_with_ir(case)?;
+        self.decide_held(case, state, ir)
+    }
+
+    /// Canon's decision for `state`, the case as just read, under its compiled protocol `ir`, at
+    /// the trusted time of now.
+    fn decide_held(
+        &self,
+        case: &CaseId,
+        state: CaseState,
+        ir: Ir,
+    ) -> Result<Decided, GovernorError> {
         let records: Vec<EvidenceRecord> = state
             .evidence
             .iter()
@@ -1379,6 +1476,10 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
         Ok(self.held(case)?.revision)
     }
 
+    /// Canon's frontier for the case as held, at the trusted time. A terminated case is handed to
+    /// Canon without its termination, which Canon judged once in [`CanonGovernor::terminate`]: its
+    /// frontier lists Canon's claims and obligations as they are now and blocks every action with
+    /// the reason `{"terminated":"<outcome>"}`, at any later trusted time.
     fn frontier(&self, case: &CaseId) -> Result<Frontier<frontier_state::Issued>, GovernorError> {
         let (state, ir, decision) = self.decided(case)?;
         let projection = project(&ir, &decision).ok_or(GovernorError::GovernorUnavailable)?;
@@ -1412,6 +1513,7 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
                 capability: action.requires.into_iter().next(),
                 reasons: action.reasons,
             })
+            .map(|action| children::after_termination(&state, action))
             .collect();
         let rendered = render(&decision);
         let frontier_id = FrontierId(frontier_uuid(&state, &rendered));
@@ -1426,8 +1528,21 @@ impl<S: FallibleCaseStore, T: EvaluationTime> Governor for CanonGovernor<S, T> {
         }))
     }
 
+    /// The outcome the case completes with, as the completion rule reads Canon's decision. A
+    /// terminated case completes with its stored outcome, answered before any Canon call: Canon
+    /// judged the termination once, in [`CanonGovernor::terminate`].
     fn completion(&self, case: &CaseId) -> Result<CompletionDetermination, GovernorError> {
-        let (state, _, decision) = self.decided(case)?;
+        let (state, ir) = self.held_with_ir(case)?;
+        if let Some(termination) = &state.termination {
+            return Ok(CompletionDetermination::Complete(
+                CompletionDeterminationComplete {
+                    outcome: termination.outcome.clone(),
+                },
+            ));
+        }
+        let Decided {
+            state, decision, ..
+        } = self.decide_held(case, state, ir)?;
         let outcome = match self.completion_rule {
             CompletionRule::ExactlyOne => completed(&decision),
             CompletionRule::FirstDeclared => {
@@ -1508,9 +1623,18 @@ impl<S: FallibleCaseStore, T> CanonGovernor<S, T> {
 }
 
 impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, T> {
+    /// Keeps `evidence` for its case (see the module documentation, "Evidence"). A record for a
+    /// terminated case is refused and nothing of it is kept: Commission's `GovernorError` has no
+    /// variant naming the termination, so the refusal is `GovernorUnavailable`
+    /// ([`CanonGovernor::terminate`]).
     fn receive(&self, evidence: AttributedEvidence) -> Result<(), GovernorError> {
         let data = evidence.into_evidence().into_data();
-        let (_, ir) = self.held_with_ir(&data.case_id)?;
+        let (held, ir) = self.held_with_ir(&data.case_id)?;
+        if held.termination.is_some() {
+            return Err(GovernorError::GovernorUnavailable);
+        }
+        // A child's outcome is written by the governor alone (see "Child cases").
+        self.refuse_submitted_outcome(&held, &ir, &data)?;
         // Commission's `GovernorError` names no record; `check_evidence` names it for the host.
         self.check_evidence(&data)
             .map_err(|_| GovernorError::GovernorUnavailable)?;
@@ -1521,11 +1645,16 @@ impl<S: FallibleCaseStore, T: EvaluationTime> EvidencePort for CanonGovernor<S, 
             .map_err(|_| GovernorError::GovernorUnavailable)?;
         self.store
             .update(&case, |state| {
+                // Again under the store's write: a termination stored since the read above.
+                if state.termination.is_some() {
+                    return Err(GovernorError::GovernorUnavailable);
+                }
                 let applies = applies(&ir, state, &data, at.as_deref());
                 state.evidence.push(HeldEvidence { data, applies });
+                Ok(())
             })
             .map_err(|_| GovernorError::GovernorUnavailable)?
-            .ok_or(GovernorError::UnknownCase)
+            .unwrap_or(Err(GovernorError::UnknownCase))
     }
 }
 
@@ -1551,6 +1680,243 @@ impl<S: FallibleCaseStore, T: EvaluationTime> ObservationPort for CanonGovernor<
             .observe(observation.into_data())
             .map_err(|_| GovernorError::GovernorUnavailable)
     }
+}
+
+/// What one step wrote ([`CanonGovernor::record_step`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StepWritten {
+    /// The artifact revisions moved, in artifact order: from the revision the case held to the
+    /// one given.
+    pub moves: Vec<loom::bindings::RevisionMove>,
+    /// The case revision once the step was written.
+    pub case_revision: i64,
+    /// Whether each record applies, in the order given.
+    pub applies: Vec<bool>,
+}
+
+/// Why a step was not written ([`CanonGovernor::record_step`]): nothing of it was kept, neither
+/// a revision move nor a record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StepError {
+    /// The store could not write the step.
+    StoreUnavailable { problem: String },
+    /// The governor does not hold the case.
+    UnknownCase,
+    /// The held case cannot be read under its protocol, or the trusted time cannot be read.
+    Unavailable,
+    /// The case's protocol does not declare `artifact`.
+    UndeclaredArtifact { artifact: String },
+    /// The revision given for `artifact` is not an identifier.
+    InvalidRevision { artifact: String },
+    /// The record `evidence` is for another case.
+    OtherCase { evidence: String },
+    /// The governor does not take the record ([`CanonGovernor::check_evidence`]).
+    Evidence(EvidenceRefusal),
+    /// The record `evidence` is not about the revisions the case holds once the step's moves are
+    /// applied: its case revision, its subject's revision or an upstream revision differs.
+    StaleRecord { evidence: String, detail: String },
+    /// The case is terminated through `outcome` and takes no write ([`CanonGovernor::terminate`]).
+    Terminated { outcome: String },
+}
+
+impl From<GovernorError> for StepError {
+    fn from(error: GovernorError) -> Self {
+        match error {
+            GovernorError::UnknownCase => Self::UnknownCase,
+            GovernorError::GovernorUnavailable => Self::Unavailable,
+        }
+    }
+}
+
+impl fmt::Display for StepError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StoreUnavailable { problem } => write!(f, "case store unavailable: {problem}"),
+            Self::UnknownCase => f.write_str("the governor does not hold the case"),
+            Self::Unavailable => {
+                f.write_str("the governor cannot read the case under its protocol")
+            }
+            Self::UndeclaredArtifact { artifact } => {
+                write!(f, "artifact `{artifact}` is not declared by the protocol")
+            }
+            Self::InvalidRevision { artifact } => write!(
+                f,
+                "the revision of artifact `{artifact}` is not an identifier"
+            ),
+            Self::OtherCase { evidence } => write!(f, "evidence `{evidence}` is for another case"),
+            Self::Evidence(refusal) => refusal.fmt(f),
+            Self::StaleRecord { evidence, detail } => write!(
+                f,
+                "evidence `{evidence}` is not about the revisions the step writes: {detail}"
+            ),
+            Self::Terminated { outcome } => terminated(f, outcome),
+        }
+    }
+}
+
+impl std::error::Error for StepError {}
+
+impl<S: FallibleCaseStore, T: EvaluationTime> CanonGovernor<S, T> {
+    /// Writes one step to the case in one store write: each artifact of `revisions` whose
+    /// revision differs from the one the case holds moves to it, the case revision rising by one
+    /// per artifact moved, and `evidence` is kept after the moves, in the order given, each record
+    /// judged as [`EvidencePort::receive`] judges one against the case as moved. An artifact
+    /// `revisions` does not name keeps its revision.
+    ///
+    /// Everything is checked before anything changes: each revision is an identifier, each record
+    /// is for the case and taken by [`CanonGovernor::check_evidence`]; and, under the store's
+    /// write, each artifact is declared and each record is about the case as moved: its
+    /// `subject_revision` is the moved case revision, and a record its facts carry names the moved
+    /// revision of its subject and of every upstream artifact. A failed check writes nothing, so a
+    /// store whose write is atomic ([`FileCaseStore`]) holds the case either as before the step or
+    /// with every move and every record of it. A step with no record that would move nothing
+    /// writes nothing.
+    ///
+    /// A terminated case takes no step, not even one that would move nothing:
+    /// [`StepError::Terminated`] names its outcome ([`CanonGovernor::terminate`]).
+    ///
+    /// # Errors
+    /// [`StepError`]; nothing of the step was kept.
+    pub fn record_step(
+        &self,
+        case: &CaseId,
+        revisions: &BTreeMap<String, String>,
+        evidence: Vec<AttributedEvidence>,
+    ) -> Result<StepWritten, StepError> {
+        if let Some((artifact, _)) = revisions
+            .iter()
+            .find(|(_, revision)| !is_identifier(revision))
+        {
+            return Err(StepError::InvalidRevision {
+                artifact: artifact.clone(),
+            });
+        }
+        let (held, ir) = self.held_with_ir(case)?;
+        if let Some(outcome) = terminated_outcome(&held) {
+            return Err(StepError::Terminated { outcome });
+        }
+        let records: Vec<EvidenceData> = evidence
+            .into_iter()
+            .map(|attributed| attributed.into_evidence().into_data())
+            .collect();
+        for data in &records {
+            if data.case_id != *case {
+                return Err(StepError::OtherCase {
+                    evidence: data.evidence_id.0.0.clone(),
+                });
+            }
+            self.check_evidence(data).map_err(StepError::Evidence)?;
+            // A child's outcome is the governor's to write, through a step as through `receive`.
+            self.refuse_submitted_outcome(&held, &ir, data)?;
+        }
+        if records.is_empty()
+            && revisions
+                .iter()
+                .all(|(artifact, revision)| held.artifacts.get(artifact) == Some(revision))
+        {
+            return Ok(StepWritten {
+                moves: Vec::new(),
+                case_revision: held.revision,
+                applies: Vec::new(),
+            });
+        }
+        let at = self.time.at(case).map_err(|_| StepError::Unavailable)?;
+        self.store
+            .update(case, |state| {
+                // Again under the store's write: a termination stored since the read above.
+                if let Some(outcome) = terminated_outcome(state) {
+                    return Err(StepError::Terminated { outcome });
+                }
+                let mut next = state.clone();
+                let moves = moved(&mut next, revisions)?;
+                for data in &records {
+                    about_moved_case(&next, data)?;
+                }
+                let mut applying = Vec::with_capacity(records.len());
+                for data in records {
+                    let applies = applies(&ir, &next, &data, at.as_deref());
+                    applying.push(applies);
+                    next.evidence.push(HeldEvidence { data, applies });
+                }
+                let written = StepWritten {
+                    moves,
+                    case_revision: next.revision,
+                    applies: applying,
+                };
+                *state = next;
+                Ok(written)
+            })
+            .map_err(|error| StepError::StoreUnavailable {
+                problem: error.to_string(),
+            })?
+            .unwrap_or(Err(StepError::UnknownCase))
+    }
+}
+
+/// Moves each artifact of `revisions` whose revision in `state` differs, raising the case revision
+/// by one per move; the moves made, in artifact order.
+fn moved(
+    state: &mut CaseState,
+    revisions: &BTreeMap<String, String>,
+) -> Result<Vec<loom::bindings::RevisionMove>, StepError> {
+    let mut moves = Vec::new();
+    for (artifact, to) in revisions {
+        let current =
+            state
+                .artifacts
+                .get_mut(artifact)
+                .ok_or_else(|| StepError::UndeclaredArtifact {
+                    artifact: artifact.clone(),
+                })?;
+        if current != to {
+            moves.push(loom::bindings::RevisionMove {
+                artifact: artifact.clone(),
+                from: current.clone(),
+                to: to.clone(),
+            });
+            to.clone_into(current);
+            state.revision += 1;
+        }
+    }
+    Ok(moves)
+}
+
+/// Whether `data` is about the case as `state` holds it: its case revision, and, for the record
+/// its facts carry, its subject's revision and every upstream revision.
+fn about_moved_case(state: &CaseState, data: &EvidenceData) -> Result<(), StepError> {
+    let stale = |detail: String| StepError::StaleRecord {
+        evidence: data.evidence_id.0.0.clone(),
+        detail,
+    };
+    if data.subject_revision != state.revision {
+        return Err(stale(format!(
+            "it is for case revision {}, and the step leaves the case at {}",
+            data.subject_revision, state.revision
+        )));
+    }
+    let Some(record) = canon_record(data) else {
+        return Ok(());
+    };
+    let held = |artifact: &str| state.artifacts.get(artifact).map(String::as_str);
+    if !bound_to_current_revision(state, &record) {
+        return Err(stale(format!(
+            "it names revision {} of {}, and the step leaves {}",
+            record.subject_revision.as_str(),
+            record.subject.as_str(),
+            held(record.subject.as_str()).unwrap_or("no revision")
+        )));
+    }
+    for (artifact, revision) in record.upstream_revisions.iter() {
+        if held(artifact.as_str()) != Some(revision.as_str()) {
+            return Err(stale(format!(
+                "it names upstream revision {} of {}, and the step leaves {}",
+                revision.as_str(),
+                artifact.as_str(),
+                held(artifact.as_str()).unwrap_or("no revision")
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// The compiled protocol, after checking `revisions` and `inputs` against what it declares.
@@ -1699,6 +2065,9 @@ fn opened(
         independence: independence.clone(),
         evidence: Vec::new(),
         decisions: Vec::new(),
+        parent: None,
+        children: Vec::new(),
+        termination: None,
     }
 }
 
@@ -1778,11 +2147,16 @@ fn snapshot(ir: &Ir, state: &CaseState) -> Case {
                         ArtifactId::new(artifact.as_str()),
                         CaseArtifact {
                             revision: Revision::new(revision.as_str()),
+                            // Loom keeps no revision ancestry, so a `descended` form is unknown.
+                            descends_from: None,
                         },
                     )
                 })
                 .collect(),
         ),
+        // Canon judges a termination once, in `terminate` (`children::judge`), and never again:
+        // a terminated case is handed to Canon as an open one, and the governor answers its
+        // stored outcome and blocks its frontier itself.
         termination: None,
         revision: Some(Revision::new(format!("r{}", state.revision))),
         inputs: Declarations::new(
@@ -1985,6 +2359,8 @@ type Reader<'p> = (&'p EvidenceKindId, Option<&'p ArtifactId>);
 /// `all`, `any` and `not`. Order forms and `children` forms are kept apart: they read the whole
 /// history, excluded records included. A `children` form reads the kind `case_outcome` about any
 /// artifact (Canon's `eval/composition.rs`, `value`), which a protocol with such a form declares.
+/// A `descended` form's `first` kind is an order reader, about revisions the current one descends
+/// from, and its `then` kind a match reader, about the subject's current revision.
 fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
     fn walk<'p>(
         predicate: &'p Predicate,
@@ -2014,6 +2390,10 @@ fn evidence_reads(ir: &Ir) -> (Vec<Reader<'_>>, Vec<Reader<'_>>) {
             Predicate::Since(form) => {
                 orders.push((&form.last, form.subject.as_ref()));
                 orders.push((&form.then.kind, form.subject.as_ref()));
+            }
+            Predicate::Descended(form) => {
+                orders.push((&form.first.kind, form.subject.as_ref()));
+                matches.push((&form.then.kind, form.subject.as_ref()));
             }
             Predicate::Children(_) => orders.extend(case_outcome.map(|kind| (kind, None))),
             Predicate::Input(_) | Predicate::Claim(_) => {}

@@ -1,0 +1,170 @@
+# story decision-request-entity: an Expired request is terminal, so every command addressed to it
+# answers wrong-state. ESS-SYNTH-004 x7: ess 0.96.0 finds no input that reaches Expire/expired, so
+# it arranges no request resting in Expired. The cause is the two changes the story asks for:
+# DecisionClassId as a text newtype compared with "escalation" (story:96-99), and the
+# record-key-open outcome on open_for_record (story:109-111). Either one alone gives these 7
+# refusals; with both reverted they disappear. No change of the specification that keeps the
+# behaviour removes them, so this authored scenario covers them.
+type: ess-scenario/7
+covers:
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Recommend
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Decide
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.TakeRecommendation
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Escalate
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Expire
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.RecordProduced
+  - loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Supersede
+domain: loom.decision
+scenario: expired-request-refuses-every-command
+summary: "Each command but Request answers wrong-state on an Expired request; authored: synthesis reaches no Expired one (ESS-SYNTH-004, text DecisionClassId and record-key-open)."
+
+timeline:
+  - at: 2026-11-21T11:00:00Z
+    command: loom.decision.Request
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      case_id: "IDEA-1.direction"
+      question_key: "IDEA-1.direction|roadmap.approve|"
+      record_key: "owner.approve@r4"
+      unblocks: {kind: approval, action: "roadmap.approve", capability: "owner.approve"}
+      subject_artifact: "roadmap"
+      subject_revision: "tr0001"
+      question: "Approve the roadmap at revision tr0001?"
+      options:
+        - letter: "A"
+          does: "Approve."
+          cost: "None."
+          consequence: {admits: ["roadmap.approve"], blocks: [], grant: granted, produces: canon_authority}
+        - letter: "B"
+          does: "Reject."
+          cost: "The roadmap is written again."
+          consequence: {admits: [], blocks: ["roadmap.approve"], grant: denied, produces: canon_authority}
+      autonomy_level: A3
+      decision_class: roadmap
+      holder: person
+      eligible: ["operator"]
+      addressed_to: "operator"
+      opened_at: 2026-11-21T11:00:00Z
+      expires_at: 2026-11-21T12:00:00Z
+    outcome: requested
+    events:
+      - event: loom.decision.DecisionRequested
+        payload:
+          request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+          case_id: "IDEA-1.direction"
+          subject_artifact: "roadmap"
+          subject_revision: "tr0001"
+
+  - at: 2026-11-21T11:01:00Z
+    command: loom.decision.Recommend
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      recommended_option: "A"
+      strength: strong
+      default_on_silence: false
+      grounds:
+        - source: story
+          citation: {form: path_line, value: {path: "docs/roadmap.md", line: 12}}
+          supports: "A"
+          how: "The roadmap states the approved direction."
+      proposed_by: rule
+      check_verdict: verified
+      check_report: "1 ground, 1 resolves"
+    outcome: recommended
+    events:
+      - event: loom.decision.RecommendationRecorded
+        payload:
+          request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+          recommended_option: "A"
+          strength: strong
+
+  - at: 2026-11-21T12:00:00Z
+    command: loom.decision.Expire
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      at: 2026-11-21T12:00:00Z
+    outcome: expired
+    events:
+      - event: loom.decision.DecisionExpired
+        payload:
+          request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+
+  - at: 2026-11-21T12:01:00Z
+    command: loom.decision.Recommend
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      strength: none
+      default_on_silence: false
+      grounds: []
+      proposed_by: llm
+      check_verdict: refused
+      check_report: "0 grounds"
+    outcome: wrong-state
+
+  - at: 2026-11-21T12:02:00Z
+    command: loom.decision.Decide
+    actor: loom.decision.Person
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      option: "A"
+      principal: "operator"
+      principal_kind: person
+      decided_at: 2026-11-21T12:02:00Z
+      case_revision: "r4"
+      reasons: ["Too late."]
+    outcome: wrong-state
+
+  - at: 2026-11-21T12:03:00Z
+    command: loom.decision.TakeRecommendation
+    actor: loom.decision.Person
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      principal: "operator"
+      principal_kind: person
+      decided_at: 2026-11-21T12:03:00Z
+      case_revision: "r4"
+      reasons: ["Too late."]
+    outcome: wrong-state
+
+  - at: 2026-11-21T12:04:00Z
+    command: loom.decision.Escalate
+    actor: loom.decision.Person
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      escalate_to: "timo"
+      reason: "Too late."
+    outcome: wrong-state
+
+  - at: 2026-11-21T12:05:00Z
+    command: loom.decision.Expire
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      at: 2026-11-21T12:05:00Z
+    outcome: wrong-state
+
+  - at: 2026-11-21T12:06:00Z
+    command: loom.decision.RecordProduced
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      produced: {document: canon_authority, record: "owner.approve@r4", case_revision: "r4"}
+    outcome: wrong-state
+
+  - at: 2026-11-21T12:07:00Z
+    command: loom.decision.Supersede
+    actor: loom.decision.Runtime
+    input:
+      request_id: "DR-IDEA-1.direction-roadmap.approve-1"
+      superseded_by: "DR-IDEA-1.direction-roadmap.approve-2"
+      reason: "Asked again."
+    outcome: wrong-state
+
+assert:
+  - view: loom.decision.ArtifactDecisionHistory
+    params: {artifact: "roadmap"}
+    contains: {request_id: "DR-IDEA-1.direction-roadmap.approve-1", state: Expired}

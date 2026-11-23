@@ -27,24 +27,26 @@ source: Atlas ADRs 0096 and 0098 (Loom is the governed runtime and calls llm for
 
 A run repeats these steps until it is blocked: by an approval gate, by nothing admissible, by its
 step budget, or by an action no effect port performs. `run_until_blocked` in
-`b10x-loom-commission` is that loop. A step whose action needed authority, which the authority
-provider granted and the effect port performed, passes the approval gate: the run goes on. So
-does one the effect port refused without ending the run: the executor is told why and may correct
-the request within the step budget.
+`b10x-loom-commission` is that loop.
 
-## 1. Project the catalogue — Loom
+A step whose action needed authority, which the authority provider granted and the effect port
+performed, passes the approval gate, and the run goes on. So does a step the effect port refused
+without ending the run: the executor is told why and may correct the request within the step
+budget.
 
-The frontier's admissible actions are projected into the catalogue the model can see. Nothing
-consequential is offered because it was registered at startup; what the model sees comes from the
-current frontier, which the governor computes with Canon for the case's current revision.
+## 1. Project the catalogue (Loom)
 
-## 2. Select one action — Loom
+The frontier's admissible actions are projected into the catalogue the model can see.
+Registration at startup puts no consequential action in it. The catalogue comes from the current
+frontier, which the governor computes with Canon for the case's current revision.
 
-A selector picks one action from that catalogue. It can be a model (the slice's `ModelSelector`, one
-forced tool call), a deterministic rule, or, later, a fast typed selector. It chooses only from the
-candidates it was given; Loom refuses any other. See [action selection](./action-selection.md).
+## 2. Select one action (Loom)
 
-## 3. Generate arguments for that action only — Loom
+A selector picks one action from that catalogue. It can be a model, a deterministic rule, or,
+later, a fast typed selector. The slice's model selector is `ModelSelector`, one forced tool call.
+It chooses only from the candidates it was given, and Loom refuses any other. See [action selection](./action-selection.md).
+
+## 3. Generate arguments for that action only (Loom)
 
 The argument generator is handed the selected catalogue entry and nothing else. Loom records the
 request for arguments against the selection it serves, then returns the action as a
@@ -52,19 +54,21 @@ request for arguments against the selection it serves, then returns the action a
 
 Since 0.3.0, the local slice can resolve [stored-result references](./result-references.md)
 while generating those arguments. Only the expanded ordinary arguments reach the proposal and
-subsequent admission; a reference never grants permission.
+subsequent admission. A reference grants no permission.
 
-## 4. Revalidate — Commission runtime
+## 4. Revalidate (Commission runtime)
 
 Time passes between selection and effect: the case may have moved, and authority may have changed.
 The runtime turns the proposal into an action request bound to the frontier's revision and
 revalidates it against the current frontier, case revision and authority provider. An action that
 needs approval the provider does not give stops the run.
 
-## 5. Invoke the effect — Commission runtime
+## 5. Invoke the effect (Commission runtime)
 
 The runtime hands the admitted request to the `EffectPort` once and records what happened as an
-observation, never as evidence. The case moves to a new revision only after an effect the port
-reports as `Performed`. A port whose work has not finished, such as a CI job, answers `Pending`:
-the runtime hands it the same request again at the next step, revalidated first, until it answers
-otherwise or a budget ends the run `Waiting`. Loom does not make this call; see [where Loom ends](./where-loom-ends.md).
+observation, not as evidence. The case moves to a new revision only after an effect the port
+reports as `Performed`.
+
+A port whose work has not finished, such as a CI job, answers `Pending`. The runtime hands it the
+same request again at the next step, revalidated first, until it answers otherwise or a budget
+ends the run `Waiting`. Loom does not make this call: see [where Loom ends](./where-loom-ends.md).

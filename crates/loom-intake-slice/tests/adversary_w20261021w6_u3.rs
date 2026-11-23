@@ -11,11 +11,14 @@ use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings};
+use b10x_loom_intake_slice::bindings::{ActionBinding, ActionBindings, UNCONFINED_FLAG_REASON};
 use b10x_loom_intake_slice::clock::SystemClock;
+use b10x_loom_intake_slice::confinement::{
+    ConfinementAdapter, EngineConfinement, EngineRunner, KillBounds, SIGNAL_GRACE, TestRunner,
+};
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::TestCommand;
 use b10x_loom_intake_slice::intent::{IntentRequest, run_intent_with_options};
@@ -272,7 +275,7 @@ fn reaped_leader_scenario() {
         }
         Err(format!("no process took the id {leader}"))
     });
-    let output = run_case_for(case.dir.path(), 2);
+    let output = run_case_for(case.dir.path(), 2, Some(short_settle_runner()));
     let mut unrelated = taker.join().unwrap().unwrap();
     let ended = unrelated.try_wait().unwrap();
     let _ = unrelated.kill();
@@ -315,11 +318,28 @@ impl Case {
 
 /// Runs the intent in case directory `dir` to its one step and returns what the run printed.
 fn run_case(dir: &Path) -> String {
-    run_case_for(dir, 1)
+    run_case_for(dir, 1, None)
 }
 
-/// Runs the intent in case directory `dir`, the command bound with a timeout of `seconds`.
-fn run_case_for(dir: &Path, seconds: i64) -> String {
+/// The runner `--unconfined-bindings` gives (`UNCONFINED_FLAG_REASON`), which the run takes before
+/// the file's opt-in, with a kill settle of 1 s in place of a host's 5 s.
+fn short_settle_runner() -> Arc<dyn TestRunner> {
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .expect("local opens with the flag's reason")
+    .with_kill_bounds(KillBounds {
+        signal_grace: SIGNAL_GRACE,
+        kill_settle: Duration::from_secs(1),
+    });
+    Arc::new(runner)
+}
+
+/// Runs the intent in case directory `dir`, the command bound with a timeout of `seconds`, on
+/// `runner` when given (beside the file's opt-in, which starts its own `local` runner otherwise).
+fn run_case_for(dir: &Path, seconds: i64, runner: Option<Arc<dyn TestRunner>>) -> String {
     let catalog: ProtocolCatalog = InstallStore::new(dir.join("installed")).catalog().unwrap();
     let governor = CanonGovernor::new(MemoryCaseStore::default())
         .with_catalog(&catalog)
@@ -335,7 +355,7 @@ fn run_case_for(dir: &Path, seconds: i64) -> String {
     let request = IntentRequest {
         intent: INTENT.into(),
         workspace: None,
-        runner: None,
+        runner,
         test: TestCommand::new("", std::iter::empty::<&str>()),
         max_steps: 1,
         threshold: 0.5,
@@ -364,6 +384,7 @@ fn run_case_for(dir: &Path, seconds: i64) -> String {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: Some(dir.join("metrics.json")),
+            ..RunOptions::default()
         },
     );
     let output = String::from_utf8_lossy(&output).into_owned();

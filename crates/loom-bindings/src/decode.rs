@@ -4,15 +4,22 @@ use crate::tree::{self, Map as Mapping, Node as Value};
 use crate::{DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, FORMAT, MAX_DOCUMENT_BYTES, Refusal, refuse};
 use loom::bindings::{
     ActionBudget, ArtifactPath, BindingsDocument, BindingsRefusalReason as Reason, BoundAction,
-    EvidenceEntry, Executor, ExecutorSpec, ProducerIndependence, ResultRule, ResultSource,
-    RetryCondition, ToolAllowList,
+    EvidenceEntry, Executor, ExecutorSpec, ExitClasses, ProducerIndependence, ProgramRoot,
+    ResultRule, ResultSource, RetryCondition, RunsScope, ToolAllowList,
 };
 use loom::json::Value as Json;
 
 type Decoded<T> = Result<T, Refusal>;
 
-const TOP: [&str; 5] = ["format", "protocol", "artifacts", "independence", "actions"];
-const ACTION: [&str; 10] = [
+const TOP: [&str; 6] = [
+    "format",
+    "protocol",
+    "program_root",
+    "artifacts",
+    "independence",
+    "actions",
+];
+const ACTION: [&str; 12] = [
     "action",
     "executor",
     "arguments",
@@ -23,7 +30,12 @@ const ACTION: [&str; 10] = [
     "timeout_seconds",
     "retry_when",
     "handoff",
+    "handoff_when",
+    "exits",
 ];
+const EXITS: [&str; 2] = ["error", "not_called"];
+/// The highest exit code an `exits` list holds.
+const MAX_EXIT_CODE: i64 = 255;
 const EXECUTOR: [&str; 12] = [
     "kind",
     "argv",
@@ -39,18 +51,36 @@ const EXECUTOR: [&str; 12] = [
     "from",
 ];
 const ENTRY: [&str; 6] = ["kind", "subject", "producer", "from", "results", "upstream"];
-const BUDGET: [&str; 4] = [
+
+/// The argv entry a person's approval replaces by its principal
+/// (`story:person-action-runs-a-program`): only in a `person` executor's `argv`, only as a whole
+/// entry, never the first.
+pub const PRINCIPAL_PLACEHOLDER: &str = "{principal}";
+
+/// Whether an argv may hold [`PRINCIPAL_PLACEHOLDER`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Placeholder {
+    /// It may not: a program's `executor.argv`, `arguments_from`, `handoff_when`.
+    Refused,
+    /// It may, as a whole entry after the first: a person's `executor.argv`.
+    Principal,
+}
+const BUDGET: [&str; 7] = [
     "max_runs",
     "max_turns",
     "max_tokens",
     "max_budget_micro_usd",
+    "runs_per",
+    "rework_limit",
+    "rework_on",
 ];
 
 /// Decodes a `loom.bindings/1` document from YAML (or JSON).
 ///
 /// # Errors
 /// The first defect: text that is not a YAML object, an undeclared member, a missing or other
-/// `format`, a malformed `protocol`, `argv`, result table, tool name, budget or timeout, or an
+/// `format`, a malformed `protocol`, `program_root` (`workspace` or `bindings`), `argv`, result
+/// table, tool name, budget, timeout or `exits` list (exit codes from 0 to 255), or an
 /// executor without the members its kind needs. Whether the actions and artifacts exist in a
 /// protocol is [`crate::check`]'s.
 pub fn decode(text: &str) -> Decoded<BindingsDocument> {
@@ -107,9 +137,23 @@ pub fn decode(text: &str) -> Decoded<BindingsDocument> {
             ));
         }
     };
+    let program_root = match top.get("program_root") {
+        None => None,
+        Some(Value::String(root)) if root == "workspace" => Some(ProgramRoot::Workspace),
+        Some(Value::String(root)) if root == "bindings" => Some(ProgramRoot::Bindings),
+        Some(other) => {
+            return Err(refuse(
+                Reason::Malformed,
+                None,
+                "program_root",
+                format!("is {}; it is workspace or bindings", shown(other)),
+            ));
+        }
+    };
     Ok(BindingsDocument {
         format,
         protocol,
+        program_root,
         artifacts: artifacts(top)?,
         independence: independence(top)?,
         actions: actions(top)?,
@@ -230,7 +274,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
     };
     let arguments_from = match map.get("arguments_from") {
         None => None,
-        Some(value) => Some(argv(value, action, "arguments_from")?),
+        Some(value) => Some(argv(value, action, "arguments_from", Placeholder::Refused)?),
     };
     if arguments.is_some() && arguments_from.is_some() {
         return Err(refuse(
@@ -245,7 +289,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         Some(Value::Sequence(entries)) => entries
             .iter()
             .enumerate()
-            .map(|(i, entry)| evidence_entry(entry, action, i))
+            .map(|(i, entry)| evidence_entry(entry, action, i, executor.kind == Executor::Person))
             .collect::<Decoded<Vec<_>>>()?,
         Some(other) => {
             return Err(refuse(
@@ -276,9 +320,26 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         None => Vec::new(),
         Some(value) => retry_when(value, action)?,
     };
+    rework(&budget, &retry_when, action)?;
     let handoff = map
         .get("handoff")
         .map(|value| non_empty(value, action, "handoff"))
+        .transpose()?;
+    let handoff_when = match map.get("handoff_when") {
+        None => Vec::new(),
+        Some(value) => argv(value, action, "handoff_when", Placeholder::Refused)?,
+    };
+    if !handoff_when.is_empty() && handoff.is_none() {
+        return Err(refuse(
+            Reason::MissingMember,
+            action,
+            "handoff",
+            "is missing; handoff_when decides when the handoff is offered, so it needs the handoff text",
+        ));
+    }
+    let exits = map
+        .get("exits")
+        .map(|value| exits(value, action))
         .transpose()?;
     Ok(BoundAction {
         action: id.clone(),
@@ -291,6 +352,52 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         timeout_seconds,
         retry_when,
         handoff,
+        handoff_when,
+        exits,
+    })
+}
+
+/// The exit classes of a program binding: `error` and `not_called`, each a list of exit codes
+/// from 0 to [`MAX_EXIT_CODE`], empty when the document leaves it out.
+fn exits(value: &Value, action: Option<&str>) -> Decoded<ExitClasses> {
+    let map = object(value, action, "exits")?;
+    known(map, &EXITS, action, "exits.")?;
+    let codes = |name: &str| -> Decoded<Vec<i64>> {
+        let member = format!("exits.{name}");
+        let Some(value) = map.get(name) else {
+            return Ok(Vec::new());
+        };
+        let Value::Sequence(items) = value else {
+            return Err(refuse(
+                Reason::Malformed,
+                action,
+                member,
+                format!("is {}; it is a list of exit codes", shown(value)),
+            ));
+        };
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                item.as_i64()
+                    .filter(|code| (0..=MAX_EXIT_CODE).contains(code))
+                    .ok_or_else(|| {
+                        refuse(
+                            Reason::Malformed,
+                            action,
+                            format!("{member}[{index}]"),
+                            format!(
+                                "is {}; it is an exit code from 0 to {MAX_EXIT_CODE}",
+                                shown(item)
+                            ),
+                        )
+                    })
+            })
+            .collect()
+    };
+    Ok(ExitClasses {
+        error: codes("error")?,
+        not_called: codes("not_called")?,
     })
 }
 
@@ -350,11 +457,17 @@ fn executor(value: &Value, action: Option<&str>) -> Decoded<ExecutorSpec> {
             })
             .transpose()
     };
+    // The kind is known before the argv: only a person's argv may name its principal.
+    let placeholder = if kind == Executor::Person {
+        Placeholder::Principal
+    } else {
+        Placeholder::Refused
+    };
     let mut spec = ExecutorSpec {
         kind,
         argv: map
             .get("argv")
-            .map(|value| argv(value, action, "executor.argv"))
+            .map(|value| argv(value, action, "executor.argv", placeholder))
             .transpose()?,
         adapter: text("adapter")?,
         model: text("model")?,
@@ -437,7 +550,15 @@ fn executor(value: &Value, action: Option<&str>) -> Decoded<ExecutorSpec> {
     Ok(spec)
 }
 
-fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String>> {
+/// The argv `member` holds: a list of strings, never a shell string, its first entry naming the
+/// program. [`PRINCIPAL_PLACEHOLDER`] stands only where `placeholder` allows it, as a whole entry
+/// after the first; anywhere else an entry holding it is refused.
+fn argv(
+    value: &Value,
+    action: Option<&str>,
+    member: &str,
+    placeholder: Placeholder,
+) -> Decoded<Vec<String>> {
     let Value::Sequence(items) = value else {
         return Err(refuse(
             Reason::InvalidArgv,
@@ -456,6 +577,22 @@ fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String
     for (index, item) in items.iter().enumerate() {
         match item {
             Value::String(text) => out.push(text.clone()),
+            // `{principal}` unquoted in a YAML flow list is a mapping: say how it is written.
+            Value::Mapping(entries)
+                if entries.keys().count() == 1
+                    && entries
+                        .get("principal")
+                        .is_some_and(|value| matches!(value, Value::Null)) =>
+            {
+                return Err(refuse(
+                    Reason::InvalidArgv,
+                    action,
+                    member,
+                    format!(
+                        "entry {index} is the mapping {PRINCIPAL_PLACEHOLDER}; the placeholder is the string \"{PRINCIPAL_PLACEHOLDER}\", quoted"
+                    ),
+                ));
+            }
             other => {
                 return Err(refuse(
                     Reason::InvalidArgv,
@@ -474,10 +611,36 @@ fn argv(value: &Value, action: Option<&str>, member: &str) -> Decoded<Vec<String
             "names no program: its first entry is empty",
         ));
     }
+    for (index, entry) in out.iter().enumerate() {
+        if !entry.contains(PRINCIPAL_PLACEHOLDER) {
+            continue;
+        }
+        let why = if placeholder == Placeholder::Refused {
+            format!(
+                "entry {index} holds {PRINCIPAL_PLACEHOLDER}, which is replaced only in a person executor's argv"
+            )
+        } else if index == 0 {
+            format!("entry 0 is {PRINCIPAL_PLACEHOLDER}: the placeholder never names the program")
+        } else if entry != PRINCIPAL_PLACEHOLDER {
+            format!(
+                "entry {index} holds {PRINCIPAL_PLACEHOLDER} and more; the placeholder is a whole entry"
+            )
+        } else {
+            continue;
+        };
+        return Err(refuse(Reason::InvalidArgv, action, member, why));
+    }
     Ok(out)
 }
 
-fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<EvidenceEntry> {
+/// One evidence entry of `action`; `person`: the action is bound to a person, whose `effect` table
+/// may name results other than `performed`.
+fn evidence_entry(
+    value: &Value,
+    action: Option<&str>,
+    index: usize,
+    person: bool,
+) -> Decoded<EvidenceEntry> {
     let slot = format!("evidence[{index}]");
     let map = object(value, action, &slot)?;
     known(map, &ENTRY, action, &format!("{slot}."))?;
@@ -509,6 +672,7 @@ fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<
         }
         Some(Value::String(text)) if text == "exit" => (ResultSource::Exit, None),
         Some(Value::String(text)) if text == "effect" => (ResultSource::Effect, None),
+        Some(Value::String(text)) if text == "runs" => (ResultSource::Runs, None),
         Some(Value::String(text)) if json_pointer(text) => {
             (ResultSource::Report, Some(text.clone()))
         }
@@ -518,7 +682,7 @@ fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<
                 action,
                 from_member,
                 format!(
-                    "is {}; it is exit, effect or a JSON pointer into the program's report",
+                    "is {}; it is exit, effect, runs or a JSON pointer into the program's report",
                     shown(other)
                 ),
             ));
@@ -551,7 +715,11 @@ fn evidence_entry(value: &Value, action: Option<&str>, index: usize) -> Decoded<
                         ));
                     }
                 };
-                if from == ResultSource::Effect && value != "performed" {
+                // A person names the result of the action taking it; any other effect is performed.
+                if from == ResultSource::Effect
+                    && value != "performed"
+                    && (!person || value == crate::ANY_KEY)
+                {
                     return Err(refuse(
                         Reason::InvalidEffectResult,
                         action,
@@ -670,6 +838,9 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
         max_turns: None,
         max_tokens: None,
         max_budget_micro_usd: None,
+        runs_per: None,
+        rework_limit: None,
+        rework_on: None,
     };
     let Some(value) = value else {
         return Ok(budget);
@@ -678,6 +849,17 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
     known(map, &BUDGET, action, "budget.")?;
     for (key, member) in map.iter() {
         let name = key.clone();
+        match name.as_str() {
+            "runs_per" => {
+                budget.runs_per = Some(runs_scope(member, action)?);
+                continue;
+            }
+            "rework_on" => {
+                budget.rework_on = Some(rework_on(member, action)?);
+                continue;
+            }
+            _ => {}
+        }
         let number = member.as_i64().filter(|n| *n >= 1).ok_or_else(|| {
             refuse(
                 Reason::InvalidBudget,
@@ -690,22 +872,135 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
             "max_runs" => budget.max_runs = number,
             "max_turns" => budget.max_turns = Some(number),
             "max_tokens" => budget.max_tokens = Some(number),
+            "rework_limit" => budget.rework_limit = Some(number),
             _ => budget.max_budget_micro_usd = Some(number),
         }
     }
     Ok(budget)
 }
 
+/// `budget.runs_per`: `case` or `rejection` (`story:rework-allowance-after-a-rejection`).
+fn runs_scope(value: &Value, action: Option<&str>) -> Decoded<RunsScope> {
+    match value {
+        Value::String(scope) if scope == "case" => Ok(RunsScope::Case),
+        Value::String(scope) if scope == "rejection" => Ok(RunsScope::Rejection),
+        other => Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            "budget.runs_per",
+            format!("is {}; it is case or rejection", shown(other)),
+        )),
+    }
+}
+
+/// `budget.rework_on`: the shape of `retry_when`, never empty and naming no kind with an empty
+/// list, or it would name no rejection.
+fn rework_on(value: &Value, action: Option<&str>) -> Decoded<Vec<RetryCondition>> {
+    let member = "budget.rework_on";
+    let conditions = conditions(value, action, member, Reason::InvalidBudget)?;
+    if conditions.is_empty() {
+        return Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            member,
+            "is empty; it names the kinds and results that are rejections",
+        ));
+    }
+    if let Some(empty) = conditions
+        .iter()
+        .find(|condition| condition.results.is_empty())
+    {
+        return Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            format!("{member}.{}", empty.kind),
+            "is empty; it lists the results of the kind that are rejections",
+        ));
+    }
+    Ok(conditions)
+}
+
+/// The rework members against `runs_per` and the decoded `retry_when`: `rework_limit` and
+/// `rework_on` are read only under `runs_per: rejection`, which needs a `retry_when` to name a
+/// rejection (a kind with no result names none), and each pair `rework_on` lists is one
+/// `retry_when` lists.
+fn rework(
+    budget: &ActionBudget,
+    retry_when: &[RetryCondition],
+    action: Option<&str>,
+) -> Decoded<()> {
+    if budget.runs_per != Some(RunsScope::Rejection) {
+        for (member, present) in [
+            ("rework_limit", budget.rework_limit.is_some()),
+            ("rework_on", budget.rework_on.is_some()),
+        ] {
+            if present {
+                return Err(refuse(
+                    Reason::InvalidBudget,
+                    action,
+                    format!("budget.{member}"),
+                    "is read only under runs_per: rejection",
+                ));
+            }
+        }
+        return Ok(());
+    }
+    if retry_when
+        .iter()
+        .all(|condition| condition.results.is_empty())
+    {
+        return Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            "budget.runs_per",
+            "is rejection and retry_when lists no result, so no record could open an allowance",
+        ));
+    }
+    for condition in budget.rework_on.iter().flatten() {
+        for result in &condition.results {
+            if !crate::retry::lists(retry_when, &condition.kind, result) {
+                return Err(refuse(
+                    Reason::InvalidBudget,
+                    action,
+                    "budget.rework_on",
+                    format!(
+                        "lists {} {result}, which retry_when does not list; a rejection is a record that sends the action back",
+                        condition.kind
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn retry_when(value: &Value, action: Option<&str>) -> Decoded<Vec<RetryCondition>> {
-    let map = object(value, action, "retry_when")?;
+    conditions(value, action, "retry_when", Reason::Malformed)
+}
+
+/// A map of evidence kinds to lists of results at `member`, a defect refused `reason`.
+fn conditions(
+    value: &Value,
+    action: Option<&str>,
+    member: &str,
+    reason: Reason,
+) -> Decoded<Vec<RetryCondition>> {
+    let map = value.as_mapping().ok_or_else(|| {
+        refuse(
+            reason,
+            action,
+            member,
+            format!("is {}; it is an object", shown(value)),
+        )
+    })?;
     let mut out = Vec::new();
     for (key, results) in map.iter() {
         let kind = key.clone();
-        let member = format!("retry_when.{kind}");
-        let results = strings(results, action, &member, Reason::Malformed)?;
+        let member = format!("{member}.{kind}");
+        let results = strings(results, action, &member, reason)?;
         if let Some(index) = results.iter().position(String::is_empty) {
             return Err(refuse(
-                Reason::Malformed,
+                reason,
                 action,
                 format!("{member}[{index}]"),
                 "is empty",

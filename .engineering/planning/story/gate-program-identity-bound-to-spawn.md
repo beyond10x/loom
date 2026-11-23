@@ -27,11 +27,13 @@ scope:
   path: crates/loom-bindings/src/program.rs
 - confidence: cited
   path: crates/loom-bindings/tests/program_identity.rs
+- confidence: inferred
+  path: crates/loom-intake-slice/src/bindings.rs
 - confidence: cited
   path: ess/domains/bindings.yaml
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 14
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:54:58Z", actor: "agent:sdc", revision: 14, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
 ---
@@ -147,6 +149,19 @@ Waiting on this one: `story:observe-reads-documents` (direct edge), and through 
 `story:gates-document-evaluated-in-the-governor`: each shares `ess/domains/bindings.yaml` (story 7:
 `ess/system.yaml` instead), `generated/rust/loom/` and `CHANGELOG.md` with this story, and
 `story:report-formats-checked-before-the-table` also `crates/loom-bindings/src/program.rs`.
+
+Open, from wave 7 planning (`review-result:bound-program-result-table-w7-design-2`): since
+revision 16 of `story:bound-program-result-table` the `ChildCommand` of a bound program is built by
+a public function of `crates/loom-intake-slice/src/bindings.rs`, which takes `argv[0]` as the
+program and mounts that file at its own host path (`at_host_path`, `confinement.rs:1303`). This
+story's `launch` needs the mount path `/opt/loom/programs/<n>/<name>` as the program, and
+`ChildCommand` has no setter that changes the program afterwards. Two ways: this story changes that
+function, which also changes what the `run --action-bindings` path starts; or the function takes
+the program's mount from its caller and the intake path keeps `at_host_path`. The planner decides
+before this story enters a wave. Until then `crates/loom-intake-slice/src/bindings.rs` is in the
+typed scope as inferred, so the wave derivation sees the file. § Why and § Scope still cite the
+start before wave 2026-11-21-w6 (`bindings.rs:415`); the re-scope before this story's wave
+corrects them.
 
 ## ESS first
 

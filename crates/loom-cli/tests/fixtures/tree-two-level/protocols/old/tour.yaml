@@ -1,0 +1,17 @@
+format: protocol/1
+protocol:
+  id: tour
+  revision: 1
+  description: >-
+    An earlier walking tour in a subdirectory of the protocols directory, which `tree open
+    --protocols` does not read.
+artifacts:
+  route: {}
+evidence_kinds:
+  case_outcome: {}
+actions:
+  route.walk:
+    effect: write
+outcomes:
+  arrived:
+    requires: {decision: arrive}

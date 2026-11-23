@@ -23,6 +23,8 @@ evidence_kinds:
   child_outcome: {}
   signoff: {}
   imported: {}
+  conformance_run: {}
+  merge_approval: {}
 independence_dimensions:
   different_principal: {}
 actions:
@@ -650,6 +652,31 @@ fn an_effect_entry_takes_the_one_value_performed() {
 }
 
 #[test]
+fn a_person_effect_table_lists_the_results_a_person_names() {
+    let entry = |results: &str| {
+        document(&format!(
+            "  - action: change.sign\n    executor: {{kind: person, principal: alice}}\n    evidence:\n      \
+             - {{kind: signoff, subject: impl, producer: alice, from: effect, results: {results}}}\n"
+        ))
+    };
+    let named = entry("{performed: signed, rejected: rejected}");
+    assert!(refused(&named).is_none(), "{:?}", refused(&named));
+    let values: Vec<String> = decode(&named).unwrap().actions[0].evidence[0]
+        .results
+        .iter()
+        .map(|rule| rule.value.clone())
+        .collect();
+    assert_eq!(values, ["performed", "rejected"]);
+    // A person names one listed value: no `*` stands for any other.
+    assert_refused(
+        &entry("{performed: signed, \"*\": rejected}"),
+        Reason::InvalidEffectResult,
+        Some("change.sign"),
+        "evidence[0].results.*",
+    );
+}
+
+#[test]
 fn an_evidence_entry_needs_a_source_and_a_table() {
     let entry = |body: &str| {
         document(&format!(
@@ -762,6 +789,9 @@ fn index(reason: Reason) -> usize {
         Reason::PathNotInWorkspace => 17,
         Reason::UndeclaredDimension => 18,
         Reason::UndeclaredEvidenceKind => 19,
+        Reason::ExitClassConflict => 20,
+        Reason::ProgramNotBesideBindings => 21,
+        Reason::ArgumentsUndeclared => 22,
     }
 }
 
@@ -796,13 +826,86 @@ fn every_refusal_reason_is_reachable_from_a_document() {
         document(&format!("{GATE}    timeout_seconds: 0\n")),
         document(GATE).replace("docs/spec", "/abs"),
         document(GATE).replace("[different_principal]", "[nothing]"),
+        document(&format!(
+            "{GATE}    exits: {{error: [1], not_called: [1]}}\n"
+        )),
     ];
-    let reached: BTreeSet<usize> = documents
+    let mut reached: BTreeSet<usize> = documents
         .iter()
         .map(|text| index(refused(text).unwrap_or_else(|| panic!("{text}")).0.reason))
         .collect();
-    let all: BTreeSet<usize> = (0..20).collect();
+    // `resolve_programs` refuses against the directory of the bindings file: `tools/gate.sh` is
+    // not beside a file in the build's scratch directory.
+    let beside =
+        decode(&document(GATE).replace("artifacts:", "program_root: bindings\nartifacts:"))
+            .expect("the document decodes");
+    let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(directory).unwrap();
+    reached.insert(index(
+        b10x_loom_bindings::resolve_programs(&beside, directory)
+            .expect_err("the program is not beside the bindings file")
+            .0
+            .reason,
+    ));
+    // The open effect port refuses, as it is built, `arguments_from` on an opening whose protocol
+    // declares no `arguments` schema.
+    reached.insert(index(undeclared_arguments()));
+    let all: BTreeSet<usize> = (0..23).collect();
     assert_eq!(reached, all);
+}
+
+/// The reason `OpenEffects::new` refuses an `open` binding with `arguments_from` on an action that
+/// declares `case_open` and no `arguments` schema.
+fn undeclared_arguments() -> Reason {
+    let nest = "format: protocol/1
+protocol:
+  id: nest
+  revision: 1
+artifacts:
+  spec: {}
+evidence_kinds:
+  case_outcome: {}
+actions:
+  kids.open:
+    effect: write
+    case_open: {protocol: leaf, subject: spec}
+";
+    let mut catalog = loom_protocols::ProtocolCatalog::default();
+    let source = || loom_protocols::ProtocolSource {
+        kind: loom_protocols::SourceKind::Memory,
+        location: "bindings-document-fixture".into(),
+        revision: String::new(),
+        path: String::new(),
+    };
+    let leaf = "format: protocol/1\nprotocol:\n  id: leaf\n  revision: 1\nartifacts:\n  spec: {}\n";
+    catalog.add_yaml("nest@1", nest, source()).unwrap();
+    catalog.add_yaml("leaf@1", leaf, source()).unwrap();
+    let text = "format: loom.bindings/1
+protocol: nest@1
+actions:
+  - action: kids.open
+    executor: {kind: open, each: kids, bindings: nest.yaml}
+    arguments_from: [/bin/true]
+";
+    let document = decode(text).expect("the document decodes");
+    let governor = loom_governor::CanonGovernor::new(loom_governor::MemoryCaseStore::default());
+    let directory = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let refused = b10x_loom_bindings::OpenEffects::new(
+        &governor,
+        b10x_loom_commission::model::responsibility::CaseId("nest".into()),
+        &document,
+        &directory.join("nest.yaml"),
+        &catalog,
+        directory,
+        directory,
+        None,
+    )
+    .map(|_| ())
+    .expect_err("the port is refused");
+    match refused {
+        b10x_loom_bindings::OpenPortError::Refused(refusal) => refusal.0.reason,
+        other => panic!("not a refusal of the document: {other}"),
+    }
 }
 
 /// The first fenced block of `text` whose info string starts with `yaml` and whose body holds
@@ -982,10 +1085,451 @@ fn nesting_at_the_cap_decodes_and_one_past_is_refused() {
     assert_eq!(refusal.0.member, "document");
 }
 
+/// A program writer of `change.implement` with a handoff text and the members `extra`.
+fn handoff_writer(extra: &str) -> String {
+    document(&format!(
+        "  - action: change.implement\n    executor: {{kind: program, argv: [tools/write.sh]}}\n{extra}"
+    ))
+}
+
+#[test]
+fn handoff_when_without_handoff_is_refused() {
+    let both = handoff_writer(
+        "    handoff: Answer the finding, then run the tree again.\n    handoff_when: [tools/sdc-tool.sh, findings-wait, --action, change.implement]\n",
+    );
+    assert_eq!(refused(&both), None, "a check beside its handoff is kept");
+    assert_eq!(
+        decode(&both).unwrap().actions[0].handoff_when,
+        [
+            "tools/sdc-tool.sh",
+            "findings-wait",
+            "--action",
+            "change.implement"
+        ]
+    );
+    assert!(
+        decode(&handoff_writer("    handoff: Go on.\n"))
+            .unwrap()
+            .actions[0]
+            .handoff_when
+            .is_empty(),
+        "no check is an empty argv"
+    );
+    let alone = handoff_writer("    handoff_when: [tools/sdc-tool.sh, findings-wait]\n");
+    assert_refused(
+        &alone,
+        Reason::MissingMember,
+        Some("change.implement"),
+        "handoff",
+    );
+}
+
+#[test]
+fn handoff_when_on_a_person_is_refused() {
+    let text = document(
+        "  - action: change.sign\n    executor: {kind: person, principal: p}\n    handoff: Sign it.\n    handoff_when: [tools/check.sh]\n",
+    );
+    assert_refused(
+        &text,
+        Reason::MemberNotForExecutor,
+        Some("change.sign"),
+        "handoff_when",
+    );
+}
+
+#[test]
+fn an_invalid_handoff_when_argv_is_refused() {
+    for argv in ["[]", "tools/check.sh", "[\"\"]", "[tools/check.sh, 3]"] {
+        let text = handoff_writer(&format!("    handoff: Go on.\n    handoff_when: {argv}\n"));
+        assert_refused(
+            &text,
+            Reason::InvalidArgv,
+            Some("change.implement"),
+            "handoff_when",
+        );
+    }
+    // Under `program_root: bindings` its program is read beside the bindings file, as any bound
+    // program's is.
+    let directory = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "handoff-when-beside-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(directory.join("tools")).unwrap();
+    std::fs::write(directory.join("tools/write.sh"), "exit 0\n").unwrap();
+    let beside = handoff_writer("    handoff: Go on.\n    handoff_when: [tools/check.sh, wait]\n")
+        .replacen(
+            "protocol: story@1\n",
+            "protocol: story@1\nprogram_root: bindings\n",
+            1,
+        );
+    let document = decode(&beside).unwrap();
+    let missing = b10x_loom_bindings::resolve_programs(&document, &directory)
+        .expect_err("a missing check is refused");
+    assert_eq!(
+        missing.0.reason,
+        Reason::ProgramNotBesideBindings,
+        "{missing}"
+    );
+    assert_eq!(missing.0.member, "handoff_when[0]", "{missing}");
+    std::fs::write(directory.join("tools/check.sh"), "exit 0\n").unwrap();
+    let resolved = b10x_loom_bindings::resolve_programs(&document, &directory).unwrap();
+    assert_eq!(
+        resolved.actions[0].handoff_when,
+        [
+            directory
+                .canonicalize()
+                .unwrap()
+                .join("tools/check.sh")
+                .display()
+                .to_string(),
+            "wait".to_owned()
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 #[test]
 fn an_alias_used_within_the_node_bound_decodes() {
     let once = document(&format!(
         "{GATE}    arguments: {{base: &a [1, 2], again: *a}}\n"
     ));
     assert!(decode(&once).is_ok());
+}
+
+// story:person-action-runs-a-program: a person binding may name an argv, run once its principal
+// approves the action; `{principal}` is replaced only there, and only as a whole entry.
+
+/// A person binding of `change.sign` whose executor holds `argv` and whose action holds `extra`.
+fn person_with(argv: &str, extra: &str) -> String {
+    document(&format!(
+        "  - action: change.sign\n    executor: {{kind: person, principal: owner, argv: {argv}}}\n    \
+         evidence:\n      - {{kind: signoff, subject: spec, producer: owner, from: effect, results: {{performed: signed}}}}\n{extra}"
+    ))
+}
+
+#[test]
+fn a_person_binding_takes_an_argv_and_no_other_program_member() {
+    let text = person_with(
+        "[sh, tools/answer.sh, \"{principal}\", --action, change.sign]",
+        "",
+    );
+    assert_eq!(refused(&text), None, "a person's argv loads:\n{text}");
+    let decoded = decode(&text).unwrap();
+    assert_eq!(
+        decoded.actions[0].executor.argv.as_deref(),
+        Some(
+            &[
+                "sh".to_owned(),
+                "tools/answer.sh".to_owned(),
+                "{principal}".to_owned(),
+                "--action".to_owned(),
+                "change.sign".to_owned(),
+            ][..]
+        )
+    );
+    // Without an argv a person binding is as before.
+    assert_eq!(
+        refused(&document(
+            "  - action: change.sign\n    executor: {kind: person, principal: owner}\n"
+        )),
+        None
+    );
+    for (member, extra) in [
+        ("arguments", "    arguments: {a: 1}\n"),
+        ("arguments_from", "    arguments_from: [tools/args.sh]\n"),
+        ("exits", "    exits: {error: [3]}\n"),
+    ] {
+        let text = person_with("[tools/answer.sh]", extra);
+        assert_refused(
+            &text,
+            Reason::MemberNotForExecutor,
+            Some("change.sign"),
+            member,
+        );
+    }
+}
+
+#[test]
+fn principal_is_never_argv_zero() {
+    let text = person_with("[\"{principal}\", x]", "");
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("change.sign"),
+        "executor.argv",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+#[test]
+fn principal_is_never_part_of_an_entry() {
+    for entry in [
+        "--by={principal}",
+        "{principal}x",
+        " {principal}",
+        "{principal}{principal}",
+    ] {
+        let text = person_with(&format!("[tools/answer.sh, \"{entry}\"]"), "");
+        let refusal = assert_refused(
+            &text,
+            Reason::InvalidArgv,
+            Some("change.sign"),
+            "executor.argv",
+        );
+        assert!(
+            refusal.0.detail.contains("{principal}"),
+            "{entry}: {refusal}"
+        );
+    }
+}
+
+#[test]
+fn principal_is_refused_in_a_program_argv() {
+    let text = document(
+        "  - action: spec.gate\n    executor: {kind: program, argv: [tools/gate.sh, \"{principal}\"]}\n",
+    );
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("spec.gate"),
+        "executor.argv",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+#[test]
+fn principal_is_refused_in_arguments_from() {
+    let text = document(&format!(
+        "{GATE}    arguments_from: [tools/args.sh, \"{{principal}}\"]\n"
+    ));
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("spec.gate"),
+        "arguments_from",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+#[test]
+fn principal_is_refused_in_handoff_when() {
+    let text = handoff_writer(
+        "    handoff: Go on.\n    handoff_when: [tools/check.sh, \"{principal}\"]\n",
+    );
+    let refusal = assert_refused(
+        &text,
+        Reason::InvalidArgv,
+        Some("change.implement"),
+        "handoff_when",
+    );
+    assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// budget.runs_per, budget.rework_limit and budget.rework_on
+// (story rework-allowance-after-a-rejection)
+
+/// `change.implement` bound to a program with `retry_when` (none when `None`) and `budget`, each
+/// written as flow YAML.
+fn implement(retry_when: Option<&str>, budget: &str) -> String {
+    let retry = retry_when.map_or_else(String::new, |r| format!("    retry_when: {r}\n"));
+    document(&format!(
+        "  - action: change.implement\n    executor: {{kind: program, argv: [tools/implement.sh]}}\n{retry}    budget: {budget}\n"
+    ))
+}
+
+/// Runbook's `change.implement` (`bindings/sdc-story.yaml`): four `retry_when` entries, and the
+/// budget its `rework-fresh-allowance` case needs.
+const RUNBOOK_IMPLEMENT: &str = "  - action: change.implement\n    executor: {kind: program, argv: [tools/implement.sh]}\n\
+\x20   retry_when:\n      implementation_change: [coverage_refused]\n      conformance_run: [failed]\n      code_review: [rejected]\n      merge_approval: [rejected]\n\
+\x20   budget: {max_runs: 3, runs_per: rejection, rework_limit: 3, rework_on: {code_review: [rejected], merge_approval: [rejected]}}\n\
+\x20   evidence:\n      - {kind: implementation_change, subject: impl, producer: implementer, from: exit, results: {\"0\": null, \"8\": coverage_refused}}\n";
+
+/// The one bound action `text` decodes to, checked against the fixture protocol.
+fn decoded_one(text: &str) -> loom::bindings::BoundAction {
+    let doc = decode(text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    check(&doc, REGISTRATION, &protocol()).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    doc.actions.into_iter().next().expect("one action")
+}
+
+#[test]
+fn runs_per_and_rework_limit_decode() {
+    use loom::bindings::{RetryCondition, RunsScope};
+    let absent = decoded_one(&implement(
+        Some("{code_review: [rejected]}"),
+        "{max_runs: 2}",
+    ));
+    assert_eq!(absent.budget.runs_per, None);
+    assert_eq!(absent.budget.rework_limit, None);
+    assert_eq!(absent.budget.rework_on, None);
+    let rejection = decoded_one(&implement(
+        Some("{code_review: [rejected]}"),
+        "{max_runs: 1, runs_per: rejection, rework_limit: 3}",
+    ));
+    assert_eq!(rejection.budget.runs_per, Some(RunsScope::Rejection));
+    assert_eq!(rejection.budget.rework_limit, Some(3));
+    assert_eq!(rejection.budget.rework_on, None);
+    let case = decoded_one(&implement(None, "{max_runs: 2, runs_per: case}"));
+    assert_eq!(case.budget.runs_per, Some(RunsScope::Case));
+    assert_eq!(case.budget.rework_limit, None);
+    let runbook = decoded_one(&document(RUNBOOK_IMPLEMENT));
+    assert_eq!(runbook.retry_when.len(), 4);
+    assert_eq!(runbook.budget.max_runs, 3);
+    assert_eq!(runbook.budget.runs_per, Some(RunsScope::Rejection));
+    assert_eq!(runbook.budget.rework_limit, Some(3));
+    assert_eq!(
+        runbook.budget.rework_on,
+        Some(vec![
+            RetryCondition {
+                kind: "code_review".to_owned(),
+                results: vec!["rejected".to_owned()],
+            },
+            RetryCondition {
+                kind: "merge_approval".to_owned(),
+                results: vec!["rejected".to_owned()],
+            },
+        ])
+    );
+    let person = decoded_one(&document(
+        "  - action: change.sign\n    executor: {kind: person, principal: p}\n    retry_when: {code_review: [rejected]}\n\
+\x20   budget: {runs_per: rejection, rework_limit: 2, rework_on: {code_review: [rejected]}}\n",
+    ));
+    assert_eq!(person.budget.runs_per, Some(RunsScope::Rejection));
+    assert_eq!(person.budget.rework_limit, Some(2));
+    assert_eq!(person.budget.rework_on.map(|on| on.len()), Some(1));
+}
+
+#[test]
+fn runs_per_and_rework_limit_refusals() {
+    let listed = Some("{code_review: [rejected]}");
+    let budget = |member: &str, text: String| {
+        assert_refused(
+            &text,
+            Reason::InvalidBudget,
+            Some("change.implement"),
+            &format!("budget.{member}"),
+        );
+    };
+    for value in ["arrival", "revision", "3"] {
+        budget(
+            "runs_per",
+            implement(listed, &format!("{{max_runs: 1, runs_per: {value}}}")),
+        );
+    }
+    // No record could open an allowance.
+    budget(
+        "runs_per",
+        implement(None, "{max_runs: 1, runs_per: rejection}"),
+    );
+    for value in ["0", "\"2\""] {
+        budget(
+            "rework_limit",
+            implement(
+                listed,
+                &format!("{{max_runs: 1, runs_per: rejection, rework_limit: {value}}}"),
+            ),
+        );
+    }
+    budget(
+        "rework_limit",
+        implement(listed, "{max_runs: 1, rework_limit: 2}"),
+    );
+    budget(
+        "rework_limit",
+        implement(listed, "{max_runs: 1, runs_per: case, rework_limit: 2}"),
+    );
+    // Alone, the retry_when the rework_on cases sit beside loads.
+    assert!(refused(&implement(listed, "{max_runs: 1, runs_per: rejection}")).is_none());
+    for rework_on in [
+        "{code_review: [accepted]}",
+        "{signoff: [rejected]}",
+        "[code_review]",
+        "rejected",
+        "{}",
+    ] {
+        budget(
+            "rework_on",
+            implement(
+                listed,
+                &format!("{{max_runs: 1, runs_per: rejection, rework_on: {rework_on}}}"),
+            ),
+        );
+    }
+    budget(
+        "rework_on.code_review",
+        implement(
+            listed,
+            "{max_runs: 1, runs_per: rejection, rework_on: {code_review: []}}",
+        ),
+    );
+    budget(
+        "rework_on",
+        implement(
+            listed,
+            "{max_runs: 1, rework_on: {code_review: [rejected]}}",
+        ),
+    );
+    budget(
+        "rework_on",
+        implement(
+            listed,
+            "{max_runs: 1, runs_per: case, rework_on: {code_review: [rejected]}}",
+        ),
+    );
+    // Only a program and a person take the three members; each document decodes, so the refusal
+    // is the load check's. `rework_limit` and `rework_on` stand beside `runs_per: rejection`,
+    // which the check names last.
+    let members = [
+        ("runs_per", "{runs_per: rejection}"),
+        ("rework_limit", "{runs_per: rejection, rework_limit: 2}"),
+        (
+            "rework_on",
+            "{runs_per: rejection, rework_on: {code_review: [rejected]}}",
+        ),
+    ];
+    for (action, executor) in [
+        ("change.implement", "{kind: agent, adapter: a}"),
+        ("change.open", "{kind: open, name: n, bindings: c.yaml}"),
+        (
+            "change.copy",
+            "{kind: copy, evidence: imported, from: other@1}",
+        ),
+    ] {
+        for (member, budget) in members {
+            let text = document(&format!(
+                "  - action: {action}\n    executor: {executor}\n    retry_when: {{code_review: [rejected]}}\n    budget: {budget}\n"
+            ));
+            decode(&text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+            assert_refused(
+                &text,
+                Reason::MemberNotForExecutor,
+                Some(action),
+                &format!("budget.{member}"),
+            );
+        }
+    }
+    // Guard: retry_when itself keeps accepting an empty map and an empty result list.
+    assert!(refused(&implement(Some("{}"), "{max_runs: 1}")).is_none());
+    assert!(refused(&implement(Some("{code_review: []}"), "{max_runs: 1}")).is_none());
+}
+
+/// Security review of unit RW (wave 7), boundary of "runs_per: rejection on an action whose
+/// retry_when is empty": a `retry_when` whose every kind lists no result names no record either,
+/// so no record could open an allowance; refused at `budget.runs_per` as `retry_when: {}` is, and
+/// as D16 refuses `rework_on: {code_review: []}`.
+#[test]
+fn security_rw_rejection_beside_a_retry_when_listing_no_result_is_refused() {
+    assert_refused(
+        &implement(
+            Some("{code_review: []}"),
+            "{max_runs: 1, runs_per: rejection}",
+        ),
+        Reason::InvalidBudget,
+        Some("change.implement"),
+        "budget.runs_per",
+    );
 }

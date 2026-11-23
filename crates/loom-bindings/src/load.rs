@@ -1,6 +1,8 @@
 //! The load-time check: a decoded document held against the compiled protocol it names.
 
-use crate::{FORMAT, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, Refusal, refuse, workspace_path};
+use crate::{
+    FORMAT, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, RUNS_SPENT, Refusal, refuse, workspace_path,
+};
 use b10x_canon::model::Protocol;
 use loom::bindings::{
     BindingsDocument, BindingsRefusalReason as Reason, BoundAction, Executor, ResultSource,
@@ -15,13 +17,17 @@ use std::collections::BTreeSet;
 /// `independence` dimension the protocol does not declare; and, per action in document order, an
 /// action the protocol does not declare, a duplicate, a member that does not belong to its
 /// executor (`tools`, a budget member other than `max_runs`, any executor member of another
-/// kind), an evidence `kind` outside the action's `may_produce`, a `subject` or `upstream` entry
+/// kind, `exits` on any but a program), an exit code `exits` lists in both classes or in a class
+/// and as a key of a `from: exit` table of the binding, an evidence `kind` outside the action's
+/// `may_produce`, a `subject` or `upstream` entry
 /// that is not a declared artifact, a `timeout_seconds` outside 1 to 3600, and an `inputs` or
 /// `outputs` path that is absolute or leaves the workspace, and an `open` executor's `bindings` path
 /// that is absolute, leaves the directory of the bindings file or names no file (`.`, a trailing
 /// `/`);
-/// a `retry_when` kind that is not an evidence kind of the protocol; and an evidence `from` that does
-/// not fit the executor (`effect` on a program, anything but `effect` on a person or an open).
+/// a `retry_when` kind that is not an evidence kind of the protocol; an evidence `from` that does
+/// not fit the executor (`effect` on a program, anything but `effect` on a person or an open,
+/// `runs` on an agent or a copy); and a `from: runs` table that lists anything but
+/// [`RUNS_SPENT`].
 ///
 /// An action the document binds nothing to is not an error; [`unbound`] lists them.
 ///
@@ -115,6 +121,7 @@ pub fn check(
             .map(|production| production.evidence.to_string())
             .collect();
         fit(bound)?;
+        exit_classes(bound)?;
         for condition in &bound.retry_when {
             if !declared_kinds.contains(&condition.kind) {
                 return Err(refuse(
@@ -134,7 +141,8 @@ pub fn check(
             let source_fits = match kind {
                 Executor::Program => entry.from != ResultSource::Effect,
                 Executor::Person | Executor::Open => entry.from == ResultSource::Effect,
-                Executor::Agent | Executor::Copy => true,
+                // Loom counts the runs of a program alone.
+                Executor::Agent | Executor::Copy => entry.from != ResultSource::Runs,
             };
             if !source_fits {
                 return Err(refuse(
@@ -142,6 +150,24 @@ pub fn check(
                     Some(id),
                     format!("{slot}.from"),
                     format!("{:?} is not a source of a {kind:?} executor", entry.from),
+                ));
+            }
+            if entry.from == ResultSource::Runs
+                && !matches!(entry.results.as_slice(), [only] if only.value == RUNS_SPENT)
+            {
+                let listed: Vec<&str> = entry
+                    .results
+                    .iter()
+                    .map(|rule| rule.value.as_str())
+                    .collect();
+                return Err(refuse(
+                    Reason::InvalidEvidence,
+                    Some(id),
+                    format!("{slot}.results"),
+                    format!(
+                        "lists {}; a from: runs table lists {RUNS_SPENT} and nothing else",
+                        listed.join(", ")
+                    ),
                 ));
             }
             if !produces.contains(&entry.kind) {
@@ -229,8 +255,17 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
     let id = Some(bound.action.as_str());
     let spec = &bound.executor;
     let kind = spec.kind;
-    let members: [(&str, bool, Executor); 11] = [
-        ("argv", spec.argv.is_some(), Executor::Program),
+    // `argv` is a program's and a person's (`story:person-action-runs-a-program`): a person's
+    // approval runs it.
+    if spec.argv.is_some() && !matches!(kind, Executor::Program | Executor::Person) {
+        return Err(refuse(
+            Reason::MemberNotForExecutor,
+            id,
+            "executor.argv",
+            format!("belongs to the Program and Person executors, not {kind:?}"),
+        ));
+    }
+    let members: [(&str, bool, Executor); 10] = [
         ("adapter", spec.adapter.is_some(), Executor::Agent),
         ("model", spec.model.is_some(), Executor::Agent),
         ("inputs", spec.inputs.is_some(), Executor::Agent),
@@ -249,6 +284,34 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
                 id,
                 format!("executor.{member}"),
                 format!("belongs to the {owner:?} executor, not {kind:?}"),
+            ));
+        }
+    }
+    for (member, present) in [
+        ("exits", bound.exits.is_some()),
+        ("handoff_when", !bound.handoff_when.is_empty()),
+    ] {
+        if present && kind != Executor::Program {
+            return Err(refuse(
+                Reason::MemberNotForExecutor,
+                id,
+                member,
+                format!("belongs to the Program executor, not {kind:?}"),
+            ));
+        }
+    }
+    // A person's program reads `{}` on standard input, and its exit decides only whether the
+    // person's effect happened: it takes no arguments and no exit classes.
+    for (member, present) in [
+        ("arguments", bound.arguments.is_some()),
+        ("arguments_from", bound.arguments_from.is_some()),
+    ] {
+        if present && kind == Executor::Person {
+            return Err(refuse(
+                Reason::MemberNotForExecutor,
+                id,
+                member,
+                "belongs to a program step, not to the Person executor: a person's program reads {} on standard input",
             ));
         }
     }
@@ -278,6 +341,70 @@ fn fit(bound: &BoundAction) -> Result<(), Refusal> {
                     format!("belongs to the Agent executor, not {kind:?}"),
                 ));
             }
+        }
+    }
+    // A program's runs and a person's program's are counted (`prepare`); nothing else reads the
+    // members of `story:rework-allowance-after-a-rejection`. `runs_per` is named last: the other
+    // two are read only beside it.
+    if !matches!(kind, Executor::Program | Executor::Person) {
+        let budget = &bound.budget;
+        for (member, present) in [
+            ("rework_limit", budget.rework_limit.is_some()),
+            ("rework_on", budget.rework_on.is_some()),
+            ("runs_per", budget.runs_per.is_some()),
+        ] {
+            if present {
+                return Err(refuse(
+                    Reason::MemberNotForExecutor,
+                    id,
+                    format!("budget.{member}"),
+                    format!("belongs to the Program and Person executors, not {kind:?}"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Refuses an exit code `bound.exits` lists in both classes, or in a class and as a key of one of
+/// the binding's `from: exit` tables: such an exit never reaches the table, so it is in one place.
+fn exit_classes(bound: &BoundAction) -> Result<(), Refusal> {
+    let Some(exits) = &bound.exits else {
+        return Ok(());
+    };
+    let id = Some(bound.action.as_str());
+    for (index, code) in exits.not_called.iter().enumerate() {
+        if exits.error.contains(code) {
+            return Err(refuse(
+                Reason::ExitClassConflict,
+                id,
+                format!("exits.not_called[{index}]"),
+                format!("{code} is listed in exits.error too; an exit is in one class"),
+            ));
+        }
+    }
+    for (index, entry) in bound.evidence.iter().enumerate() {
+        if entry.from != ResultSource::Exit {
+            continue;
+        }
+        for rule in &entry.results {
+            let classed = |codes: &[i64]| codes.iter().any(|code| code.to_string() == rule.value);
+            let class = if classed(&exits.error) {
+                "exits.error"
+            } else if classed(&exits.not_called) {
+                "exits.not_called"
+            } else {
+                continue;
+            };
+            return Err(refuse(
+                Reason::ExitClassConflict,
+                id,
+                format!("evidence[{index}].results.{}", rule.value),
+                format!(
+                    "{class} lists the exit {}, which never reaches this table",
+                    rule.value
+                ),
+            ));
         }
     }
     Ok(())

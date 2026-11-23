@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:decision-request-entity
 kind: story
-status: proposed
+status: active
 title: loom.decision declares the decision request and its eight commands, and b10x-loom-decision applies them
 summary: 'The final SDC contract moved into Loom''s ESS at ess/37, ordered Strength and AutonomyLevel kept: class ids, the decided case revision, one open request per record id, and the DecisionStore port with the records kept beside a request'
 tags:
@@ -14,6 +14,8 @@ relations:
 - depends_on: story:ess-096-upgrade
 - depends_on: story:ess-format-37
 scope:
+- confidence: cited
+  path: Taskfile.yml
 - confidence: inferred
   path: crates/loom-conformance/Cargo.toml
 - confidence: cited
@@ -21,24 +23,33 @@ scope:
 - confidence: inferred
   path: crates/loom-conformance/src/lib.rs
 - confidence: cited
+  path: crates/loom-conformance/tests/adversary2_w2_conformance_status.rs
+- confidence: cited
+  path: crates/loom-conformance/tests/conform.rs
+- confidence: cited
   path: crates/loom-decision
 - confidence: cited
   path: crates/loom-decision/tests/decision_request.rs
 - confidence: cited
   path: crates/loom-executor/tests/crate_names.rs
 - confidence: cited
+  path: crates/loom-executor/tests/ess_gate.rs
+- confidence: cited
   path: ess/domains/decision.yaml
 - confidence: cited
   path: ess/ess-inputs.yaml
-- confidence: inferred
+- confidence: cited
+  path: ess/scenarios/decision
+- confidence: cited
   path: ess/scenarios/decision/merge-a5-veto.yaml
 - confidence: cited
   path: ess/system.yaml
 - confidence: inferred
   path: website/data/ess/loom-decision.domain-graph.json
-revision: 17
+revision: 42
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-21T03:05:18Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "sdc-standing-rule-2026-11-21"}
+- {from: "proposed", to: "active", at: "2026-11-21T13:30:58Z", actor: "agent:sdc", revision: 35, decided_on: {"recorded":{"review_outcome":2}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w7"}
 ---
 ## Outcome
 
@@ -182,8 +193,9 @@ It replaced its earlier choice, `ess/31` with `ordered: true` dropped
 
 ## Waits on
 
-`story:ess-format-37` (wave 2026-11-21-w6): `ess/system.yaml` at `ess/37`, which `ordered: true` on `Strength`
-and `AutonomyLevel` needs (from `ess/36`); both stories change `ess/system.yaml`. The two stories
+`story:ess-format-37` is delivered (wave 2026-11-21-w6) and `ess/system.yaml` declares `ess/37`:
+the dependency is met. This story needs `ess/37` for `ordered: true` on `Strength` and
+`AutonomyLevel` (from `ess/36`); both stories change `ess/system.yaml`. The two stories
 it named before are implemented at `9b4170fb`: `story:ess-format-31` (`ess/31`, which `[]` in
 `sets:` and the `coalesce` guard need) and `story:ess-096-upgrade` (the `ess` 0.96.0 pin).
 
@@ -289,26 +301,140 @@ raise (`story:ess-format-37`), an ESS toolchain change, and any `min` or `max` m
 order over `Strength` or `AutonomyLevel`. A guide or a `website/data/status.json` entry: the
 crate is an internal library with no command.
 
+## As built, wave 2026-11-21-w7
+
+Where the unit's commits (`c1a1f443..838536f2`, fourteen) differ from the text above, the commits
+are what holds:
+
+- The story does not mention the ESS gate; the unit changed it (`sdc`, option A; `9450c100`).
+  Step 3 of `crates/loom-executor/tests/ess_gate.rs` synthesizes with `--suite-format 5` (`:97`)
+  and passes when every refusal occurrence is covered by an authored `covers:` scenario
+  (`synthesize_holds`, `:219`); `task conform` fails when a cover is skipped, unsupported or
+  unreported (`unexecuted_covers`, `conform.rs:430`). Rule: AGENTS.md:206-217.
+- The domain makes ess 0.96.0 refuse 17 occurrences: 10 at `3be62683` (8 ESS-SYNTH-004: the seven
+  `Expired` refusals and `supersede`; 2 ESS-SYNTH-001 on `RecordProduced/recorded`, as in the SDC
+  file) and 7 more after `kind-not-principal` (ESS-SYNTH-003, which the two SYNTH-001 also read
+  after it; commit bodies of `54cf9f95` and `86313d78`). Four authored scenarios in
+  `ess/scenarios/decision/` cover them: `expired-request-refuses-every-command`,
+  `escalated-request-is-superseded`, `produced-record-is-recorded-once`,
+  `decide-kind-guards-under-a-rule` (`4d75156b`, `54cf9f95`). `COVER_TABLE` pins each occurrence
+  to its cover (`conform.rs:69`; `0357f12a`).
+- `Decide` and `TakeRecommendation` have a guard the story does not name: `kind-not-principal`
+  refuses `NotEligible` when `principal_kind` disagrees with the form of `principal`
+  (`decider:<kind>`, `rule:<name>`, `silence`, any other name a person), first in both commands
+  (`decision.yaml:603`, `:700`; `apply.rs:411`, `:527`). Decided by `sdc` after pass 1, F1
+  (`54cf9f95`, `b6dfb3a3`, `0357f12a`); the SDC's contract lacks it.
+- One open request per record key is an obligation of `DecisionStore::write`, not only of the
+  lookup in `Request` (`store.rs:133-137`; the in-memory store holds it in one step, `:229-250`).
+  `StoreConflict` carries `record_key_held_by` (`store.rs:41`); `Request` answers `RecordKeyOpen`
+  naming that holder (`apply.rs:291-298`) and reads the store before `open_for_record`
+  (`:222-223`). F3; `0357f12a`. A `Request` for an id already stored is `StoreConflict`, a Rust
+  error, not an ESS outcome (`apply.rs:205`; AGENTS.md:1302-1303).
+- The view `DecisionRequests` carries `record_key` and `decided_case_revision`
+  (`decision.yaml:1023`, `:1053`), which the list of changes does not name (F6; kept).
+  `decided_case_revision` is stored as given (`apply.rs:491`, `:588`), compared with nothing.
+- The conformance run checks no invariant after an authored scenario's steps (a mutant; `838536f2`,
+  its commit body); the two `invariant/after` occurrences have their own test in
+  `crates/loom-decision/tests/decision_request.rs:675`,
+  `the_stored_request_keeps_every_invariant_after_recorded_and_already_recorded` (`838536f2`).
+- Changed outside Scope: the six scenarios beside `merge-a5-veto.yaml` and their lines in
+  `ess/ess-inputs.yaml`; `Taskfile.yml`; AGENTS.md; `conform.rs` and `ess_gate.rs`;
+  `crates/loom-conformance/tests/adversary2_w2_conformance_status.rs` (`--scenarios ess` added
+  to its synthesize call, no assertion changed, `2a008cf2`); the reviewers' test files in
+  `crates/loom-decision/tests/`: `security_w20261121w7_u1.rs` (`732fd2e9`) and
+  `security_w20261121w7_u1_pass2.rs` (`638213b5`).
+- Not closed (`review-result:decision-request-entity-security-1`, `-2`): the fact report names
+  the trigger of the 8 ESS-SYNTH-004, not the cause; pass 2 did not check whether a
+  behaviour-keeping change of the specification removes the 7 later occurrences.
+
 ## Scope
 
-Derived 2026-11-21 by `story-scoper`. Every line is **cited** (read from the story or the tree) or
-**inferred** (a reading that could be wrong).
+Rewritten 2026-11-21 at the close of wave 2026-11-21-w7 from the unit's commits (`git diff --stat
+c1a1f443 838536f2`: 60 files, 13136 insertions, 151 deletions). Every line is cited from that diff.
 
-- **Primary surface:** `ess/domains/decision.yaml` (new domain `loom.decision`) and `crates/loom-decision` (new crate `b10x-loom-decision`) — cited (story Outcome, ESS first)
-- **Files (ESS):** `ess/domains/decision.yaml`, `ess/system.yaml` (one `domains:` line, after `loom.bindings` at `ess/system.yaml:24`), `ess/ess-inputs.yaml` (one `specification:` line, `ess/ess-inputs.yaml:17`) — cited
-- **Files (crate):** `crates/loom-decision/{Cargo.toml,src/**,tests/decision_request.rs}` — cited (`Cargo.toml` and `src` are inferred as the crate's own layout, as `crates/loom-bindings` has)
-- **Files (conformance):** `crates/loom-conformance/src/decision.rs` — cited; `crates/loom-conformance/src/lib.rs` — inferred, needs a `mod decision;` line, a field on `Live` (`lib.rs:142-163`), command arms beside `run::RUN_ONCE` (`lib.rs:220-256`) and a view arm beside `resource::LOOM_AGENTS` (`lib.rs:375`); `crates/loom-conformance/Cargo.toml` — inferred, gains `b10x-loom-decision = { path = "../loom-decision" }`
-- **Files (house test):** `crates/loom-executor/tests/crate_names.rs` — cited (story acceptance). `EXPECTED` is `[..; 29]` at `:18`, so the length becomes 30 and a tuple `("b10x-loom-decision", "loom-decision", Some("b10x_loom_decision"))` is added
-- **Files (scenario):** `ess/scenarios/decision/merge-a5-veto.yaml` plus its `ess/ess-inputs.yaml` line — inferred path (acceptance says "copied into Loom"; sibling scenarios sit in `ess/scenarios/<group>/`)
-- **Files (generated, regenerated not hand-edited):** `generated/rust/loom/**`, `website/docs/reference/ess/loom-decision.md`, `website/data/ess/loom-decision.domain-graph.json` — inferred, from AGENTS.md § Generated files and the `loom.bindings` commit `501c332a`
-- **Symbols:** `DecisionRequest`, `DecisionStore`, `EscalationSuppressedRecord`, `SuppressionCause`, `DecisionClassId`, `OpenDecisionsForPrincipal`, `ArtifactDecisionHistory`, `DecisionRequests`, actor `loom.decision.Runtime`, errors `RecordKeyOpen` and `NotARequestClass` — cited (story). None exists in `ess/`, `generated/` or `crates/` (`git grep` found no `loom.decision`).
-- **Documents:** none beyond the generated reference page. The story ships no guide, so `website/data/status.json` is not scoped (see "could not establish").
-- **Confidence:** high for the ESS files and the crate, which the story names. Medium for `loom-conformance/src/lib.rs` and the scenario path: the dispatch is a closed `match` over command ids that returns `unavailable` for an unknown command (`lib.rs:256-261`), so the new commands cannot pass without an arm.
-- **Would collide with:**
-  - `ess/system.yaml`: `story:ess-format-37` (wave 2026-11-21-w6) changes its `format:` line from `ess/31` to `ess/37`, and this story adds a `domains:` line — ordered, this story `depends_on` it.
-  - `ess/system.yaml`, `ess/ess-inputs.yaml`: `story:hash-chained-run-log` (`loom.runlog`) — no `depends_on` path; `story:tree-run-command` (`loom.tree`) — no path; `story:engine-configuration-document` (`loom.engine`) — no path; `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`, `story:boundary-admits-declared-http-egress` (scenario lines in `ess-inputs.yaml`) — no path; `story:autonomy-grant-table` (`loom.autonomy`) — ordered, it `depends_on` this story.
-  - `crates/loom-executor/tests/crate_names.rs`: `story:hash-chained-run-log`, `story:tree-run-command` — no path. A merge of any two of them must both bump `[..; 29]` and add a tuple.
-  - `crates/loom-conformance/src/lib.rs`: `story:tree-run-command`, `story:agent-selects-the-connectors-relay`, `story:send-input-in-the-declared-shape`, `story:revalidation-membership-conformance` — no path (the first three also touch `loom-conformance/Cargo.toml`, except `revalidation-membership-conformance`, which touches `lib.rs` only).
-  - `ess/domains/decision.yaml`, `crates/loom-decision/{Cargo.toml,src/lib.rs}`: every other story of the epic except `story:decision-suspension-reason` is ordered after this one by a `depends_on` path (graph: 19 of 20 siblings; the edges are direct only for `autonomy-grant-table` and `decision-request-file-store`). `decision-suspension-reason` touches only `ess/commission/` and Commission crates, so it does not collide.
-  - `Cargo.lock`, `generated/rust/loom/**`: every story that changes `ess/` or adds a crate.
-- **Safety fact:** the change adds a domain and a crate and edits no existing declaration, so no existing caller changes. `loom.bindings` landed as the same three `ess/` files (`501c332a`) plus a crate depending on `loom = { path = "../../generated/rust/loom" }` (`crates/loom-bindings/Cargo.toml:16`) — step 2, unproven. Whether `task crd-drift` or `task docs-check` move beyond the new domain's own page was not walked.
+- **Primary surface:** `ess/domains/decision.yaml` and `crates/loom-decision` — cited, 1 and 9 of
+  the 60 changed files (the crate: `Cargo.toml`, five `src/` files, three test files); the rest are
+  3 ESS files in all with the domain, 7 scenarios, 25 generated files, 4 site files, 5 under
+  `crates/loom-conformance`, 2 under `crates/loom-executor`, `Cargo.lock`, `Taskfile.yml` and 3
+  documents
+- **Files (ESS sources):** `ess/domains/decision.yaml` (new, 1057 lines: domain `loom.decision`, 71
+  declarations among them the entity `DecisionRequest`, the actors `Runtime`, `Person` and
+  `Decider`, the eight commands, nine events and three views), `ess/system.yaml` (1 line:
+  `loom.decision`), `ess/ess-inputs.yaml` (8 lines: the domain and seven `scenarios:` entries)
+- **Files (scenarios):** `ess/scenarios/decision/` — new, 7 files, 714 lines: `merge-a5-veto.yaml`
+  (133), `expired-request-refuses-every-command.yaml` (170), `escalated-request-is-superseded.yaml`
+  (82), `produced-record-is-recorded-once.yaml` (111), `decide-kind-not-principal.yaml` (62),
+  `take-recommendation-kind-not-principal.yaml` (61), `decide-kind-guards-under-a-rule.yaml` (95);
+  four of them carry `covers:` for 17 refusal occurrences synthesis cannot reach
+- **Files (generated output):** `generated/rust/loom/**` — cited, 25 files from `ess synthesize
+  --layout crate` (`task generate`): new `src/decision.rs` (2009 lines) and `src/actor.rs` (83),
+  `plan.json` (659 and 29), `PLAN.md` (85 and 2), `src/primitives.rs` (400 and 1),
+  `src/behaviour.rs` (177 and 1), `src/lib.rs` (3 and 1), and 18 files of 1 and 1 each (`Cargo.toml`
+  and 17 `src/*.rs`: the contract digest on line 2); also
+  `website/docs/reference/ess/loom-decision.md` (new, 986 lines),
+  `website/data/ess/loom-decision.domain-graph.json` (new, 251),
+  `website/docs/reference/ess/index.mdx` (47 and 38), `website/docs/reference/crates.md` (3 and 2)
+- **Files (source, `crates/loom-decision`):** new crate, `Cargo.toml` (14 lines, depends on the
+  generated `loom` crate alone), `src/apply.rs` (958, the eight commands in ESS's precedence, 2 unit
+  tests), `src/store.rs` (291, the `DecisionStore` port and `InMemoryDecisionStore`),
+  `src/instant.rs` (167, RFC 3339 reading, 2 unit tests), `src/views.rs` (91, the three views),
+  `src/lib.rs` (51)
+- **Files (source, `crates/loom-conformance`):** `src/decision.rs` (new, 1203 lines: the adapter
+  that applies the eight commands and three views to the scenario's store), `src/lib.rs` (26 lines:
+  `mod decision;`, a `decisions` field on `Live`, eight command arms, one view arm), `Cargo.toml` (3
+  lines: the `b10x-loom-decision` path dependency and the description)
+- **Files (new tests):** `crates/loom-decision/tests/decision_request.rs` (1657 lines, 26 `#[test]`,
+  the story's cases), `crates/loom-decision/tests/security_w20261121w7_u1.rs` (1258 lines, 6
+  `#[test]`, the security reviewer's pass-1 cases) and
+  `crates/loom-decision/tests/security_w20261121w7_u1_pass2.rs` (329 lines, 3 `#[test]`, pass 2),
+  committed unchanged
+- **Files (existing tests):** `crates/loom-conformance/tests/conform.rs` (328 lines, still 3
+  `#[test]`: the pinned `COVER_TABLE` of 17 rows, the check that every cover is executed and that
+  the suite's cover map equals the table, self-checks on moved copies),
+  `crates/loom-executor/tests/ess_gate.rs` (222 lines, 10 `#[test]` become 12: gate step 3 reads
+  `--suite-format 5` counts and fails an uncovered refusal,
+  `gate_over_a_copy_synthesize_refuses_with_exit_0_fails_at_synthesize` is renamed
+  `gate_over_a_copy_with_an_uncovered_refusal_fails_at_synthesize`),
+  `crates/loom-executor/tests/crate_names.rs` (7 lines: `EXPECTED` from 30 to 31 entries, gains
+  `b10x-loom-decision`), `crates/loom-conformance/tests/adversary2_w2_conformance_status.rs` (2
+  lines: `--scenarios ess`) — cited
+- **Files (manifests and lock):** `Cargo.lock` (8 lines: the `b10x-loom-decision` package, and the
+  dependency line in `b10x-loom-conformance`), `Taskfile.yml` (2 lines: the `ess-gate` description)
+  — cited
+- **Files (documents):** `AGENTS.md` (75 lines: § ESS item 3 and the rule on covering a refusal, the
+  new § Decision requests, the `commission:ess-gate` sentence), `CHANGELOG.md` (1 line: an `Added`
+  bullet), `README.md` (1 line: the crate's row) — cited
+- **Symbols (added, `b10x_loom_decision`):** functions `request`, `recommend`, `decide`,
+  `take_recommendation`, `record_produced`, `escalate`, `supersede`, `expire`,
+  `open_decisions_for_principal`, `artifact_decision_history`, `decision_requests`; trait
+  `DecisionStore` (`read`, `write`, `list`, `open_for_record`, `append_record`, `records`) and
+  `InMemoryDecisionStore` (`new`, `with_requests`); types `DecisionError`, `Undecided`,
+  `StoreFailure`, `StoreConflict`, `WriteError`, `AppendError`; re-exports `model`
+  (`loom::decision`) and `Timestamp` — cited
+- **Symbols (added, generated `loom`):** modules `decision` and `actor` (`Actor`, `Caller`, `may`),
+  the trait `DecisionRequestStorage` in `behaviour`, and the helper module `invariant` in
+  `primitives` — cited
+- **Symbols (changed, none public):** `crates/loom-conformance/src/lib.rs` `LoomTarget`'s command
+  and view dispatch (new arms), `Live` (new field); `crates/loom-executor/tests/ess_gate.rs`
+  `refusals` now returns the counts `Refusals { occurrences, covered }` and gains
+  `synthesize_holds`; no public item removed — cited
+- **Not predicted and touched:** `AGENTS.md`, `Taskfile.yml`,
+  `crates/loom-executor/tests/ess_gate.rs`, `crates/loom-conformance/tests/conform.rs`,
+  `crates/loom-conformance/tests/adversary2_w2_conformance_status.rs` (the gate now counts covered
+  refusals), the six scenario files besides `merge-a5-veto.yaml`, the two security test files (under
+  the typed `crates/loom-decision` row but unnamed), and `generated/rust/loom/src/actor.rs`,
+  `src/behaviour.rs`, `src/primitives.rs` (the Scope named `generated/rust/loom/**` as a whole)
+- **Predicted and not touched:** none; every row of the typed scope is in the diff, and the
+  generated, document and lock files the Scope inferred are all in it
+- **Review:** `decision-request-entity-security-1` (red at `2a008cf2`, six findings: a listed
+  decider naming itself a person decides under a rule because `principal_kind` is the command's own
+  claim; the doc says who may decide is never read from the command; two open requests for one
+  record key through the gap between check and write; a scenario covering a refusal it does not test
+  passes the gate; the `broken_invariant` check in `write` is untested; the view `DecisionRequests`
+  gains `record_key` and `decided_case_revision`, which the story does not list) and `-security-2`
+  (green at `0357f12a`: F1, F3, F4 and F5 closed by `kind-not-principal`, the record-key check
+  inside the store's write, the pinned `COVER_TABLE` and a test of the invariant check, F2 holds as
+  fixed; one note left, the docs said synthesis arranges no Decided request for `RecordProduced`
+  although `option-produces-none` is still synthesized, which the later commits `86313d78` and
+  `e1373728` reword); the plan-time results `decision-request-entity-e3r15-acceptance` and
+  `-e3r15-design` are not read for this section

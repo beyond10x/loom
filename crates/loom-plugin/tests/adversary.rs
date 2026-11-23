@@ -238,7 +238,7 @@ fn two_hosts_on_one_state_directory_record_an_item_once() {
         polling.wait();
         let refused = run_plugin_on(
             &second,
-            &fixture.host(&config),
+            &fixture.host(&config).with_lock_wait(REFUSAL_WAIT),
             &state,
             &AtomicBool::new(true),
         );
@@ -267,3 +267,7 @@ fn two_hosts_on_one_state_directory_record_an_item_once() {
          {record:?}"
     );
 }
+
+/// How long a refused second host waits for the held lock here: the holder in these cases
+/// keeps it, so the wait only delays the refusal ([`StateDir::open_waiting`]).
+const REFUSAL_WAIT: std::time::Duration = std::time::Duration::from_millis(200);

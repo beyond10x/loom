@@ -20,9 +20,12 @@ use loom_governor::{CanonGovernor, MemoryCaseStore};
 use loom_protocols::ProtocolCatalog;
 use serde_json::{Value, json};
 
+#[path = "support/loom.rs"]
+mod loom_bin;
+
 /// Runs `b10x-loom evaluate` with `args`, `stdin` on its standard input.
 fn evaluate(root: &Path, args: &[&str], stdin: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+    let mut child = loom_bin::loom()
         .arg("evaluate")
         .args(args)
         .env("XDG_DATA_HOME", root)
@@ -288,7 +291,7 @@ fn an_input_that_is_not_a_regular_file_is_refused_naming_it() {
     let directory = root.path().join("request.d");
     std::fs::create_dir_all(&directory).unwrap();
     for path in [fifo.as_path(), directory.as_path(), Path::new("/dev/zero")] {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_b10x-loom"))
+        let mut child = loom_bin::loom()
             .args(["evaluate", "--input", path.to_str().unwrap()])
             .env("XDG_DATA_HOME", root.path())
             .env_remove("B10X_LOOM_CONFINEMENT_REEXEC")

@@ -30,7 +30,22 @@
 //!   itself named otherwise.
 //!
 //! An `ActionFinished` holds an `exit` or a `refusal`, exactly one: a line with both or neither
-//! does not read as a line, so `verify` refuses it and an append refuses to write it.
+//! does not read as a line, so `verify` refuses it and an append refuses to write it. A
+//! `HandoffChecked` (story `handoff-when-a-program-decides`) is held to the same rule; a reader
+//! from before it refuses the kind. A
+//! `ChildOpened` or `ChildClosed` holds `record` and `record_digest` together or neither, the
+//! digest 64 lower-case hex digits, under the same rule. A log written before those members
+//! existed reads with both absent; a reader from before them refuses a line that holds them.
+//!
+//! A `Stopped` holds `budget` only beside the stop [`BUDGET_SPENT`], spelled as [`budget_name`]
+//! spells a `loom.tree.SpentBudget`: a line holding it beside another stop, or holding another
+//! spelling, does not read, under the same rule. A `BudgetSpent` line written before the member
+//! existed holds none and reads; a reader from before it refuses a line that holds it.
+//!
+//! A `StopRecorded` (the principal and the reason of a hold) and a `StopLifted` (the principal and
+//! `stop`, the `seq` of the line it lifts) are the lines `tree hold` and `tree reopen` write to a
+//! tree's root log (`story:tree-suite-stop-resume-reopen-steps`); a reader from before them
+//! refuses the kinds.
 //!
 //! What the log cannot show: a change to the last line alone is not detected, as a cut at a line
 //! boundary is not, since no line after it names its digest, and the next append makes the change
@@ -54,10 +69,11 @@ use loom::json::{
 use loom::primitives::Timestamp;
 use loom::runlog::{
     ActionFinished, ActionStarted, AuthorityRecorded, CaseOpened, ChildClosed, ChildOpened,
-    Discarded, Evaluated, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal, RunLogRefused,
-    Stopped, Terminated,
+    Discarded, Evaluated, HandoffChecked, RevisionMove, RunLogEvent, RunLogLine, RunLogRefusal,
+    RunLogRefused, StopLifted, StopRecorded, Stopped, Terminated,
 };
-use loom_governor::{FileStoreError, LockedDir, case_file_stem};
+use loom::tree::SpentBudget;
+use loom_governor::{FileStoreError, LockedDir, case_file_stem, durable};
 use sha2::{Digest as _, Sha256};
 
 /// What every log file's name starts with.
@@ -65,6 +81,33 @@ pub const PREFIX: &str = "runlog-";
 
 /// What every log file's name ends with.
 pub const EXTENSION: &str = ".jsonl";
+
+/// The stop of a `Stopped` line a budget ended the run with: the one stop whose line names the
+/// budget.
+pub const BUDGET_SPENT: &str = "BudgetSpent";
+
+/// The budgets, in the order a tree run asks them before a step.
+const SPENT_BUDGETS: [SpentBudget; 3] = [
+    SpentBudget::Cancel,
+    SpentBudget::MaxSteps,
+    SpentBudget::MaxWallSeconds,
+];
+
+/// How a `Stopped` line spells `budget`: the variant's name.
+pub fn budget_name(budget: SpentBudget) -> &'static str {
+    match budget {
+        SpentBudget::Cancel => "Cancel",
+        SpentBudget::MaxSteps => "MaxSteps",
+        SpentBudget::MaxWallSeconds => "MaxWallSeconds",
+    }
+}
+
+/// The budget `name` spells as [`budget_name`] does; `None` for any other text.
+pub fn spent_budget(name: &str) -> Option<SpentBudget> {
+    SPENT_BUDGETS
+        .into_iter()
+        .find(|budget| budget_name(*budget) == name)
+}
 
 /// The name of the log file of the case with id `case`: [`PREFIX`], the case file's stem and
 /// [`EXTENSION`].
@@ -289,17 +332,14 @@ impl RunLog {
         file.write_all(second)
             .map_err(|error| abandon(failed(&temporary, error)))?;
         step!(AppendStep::Written);
-        file.sync_all()
-            .map_err(|error| abandon(failed(&temporary, error)))?;
+        durable::sync_file(&file).map_err(|error| abandon(failed(&temporary, error)))?;
         step!(AppendStep::Synced);
         drop(file);
         fs::rename(&temporary, path).map_err(|error| abandon(failed(path, error)))?;
         step!(AppendStep::Renamed);
         // The rename has happened, so the new line is in the log; a failed directory sync only
         // weakens how soon it is durable and is not reported as a failed append.
-        if let Ok(dir) = fs::File::open(self.dir.path()) {
-            let _ = dir.sync_all();
-        }
+        durable::sync_dir(self.dir.path());
         step!(AppendStep::DirectorySynced);
         Ok(Some(line))
     }
@@ -495,13 +535,26 @@ pub fn encode(line: &RunLogLine) -> String {
             text(&mut out, "action", &event.action);
             text(&mut out, "reason", &event.reason);
         }
+        RunLogEvent::HandoffChecked(event) => {
+            text(&mut out, "action", &event.action);
+            if let Some(exit) = event.exit {
+                member(&mut out, "exit");
+                push_integer(&mut out, exit);
+            }
+            optional(&mut out, "refusal", &event.refusal);
+            optional(&mut out, "blob_digest", &event.blob_digest);
+        }
         RunLogEvent::ChildOpened(event) => {
             text(&mut out, "child", &event.child);
             text(&mut out, "protocol", &event.protocol);
+            optional(&mut out, "record", &event.record);
+            optional(&mut out, "record_digest", &event.record_digest);
         }
         RunLogEvent::ChildClosed(event) => {
             text(&mut out, "child", &event.child);
             optional(&mut out, "outcome", &event.outcome);
+            optional(&mut out, "record", &event.record);
+            optional(&mut out, "record_digest", &event.record_digest);
         }
         RunLogEvent::AuthorityRecorded(event) => {
             text(&mut out, "capability", &event.capability);
@@ -511,8 +564,18 @@ pub fn encode(line: &RunLogLine) -> String {
         RunLogEvent::Stopped(event) => {
             text(&mut out, "stop", &event.stop);
             texts(&mut out, "next", &event.next);
+            optional(&mut out, "budget", &event.budget);
         }
         RunLogEvent::Terminated(event) => text(&mut out, "reason", &event.reason),
+        RunLogEvent::StopRecorded(event) => {
+            text(&mut out, "principal", &event.principal);
+            text(&mut out, "reason", &event.reason);
+        }
+        RunLogEvent::StopLifted(event) => {
+            text(&mut out, "principal", &event.principal);
+            member(&mut out, "stop");
+            push_integer(&mut out, event.stop);
+        }
     }
     out.push('}');
     out
@@ -526,11 +589,14 @@ fn kind(event: &RunLogEvent) -> &'static str {
         RunLogEvent::ActionStarted(_) => "ActionStarted",
         RunLogEvent::ActionFinished(_) => "ActionFinished",
         RunLogEvent::Discarded(_) => "Discarded",
+        RunLogEvent::HandoffChecked(_) => "HandoffChecked",
         RunLogEvent::ChildOpened(_) => "ChildOpened",
         RunLogEvent::ChildClosed(_) => "ChildClosed",
         RunLogEvent::AuthorityRecorded(_) => "AuthorityRecorded",
         RunLogEvent::Stopped(_) => "Stopped",
         RunLogEvent::Terminated(_) => "Terminated",
+        RunLogEvent::StopRecorded(_) => "StopRecorded",
+        RunLogEvent::StopLifted(_) => "StopLifted",
     }
 }
 
@@ -549,11 +615,14 @@ fn event_members(kind: &str) -> Option<&'static [&'static str]> {
             "revisions",
         ],
         "Discarded" => &["action", "reason"],
-        "ChildOpened" => &["child", "protocol"],
-        "ChildClosed" => &["child", "outcome"],
+        "HandoffChecked" => &["action", "exit", "refusal", "blob_digest"],
+        "ChildOpened" => &["child", "protocol", "record", "record_digest"],
+        "ChildClosed" => &["child", "outcome", "record", "record_digest"],
         "AuthorityRecorded" => &["capability", "decision", "principal"],
-        "Stopped" => &["stop", "next"],
+        "Stopped" => &["stop", "next", "budget"],
         "Terminated" => &["reason"],
+        "StopRecorded" => &["principal", "reason"],
+        "StopLifted" => &["principal", "stop"],
         _ => return None,
     })
 }
@@ -618,7 +687,9 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
         "ActionStarted" => RunLogEvent::ActionStarted(ActionStarted {
             action: text("action")?,
         }),
-        "ActionFinished" if value.member("exit").is_some() == value.member("refusal").is_some() => {
+        "ActionFinished" | "HandoffChecked"
+            if value.member("exit").is_some() == value.member("refusal").is_some() =>
+        {
             return Err(DecodeError {
                 at: "exit".to_owned(),
                 expected: "an exit or a refusal, exactly one".to_owned(),
@@ -629,6 +700,15 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
                 },
             });
         }
+        "HandoffChecked" => RunLogEvent::HandoffChecked(HandoffChecked {
+            action: text("action")?,
+            exit: value
+                .member("exit")
+                .map(|exit| integer_at(exit, "exit", "an integer"))
+                .transpose()?,
+            refusal: optional_text(value, "", "refusal")?,
+            blob_digest: optional_text(value, "", "blob_digest")?,
+        }),
         "ActionFinished" => RunLogEvent::ActionFinished(ActionFinished {
             action: text("action")?,
             exit: value
@@ -648,22 +728,45 @@ fn decode(value: &Value) -> Result<RunLogLine, DecodeError> {
             action: text("action")?,
             reason: text("reason")?,
         }),
-        "ChildOpened" => RunLogEvent::ChildOpened(ChildOpened {
-            child: text("child")?,
-            protocol: text("protocol")?,
-        }),
-        "ChildClosed" => RunLogEvent::ChildClosed(ChildClosed {
-            child: text("child")?,
-            outcome: optional_text(value, "", "outcome")?,
-        }),
+        "ChildOpened" => {
+            let (record, record_digest) = child_record(value)?;
+            RunLogEvent::ChildOpened(ChildOpened {
+                child: text("child")?,
+                protocol: text("protocol")?,
+                record,
+                record_digest,
+            })
+        }
+        "ChildClosed" => {
+            let (record, record_digest) = child_record(value)?;
+            RunLogEvent::ChildClosed(ChildClosed {
+                child: text("child")?,
+                outcome: optional_text(value, "", "outcome")?,
+                record,
+                record_digest,
+            })
+        }
         "AuthorityRecorded" => RunLogEvent::AuthorityRecorded(AuthorityRecorded {
             capability: text("capability")?,
             decision: text("decision")?,
             principal: text("principal")?,
         }),
-        "Stopped" => RunLogEvent::Stopped(Stopped {
-            stop: text("stop")?,
-            next: texts("next")?,
+        "Stopped" => {
+            let stop = text("stop")?;
+            let budget = stopped_budget(value, &stop)?;
+            RunLogEvent::Stopped(Stopped {
+                stop,
+                next: texts("next")?,
+                budget,
+            })
+        }
+        "StopRecorded" => RunLogEvent::StopRecorded(StopRecorded {
+            principal: text("principal")?,
+            reason: text("reason")?,
+        }),
+        "StopLifted" => RunLogEvent::StopLifted(StopLifted {
+            principal: text("principal")?,
+            stop: integer_at(member_at(value, "", "stop")?, "stop", "an integer")?,
         }),
         _ => RunLogEvent::Terminated(Terminated {
             reason: text("reason")?,
@@ -682,6 +785,59 @@ fn optional_text(value: &Value, at: &str, name: &str) -> Result<Option<String>, 
         .member(name)
         .map(|held| text_at(held, &json::nested(at, name), "a string").map(str::to_owned))
         .transpose()
+}
+
+/// The `record` and `record_digest` of a child line: both or neither, the digest 64 lower-case
+/// hex digits. ESS cannot state the pairing yet, so the reader holds it.
+fn child_record(value: &Value) -> Result<(Option<String>, Option<String>), DecodeError> {
+    let record = optional_text(value, "", "record")?;
+    let digest = optional_text(value, "", "record_digest")?;
+    let missing = |at: &str, beside: &str| DecodeError {
+        at: at.to_owned(),
+        expected: format!("a {at} beside {beside}: the two come together or not at all"),
+        found: "none".to_owned(),
+    };
+    match (&record, &digest) {
+        (Some(_), None) => Err(missing("record_digest", "record")),
+        (None, Some(_)) => Err(missing("record", "record_digest")),
+        (_, Some(held)) if !is_sha256(held) => Err(DecodeError {
+            at: "record_digest".to_owned(),
+            expected: "a SHA-256, 64 lower-case hex digits".to_owned(),
+            found: if held.len() == 64 {
+                "a character that is no lower-case hex digit".to_owned()
+            } else {
+                format!("{} bytes", held.len())
+            },
+        }),
+        _ => Ok((record, digest)),
+    }
+}
+
+/// The `budget` of a `Stopped` line whose stop is `stop`: absent, or one [`spent_budget`] reads
+/// beside [`BUDGET_SPENT`]. ESS cannot state the rule yet, so the reader holds it.
+fn stopped_budget(value: &Value, stop: &str) -> Result<Option<String>, DecodeError> {
+    let budget = optional_text(value, "", "budget")?;
+    match &budget {
+        Some(_) if stop != BUDGET_SPENT => Err(DecodeError {
+            at: "budget".to_owned(),
+            expected: format!("no budget beside a stop other than {BUDGET_SPENT}"),
+            found: "a budget".to_owned(),
+        }),
+        Some(name) if spent_budget(name).is_none() => Err(DecodeError {
+            at: "budget".to_owned(),
+            expected: format!("one of {}", SPENT_BUDGETS.map(budget_name).join(", ")),
+            found: format!("`{name}`"),
+        }),
+        _ => Ok(budget),
+    }
+}
+
+/// Whether `text` is 64 lower-case hex digits.
+fn is_sha256(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 fn revision_move(value: &Value, at: &str) -> Result<RevisionMove, DecodeError> {

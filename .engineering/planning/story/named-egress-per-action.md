@@ -12,6 +12,7 @@ relations:
 - serves: vision:O1
 - depends_on: story:tree-run-command
 - depends_on: story:executable-allow-list
+- depends_on: story:mixed-egress-launches
 revision: 3
 ---
 ## Outcome

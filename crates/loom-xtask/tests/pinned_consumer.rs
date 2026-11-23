@@ -139,10 +139,7 @@ fn the_pinned_consumer_resolves_one_copy_of_each_loom_crate() {
         .lines()
         .filter(|line| {
             let name = line.split_whitespace().next().unwrap_or_default();
-            name.starts_with("b10x-loom-")
-                || name.starts_with("loom-")
-                || name == "b10x-canon"
-                || name == "b10x-canon-engineering"
+            name.starts_with("b10x-loom-") || name.starts_with("loom-") || name == "b10x-canon"
         })
         .collect();
     assert!(

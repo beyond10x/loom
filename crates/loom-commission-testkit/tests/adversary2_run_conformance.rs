@@ -23,7 +23,9 @@ use b10x_loom_commission::model::responsibility::{
 use b10x_loom_commission::outcome::RunStore;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Command;
+
+#[path = "support/made_once.rs"]
+mod made_once;
 
 const NS: &str = "commission.responsibility.";
 
@@ -34,26 +36,17 @@ fn root() -> PathBuf {
     root.canonicalize().unwrap_or(root)
 }
 
-/// The suite, synthesized from this tree's `ess/` now.
-/// Each caller names its own file: the tests of this binary run in parallel, and a shared file was
-/// read by one test while the other truncated it ("suite is not JSON").
+/// The suite, synthesized from this tree's `ess/` now: once a test run for every test that reads
+/// it (`made_once::commission_synthesis`). A test reads the shared file and never writes it.
 fn suite(caller: &str) -> Value {
-    let out_dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("adversary2_run_conformance");
-    std::fs::create_dir_all(&out_dir).expect("create suite dir");
-    let out = out_dir.join(format!("{caller}.json"));
-    let run = Command::new("ess")
-        .args(["verify", "conform", "synthesize", "--path"])
-        .arg(root().join("ess/commission"))
-        .arg("--out")
-        .arg(&out)
-        .output()
-        .unwrap_or_else(|error| panic!("run `ess verify conform synthesize`: {error}"));
-    assert!(
-        run.status.success(),
-        "`ess verify conform synthesize` failed:\n{}",
-        String::from_utf8_lossy(&run.stderr)
+    let synthesis = made_once::commission_synthesis(&root());
+    assert_eq!(
+        synthesis.code,
+        Some(0),
+        "`ess verify conform synthesize` failed for {caller}:\n{}",
+        synthesis.stderr
     );
-    let text = std::fs::read_to_string(&out).expect("read suite");
+    let text = std::fs::read_to_string(&synthesis.suite).expect("read suite");
     json::parse(&text).unwrap_or_else(|error| panic!("suite is not JSON: {error:?}"))
 }
 

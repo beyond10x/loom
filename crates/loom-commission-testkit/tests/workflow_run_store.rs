@@ -680,11 +680,16 @@ fn store_dir(name: &str) -> PathBuf {
 }
 
 /// The run across an approval, suspended in one process and resumed in another, once for the
-/// cases that read it.
+/// cases that read it in this process. Its directory is named after the test that ran it, so a
+/// runner that gives each test its own process (nextest) runs it once a test, apart.
 fn across_an_approval() -> &'static (PathBuf, Written) {
     static RAN: OnceLock<(PathBuf, Written)> = OnceLock::new();
     RAN.get_or_init(|| {
-        let dir = store_dir("across-approval");
+        let test = std::thread::current()
+            .name()
+            .unwrap_or("main")
+            .replace("::", "-");
+        let dir = store_dir(&format!("across-approval/{test}"));
         run_child("suspend", &dir);
         run_child("resume", &dir);
         let suspended = Written::read(&dir.join("suspend.txt"));

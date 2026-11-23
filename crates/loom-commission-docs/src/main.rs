@@ -139,17 +139,26 @@ fn provenance(site: &Path, commit: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// `ess --version`, as it prints it (`ess 0.69.0`). CI pins the release.
+/// `ess --version`, as it prints it (`ess 0.69.0`). CI pins the release; a dispatcher that hands
+/// the call to the pinned release prints its own line first, so the last line is the version.
 fn ess_version(ess: &Path) -> Result<String> {
     let output = Command::new(ess)
         .arg("--version")
         .output()
         .map_err(|error| format!("running {}: {error}", ess.display()))?;
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if !output.status.success() || version.is_empty() {
-        return Err("`ess --version` printed no version".into());
+    match version_line(&output.stdout) {
+        Some(version) if output.status.success() => Ok(version),
+        _ => Err("`ess --version` printed no version".into()),
     }
-    Ok(version)
+}
+
+fn version_line(stdout: &[u8]) -> Option<String> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(str::to_owned)
 }
 
 fn compile_ir(root: &Path, ess: &Path) -> Result<Value> {
@@ -983,6 +992,16 @@ mod tests {
                 .unwrap_err()
                 .contains("unsupported type reference kind")
         );
+    }
+
+    #[test]
+    fn the_ess_version_is_the_last_line_a_dispatcher_prints() {
+        assert_eq!(
+            version_line(b"ess 0.97.4\ness 0.98.0\n").as_deref(),
+            Some("ess 0.98.0")
+        );
+        assert_eq!(version_line(b"ess 0.98.0\n").as_deref(), Some("ess 0.98.0"));
+        assert_eq!(version_line(b"\n  \n"), None);
     }
 
     #[test]

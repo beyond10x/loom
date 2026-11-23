@@ -1,0 +1,25 @@
+format: loom.bindings/1
+protocol: finding@1
+artifacts:
+  ledger: ledger.txt
+actions:
+  - action: findings.write
+    executor:
+      kind: program
+      argv: [sh, stubs/first.sh]
+    evidence:
+      - kind: findings_written
+        subject: ledger
+        producer: program
+        from: exit
+        results: {"0": written, "*": failed}
+  - action: decision.apply
+    executor:
+      kind: program
+      argv: [sh, stubs/apply.sh]
+    evidence:
+      - kind: decision_applied
+        subject: ledger
+        producer: program
+        from: exit
+        results: {"0": applied, "*": refused}

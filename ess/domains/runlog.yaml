@@ -42,11 +42,14 @@ types:
       ActionStarted: loom.runlog.ActionStarted
       ActionFinished: loom.runlog.ActionFinished
       Discarded: loom.runlog.Discarded
+      HandoffChecked: loom.runlog.HandoffChecked
       ChildOpened: loom.runlog.ChildOpened
       ChildClosed: loom.runlog.ChildClosed
       AuthorityRecorded: loom.runlog.AuthorityRecorded
       Stopped: loom.runlog.Stopped
       Terminated: loom.runlog.Terminated
+      StopRecorded: loom.runlog.StopRecorded
+      StopLifted: loom.runlog.StopLifted
 
   # The case was opened: its id and the registered protocol that governs it, `name@major`.
   - name: loom.runlog.CaseOpened
@@ -115,7 +118,30 @@ types:
       - name: reason
         type: String
 
-  # A child case was opened: its id and the registered protocol that governs it.
+  # The `handoff_when` check of an action was run (story handoff-when-a-program-decides), before
+  # the stop or the step it decides: the action, the check's exit status or why it gave none (a
+  # launch error, a timeout or a signal; one of the two, as on `ActionFinished`), and the digest of
+  # the blob holding its output. Exit 0 offered the action's handoff; any other exit skipped it; a
+  # refusal stopped the run; a cancelled check's refusal starts `Cancelled:` and the run stopped
+  # `Cancelled`. The line is what a reader of the log takes the check's answer from:
+  # nothing runs the check again to read it.
+  - name: loom.runlog.HandoffChecked
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: refusal
+        type: Optional<String>
+      - name: blob_digest
+        type: Optional<String>
+
+  # A child case was opened: its id and the registered protocol that governs it, and the child's
+  # `case_outcome` record in the parent as the opening wrote it: `record` its evidence id (the
+  # link's `outcome_evidence`) and `record_digest` the SHA-256 of the record's facts, 64
+  # lower-case hex digits. `record` and `record_digest` come together or not at all; a line
+  # holding one without the other does not read.
   - name: loom.runlog.ChildOpened
     kind: struct
     fields:
@@ -123,15 +149,25 @@ types:
         type: String
       - name: protocol
         type: String
+      - name: record
+        type: Optional<String>
+      - name: record_digest
+        type: Optional<String>
 
   # A child case was closed, with the outcome it completed with (absent when it completed with
-  # none).
+  # none), and the child's `case_outcome` record in the parent as the termination replaced it:
+  # the same `record`, a new `record_digest`. The two come together or not at all, as on
+  # `ChildOpened`.
   - name: loom.runlog.ChildClosed
     kind: struct
     fields:
       - name: child
         type: String
       - name: outcome
+        type: Optional<String>
+      - name: record
+        type: Optional<String>
+      - name: record_digest
         type: Optional<String>
 
   # An authority decision was recorded: the capability asked for, the decision and the principal
@@ -146,7 +182,14 @@ types:
       - name: principal
         type: String
 
-  # The run stopped: the stop, and the decisions that would let it go on.
+  # The run stopped: the stop, the decisions that would let it go on, and on a `BudgetSpent` stop
+  # the budget that ended the run, one of `Cancel` (the run's cancel handle was set; written only
+  # before a cancel stopped a run `Cancelled`), `MaxSteps` (the run took its steps) and
+  # `MaxWallSeconds` (its seconds of wall time are spent), as `loom.tree.SpentBudget` spells them.
+  # A `Cancelled` stop's `next` names the action whose step was cancelled or was to be taken
+  # next. `budget` is written exactly when `stop` is `BudgetSpent`;
+  # a line holding it beside another stop, or holding another spelling, does not read. A
+  # `BudgetSpent` line written before the member existed holds none and still reads.
   - name: loom.runlog.Stopped
     kind: struct
     fields:
@@ -154,6 +197,8 @@ types:
         type: String
       - name: next
         type: List<String>
+      - name: budget
+        type: Optional<String>
 
   # The run ended for good, and why.
   - name: loom.runlog.Terminated
@@ -161,6 +206,30 @@ types:
     fields:
       - name: reason
         type: String
+
+  # The tree was held (story tree-suite-stop-resume-reopen-steps): written by `tree hold` to the
+  # root case's log, under the store lock, with the principal who held it and why, both from the
+  # command line. The tree is held while the root's log holds a `StopRecorded` line with no
+  # `StopLifted` line after it; `tree run` on a held tree is refused `TreeStopped` and writes
+  # nothing. The line records a decision and locks no one out: a person who can write the store
+  # can cut it while it is the last line.
+  - name: loom.runlog.StopRecorded
+    kind: struct
+    fields:
+      - name: principal
+        type: String
+      - name: reason
+        type: String
+
+  # The hold was lifted: written by `tree reopen` to the root case's log, under the store lock,
+  # with the principal who lifted it and `stop`, the `seq` of the `StopRecorded` line it lifts.
+  - name: loom.runlog.StopLifted
+    kind: struct
+    fields:
+      - name: principal
+        type: String
+      - name: stop
+        type: Integer
 
   # Why a reader refuses a log. `CutLine`: the last line does not end with a line feed, or does
   # not read as a line. `BrokenChain`: a line's `prev` is not the SHA-256 of the line before it

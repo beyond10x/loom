@@ -26,6 +26,14 @@
 //! host catalog that binds a built-in's name to another definition has its cases checked against
 //! the built-in here.
 //!
+//! A child case's link to its parent is its `parent` member, a parent's links to its children its
+//! `children` member, and a terminated case's outcome and instant its `termination` member, each
+//! left out when the case has none, so a case stored before child cases reads as one with no
+//! link and no termination. A link that does not name the case holding it (`parent` whose
+//! `child` is another case, a `children` entry whose `parent` is another case) is refused on read,
+//! and so is a link without its `name`, with a name that is not one plain segment, or with one
+//! the child id was not built from (`<parent>.<name>`, `<parent>.<name>.<n>`).
+//!
 //! Every operation holds an exclusive lock on `<dir>/.lock` for its duration, so two stores over
 //! one directory, in one process or in two, never interleave a read and a write of the same file.
 //! The lock and the write are the ones [`FileSuspensionStore`](crate::FileSuspensionStore) uses,
@@ -47,6 +55,8 @@
 use std::fmt;
 use std::fs;
 use std::io;
+use std::io::Write as _;
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use b10x_loom_commission::model::json as commission_json;
@@ -58,8 +68,8 @@ use b10x_loom_commission::model::responsibility::{
 };
 use loom::evaluation::ExplicitDecision;
 use loom::governor::{
-    StoredArtifact, StoredCase, StoredCaseId, StoredEvidence, StoredEvidenceData,
-    StoredIndependence, StoredInput, StoredObservation,
+    CaseLink, CaseTermination, StoredArtifact, StoredCase, StoredCaseId, StoredEvidence,
+    StoredEvidenceData, StoredIndependence, StoredInput, StoredObservation,
 };
 use loom::json::{
     self, DecodeError, Value, bool_at, integer_at, items_at, member, member_at, nested, push_bool,
@@ -79,9 +89,9 @@ const OBSERVATIONS: &str = "observations.json";
 
 /// The longest id, in bytes, whose file is named by its hex: `case-` and 200 hex digits and
 /// `.json` is 210 bytes, under the 255 a file name may have.
-const HEX_NAMED: usize = 100;
+pub(crate) const HEX_NAMED: usize = 100;
 
-fn push_hex(out: &mut String, bytes: &[u8]) {
+pub(crate) fn push_hex(out: &mut String, bytes: &[u8]) {
     for byte in bytes {
         out.push_str(&format!("{byte:02x}"));
     }
@@ -313,6 +323,107 @@ impl FallibleCaseStore for FileCaseStore {
     }
 }
 
+/// A step of one case write, in the order they happen; [`FileCaseStore::update_until`] hands each
+/// to its caller once it is done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteStep {
+    /// The temporary file was created, empty.
+    Created,
+    /// The first half of the case document was written to the temporary file.
+    HalfWritten,
+    /// Every byte was written to the temporary file.
+    Written,
+    /// The temporary file was synced.
+    Synced,
+    /// The temporary file was renamed over the case file: the case is the changed one.
+    Renamed,
+    /// The directory was synced.
+    DirectorySynced,
+}
+
+impl WriteStep {
+    /// Every step, in order.
+    pub const ALL: [Self; 6] = [
+        Self::Created,
+        Self::HalfWritten,
+        Self::Written,
+        Self::Synced,
+        Self::Renamed,
+        Self::DirectorySynced,
+    ];
+
+    /// Whether the case file holds the changed case once this step is done.
+    pub fn renamed(self) -> bool {
+        matches!(self, Self::Renamed | Self::DirectorySynced)
+    }
+}
+
+impl FileCaseStore {
+    /// [`FallibleCaseStore::update`], making the write as [`FallibleCaseStore::update`] does
+    /// (the same document, a temporary file in the directory, synced and renamed over the case
+    /// file) and handing `stop` each [`WriteStep`] once it is done. When `stop` answers
+    /// [`ControlFlow::Break`] the write ends right there, as a crash would end it: it releases the
+    /// lock and does nothing else (its temporary file stays until a store opens the directory
+    /// again), and answers `Ok(None)`. Otherwise it answers what `change` answered, `None` inside
+    /// when the case is not held. For a crash test of a write that holds both a step's revision
+    /// moves and its records (`CanonGovernor::record_step`).
+    ///
+    /// # Errors
+    /// As [`FallibleCaseStore::update`].
+    pub fn update_until<T>(
+        &self,
+        case: &CaseId,
+        change: impl FnOnce(&mut CaseState) -> T,
+        stop: &mut dyn FnMut(WriteStep) -> ControlFlow<()>,
+    ) -> Result<Option<Option<T>>, FileStoreError> {
+        self.locked(|| {
+            let Some(mut state) = self.read_case(case)? else {
+                return Ok(Some(None));
+            };
+            let result = change(&mut state);
+            let path = self.case_path(&state.id);
+            let stored = stored_case(&state);
+            let mut text = String::new();
+            encode_case(&mut text, &stored);
+            let reread = json::parse(&text)
+                .ok()
+                .and_then(|value| decode_case(&value).ok());
+            if reread.as_ref() != Some(&stored) {
+                return Err(failed(
+                    &path,
+                    "the case would not read back as it is held; nothing was written",
+                ));
+            }
+            let (temporary, mut file) = self.dir.temporary()?;
+            macro_rules! step {
+                ($step:expr) => {
+                    if stop($step).is_break() {
+                        return Ok(None);
+                    }
+                };
+            }
+            let abandon = |error: io::Error| {
+                let _ = fs::remove_file(&temporary);
+                failed(&temporary, error)
+            };
+            step!(WriteStep::Created);
+            let (first, second) = text.as_bytes().split_at(text.len() / 2);
+            file.write_all(first).map_err(abandon)?;
+            step!(WriteStep::HalfWritten);
+            file.write_all(second).map_err(abandon)?;
+            step!(WriteStep::Written);
+            crate::durable::sync_file(&file).map_err(abandon)?;
+            step!(WriteStep::Synced);
+            drop(file);
+            fs::rename(&temporary, &path).map_err(abandon)?;
+            step!(WriteStep::Renamed);
+            crate::durable::sync_dir(self.dir.path());
+            step!(WriteStep::DirectorySynced);
+            Ok(Some(Some(result)))
+        })
+    }
+}
+
 // ---- the held case and the stored case --------------------------------------------------------
 
 fn stored_case(state: &CaseState) -> StoredCase {
@@ -369,12 +480,47 @@ fn stored_case(state: &CaseState) -> StoredCase {
             })
             .collect(),
         decisions: (!state.decisions.is_empty()).then(|| state.decisions.clone()),
+        parent: state.parent.clone(),
+        children: (!state.children.is_empty()).then(|| state.children.clone()),
+        termination: state.termination.clone(),
     }
+}
+
+/// Refuses a stored case whose links are not its own: a `parent` link naming another child, or a
+/// `children` link naming another parent; and one whose link holds a name that is not one plain
+/// segment or not the one its child id was built from.
+fn own_links(stored: &StoredCase) -> Result<(), String> {
+    if let Some(link) = &stored.parent
+        && link.child != stored.id
+    {
+        return Err(format!(
+            "case `{}` holds the parent link of `{}`",
+            stored.id.0, link.child.0
+        ));
+    }
+    for link in stored.children.iter().flatten() {
+        if link.parent != stored.id {
+            return Err(format!(
+                "case `{}` holds the child link of `{}`",
+                stored.id.0, link.parent.0
+            ));
+        }
+    }
+    for link in stored.parent.iter().chain(stored.children.iter().flatten()) {
+        if !crate::children::link_name_fits(link) {
+            return Err(format!(
+                "case `{}` holds a link to `{}` whose name `{}` did not build that id",
+                stored.id.0, link.child.0, link.name
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The held case a stored one describes; an error when it names one artifact, one input or one
 /// independent producer twice, or one dimension twice for a producer.
 fn held_case(stored: StoredCase) -> Result<CaseState, String> {
+    own_links(&stored)?;
     let mut artifacts = std::collections::BTreeMap::new();
     for StoredArtifact { artifact, revision } in stored.artifacts {
         if artifacts.contains_key(&artifact) {
@@ -444,6 +590,9 @@ fn held_case(stored: StoredCase) -> Result<CaseState, String> {
             })
             .collect(),
         decisions: stored.decisions.unwrap_or_default(),
+        parent: stored.parent,
+        children: stored.children.unwrap_or_default(),
+        termination: stored.termination,
     })
 }
 
@@ -601,7 +750,115 @@ fn encode_case(out: &mut String, case: &StoredCase) {
         }
         out.push(']');
     }
+    encode_tree_members(out, case);
     out.push('}');
+}
+
+/// The members of story child-case-runtime, each only when present: `parent`, `children` and
+/// `termination`.
+fn encode_tree_members(out: &mut String, case: &StoredCase) {
+    if let Some(link) = &case.parent {
+        member(out, "parent");
+        encode_link(out, link);
+    }
+    if let Some(children) = &case.children {
+        member(out, "children");
+        out.push('[');
+        for (index, link) in children.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            encode_link(out, link);
+        }
+        out.push(']');
+    }
+    if let Some(termination) = &case.termination {
+        member(out, "termination");
+        out.push('{');
+        member(out, "outcome");
+        push_text(out, &termination.outcome);
+        member(out, "instant");
+        push_text(out, &termination.instant.0);
+        out.push('}');
+    }
+}
+
+fn encode_link(out: &mut String, link: &CaseLink) {
+    out.push('{');
+    member(out, "parent");
+    push_text(out, &link.parent.0);
+    member(out, "child");
+    push_text(out, &link.child.0);
+    member(out, "name");
+    push_text(out, &link.name);
+    member(out, "action");
+    push_text(out, &link.action);
+    member(out, "outcome_evidence");
+    push_text(out, &link.outcome_evidence.0);
+    member(out, "subject");
+    push_text(out, &link.subject);
+    member(out, "subject_revision");
+    push_text(out, &link.subject_revision);
+    out.push('}');
+}
+
+const LINK_MEMBERS: [&str; 7] = [
+    "parent",
+    "child",
+    "name",
+    "action",
+    "outcome_evidence",
+    "subject",
+    "subject_revision",
+];
+
+fn decode_link(value: &Value, at: &str) -> Result<CaseLink, DecodeError> {
+    exactly(value, at, &LINK_MEMBERS)?;
+    Ok(CaseLink {
+        parent: StoredCaseId(text_member(value, at, "parent")?),
+        child: StoredCaseId(text_member(value, at, "child")?),
+        name: text_member(value, at, "name")?,
+        action: text_member(value, at, "action")?,
+        outcome_evidence: Uuid(text_member(value, at, "outcome_evidence")?),
+        subject: text_member(value, at, "subject")?,
+        subject_revision: text_member(value, at, "subject_revision")?,
+    })
+}
+
+/// The optional members of story child-case-runtime, absent in every case Loom 0.58.0 and
+/// earlier wrote.
+type TreeMembers = (
+    Option<CaseLink>,
+    Option<Vec<CaseLink>>,
+    Option<CaseTermination>,
+);
+
+fn decode_tree_members(value: &Value) -> Result<TreeMembers, DecodeError> {
+    let parent = value
+        .member("parent")
+        .map(|link| decode_link(link, "parent"))
+        .transpose()?;
+    let children = value
+        .member("children")
+        .map(|children| {
+            items_at(children, "children", "an array")?
+                .iter()
+                .enumerate()
+                .map(|(index, link)| decode_link(link, &format!("children[{index}]")))
+                .collect::<Result<Vec<_>, DecodeError>>()
+        })
+        .transpose()?;
+    let termination = value
+        .member("termination")
+        .map(|termination| {
+            exactly(termination, "termination", &["outcome", "instant"])?;
+            Ok::<_, DecodeError>(CaseTermination {
+                outcome: text_member(termination, "termination", "outcome")?,
+                instant: Timestamp(text_member(termination, "termination", "instant")?),
+            })
+        })
+        .transpose()?;
+    Ok((parent, children, termination))
 }
 
 fn encode_evidence_data(out: &mut String, data: &StoredEvidenceData) {
@@ -693,8 +950,12 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
             "independence",
             "evidence",
             "decisions",
+            "parent",
+            "children",
+            "termination",
         ],
     )?;
+    let (parent, children, termination) = decode_tree_members(value)?;
     // Absent when the host declared no producer independent, and in every case Loom 0.23.0 and
     // earlier wrote; present, it is an array.
     let independence = value
@@ -798,6 +1059,9 @@ fn decode_case(value: &Value) -> Result<StoredCase, DecodeError> {
         independence,
         evidence,
         decisions,
+        parent,
+        children,
+        termination,
     })
 }
 

@@ -1,27 +1,52 @@
 ---
 title: Getting started
 sidebar_position: 2
-description: Build b10x-loom, run the SDK example without a model, and read what a live run looks like.
-lede: Build the command line from source, run a whole governed embedding on scripted fake models in one command, and compare it with a recorded live run.
-source: crates/loom-cli, crates/loom-sdk/examples/software_change.rs, docs/qualification/2026-10-05-b10x-loom-live-run.md
+description: Download or build b10x-loom, run the SDK example without a model, and read what a live run looks like.
+lede: Download the command line or build it from source, run a whole governed embedding on scripted fake models in one command, and compare it with a recorded live run.
+source: crates/loom-cli, .github/workflows/binaries.yml, crates/loom-sdk/examples/software_change.rs, docs/qualification/2026-10-05-b10x-loom-live-run.md
 ---
 
 # Getting started
 
-You need a Rust toolchain (edition 2024) and `git`. Nothing is on a registry, so you build from
-the repository at the release tag, `0.59.0`.
+Nothing is on a registry. On Linux x86-64 you can download the `b10x-loom` binary a release
+carries; otherwise you build from the repository at the release tag, `0.60.0`, with a Rust
+toolchain (edition 2024) and `git`. The SDK example below needs the toolchain either way.
+
+## Download the command line
+
+Each release from `0.60.0` on carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz`, the
+binary and Loom's `LICENSE`, with its SHA-256 checksum beside it; an earlier release has none.
+The binary needs the glibc of Debian bookworm (2.36) or newer, and the libraries the `loom-agent`
+image installs for it (`libssl3`, `libcurl4`, `ca-certificates`).
+
+```console
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.60.0/b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.60.0/b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz
+./b10x-loom-0.60.0-x86_64-unknown-linux-gnu/b10x-loom --version
+```
+
+```text
+b10x-loom-0.60.0-x86_64-unknown-linux-gnu.tar.gz: OK
+b10x-loom 0.60.0
+```
+
+The checksum file comes from the same place as the archive. A CI that installs Loom keeps the
+version and the digest in its own repository and checks the download against that digest
+instead: `echo "$SHA256  $f" | sha256sum -c -`.
 
 ## Build the command line
 
 ```console
-git clone --branch 0.59.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.60.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.59.0
+b10x-loom 0.60.0
 ```
 
 `b10x-loom run --help` lists its flags and exit statuses; the [CLI reference](./reference/cli.md)

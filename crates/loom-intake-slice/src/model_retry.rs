@@ -9,7 +9,9 @@ use llm_routing::RetryPolicy;
 use loom_protocols::ProtocolCatalog;
 use std::time::Duration;
 
-const POLICY: RetryPolicy = RetryPolicy {
+/// The slice's caller retries in production: three identical attempts, waiting 1 s and then 2 s
+/// (or the provider's requested delay, capped at 30 s, when that is longer).
+pub const MODEL_RETRY: RetryPolicy = RetryPolicy {
     max_attempts: 3,
     ..RetryPolicy::DEFAULT
 };
@@ -19,6 +21,7 @@ pub(crate) async fn classify_with_retries(
     model: &dyn Model,
     threshold: f64,
     catalog: Option<&ProtocolCatalog>,
+    policy: RetryPolicy,
 ) -> Result<ProtocolPick, RouterError> {
     let model = ObservedModel(model);
     let cancel = Cancel::new();
@@ -32,7 +35,7 @@ pub(crate) async fn classify_with_retries(
         };
         if let Err(RouterError::Model(ModelError::Model(error) | ModelError::Transport(error))) =
             &mut answer
-            && wait_to_retry(error, attempt, &cancel).await
+            && wait_to_retry(error, attempt, &cancel, policy).await
         {
             continue;
         }
@@ -45,6 +48,7 @@ pub(crate) async fn turn_with_retries(
     request: &TurnRequest,
     sink: &mut dyn StreamSink,
     cancel: &Cancel,
+    policy: RetryPolicy,
 ) -> Result<TurnOutcome, Error> {
     let model = ObservedModel(model);
     let mut attempt = 0;
@@ -52,7 +56,7 @@ pub(crate) async fn turn_with_retries(
         attempt += 1;
         let mut answer = model.turn(request, sink, cancel).await;
         if let Err(error) = &mut answer
-            && wait_to_retry(error, attempt, cancel).await
+            && wait_to_retry(error, attempt, cancel, policy).await
         {
             continue;
         }
@@ -60,16 +64,21 @@ pub(crate) async fn turn_with_retries(
     }
 }
 
-async fn wait_to_retry(error: &mut Error, attempt: u32, cancel: &Cancel) -> bool {
+async fn wait_to_retry(
+    error: &mut Error,
+    attempt: u32,
+    cancel: &Cancel,
+    policy: RetryPolicy,
+) -> bool {
     if !error.may_retry() {
         return false;
     }
-    if attempt >= POLICY.max_attempts {
+    if attempt >= policy.max_attempts {
         error.retriable = false;
         error.message = format!("{} (after {attempt} attempts)", error.message);
         return false;
     }
-    let delay = POLICY.delay(attempt, error.retry_after_ms.map(Duration::from_millis));
+    let delay = policy.delay(attempt, error.retry_after_ms.map(Duration::from_millis));
     tokio::select! {
         biased;
         () = cancel.cancelled() => {
@@ -206,6 +215,7 @@ mod tests {
             &request(),
             &mut VecSink::new(10, 4096),
             &Cancel::new(),
+            MODEL_RETRY,
         )
         .await
         .unwrap_err();
@@ -229,6 +239,7 @@ mod tests {
                 &request(),
                 &mut VecSink::new(10, 4096),
                 &Cancel::new(),
+                MODEL_RETRY,
             )
             .await
             .unwrap_err();
@@ -245,7 +256,7 @@ mod tests {
         let request = request();
         let mut sink = VecSink::new(10, 4096);
         let (answer, ()) = tokio::join!(
-            turn_with_retries(&model, &request, &mut sink, &cancel),
+            turn_with_retries(&model, &request, &mut sink, &cancel, MODEL_RETRY),
             async {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 cancel.cancel();
@@ -257,7 +268,7 @@ mod tests {
         assert!(!error.retriable);
         assert_eq!(start.elapsed(), Duration::from_millis(100));
         assert_eq!(model.calls.load(Ordering::SeqCst), 1);
-        turn_with_retries(&model, &request, &mut sink, &cancel)
+        turn_with_retries(&model, &request, &mut sink, &cancel, MODEL_RETRY)
             .await
             .unwrap_err();
         assert_eq!(model.calls.load(Ordering::SeqCst), 1);
@@ -281,9 +292,10 @@ mod tests {
                 let mut model = Failing::new();
                 model.event = Some(event.clone());
                 let mut sink = VecSink::new(limit, 4096);
-                let error = turn_with_retries(&model, &request(), &mut sink, &Cancel::new())
-                    .await
-                    .unwrap_err();
+                let error =
+                    turn_with_retries(&model, &request(), &mut sink, &Cancel::new(), MODEL_RETRY)
+                        .await
+                        .unwrap_err();
                 assert_eq!(model.calls.load(Ordering::SeqCst), 1);
                 assert!(!error.may_retry());
             }
@@ -308,6 +320,7 @@ mod tests {
                 &request(),
                 &mut VecSink::new(10, 4096),
                 &Cancel::new(),
+                MODEL_RETRY,
             )
             .await
             .unwrap_err();

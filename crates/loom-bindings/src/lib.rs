@@ -6,18 +6,72 @@
 //! `argv` that is empty or not a list of strings, a result table that is not one. [`check`] holds
 //! the decoded document against the compiled protocol it names, as it is loaded. Both refuse the
 //! first defect found, naming the action and the member. [`unbound`] lists the actions the
-//! document binds nothing to; that is not an error.
+//! document binds nothing to; that is not an error. [`resolve_programs`] turns the program paths
+//! of a document with `program_root: bindings` into the absolute real paths of the files beside
+//! its bindings file.
 //!
-//! The crate executes nothing, starts no process and opens no network connection.
+//! [`ProgramEffects`] is the effect port that performs an action bound to a `program` executor,
+//! for any registered protocol: it starts each program through the host's runner alone, as
+//! `b10x_loom_intake_slice::bindings` admits the runner and builds the child, keeps its output as
+//! one content-addressed blob, and records evidence by the binding's result table alone. Once the
+//! program ended, every artifact the document places at a path takes the content digest of what is
+//! there as its revision ([`content_revision`]), written with the step's records in one store
+//! write; [`PlacedRevisions`] computes them again before every evaluation. Decoding and the
+//! load-time check start no process; the crate opens no network connection.
+//!
+//! [`run_handoff_check`] runs the `handoff_when` check of a program binding once, through the
+//! same runner, with the whole workspace read-only and no retry feedback, and answers its exit or
+//! why it gave none (story:handoff-when-a-program-decides); a host decides the handoff from it.
+//!
+//! [`check_case_open`] holds an `open` executor to the protocol's `case_open` at load, and
+//! [`OpenEffects`] performs an action bound to `open`: it opens the child cases through
+//! `CanonGovernor::open_children`, under the protocol `case_open` names, with the independence of
+//! the child's bindings file, read beside the parent's (story:child-case-runtime).
+//!
+//! [`CopyEffects`] performs an action bound to `copy`: it copies the latest applying record of the
+//! binding's kind about the current revision of its subject from another case of the same tree,
+//! read through `CanonGovernor::tree` and `CanonGovernor::case_state`, citing an observation of
+//! [`COPY_SOURCE`]; no program runs (story:record-copy-between-cases).
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod arguments;
+mod child;
+mod copy;
 mod decode;
+mod handoff;
 mod load;
+mod open;
+mod program;
+mod resolve;
+mod retry;
+mod revision;
 mod tree;
 
-pub use decode::decode;
+pub use child::{
+    CASE_NAME_VARIABLE, CASE_VARIABLE, CaseNames, MAX_CASE_VARIABLE_BYTES,
+    PARENT_CASE_NAME_VARIABLE, TIMEOUT_VARIABLE, bound_case_child,
+};
+pub use copy::{COPY_SOURCE, CopyEffects};
+pub use decode::{PRINCIPAL_PLACEHOLDER, decode};
+pub use handoff::{
+    HandoffCheck, LAUNCH_FAILURE_EXITS, SIGNAL_EXITS, handoff_check_of, run_handoff_check,
+};
 pub use load::{check, unbound};
+pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
+pub use program::{
+    ANY_KEY, BLOBS, ChildInputs, NotPrepared, PROGRAM_SOURCE, Prepared, ProgramEffects, RUNS_SPENT,
+    RunPlace, Started, TIMEOUT_KEY, prepare, start,
+};
+pub use resolve::resolve_programs;
+pub use retry::{
+    PERSON_SOURCE, RETRY_FEEDBACK_FORMAT, RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES,
+    RETRY_LOG_LINES, keep_reasons, read_reasons_file, reasons_fit, retry_records,
+};
+pub use revision::{
+    ABSENT, MAX_ARTIFACT_BYTES, MAX_TREE_DEPTH, MAX_TREE_ENTRIES, PlacedRevisions, RefreshError,
+    TREE_HEADER, content_revision, placements, revisions_of,
+};
 
 use loom::bindings::BindingsRefusal;
 use std::fmt;

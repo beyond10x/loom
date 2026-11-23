@@ -1,0 +1,12 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: step@1
+  bindings: bindings/step.bindings.yaml
+  seed: [{from: stubs/quick.sh, to: stubs/program.sh}, {from: names/one.txt, to: name.txt}]
+  steps: [{do: open}, {do: run}, {do: status}]
+cycles:
+  - name: broken
+    bindings: bindings/absent.bindings.yaml
+  - name: second
+  - name: third
+  - name: fourth

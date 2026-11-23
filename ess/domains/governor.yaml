@@ -5,14 +5,17 @@
 # StoredCase per case and the StoredObservation list beside it; reading them back must give the
 # governor the same case, so every Json value is kept as it arrived, members in order and numbers
 # in their spelling. Protocol definitions are not stored: the host registers them again.
+# A decision request is kept as StoredDecisionRequest, a file each beside the cases (story
+# decision-request-file-store); its fields are typed by loom.decision.
 domain: loom.governor
 
 summary: >-
   The governor's held case as a store writes it: the case id, the protocol that governs it, the
   case revision, the current revision of every declared artifact, the value of every case input
   the protocol declares, the independence dimensions the host declared for each evidence producer,
-  every evidence record received with whether it applies, and every explicit decision recorded for
-  it; and the observations kept beside the cases.
+  every evidence record received with whether it applies, every explicit decision recorded for
+  it, the links to the case that opened it and to the cases it opened, and how it terminated; and
+  the observations kept beside the cases.
 
 naming:
   wire: governor
@@ -103,7 +106,13 @@ types:
   # dimensions; it is absent when the host declared none, as in every case Loom 0.23.0 and
   # earlier stored, which those versions evaluated with no producer declared. A case whose
   # declarations name a producer or a dimension twice, or a dimension its protocol does not
-  # declare, is never decided.
+  # declare, is never decided. `parent` is the link to the case that opened this one through a
+  # `case_open` action, absent for a case nobody opened so (a root); `children` lists the link to
+  # every child case this one opened, in the order opened, absent when it opened none;
+  # `termination` is the outcome the case terminated through and when, absent while it is open
+  # (story child-case-runtime). A case stored without them (as Loom 0.58.0 and earlier wrote
+  # every case) is a root that opened no child and is open; a case stored with one of them is
+  # refused by those versions.
   - name: loom.governor.StoredCase
     kind: struct
     fields:
@@ -123,6 +132,52 @@ types:
         type: List<loom.governor.StoredEvidence>
       - name: decisions
         type: Optional<List<loom.evaluation.ExplicitDecision>>
+      - name: parent
+        type: Optional<loom.governor.CaseLink>
+      - name: children
+        type: Optional<List<loom.governor.CaseLink>>
+      - name: termination
+        type: Optional<loom.governor.CaseTermination>
+
+  # The link between a parent case and one child case it opened by performing a `case_open`
+  # action (story child-case-runtime): the parent, the child, the name the opening gave the child
+  # (`<parent>.<name>` is its id, or `<parent>.<name>.<n>` for a repeated name, so a tool reads
+  # the name here and never parses the id), the opening action, the id of the
+  # one `case_outcome` evidence record the parent holds for the child (result `open` while the
+  # child runs, then the child's outcome), the artifact the action's `case_open.subject` names,
+  # and the parent's revision of that artifact when the child was opened. The same link is the
+  # child's `parent` and one entry of the parent's `children`; a link the other side does not hold
+  # is no link. Only the governor writes it, when it opens the child; no caller, evidence record
+  # or bindings document names one.
+  - name: loom.governor.CaseLink
+    kind: struct
+    fields:
+      - name: parent
+        type: loom.governor.StoredCaseId
+      - name: child
+        type: loom.governor.StoredCaseId
+      - name: name
+        type: String
+      - name: action
+        type: String
+      - name: outcome_evidence
+        type: Uuid
+      - name: subject
+        type: String
+      - name: subject_revision
+        type: String
+
+  # How a case ended (story child-case-runtime): the outcome its protocol declares that it
+  # terminated through, which Canon judged legitimate when the host terminated it, and the
+  # trusted instant the host gave. A terminated case is evaluated with it, performs no further
+  # action, and completes with it.
+  - name: loom.governor.CaseTermination
+    kind: struct
+    fields:
+      - name: outcome
+        type: String
+      - name: instant
+        type: Timestamp
 
   # When a case completes while more than one outcome its protocol declares is legitimate at once
   # (story first-declared-completion). `ExactlyOne`, the default, completes only when exactly one
@@ -151,3 +206,108 @@ types:
         type: Timestamp
       - name: payload
         type: Json
+
+  # One decision request as FileDecisionStore keeps it, one file per request beside the cases
+  # (story decision-request-file-store): the request, field for field as loom.decision declares
+  # the entity DecisionRequest, typed by that domain's types; its lifecycle state; the
+  # EscalationSuppressedRecords kept beside it, in the order appended; and `position`, its place
+  # in the order requests were first stored (one more than the highest the directory held when
+  # the request was first written, kept by every later write), so the store lists in that order
+  # after a restart. The store keeps the request and the records as the domain declares them and
+  # reads nothing into them. A file that does not read as one, holds another request's id,
+  # breaks an invariant of DecisionRequest or keeps a record of another request is refused,
+  # naming the file, and never repaired. The domain declares no conflict of its own: a write over
+  # a request that changed since it was read is the DecisionStore port's StoreConflict.
+  - name: loom.governor.StoredDecisionRequest
+    kind: struct
+    fields:
+      - name: position
+        type: Integer
+      - name: state
+        type: loom.decision.DecisionRequest.State
+      - name: request
+        type: loom.governor.StoredDecisionRequestData
+      - name: records
+        type: List<loom.decision.EscalationSuppressedRecord>
+
+  # The fields of loom.decision.DecisionRequest, its identity `request_id` first, each typed as
+  # that entity declares it.
+  - name: loom.governor.StoredDecisionRequestData
+    kind: struct
+    fields:
+      - name: request_id
+        type: loom.decision.DecisionRequestId
+      - name: case_id
+        type: loom.decision.CaseId
+      - name: question_key
+        type: String
+      - name: record_key
+        type: String
+      - name: unblocks
+        type: loom.decision.Unblocks
+      - name: subject_artifact
+        type: loom.decision.ArtifactId
+      - name: subject_revision
+        type: loom.decision.Revision
+      - name: subject_path
+        type: Optional<String>
+      - name: question
+        type: String
+      - name: options
+        type: List<loom.decision.DecisionOption>
+      - name: autonomy_level
+        type: loom.decision.AutonomyLevel
+      - name: decision_class
+        type: loom.decision.DecisionClassId
+      - name: holder
+        type: loom.decision.Holder
+      - name: eligible
+        type: List<loom.decision.Principal>
+      - name: addressed_to
+        type: loom.decision.Principal
+      - name: opened_at
+        type: Timestamp
+      - name: expires_at
+        type: Optional<Timestamp>
+      - name: supersedes
+        type: Optional<loom.decision.DecisionRequestId>
+      - name: recommended_option
+        type: Optional<loom.decision.OptionLetter>
+      - name: recommended_answer
+        type: Optional<String>
+      - name: recommendation_strength
+        type: loom.decision.Strength
+      - name: default_on_silence
+        type: Boolean
+      - name: grounds
+        type: List<loom.decision.Ground>
+      - name: recommended_by
+        type: Optional<loom.decision.ProposerKind>
+      - name: grounding_report
+        type: Optional<String>
+      - name: no_recommendation_reason
+        type: Optional<String>
+      - name: escalated_to
+        type: Optional<loom.decision.Principal>
+      - name: escalation_reason
+        type: Optional<String>
+      - name: decided_option
+        type: Optional<loom.decision.OptionLetter>
+      - name: decided_answer
+        type: Optional<String>
+      - name: decided_by
+        type: Optional<loom.decision.Principal>
+      - name: decided_by_kind
+        type: Optional<loom.decision.PrincipalKind>
+      - name: decided_at
+        type: Optional<Timestamp>
+      - name: decided_case_revision
+        type: Optional<loom.decision.Revision>
+      - name: decision_reasons
+        type: List<String>
+      - name: produced_record
+        type: Optional<loom.decision.ProducedRecord>
+      - name: superseded_by
+        type: Optional<loom.decision.DecisionRequestId>
+      - name: superseded_reason
+        type: Optional<String>

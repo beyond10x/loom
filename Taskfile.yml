@@ -1,5 +1,10 @@
 version: '3'
 
+env:
+  ESS_TOOLCHAIN:
+    sh: |-
+      echo "${ESS_TOOLCHAIN:-$(sed -n 's/^requires: ess //p' ess/ess-inputs.yaml)}"
+
 includes:
   commission: ./Taskfile.commission.yml
 
@@ -33,8 +38,10 @@ tasks:
       - task: commission:deps-guard
       - cargo fmt --all --check
       - cargo clippy --workspace --all-targets --locked -- -D warnings
-      - cargo test --workspace --locked
+      - task: test-step
+      - task: durable-check
       - task: consumer-check
+      - task: embedder-check
       - task: docs-check
       - task: commission:docs-drift
 
@@ -59,9 +66,37 @@ tasks:
       - cargo run -q --locked -p loom-xtask -- intake-drift
 
   ess-gate:
-    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, synthesize with 0 refusals, no open question.
+    desc: ESS hard gate (Atlas ADR 0076) — validate, compile, the committed synthesis (--suite-format 5) of this ess/ with 0 refusals not covered by authored scenarios, no open question.
     cmds:
-      - cargo test -p b10x-loom-executor --test ess_gate --locked
+      - cargo test -p b10x-loom-executor --test ess_gate --locked -- --skip slow_
+
+  suite-generate:
+    desc: Rewrite generated/ess/loom/, the conformance suite synthesized from ess/ (--suite-format 5) and the digest of its inputs; takes minutes, run it after every change under ess/.
+    env:
+      SLOT_TIMEOUT: 30m
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- suite-generate
+
+  test-step:
+    desc: Every test but the slow lane's, on 4 threads as on CI's runner (and 4 slots of the build pool), failing a test over 60 s or the step over 120 s.
+    env:
+      SLOT_TOKENS: '4'
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- test-step
+
+  durable-check:
+    desc: Outside the test step, the store syncs without the test sync switch; the count tests run without its feature, a release build with it fails to compile, b10x-loom-cli's normal dependencies do not hold it.
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- durable-check
+
+  slow:
+    desc: The slow lane, not part of check; run it after every change under ess/. Synthesizes ess/ again and fails unless generated/ess/loom/ is equal byte for byte, then runs every slow_ test.
+    env:
+      SLOT_TIMEOUT: 30m
+    cmds:
+      - cargo run -q --locked -p loom-xtask -- suite-check
+      - cargo nextest run --workspace --locked --profile slow --no-run
+      - cargo nextest run --workspace --locked --profile slow
 
   generate:
     desc: Rewrite generated/rust/loom/ from a fresh synthesis of ess/.
@@ -149,18 +184,32 @@ tasks:
       - cargo fmt --manifest-path consumers/pinned/Cargo.toml --check
       - cargo test --manifest-path consumers/pinned/Cargo.toml --offline
 
+  embedder-check:
+    desc: Build crates/loom-tree/tests/embedder, an engine that depends on b10x-loom-tree alone, offline over the workspace's Cargo.lock.
+    cmds:
+      - cargo check --offline --locked -p b10x-loom-tree-embedder-fixture
+
   plan:
     desc: Validate the AEP planning store.
     cmds:
       - aep plan artifact validate
 
   docs-generate:
-    desc: Regenerate the derived documentation pages under website/docs/reference/.
+    desc: Regenerate the derived documentation pages and contracts, then their stamp website/docs/reference/.generated.json; the one build of loom-docs.
+    env:
+      SLOT_TIMEOUT: 30m
     cmds:
       - cargo run --locked -p loom-docs -- generate
 
   docs-check:
-    desc: Fail when the generated documentation pages are missing, stale or edited by hand.
+    desc: Fail when an input of the documentation generator, the ess version or a generated file differs from the committed stamp, or a page has a raw admonition title; builds no loom-docs.
+    cmds:
+      - cargo run --locked -q -p loom-xtask -- docs-stamp --check
+
+  docs-slow:
+    desc: The slow lane of the documentation, regenerate every page and contract and fail unless the committed ones and the stamp are equal to them.
+    env:
+      SLOT_TIMEOUT: 30m
     cmds:
       - cargo run --locked -p loom-docs -- generate --check
 

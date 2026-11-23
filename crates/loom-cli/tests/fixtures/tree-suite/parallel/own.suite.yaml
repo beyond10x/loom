@@ -1,0 +1,12 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: step@1
+  bindings: bindings/step.bindings.yaml
+  steps: [{do: open}, {do: run}, {do: status}]
+cycles:
+  - name: late
+    seed: [{from: stubs/own.sh, to: stubs/program.sh}, {from: barrier, to: barrier}, {from: names/late.txt, to: name.txt}, {from: names/late.txt, to: tag.txt}]
+  - name: middle
+    seed: [{from: stubs/own.sh, to: stubs/program.sh}, {from: barrier, to: barrier}, {from: names/middle.txt, to: name.txt}, {from: names/middle.txt, to: tag.txt}]
+  - name: early
+    seed: [{from: stubs/own.sh, to: stubs/program.sh}, {from: barrier, to: barrier}, {from: names/early.txt, to: name.txt}, {from: names/early.txt, to: tag.txt}]

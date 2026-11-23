@@ -8,15 +8,15 @@ description: What Loom is, what it holds, where it stops, and which neighbours i
 
 # Loom
 
-Loom is the agent runtime: it runs governed agents, and `b10x-loom-sdk` is its library for building
-on it. It makes a model behave like an agent for one bounded run, inside a governed frontier, and
-it holds everything that run needs in one repository:
+Loom is the agent runtime. It runs governed agents, and `b10x-loom-sdk` is its library for
+building on it. Loom makes a model behave like an agent for one bounded run, inside a governed
+frontier, and holds everything that run needs in one repository:
 
 | Part | Package | What it does |
 |---|---|---|
 | The executor | `b10x-loom-executor` | Projects the frontier into a catalogue, selects one action, generates its arguments, and ends at a `ProposedAction` |
 | Commission | `b10x-loom-commission` | The contracts and the runtime loop: it rechecks every proposal against the frontier, the case revision and authority, then invokes it through an effect port |
-| The governor | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier; it decides and never acts |
+| The governor | `b10x-loom-governor` | Evaluates a case's protocol with Canon and issues the frontier. It decides and does not act |
 | Intake | `b10x-loom-intake-*` | Routes an intent to a protocol and runs a local slice that edits a git work tree and runs its tests |
 | The command line | `b10x-loom-cli` | `b10x-loom run`: an intent in, a governed run until it is blocked |
 | The SDK | `b10x-loom-sdk` | One crate an application depends on to embed all of the above |
@@ -39,7 +39,7 @@ A selector can be wrong about which admissible action is best. It cannot produce
 frontier does not contain, and nothing it says becomes evidence.
 
 :::caution[Early]
-Loom's current release is `0.59.0`, from source at that tag; consumers pin `tag = "0.59.0"`.
+Loom's current release is `0.60.0`, from source at that tag; consumers pin `tag = "0.60.0"`.
 `b10x-loom run` has completed a live run against a hosted model ([qualification record][live]); the
 SDK example runs on scripted fake models. Each page says whether what it describes is
 **shipped**, **decided** or **planned**, and the [status page](/docs/status) lists every capability.
@@ -54,13 +54,17 @@ SDK example runs on scripted fake models. Each page says whether what it describ
   the engineering protocols it runs (`software-change@1`) to
   [engineering protocols](https://beyond10x.github.io/engineering-protocols/)
   ([GitHub](https://github.com/beyond10x/engineering-protocols)).
+
 - It does not hold credentials or speak a provider's wire. Model calls go through
-  [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm)); the
+  [llm](https://beyond10x.github.io/llm/) ([GitHub](https://github.com/beyond10x/llm)). The
   credential is the operator's, read by llm.
+
 - It does not grant authority. A capability an action needs comes from an authority provider the
-  embedder supplies; the command line's provider grants none, so a run stops at the merge.
-- It does not merge, push or deploy. It confines tests with Substrate; an explicit
+  embedder supplies. The command line's provider grants none, so a run stops at the merge.
+
+- It does not merge, push or deploy. It confines tests with Substrate, and an explicit
   `--confinement none` opts out.
+
 - It does not keep the engineering record of a case or compare harnesses. Both are neighbours'
   work: [AEP](https://beyond10x.github.io/ecosystem/aep/) ([GitHub](https://github.com/beyond10x/aep)) keeps
   the record, and [Metaharness](https://beyond10x.github.io/metaharness/)
@@ -68,20 +72,21 @@ SDK example runs on scripted fake models. Each page says whether what it describ
   the governed runtime above it, not one of those harnesses (Atlas ADR 0096).
 
 Loom is specified in [ESS](https://beyond10x.github.io/ess/)
-([GitHub](https://github.com/beyond10x/ess)); the [specification reference](/docs/reference/ess)
+([GitHub](https://github.com/beyond10x/ess)). The [specification reference](/docs/reference/ess)
 is generated from the repository.
 
-## Two rules about trust
+## Trust
 
-- **The model is not trusted context.** It never supplies identity, authority, case revision,
-  trusted time, approval results or tenant context. Those come from the governed side of the run.
-- **A trace is not evidence.** What Loom records about a run helps you understand and compare runs.
-  Evidence comes from a trusted verifier: in the slice, the exit status of the test command it ran
-  itself.
+The model is not trusted context. It does not supply identity, authority, case revision, trusted
+time, approval results or tenant context. Those come from the governed side of the run.
+
+A trace is not evidence. What Loom records about a run helps you understand and compare runs.
+Evidence comes from a trusted verifier: in the slice, the exit status of the test command it ran
+itself.
 
 ## Where to go next
 
-- [Getting started](./getting-started.md): build it, run the SDK example, read a live run
+- [Getting started](./getting-started.md)
 - [Run an intent](./guides/run-an-intent.md) and [embed the runtime](./guides/embed-the-runtime.md)
 - [One run, five steps](/docs/concepts/one-run) and [where Loom ends](./concepts/where-loom-ends.md)
 - [The governor and intake](./concepts/governor-and-intake.md)

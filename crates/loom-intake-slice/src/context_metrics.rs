@@ -529,6 +529,7 @@ mod run_tests {
             &RunOptions {
                 context_policy: ContextPolicy::Bounded,
                 context_report: Some(path.clone()),
+                ..RunOptions::default()
             },
         );
         assert!(matches!(result, Err(SliceError::Router(_))));
@@ -546,6 +547,7 @@ mod run_tests {
             &RunOptions {
                 context_policy: ContextPolicy::Legacy,
                 context_report: Some(directory.path().to_owned()),
+                ..RunOptions::default()
             },
         );
         assert!(matches!(

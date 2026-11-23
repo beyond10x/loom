@@ -33,6 +33,7 @@ mod crates;
 mod graph;
 mod run_events;
 mod run_log;
+mod stamp;
 
 use std::{
     collections::BTreeMap,
@@ -65,48 +66,6 @@ const ESS_REFERENCE: &str = "website/docs/reference/ess";
 const ESS_DATA: &str = "website/data/ess";
 /// Every documentation page, generated or written by hand, relative to the repository root.
 const DOCS: &str = "website/docs";
-
-/// Whether `line` matches `^:::[a-z]+ +\S`: an admonition whose title is not in brackets, which
-/// Docusaurus prints as raw text.
-fn is_raw_admonition(line: &str) -> bool {
-    let Some(rest) = line.strip_prefix(":::") else {
-        return false;
-    };
-    let kind = rest.bytes().take_while(u8::is_ascii_lowercase).count();
-    let rest = &rest[kind..];
-    let spaces = rest.bytes().take_while(|b| *b == b' ').count();
-    kind > 0
-        && spaces > 0
-        && rest[spaces..]
-            .chars()
-            .next()
-            .is_some_and(|c| !c.is_whitespace())
-}
-
-/// `file:line` of every raw admonition title in the Markdown and MDX pages under `dir`.
-fn raw_admonitions(dir: &Path) -> Result<Vec<String>> {
-    let mut found = Vec::new();
-    let mut entries: Vec<_> = fs::read_dir(dir)
-        .with_context(|| format!("reading {}", dir.display()))?
-        .collect::<Result<_, _>>()?;
-    entries.sort_by_key(|entry| entry.path());
-    for entry in entries {
-        let path = entry.path();
-        if path.is_dir() {
-            found.extend(raw_admonitions(&path)?);
-        } else if path
-            .extension()
-            .is_some_and(|ext| ext == "md" || ext == "mdx")
-        {
-            for (n, line) in fs::read_to_string(&path)?.lines().enumerate() {
-                if is_raw_admonition(line) {
-                    found.push(format!("{}:{}", path.display(), n + 1));
-                }
-            }
-        }
-    }
-    Ok(found)
-}
 
 #[derive(Parser)]
 #[command(about = "Generate and check the derived pages of the Loom documentation site")]
@@ -369,10 +328,8 @@ fn ess_system(root: &Path, system: &str, ess: &Path) -> Result<(Pages, Pages, Ve
         data.insert(name, serde_json::to_string_pretty(&graph)? + "\n");
     }
 
-    let scratch = ess_output_dir(
-        &build_dir(root, std::env::var_os("CARGO_TARGET_DIR")),
-        system,
-    );
+    let build = build_dir(root, std::env::var_os("CARGO_TARGET_DIR"));
+    let scratch = ess_output_dir(&build, system);
     let owned = scratch
         .parent()
         .context("the ESS output directory has no parent")?;
@@ -394,14 +351,9 @@ fn ess_system(root: &Path, system: &str, ess: &Path) -> Result<(Pages, Pages, Ve
             ],
         )?;
         let dir = scratch.join("docs/domains");
-        let mut files: Vec<_> = fs::read_dir(&dir)
-            .with_context(|| format!("reading {}", dir.display()))?
-            .collect::<Result<_, _>>()?;
-        files.sort_by_key(|entry| entry.file_name());
         let mut pages = Pages::new();
         let mut index = Vec::new();
-        for entry in files {
-            let name = entry.file_name().to_string_lossy().into_owned();
+        for name in stamp::read_ess_output_dir(&build, &dir)? {
             let Some(stem) = name.strip_suffix(".md") else {
                 continue;
             };
@@ -410,7 +362,8 @@ fn ess_system(root: &Path, system: &str, ess: &Path) -> Result<(Pages, Pages, Ve
                 data.contains_key(&graph),
                 "ess page {name} has no domain in the compiled model of {system}"
             );
-            let (title, summary, page) = domain_page(&fs::read_to_string(entry.path())?)?;
+            let (title, summary, page) =
+                domain_page(&stamp::read_ess_output(&build, &dir.join(&name))?)?;
             index.push(DomainEntry {
                 page: name.clone(),
                 graph,
@@ -460,12 +413,11 @@ fn ess_outputs(root: &Path, ess: &Path) -> Result<Outputs> {
     Ok(Outputs::from([(ESS_REFERENCE, pages), (ESS_DATA, data)]))
 }
 
-/// Fails unless [`run_events::PAGE`] names everything `intake.events` declares; then writes the
-/// V1 contract ([`run_events::CONTRACT`]) from the declaration, or, with `check`, compares the
-/// committed one with it, failing on a difference that breaks a reader and naming every one.
-fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
+/// Fails unless [`run_events::PAGE`] names everything `intake.events` declares; then gives the
+/// V1 contract ([`run_events::CONTRACT`]) from the declaration.
+fn run_events_declared(root: &Path, ess: &Path) -> Result<serde_json::Value> {
     let model = compile(ess, &root.join(run_events::SYSTEM))?;
-    let page = fs::read_to_string(root.join(run_events::PAGE))
+    let page = stamp::read_input(root, run_events::PAGE)
         .with_context(|| format!("{} is missing", run_events::PAGE))?;
     let missing = run_events::problems(&model, &page, b10x_loom_cli::events::SCHEMA_VERSION)?;
     if !missing.is_empty() {
@@ -477,29 +429,28 @@ fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
     }
     println!("{}: documents every run event kind", run_events::PAGE);
 
-    let declared = run_events::contract(
+    run_events::contract(
         &model,
         b10x_loom_cli::EXIT_STATUS,
         b10x_loom_cli::events::FAILED,
         b10x_loom_cli::NOTHING_SUSPENDED_AT_GATE,
         b10x_loom_cli::events::SCHEMA_VERSION,
-    )?;
-    let path = root.join(run_events::CONTRACT);
-    if !check {
-        fs::write(&path, serde_json::to_string_pretty(&declared)? + "\n")
-            .with_context(|| format!("writing {}", run_events::CONTRACT))?;
-        println!("{}: written", run_events::CONTRACT);
-        return Ok(());
-    }
-    let committed: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&path).with_context(|| {
+    )
+}
+
+/// Compares the committed V1 contract of the run events with `declared`, failing on a
+/// difference that breaks a reader and naming every one.
+fn run_events_check(root: &Path, declared: &serde_json::Value) -> Result<()> {
+    let committed: serde_json::Value = serde_json::from_str(
+        &stamp::read_input(root, run_events::CONTRACT).with_context(|| {
             format!(
                 "{} is missing; run `task docs-generate`",
                 run_events::CONTRACT
             )
-        })?)
-        .with_context(|| format!("parsing {}", run_events::CONTRACT))?;
-    let found = run_events::differences(&committed, &declared);
+        })?,
+    )
+    .with_context(|| format!("parsing {}", run_events::CONTRACT))?;
+    let found = run_events::differences(&committed, declared);
     let listed = found
         .iter()
         .map(ToString::to_string)
@@ -528,18 +479,9 @@ fn run_events_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
     Ok(())
 }
 
-/// Writes the run log contract ([`run_log::CONTRACT`]) from the `loom.runlog` declaration, or,
-/// with `check`, fails unless the committed file is exactly what the declaration gives.
-fn run_log_contract(root: &Path, ess: &Path, check: bool) -> Result<()> {
-    let model = compile(ess, &root.join(run_log::SYSTEM))?;
-    let declared = run_log::text(&model)?;
-    let path = root.join(run_log::CONTRACT);
-    if !check {
-        fs::write(&path, declared).with_context(|| format!("writing {}", run_log::CONTRACT))?;
-        println!("{}: written", run_log::CONTRACT);
-        return Ok(());
-    }
-    match fs::read_to_string(&path) {
+/// Fails unless the committed run log contract ([`run_log::CONTRACT`]) is exactly `declared`.
+fn run_log_check(root: &Path, declared: &str) -> Result<()> {
+    match stamp::read_input(root, run_log::CONTRACT) {
         Ok(found) if found == declared => {
             println!("{}: the declared loom.runlog", run_log::CONTRACT);
             Ok(())
@@ -561,14 +503,173 @@ fn single_pages(root: &Path) -> Result<Pages> {
     ]))
 }
 
-/// Every difference between the expected files and the files in `dir`.
-fn drift(expected: &Pages, dir: &Path) -> Result<Vec<String>> {
+/// Every file `generate` writes, held in memory before any is written.
+struct Generated {
+    /// Directories replaced whole, each with its files.
+    dirs: Outputs,
+    /// The pages that stand alone ([`single_pages`]), by path relative to the repository root.
+    pages: Pages,
+    /// The V1 contract of the run events, as the declaration gives it.
+    run_events: serde_json::Value,
+    /// The run log contract, as the declaration gives it.
+    run_log: String,
+}
+
+impl Generated {
+    /// Every file with its content, by path relative to the repository root: the directories'
+    /// files, the single pages and the two contracts.
+    fn files(&self) -> Result<Pages> {
+        let mut files = Pages::new();
+        for (dir, pages) in &self.dirs {
+            for (name, content) in pages {
+                files.insert(format!("{dir}/{name}"), content.clone());
+            }
+        }
+        files.extend(self.pages.clone());
+        files.insert(
+            run_events::CONTRACT.to_owned(),
+            serde_json::to_string_pretty(&self.run_events)? + "\n",
+        );
+        files.insert(run_log::CONTRACT.to_owned(), self.run_log.clone());
+        Ok(files)
+    }
+}
+
+/// Generates every file from the repository at `root`, writing none.
+fn generated(root: &Path, ess: &Path) -> Result<Generated> {
+    let dirs = ess_outputs(root, ess)?;
+    let pages = single_pages(root)?;
+    let run_events = run_events_declared(root, ess)?;
+    let run_log = run_log::text(&compile(ess, &root.join(run_log::SYSTEM))?)?;
+    Ok(Generated {
+        dirs,
+        pages,
+        run_events,
+        run_log,
+    })
+}
+
+/// The stamp of `generated` over the inputs under `root`, made with `ess_version`. Fails when a
+/// generated file lies outside [`stamp::OUTPUTS`] or an entry of it is not generated, so the
+/// list the check walks is the list `generate` writes.
+fn stamp_of(root: &Path, generated: &Generated, ess_version: &str) -> Result<stamp::Stamp> {
+    let files = generated.files()?;
+    for relative in files.keys() {
+        ensure!(
+            stamp::is_output(relative),
+            "loom-docs generates {relative}, which `stamp::OUTPUTS` does not name"
+        );
+    }
+    for entry in stamp::OUTPUTS {
+        ensure!(
+            files
+                .keys()
+                .any(|relative| relative == entry || relative.starts_with(&format!("{entry}/"))),
+            "`stamp::OUTPUTS` names {entry}, which loom-docs does not generate"
+        );
+    }
+    let outputs = files
+        .iter()
+        .map(|(relative, content)| (relative.clone(), stamp::hash(content.as_bytes())))
+        .collect();
+    Ok(stamp::Stamp::new(
+        stamp::input_files(root)?,
+        ess_version,
+        outputs,
+    ))
+}
+
+/// Writes every generated file under `root`, each directory replaced whole, then the single
+/// pages and the contracts, and the stamp last. The earlier stamp is removed first, so a write
+/// that fails part way leaves no stamp and `task docs-check` fails.
+fn write_outputs(root: &Path, generated: &Generated, ess_version: &str) -> Result<()> {
+    let stamped = stamp_of(root, generated, ess_version)?;
+    stamp::remove(root)?;
+    for (relative, files) in &generated.dirs {
+        let dir = root.join(relative);
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        fs::create_dir_all(&dir)?;
+        for (name, content) in files {
+            fs::write(dir.join(name), content)?;
+        }
+        println!("{relative}: wrote {} files", files.len());
+    }
+    let dirs: Vec<String> = generated.dirs.keys().map(|dir| format!("{dir}/")).collect();
+    for (relative, content) in generated.files()? {
+        if dirs.iter().any(|dir| relative.starts_with(dir)) {
+            continue;
+        }
+        let path = root.join(&relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, content).with_context(|| format!("writing {relative}"))?;
+        println!("{relative}: written");
+    }
+    stamp::write(root, &stamped)?;
+    println!(
+        "{}: written ({} inputs, {} generated files, {ess_version})",
+        stamp::PATH,
+        stamped.input_files.len(),
+        stamped.outputs.len()
+    );
+    Ok(())
+}
+
+/// Fails when a generated file under `root` is missing, stale or edited by hand, a page under
+/// `website/docs` has a raw admonition title, or the committed stamp is not the one `generate`
+/// would write.
+fn check_outputs(root: &Path, generated: &Generated, ess_version: &str) -> Result<()> {
+    for (relative, files) in &generated.dirs {
+        let problems = drift(files, root, relative)?;
+        if !problems.is_empty() {
+            bail!(
+                "{relative} has drifted ({}); run `task docs-generate`",
+                problems.join(", ")
+            );
+        }
+        println!("{relative}: {} generated files current", files.len());
+    }
+    let raw = stamp::raw_admonitions(&root.join(DOCS))?;
+    if !raw.is_empty() {
+        bail!(
+            "raw admonition titles (write `:::kind[Title]`): {}",
+            raw.join(", ")
+        );
+    }
+    println!("{DOCS}: no raw admonition titles");
+    for (relative, content) in &generated.pages {
+        match stamp::read_input(root, relative) {
+            Ok(found) if &found == content => println!("{relative}: current"),
+            Ok(_) => bail!("{relative} is stale or edited; run `task docs-generate`"),
+            Err(_) => bail!("{relative} is missing; run `task docs-generate`"),
+        }
+    }
+    run_events_check(root, &generated.run_events)?;
+    run_log_check(root, &generated.run_log)?;
+    let expected = stamp_of(root, generated, ess_version)?;
+    match stamp::read(root) {
+        Ok(committed) if committed == expected => {
+            println!("{}: current", stamp::PATH);
+            Ok(())
+        }
+        Ok(_) => bail!(
+            "{} is stale or edited; run `task docs-generate`",
+            stamp::PATH
+        ),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Every difference between the expected files and the files in `<root>/<relative>`.
+fn drift(expected: &Pages, root: &Path, relative: &str) -> Result<Vec<String>> {
     let mut actual = Pages::new();
-    if dir.exists() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            actual.insert(name, fs::read_to_string(entry.path())?);
+    if root.join(relative).exists() {
+        for name in stamp::read_input_dir(root, relative)? {
+            let content = stamp::read_input(root, &format!("{relative}/{name}"))?;
+            actual.insert(name, content);
         }
     }
     let mut problems = Vec::new();
@@ -585,57 +686,22 @@ fn drift(expected: &Pages, dir: &Path) -> Result<Vec<String>> {
     Ok(problems)
 }
 
+/// The version line of `ess`: the last non-empty line `ess --version` prints.
+fn ess_version(ess: &Path) -> Result<String> {
+    stamp::version_line(&run(ess, &["--version".as_ref()])?)
+        .with_context(|| format!("`{} --version` printed nothing", ess.display()))
+}
+
 fn main() -> Result<()> {
     match Cli::parse().command {
         Action::Generate { check, root, ess } => {
-            let outputs = ess_outputs(&root, &ess)?;
-            for (relative, files) in &outputs {
-                let dir = root.join(relative);
-                if check {
-                    let problems = drift(files, &dir)?;
-                    if !problems.is_empty() {
-                        bail!(
-                            "{relative} has drifted ({}); run `task docs-generate`",
-                            problems.join(", ")
-                        );
-                    }
-                    println!("{relative}: {} generated files current", files.len());
-                    if relative == &ESS_REFERENCE {
-                        let raw = raw_admonitions(&root.join(DOCS))?;
-                        if !raw.is_empty() {
-                            bail!(
-                                "raw admonition titles (write `:::kind[Title]`): {}",
-                                raw.join(", ")
-                            );
-                        }
-                        println!("{DOCS}: no raw admonition titles");
-                    }
-                } else {
-                    if dir.exists() {
-                        fs::remove_dir_all(&dir)?;
-                    }
-                    fs::create_dir_all(&dir)?;
-                    for (name, content) in files {
-                        fs::write(dir.join(name), content)?;
-                    }
-                    println!("{relative}: wrote {} files", files.len());
-                }
+            let version = ess_version(&ess)?;
+            let generated = generated(&root, &ess)?;
+            if check {
+                check_outputs(&root, &generated, &version)?;
+            } else {
+                write_outputs(&root, &generated, &version)?;
             }
-            for (relative, content) in single_pages(&root)? {
-                let path = root.join(&relative);
-                if check {
-                    match fs::read_to_string(&path) {
-                        Ok(found) if found == content => println!("{relative}: current"),
-                        Ok(_) => bail!("{relative} is stale or edited; run `task docs-generate`"),
-                        Err(_) => bail!("{relative} is missing; run `task docs-generate`"),
-                    }
-                } else {
-                    fs::write(&path, content)?;
-                    println!("{relative}: written");
-                }
-            }
-            run_events_contract(&root, &ess, check)?;
-            run_log_contract(&root, &ess, check)?;
         }
         Action::Provenance { site, commit } => {
             write_provenance(&site, &commit)?;
@@ -722,62 +788,100 @@ mod tests {
     }
 
     #[test]
-    fn raw_admonition_titles_are_found_and_bracketed_ones_pass() {
-        for raw in [
-            ":::caution Planned",
-            ":::note  These thresholds",
-            ":::info Decided design",
-        ] {
-            assert!(is_raw_admonition(raw), "{raw}");
-        }
-        for fine in [
-            ":::caution[Planned]",
-            ":::",
-            ":::note",
-            ":::note ",
-            "::: note Title",
-            ":::Note Title",
-            " :::note Title",
-        ] {
-            assert!(!is_raw_admonition(fine), "{fine}");
-        }
-
-        let dir = scratch("admonitions");
-        fs::create_dir_all(dir.join("concepts")).unwrap();
-        fs::write(dir.join("index.md"), ":::caution[Bootstrap]\nok\n:::\n").unwrap();
-        fs::write(
-            dir.join("concepts/a.mdx"),
-            "text\n:::caution Planned\n:::\n",
-        )
-        .unwrap();
-        fs::write(dir.join("notes.txt"), ":::caution Planned\n").unwrap();
-        let found = raw_admonitions(&dir).unwrap();
-        assert_eq!(found.len(), 1);
-        assert!(found[0].ends_with("concepts/a.mdx:2"), "{found:?}");
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
     fn drift_names_missing_edited_and_stray_pages() {
-        let dir = scratch("drift");
+        let root = scratch("drift");
+        let dir = root.join(ESS_REFERENCE);
         let mut expected = Pages::new();
         expected.insert("a.md".into(), "A\n".into());
         expected.insert("b.md".into(), "B\n".into());
         assert_eq!(
-            drift(&expected, &dir).unwrap(),
+            drift(&expected, &root, ESS_REFERENCE).unwrap(),
             ["missing a.md", "missing b.md"]
         );
+        fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("a.md"), "A\n").unwrap();
         fs::write(dir.join("b.md"), "B, edited by hand\n").unwrap();
         fs::write(dir.join("c.md"), "C\n").unwrap();
         assert_eq!(
-            drift(&expected, &dir).unwrap(),
+            drift(&expected, &root, ESS_REFERENCE).unwrap(),
             ["stale or edited b.md", "not generated c.md"]
         );
         fs::write(dir.join("b.md"), "B\n").unwrap();
         fs::remove_file(dir.join("c.md")).unwrap();
-        assert!(drift(&expected, &dir).unwrap().is_empty());
-        fs::remove_dir_all(dir).unwrap();
+        assert!(drift(&expected, &root, ESS_REFERENCE).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// Fixed generated files, one or more for every entry of `stamp::OUTPUTS`.
+    fn fixed() -> Generated {
+        let page = |name: &str, content: &str| (name.to_owned(), content.to_owned());
+        Generated {
+            dirs: Outputs::from([
+                (ESS_REFERENCE, Pages::from([page("index.mdx", "# ESS\n")])),
+                (
+                    ESS_DATA,
+                    Pages::from([page("loom-run.domain-graph.json", "{}\n")]),
+                ),
+            ]),
+            pages: Pages::from([
+                page(cli::PAGE, "# CLI\n"),
+                page(cli::OPERATOR_PAGE, "# Operator CLI\n"),
+                page(crates::PAGE, "# Crates\n"),
+            ]),
+            run_events: serde_json::json!({ "schema_version": 1 }),
+            run_log: "{}\n".to_owned(),
+        }
+    }
+
+    #[test]
+    fn the_writer_puts_the_stamp_after_the_pages() {
+        let root = scratch("stamp");
+        for (relative, content) in [
+            ("Cargo.lock", "# lock\n"),
+            ("ess/system.yaml", "system: loom\n"),
+            ("crates/loom-cli/src/lib.rs", "//! cli\n"),
+            ("crates/loom-runlog/Cargo.toml", "[package]\n"),
+            ("crates/loom-runlog/src/lib.rs", "//! not an input\n"),
+        ] {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        let generated = fixed();
+        write_outputs(&root, &generated, "ess 0.96.0").unwrap();
+
+        let written = stamp::read(&root).expect("generate writes the stamp after the pages");
+        let files = generated.files().unwrap();
+        assert_eq!(
+            written.outputs.keys().collect::<Vec<_>>(),
+            files.keys().collect::<Vec<_>>()
+        );
+        for (relative, digest) in &written.outputs {
+            let on_disk = fs::read(root.join(relative)).unwrap();
+            assert_eq!(digest, &stamp::hash(&on_disk), "{relative}");
+            assert_eq!(on_disk, files[relative].as_bytes(), "{relative}");
+        }
+        assert_eq!(written.inputs, stamp::input_hash(&root).unwrap());
+        assert_eq!(
+            written.input_files.keys().collect::<Vec<_>>(),
+            [
+                "Cargo.lock",
+                "crates/loom-cli/src/lib.rs",
+                "crates/loom-runlog/Cargo.toml",
+                "ess/system.yaml"
+            ]
+        );
+        assert_eq!(written.ess, "ess 0.96.0");
+
+        // A page that cannot be written leaves no stamp behind, not even the earlier one.
+        fs::remove_file(root.join(cli::PAGE)).unwrap();
+        fs::create_dir_all(root.join(cli::PAGE).join("blocked")).unwrap();
+        assert!(write_outputs(&root, &generated, "ess 0.96.0").is_err());
+        assert!(
+            !root.join(stamp::PATH).exists(),
+            "a stamp survived a failed write of the pages"
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// ESS locks the parent of its `--out` exclusively, so a parent shared with other processes,

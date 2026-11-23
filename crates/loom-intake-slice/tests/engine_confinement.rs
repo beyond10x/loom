@@ -5,7 +5,7 @@
 //! its record; under `linux` the runner wraps today's host-driver route.
 //!
 //! No case starts a network connection or a model. The `local` cases run real host processes in
-//! temporary directories; the two `linux` cases marked gated run in a delegated scope through
+//! temporary directories; the `linux` cases marked gated run in a delegated scope through
 //! `tests/support` and skip naming what is missing. The host-policy case starts this binary
 //! again with `SUBSTRATE_CONFINEMENT_LOCAL=refuse` on that child process alone, so no other case
 //! sees the variable.
@@ -25,7 +25,8 @@ use b10x_loom_intake_slice::clock::Clock;
 use b10x_loom_intake_slice::confinement::{
     AppliedConfinement, Backend, BaselineEnvironment, ChildCommand, ChildError, ChildOutput,
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EgressAperture, EngineConfinement,
-    EngineRunner, ExecEnvironment, TestRunner, discover_cgroup_root, escape_reason,
+    EngineRunner, ExecEnvironment, SubstrateRunner, TestRunner, discover_cgroup_root,
+    escape_reason, hold_cgroup_root,
 };
 use b10x_loom_intake_slice::context::ContextPolicy;
 use b10x_loom_intake_slice::executor::{TestCommand, UnconfinedRunner, applied_label};
@@ -100,6 +101,16 @@ fn shell(script: &str, workspace: &Path, args: &[&str]) -> ChildCommand {
     let mut words = vec!["-c".to_owned(), script.to_owned(), "sh".to_owned()];
     words.extend(args.iter().map(|arg| (*arg).to_owned()));
     ChildCommand::new("sh", words, workspace).with_environment(baseline())
+}
+
+/// A child's shell line that holds until the host creates `target/release` in its workspace
+/// ([`release`]), at most 30 s: the child runs exactly as long as the host's check needs.
+const HOLD: &str =
+    "i=0; while [ ! -e target/release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done";
+
+/// Ends the [`HOLD`] of the child working in `workspace`.
+fn release(workspace: &std::path::Path) {
+    std::fs::write(workspace.join("target/release"), "").expect("the release marker");
 }
 
 /// The four launches of a runner, by name.
@@ -691,6 +702,40 @@ fn a_local_test_past_its_timeout_is_killed_with_its_group() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// A cancel set before the launch (`story:cancel-a-running-bound-program`)
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_child_whose_cancel_is_set_is_refused_before_launch() {
+    use b10x_loom_intake_slice::confinement::Cancel as ChildCancel;
+    let fixture = Fixture::new();
+    let marker = fixture.outside.join("marker");
+    let cancel = ChildCancel::new();
+    cancel.cancel();
+    let child = shell(
+        &format!("touch '{}'", marker.display()),
+        &fixture.workspace,
+        &[],
+    )
+    .with_cancel(cancel);
+    // `linux` is refused before any check or driver open, so it needs no delegated scope.
+    let linux = EngineRunner::open(&linux_confinement()).expect("linux builds");
+    for (adapter, runner) in [("local", local_runner()), ("linux", linux)] {
+        for child in [child.clone(), child.clone().with_stdin(b"input\n".to_vec())] {
+            let error = runner
+                .run_child(&child)
+                .expect_err("a child whose cancel is set is refused");
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::Cancelled,
+                "{adapter}: {error}"
+            );
+            assert!(!marker.exists(), "{adapter}: the child started");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Refusals under `local`
 
 #[test]
@@ -864,9 +909,10 @@ fn building_a_linux_runner_ends_no_run() {
         |_, workspace| {
             let first = EngineRunner::open(&linux_confinement()).expect("linux builds");
             let live = first
-                .spawn_child(&shell("sleep 2; exit 7", workspace, &[]))
+                .spawn_child(&shell(&format!("{HOLD}; exit 7"), workspace, &[]))
                 .expect("the first runner's child starts");
             let _second = EngineRunner::open(&linux_confinement()).expect("linux builds again");
+            release(workspace);
             let result = live.wait().expect("the first child ends");
             assert_eq!(result.exit.exit_code, Some(7), "{:?}", result.output);
         },
@@ -921,6 +967,88 @@ fn an_undelegated_root_is_refused_and_nothing_falls_back() {
     assert!(!marker.exists(), "no child started");
 }
 
+/// `story:concurrent-confined-runs`: a process holds its delegated root once, and every run of the
+/// process shares that hold. A second hold in the same process is refused, naming the root, while a
+/// runner on the held root runs a child, so the runner takes no hold of its own; once the first hold
+/// is dropped, the root is held again.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_second_hold_of_a_root_in_this_process_is_refused() {
+    // Gated: runs in a delegated scope, or skips naming what is missing.
+    support::delegated(
+        "a_second_hold_of_a_root_in_this_process_is_refused",
+        &[],
+        |runner, workspace| {
+            let root = runner.cgroup_root().expect("the harness names its root");
+            let hold = hold_cgroup_root(root).expect("the process holds its delegated root");
+            let second = hold_cgroup_root(root).expect_err("a second hold in this process");
+            assert_eq!(
+                second.reason,
+                ConfinementRefusal::CgroupUndelegated,
+                "{second}"
+            );
+            assert!(
+                second.detail.contains(&hold.root().display().to_string()),
+                "the refusal names the root: {second}"
+            );
+            let held = SubstrateRunner::new(Some(hold.root().to_owned()));
+            let result = held
+                .run_child(&shell("true", workspace, &[]))
+                .expect("a runner on the held root runs: it takes no hold");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            drop(hold);
+            let again = hold_cgroup_root(root).expect("a dropped hold frees the root");
+            assert_eq!(again.root(), root.canonicalize().unwrap());
+        },
+    );
+}
+
+/// `story:concurrent-confined-runs`: a cgroup beside the one this process runs in, under the same
+/// delegated scope, holds no process of it, so Substrate proves no `limits` there and a run on it
+/// is refused `CgroupUndelegated`. That is why each run of a process does not get a cgroup root of
+/// its own: every run shares the one root the process holds.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated() {
+    // Gated: runs in a delegated scope, or skips naming what is missing.
+    support::delegated(
+        "a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated",
+        &[],
+        |runner, workspace| {
+            let root = runner.cgroup_root().expect("the harness names its root");
+            let sibling = root.join(format!("loom-run-{}", std::process::id()));
+            std::fs::create_dir(&sibling).expect("a sibling cgroup of this process's own");
+            let error = {
+                let runner = EngineRunner::open(&EngineConfinement {
+                    adapter: ConfinementAdapter::Linux,
+                    local_reason: None,
+                    cgroup_root: Some(sibling.to_string_lossy().into_owned()),
+                })
+                .expect("building a linux runner opens nothing");
+                runner
+                    .run_child(&shell("true", workspace, &[]))
+                    .expect_err("a root that holds no process of this one runs nothing")
+            };
+            let _ = std::fs::remove_dir(&sibling);
+            assert_eq!(
+                error.reason,
+                ConfinementRefusal::CgroupUndelegated,
+                "{error}"
+            );
+            assert!(
+                error.detail.contains("`limits`"),
+                "Substrate proves no limits on a root that holds no process of this one: {error}"
+            );
+        },
+    );
+}
+
 // ---------------------------------------------------------------------------------------------
 // The run line
 
@@ -972,6 +1100,7 @@ fn a_local_run_prints_its_adapter_and_reason() {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: None,
+            ..RunOptions::default()
         },
     );
     let printed = String::from_utf8(out).unwrap();
@@ -1013,6 +1142,7 @@ fn slice_run_lines(runner: Arc<dyn TestRunner>) -> Vec<String> {
         &RunOptions {
             context_policy: ContextPolicy::Legacy,
             context_report: None,
+            ..RunOptions::default()
         },
     );
     String::from_utf8(out)

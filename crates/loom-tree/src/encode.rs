@@ -1,0 +1,387 @@
+//! The JSON documents the tree commands print, member for member as `loom.tree` declares them;
+//! an absent optional member is left out, and an enum is its variant's name.
+
+use loom::tree::{
+    CaseReplay, CaseStatus, LogFailure, NextDecision, StatusApproval, StatusCopy, StatusEvidence,
+    StatusLog, StatusRun, TreeProtocol, TreeRefusal, TreeReplay, TreeRun, TreeStatus, TreeVerify,
+};
+use serde_json::{Map, Value, json};
+
+fn put(object: &mut Map<String, Value>, name: &str, value: Option<Value>) {
+    if let Some(value) = value {
+        object.insert(name.to_owned(), value);
+    }
+}
+
+/// `refusal` as one JSON object.
+pub fn refusal_json(refusal: &TreeRefusal) -> Value {
+    let mut object = Map::new();
+    object.insert("reason".into(), json!(format!("{:?}", refusal.reason)));
+    object.insert("detail".into(), json!(refusal.detail));
+    put(&mut object, "case", refusal.case.clone().map(Value::from));
+    put(&mut object, "file", refusal.file.clone().map(Value::from));
+    put(
+        &mut object,
+        "action",
+        refusal.action.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "command",
+        refusal.command.clone().map(Value::from),
+    );
+    put(&mut object, "story", refusal.story.clone().map(Value::from));
+    put(&mut object, "holder", refusal.holder.map(Value::from));
+    Value::Object(object)
+}
+
+fn case_json(case: &CaseStatus) -> Value {
+    let mut object = Map::new();
+    object.insert("case".into(), json!(case.case));
+    put(&mut object, "parent", case.parent.clone().map(Value::from));
+    object.insert("protocol".into(), json!(case.protocol));
+    object.insert("revision".into(), json!(case.revision));
+    put(
+        &mut object,
+        "outcome",
+        case.outcome.clone().map(Value::from),
+    );
+    put(&mut object, "stop", case.stop.clone().map(Value::from));
+    object.insert("open_obligations".into(), json!(case.open_obligations));
+    object.insert("case_file".into(), json!(case.case_file));
+    object.insert("run_log".into(), json!(case.run_log));
+    put(&mut object, "name", case.name.clone().map(Value::from));
+    object.insert("protocol_id".into(), json!(case.protocol_id));
+    object.insert("protocol_revision".into(), json!(case.protocol_revision));
+    object.insert("stop_next".into(), json!(case.stop_next));
+    object.insert(
+        "evidence".into(),
+        Value::Array(case.evidence.iter().map(evidence_json).collect()),
+    );
+    object.insert(
+        "runs".into(),
+        Value::Array(case.runs.iter().map(run_entry_json).collect()),
+    );
+    object.insert(
+        "approvals".into(),
+        Value::Array(case.approvals.iter().map(approval_json).collect()),
+    );
+    object.insert(
+        "copies".into(),
+        Value::Array(case.copies.iter().map(copy_json).collect()),
+    );
+    put(&mut object, "log", case.log.as_ref().map(log_json));
+    put(
+        &mut object,
+        "budget",
+        case.budget
+            .map(|budget| Value::from(b10x_loom_runlog::budget_name(budget))),
+    );
+    Value::Object(object)
+}
+
+fn log_json(log: &StatusLog) -> Value {
+    let mut object = Map::new();
+    object.insert("verified".into(), json!(log.verified));
+    put(
+        &mut object,
+        "refusal",
+        log.refusal
+            .map(|refusal| Value::from(format!("{refusal:?}"))),
+    );
+    put(&mut object, "line", log.line.map(Value::from));
+    put(&mut object, "detail", log.detail.clone().map(Value::from));
+    Value::Object(object)
+}
+
+fn evidence_json(record: &StatusEvidence) -> Value {
+    let mut object = Map::new();
+    object.insert("index".into(), json!(record.index));
+    object.insert("evidence_id".into(), json!(record.evidence_id));
+    object.insert("kind".into(), json!(record.kind));
+    put(
+        &mut object,
+        "result",
+        record.result.clone().map(Value::from),
+    );
+    object.insert("subject".into(), json!(record.subject));
+    object.insert("subject_revision".into(), json!(record.subject_revision));
+    object.insert(
+        "upstream_revisions".into(),
+        crate::run::plain(&record.upstream_revisions),
+    );
+    object.insert("producer".into(), json!(record.producer));
+    put(
+        &mut object,
+        "action",
+        record.action.clone().map(Value::from),
+    );
+    put(&mut object, "name", record.name.clone().map(Value::from));
+    Value::Object(object)
+}
+
+fn run_entry_json(run: &StatusRun) -> Value {
+    let mut object = Map::new();
+    object.insert("action".into(), json!(run.action));
+    put(&mut object, "exit", run.exit.map(Value::from));
+    object.insert("attempt".into(), json!(run.attempt));
+    object.insert("retried".into(), json!(run.retried));
+    object.insert("retry_of".into(), json!(run.retry_of));
+    put(&mut object, "cancelled", run.cancelled.map(Value::from));
+    Value::Object(object)
+}
+
+fn approval_json(approval: &StatusApproval) -> Value {
+    let mut object = Map::new();
+    object.insert("capability".into(), json!(approval.capability));
+    put(
+        &mut object,
+        "action",
+        approval.action.clone().map(Value::from),
+    );
+    object.insert("answer".into(), json!(format!("{:?}", approval.answer)));
+    object.insert("actor".into(), json!(approval.actor));
+    object.insert("at".into(), json!(approval.at));
+    Value::Object(object)
+}
+
+fn copy_json(copy: &StatusCopy) -> Value {
+    json!({
+        "source_case": copy.source_case,
+        "target_case": copy.target_case,
+        "record_kind": copy.record_kind,
+    })
+}
+
+/// `value` as a generated `loom` JSON value; a number keeps its spelling.
+pub(crate) fn loom_json(value: &Value) -> loom::json::Value {
+    use loom::json::Value as Loom;
+    match value {
+        Value::Null => Loom::Null,
+        Value::Bool(value) => Loom::Bool(*value),
+        Value::Number(number) => Loom::Number(number.to_string()),
+        Value::String(text) => Loom::Text(text.clone()),
+        Value::Array(items) => Loom::Array(items.iter().map(loom_json).collect()),
+        Value::Object(members) => Loom::Object(
+            members
+                .iter()
+                .map(|(name, member)| (name.clone(), loom_json(member)))
+                .collect(),
+        ),
+    }
+}
+
+/// One protocol of a tree as one JSON object.
+pub(crate) fn protocol_json(protocol: &TreeProtocol) -> Value {
+    json!({
+        "registration": protocol.registration,
+        "protocol": protocol.protocol,
+        "revision": protocol.revision,
+        "file": protocol.file,
+        "sha256": protocol.sha256,
+    })
+}
+
+/// `status` as one JSON object.
+pub fn status_json(status: &TreeStatus) -> Value {
+    json!({
+        "format": status.format,
+        "version": status.version,
+        "store": status.store,
+        "workspace": status.workspace,
+        "root": status.root,
+        "cases": status.cases.iter().map(case_json).collect::<Vec<_>>(),
+        "protocols": status.protocols.iter().map(protocol_json).collect::<Vec<_>>(),
+    })
+}
+
+fn failure_json(failure: &LogFailure) -> Value {
+    json!({"case": failure.case, "line": failure.line, "detail": failure.detail})
+}
+
+/// `verified` as one JSON object.
+pub fn verify_json(verified: &TreeVerify) -> Value {
+    let mut object = Map::new();
+    object.insert("cases".into(), json!(verified.cases));
+    put(
+        &mut object,
+        "failure",
+        verified.failure.as_ref().map(failure_json),
+    );
+    Value::Object(object)
+}
+
+fn case_replay_json(case: &CaseReplay) -> Value {
+    let mut object = Map::new();
+    object.insert("case".into(), json!(case.case));
+    object.insert("evaluated".into(), json!(case.evaluated));
+    put(&mut object, "seq", case.seq.map(Value::from));
+    put(&mut object, "at", case.at.clone().map(Value::from));
+    put(
+        &mut object,
+        "case_revision",
+        case.case_revision.map(Value::from),
+    );
+    put(
+        &mut object,
+        "logged_case_revision",
+        case.logged_case_revision.map(Value::from),
+    );
+    put(
+        &mut object,
+        "unmatched_line",
+        case.unmatched_line.map(Value::from),
+    );
+    put(
+        &mut object,
+        "state_matches_log",
+        case.state_matches_log.map(Value::from),
+    );
+    put(
+        &mut object,
+        "decision_digest",
+        case.decision_digest.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "logged_decision_digest",
+        case.logged_decision_digest.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "decision_matches_log",
+        case.decision_matches_log.map(Value::from),
+    );
+    Value::Object(object)
+}
+
+/// `replayed` as one JSON object, `{"cases": [...]}`: a case with no `evaluated` line is exactly
+/// `{"case", "evaluated": false}`.
+pub fn replay_json(replayed: &TreeReplay) -> Value {
+    json!({"cases": replayed.cases.iter().map(case_replay_json).collect::<Vec<_>>()})
+}
+
+/// One decision a waiting tree names, as one JSON object.
+pub fn decision_json(decision: &NextDecision) -> Value {
+    let mut object = Map::new();
+    object.insert("case".into(), json!(decision.case));
+    object.insert("kind".into(), json!(format!("{:?}", decision.kind)));
+    put(
+        &mut object,
+        "action",
+        decision.action.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "capability",
+        decision.capability.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "principal",
+        decision.principal.clone().map(Value::from),
+    );
+    object.insert("decides".into(), json!(decision.decides));
+    put(
+        &mut object,
+        "subject",
+        decision.subject.clone().map(Value::from),
+    );
+    put(
+        &mut object,
+        "revision",
+        decision.revision.clone().map(Value::from),
+    );
+    put(&mut object, "path", decision.path.clone().map(Value::from));
+    put(
+        &mut object,
+        "outcome",
+        decision.outcome.clone().map(Value::from),
+    );
+    object.insert("command".into(), json!(decision.command));
+    Value::Object(object)
+}
+
+/// `run` as one JSON object.
+pub fn run_json(run: &TreeRun) -> Value {
+    let mut object = Map::new();
+    object.insert("stop".into(), json!(format!("{:?}", run.stop)));
+    object.insert("case".into(), json!(run.case));
+    object.insert("steps".into(), json!(run.steps));
+    object.insert(
+        "decisions".into(),
+        Value::Array(run.decisions.iter().map(decision_json).collect()),
+    );
+    put(&mut object, "detail", run.detail.clone().map(Value::from));
+    Value::Object(object)
+}
+
+#[cfg(test)]
+mod tests {
+    use loom::tree::{DecisionKind, NextDecision};
+
+    use super::decision_json;
+
+    /// A decision of `kind` with the members every kind has.
+    fn decision(kind: DecisionKind) -> NextDecision {
+        NextDecision {
+            case: "root".into(),
+            kind,
+            action: None,
+            capability: None,
+            principal: None,
+            decides: "what is decided".into(),
+            subject: None,
+            revision: None,
+            path: None,
+            outcome: None,
+            command: vec!["b10x-loom".into(), "tree".into()],
+        }
+    }
+
+    #[test]
+    fn a_decision_without_a_principal_encodes_as_before() {
+        let approve_action = NextDecision {
+            action: Some("post.seal".into()),
+            capability: Some("clerk.seal".into()),
+            subject: Some("post".into()),
+            revision: Some("sha256:00".into()),
+            path: Some("/w/road.txt".into()),
+            ..decision(DecisionKind::ApproveAction)
+        };
+        let approve = NextDecision {
+            action: Some("post.stamp".into()),
+            capability: Some("clerk.stamp".into()),
+            ..decision(DecisionKind::Approve)
+        };
+        let close = NextDecision {
+            outcome: Some("left".into()),
+            ..decision(DecisionKind::Close)
+        };
+        let handoff = NextDecision {
+            action: Some("route.write".into()),
+            ..decision(DecisionKind::Handoff)
+        };
+        // Today's print of each value, before `principal` was declared.
+        for (value, bytes) in [
+            (
+                approve_action,
+                r#"{"action":"post.seal","capability":"clerk.seal","case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"ApproveAction","path":"/w/road.txt","revision":"sha256:00","subject":"post"}"#,
+            ),
+            (
+                approve,
+                r#"{"action":"post.stamp","capability":"clerk.stamp","case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"Approve"}"#,
+            ),
+            (
+                close,
+                r#"{"case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"Close","outcome":"left"}"#,
+            ),
+            (
+                handoff,
+                r#"{"action":"route.write","case":"root","command":["b10x-loom","tree"],"decides":"what is decided","kind":"Handoff"}"#,
+            ),
+        ] {
+            assert_eq!(decision_json(&value).to_string(), bytes);
+        }
+    }
+}

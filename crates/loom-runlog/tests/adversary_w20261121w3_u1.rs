@@ -148,7 +148,20 @@ fn contract_line(contract: &Value, kind: &str) -> serde_json::Map<String, Value>
         .as_object()
         .expect("fields")
     {
-        line.insert(name.clone(), sample(stated));
+        // A child line's `record_digest` is a SHA-256 (story child-record-in-the-run-log), a form
+        // the contract cannot state.
+        // A `stopped` line holds `budget` only on a `BudgetSpent` stop and only as one of the
+        // budgets' spellings (story tree-status-names-what-it-read), which it cannot state either.
+        let value = if name == "record_digest" {
+            json!(digest(b"facts"))
+        } else if kind == "Stopped" && name == "stop" {
+            json!("BudgetSpent")
+        } else if kind == "Stopped" && name == "budget" {
+            json!("MaxSteps")
+        } else {
+            sample(stated)
+        };
+        line.insert(name.clone(), value);
     }
     line
 }
@@ -161,7 +174,8 @@ fn one_line(line: &serde_json::Map<String, Value>) -> Vec<u8> {
 
 /// The contract document, read as the specification of a line: every kind it names reads with
 /// every field it states, writes back as exactly those members, loses a required field only by
-/// being refused, and takes no member the contract does not state. `ActionFinished` holds exactly
+/// being refused, and takes no member the contract does not state. `ActionFinished` (and
+/// `HandoffChecked`, story handoff-when-a-program-decides) holds exactly
 /// one of `exit` and `refusal` (the domain's "one of the two", which the contract cannot state):
 /// it is read twice, with every field and `exit` alone, and with every field and `refusal` alone;
 /// the line with both and the line with neither are refused.
@@ -169,11 +183,18 @@ fn one_line(line: &serde_json::Map<String, Value>) -> Vec<u8> {
 fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
     let contract = contract();
     let kinds = contract["kinds"].as_object().expect("kinds");
-    assert_eq!(kinds.len(), 10, "the story names ten events");
+    // Ten events of story run-log-hash-chain, `HandoffChecked` of story
+    // handoff-when-a-program-decides, which holds exactly one of `exit` and `refusal` too, and
+    // `StopRecorded` and `StopLifted` of story tree-suite-stop-resume-reopen-steps.
+    assert_eq!(kinds.len(), 13, "thirteen events");
     for (kind, body) in kinds {
         let full = contract_line(&contract, kind);
         let exclusive = ["exit", "refusal"];
-        let variants: Vec<serde_json::Map<String, Value>> = if kind == "ActionFinished" {
+        let one_of = kind == "ActionFinished" || kind == "HandoffChecked";
+        // A child line holds `record` and `record_digest` together or neither (story
+        // child-record-in-the-run-log), which the contract cannot state either.
+        let paired = ["record", "record_digest"];
+        let variants: Vec<serde_json::Map<String, Value>> = if one_of {
             for member in exclusive {
                 assert!(full.contains_key(member), "the contract states `{member}`");
             }
@@ -221,11 +242,27 @@ fn every_kind_of_the_contract_reads_and_writes_exactly_the_fields_it_states() {
                 let mut without = line.clone();
                 without.remove(name);
                 let result = verify(&one_line(&without));
-                if kind == "ActionFinished" && exclusive.contains(&name.as_str()) {
+                if one_of && exclusive.contains(&name.as_str()) {
                     assert_eq!(
                         refusal(result),
                         (RunLogRefusal::CutLine, 0),
                         "{kind}: `{name}`, the only one of exit and refusal, left out"
+                    );
+                } else if paired.contains(&name.as_str())
+                    && (kind == "ChildOpened" || kind == "ChildClosed")
+                {
+                    assert_eq!(
+                        refusal(result),
+                        (RunLogRefusal::CutLine, 0),
+                        "{kind}: `{name}` left out of the pair record and record_digest"
+                    );
+                    let mut neither = without.clone();
+                    for member in paired {
+                        neither.remove(member);
+                    }
+                    assert!(
+                        verify(&one_line(&neither)).is_ok(),
+                        "{kind}: the pair left out together reads"
                     );
                 } else if stated["optional"] == json!(true) {
                     assert!(
@@ -633,6 +670,9 @@ fn the_log_file_has_the_mode_of_the_case_file_beside_it() {
             independence: CaseIndependence::none(),
             evidence: Vec::new(),
             decisions: Vec::new(),
+            parent: None,
+            children: Vec::new(),
+            termination: None,
         })
         .expect("the case is written");
     let log = RunLog::open(&dir).expect("opens");
@@ -642,18 +682,18 @@ fn the_log_file_has_the_mode_of_the_case_file_beside_it() {
     assert_eq!(mode(&log.path(CASE)), mode(&case));
 }
 
-/// Many threads, each with its own `RunLog` over one directory, append to one case: every line
-/// lands once, the log verifies.
-#[test]
-fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
-    let dir = store_dir("threads");
+/// Eight threads, each with its own `RunLog` over one directory, append `per_thread` lines each to
+/// one case: every line lands once, the log verifies. Each append reads the log and syncs its
+/// file and directory, so the count sets the time.
+fn eight_threads_append(label: &str, per_thread: usize) {
+    let dir = store_dir(label);
     RunLog::open(&dir).expect("opens");
     let handles: Vec<_> = (0..8)
         .map(|t| {
             let dir = dir.clone();
             thread::spawn(move || {
                 let log = RunLog::open(&dir).expect("opens in a thread");
-                for i in 0..25 {
+                for i in 0..per_thread {
                     log.append(
                         CASE,
                         at(i),
@@ -673,7 +713,7 @@ fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
         .expect("opens")
         .read(CASE)
         .expect("verifies");
-    assert_eq!(read.len(), 200);
+    assert_eq!(read.len(), 8 * per_thread);
     let reasons: BTreeSet<String> = read
         .iter()
         .map(|l| match &l.event {
@@ -681,7 +721,20 @@ fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
             other => panic!("{other:?}"),
         })
         .collect();
-    assert_eq!(reasons.len(), 200, "every line once");
+    assert_eq!(reasons.len(), 8 * per_thread, "every line once");
+}
+
+/// [`eight_threads_append`] with 5 lines a thread.
+#[test]
+fn eight_threads_with_their_own_run_logs_leave_every_line_once() {
+    eight_threads_append("threads", 5);
+}
+
+/// [`eight_threads_append`] with 25 lines a thread, the count the case held before, in the slow
+/// lane (`task slow`): about 23 s on a loaded host.
+#[test]
+fn slow_eight_threads_with_their_own_run_logs_leave_every_line_once() {
+    eight_threads_append("threads-slow", 25);
 }
 
 /// A long line (4 MiB of event text) is written and read back whole.

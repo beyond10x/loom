@@ -64,14 +64,14 @@ mod several_apertures;
 mod spec;
 #[cfg(test)]
 mod workdir;
-pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild};
-pub use engine::EngineRunner;
+pub use child::{ChildError, ChildFrame, ChildResult, ChildSignal, ConfinedChild, SIGNAL_GRACE};
+pub use engine::{EngineRunner, KILL_SETTLE, KillBounds};
 
 static NEXT_EXEC: AtomicU64 = AtomicU64::new(0);
 const WRITABLE: &str = "target";
 const RUST_MOUNT: &str = "/toolchain/rust";
 const CACHE_MOUNT: &str = "/toolchain/cargo-cache";
-// Four roots are admitted by the released driver: compiler, registry and two Git caches.
+// Four of the released driver's eight roots: compiler, registry and two Git caches.
 const CACHE_DIRS: [&str; 3] = ["registry", "git/db", "git/checkouts"];
 
 /// The trusted test execution port. Implementations supply observed isolation, not promises.
@@ -207,6 +207,90 @@ pub struct TestExecution {
     pub child_output: ChildOutput,
 }
 
+/// A cancel handle: a shared flag a host sets, from any thread, to end a child it handed the
+/// handle ([`ChildCommand::with_cancel`]) before its timeout. Clones share one flag, and setting it
+/// cannot be undone.
+///
+/// A child whose handle is set before it starts is refused [`ConfinementRefusal::Cancelled`] and
+/// nothing starts. One running when it is set is killed within 100 ms, with no grace, and its run
+/// is refused [`ConfinementRefusal::Cancelled`]: under `linux` with every process it started (its
+/// cgroup), a write of its input still pending dropped; under `local` with its process group
+/// only, so a process that left the group (`setsid`, a daemon) is not killed and survives the
+/// cancel. A child that ended before the handle was read set keeps its result.
+#[derive(Clone, Default)]
+pub struct Cancel(Arc<std::sync::atomic::AtomicBool>);
+
+impl Cancel {
+    /// A handle not set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the handle: every child holding it, or a clone of it, is ended.
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the handle is set.
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+impl fmt::Debug for Cancel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Cancel").field(&self.is_cancelled()).finish()
+    }
+}
+
+/// Two handles are equal when they share one flag.
+impl PartialEq for Cancel {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Cancel {}
+
+/// The refusal of a child whose cancel handle was set before it started: nothing started.
+fn cancelled_before_launch() -> ConfinementError {
+    refuse(
+        ConfinementRefusal::Cancelled,
+        "the child's cancel was set before it started; nothing started",
+    )
+}
+
+/// The refusal of a child its cancel handle killed `ran` after it started.
+fn killed_by_cancel(ran: Duration) -> ConfinementError {
+    refuse(
+        ConfinementRefusal::Cancelled,
+        format!(
+            "the child was killed by its cancel after {:.1} s",
+            ran.as_secs_f64()
+        ),
+    )
+}
+
+/// Whether `cancel` is given and set.
+fn is_set(cancel: Option<&Cancel>) -> bool {
+    cancel.is_some_and(Cancel::is_cancelled)
+}
+
+/// How often a confined child's wait reads its cancel handle.
+const CANCEL_READ: Duration = Duration::from_millis(100);
+
+/// Ends once `cancel` is set, read every [`CANCEL_READ`]; never without a handle.
+async fn until_cancelled(cancel: Option<&Cancel>) {
+    match cancel {
+        Some(cancel) => {
+            while !cancel.is_cancelled() {
+                tokio::time::sleep(CANCEL_READ).await;
+            }
+        }
+        None => std::future::pending().await,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfinementError {
     pub reason: ConfinementRefusal,
@@ -231,29 +315,119 @@ fn scope_error(detail: impl fmt::Display) -> ConfinementError {
 /// The Substrate runner: tests ([`TestRunner`]) and children the host names
 /// ([`SubstrateRunner::run_child`]) run through it confined.
 ///
-/// A runner and its clones share one Substrate driver per directory that holds their workspaces,
-/// egress apertures and certificate bundle they name (Substrate fixes a driver's apertures and
-/// bundle when it opens), opened at the first launch that needs it, so their launches in
-/// workspaces of one directory run side by side; each launch releases its execution from the
-/// driver once it ended. Opening a driver ends every confined run under its cgroup root (Substrate
-/// reconciles them as orphans), so no driver is opened on a root, however its path is spelled,
-/// while a launch of this process runs under it: a launch that needs a driver for another
-/// directory, set of egress apertures or certificate bundle then is refused with
+/// Every runner of the process shares one Substrate driver per cgroup root, directory that holds
+/// the workspaces, and egress apertures and certificate bundle a launch names (Substrate fixes a
+/// driver's apertures and bundle when it opens; [`DriverKey`]), opened at the first launch that
+/// needs it, so launches in workspaces of one directory run side by side, whichever runner started
+/// them; each launch releases its execution from the driver once it ended. A runner and its clones
+/// keep the drivers they used, and a driver is closed once the last runner that used it is
+/// dropped. Opening a driver ends every confined run under its cgroup root (Substrate reconciles
+/// them as orphans), so no driver is opened on a root, however its path is spelled, while a launch
+/// of this process runs under it: a launch that needs a driver for another directory, set of
+/// egress apertures or certificate bundle then is refused with
 /// [`ConfinementRefusal::CapabilityUnserved`] instead.
+///
+/// A runner takes no hold of its cgroup root: a process that runs several trees holds the root
+/// once ([`hold_cgroup_root`]) and gives every runner the held root ([`CgroupRootHold::root`]).
 #[derive(Debug, Clone, Default)]
 pub struct SubstrateRunner {
     cgroup_root: Option<PathBuf>,
     drivers: Arc<Drivers>,
 }
 
-/// The drivers a runner and its clones opened, by the directory holding their workspaces, each
-/// with the [`DriverEgress`] it was opened for.
-#[derive(Default)]
-struct Drivers(Mutex<BTreeMap<PathBuf, Vec<Arc<OpenDriver>>>>);
-impl fmt::Debug for Drivers {
+/// The drivers a runner and its clones used, kept open for as long as one of them lives: the
+/// process's table ([`DRIVERS`]) holds each driver only weakly.
+struct Drivers<D = OpenDriver>(Mutex<Vec<Arc<D>>>);
+impl<D> Default for Drivers<D> {
+    fn default() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+}
+impl<D> fmt::Debug for Drivers<D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let drivers = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        f.debug_list().entries(drivers.keys()).finish()
+        let kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        f.debug_struct("Drivers")
+            .field("kept", &kept.len())
+            .finish()
+    }
+}
+impl<D> Drivers<D> {
+    /// Keep `driver` open for as long as this runner or a clone lives, once.
+    fn keep(&self, driver: &Arc<D>) {
+        let mut kept = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if !kept.iter().any(|open| Arc::ptr_eq(open, driver)) {
+            kept.push(Arc::clone(driver));
+        }
+    }
+}
+
+/// What a shared driver was opened for: the canonical cgroup root it reconciles, the directory
+/// holding the workspaces it adopts, and its [`DriverEgress`]. Two launches share a driver only
+/// when their keys are equal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DriverKey {
+    cgroup_root: PathBuf,
+    directory: PathBuf,
+    egress: DriverEgress,
+}
+
+/// The drivers the runners of a process opened, by [`DriverKey`], each held weakly: the runners
+/// that used a driver keep it open ([`Drivers`]), and an entry whose driver closed is dropped.
+struct DriverTable<D>(Mutex<Vec<(DriverKey, std::sync::Weak<D>)>>);
+
+/// The one driver table of the process, shared by every [`SubstrateRunner`].
+static DRIVERS: DriverTable<OpenDriver> = DriverTable::new();
+
+impl<D> DriverTable<D> {
+    const fn new() -> Self {
+        Self(Mutex::new(Vec::new()))
+    }
+
+    /// The driver for `key`: the one a runner of this process opened for an equal key and still
+    /// keeps, or a new one `open` opens. Opening ends every confined run under the key's root, so
+    /// while a launch of this process runs there it is refused
+    /// [`ConfinementRefusal::CapabilityUnserved`] and `open` is not called; the count is held while
+    /// `open` runs, so no launch starts there meanwhile.
+    fn driver(
+        &self,
+        key: &DriverKey,
+        open: impl FnOnce(&DriverKey) -> Result<D, ConfinementError>,
+    ) -> Result<Arc<D>, ConfinementError> {
+        let mut table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        table.retain(|(_, driver)| driver.strong_count() > 0);
+        let shared = table
+            .iter()
+            .find(|(held, _)| held == key)
+            .and_then(|(_, driver)| driver.upgrade());
+        if let Some(driver) = shared {
+            return Ok(driver);
+        }
+        let running = running();
+        if running
+            .get(&key.cgroup_root)
+            .is_some_and(|count| *count > 0)
+        {
+            return Err(refuse(
+                ConfinementRefusal::CapabilityUnserved,
+                format!(
+                    "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
+                    key.cgroup_root.display()
+                ),
+            ));
+        }
+        let driver = Arc::new(open(key)?);
+        drop(running);
+        table.push((key.clone(), Arc::downgrade(&driver)));
+        Ok(driver)
+    }
+
+    /// Whether the table holds an open driver for `key`.
+    #[cfg(test)]
+    fn holds(&self, key: &DriverKey) -> bool {
+        let table = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        table
+            .iter()
+            .any(|(held, driver)| held == key && driver.strong_count() > 0)
     }
 }
 
@@ -426,6 +600,12 @@ impl SubstrateRunner {
         }
     }
 
+    /// The cgroup root this runner's drivers open on, as the host named it; `None` when a driver
+    /// discovers one as it opens ([`discover_cgroup_root`]).
+    pub fn cgroup_root(&self) -> Option<&Path> {
+        self.cgroup_root.as_deref()
+    }
+
     /// Probe the real backend before opening a model session. No test is launched.
     pub fn preflight(&self, root: &Path) -> Result<(), ConfinementError> {
         let root = validate_workspace(root, &[])?;
@@ -433,9 +613,10 @@ impl SubstrateRunner {
         Ok(())
     }
 
-    /// The driver for the workspace `root` opened for `egress`: the one this runner or a clone
-    /// opened for its directory and an equal [`DriverEgress`], or a new one. The workspace is
-    /// adopted on it either way.
+    /// The driver for the workspace `root` opened for `egress`: the one a runner of this process
+    /// opened for this runner's cgroup root, the workspace's directory and an equal
+    /// [`DriverEgress`], or a new one ([`DRIVERS`]). This runner and its clones keep it, and the
+    /// workspace is adopted on it either way.
     fn driver(
         &self,
         root: &Path,
@@ -444,27 +625,13 @@ impl SubstrateRunner {
         let parent = root
             .parent()
             .ok_or_else(|| scope_error("workspace has no parent"))?;
-        let mut drivers = self
-            .drivers
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let opened = drivers
-            .get(parent)
-            .and_then(|opened| opened.iter().find(|open| open.egress == *egress))
-            .map(Arc::clone);
-        let open = match opened {
-            Some(open) => open,
-            None => {
-                let open = Arc::new(self.open(parent, egress)?);
-                drivers
-                    .entry(parent.to_owned())
-                    .or_default()
-                    .push(Arc::clone(&open));
-                open
-            }
+        let key = DriverKey {
+            cgroup_root: self.delegated_root()?,
+            directory: parent.to_owned(),
+            egress: egress.clone(),
         };
-        drop(drivers);
+        let open = DRIVERS.driver(&key, open_driver)?;
+        self.drivers.keep(&open);
         open.driver
             .workspace_root_identity(workspace_name(root)?)
             .map_err(|e| {
@@ -476,16 +643,12 @@ impl SubstrateRunner {
         Ok(open)
     }
 
-    fn open(&self, parent: &Path, egress: &DriverEgress) -> Result<OpenDriver, ConfinementError> {
-        let state = tempfile::Builder::new()
-            .prefix("loom-substrate-")
-            .tempdir()
-            .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
-        let mut config = driver_config(parent, state.path(), egress)?;
-        // One root has one name: the count of running launches is keyed by it, however the host
-        // spelled the root.
-        let cgroup_root = self
-            .cgroup_root
+    /// The canonical cgroup root this runner's drivers open on: the one the host named, or the
+    /// one discovery finds, refused `CgroupUndelegated` unless it is an empty cgroup v2 directory
+    /// whose `cgroup.procs` opens for writing. One root has one name: the table and the count of
+    /// running launches are keyed by it, however the host spelled the root.
+    fn delegated_root(&self) -> Result<PathBuf, ConfinementError> {
+        self.cgroup_root
             .clone()
             .or_else(discover_cgroup_root)
             .and_then(|path| path.canonicalize().ok())
@@ -497,77 +660,81 @@ impl SubstrateRunner {
                         .write(true)
                         .open(path.join("cgroup.procs"))
                         .is_ok()
-            });
-        let Some(cgroup_root) = cgroup_root else {
-            return Err(refuse(
-                ConfinementRefusal::CgroupUndelegated,
-                "Substrate requires an empty delegated cgroup v2 subtree containing this process in a child; use systemd-run --user -p Delegate=yes --scope or --cgroup-root",
-            ));
-        };
-        config.cgroup_root = Some(cgroup_root.clone());
-        // Opening kills every exec cgroup under the root; hold the count so no launch starts
-        // there meanwhile, and open nothing over a launch already running there.
-        let running = running();
-        if running.get(&cgroup_root).is_some_and(|count| *count > 0) {
+            })
+            .ok_or_else(|| {
+                refuse(
+                    ConfinementRefusal::CgroupUndelegated,
+                    "Substrate requires an empty delegated cgroup v2 subtree containing this process in a child; use systemd-run --user -p Delegate=yes --scope or --cgroup-root",
+                )
+            })
+    }
+}
+
+/// Open a Substrate driver for `key`, as [`DriverTable::driver`] calls it: no launch of this
+/// process runs under the key's root meanwhile.
+fn open_driver(key: &DriverKey) -> Result<OpenDriver, ConfinementError> {
+    let DriverKey {
+        cgroup_root,
+        directory,
+        egress,
+    } = key;
+    let state = tempfile::Builder::new()
+        .prefix("loom-substrate-")
+        .tempdir()
+        .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
+    let mut config = driver_config(directory, state.path(), egress)?;
+    config.cgroup_root = Some(cgroup_root.clone());
+    let driver = HostDriver::open(config).map_err(|e| {
+        refuse(
+            ConfinementRefusal::BackendMissing,
+            format!("Substrate open: {e:?}"),
+        )
+    })?;
+    let machine = driver.machine();
+    let adapter_facts = admitted_facts(&machine)?;
+    let facts = machine.facts;
+    if facts.exec_no_egress != Some(true) || facts.exec_workspace_scoped_write != Some(true) {
+        return Err(refuse(
+            ConfinementRefusal::CapabilityUnserved,
+            "Substrate does not serve no-network execution with scoped workspace writes",
+        ));
+    }
+    // Substrate publishes the declared apertures only once its mechanism worked in a
+    // throwaway sandbox; a declared one it does not publish is never served.
+    for aperture in &egress.apertures {
+        let Some(served) = facts.exec_egress_apertures.as_ref() else {
             return Err(refuse(
                 ConfinementRefusal::CapabilityUnserved,
                 format!(
-                    "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
-                    cgroup_root.display()
+                    "Substrate does not serve the egress aperture `{}` on this machine: its mechanism did not prove itself when the driver opened",
+                    aperture.name
+                ),
+            ));
+        };
+        if !served.iter().any(|fact| {
+            fact.name == aperture.name
+                && fact.destination == aperture.pinned.to_string()
+                && fact.max_bytes == aperture.max_bytes
+        }) {
+            return Err(refuse(
+                ConfinementRefusal::CapabilityUnserved,
+                format!(
+                    "Substrate published no egress aperture `{}` as it was declared",
+                    aperture.name
                 ),
             ));
         }
-        let driver = HostDriver::open(config).map_err(|e| {
-            refuse(
-                ConfinementRefusal::BackendMissing,
-                format!("Substrate open: {e:?}"),
-            )
-        })?;
-        drop(running);
-        let machine = driver.machine();
-        let adapter_facts = admitted_facts(&machine)?;
-        let facts = machine.facts;
-        if facts.exec_no_egress != Some(true) || facts.exec_workspace_scoped_write != Some(true) {
-            return Err(refuse(
-                ConfinementRefusal::CapabilityUnserved,
-                "Substrate does not serve no-network execution with scoped workspace writes",
-            ));
-        }
-        // Substrate publishes the declared apertures only once its mechanism worked in a
-        // throwaway sandbox; a declared one it does not publish is never served.
-        for aperture in &egress.apertures {
-            let Some(served) = facts.exec_egress_apertures.as_ref() else {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!(
-                        "Substrate does not serve the egress aperture `{}` on this machine: its mechanism did not prove itself when the driver opened",
-                        aperture.name
-                    ),
-                ));
-            };
-            if !served.iter().any(|fact| {
-                fact.name == aperture.name
-                    && fact.destination == aperture.pinned.to_string()
-                    && fact.max_bytes == aperture.max_bytes
-            }) {
-                return Err(refuse(
-                    ConfinementRefusal::CapabilityUnserved,
-                    format!(
-                        "Substrate published no egress aperture `{}` as it was declared",
-                        aperture.name
-                    ),
-                ));
-            }
-        }
-        Ok(OpenDriver {
-            driver,
-            adapter_facts,
-            cgroup_root,
-            egress: egress.clone(),
-            state,
-        })
     }
+    Ok(OpenDriver {
+        driver,
+        adapter_facts,
+        cgroup_root: cgroup_root.clone(),
+        egress: egress.clone(),
+        state,
+    })
+}
 
+impl SubstrateRunner {
     /// Run a child process the host names, confined through Substrate with the guarantees a test
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
@@ -590,13 +757,24 @@ impl SubstrateRunner {
     /// raw-pipe session under the same checks; more than [`ChildCommand::MAX_INPUT_BYTES`] is
     /// refused before anything starts. Its result holds its standard output and standard error
     /// whole and apart ([`TestExecution::child_output`]) beside the tail of each in `output`.
+    ///
+    /// A child given a cancel handle ([`ChildCommand::with_cancel`]) runs as a raw-pipe session,
+    /// its standard input empty unless the host gave it bytes, so its wait sees the handle: one
+    /// set before the start is refused [`ConfinementRefusal::Cancelled`] before any check or
+    /// driver open, and one set while the child runs kills it, with its whole cgroup, within
+    /// 100 ms, its input still unwritten or not, its run refused
+    /// [`ConfinementRefusal::Cancelled`].
     pub fn run_child(&self, child: &ChildCommand) -> Result<TestExecution, ConfinementError> {
+        if is_set(child.cancel.as_ref()) {
+            return Err(cancelled_before_launch());
+        }
         check_program(&child.program)?;
         check_stdin(child.stdin.as_deref())?;
         check_network(child.network, &child.egress)?;
         // Read once, here: the child trusts these bytes, whatever the path holds later.
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
+        check_read_only(child)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         check_workdir(child)?;
@@ -610,7 +788,13 @@ impl SubstrateRunner {
         let machine = open.driver.machine();
         check_driver_mounts(&open, child, &machine.facts)?;
         check_workdir_served(child, &machine.facts)?;
-        let launched = match child.stdin.as_deref() {
+        // A child with a cancel handle runs through the read loop, which sees the handle, with
+        // empty standard input when the host gave it none.
+        let stdin = child
+            .stdin
+            .as_deref()
+            .or(child.cancel.is_some().then_some(&[][..]));
+        let launched = match stdin {
             None => Self::launch(&open, workspace, &child.input(workspace, machine.snapshot))?,
             Some(stdin) => {
                 check_pipe_sessions(&machine.facts)?;
@@ -620,6 +804,7 @@ impl SubstrateRunner {
                     &child.session_input(workspace, machine.snapshot),
                     stdin,
                     child.timeout,
+                    child.cancel.as_ref(),
                 )?
             }
         };
@@ -650,6 +835,7 @@ impl SubstrateRunner {
         check_network(child.network, &child.egress)?;
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
+        check_read_only(child)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         check_workdir(child)?;
@@ -708,13 +894,19 @@ impl SubstrateRunner {
     /// observation, which records both streams whatever was read live. A write the child ended
     /// first is no failure: it read what it read. Every path ends the child before it returns,
     /// killing it when it ran past its timeout and a margin, which leaves it with no exit status
-    /// and so refused.
+    /// and so refused. A `cancel` set while the child runs is read every [`CANCEL_READ`] beside
+    /// the write and the read loop: both are dropped, a write blocked on a child that reads
+    /// nothing included, the child still running then is killed the same way, at once, and the
+    /// run is refused [`ConfinementRefusal::Cancelled`], even when Substrate observed its end
+    /// first. A child whose input and output were done before the cancel was read keeps its
+    /// result.
     fn launch_with_stdin(
         open: &OpenDriver,
         workspace: &str,
         session: &PipeSessionStartInput,
         stdin: &[u8],
         timeout: Duration,
+        cancel: Option<&Cancel>,
     ) -> Result<Launched, ConfinementError> {
         let input = &session.exec;
         let prepared = Prepared::new(open, workspace, input)?;
@@ -726,6 +918,9 @@ impl SubstrateRunner {
             .build()
             .map_err(|e| refuse(ConfinementRefusal::BackendMissing, e))?;
         let deadline = drain_deadline(timeout)?;
+        let started = std::time::Instant::now();
+        // Set when the loop's own kill ended a child its cancel was set for.
+        let mut killed_by_cancel_after = None;
         let observed = runtime.block_on(async {
             dispatched(
                 driver
@@ -759,22 +954,48 @@ impl SubstrateRunner {
                     }
                 }
             };
-            let (written, drained) = tokio::join!(write, drain);
-            let observed = match driver.observe_exec(id).await {
-                Ok(observed) if is_terminal(observed.resource.state) => observed,
-                // Still running past its deadline, or unobservable: it is ended here, and a child
-                // ended so has no exit status.
-                _ => driver
-                    .signal(
-                        id,
-                        &ExecSignalInput {
-                            signal: Signal::Kill,
-                            grace_ms: 0,
-                        },
-                    )
-                    .await
-                    .map_err(observation_error)?,
+            // The cancel is watched beside the write and the read loop, never after them: a write
+            // blocked on a child that reads nothing, or a read loop still waiting, is dropped
+            // when the cancel is read, which releases the session's input and output.
+            let (written, drained, by_cancel) = tokio::select! {
+                biased;
+                (written, drained) = async { tokio::join!(write, drain) } => {
+                    (written, drained, false)
+                }
+                () = until_cancelled(cancel) => (Ok(()), Ok(()), true),
             };
+            let observed = match driver.observe_exec(id).await {
+                // A child whose cancel was read while it ran is never a result, even when
+                // Substrate observed it ended (at its timeout, say) before the kill below.
+                Ok(observed) if is_terminal(observed.resource.state) => {
+                    if by_cancel {
+                        killed_by_cancel_after = Some(started.elapsed());
+                    }
+                    observed
+                }
+                // Still running past its deadline or after its cancel, or unobservable: it is
+                // ended here, and a child ended so has no exit status.
+                _ => {
+                    let cancelled = by_cancel || is_set(cancel);
+                    let killed = driver
+                        .signal(
+                            id,
+                            &ExecSignalInput {
+                                signal: Signal::Kill,
+                                grace_ms: 0,
+                            },
+                        )
+                        .await
+                        .map_err(observation_error)?;
+                    if cancelled {
+                        killed_by_cancel_after = Some(started.elapsed());
+                    }
+                    killed
+                }
+            };
+            if killed_by_cancel_after.is_some() {
+                return Ok(observed);
+            }
             if let Err(e) = drained {
                 return Err(refuse(
                     ConfinementRefusal::CapabilityUnserved,
@@ -794,6 +1015,9 @@ impl SubstrateRunner {
                 _ => Ok(observed),
             }
         })?;
+        if let Some(ran) = killed_by_cancel_after {
+            return Err(killed_by_cancel(ran));
+        }
         settle(
             input,
             &open.egress.apertures,
@@ -1141,7 +1365,8 @@ impl TestRunner for SubstrateRunner {
 /// since Substrate's `/usr/bin/env` would read it as an assignment. Its directory is adopted as Substrate's
 /// workspace and is the child's working directory, `/workspace`; the child writes only under its
 /// `target/`, as a test does, and under the workspace directories the host names
-/// ([`ChildCommand::with_writable`]), `.git` only when named, and no toolchain or cache is
+/// ([`ChildCommand::with_writable`]), `.git` only when named, or nowhere in it, `target` included
+/// ([`ChildCommand::with_read_only_workspace`]), and no toolchain or cache is
 /// mounted. Its environment is exactly the one the host names as Substrate's
 /// [`ExecEnvironment`], empty unless it names one. It asks
 /// Substrate for [`SandboxProfile::Workspace`] with [`NetworkMode::None`] unless the host names
@@ -1179,6 +1404,8 @@ pub struct ChildCommand {
     read_only_files: Vec<ReadOnlyMount>,
     host_paths: Vec<PathBuf>,
     workdir: Option<PathBuf>,
+    cancel: Option<Cancel>,
+    read_only_workspace: bool,
 }
 
 /// A host directory or file a [`ChildCommand`] reads, and where the child sees it: its host path
@@ -1225,6 +1452,8 @@ impl ChildCommand {
             read_only_files: Vec::new(),
             host_paths: Vec::new(),
             workdir: None,
+            cancel: None,
+            read_only_workspace: false,
         }
     }
 
@@ -1323,6 +1552,37 @@ impl ChildCommand {
     pub fn with_writable(mut self, path: impl Into<PathBuf>) -> Self {
         self.writable.push(path.into());
         self
+    }
+
+    /// The same child writing nothing in the workspace, `target` included: Substrate is asked for
+    /// a read-only workspace (`WorkspaceAccess::ReadOnly`), and a record reporting any writable
+    /// path is refused as a wider one is. Beside a path named writable
+    /// ([`ChildCommand::with_writable`]) the launch is refused
+    /// [`ConfinementRefusal::ScopeInvalid`] before anything starts. A `local` runner runs
+    /// unconfined and keeps nothing read-only.
+    #[must_use]
+    pub fn with_read_only_workspace(self) -> Self {
+        Self {
+            read_only_workspace: true,
+            ..self
+        }
+    }
+
+    /// Whether the child writes nothing in the workspace ([`ChildCommand::with_read_only_workspace`]).
+    pub fn read_only_workspace(&self) -> bool {
+        self.read_only_workspace
+    }
+
+    /// What the child asks Substrate to write in the workspace: nothing when it is read-only, else
+    /// `target` and the paths the host named.
+    fn workspace_access(&self) -> WorkspaceAccess {
+        if self.read_only_workspace {
+            WorkspaceAccess::ReadOnly
+        } else {
+            WorkspaceAccess::Scoped {
+                writable_subtrees: writable_request(&self.writable),
+            }
+        }
     }
 
     /// The same child with exactly `environment` and no other variable, except `SSL_CERT_FILE`
@@ -1445,6 +1705,25 @@ impl ChildCommand {
             stdin: Some(bytes.into()),
             ..self
         }
+    }
+
+    /// The same child holding `cancel`: set before the child starts, [`TestRunner::run_child`]
+    /// refuses it [`ConfinementRefusal::Cancelled`] and starts nothing; set while it runs, the
+    /// runner kills it, with no grace, and refuses its run [`ConfinementRefusal::Cancelled`]
+    /// (see [`Cancel`] for what is killed under `linux` and `local`, and when). A cancel set after the
+    /// child ended changes nothing. A live child ([`SubstrateRunner::spawn_child`]) does not read
+    /// it: [`ConfinedChild::signal`] ends one.
+    #[must_use]
+    pub fn with_cancel(self, cancel: Cancel) -> Self {
+        Self {
+            cancel: Some(cancel),
+            ..self
+        }
+    }
+
+    /// The cancel handle the child holds, if the host gave it one.
+    pub fn cancel(&self) -> Option<&Cancel> {
+        self.cancel.as_ref()
     }
 
     /// The program the host named.
@@ -1667,9 +1946,7 @@ impl ChildCommand {
             },
             limits: limits(self.timeout),
             wait: true,
-            workspace_access: WorkspaceAccess::Scoped {
-                writable_subtrees: writable_request(&self.writable),
-            },
+            workspace_access: self.workspace_access(),
             scratch: None,
             measurements: Default::default(),
             // In the order named; `check_mounts` resolved every host path to a root or a file
@@ -1850,6 +2127,17 @@ fn writable_request(named: &[PathBuf]) -> Vec<String> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+/// Refuse a child that is read-only in its workspace ([`ChildCommand::with_read_only_workspace`])
+/// and names a writable path beside: it would be given neither.
+fn check_read_only(child: &ChildCommand) -> Result<(), ConfinementError> {
+    if child.read_only_workspace && !child.writable.is_empty() {
+        return Err(scope_error(
+            "a child read-only in its workspace names no writable path; name one or the other",
+        ));
+    }
+    Ok(())
 }
 
 /// Refuse, before anything is touched, a named writable path that cannot name a directory of the
@@ -2388,7 +2676,7 @@ fn canonical_workspace(root: &Path) -> Result<PathBuf, ConfinementError> {
 ///    byte bounds; a mount on, under or containing one Substrate owns ([`OWNED_MOUNTS`]);
 /// 2. each host path on disk, every component read without following it: none a symbolic link,
 ///    the path there, a directory for a root, a regular file for a file;
-/// 3. at most 4 roots and 16 files, Substrate's bounds;
+/// 3. at most 8 roots and 16 files, Substrate's bounds;
 /// 4. no two mounts equal, and none under another;
 /// 5. no host path that holds the certificate bundle the child names ([`check_ca_bundle`]), as
 ///    named or as it resolves, or the directory the driver's private state is made in;
@@ -3441,7 +3729,12 @@ const NEEDED_FAMILIES: [ContractFamily; 6] = [
 fn admitted_facts(
     machine: &substrate_wire::CapabilitySnapshot,
 ) -> Result<Vec<String>, ConfinementError> {
-    let proved = substrate_host::confinement::linux::proof(machine);
+    // Loom names no `HostConfig::exec_gate`, so the driver's probe proves no executable list:
+    // the facts `exec_subpaths` and `exec_denied_paths` stay unproved.
+    let proved = substrate_host::confinement::linux::proof(
+        machine,
+        &substrate_host::confinement::linux::ExecListProof::default(),
+    );
     for family in NEEDED_FAMILIES {
         if !proved.serves(&family) {
             let (reason, hint) = if family == ContractFamily::Limits {
@@ -3640,6 +3933,138 @@ pub fn prepare_delegated_cgroup() -> Result<PathBuf, ConfinementError> {
     Ok(root)
 }
 
+/// The controllers a cgroup root hands the cgroup of each launch, as Substrate's driver needs
+/// them.
+const ROOT_CONTROLLERS: [&str; 3] = ["cpu", "memory", "pids"];
+
+/// A cgroup root this process holds for as long as the value lives: an advisory `flock` on the
+/// root's own directory, which the kernel keys by that directory however a host spells its path,
+/// and releases when the holder ends, killed or not, so no stale hold outlives its process.
+/// Another process holding a root the same way is refused it meanwhile.
+#[derive(Debug)]
+pub struct CgroupRootHold {
+    root: PathBuf,
+    _directory: std::fs::File,
+}
+
+impl CgroupRootHold {
+    /// The canonical root held.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
+/// Hold the cgroup root `root` for this process ([`CgroupRootHold`]), then check that it
+/// qualifies ([`check_cgroup_root`]). Refused `CgroupUndelegated`, naming the root: one that
+/// cannot be resolved or opened, one another process holds, and one that does not qualify.
+pub fn hold_cgroup_root(root: &Path) -> Result<CgroupRootHold, ConfinementError> {
+    let fail = |detail: String| refuse(ConfinementRefusal::CgroupUndelegated, detail);
+    let canonical = root.canonicalize().map_err(|e| {
+        fail(format!(
+            "the cgroup root {} is not delegated: it cannot be resolved ({e})",
+            root.display()
+        ))
+    })?;
+    let directory = std::fs::File::open(&canonical).map_err(|e| {
+        fail(format!(
+            "the cgroup root {} is not delegated: it cannot be opened ({e})",
+            canonical.display()
+        ))
+    })?;
+    match directory.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
+            return Err(fail(format!(
+                "the cgroup root {} is held by another process: two runs never share a root",
+                canonical.display()
+            )));
+        }
+        Err(std::fs::TryLockError::Error(e)) => {
+            return Err(fail(format!(
+                "the cgroup root {} cannot be held: {e}",
+                canonical.display()
+            )));
+        }
+    }
+    check_cgroup_root(&canonical)?;
+    Ok(CgroupRootHold {
+        root: canonical,
+        _directory: directory,
+    })
+}
+
+/// Whether the canonical cgroup root `root` qualifies as Substrate requires one, refused
+/// `CgroupUndelegated` naming it and the first rule it breaks, in this order: a cgroup v2
+/// directory, writable (its `cgroup.procs` opens for writing), delegated (its
+/// `cgroup.controllers` names cpu, memory and pids, and its `cgroup.subtree_control` hands them on
+/// or opens for writing), this process in a child of it, and empty (its `cgroup.procs` names no
+/// process).
+pub fn check_cgroup_root(root: &Path) -> Result<(), ConfinementError> {
+    let fail = |detail: String| refuse(ConfinementRefusal::CgroupUndelegated, detail);
+    let shown = root.display();
+    let writable = |file: &str| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(root.join(file))
+            .map(drop)
+    };
+    let names_all = |text: &str| {
+        ROOT_CONTROLLERS
+            .iter()
+            .all(|wanted| text.split_whitespace().any(|named| named == *wanted))
+    };
+    let Ok(controllers) = std::fs::read_to_string(root.join("cgroup.controllers")) else {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not delegated: it is no cgroup v2 directory"
+        )));
+    };
+    if let Err(e) = writable("cgroup.procs") {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not writable: its cgroup.procs does not open for writing ({e})"
+        )));
+    }
+    if !names_all(&controllers) {
+        let named = controllers.split_whitespace().collect::<Vec<_>>().join(" ");
+        return Err(fail(format!(
+            "the cgroup root {shown} is not delegated: its cgroup.controllers names {}, not cpu, memory and pids",
+            if named.is_empty() { "nothing" } else { &named }
+        )));
+    }
+    let handed = std::fs::read_to_string(root.join("cgroup.subtree_control")).unwrap_or_default();
+    if !names_all(&handed)
+        && let Err(e) = writable("cgroup.subtree_control")
+    {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not delegated: its cgroup.subtree_control does not open for writing ({e})"
+        )));
+    }
+    let current = current_cgroup();
+    if !current
+        .as_deref()
+        .is_some_and(|current| current != root && current.starts_with(root))
+    {
+        return Err(fail(format!(
+            "this process is not in a child of the cgroup root {shown}: it is in {}",
+            current.as_deref().map_or_else(
+                || "no cgroup v2".to_owned(),
+                |current| current.display().to_string()
+            )
+        )));
+    }
+    let processes = std::fs::read_to_string(root.join("cgroup.procs")).map_err(|e| {
+        fail(format!(
+            "the cgroup root {shown} is not writable: its cgroup.procs cannot be read ({e})"
+        ))
+    })?;
+    if !processes.trim().is_empty() {
+        return Err(fail(format!(
+            "the cgroup root {shown} is not empty: it holds the processes {}",
+            processes.split_whitespace().collect::<Vec<_>>().join(" ")
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3677,14 +4102,16 @@ mod tests {
             "exec.cgroup-kill": true,
             "exec.output-limit-bytes": 1_048_576,
             "workspace.guarded-io": true,
-            "exec.read-only-roots": {"max_roots": 4},
+            "exec.read-only-roots": {"max_roots": 8},
             "exec.read-only-files": {"max_files": 16},
         });
         let facts = admitted_facts(&snapshot(served.clone())).expect("every family served");
         // story:substrate-0-21-pin: since Substrate 0.15.0 the `linux` adapter also proves
         // `stdin_pipe` and `output_live` whenever its floor (argv-only exec and namespaces) holds,
         // as it does here, and `FACT_ORDER` places them last; the three facts of 0.14.0 keep their
-        // place.
+        // place. story:substrate-0-24-0-pin: Substrate 0.22.0 publishes 8 roots, and the facts of
+        // 0.23.0 and 0.24.0 (`exec_subpaths`, `exec_denied_paths`) are proved only with an exec
+        // gate, which Loom does not name, so the list is the same on 0.24.0's `FACT_ORDER`.
         assert_eq!(
             facts,
             [
@@ -4204,7 +4631,7 @@ mod tests {
         let launch = Running::enter(&cgroup.canonicalize().unwrap());
         let spelled = cgroup.join("..").join("cgroup");
         let error = SubstrateRunner::new(Some(spelled))
-            .open(fixture.path(), &DriverEgress::NONE)
+            .driver(&fixture.path().join("workspace"), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
@@ -4223,10 +4650,12 @@ mod tests {
         std::fs::write(cgroup.join("cgroup.controllers"), "cpu memory pids\n").unwrap();
         std::fs::write(cgroup.join("cgroup.procs"), "").unwrap();
         let runner = SubstrateRunner::new(Some(cgroup.clone()));
+        // A runner and its clone keep one set of drivers, so they share every table entry either
+        // of them uses.
         assert!(Arc::ptr_eq(&runner.drivers, &runner.clone().drivers));
         let launch = Running::enter(&cgroup);
         let error = runner
-            .open(fixture.path(), &DriverEgress::NONE)
+            .driver(&fixture.path().join("workspace"), &DriverEgress::NONE)
             .err()
             .expect("nothing is opened");
         // story:substrate-0-12-pin: the runner no longer checks for `/usr/bin/bwrap` itself, so the
@@ -4237,6 +4666,469 @@ mod tests {
         assert!(
             !running().contains_key(&cgroup),
             "a finished launch is no longer counted"
+        );
+    }
+
+    /// A driver the table's tests open: no Substrate driver.
+    #[derive(Debug)]
+    struct FakeDriver;
+
+    /// An opener that counts its calls in `calls` and opens a [`FakeDriver`].
+    fn counting(
+        calls: &std::cell::Cell<usize>,
+    ) -> impl FnOnce(&DriverKey) -> Result<FakeDriver, ConfinementError> + '_ {
+        move |_| {
+            calls.set(calls.get() + 1);
+            Ok(FakeDriver)
+        }
+    }
+
+    /// The key of a driver for the workspaces in `directory` under the cgroup root `root`.
+    fn table_key(root: &Path, directory: &str, egress: DriverEgress) -> DriverKey {
+        DriverKey {
+            cgroup_root: root.to_owned(),
+            directory: root.join(directory),
+            egress,
+        }
+    }
+
+    /// The detail of the refusal of a driver open over a running launch, as it read before the
+    /// table (`story:concurrent-confined-runs` keeps it).
+    fn running_detail(root: &Path) -> String {
+        format!(
+            "a confined launch of this process is running under {}; opening another Substrate driver there would end it",
+            root.display()
+        )
+    }
+
+    /// story:concurrent-confined-runs: two runners asking for one key get one driver, opened once,
+    /// and the second gets it while a launch on it runs, since sharing a driver opens nothing.
+    #[test]
+    fn driver_table_two_runners_share_one_driver_for_one_key() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let (first, second) = (Drivers::default(), Drivers::default());
+        let key = table_key(root.path(), "workspaces", DriverEgress::NONE);
+        let opened = table
+            .driver(&key, counting(&calls))
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let shared = table
+            .driver(&key, counting(&calls))
+            .expect("the second runner shares the driver while a launch runs on it");
+        second.keep(&shared);
+        assert!(Arc::ptr_eq(&opened, &shared), "one driver for one key");
+        assert_eq!(calls.get(), 1, "the opener ran once");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: a launch counted under one root refuses no driver under
+    /// another.
+    #[test]
+    fn driver_table_a_launch_under_one_root_does_not_refuse_another_root() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let launch = Running::enter(a.path());
+        let key = table_key(b.path(), "workspaces", DriverEgress::NONE);
+        let opened = table.driver(&key, counting(&calls));
+        assert!(opened.is_ok(), "{:?}", opened.err());
+        assert_eq!(calls.get(), 1, "root B's driver opened");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: while a launch runs under a root, a runner that needs a
+    /// driver for another directory under it is refused as before, and nothing opens.
+    #[test]
+    fn driver_table_another_directory_under_a_running_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let first = Drivers::default();
+        let opened = table
+            .driver(
+                &table_key(root.path(), "here", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let error = table
+            .driver(
+                &table_key(root.path(), "elsewhere", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect_err("another directory under a running root opens nothing");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(error.detail, running_detail(root.path()));
+        assert_eq!(calls.get(), 1, "the opener was not called again");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: while a launch runs under a root, a launch in the same
+    /// directory with another egress is refused in the same way, and nothing opens.
+    #[test]
+    fn driver_table_another_egress_under_a_running_root_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let first = Drivers::default();
+        let opened = table
+            .driver(
+                &table_key(root.path(), "here", DriverEgress::NONE),
+                counting(&calls),
+            )
+            .expect("the first open");
+        first.keep(&opened);
+        let launch = Running::enter(root.path());
+        let bundle = DriverEgress {
+            apertures: Vec::new(),
+            ca_bundle: Some(CaBundle {
+                named: PathBuf::from("/etc/ssl/bundle.pem"),
+                bytes: b"bundle".to_vec(),
+            }),
+        };
+        let error = table
+            .driver(&table_key(root.path(), "here", bundle), counting(&calls))
+            .expect_err("another egress under a running root opens nothing");
+        assert_eq!(error.reason, ConfinementRefusal::CapabilityUnserved);
+        assert_eq!(error.detail, running_detail(root.path()));
+        assert_eq!(calls.get(), 1, "the opener was not called again");
+        drop(launch);
+    }
+
+    /// story:concurrent-confined-runs: the table holds a driver only while a runner that used it
+    /// lives; once the last one is dropped, the next request opens a new one.
+    #[test]
+    fn driver_table_a_driver_dropped_by_its_last_runner_leaves_the_table() {
+        let root = tempfile::tempdir().unwrap();
+        let table = DriverTable::new();
+        let calls = std::cell::Cell::new(0);
+        let key = table_key(root.path(), "workspaces", DriverEgress::NONE);
+        let (first, second) = (Drivers::default(), Drivers::default());
+        first.keep(&table.driver(&key, counting(&calls)).unwrap());
+        second.keep(&table.driver(&key, counting(&calls)).unwrap());
+        assert_eq!(calls.get(), 1);
+        drop(first);
+        assert!(table.holds(&key), "a runner that used the driver lives");
+        drop(second);
+        assert!(!table.holds(&key), "the last runner that used it is gone");
+        let third = Drivers::default();
+        third.keep(&table.driver(&key, counting(&calls)).unwrap());
+        assert_eq!(calls.get(), 2, "the next request opened the driver again");
+    }
+
+    /// The crates whose statics `every_static_of_the_runtime_crates_is_listed_harmless` reads: the
+    /// Loom crates `b10x-loom-tree` links, by their directory under `crates/`.
+    const RUNTIME_CRATES: [&str; 9] = [
+        "loom-intake-slice",
+        "loom-bindings",
+        "loom-governor",
+        "loom-commission",
+        "loom-executor",
+        "loom-protocols",
+        "loom-runlog",
+        "loom-tree",
+        "loom-intake-references",
+    ];
+
+    /// Every static of [`RUNTIME_CRATES`]: its file under `crates/`, its name, and why it lets no
+    /// run of the process change another run's result (`story:concurrent-confined-runs`).
+    const HARMLESS_STATICS: [(&str, &str, &str); 27] = [
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "RUNNING",
+            "counts launches per root; only refuses a driver open that would end one",
+        ),
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "DRIVERS",
+            "shares a driver only between launches with an equal key",
+        ),
+        (
+            "loom-intake-slice/src/confinement.rs",
+            "NEXT_EXEC",
+            "makes names unique",
+        ),
+        (
+            "loom-bindings/src/program.rs",
+            "ISSUED",
+            "makes names unique",
+        ),
+        ("loom-bindings/src/open.rs", "ISSUED", "makes names unique"),
+        ("loom-bindings/src/copy.rs", "ISSUED", "makes names unique"),
+        (
+            "loom-intake-slice/src/executor.rs",
+            "ISSUED",
+            "makes names unique",
+        ),
+        (
+            "loom-governor/src/locked_dir.rs",
+            "NEXT_TEMPORARY",
+            "makes names unique",
+        ),
+        (
+            "loom-intake-slice/src/state_dir.rs",
+            "NEXT_TEMPORARY",
+            "makes names unique",
+        ),
+        (
+            "loom-intake-slice/src/results.rs",
+            "NEXT_SCOPE",
+            "makes names unique",
+        ),
+        ("loom-executor/src/lib.rs", "MADE", "makes names unique"),
+        ("loom-tree/src/suite/run.rs", "WRITES", "makes names unique"),
+        (
+            "loom-governor/src/lib.rs",
+            "ENGINEERING",
+            "the compiled-in catalog, immutable once made",
+        ),
+        ("loom-intake-references/src/lib.rs", "TOKEN", "immutable"),
+        ("loom-intake-references/src/lib.rs", "MARK", "immutable"),
+        ("loom-intake-references/src/lib.rs", "GITHUB", "immutable"),
+        ("loom-intake-references/src/lib.rs", "GITLAB", "immutable"),
+        ("loom-intake-references/src/lib.rs", "SLACK", "immutable"),
+        ("loom-intake-references/src/lib.rs", "JIRA", "immutable"),
+        (
+            "loom-intake-slice/src/git.rs",
+            "RECORDINGS",
+            "keyed by the canonical workspace, replaced only for the same workspace",
+        ),
+        (
+            "loom-executor/src/metering.rs",
+            "OPEN",
+            "thread-local; each run has its own thread",
+        ),
+        (
+            "loom-executor/src/metering.rs",
+            "TURNING",
+            "thread-local; each run has its own thread",
+        ),
+        (
+            "loom-intake-slice/src/clock.rs",
+            "OFFSET",
+            "feature `test-clock`, test builds only; it only moves forward",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "SYNCED",
+            "counts syncs for a report; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "SKIPPED",
+            "counts skipped syncs for a report, test builds only; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "ON_THIS_THREAD",
+            "thread-local counts for a report; no run reads it",
+        ),
+        (
+            "loom-governor/src/durable.rs",
+            "MARKER",
+            "immutable bytes, test builds only",
+        ),
+    ];
+
+    /// The names of the statics `line` declares (`static NAME:` or `static mut NAME:`, never a
+    /// `'static` lifetime), the part after `//` left out.
+    fn declared_statics(line: &str) -> Vec<String> {
+        let code = line.split("//").next().unwrap_or_default();
+        let ident = |c: char| c.is_ascii_alphanumeric() || c == '_';
+        let mut names = Vec::new();
+        for (at, _) in code.match_indices("static") {
+            let before = code[..at].chars().next_back();
+            if before.is_some_and(|c| ident(c) || c == '\'') {
+                continue;
+            }
+            let rest = &code[at + "static".len()..];
+            if !rest.starts_with(char::is_whitespace) {
+                continue;
+            }
+            let mut rest = rest.trim_start();
+            if let Some(after) = rest.strip_prefix("mut ") {
+                rest = after.trim_start();
+            }
+            let name: String = rest.chars().take_while(|c| ident(*c)).collect();
+            if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+                continue;
+            }
+            if rest[name.len()..].trim_start().starts_with(':') {
+                names.push(name);
+            }
+        }
+        names
+    }
+
+    /// Every `.rs` file under `directory`, recursively.
+    fn rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, files);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    /// story:concurrent-confined-runs: every static of the runtime crates, test modules and
+    /// feature-gated code included, is in [`HARMLESS_STATICS`], and every entry there is still a
+    /// static. A lazily made global (`OnceLock`, `LazyLock`, `lazy_static!`) that declares no listed
+    /// static fails too.
+    #[test]
+    fn every_static_of_the_runtime_crates_is_listed_harmless() {
+        // Spelled in two halves, so this file's own text holds none of them whole.
+        let lazy = [
+            concat!("Once", "Lock<"),
+            concat!("Once", "Lock::"),
+            concat!("Lazy", "Lock<"),
+            concat!("Lazy", "Lock::"),
+            concat!("lazy_", "static!"),
+        ];
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let listed: std::collections::BTreeSet<(&str, &str)> = HARMLESS_STATICS
+            .iter()
+            .map(|(file, name, _)| (*file, *name))
+            .collect();
+        let mut found = std::collections::BTreeSet::new();
+        let mut unlisted = Vec::new();
+        for name in RUNTIME_CRATES {
+            let mut files = Vec::new();
+            rust_files(&crates.join(name).join("src"), &mut files);
+            assert!(!files.is_empty(), "crates/{name}/src holds Rust files");
+            for path in files {
+                let file = path
+                    .strip_prefix(crates)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (number, line) in text.lines().enumerate() {
+                    let statics = declared_statics(line);
+                    for name in &statics {
+                        if listed.contains(&(file.as_str(), name.as_str())) {
+                            found.insert((file.clone(), name.clone()));
+                        } else {
+                            unlisted.push(format!("{file}:{}: static {name}", number + 1));
+                        }
+                    }
+                    let code = line.split("//").next().unwrap_or_default();
+                    if statics.is_empty() && lazy.iter().any(|needle| code.contains(needle)) {
+                        unlisted.push(format!("{file}:{}: {}", number + 1, line.trim()));
+                    }
+                }
+            }
+        }
+        assert!(
+            unlisted.is_empty(),
+            "statics of the runtime crates not listed harmless:\n{}",
+            unlisted.join("\n")
+        );
+        let stale: Vec<_> = listed
+            .iter()
+            .filter(|(file, name)| !found.contains(&((*file).to_owned(), (*name).to_owned())))
+            .collect();
+        assert!(stale.is_empty(), "listed and no longer a static: {stale:?}");
+    }
+
+    /// The configuration of every driver Loom opens names no Git source
+    /// (story:drop-the-substrate-git-feature).
+    #[test]
+    fn the_driver_config_names_no_git_source() {
+        let fixture = tempfile::tempdir().unwrap();
+        let config = driver_config(fixture.path(), fixture.path(), &DriverEgress::NONE)
+            .expect("a driver configuration");
+        assert!(config.git_sources.is_empty(), "{:?}", config.git_sources);
+    }
+
+    /// Loom builds `b10x-substrate-host` without its `git` feature, so a Git source that reaches
+    /// the driver Loom configures is refused `workspace.git-source-unserved`
+    /// (story:drop-the-substrate-git-feature). At this pin the driver opens with the binding and
+    /// refuses at its first use, the creation of a workspace from it, before it reads the locator
+    /// or asks for authority. The locator's host is under `.invalid`, so nothing is fetched.
+    #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "confinement runs on Linux only")]
+    fn a_git_source_on_loom_s_driver_is_refused_unserved() {
+        use substrate_host::Driver as _;
+        use substrate_wire::{GitSource, GitSourceEnvelope, WorkspaceCreateInput, WorkspaceSource};
+
+        let fixture = tempfile::tempdir().unwrap();
+        let parent = fixture.path().join("workspaces");
+        let state = fixture.path().join("state");
+        std::fs::create_dir_all(&parent).unwrap();
+        std::fs::create_dir_all(&state).unwrap();
+        let mut config =
+            driver_config(&parent, &state, &DriverEgress::NONE).expect("a driver configuration");
+        config.git_sources.push(
+            substrate_host::GitSourceBinding::new(
+                "forge",
+                "https://forge.example.invalid/loom/",
+                None,
+            )
+            .expect("a well-formed Git source binding"),
+        );
+        let driver = match HostDriver::open(config) {
+            Ok(driver) => driver,
+            Err(error) if error.code == "workspace.git-source-unserved" => {
+                panic!(
+                    "the refusal came at open, not at first use: {}",
+                    error.message
+                )
+            }
+            Err(error) => {
+                eprintln!(
+                    "skipped: missing prerequisite: a Substrate host driver that opens here ({}: {})",
+                    error.code, error.message
+                );
+                return;
+            }
+        };
+        let input = WorkspaceCreateInput {
+            source: WorkspaceSource::Git(GitSourceEnvelope {
+                git: GitSource {
+                    source: "forge".to_owned(),
+                    locator: "https://forge.example.invalid/loom/repo.git".to_owned(),
+                    reference: "main".to_owned(),
+                    commit: "0123456789abcdef0123456789abcdef01234567".to_owned(),
+                    depth: 1,
+                },
+            }),
+            labels: substrate_wire::Labels::new(),
+            storage: None,
+            lease_ttl_ms: None,
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let outcome = runtime
+            .block_on(driver.create_workspace_authorized("loom-git", "loom-git", &input, None));
+        match outcome {
+            DispatchOutcome::NotDispatched(error) => {
+                assert_eq!(
+                    (error.code, error.message.as_str()),
+                    (
+                        "workspace.git-source-unserved",
+                        "This build of the host driver has no `git` feature, so it serves no Git source."
+                    )
+                );
+            }
+            DispatchOutcome::Observed(_) => panic!("a Git workspace was created"),
+            DispatchOutcome::ContainedAbsent(error) | DispatchOutcome::OutcomeUnknown(error) => {
+                panic!(
+                    "the Git source was dispatched: {}: {}",
+                    error.code, error.message
+                )
+            }
+        }
+        assert!(
+            !parent.join("loom-git").exists(),
+            "a refused Git source leaves no workspace"
         );
     }
 

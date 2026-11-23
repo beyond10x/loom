@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 03a4fc948ecc8c56f554376674e3477aca9cfb4b05fd51d3cae6948310aa1cc1
+// contract digest b1059a76e03d9c610f8ec466fc4753d09ac15c538c99fdd88c3e19cd41529600
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Run log — `loom.runlog`.
@@ -59,6 +59,10 @@ pub struct ChildClosed {
     pub child: String,
     /// `outcome` — `Optional<String>`.
     pub outcome: Option<String>,
+    /// `record` — `Optional<String>`.
+    pub record: Option<String>,
+    /// `record_digest` — `Optional<String>`.
+    pub record_digest: Option<String>,
 }
 
 /// ChildOpened — `loom.runlog.ChildOpened`.
@@ -68,6 +72,10 @@ pub struct ChildOpened {
     pub child: String,
     /// `protocol` — `String`.
     pub protocol: String,
+    /// `record` — `Optional<String>`.
+    pub record: Option<String>,
+    /// `record_digest` — `Optional<String>`.
+    pub record_digest: Option<String>,
 }
 
 /// Discarded — `loom.runlog.Discarded`.
@@ -88,6 +96,19 @@ pub struct Evaluated {
     pub frontier: String,
     /// `decision_digest` — `String`.
     pub decision_digest: String,
+}
+
+/// HandoffChecked — `loom.runlog.HandoffChecked`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandoffChecked {
+    /// `action` — `String`.
+    pub action: String,
+    /// `exit` — `Optional<Integer>`.
+    pub exit: Option<i64>,
+    /// `refusal` — `Optional<String>`.
+    pub refusal: Option<String>,
+    /// `blob_digest` — `Optional<String>`.
+    pub blob_digest: Option<String>,
 }
 
 /// RevisionMove — `loom.runlog.RevisionMove`.
@@ -120,6 +141,12 @@ pub enum RunLogEvent {
     Discarded(Discarded),
     /// Tagged `Evaluated` — `loom.runlog.Evaluated`.
     Evaluated(Evaluated),
+    /// Tagged `HandoffChecked` — `loom.runlog.HandoffChecked`.
+    HandoffChecked(HandoffChecked),
+    /// Tagged `StopLifted` — `loom.runlog.StopLifted`.
+    StopLifted(StopLifted),
+    /// Tagged `StopRecorded` — `loom.runlog.StopRecorded`.
+    StopRecorded(StopRecorded),
     /// Tagged `Stopped` — `loom.runlog.Stopped`.
     Stopped(Stopped),
     /// Tagged `Terminated` — `loom.runlog.Terminated`.
@@ -161,6 +188,24 @@ pub struct RunLogRefused {
     pub detail: String,
 }
 
+/// StopLifted — `loom.runlog.StopLifted`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopLifted {
+    /// `principal` — `String`.
+    pub principal: String,
+    /// `stop` — `Integer`.
+    pub stop: i64,
+}
+
+/// StopRecorded — `loom.runlog.StopRecorded`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StopRecorded {
+    /// `principal` — `String`.
+    pub principal: String,
+    /// `reason` — `String`.
+    pub reason: String,
+}
+
 /// Stopped — `loom.runlog.Stopped`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stopped {
@@ -168,6 +213,8 @@ pub struct Stopped {
     pub stop: String,
     /// `next` — `List<String>`.
     pub next: Vec<String>,
+    /// `budget` — `Optional<String>`.
+    pub budget: Option<String>,
 }
 
 /// Terminated — `loom.runlog.Terminated`.

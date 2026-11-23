@@ -41,21 +41,37 @@ pub const WRITE_DEADLINE: Duration = Duration::from_secs(10);
 /// How long what the caller still sends after the answer is drained, as a whole.
 pub const DRAIN_DEADLINE: Duration = Duration::from_secs(1);
 
-/// The deadlines of one connection.
-#[derive(Debug, Clone, Copy)]
-struct Deadlines {
-    head: Duration,
-    body: Duration,
-    write: Duration,
-    drain: Duration,
+/// The deadlines of one connection. A host's listener keeps [`Deadlines::HOST`] (the constants
+/// above); a test gives its listener shorter ones ([`crate::A2aServer::with_deadlines`]) so that
+/// it does not wait 10 s for a cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Deadlines {
+    /// The request line and headers, from the connection's start ([`HEAD_DEADLINE`]).
+    pub head: Duration,
+    /// The body, from the end of the head ([`BODY_DEADLINE`]).
+    pub body: Duration,
+    /// The answer, and each event of a stream ([`WRITE_DEADLINE`]).
+    pub write: Duration,
+    /// What the caller still sends after the answer ([`DRAIN_DEADLINE`]).
+    pub drain: Duration,
 }
 
-const DEADLINES: Deadlines = Deadlines {
-    head: HEAD_DEADLINE,
-    body: BODY_DEADLINE,
-    write: WRITE_DEADLINE,
-    drain: DRAIN_DEADLINE,
-};
+impl Deadlines {
+    /// A host's deadlines: [`HEAD_DEADLINE`], [`BODY_DEADLINE`], [`WRITE_DEADLINE`] and
+    /// [`DRAIN_DEADLINE`].
+    pub const HOST: Deadlines = Deadlines {
+        head: HEAD_DEADLINE,
+        body: BODY_DEADLINE,
+        write: WRITE_DEADLINE,
+        drain: DRAIN_DEADLINE,
+    };
+}
+
+impl Default for Deadlines {
+    fn default() -> Self {
+        Self::HOST
+    }
+}
 
 /// A stream every read and write of which ends by `deadline`: each waits at most the time left,
 /// and none starts once it passed.
@@ -183,15 +199,12 @@ pub struct Connection {
 }
 
 impl Connection {
-    /// The connection over `stream`, its head due within [`HEAD_DEADLINE`] from now.
+    /// The connection over `stream` under `deadlines` ([`Deadlines::HOST`] on a host's
+    /// listener), its head due within `deadlines.head` from now.
     ///
     /// # Errors
     /// The stream cannot be made blocking.
-    pub fn new(stream: TcpStream) -> io::Result<Self> {
-        Self::with_deadlines(stream, DEADLINES)
-    }
-
-    fn with_deadlines(stream: TcpStream, deadlines: Deadlines) -> io::Result<Self> {
+    pub fn with_deadlines(stream: TcpStream, deadlines: Deadlines) -> io::Result<Self> {
         stream.set_nonblocking(false)?;
         Ok(Self {
             reader: BufReader::new(Timed {

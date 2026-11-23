@@ -1,0 +1,47 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: tour@1
+  bindings: bindings/tour.bindings.yaml
+  seed: [{from: stubs, to: stubs}, {from: seeds/route.txt, to: route.txt}]
+cycles:
+  - name: arrives
+    decide:
+      - {take: approve, capability: guide.approve, times: any}
+      - {take: approve, capability: guide.issue, times: any}
+    expect:
+      exit: 0
+      outcome: arrived
+      checks:
+        - check: exists
+          name: first-ticket-issued
+          select: [{records: {case: first}}, {where: {kind: ticket_issued, result: issued}}]
+        - check: count
+          name: two-tickets-run
+          select: [{runs: {case: "*"}}, {where: {action: ticket.issue}}]
+          is: 2
+  - name: waits
+    decide:
+      - {take: approve, capability: guide.approve}
+    expect:
+      exit: 3
+      stop: AwaitingAuthority
+  - name: wrong
+    bindings: bindings/tour-wrong.bindings.yaml
+    decide:
+      - {take: approve, capability: guide.approve, times: any}
+      - {take: approve, capability: guide.issue, times: any}
+    expect:
+      exit: 0
+      outcome: arrived
+  - name: later
+    pending: true
+    steps: [{do: open}, {do: run, rounds: 1}]
+    expect:
+      exit: 3
+      checks:
+        - check: equals
+          name: check-log-says-hello
+          select: [{doc: {in: work, path: check.log}}]
+          is: hello
+  - name: allows
+    steps: [{do: open}, {do: run}, {do: allow, name: again}]

@@ -1,0 +1,1257 @@
+# A tree of protocol cases run from a case store (story tree-run-command): the `b10x-loom tree`
+# command group opens the root case of a tree in a store directory, runs the tree on Commission's
+# loop with the deterministic selector and the bound executors until the root is terminated or the
+# tree waits on a person, records a person's approval for one case, closes a case through a named
+# outcome, verifies every case's run log and prints the tree's status. The crate b10x-loom-tree
+# holds the run logic and b10x-loom-cli the flags. What a command prints and what it keeps in the
+# store beside the case files is declared here; a command is a process, not a stored entity with a
+# lifecycle, so the domain declares types only and no command.
+domain: loom.tree
+
+summary: >-
+  A tree of protocol cases run from a case store: how a run of the tree stops, the decisions a
+  waiting tree names with the command that records each, the budget of one run, a person's
+  approval of one capability for one case, the protocols a tree was opened from, the status of
+  every case of the tree, the result of verifying its run logs, and the refusals of the tree
+  commands.
+
+naming:
+  wire: tree
+  display: Tree
+
+types:
+  # How one `tree run` stopped. `Terminal`: the root case is terminated through an outcome (exit
+  # 0). `AwaitingPerson`: a decision only a person takes is open, an approval of a person action,
+  # the choice between two legitimate outcomes or a writer's handoff (exit 3). `AwaitingAuthority`:
+  # an admissible action needs an approval of its capability (exit 3). `Stuck`: a case has no
+  # useful action, no legitimate outcome and nothing awaiting approval (exit 4). `BudgetSpent`: the
+  # step or the wall-time budget is spent before the next step (`loom.tree.SpentBudget`, exit 5).
+  # `Cancelled` (story cancel-a-running-bound-program): the caller's cancel flag was set, before a
+  # step or while a step's program ran, which was then killed (exit 5).
+  - name: loom.tree.TreeStop
+    kind: enum
+    variants: [Terminal, AwaitingPerson, AwaitingAuthority, Stuck, BudgetSpent, Cancelled]
+
+  # The budget that ended a `tree run` `BudgetSpent`, asked in this order before each step:
+  # `MaxSteps`, the run took its `max_steps` steps; `MaxWallSeconds`, its `max_wall_seconds` of
+  # wall time are spent. `Cancel` is read from a `stopped` line a run wrote before a cancel stopped
+  # it `Cancelled` (story cancel-a-running-bound-program); no run writes it now. An action's own
+  # run limit (`budget.max_runs` of a binding) ends no run: it refuses that action's step. A tree
+  # run starts no model, so no model-call budget ends one.
+  - name: loom.tree.SpentBudget
+    kind: enum
+    variants: [Cancel, MaxSteps, MaxWallSeconds]
+
+  # What a printed decision records. `Approve`: `tree approve` of the capability, with which the
+  # next `tree run` takes the action itself. `ApproveAction`: `tree approve --action`, with which
+  # the person takes a `person` action. `Close`: `tree close` through one of the legitimate
+  # outcomes. `Handoff`: the writer's handoff text, after which `tree run` is run again.
+  - name: loom.tree.DecisionKind
+    kind: enum
+    variants: [Approve, ApproveAction, Close, Handoff]
+
+  # One decision a waiting tree names: the case, the action (absent for a close), the capability
+  # an approval is about, what is decided (a sentence, or the handoff text), the subject artifact
+  # with its revision and its path in the workspace when the decision is about one, the outcome a
+  # close records, and the exact command that records the decision as its argv. Nothing a program
+  # printed, no report and no bindings text selects the case, the action, the capability or the
+  # principal of the command; a handoff text is printed as the decision and never as a command.
+  # `principal`: the principal the printed command records; for `ApproveAction` the bound person
+  # Loom checks, for `Approve` the default and no restriction; absent for `Close` and `Handoff`.
+  - name: loom.tree.NextDecision
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: kind
+        type: loom.tree.DecisionKind
+      - name: action
+        type: Optional<String>
+      - name: capability
+        type: Optional<String>
+      - name: principal
+        type: Optional<String>
+      - name: decides
+        type: String
+      - name: subject
+        type: Optional<String>
+      - name: revision
+        type: Optional<String>
+      - name: path
+        type: Optional<String>
+      - name: outcome
+        type: Optional<String>
+      - name: command
+        type: List<String>
+
+  # The budget of one `tree run`: the steps it may take across every case of the tree and the
+  # seconds of wall time it may run; absent, the command's default. Each present member is at
+  # least 1. The run stops before the step that would pass either.
+  - name: loom.tree.TreeBudget
+    kind: struct
+    fields:
+      - name: max_steps
+        type: Optional<Integer>
+      - name: max_wall_seconds
+        type: Optional<Integer>
+
+  # What one `tree run` ends with: the stop, the case it names (the root when terminated, else the
+  # case that waits, is stuck or was to take the next step), the steps it took, the decisions that
+  # would let the tree go on, and what else the stop says.
+  - name: loom.tree.TreeRun
+    kind: struct
+    fields:
+      - name: stop
+        type: loom.tree.TreeStop
+      - name: case
+        type: String
+      - name: steps
+        type: Integer
+      - name: decisions
+        type: List<loom.tree.NextDecision>
+      - name: detail
+        type: Optional<String>
+
+  # A principal's decision on a capability.
+  - name: loom.tree.ApprovalDecision
+    kind: enum
+    variants: [Allow, Deny]
+
+  # A principal's decision on one capability for one case at one case revision, and the instant it
+  # was recorded; kept in the store beside the case file. It allows that capability for that case
+  # while the case is at that revision, and nothing else.
+  - name: loom.tree.CaseApproval
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: capability
+        type: String
+      - name: decision
+        type: loom.tree.ApprovalDecision
+      - name: principal
+        type: String
+      - name: case_revision
+        type: Integer
+      - name: at
+        type: Timestamp
+
+  # Where a tree's protocols come from: the host's catalog, or the files of the directory
+  # `tree open --protocols` named, kept in the store.
+  - name: loom.tree.TreeCatalog
+    kind: enum
+    variants: [Host, Directory]
+
+  # One protocol of a tree: an entry of `tree-protocols.json` for a tree opened with
+  # `--protocols`, and of `tree status`'s `protocols`. The registration it is held under, its
+  # protocol id and revision as the document declares them, the file it was read from (the
+  # catalog's source path) and the SHA-256 of the document's bytes as read, which names its blob
+  # in the store of a tree opened with `--protocols`.
+  - name: loom.tree.TreeProtocol
+    kind: struct
+    fields:
+      - name: registration
+        type: String
+      - name: protocol
+        type: String
+      - name: revision
+        type: Integer
+      - name: file
+        type: String
+      - name: sha256
+        type: String
+
+  # The tree a store holds, `tree.json`, written once by `tree open` beside the root case file: its
+  # format (`loom.tree/1`), the root case, the workspace every case works in (an absolute path),
+  # the root's bindings file (an absolute path) and where its protocols come from.
+  - name: loom.tree.TreeManifest
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: root
+        type: String
+      - name: workspace
+        type: String
+      - name: bindings
+        type: String
+      - name: catalog
+        type: loom.tree.TreeCatalog
+
+  # The last line of a case's run log as the tree last wrote it: its `seq` and the SHA-256 of its
+  # bytes. Kept beside the run log, so a change to the log's last line is seen too.
+  - name: loom.tree.TreeLogHead
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: seq
+        type: Integer
+      - name: digest
+        type: String
+
+  # One record a case of `tree status` holds, in the order the case received it: its position from
+  # 0, the governor's id of it, and, read from its `canon-evidence/1` record, its kind, result,
+  # subject, subject revision and upstream revisions (an object of artifact to revision), its
+  # producer, and the action of the step that gave it (absent when no step did). A `case_outcome`
+  # record carries `name`, the link name of the child it is about (the parent's `children[].name`
+  # whose `outcome_evidence` is the record's id); every other record carries none.
+  - name: loom.tree.StatusEvidence
+    kind: struct
+    fields:
+      - name: index
+        type: Integer
+      - name: evidence_id
+        type: String
+      - name: kind
+        type: String
+      - name: result
+        type: Optional<String>
+      - name: subject
+        type: String
+      - name: subject_revision
+        type: String
+      - name: upstream_revisions
+        type: Json
+      - name: producer
+        type: String
+      - name: action
+        type: Optional<String>
+      - name: name
+        type: Optional<String>
+
+  # One run of a bound program of a case: the action, its exit (absent when it timed out or the
+  # runner refused it), its attempt in the action's own chain from 1, whether the next run of the
+  # action was a retry, and the evidence ids the run was given as the records that sent it back.
+  # `cancelled` (story cancel-a-running-bound-program) is true on a run its cancel handle ended, and
+  # absent on every other run.
+  - name: loom.tree.StatusRun
+    kind: struct
+    fields:
+      - name: action
+        type: String
+      - name: exit
+        type: Optional<Integer>
+      - name: attempt
+        type: Integer
+      - name: retried
+        type: Boolean
+      - name: retry_of
+        type: List<String>
+      - name: cancelled
+        type: Optional<Boolean>
+
+  # One `tree approve` on a case, in the order recorded: the capability, the action `--action`
+  # named (absent without it), the answer, the principal and the instant.
+  - name: loom.tree.StatusApproval
+    kind: struct
+    fields:
+      - name: capability
+        type: String
+      - name: action
+        type: Optional<String>
+      - name: answer
+        type: loom.tree.ApprovalDecision
+      - name: actor
+        type: String
+      - name: at
+        type: String
+
+  # One record a `copy` binding copied into a case: the case it was copied from, the case it was
+  # copied into and its kind.
+  - name: loom.tree.StatusCopy
+    kind: struct
+    fields:
+      - name: source_case
+        type: String
+      - name: target_case
+        type: String
+      - name: record_kind
+        type: String
+
+  # Whether a case's run log verified when `tree status` read it. `verified` is true when the log
+  # verifies or is missing (read as a log of no line), and then `refusal`, `line` and `detail` are
+  # absent. Otherwise it is false and they are the reader's refusal, the first line that fails it
+  # counted from 0, and what is wrong with that line; the case's entry then holds no stop, budget,
+  # approval or action read from that log.
+  - name: loom.tree.StatusLog
+    kind: struct
+    fields:
+      - name: verified
+        type: Boolean
+      - name: refusal
+        type: Optional<loom.runlog.RunLogRefusal>
+      - name: line
+        type: Optional<Integer>
+      - name: detail
+        type: Optional<String>
+
+  # One case of `tree status`: its id, its parent (absent for the root), the registration it is
+  # held under, its case revision, the outcome it ended through or the stop its last run recorded,
+  # its open obligations, and the paths of its case file and its run log; then the last segment of
+  # its id below its parent, its protocol id and revision, the decisions its last stop waits on,
+  # its records, the runs of its bound programs, its approvals and the records copied into it; then
+  # whether its run log verified (absent only in a status printed before the member existed) and,
+  # when its last `stopped` line is a `BudgetSpent` stop naming one, the budget that ended that run.
+  - name: loom.tree.CaseStatus
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: parent
+        type: Optional<String>
+      - name: protocol
+        type: String
+      - name: revision
+        type: Integer
+      - name: outcome
+        type: Optional<String>
+      - name: stop
+        type: Optional<String>
+      - name: open_obligations
+        type: List<String>
+      - name: case_file
+        type: String
+      - name: run_log
+        type: String
+      - name: name
+        type: Optional<String>
+      - name: protocol_id
+        type: String
+      - name: protocol_revision
+        type: String
+      - name: stop_next
+        type: List<String>
+      - name: evidence
+        type: List<loom.tree.StatusEvidence>
+      - name: runs
+        type: List<loom.tree.StatusRun>
+      - name: approvals
+        type: List<loom.tree.StatusApproval>
+      - name: copies
+        type: List<loom.tree.StatusCopy>
+      - name: log
+        type: Optional<loom.tree.StatusLog>
+      - name: budget
+        type: Optional<loom.tree.SpentBudget>
+
+  # `tree status`: its format `loom.tree-status/1` and the version of `b10x-loom-tree` that printed
+  # it, the store directory, the workspace, the root case, one entry per case of the tree in tree
+  # order, and one entry per protocol the tree's cases use, read from the catalog the status was
+  # read with (the host's, or the one a tree opened with `--protocols` keeps): listed once however
+  # many cases use it, in the order of its first case.
+  - name: loom.tree.TreeStatus
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: version
+        type: String
+      - name: store
+        type: String
+      - name: workspace
+        type: String
+      - name: root
+        type: String
+      - name: cases
+        type: List<loom.tree.CaseStatus>
+      - name: protocols
+        type: List<loom.tree.TreeProtocol>
+
+  # The first run log of a tree that does not verify: the case, the line counted from 0 and what
+  # is wrong with it.
+  - name: loom.tree.LogFailure
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: line
+        type: Integer
+      - name: detail
+        type: String
+
+  # `tree verify`: the cases whose logs were read and the first failure, absent when every log
+  # verifies.
+  - name: loom.tree.TreeVerify
+    kind: struct
+    fields:
+      - name: cases
+        type: Integer
+      - name: failure
+        type: Optional<loom.tree.LogFailure>
+
+  # One case of `tree replay` (story tree-replay-command): the case decided again from what the
+  # store holds, as of its last `evaluated` line, the case rebuilt by undoing every line of its run
+  # log after that one. `evaluated`: whether its log holds an `evaluated` line; every member after
+  # it is absent when it does not. `seq` and `at`: that line's. `case_revision`: the rebuilt case's
+  # revision, `logged_case_revision` the line's. `unmatched_line`: the `seq` of the first line,
+  # newest first, whose undo does not apply to the case as held (a record or a link it does not
+  # hold, a move whose `to` is not the artifact's revision, a `child closed` whose `child opened`
+  # is not after the `evaluated` line); absent when every line's applies. `state_matches_log`: the
+  # two revisions are equal and no line is unmatched. `decision_digest`: the SHA-256 of Canon's
+  # decision for the rebuilt case, encoded as the line's `decision_digest`, which is
+  # `logged_decision_digest`. `decision_matches_log`: the two digests are equal.
+  - name: loom.tree.CaseReplay
+    kind: struct
+    fields:
+      - name: case
+        type: String
+      - name: evaluated
+        type: Boolean
+      - name: seq
+        type: Optional<Integer>
+      - name: at
+        type: Optional<String>
+      - name: case_revision
+        type: Optional<Integer>
+      - name: logged_case_revision
+        type: Optional<Integer>
+      - name: unmatched_line
+        type: Optional<Integer>
+      - name: state_matches_log
+        type: Optional<Boolean>
+      - name: decision_digest
+        type: Optional<String>
+      - name: logged_decision_digest
+        type: Optional<String>
+      - name: decision_matches_log
+        type: Optional<Boolean>
+
+  # `tree replay`: one entry per case, in tree order, or for the case `--case` names and the cases
+  # below it. It reads the store and never holds it.
+  - name: loom.tree.TreeReplay
+    kind: struct
+    fields:
+      - name: cases
+        type: List<loom.tree.CaseReplay>
+
+  # A suite of scripted tree cycles (story tree-suite-format), `loom.tree-suite/1`: the format,
+  # the members every cycle takes unless it states its own, and the cycles, run one after another
+  # by `b10x-loom tree test`. A check is data: a selection over what the cycle left and one test
+  # from a closed list; no shell, no query string and no expression language.
+  - name: loom.tree.TreeSuite
+    kind: struct
+    fields:
+      - name: format
+        type: String
+      - name: defaults
+        type: Optional<loom.tree.SuiteDefaults>
+      - name: cycles
+        type: List<loom.tree.SuiteCycle>
+
+  # The members a cycle takes when it states none of its own. A stated member replaces the
+  # default whole, except `decide`, whose entries are tried after the cycle's own. `name`,
+  # `pending`, `when` and `expect` are a cycle's alone.
+  - name: loom.tree.SuiteDefaults
+    kind: struct
+    fields:
+      - name: protocol
+        type: Optional<String>
+      - name: bindings
+        type: Optional<String>
+      - name: engine
+        type: Optional<String>
+      - name: fixtures
+        type: Optional<String>
+      - name: revisions
+        type: Optional<List<loom.tree.ArtifactRevision>>
+      - name: seed
+        type: Optional<List<loom.tree.SeedEntry>>
+      - name: principal
+        type: Optional<String>
+      - name: max_rounds
+        type: Optional<Integer>
+      - name: decide
+        type: Optional<List<loom.tree.ScriptedDecision>>
+      - name: steps
+        type: Optional<List<loom.tree.CycleStep>>
+
+  # One scripted cycle, its defaults applied: its name (a letter or digit first, then letters,
+  # digits, `-`, `_` or `.`), whether the suite marks it pending, the conditions under which it
+  # runs, the root's registration and bindings file (relative to the suite's directory), the
+  # engine and fixtures named for the stories that read them, the initial artifact revisions, the
+  # files copied into its workspace, the principal of its approvals, the most rounds of `tree run`
+  # it takes (default 40), its scripted decisions, its steps (default `open` then `run`) and what
+  # it must end with.
+  - name: loom.tree.SuiteCycle
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: pending
+        type: Boolean
+      - name: when
+        type: List<loom.tree.CycleCondition>
+      - name: protocol
+        type: Optional<String>
+      - name: bindings
+        type: Optional<String>
+      - name: engine
+        type: Optional<String>
+      - name: fixtures
+        type: Optional<String>
+      - name: revisions
+        type: List<loom.tree.ArtifactRevision>
+      - name: seed
+        type: List<loom.tree.SeedEntry>
+      - name: principal
+        type: Optional<String>
+      - name: max_rounds
+        type: Integer
+      - name: decide
+        type: List<loom.tree.ScriptedDecision>
+      - name: steps
+        type: List<loom.tree.CycleStep>
+      - name: expect
+        type: loom.tree.CycleExpectation
+
+  # The initial revision of one artifact, as `tree open --revision <artifact>=<revision>` gives it.
+  - name: loom.tree.ArtifactRevision
+    kind: struct
+    fields:
+      - name: artifact
+        type: String
+      - name: revision
+        type: String
+
+  # One file or directory of the suite's directory copied into the cycle's workspace: `from`
+  # relative to the suite's directory, `to` relative to the workspace; neither leaves its root.
+  - name: loom.tree.SeedEntry
+    kind: struct
+    fields:
+      - name: from
+        type: String
+      - name: to
+        type: String
+
+  # A condition under which a cycle runs: that a protocol of the suite's catalog declares an
+  # action or an outcome, or that a file of the suite's directory holds `test` at its path.
+  - name: loom.tree.CycleCondition
+    kind: struct
+    fields:
+      - name: protocol
+        type: Optional<String>
+      - name: declares
+        type: Optional<loom.tree.DeclaredName>
+      - name: suite
+        type: Optional<String>
+      - name: test
+        type: Optional<loom.tree.Condition>
+
+  # An action or an outcome a protocol declares, one of the two.
+  - name: loom.tree.DeclaredName
+    kind: struct
+    fields:
+      - name: action
+        type: Optional<String>
+      - name: outcome
+        type: Optional<String>
+
+  # What a step of a cycle does: one tree command, one scripted decision, or one file of the suite
+  # written into the workspace (`write`).
+  - name: loom.tree.StepKind
+    kind: enum
+    variants: [open, run, approve, close, decide, stop, resume, allow, reopen, replay, status, verify, write]
+
+  # One step of a cycle: what it does, its name (unique in the cycle), the minutes after `--at` it
+  # runs at, the exit it must end with, the refusal it must give, the engine and rounds of a `run`,
+  # the checks evaluated right after it, and the members of the command it stands for (the case,
+  # the capability or the action, the principal, the outcome of a close, the result, reasons or
+  # denial of an approval, the option of a decision, the reason of a `stop`, which is `suite step
+  # <label>` when absent). `from` and `to` are the two members of a `write`: `from` the source, a
+  # regular file of the suite's directory, and `to` the target, a path of plain names in the
+  # cycle's workspace.
+  - name: loom.tree.CycleStep
+    kind: struct
+    fields:
+      - name: do
+        type: loom.tree.StepKind
+      - name: name
+        type: Optional<String>
+      - name: at
+        type: Optional<Integer>
+      - name: exit
+        type: Optional<loom.tree.ExitExpectation>
+      - name: refusal
+        type: Optional<String>
+      - name: engine
+        type: Optional<String>
+      - name: rounds
+        type: Optional<Integer>
+      - name: checks
+        type: List<loom.tree.SuiteCheck>
+      - name: case
+        type: Optional<String>
+      - name: capability
+        type: Optional<String>
+      - name: action
+        type: Optional<String>
+      - name: principal
+        type: Optional<String>
+      - name: outcome
+        type: Optional<String>
+      - name: result
+        type: Optional<String>
+      - name: reasons
+        type: Optional<List<String>>
+      - name: deny
+        type: Optional<Boolean>
+      - name: option
+        type: Optional<String>
+      - name: reason
+        type: Optional<String>
+      - name: from
+        type: Optional<String>
+      - name: to
+        type: Optional<String>
+
+  # The exit a step must end with: exactly `status`, or any status but `not`; one of the two.
+  - name: loom.tree.ExitExpectation
+    kind: struct
+    fields:
+      - name: status
+        type: Optional<Integer>
+      - name: not
+        type: Optional<Integer>
+
+  # How many times a scripted decision may answer a wait: `count` times, or as often as it is
+  # asked when `any` is true. Default once.
+  - name: loom.tree.UseBound
+    kind: struct
+    fields:
+      - name: count
+        type: Optional<Integer>
+      - name: any
+        type: Boolean
+
+  # A scripted decision a `run` step takes at an exit 3. On the wire the tag is `take`.
+  - name: loom.tree.ScriptedDecision
+    kind: union
+    tag: take
+    variants:
+      approve: loom.tree.ScriptedApproval
+      close: loom.tree.ScriptedClose
+      decide: loom.tree.ScriptedChoice
+
+  # An approval taken for a printed wait it matches by case and by capability or action, as
+  # `tree approve` records it.
+  - name: loom.tree.ScriptedApproval
+    kind: struct
+    fields:
+      - name: case
+        type: Optional<String>
+      - name: capability
+        type: Optional<String>
+      - name: action
+        type: Optional<String>
+      - name: principal
+        type: Optional<String>
+      - name: result
+        type: Optional<String>
+      - name: reasons
+        type: Optional<List<String>>
+      - name: deny
+        type: Optional<Boolean>
+      - name: times
+        type: loom.tree.UseBound
+      - name: optional
+        type: Boolean
+
+  # A close through a named outcome taken for a printed wait it matches by case, as `tree close`
+  # records it.
+  - name: loom.tree.ScriptedClose
+    kind: struct
+    fields:
+      - name: case
+        type: Optional<String>
+      - name: outcome
+        type: String
+      - name: principal
+        type: Optional<String>
+      - name: times
+        type: loom.tree.UseBound
+      - name: optional
+        type: Boolean
+
+  # A decision on a decision request taken for a printed wait it matches by case.
+  - name: loom.tree.ScriptedChoice
+    kind: struct
+    fields:
+      - name: case
+        type: Optional<String>
+      - name: option
+        type: Optional<String>
+      - name: principal
+        type: Optional<String>
+      - name: times
+        type: loom.tree.UseBound
+      - name: optional
+        type: Boolean
+
+  # What a cycle must end with: the exit of its last `run` step, the root's terminal outcome, the
+  # last stop and the case it names, and the checks over what the cycle left.
+  - name: loom.tree.CycleExpectation
+    kind: struct
+    fields:
+      - name: exit
+        type: Optional<Integer>
+      - name: outcome
+        type: Optional<String>
+      - name: stop
+        type: Optional<loom.tree.StopExpectation>
+      - name: checks
+        type: List<loom.tree.SuiteCheck>
+
+  # The last stop a cycle must end with, and the case it names when given.
+  - name: loom.tree.StopExpectation
+    kind: struct
+    fields:
+      - name: stop
+        type: loom.tree.TreeStop
+      - name: case
+        type: Optional<String>
+
+  # The thirteen check kinds.
+  - name: loom.tree.CheckKind
+    kind: enum
+    variants: [exists, count, equals, contains, lacks, matches, not_matches, all, none, some, sequence, before, compare]
+
+  # One check: its kind, its name, the selection it reads (every kind but `compare`) and the
+  # members of its kind; the decoder refuses a member the kind does not take.
+  - name: loom.tree.SuiteCheck
+    kind: struct
+    fields:
+      - name: check
+        type: loom.tree.CheckKind
+      - name: name
+        type: Optional<String>
+      - name: select
+        type: List<loom.tree.SelectItem>
+      - name: is
+        type: Optional<Json>
+      - name: min
+        type: Optional<Integer>
+      - name: max
+        type: Optional<Integer>
+      - name: regex
+        type: Optional<String>
+      - name: where
+        type: Optional<loom.tree.Conditions>
+      - name: starts
+        type: Optional<List<Json>>
+      - name: ends
+        type: Optional<List<Json>>
+      - name: within
+        type: Optional<List<Json>>
+      - name: first
+        type: Optional<loom.tree.Conditions>
+      - name: then
+        type: Optional<loom.tree.Conditions>
+      - name: between_none
+        type: Optional<loom.tree.Conditions>
+      - name: left
+        type: Optional<loom.tree.Operand>
+      - name: op
+        type: Optional<loom.tree.CompareOp>
+      - name: right
+        type: Optional<loom.tree.Operand>
+
+  # The sources a selection starts from.
+  - name: loom.tree.SourceKind
+    kind: enum
+    variants: [log, records, runs, cases, doc, files, step, suite, requests, calls]
+
+  # One item of a selection: exactly one member is present, a source first and then operations.
+  - name: loom.tree.SelectItem
+    kind: struct
+    fields:
+      - name: log
+        type: Optional<loom.tree.LogSource>
+      - name: records
+        type: Optional<loom.tree.RecordsSource>
+      - name: runs
+        type: Optional<loom.tree.CaseSource>
+      - name: cases
+        type: Optional<loom.tree.CasesSource>
+      - name: doc
+        type: Optional<loom.tree.DocSource>
+      - name: files
+        type: Optional<loom.tree.FilesSource>
+      - name: step
+        type: Optional<String>
+      - name: suite
+        type: Optional<String>
+      - name: requests
+        type: Optional<loom.tree.CaseSource>
+      - name: calls
+        type: Optional<loom.tree.CaseSource>
+      - name: where
+        type: Optional<loom.tree.Conditions>
+      - name: pick
+        type: Optional<loom.tree.SelectPick>
+      - name: path
+        type: Optional<String>
+      - name: follow
+        type: Optional<loom.tree.Follow>
+      - name: as
+        type: Optional<loom.tree.ReadAs>
+
+  # Which cases a source reads: the case at a path below the root (`.` the root), every case of a
+  # protocol, every case whose id ends in a segment, or every case.
+  - name: loom.tree.CaseSelector
+    kind: struct
+    fields:
+      - name: path
+        type: Optional<String>
+      - name: protocol
+        type: Optional<String>
+      - name: name
+        type: Optional<String>
+      - name: every
+        type: Boolean
+
+  # A case's run log lines of the event kinds named (every kind when none is).
+  - name: loom.tree.LogSource
+    kind: struct
+    fields:
+      - name: case
+        type: loom.tree.CaseSelector
+      - name: event
+        type: List<String>
+
+  # The evidence records a case holds of the kinds named (every kind when none is).
+  - name: loom.tree.RecordsSource
+    kind: struct
+    fields:
+      - name: case
+        type: loom.tree.CaseSelector
+      - name: kind
+        type: List<String>
+
+  # A source that reads one thing per case.
+  - name: loom.tree.CaseSource
+    kind: struct
+    fields:
+      - name: case
+        type: loom.tree.CaseSelector
+
+  # The cases of `tree status`, of one protocol or all.
+  - name: loom.tree.CasesSource
+    kind: struct
+    fields:
+      - name: protocol
+        type: Optional<String>
+
+  # The two directories of a cycle a document is read from.
+  - name: loom.tree.CycleArea
+    kind: enum
+    variants: [work, store]
+
+  # One file of a cycle's workspace or store, at a relative path.
+  - name: loom.tree.DocSource
+    kind: struct
+    fields:
+      - name: in
+        type: loom.tree.CycleArea
+      - name: path
+        type: String
+
+  # The relative paths of a cycle's workspace or store that match a pattern.
+  - name: loom.tree.FilesSource
+    kind: struct
+    fields:
+      - name: in
+        type: loom.tree.CycleArea
+      - name: glob
+        type: String
+
+  # Which item a pick keeps.
+  - name: loom.tree.PickPosition
+    kind: enum
+    variants: [first, last, index]
+
+  # A pick: the first item, the last, or the one at `index` (from 0; negative from the end).
+  - name: loom.tree.SelectPick
+    kind: struct
+    fields:
+      - name: position
+        type: loom.tree.PickPosition
+      - name: index
+        type: Optional<Integer>
+
+  # What a follow reads.
+  - name: loom.tree.FollowTarget
+    kind: enum
+    variants: [blob, evidence, file]
+
+  # A follow: the blob a member names (`member`, default `blob_digest`), the evidence records an
+  # item names, or the file an item names in the workspace (`below` a relative path under it).
+  - name: loom.tree.Follow
+    kind: struct
+    fields:
+      - name: target
+        type: loom.tree.FollowTarget
+      - name: member
+        type: Optional<String>
+      - name: below
+        type: Optional<String>
+
+  # How a file is read when its extension does not say it.
+  - name: loom.tree.ReadAs
+    kind: enum
+    variants: [text, lines, json, jsonl, yaml]
+
+  # The tests an item must hold: every one of `all`, and, when `any_of` is not empty, every test
+  # of one of its groups.
+  - name: loom.tree.Conditions
+    kind: struct
+    fields:
+      - name: all
+        type: List<loom.tree.Condition>
+      - name: any_of
+        type: List<loom.tree.ConditionGroup>
+
+  # One entry of `any_of`.
+  - name: loom.tree.ConditionGroup
+    kind: struct
+    fields:
+      - name: all
+        type: List<loom.tree.Condition>
+
+  # The type a value must be of.
+  - name: loom.tree.ValueType
+    kind: enum
+    variants: [string, number, bool, list, map, "null"]
+
+  # The length of a string or list, at least `min` and at most `max`.
+  - name: loom.tree.LengthBound
+    kind: struct
+    fields:
+      - name: min
+        type: Optional<Integer>
+      - name: max
+        type: Optional<Integer>
+
+  # One test of the values at a path of an item: exactly one test member is present.
+  - name: loom.tree.Condition
+    kind: struct
+    fields:
+      - name: path
+        type: String
+      - name: equals
+        type: Optional<Json>
+      - name: not_equals
+        type: Optional<Json>
+      - name: in
+        type: Optional<List<Json>>
+      - name: not_in
+        type: Optional<List<Json>>
+      - name: contains
+        type: Optional<Json>
+      - name: lacks
+        type: Optional<Json>
+      - name: matches
+        type: Optional<String>
+      - name: not_matches
+        type: Optional<String>
+      - name: min
+        type: Optional<Json>
+      - name: max
+        type: Optional<Json>
+      - name: type
+        type: Optional<loom.tree.ValueType>
+      - name: length
+        type: Optional<loom.tree.LengthBound>
+      - name: exists
+        type: Optional<Boolean>
+
+  # How `compare` relates its operands.
+  - name: loom.tree.CompareOp
+    kind: enum
+    variants: [eq, ne, lt, le, gt, ge, subset]
+
+  # What an operand takes of its selection.
+  - name: loom.tree.OperandTake
+    kind: enum
+    variants: [value, count, size, digest, length]
+
+  # One side of `compare`: a value written in the suite, or what `take` takes of a selection
+  # (default `value`), plus an integer, read as the cycle stood right after a named step.
+  - name: loom.tree.Operand
+    kind: struct
+    fields:
+      - name: value
+        type: Optional<Json>
+      - name: select
+        type: Optional<List<loom.tree.SelectItem>>
+      - name: take
+        type: Optional<loom.tree.OperandTake>
+      - name: plus
+        type: Optional<Integer>
+      - name: after
+        type: Optional<String>
+
+  # Why a cycle did not end as the suite expects, when no check of a kind names it:
+  # `ExitDiffers`, `RefusalDiffers`, `OutcomeDiffers`, `StopDiffers`, `VerifyFailed` (a store
+  # that does not pass `tree verify`), `ScriptUnused` (a scripted decision not optional and never
+  # used), `RoundsSpent`, `OperandNotOne`, `BlobChanged`, `PathOutsideCycle` (also a link at
+  # any component of a `write` step's `to`), `SelectionTooLarge`, `SeedUnusable`, `StepFailed` (a
+  # step's command could not run), `CycleTimedOut` (the cycle ran past `--cycle-timeout`: its
+  # running program was killed or its next step not started; the check is the step, the kind its
+  # kind, and found the seconds the cycle ran).
+  - name: loom.tree.DifferenceReason
+    kind: enum
+    variants:
+      - CheckFailed
+      - ExitDiffers
+      - RefusalDiffers
+      - OutcomeDiffers
+      - StopDiffers
+      - VerifyFailed
+      - ScriptUnused
+      - RoundsSpent
+      - OperandNotOne
+      - BlobChanged
+      - PathOutsideCycle
+      - SelectionTooLarge
+      - SeedUnusable
+      - StepFailed
+      - CycleTimedOut
+
+  # The first difference of a cycle: the check it names (its name, else its place, as
+  # `expect.checks[<i>]`), its kind (a check kind, or `exit`, `outcome`, `stop`, `refusal`,
+  # `verify`, `decide`, `run`, `seed`, `write`), why, the expected value, and what was found when Loom
+  # prints it: a number, a boolean or a value Loom declares, any other text as its length and the
+  # first 12 hex digits of its SHA-256.
+  - name: loom.tree.CheckDifference
+    kind: struct
+    fields:
+      - name: check
+        type: String
+      - name: kind
+        type: String
+      - name: reason
+        type: loom.tree.DifferenceReason
+      - name: expected
+        type: String
+      - name: found
+        type: Optional<String>
+
+  # A cycle that waits for a story: its name, the story and the kind it uses that waits.
+  - name: loom.tree.WaitingCycle
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: story
+        type: String
+      - name: kind
+        type: String
+
+  # What one cycle of `tree test` ended with: its name, whether it is pending, the story it waits
+  # for, whether it ran, the `when` condition that kept it from running, whether it ended as
+  # expected, its first difference, the exit of its last `run` step and its wall time in seconds.
+  - name: loom.tree.CycleResult
+    kind: struct
+    fields:
+      - name: name
+        type: String
+      - name: pending
+        type: Boolean
+      - name: waits_for
+        type: Optional<loom.tree.WaitingCycle>
+      - name: run
+        type: Boolean
+      - name: not_run_when
+        type: Optional<Integer>
+      - name: as_expected
+        type: Boolean
+      - name: difference
+        type: Optional<loom.tree.CheckDifference>
+      - name: exit
+        type: Optional<Integer>
+      - name: seconds
+        type: Decimal
+
+  # `tree test --report`: every cycle's result in suite order, the number of cycles expected (run
+  # and not pending), of those as expected, the names of those that failed, the number pending
+  # (marked so, or waiting), the names of the pending cycles that pass, the cycles waiting for a
+  # story and the names of those not run. `cycles` and every list of names are in suite order with
+  # any worker count, whatever order the cycles end in. `only`: the cycles `--only` selected, in
+  # suite order, absent in a full run. `suite_cycles`: the number of cycles in the suite.
+  - name: loom.tree.SuiteReport
+    kind: struct
+    fields:
+      - name: cycles
+        type: List<loom.tree.CycleResult>
+      - name: expected
+        type: Integer
+      - name: as_expected
+        type: Integer
+      - name: failed
+        type: List<String>
+      - name: pending
+        type: Integer
+      - name: pending_passing
+        type: List<String>
+      - name: waiting
+        type: List<loom.tree.WaitingCycle>
+      - name: not_run
+        type: List<String>
+      - name: only
+        type: Optional<List<String>>
+      - name: suite_cycles
+        type: Integer
+
+  # Why `tree test` refused before any cycle ran (exit 2). `SuiteUnreadable`: the suite is no
+  # regular file within 1 MiB of YAML, or names another format. `MemberUndeclared`: a member the
+  # format does not declare where it stands. `MemberMissing`: a required member is absent.
+  # `PathOutsideSuite`: a path of the suite's directory is absolute or leaves it. `PathOutsideCycle`:
+  # a path of a cycle's workspace or store is absolute or leaves it. `CycleNameUnusable`: a
+  # cycle's name is not a letter or digit then letters, digits, `-`, `_` or `.`. `CycleTwice`,
+  # `StepNameTwice`: a name given twice. `AfterUnknownStep`: an `after` or a `step` source naming
+  # no step before it. `PathUnusable`: a path that is not one. `RegexUnusable`: a regex over 1024
+  # bytes, with look-around or a back-reference, or one the regex syntax refuses.
+  # `SelectUnusable`: a selection not starting with exactly one source, or an operation with more
+  # than one key. `StepKindUnknown`, `SourceUnknown`, `EventKindUnknown`: a name the format does not
+  # know. `ProtocolsUnreadable`: a file of `--protocols` that Canon refuses. `ScratchNotEmpty`:
+  # `--scratch` holds anything. `SeedUnusable`: a seed entry that is a link or is absent, or a
+  # `write` step's `from` that is a link, is behind a link, is absent, is not a regular file or is
+  # over 1 MiB.
+  # `CycleUnknown`: an `--only` name that is no cycle of the suite. `SubstrateWorkersUnserved`:
+  # more than 16 workers under `--confinement substrate`: the cycles share one Substrate driver,
+  # which runs at most 16 executions at once.
+  - name: loom.tree.SuiteRefusalReason
+    kind: enum
+    variants:
+      - SuiteUnreadable
+      - MemberUndeclared
+      - MemberMissing
+      - PathOutsideSuite
+      - PathOutsideCycle
+      - CycleNameUnusable
+      - CycleTwice
+      - StepNameTwice
+      - AfterUnknownStep
+      - PathUnusable
+      - RegexUnusable
+      - SelectUnusable
+      - StepKindUnknown
+      - SourceUnknown
+      - EventKindUnknown
+      - ProtocolsUnreadable
+      - ScratchNotEmpty
+      - SeedUnusable
+      - CycleUnknown
+      - SubstrateWorkersUnserved
+
+  # A refused suite: the reason, the member path it names (`cycles[2].steps[0].do`), and what is
+  # wrong.
+  - name: loom.tree.SuiteRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.tree.SuiteRefusalReason
+      - name: member
+        type: Optional<String>
+      - name: detail
+        type: String
+
+  # Why a tree command was refused; nothing is written unless the reason says otherwise.
+  # `StoreInUse`: another tree command holds the store, its process id named. `NotATree`: the
+  # store holds no tree. `StoreNotEmpty`: `tree open` on a store that holds anything.
+  # `WorkspaceUnusable`: the workspace is no directory or cannot be read. `BindingsRefused`: a
+  # bindings file of the tree does not decode or does not check against its protocol.
+  # `AgentNotRunYet`: a binding of the tree has an `agent` executor, named with the file, the action
+  # and the story that runs it. `UnknownProtocol`: the root registration is not in the tree's
+  # catalog. `InvalidRevision`: an initial artifact revision is malformed or names an artifact the
+  # protocol does not declare. `InvalidInstant`: `--at` is no RFC 3339 instant. `CaseNotInTree`: the
+  # named case is not a case of the tree. `CaseTerminated`: the named case is terminated already.
+  # `OutcomeNotLegitimate`: `tree close` names an outcome that is not legitimate for the case.
+  # `NotAPersonAction`: `tree approve --action` names an action not bound to `person`, or one the
+  # frontier does not admit. `ConfinementRefused`: the runner for bound programs is refused.
+  # `StoreUnreadable`: a file of the store cannot be read or written. `LogRefused`: a run log of
+  # the tree does not verify, so no command appends to it. `StoredProtocolChanged`: a stored
+  # protocol blob no longer has the SHA-256 `tree-protocols.json` names. `DuplicateProtocol`: two
+  # files of the protocols directory declare one protocol id. `ProtocolRefused`: a file of the
+  # directory is not a regular UTF-8 file within 1 MiB, or Canon refuses it, or its id gives no
+  # registration. `ProtocolLinkLeavesDirectory`: a link of the directory resolves outside it.
+  # `ProtocolNotInDirectory`: the root registration, or a protocol a `case_open` names, is in no
+  # file of the directory. `NoProtocolFiles`: the directory holds no protocol file.
+  # `HandoffCheckFailed`: the `handoff_when` check of the named action could not be started, was
+  # killed at its timeout or by a signal, or gave no exit status; the run stops, its `handoff
+  # checked` line written, and the action's program does not run. `PersonProgramFailed` (story
+  # person-action-runs-a-program): the program of the person action `tree approve --action` takes
+  # was not started (its runs spent, a placed artifact that cannot be digested, an argv left
+  # unresolved, a timeout or a child that cannot be built; nothing is written), or it ran and did
+  # not end well (an exit other than 0, killed at its timeout, refused by its runner, or a program
+  # of an action that does not write changed a placed artifact): the approval, the run's
+  # observation, its blob, the moves and one `action finished` line are kept, and no person record
+  # is written. The detail names why, the exit or the blob digest, never the program's output.
+  # `TreeStopped` (story tree-suite-stop-resume-reopen-steps): `tree run` on a held tree, after the
+  # store lock is taken and before anything is written; the detail names the hold's instant,
+  # principal and reason and the `tree reopen` command that lifts it. `TreeAlreadyStopped`: `tree
+  # hold` on a tree that is held already. `TreeNotStopped`: `tree reopen` on a tree that is not
+  # held. `StopUnusable`: a `--principal` or `--reason` of `tree hold` or `tree reopen` that is
+  # empty, too long or holds a control character, named with its rule, before the store is opened.
+  # None of the four writes anything.
+  - name: loom.tree.TreeRefusalReason
+    kind: enum
+    variants:
+      - StoreInUse
+      - NotATree
+      - StoreNotEmpty
+      - WorkspaceUnusable
+      - BindingsRefused
+      - AgentNotRunYet
+      - UnknownProtocol
+      - InvalidRevision
+      - InvalidInstant
+      - CaseNotInTree
+      - CaseTerminated
+      - OutcomeNotLegitimate
+      - NotAPersonAction
+      - ConfinementRefused
+      - StoreUnreadable
+      - LogRefused
+      - StoredProtocolChanged
+      - DuplicateProtocol
+      - ProtocolRefused
+      - ProtocolLinkLeavesDirectory
+      - ProtocolNotInDirectory
+      - NoProtocolFiles
+      - UnknownStatusFormat
+      - HandoffCheckFailed
+      - PersonProgramFailed
+      - TreeStopped
+      - TreeAlreadyStopped
+      - TreeNotStopped
+      - StopUnusable
+
+  # A refused tree command: the reason, what is wrong, and where the reason names one the case,
+  # the file, the action, the story that lifts it and the process id of the store's holder.
+  # `command` (story person-action-runs-a-program) is the argv of the refused `tree approve` call,
+  # `b10x-loom tree approve --store <store> --case <case> [--capability <capability>] --principal
+  # <principal> --action <action> [--result <result>] [--reasons <text> | --reasons-file <file>]
+  # [--at <instant>] --confinement <confinement> [--cgroup-root <dir>]`, the paths absolute: the
+  # command line sets it on every `PersonProgramFailed` and on no other reason, and running it
+  # takes the action again. The library leaves it absent.
+  - name: loom.tree.TreeRefusal
+    kind: struct
+    fields:
+      - name: reason
+        type: loom.tree.TreeRefusalReason
+      - name: detail
+        type: String
+      - name: case
+        type: Optional<String>
+      - name: file
+        type: Optional<String>
+      - name: action
+        type: Optional<String>
+      - name: story
+        type: Optional<String>
+      - name: holder
+        type: Optional<Integer>
+      - name: command
+        type: Optional<List<String>>

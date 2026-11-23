@@ -1,0 +1,60 @@
+format: loom-ess-synthesis/1
+command: ess verify conform synthesize --path ess --scenarios ess --suite-format 5
+regenerate: task suite-generate
+ess: ess 0.98.0
+inputs: sha256:96c06f02c2606e38bc2655f20bf0b6968e4f17fd333ddccc41995830e99f0373
+exit: 0
+suite: sha256:84fb387f5e5b25080ead212649a24040eb3f560c42460ea7289a21afa52f4e8f
+stdout:
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/already-recorded`
+  no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/recorded`
+  no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Decide`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Escalate`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Expire`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Recommend`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.RecordProduced`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.Supersede`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/state/Expired/refuses/loom.decision.TakeRecommendation`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Expired`, and the route runs through `loom.decision.Expire/expired`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: outcome loom.decision.Decide/decider-under-rule has no scenario `loom.decision.Decide/outcome/decider-under-rule`
+  no candidate of the 32 tried satisfies ``loom.decision.DecisionRequest` stored eligible,holder,options,unblocks selecting this branch, over the rows 32 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: outcome loom.decision.Decide/rule-not-holder has no scenario `loom.decision.Decide/outcome/rule-not-holder`
+  no candidate of the 32 tried satisfies ``loom.decision.DecisionRequest` stored eligible,holder,options,unblocks selecting this branch, over the rows 32 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: outcome loom.decision.Decide/silence-takes-recommendation has no scenario `loom.decision.Decide/outcome/silence-takes-recommendation`
+  no candidate of the 32 tried satisfies ``loom.decision.DecisionRequest` stored eligible,holder,options,unblocks selecting this branch, over the rows 32 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: outcome loom.decision.RecordProduced/already-recorded has no scenario `loom.decision.RecordProduced/outcome/already-recorded`
+  no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: outcome loom.decision.RecordProduced/produced-conflict has no scenario `loom.decision.RecordProduced/outcome/produced-conflict`
+  no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: outcome loom.decision.RecordProduced/recorded has no scenario `loom.decision.RecordProduced/outcome/recorded`
+  no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: transition loom.decision.DecisionRequest/record_produced has no scenario `loom.decision.DecisionRequest/transition/record_produced/by/loom.decision.RecordProduced/recorded`
+  no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
+  help: write the branch's condition over values a candidate can carry, or supply a fixture for it
+refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: transition loom.decision.DecisionRequest/supersede has no scenario `loom.decision.DecisionRequest/transition/supersede/by/loom.decision.Supersede/superseded`
+  it needs an instance of `loom.decision.DecisionRequest` resting in `Escalated`, and the route runs through `loom.decision.Escalate/escalated`, which no input reaches
+  help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
+369 selected scenario(s), 110 authored source(s), 17 refusal occurrence(s), 17 covered by authored

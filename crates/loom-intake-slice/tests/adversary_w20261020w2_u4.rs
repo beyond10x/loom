@@ -98,6 +98,16 @@ fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
     }
 }
 
+/// A child's shell line that holds until the host creates `target/release` in its workspace
+/// ([`release`]), at most 30 s: the child runs exactly as long as the host's check needs.
+const HOLD: &str =
+    "i=0; while [ ! -e target/release ] && [ $i -lt 600 ]; do sleep 0.05; i=$((i+1)); done";
+
+/// Ends the [`HOLD`] of the child working in `workspace`.
+fn release(workspace: &std::path::Path) {
+    std::fs::write(workspace.join("target/release"), "").expect("the release marker");
+}
+
 /// A host runs one child beside another (the story's Why: a harness child, `git`, a forge command
 /// and `aep` beside a test command). Launching the second child must not end the first: each
 /// `run_child` call is its own confined run, and the first one's result is its own.
@@ -114,7 +124,10 @@ fn adv_a_second_child_launch_leaves_a_running_child_running() {
                 "sh",
                 [
                     "-c",
-                    "touch target/started; sleep 4; touch target/finished; printf first-done",
+                    format!(
+                        "touch target/started; {HOLD}; touch target/finished; printf first-done"
+                    )
+                    .as_str(),
                 ],
                 workspace,
             )
@@ -136,6 +149,7 @@ fn adv_a_second_child_launch_leaves_a_running_child_running() {
             );
 
             let other = runner.run_child(&ChildCommand::new("true", [] as [&str; 0], &second));
+            release(workspace);
             let first = handle.join().unwrap();
             eprintln!("first child: {first:?}");
             eprintln!("second child: {other:?}");
@@ -249,7 +263,10 @@ fn adv_a_root_named_another_way_opens_no_driver_over_a_running_child() {
             let started = workspace.join("target/started");
             let first = ChildCommand::new(
                 "sh",
-                ["-c", "touch target/started; sleep 3; printf first-done"],
+                [
+                    "-c",
+                    format!("touch target/started; {HOLD}; printf first-done").as_str(),
+                ],
                 workspace,
             )
             .with_timeout(Duration::from_secs(60));
@@ -271,6 +288,7 @@ fn adv_a_root_named_another_way_opens_no_driver_over_a_running_child() {
 
             let other = SubstrateRunner::new(Some(same_root.clone()))
                 .run_child(&ChildCommand::new("true", [] as [&str; 0], &elsewhere));
+            release(workspace);
             let first = handle.join().unwrap();
             eprintln!("root {}, named {}", root.display(), same_root.display());
             eprintln!("first child: {first:?}");

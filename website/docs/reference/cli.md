@@ -39,6 +39,17 @@ Generated from the clap definition of the `b10x-loom` command line in [`crates/l
 | [`b10x-loom agent boundary-ready`](#b10x-loom-agent-boundary-ready) | Say whether every boundary port on 127.0.0.1 accepts a connection: the boundary's startup probe |
 | [`b10x-loom approve`](#b10x-loom-approve) | Approve the request a commission's Suspension holds: write a grant into the state directory. Approval performs nothing; `resume` does |
 | [`b10x-loom resume`](#b10x-loom-resume) | Continue a commission's suspended run after its approval: perform the suspended request once, release the Suspension, and run on until the run stops |
+| [`b10x-loom tree`](#b10x-loom-tree) | Run a tree of protocol cases from a case store: open its root case, and print the tree's status and the verdict on its run logs |
+| [`b10x-loom tree open`](#b10x-loom-tree-open) | Open the root case of a tree in an empty store directory, from a registered protocol, a loom.bindings/1 file and the initial artifact revisions |
+| [`b10x-loom tree run`](#b10x-loom-tree-run) | Drive the tree: one step of one case at a time on Commission's loop, until the root is terminated through its one legitimate outcome or the tree waits |
+| [`b10x-loom tree approve`](#b10x-loom-tree-approve) | Record a principal's decision on one capability for one case of the tree, at the case's current revision |
+| [`b10x-loom tree close`](#b10x-loom-tree-close) | Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is |
+| [`b10x-loom tree status`](#b10x-loom-tree-status) | Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log |
+| [`b10x-loom tree verify`](#b10x-loom-tree-verify) | Verify the run log of every case of the tree and name the first line that fails |
+| [`b10x-loom tree replay`](#b10x-loom-tree-replay) | Decide every case of the tree again as of its last evaluated line and print, per case, whether its state and Canon's decision equal what that line recorded |
+| [`b10x-loom tree hold`](#b10x-loom-tree-hold) | Hold the tree: record in its root case's run log that a principal stopped it and why; tree run is refused until tree reopen lifts the hold |
+| [`b10x-loom tree reopen`](#b10x-loom-tree-reopen) | Lift the hold tree hold recorded, so that tree run goes on |
+| [`b10x-loom tree test`](#b10x-loom-tree-test) | Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers at once, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects |
 
 ## `b10x-loom run`
 
@@ -645,4 +656,264 @@ Exit status:
   1   anything else failed: the state directory, the resume context, the workspace, the models
   2   the command line is not valid
 Nothing is performed on any status from 10 to 21.
+```
+
+## `b10x-loom tree`
+
+Run a tree of protocol cases from a case store: open its root case, and print the tree's status and the verdict on its run logs
+
+```text
+Usage: b10x-loom tree <COMMAND>
+```
+
+## `b10x-loom tree open`
+
+Open the root case of a tree in an empty store directory, from a registered protocol, a loom.bindings/1 file and the initial artifact revisions
+
+```text
+Usage: b10x-loom tree open [OPTIONS] --store <DIR> --protocol <NAME@MAJOR> --bindings <FILE> --workspace <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory: absent, or an empty directory |
+| `--protocol <NAME@MAJOR>` | yes | none | The registration of the root's protocol, `name@major` |
+| `--protocols <DIR>` | no | none | Read the tree's protocols from the files directly in this directory whose names end in `.yaml`, each under the registration it declares, and keep them in the store: the tree's catalog is those and no other. Without it the tree uses the installed and built-in protocols |
+| `--bindings <FILE>` | yes | none | The root's loom.bindings/1 file |
+| `--workspace <DIR>` | yes | none | The existing directory every case of the tree works in; every path of the bindings is relative to it |
+| `--revision <ARTIFACT=REVISION>` | no | none | The initial revision of one artifact, `ARTIFACT=REVISION`; repeat for each |
+| `--case <ID>` | no | `root` | The id of the root case |
+| `--at <INSTANT>` | no | none | The instant every write of the command records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+Everything is checked before anything is written: the store (absent, or an empty directory), the workspace (an existing directory), --at, the bindings file and, through the `bindings` member of each `open` executor, every bindings file of the tree. A binding with an `agent` executor anywhere in the tree is refused AgentNotRunYet, naming the file, the action and story:bound-agent-node. An artifact no --revision names takes the revision of what is at the path the bindings place it at.
+
+Exit status:
+  0  the tree is open; its root case and store are printed
+  1  refused, nothing written: the reason, and the file, action or case it names, on standard error
+```
+
+## `b10x-loom tree run`
+
+Drive the tree: one step of one case at a time on Commission's loop, until the root is terminated through its one legitimate outcome or the tree waits
+
+```text
+Usage: b10x-loom tree run [OPTIONS] --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--max-steps <N>` | no | none | The most steps the run takes |
+| `--max-wall-seconds <SECONDS>` | no | none | The most seconds of wall time the run takes before a step |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under |
+| `--cgroup-root <DIR>` | no | none | The delegated cgroup v2 directory every confined program runs under: empty, writable, delegated, with this process in a child of it, and held by this run alone. Without it, tree run starts itself again in a delegated scope of its own |
+| `--at <INSTANT>` | no | none | The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+Every open child takes its steps before its parent's next one; each step is selected by the deterministic selector and performed through the action's bound executor. A case is terminated when its completion gives exactly one legitimate outcome and no action in it is useful. When the tree waits, each decision is printed with the exact command that records it; a handoff's command is the next tree run, under this run's --confinement. A person action is never taken by tree run.
+
+Confinement: the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree run starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree run --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined. Started again, tree run moves into a leaf of its scope and the scope is its cgroup root. A root is held by one tree run at a time and released when that run ends, killed or not, so two runs never share a root; tree run never takes an ancestor cgroup it finds.
+
+SIGTERM or SIGINT cancels the run: a program it is running is stopped with every process it started and its step recorded cancelled, and the run ends Cancelled with exit status 5; a later signal changes nothing.
+
+Exit status:
+  0  the root is terminated through its one legitimate outcome
+  1  refused, nothing written: StoreInUse naming the holder, TreeStopped naming the hold and the tree reopen command that lifts it, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
+  3  the tree waits on a person or on authority: each decision and its command on standard error
+  4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
+  5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run
+```
+
+## `b10x-loom tree approve`
+
+Record a principal's decision on one capability for one case of the tree, at the case's current revision
+
+```text
+Usage: b10x-loom tree approve [OPTIONS] --store <DIR> --case <ID> --principal <PRINCIPAL>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <ID>` | yes | none | The case of the tree the decision is for |
+| `--capability <CAPABILITY>` | no | none | The capability decided. With --action it may be left out when the protocol action needs none: the action is taken and no authority is recorded |
+| `--principal <PRINCIPAL>` | yes | none | The principal who decided |
+| `--deny` | no | `false` | Deny the capability instead of approving it |
+| `--action <ACTION>` | no | none | Then take this `person` action of the case as the principal: the records its binding declares are produced by the principal about the subject's revision now |
+| `--result <RESULT>` | no | none | The result the person action ends with: a value every `from: effect` entry of its binding lists in its results, which maps it to each record's result; `performed` when absent |
+| `--reasons <TEXT>` | no | none | The person's reasons for the result, at most 65536 bytes and 60 lines: kept as a blob of the store, and the log of the record a writer this result sends back is given |
+| `--reasons-file <FILE>` | no | none | The reasons read from a regular file inside the tree's workspace, opened without following a symbolic link |
+| `--at <INSTANT>` | no | none | The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement the program of the person action starts under, when its binding names an argv, as tree run's programs do; an action with no program starts nothing under it |
+| `--cgroup-root <DIR>` | no | none | The delegated cgroup v2 directory the program runs under, as tree run --cgroup-root; without it, tree approve of an action with a program starts itself again in a delegated scope of its own |
+
+```text
+The decision is kept beside the case file and allows that capability for that case while the case is at the revision it was recorded at, and nothing else: another case, another capability or a moved case reads no approval. A denial wins over an approval of the same capability for the same case and revision. A person action whose protocol action needs no capability is taken with --action and no --capability, and records no authority; one that needs a capability is refused without it. --result names the result the person action ends with, one its binding's results list, and --reasons or --reasons-file the person's reasons, which a writer the result sends back reads in its retry feedback; a result an entry does not list is refused and nothing is written.
+
+Exit status:
+  0  the decision is recorded; it is printed
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, NotAPersonAction, or the store cannot be read
+```
+
+## `b10x-loom tree close`
+
+Terminate one case of the tree through an outcome Canon reports legitimate for it now: the choice a waiting `tree run` prints when more than one is
+
+```text
+Usage: b10x-loom tree close [OPTIONS] --store <DIR> --case <ID> --outcome <OUTCOME>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <ID>` | yes | none | The case of the tree to close |
+| `--outcome <OUTCOME>` | yes | none | The outcome the case ends through |
+| `--at <INSTANT>` | no | none | The instant the termination records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+## `b10x-loom tree status`
+
+Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or stop, open obligations, and the paths of its case file and run log
+
+```text
+Usage: b10x-loom tree status --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+
+```text
+The store is read and never held, so a live view can read it while a run holds it.
+
+Exit status:
+  0  the status is printed
+  1  refused: the store holds no tree or cannot be read
+```
+
+## `b10x-loom tree verify`
+
+Verify the run log of every case of the tree and name the first line that fails
+
+```text
+Usage: b10x-loom tree verify --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+
+```text
+Each log is checked against its chain (a cut, a missing or reordered line, a changed byte) and its last line against the head the tree kept, so a change to any byte of a log is seen. The store is read and never held.
+
+Exit status:
+  0  every log verifies
+  1  refused: the store holds no tree or cannot be read
+  3  a log does not verify: the case and the line, counted from 0, on standard error
+```
+
+## `b10x-loom tree replay`
+
+Decide every case of the tree again as of its last evaluated line and print, per case, whether its state and Canon's decision equal what that line recorded
+
+```text
+Usage: b10x-loom tree replay [OPTIONS] --store <DIR>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--case <CASE>` | no | none | Replay this case of the tree and the cases below it alone |
+
+```text
+Each case is rebuilt as it was at the last evaluated line of its run log, by undoing every later line of that log, and decided again through the same path tree run decides with. state_matches_log says the rebuilt case revision equals the logged one and every later line could be undone (unmatched_line names the first that could not); decision_matches_log says the digest of Canon's decision equals the logged one. A case whose log holds no evaluated line is listed as {case, evaluated: false} and is not compared. --case names one case: it and the cases below it are replayed alone. The store is read and never held, and nothing is written.
+
+Exit status:
+  0  every compared case matches its log; the cases are printed
+  1  refused: NotATree, CaseNotInTree for a --case the tree does not hold, LogRefused, or the store cannot be read
+  3  a case differs: the cases are printed, and the first that differs and whether its state or its decision on standard error
+```
+
+## `b10x-loom tree hold`
+
+Hold the tree: record in its root case's run log that a principal stopped it and why; tree run is refused until tree reopen lifts the hold
+
+```text
+Usage: b10x-loom tree hold [OPTIONS] --store <DIR> --principal <PRINCIPAL> --reason <TEXT>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--principal <PRINCIPAL>` | yes | none | The principal who holds the tree |
+| `--reason <TEXT>` | yes | none | Why the tree is held |
+| `--at <INSTANT>` | no | none | The instant the hold records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+The hold is one stop recorded line, the principal and the reason, in the root case's run log, written under the store lock. While the tree is held, tree run is refused TreeStopped and writes nothing; tree approve, tree close, tree status and tree verify work as on any other tree, and an approval does not lift the hold. tree reopen lifts it. The principal is 1 to 200 bytes and the reason 1 to 1024 bytes, neither with a control character. The hold records a decision and locks nobody out: whoever can write the store can cut its line.
+
+Exit status:
+  0  the hold is recorded; it is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeAlreadyStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid
+```
+
+## `b10x-loom tree reopen`
+
+Lift the hold tree hold recorded, so that tree run goes on
+
+```text
+Usage: b10x-loom tree reopen [OPTIONS] --store <DIR> --principal <PRINCIPAL>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--store <DIR>` | yes | none | The store directory `tree open` made |
+| `--principal <PRINCIPAL>` | yes | none | The principal who lifts the hold |
+| `--at <INSTANT>` | no | none | The instant the lift records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent |
+
+```text
+The lift is one stop lifted line, the principal and the seq of the stop recorded line it lifts, in the root case's run log, written under the store lock. After it tree run goes on as it would have without the hold.
+
+Exit status:
+  0  the hold is lifted; the lift is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeNotStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid
+```
+
+## `b10x-loom tree test`
+
+Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers at once, each in its own directory of --scratch, and print per cycle whether it ended as the suite expects
+
+```text
+Usage: b10x-loom tree test [OPTIONS] --suite <FILE>
+```
+
+| Argument | Required | Default | Meaning |
+|---|---|---|---|
+| `--suite <FILE>` | yes | none | The loom.tree-suite/1 file; its seeds, bindings and suite sources are paths below its directory |
+| `--protocols <DIR>` | no | none | The directory whose `.yaml` files are the protocols of every cycle's tree; not read with --list |
+| `--scratch <DIR>` | no | none | The directory the cycles work in: absent or empty; not used with --list |
+| `--at <INSTANT>` | no | none | The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ`; not read with --list |
+| `--list` | no | `false` | Print one line per cycle of the suite and run nothing: `<name>`, `<name>: pending`, or `<name>: pending, waits for story:<id> (<kind>)`. Reads the suite alone; --only applies |
+| `--cycle-timeout <SECONDS>` | no | `60` | How long a cycle may run, 1 to 60 seconds: past it, its running program is killed and the cycle ends CycleTimedOut. Any other value is refused before the suite is read |
+| `--confinement <CONFINEMENT>` | no | `substrate` | The confinement every bound program starts under. `substrate` runs every program of every cycle under one delegated cgroup root: `--cgroup-root`, or the scope `tree test` starts itself again in |
+| `--cgroup-root <DIR>` | no | none | The delegated cgroup v2 directory every confined program runs under: empty, writable, delegated, with this process in a child of it, and held by this run alone. Without it, tree test starts itself again in a delegated scope of its own |
+| `--workers <N>` | no | `1` | How many cycles run at once, 1 to 64. More than 16 under `--confinement substrate` are refused SubstrateWorkersUnserved before any cycle |
+| `--only <NAME>` | no | none | Run only the named cycles; the flag repeats and a comma separates names. A name that is no cycle of the suite is refused CycleUnknown before any cycle |
+| `--report <FILE>` | no | none | Also write the result as one loom.tree.SuiteReport JSON document to this file |
+
+```text
+Cycle n works in <scratch>/work/<n>/ and keeps its tree in <scratch>/store/<n>/, n its position in the suite, and nothing but the --report file is written outside --scratch, which must be absent or empty. The protocols are read once, as tree open --protocols reads them. Each step runs through the function of its tree command in this process; no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a later story is pending and not run; one whose `when` fails is not run. One line is printed per cycle in suite order, as soon as it and every cycle before it ended, then the two summary lines and `slowest: <name> (<s> s), ...`, up to ten cycles that ran, slowest first; a found value that is not a number, a boolean or a name Loom declares is printed as its length and digest.
+
+--cycle-timeout SECONDS (1 to 60, default 60) bounds each cycle from its start: past it, its running program is killed and the cycle ends CycleTimedOut, naming its step; the other cycles go on. 0 or above 60 is refused before the suite is read. --list prints one line per cycle, `<name>`, `<name>: pending` or `<name>: pending, waits for story:<id> (<kind>)`, reads the suite alone and runs nothing; --protocols, --scratch and --at are not needed with it.
+
+--workers N runs up to N cycles at once. Under --confinement local nothing is confined, so a program can read the other cycles' workspaces. Under --confinement substrate every program of every cycle runs confined under the one cgroup root this command holds, the cycles share one Substrate driver, and a program sees no other cycle's workspace or process; more than 16 workers under substrate are refused SubstrateWorkersUnserved. --only NAME runs the named cycles alone (repeat the flag, or separate names with commas); a name that is no cycle of the suite is refused CycleUnknown, and with --only the first summary line reads `cycles: selected <S> of <C>, <N> expected, ...`.
+
+Confinement: the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree test starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree test --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined. Started again, tree test moves into a leaf of its scope, the scope is its cgroup root, and the first process exits with the status of the one started again. A root is held by one process at a time.
+
+Exit status:
+  0  every cycle that ran and is not pending ended as expected; with --list, the suite was listed
+  1  a cycle that ran and is not pending did not, or the report could not be written
+  2  refused before any cycle: the command line, --cycle-timeout outside 1 to 60, the suite, an --only name (CycleUnknown), --workers above 16 under substrate (SubstrateWorkersUnserved), the confinement (ConfinementRefused: the cgroup root, the start again or its handshake), the protocols, a seed or the scratch directory
 ```

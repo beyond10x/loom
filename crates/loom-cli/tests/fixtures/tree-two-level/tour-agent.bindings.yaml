@@ -1,0 +1,16 @@
+format: loom.bindings/1
+protocol: tour@1
+artifacts:
+  route: route.txt
+actions:
+  - action: first.open
+    executor:
+      kind: open
+      name: first
+      bindings: tour-leg-agent.bindings.yaml
+    evidence:
+      - kind: first_leg_opened
+        subject: route
+        producer: loom
+        from: effect
+        results: {performed: opened}

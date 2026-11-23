@@ -197,6 +197,7 @@ pub mod model_catalog;
 pub mod plugin;
 pub mod regular_file;
 pub mod stage;
+pub mod tree;
 
 /// The exit status a run that stopped for `reason` returns, as [`EXIT_STATUS`] states it.
 pub fn exit_status(reason: StopReason) -> u8 {
@@ -247,6 +248,554 @@ pub enum Command {
     /// once, release the Suspension, and run on until the run stops.
     #[command(after_help = RESUME_HELP)]
     Resume(ResumeArgs),
+    /// Run a tree of protocol cases from a case store: open its root case, and print the tree's
+    /// status and the verdict on its run logs.
+    Tree(TreeArgs),
+}
+
+/// The arguments of `b10x-loom tree`.
+#[derive(Debug, Args)]
+pub struct TreeArgs {
+    /// The tree command to run.
+    #[command(subcommand)]
+    pub command: TreeCommand,
+}
+
+/// The commands of `b10x-loom tree`.
+#[derive(Debug, Subcommand)]
+pub enum TreeCommand {
+    /// Open the root case of a tree in an empty store directory, from a registered protocol, a
+    /// loom.bindings/1 file and the initial artifact revisions.
+    #[command(after_help = TREE_OPEN_HELP)]
+    Open(TreeOpenArgs),
+    /// Drive the tree: one step of one case at a time on Commission's loop, until the root is
+    /// terminated through its one legitimate outcome or the tree waits.
+    #[command(after_help = TREE_RUN_HELP)]
+    Run(TreeRunArgs),
+    /// Record a principal's decision on one capability for one case of the tree, at the case's
+    /// current revision.
+    #[command(after_help = TREE_APPROVE_HELP)]
+    Approve(TreeApproveArgs),
+    /// Terminate one case of the tree through an outcome Canon reports legitimate for it now: the
+    /// choice a waiting `tree run` prints when more than one is.
+    Close(TreeCloseArgs),
+    /// Print the tree as one JSON object: per case its id, parent, protocol, revision, outcome or
+    /// stop, open obligations, and the paths of its case file and run log.
+    #[command(after_help = TREE_STATUS_HELP)]
+    Status(TreeStoreArgs),
+    /// Verify the run log of every case of the tree and name the first line that fails.
+    #[command(after_help = TREE_VERIFY_HELP)]
+    Verify(TreeStoreArgs),
+    /// Decide every case of the tree again as of its last evaluated line and print, per case,
+    /// whether its state and Canon's decision equal what that line recorded.
+    #[command(after_help = TREE_REPLAY_HELP)]
+    Replay(TreeReplayArgs),
+    /// Hold the tree: record in its root case's run log that a principal stopped it and why;
+    /// tree run is refused until tree reopen lifts the hold.
+    #[command(after_help = TREE_HOLD_HELP)]
+    Hold(TreeHoldArgs),
+    /// Lift the hold tree hold recorded, so that tree run goes on.
+    #[command(after_help = TREE_REOPEN_HELP)]
+    Reopen(TreeReopenArgs),
+    /// Run a loom.tree-suite/1 suite of scripted tree cycles, one after another or up to --workers
+    /// at once, each in its own directory of --scratch, and print per cycle whether it ended as the
+    /// suite expects.
+    #[command(after_help = TREE_TEST_HELP)]
+    Test(TreeTestArgs),
+}
+
+/// The precondition of `tree test`'s default confinement and its remedy, which `tree test --help`
+/// and every confinement refusal of `tree test` state.
+macro_rules! tree_test_confinement_precondition {
+    () => {
+        "the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: \
+without --cgroup-root, tree test starts itself again in a scope of its own under systemd-run --user \
+--scope -p Delegate=yes; pass tree test --cgroup-root DIR naming an empty, writable, delegated \
+cgroup v2 directory with this process in a child of it, or --confinement local to run every \
+program unconfined"
+    };
+}
+
+/// What `tree test --help` says about the cycles, the confinement, the output and the exit status.
+pub const TREE_TEST_HELP: &str = concat!(
+    "Cycle n works in <scratch>/work/<n>/ and keeps its tree in \
+<scratch>/store/<n>/, n its position in the suite, and nothing but the --report file is written \
+outside --scratch, which must be absent or empty. The protocols are read once, as tree open \
+--protocols reads them. Each step runs through the function of its tree command in this process; \
+no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a \
+later story is pending and not run; one whose `when` fails is not run. One line is printed per \
+cycle in suite order, as soon as it and every cycle before it ended, then the two summary lines \
+and `slowest: <name> (<s> s), ...`, up to ten cycles that ran, slowest first; a found value that \
+is not a number, a boolean or a name Loom declares is printed as its length and digest.
+
+--cycle-timeout SECONDS (1 to 60, default 60) bounds each cycle from its start: past it, its \
+running program is killed and the cycle ends CycleTimedOut, naming its step; the other cycles go \
+on. 0 or above 60 is refused before the suite is read. --list prints one line per cycle, `<name>`, \
+`<name>: pending` or `<name>: pending, waits for story:<id> (<kind>)`, reads the suite alone and \
+runs nothing; --protocols, --scratch and --at are not needed with it.
+
+--workers N runs up to N cycles at once. Under --confinement local nothing is confined, so a \
+program can read the other cycles' workspaces. Under --confinement substrate every program of \
+every cycle runs confined under the one cgroup root this command holds, the cycles share one \
+Substrate driver, and a program sees no other cycle's workspace or process; more than 16 workers \
+under substrate are refused SubstrateWorkersUnserved. --only NAME runs the named cycles alone \
+(repeat the flag, or separate names with commas); a name that is no cycle of the suite is refused \
+CycleUnknown, and with --only the first summary line reads `cycles: selected <S> of <C>, <N> \
+expected, ...`.
+
+Confinement: ",
+    tree_test_confinement_precondition!(),
+    ". Started again, tree test moves into a leaf of its scope, the scope is its cgroup root, and \
+the first process exits with the status of the one started again. A root is held by one process \
+at a time.
+
+Exit status:
+  0  every cycle that ran and is not pending ended as expected; with --list, the suite was listed
+  1  a cycle that ran and is not pending did not, or the report could not be written
+  2  refused before any cycle: the command line, --cycle-timeout outside 1 to 60, the suite, an \
+--only name (CycleUnknown), --workers above 16 under substrate (SubstrateWorkersUnserved), the \
+confinement (ConfinementRefused: the cgroup root, the start again or its handshake), the \
+protocols, a seed or the scratch directory"
+);
+
+/// The default and the largest `tree test --cycle-timeout`, in seconds: a cycle may not outlive the
+/// 60 s bound of one test, from which a `run` step's wall time derives.
+pub const TREE_TEST_CYCLE_TIMEOUT: u64 = b10x_loom_tree::suite::CYCLE_WALL_SECONDS;
+
+/// The exit status of `tree test` when a cycle did not end as expected.
+pub const TREE_TEST_FAILED: u8 = 1;
+
+/// The exit status of `tree test` when it was refused before any cycle.
+pub const TREE_TEST_REFUSED: u8 = 2;
+
+/// The precondition of `tree test`'s default confinement and its remedy, which every confinement
+/// refusal of `tree test` ends with.
+pub const TREE_TEST_CONFINEMENT_PRECONDITION: &str = tree_test_confinement_precondition!();
+
+/// The arguments of `b10x-loom tree test`.
+#[derive(Debug, Args)]
+pub struct TreeTestArgs {
+    /// The loom.tree-suite/1 file; its seeds, bindings and suite sources are paths below its
+    /// directory.
+    #[arg(long, value_name = "FILE")]
+    pub suite: PathBuf,
+    /// The directory whose `.yaml` files are the protocols of every cycle's tree; not read with
+    /// --list.
+    #[arg(long, value_name = "DIR", required_unless_present = "list")]
+    pub protocols: Option<PathBuf>,
+    /// The directory the cycles work in: absent or empty; not used with --list.
+    #[arg(long, value_name = "DIR", required_unless_present = "list")]
+    pub scratch: Option<PathBuf>,
+    /// The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ`; not read with
+    /// --list.
+    #[arg(long, value_name = "INSTANT", required_unless_present = "list")]
+    pub at: Option<String>,
+    /// Print one line per cycle of the suite and run nothing: `<name>`, `<name>: pending`, or
+    /// `<name>: pending, waits for story:<id> (<kind>)`. Reads the suite alone; --only applies.
+    #[arg(long)]
+    pub list: bool,
+    /// How long a cycle may run, 1 to 60 seconds: past it, its running program is killed and
+    /// the cycle ends CycleTimedOut. Any other value is refused before the suite is read.
+    #[arg(long, value_name = "SECONDS", default_value_t = TREE_TEST_CYCLE_TIMEOUT)]
+    pub cycle_timeout: u64,
+    /// The confinement every bound program starts under. `substrate` runs every program of every
+    /// cycle under one delegated cgroup root: `--cgroup-root`, or the scope `tree test` starts
+    /// itself again in.
+    #[arg(long, value_enum, default_value = "substrate")]
+    pub confinement: TreeConfinement,
+    /// The delegated cgroup v2 directory every confined program runs under: empty, writable,
+    /// delegated, with this process in a child of it, and held by this run alone. Without it,
+    /// tree test starts itself again in a delegated scope of its own.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
+    /// How many cycles run at once, 1 to 64. More than 16 under `--confinement substrate` are
+    /// refused SubstrateWorkersUnserved before any cycle.
+    #[arg(long, value_name = "N", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=64))]
+    pub workers: u8,
+    /// Run only the named cycles; the flag repeats and a comma separates names. A name that is no
+    /// cycle of the suite is refused CycleUnknown before any cycle.
+    #[arg(long, value_name = "NAME", value_delimiter = ',')]
+    pub only: Vec<String>,
+    /// Also write the result as one loom.tree.SuiteReport JSON document to this file.
+    #[arg(long, value_name = "FILE")]
+    pub report: Option<PathBuf>,
+}
+
+/// What `tree open --help` says about the store, the checks and the exit status.
+pub const TREE_OPEN_HELP: &str = "Everything is checked before anything is written: the store \
+(absent, or an empty directory), the workspace (an existing directory), --at, the bindings file \
+and, through the `bindings` member of each `open` executor, every bindings file of the tree. A \
+binding with an `agent` executor anywhere in the tree is refused AgentNotRunYet, naming the file, \
+the action and story:bound-agent-node. An artifact no --revision names takes the revision of what \
+is at the path the bindings place it at.
+
+Exit status:
+  0  the tree is open; its root case and store are printed
+  1  refused, nothing written: the reason, and the file, action or case it names, on standard error";
+
+/// What `tree approve --help` says about the decision and the exit status.
+pub const TREE_APPROVE_HELP: &str = "The decision is kept beside the case file and allows that \
+capability for that case while the case is at the revision it was recorded at, and nothing else: \
+another case, another capability or a moved case reads no approval. A denial wins over an \
+approval of the same capability for the same case and revision. A person action whose protocol \
+action needs no capability is taken with --action and no --capability, and records no authority; \
+one that needs a capability is refused without it. --result names the result the person action \
+ends with, one its binding's results list, and --reasons or --reasons-file the person's reasons, \
+which a writer the result sends back reads in its retry feedback; a result an entry does not list \
+is refused and nothing is written.
+
+Exit status:
+  0  the decision is recorded; it is printed
+  1  refused, nothing written: StoreInUse naming the holder, CaseNotInTree, NotAPersonAction, or the store cannot be read";
+
+/// What `tree status --help` says about the output and the exit status.
+pub const TREE_STATUS_HELP: &str = "The store is read and never held, so a live view can read it \
+while a run holds it.
+
+Exit status:
+  0  the status is printed
+  1  refused: the store holds no tree or cannot be read";
+
+/// What `tree verify --help` says about the output and the exit status.
+pub const TREE_VERIFY_HELP: &str = "Each log is checked against its chain (a cut, a missing or \
+reordered line, a changed byte) and its last line against the head the tree kept, so a change to \
+any byte of a log is seen. The store is read and never held.
+
+Exit status:
+  0  every log verifies
+  1  refused: the store holds no tree or cannot be read
+  3  a log does not verify: the case and the line, counted from 0, on standard error";
+
+/// What `tree replay --help` says about the comparison, the output and the exit status.
+pub const TREE_REPLAY_HELP: &str = "Each case is rebuilt as it was at the last evaluated line of \
+its run log, by undoing every later line of that log, and decided again through the same path \
+tree run decides with. state_matches_log says the rebuilt case revision equals the logged one and \
+every later line could be undone (unmatched_line names the first that could not); \
+decision_matches_log says the digest of Canon's decision equals the logged one. A case whose log \
+holds no evaluated line is listed as {case, evaluated: false} and is not compared. --case names \
+one case: it and the cases below it are replayed alone. The store is read and never held, and \
+nothing is written.
+
+Exit status:
+  0  every compared case matches its log; the cases are printed
+  1  refused: NotATree, CaseNotInTree for a --case the tree does not hold, LogRefused, or the store cannot be read
+  3  a case differs: the cases are printed, and the first that differs and whether its state or its decision on standard error";
+
+/// The exit status of `tree replay` when a case differs from its log.
+pub const TREE_REPLAY_DIFFERS: u8 = 3;
+
+/// The arguments of `b10x-loom tree replay`.
+#[derive(Debug, Args)]
+pub struct TreeReplayArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// Replay this case of the tree and the cases below it alone.
+    #[arg(long, value_name = "CASE")]
+    pub case: Option<String>,
+}
+
+/// What `tree hold --help` says about the hold and the exit status.
+pub const TREE_HOLD_HELP: &str = "The hold is one stop recorded line, the principal and the \
+reason, in the root case's run log, written under the store lock. While the tree is held, tree run \
+is refused TreeStopped and writes nothing; tree approve, tree close, tree status and tree verify \
+work as on any other tree, and an approval does not lift the hold. tree reopen lifts it. The \
+principal is 1 to 200 bytes and the reason 1 to 1024 bytes, neither with a control character. The \
+hold records a decision and locks nobody out: whoever can write the store can cut its line.
+
+Exit status:
+  0  the hold is recorded; it is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeAlreadyStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid";
+
+/// What `tree reopen --help` says about the lift and the exit status.
+pub const TREE_REOPEN_HELP: &str = "The lift is one stop lifted line, the principal and the seq of \
+the stop recorded line it lifts, in the root case's run log, written under the store lock. After \
+it tree run goes on as it would have without the hold.
+
+Exit status:
+  0  the hold is lifted; the lift is printed
+  1  refused, nothing written: StopUnusable naming the member and its rule (before the store is read), TreeNotStopped, StoreInUse naming the holder, or the store cannot be read
+  2  the command line is not valid";
+
+/// The arguments of `b10x-loom tree hold`.
+#[derive(Debug, Args)]
+pub struct TreeHoldArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The principal who holds the tree.
+    #[arg(long, value_name = "PRINCIPAL")]
+    pub principal: String,
+    /// Why the tree is held.
+    #[arg(long, value_name = "TEXT")]
+    pub reason: String,
+    /// The instant the hold records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of `b10x-loom tree reopen`.
+#[derive(Debug, Args)]
+pub struct TreeReopenArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The principal who lifts the hold.
+    #[arg(long, value_name = "PRINCIPAL")]
+    pub principal: String,
+    /// The instant the lift records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The precondition of `tree run`'s default confinement and its remedy, which `tree run --help`
+/// and every confinement refusal of `tree run` state.
+macro_rules! tree_confinement_precondition {
+    () => {
+        "the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: \
+without --cgroup-root, tree run starts itself again in a scope of its own under systemd-run --user \
+--scope -p Delegate=yes; pass tree run --cgroup-root DIR naming an empty, writable, delegated \
+cgroup v2 directory with this process in a child of it, or --confinement local to run every \
+program unconfined"
+    };
+}
+
+/// The precondition of `tree run`'s default confinement and its remedy, which every confinement
+/// refusal of `tree run` ends with.
+pub const TREE_CONFINEMENT_PRECONDITION: &str = tree_confinement_precondition!();
+
+/// What `tree run --help` says about the steps, the waits, the confinement and the exit status.
+pub const TREE_RUN_HELP: &str = concat!(
+    "Every open child takes its steps before its parent's next one; \
+each step is selected by the deterministic selector and performed through the action's bound \
+executor. A case is terminated when its completion gives exactly one legitimate outcome and no \
+action in it is useful. When the tree waits, each decision is printed with the exact command that \
+records it; a handoff's command is the next tree run, under this run's --confinement. A person \
+action is never taken by tree run.
+
+Confinement: ",
+    tree_confinement_precondition!(),
+    ". Started again, tree run moves into a leaf of its scope and the scope is its cgroup root. A \
+root is held by one tree run at a time and released when that run ends, killed or not, so two runs \
+never share a root; tree run never takes an ancestor cgroup it finds.
+
+SIGTERM or SIGINT cancels the run: a program it is running is stopped with every process it \
+started and its step recorded cancelled, and the run ends Cancelled with exit status 5; a later \
+signal changes nothing.
+
+Exit status:
+  0  the root is terminated through its one legitimate outcome
+  1  refused, nothing written: StoreInUse naming the holder, TreeStopped naming the hold and the tree reopen command that lifts it, ConfinementRefused naming the cgroup root and the rule it breaks or the remedy, or the store or a bindings file cannot be read
+  3  the tree waits on a person or on authority: each decision and its command on standard error
+  4  a case is stuck: nothing useful, no legitimate outcome, nothing awaiting approval
+  5  the step or wall-time budget is spent, or SIGTERM or SIGINT cancelled the run"
+);
+
+/// Set in a `b10x-loom` that `run` or `tree run` started again in a delegated scope
+/// ([`start_delegated`]): it does not start itself again.
+pub const REEXEC_MARKER: &str = "B10X_LOOM_CONFINEMENT_REEXEC";
+
+/// The path of the file a `b10x-loom` started again creates once it runs in its scope.
+pub const REEXEC_READY: &str = "B10X_LOOM_CONFINEMENT_READY";
+
+/// Starts `executable` with this process's own arguments in a delegated user systemd scope of its
+/// own (`systemd-run --user --scope -p Delegate=yes`), [`REEXEC_MARKER`] and `variables` set, and
+/// waits for it. `run` and `tree run` both start themselves again here.
+///
+/// # Errors
+/// `systemd-run` cannot be started.
+pub fn start_delegated(
+    executable: &std::path::Path,
+    variables: &[(&str, &std::ffi::OsStr)],
+) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("systemd-run")
+        .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
+        .arg(executable)
+        .args(std::env::args_os().skip(1))
+        .env(REEXEC_MARKER, "1")
+        .envs(variables.iter().copied())
+        .status()
+}
+
+/// The exit status of `tree run` for each way it stops.
+pub fn tree_run_exit_status(stop: b10x_loom_tree::model::TreeStop) -> u8 {
+    use b10x_loom_tree::model::TreeStop;
+    match stop {
+        TreeStop::Terminal => 0,
+        TreeStop::AwaitingPerson | TreeStop::AwaitingAuthority => 3,
+        TreeStop::Stuck => 4,
+        TreeStop::BudgetSpent | TreeStop::Cancelled => 5,
+    }
+}
+
+/// The confinement every bound program of a tree run starts under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TreeConfinement {
+    /// Substrate's linux adapter; refused when it is unavailable.
+    Substrate,
+    /// Unconfined, declared insecure, through Substrate's local adapter, recorded on every launch.
+    Local,
+}
+
+/// The arguments of `b10x-loom tree run`.
+#[derive(Debug, Args)]
+pub struct TreeRunArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The most steps the run takes.
+    #[arg(long, value_name = "N")]
+    pub max_steps: Option<i64>,
+    /// The most seconds of wall time the run takes before a step.
+    #[arg(long, value_name = "SECONDS")]
+    pub max_wall_seconds: Option<i64>,
+    /// The confinement every bound program starts under.
+    #[arg(long, value_enum, default_value = "substrate")]
+    pub confinement: TreeConfinement,
+    /// The delegated cgroup v2 directory every confined program runs under: empty, writable,
+    /// delegated, with this process in a child of it, and held by this run alone. Without it,
+    /// tree run starts itself again in a delegated scope of its own.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
+    /// The instant every write of the run records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when
+    /// absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The exit status of a refused tree command.
+pub const TREE_REFUSED: u8 = 1;
+
+/// The exit status of `tree verify` when a log does not verify.
+pub const TREE_LOG_FAILED: u8 = 3;
+
+/// The arguments of `b10x-loom tree open`.
+#[derive(Debug, Args)]
+pub struct TreeOpenArgs {
+    /// The store directory: absent, or an empty directory.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The registration of the root's protocol, `name@major`.
+    #[arg(long, value_name = "NAME@MAJOR")]
+    pub protocol: String,
+    /// Read the tree's protocols from the files directly in this directory whose names end in
+    /// `.yaml`, each under the registration it declares, and keep them in the store: the tree's
+    /// catalog is those and no other. Without it the tree uses the installed and built-in
+    /// protocols.
+    #[arg(long, value_name = "DIR")]
+    pub protocols: Option<PathBuf>,
+    /// The root's loom.bindings/1 file.
+    #[arg(long, value_name = "FILE")]
+    pub bindings: PathBuf,
+    /// The existing directory every case of the tree works in; every path of the bindings is
+    /// relative to it.
+    #[arg(long, value_name = "DIR")]
+    pub workspace: PathBuf,
+    /// The initial revision of one artifact, `ARTIFACT=REVISION`; repeat for each.
+    #[arg(long = "revision", value_name = "ARTIFACT=REVISION", value_parser = artifact_revision)]
+    pub revisions: Vec<(String, String)>,
+    /// The id of the root case.
+    #[arg(long, value_name = "ID", default_value = "root")]
+    pub case: String,
+    /// The instant every write of the command records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's
+    /// when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of `b10x-loom tree approve`.
+#[derive(Debug, Args)]
+pub struct TreeApproveArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The case of the tree the decision is for.
+    #[arg(long, value_name = "ID")]
+    pub case: String,
+    /// The capability decided. With --action it may be left out when the protocol action needs
+    /// none: the action is taken and no authority is recorded.
+    #[arg(long, value_name = "CAPABILITY", required_unless_present = "action")]
+    pub capability: Option<String>,
+    /// The principal who decided.
+    #[arg(long, value_name = "PRINCIPAL")]
+    pub principal: String,
+    /// Deny the capability instead of approving it.
+    #[arg(long)]
+    pub deny: bool,
+    /// Then take this `person` action of the case as the principal: the records its binding
+    /// declares are produced by the principal about the subject's revision now.
+    #[arg(long, value_name = "ACTION", conflicts_with = "deny")]
+    pub action: Option<String>,
+    /// The result the person action ends with: a value every `from: effect` entry of its binding
+    /// lists in its results, which maps it to each record's result; `performed` when absent.
+    #[arg(
+        long,
+        value_name = "RESULT",
+        requires = "action",
+        conflicts_with = "deny"
+    )]
+    pub result: Option<String>,
+    /// The person's reasons for the result, at most 65536 bytes and 60 lines: kept as a blob of
+    /// the store, and the log of the record a writer this result sends back is given.
+    #[arg(
+        long,
+        value_name = "TEXT",
+        requires = "result",
+        conflicts_with = "reasons_file"
+    )]
+    pub reasons: Option<String>,
+    /// The reasons read from a regular file inside the tree's workspace, opened without following
+    /// a symbolic link.
+    #[arg(long, value_name = "FILE", requires = "result")]
+    pub reasons_file: Option<PathBuf>,
+    /// The instant the decision records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+    /// The confinement the program of the person action starts under, when its binding names an
+    /// argv, as tree run's programs do; an action with no program starts nothing under it.
+    #[arg(long, value_enum, default_value = "substrate")]
+    pub confinement: TreeConfinement,
+    /// The delegated cgroup v2 directory the program runs under, as tree run --cgroup-root; without
+    /// it, tree approve of an action with a program starts itself again in a delegated scope of its
+    /// own.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
+}
+
+/// The arguments of `b10x-loom tree close`.
+#[derive(Debug, Args)]
+pub struct TreeCloseArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+    /// The case of the tree to close.
+    #[arg(long, value_name = "ID")]
+    pub case: String,
+    /// The outcome the case ends through.
+    #[arg(long, value_name = "OUTCOME")]
+    pub outcome: String,
+    /// The instant the termination records, `YYYY-MM-DDTHH:MM:SSZ`; the host clock's when absent.
+    #[arg(long, value_name = "INSTANT")]
+    pub at: Option<String>,
+}
+
+/// The arguments of a tree command that names only the store.
+#[derive(Debug, Args)]
+pub struct TreeStoreArgs {
+    /// The store directory `tree open` made.
+    #[arg(long, value_name = "DIR")]
+    pub store: PathBuf,
+}
+
+/// `ARTIFACT=REVISION` as the pair it names.
+fn artifact_revision(text: &str) -> Result<(String, String), String> {
+    match text.split_once('=') {
+        Some((artifact, revision)) if !artifact.is_empty() && !revision.is_empty() => {
+            Ok((artifact.to_owned(), revision.to_owned()))
+        }
+        _ => Err("expected ARTIFACT=REVISION".into()),
+    }
 }
 
 /// The arguments of `b10x-loom approve`.

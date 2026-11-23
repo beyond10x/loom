@@ -11,6 +11,7 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - depends_on: story:substrate-0-21-pin
 - depends_on: story:confinement-opens-from-engine-config
+- depends_on: story:substrate-0-24-0-pin
 scope:
 - confidence: inferred
   path: Cargo.lock

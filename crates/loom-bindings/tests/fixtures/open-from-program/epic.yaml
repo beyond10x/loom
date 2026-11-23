@@ -1,0 +1,11 @@
+format: loom.bindings/1
+protocol: epic@1
+program_root: bindings
+artifacts:
+  epic: epic.md
+actions:
+  - action: stories.open
+    executor: {kind: open, each: stories, bindings: story.yaml}
+    arguments_from: [bin/list-stories]
+    evidence:
+      - {kind: stories_opened, subject: epic, producer: drive, from: effect, results: {performed: opened}}
