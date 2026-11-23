@@ -512,15 +512,19 @@ cycles:
 ```console
 $ b10x-loom tree test --suite suite.yaml --protocols protocols --scratch scratch \
     --at 2026-11-22T08:00:00Z --confinement local --report report.json
-arrives: as expected (9.0 s)
-waits: as expected (1.9 s)
-wrong: FAILED: expect.outcome (outcome, OutcomeDiffers): expected arrived, found turned_back (3.3 s)
-later: pending, still failing: check-log-says-hello (equals, CheckFailed): expected hello, found 26 bytes, sha256 a77f6b1ee3b7 (1.8 s)
+arrives: as expected (2.5 s)
+waits: as expected (0.6 s)
+wrong: FAILED: expect.outcome (outcome, OutcomeDiffers): expected arrived, found turned_back (1.9 s)
+later: pending, still failing: check-log-says-hello (equals, CheckFailed): expected hello, found 26 bytes, sha256 a77f6b1ee3b7 (0.4 s)
 allows: pending, waits for story:tree-stop-record-and-labels (allow)
 cycles: 3 expected, 2 as expected, 1 failed: wrong
 pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: allows on story:tree-stop-record-and-labels)
+slowest: arrives (2.5 s), wrong (1.9 s), waits (0.6 s), later (0.4 s)
 (exit 1)
 ```
+
+The last line names up to ten cycles that ran, slowest first, cycles of equal seconds in suite
+order; it reads their `seconds` and adds nothing to the report.
 
 `--scratch` must be absent or empty, and nothing is written outside it but `--report`, the same
 result as one `loom.tree.SuiteReport` JSON document. The protocols of `--protocols` are read once,
@@ -548,10 +552,11 @@ cycle of the suite is refused `CycleUnknown` (exit 2) and nothing is written. Th
 ```console
 $ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch \
     --at 2026-11-22T08:00:00Z --confinement local --only b,d
-b: as expected (0.3 s)
-d: as expected (0.3 s)
+b: as expected (0.4 s)
+d: as expected (0.2 s)
 cycles: selected 2 of 5, 2 expected, 2 as expected, 0 failed: none
 pending: 0 (0 still failing: none; passing, move to expected: none; 0 waiting: none)
+slowest: b (0.4 s), d (0.2 s)
 (exit 0)
 $ ls scratch scratch/work
 scratch:
@@ -589,10 +594,11 @@ two cycles whose program copies the cycle's `tag.txt` to `target/own.txt`.
 ```console
 $ b10x-loom tree test --suite kept.suite.yaml --protocols protocols --scratch scratch \
     --at 2026-11-22T08:00:00Z --workers 2
-one: as expected (2.4 s)
-two: as expected (2.4 s)
+one: as expected (2.1 s)
+two: as expected (2.1 s)
 cycles: 2 expected, 2 as expected, 0 failed: none
 pending: 0 (0 still failing: none; passing, move to expected: none; 0 waiting: none)
+slowest: one (2.1 s), two (2.1 s)
 (exit 0)
 $ ls scratch scratch/work scratch/store
 scratch:
@@ -627,12 +633,58 @@ b10x-loom: tree test refused: ConfinementRefused: --cgroup-root names the root o
 (exit 2)
 ```
 
+`--cycle-timeout <seconds>` (1 to 60, default 60) bounds each cycle from its start. One watcher
+thread beside the workers sets a cycle's own flag at its deadline: the `tree run` it is in stops
+`Cancelled` within 10 s, its program killed, and the cycle ends with the difference
+`CycleTimedOut`, naming the step, its kind and the seconds the cycle ran; a cycle between steps
+ends before its next one. The other cycles go on. 0 or a value above 60 is refused (exit 2)
+before the suite is read, since a cycle may not outlive the 60 s bound of one test. The suite below
+is `crates/loom-cli/tests/fixtures/tree-suite/parallel/timeout.suite.yaml`: `sleeps` runs a
+program that sleeps 30 s, `brief` one that ends in 0.3 s.
+
+```console
+$ b10x-loom tree test --suite parallel/timeout.suite.yaml --protocols parallel/protocols \
+    --scratch scratch4 --at 2026-11-22T08:00:00Z --confinement local --workers 2 --cycle-timeout 2
+sleeps: FAILED: steps[1] (run, CycleTimedOut): expected an end within 2 s, found 2.2 (2.2 s)
+brief: as expected (0.4 s)
+cycles: 2 expected, 1 as expected, 1 failed: sleeps
+pending: 0 (0 still failing: none; passing, move to expected: none; 0 waiting: none)
+slowest: sleeps (2.2 s), brief (0.4 s)
+(exit 1)
+$ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch5 \
+    --at 2026-11-22T08:00:00Z --confinement local --cycle-timeout 61
+b10x-loom: tree test refused: --cycle-timeout 61 is outside 1 to 60 seconds: a cycle may not outlive the 60 s bound of one test
+{"detail":"--cycle-timeout 61 is outside 1 to 60 seconds: a cycle may not outlive the 60 s bound of one test","member":"--cycle-timeout"}
+(exit 2)
+```
+
+`--list` prints one line per cycle in suite order, `<name>`, `<name>: pending` or `<name>: pending,
+waits for story:<id> (<kind>)`, and runs nothing: it reads the suite alone, evaluates no `when` and
+writes nothing, so `--protocols`, `--scratch` and `--at` are not needed. `--only` applies to it. It
+exits 0, or 2 when the suite or an `--only` name is refused. The suite below is
+`crates/loom-cli/tests/fixtures/tree-suite/list.suite.yaml`.
+
+```console
+$ b10x-loom tree test --list --suite list.suite.yaml
+a
+b: pending
+c: pending, waits for story:tree-test-decide-and-requests (decide)
+d
+e
+(exit 0)
+$ b10x-loom tree test --list --suite only.suite.yaml --only b,d
+b
+d
+(exit 0)
+```
+
 At an exit 3 of `tree run`, every printed wait is answered by the first `decide` entry, in list
 order, that matches it and has a use left: `approve` by `case` (an id, or its last part),
 `capability` and `action`, `close` by `case` and `outcome`; `times` is a count (default 1) or
 `any`. The rounds go on until another exit, a wait no entry answers, or `max_rounds`
 (`RoundsSpent`). An entry that is not `optional` and was never used is the difference
-`ScriptUnused`. Each cycle's `tree run` rounds share 60 s of wall time.
+`ScriptUnused`. Each cycle's `tree run` rounds share 60 s of wall time, and `--cycle-timeout`
+bounds the whole cycle.
 
 A cycle states `name`, and any of `pending`, `when`, `protocol`, `bindings`, `engine`,
 `fixtures`, `revisions`, `seed`, `principal`, `max_rounds` (default 40), `decide`, `steps`
@@ -757,7 +809,7 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 | `calls` | `story:agent-node-run-records` |
 | `engine` | `story:engine-configuration-document` |
 | `fixtures`; event `RunSettings` | `story:engine-agents-section` |
-| `decide` (step and entry); `requests` | `story:tree-test-command` |
+| `decide` (step and entry); `requests` | `story:tree-test-decide-and-requests` |
 
 ### From Rust
 
@@ -765,11 +817,13 @@ first 12 hex digits of its SHA-256, so a program's output never reaches a summar
 `read_suite(path)` decode a suite, `evaluate_checks(checks, place, view, captured)` tests checks
 over what a cycle left, and `run_suite(suite, &SuiteSettings, observer, cancel)` runs one and
 answers a `SuiteReport`. It prints nothing and reads no environment variable and no current
-directory: every path of `SuiteSettings` is absolute. `SuiteSettings::new` sets `workers` to 1
-and `only` to every cycle. The observer, a `SuiteObserver` or a closure over `&CycleResult`, is
-given each cycle's result in suite order on the caller's thread, as soon as every result before it
-has ended. A set cancel flag starts no further cycle and ends each running one before its next
-step; a running `tree run` stops `Cancelled`, and its step ends "the suite was cancelled".
+directory: every path of `SuiteSettings` is absolute. `SuiteSettings::new` sets `workers` to 1,
+`only` to every cycle and `cycle_timeout` to 60 s. The observer, a `SuiteObserver` or a closure
+over `&CycleResult`, is given each cycle's result in suite order on the caller's thread, as soon as
+every result before it has ended. A set cancel flag starts no further cycle and ends each running
+one before its next step; a running `tree run` stops `Cancelled`, its program killed, and its step
+ends "the suite was cancelled". `slowest_line(&report)` gives the `slowest:` line and
+`list_suite(suite, only, SUITE_AVAILABILITY)` the lines of `--list`.
 
 Under Substrate, an engine builds the runner as `tree test` does, through `embed::TreeRunner`:
 `TreeRunner::on_root(root)?` for a root it names, or `TreeRunner::in_own_scope()?` in a delegated

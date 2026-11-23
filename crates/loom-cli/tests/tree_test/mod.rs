@@ -258,7 +258,8 @@ fn the_summary_counts_expected_pending_and_waiting() {
     let ran = ran();
     let started = Instant::now();
     let lines: Vec<&str> = ran.stdout.lines().collect();
-    assert_eq!(lines.len(), 7, "{}", ran.stdout);
+    // Five cycle lines, the two summary lines and the `slowest:` line.
+    assert_eq!(lines.len(), 8, "{}", ran.stdout);
     assert_eq!(
         lines[5],
         "cycles: 3 expected, 2 as expected, 1 failed: wrong"
@@ -808,7 +809,8 @@ fn only_runs_the_named_cycles() {
     made.sort();
     assert_eq!(made, ["2", "4"]);
     let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 4, "{stdout}");
+    // Two cycle lines, the two summary lines and the `slowest:` line.
+    assert_eq!(lines.len(), 5, "{stdout}");
     assert!(lines[2].starts_with("cycles: selected 2 of 5,"), "{stdout}");
     let report = read_report(&dir.join("scratch.json"));
     assert_eq!(report["only"], json!(["b", "d"]), "{report}");
@@ -831,13 +833,24 @@ fn only_repeated_equals_only_with_a_comma() {
         "{}",
         text(&repeated.stderr)
     );
-    // The output, each cycle's wall time apart.
+    // The output, each cycle's wall time apart: the `slowest:` line, whose order is that of the
+    // wall times, as the names it holds in byte order.
     let lines = |output: &Output| -> Vec<String> {
         text(&output.stdout)
             .lines()
-            .map(|line| match line.rfind(" (") {
-                Some(at) if line.ends_with(" s)") => line[..at].to_owned(),
-                _ => line.to_owned(),
+            .map(|line| {
+                if let Some(slowest) = line.strip_prefix("slowest: ") {
+                    let mut named: Vec<&str> = slowest
+                        .split(", ")
+                        .map(|part| part.split(" (").next().unwrap_or(part))
+                        .collect();
+                    named.sort_unstable();
+                    return format!("slowest: {}", named.join(", "));
+                }
+                match line.rfind(" (") {
+                    Some(at) if line.ends_with(" s)") => line[..at].to_owned(),
+                    _ => line.to_owned(),
+                }
             })
             .collect()
     };
@@ -1737,4 +1750,269 @@ fn a_refused_handshake_exits_2() {
     );
     assert!(!dir.join("scratch").exists());
     let _ = fs::remove_dir_all(&dir);
+}
+
+// Acceptance for `story:tree-test-command`: `--cycle-timeout` and the cycle kill, the `slowest:`
+// line, `--list`, and the availability that no longer names this story. On a host this loaded a
+// 5 s self-check fails for load alone, so these tests assert no wall time of their own but the
+// 60 s bound of one test; test 1 prints its time.
+
+/// The suite `parallel/timeout.suite.yaml`: `sleeps`, whose program writes its process id to
+/// `pid.txt` and sleeps 30 s, and `brief`, whose program ends in 0.3 s.
+const TIMEOUT_SUITE: &str = "timeout.suite.yaml";
+
+/// The suite `list.suite.yaml`: five cycles, `b` pending, `c` waiting on its `decide` step.
+const LIST_SUITE: &str = "list.suite.yaml";
+
+/// Whether a process `pid` names is still there (`kill -0`).
+fn process_exists(pid: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", "kill -0 \"$1\" 2>/dev/null", "sh", pid])
+        .status()
+        .unwrap()
+        .success()
+}
+
+/// Test 1: with `--cycle-timeout 2` the watcher sets `sleeps`' flag at its deadline while its
+/// worker is blocked in `run_tree`; its program is killed, the cycle ends `CycleTimedOut` at
+/// `steps[1]` and `brief` ends as expected beside it.
+#[test]
+fn a_cycle_over_its_timeout_is_killed() {
+    let started = Instant::now();
+    let dir = fresh_scratch("cycle-timeout");
+    let tested = tree_test_in(
+        &dir,
+        "scratch",
+        &Path::new(PARALLEL).join(TIMEOUT_SUITE),
+        &Path::new(PARALLEL).join("protocols"),
+        &["--cycle-timeout", "2", "--workers", "2"],
+    );
+    let spent = started.elapsed();
+    eprintln!("a_cycle_over_its_timeout_is_killed: the command took {spent:?}");
+    let said = format!("{}{}", text(&tested.stdout), text(&tested.stderr));
+    assert_eq!(tested.status.code(), Some(1), "{said}");
+    let report = read_report(&dir.join("scratch.json"));
+    let sleeps = cycle_of(&report, "sleeps");
+    assert_eq!(sleeps["as_expected"], false, "{said}{sleeps}");
+    let difference = &sleeps["difference"];
+    assert_eq!(
+        difference["reason"],
+        format!("{:?}", DifferenceReason::CycleTimedOut),
+        "{said}{sleeps}"
+    );
+    assert_eq!(difference["check"], "steps[1]", "{sleeps}");
+    assert_eq!(difference["kind"], "run", "{sleeps}");
+    let found: f64 = difference["found"]
+        .as_str()
+        .and_then(|found| found.parse().ok())
+        .unwrap_or_else(|| panic!("found is no number of seconds: {sleeps}"));
+    assert!(found >= 2.0, "{sleeps}");
+    // The cycle ended long before its program's 30 s sleep would have.
+    let seconds = sleeps["seconds"].as_f64().unwrap();
+    assert!(seconds < 15.0, "{sleeps}");
+    assert!(
+        said.lines()
+            .any(|line| line.starts_with("sleeps: FAILED: steps[1] (run, CycleTimedOut)")),
+        "{said}"
+    );
+    // No process of the program is left.
+    let pid = fs::read_to_string(dir.join("scratch/work/1/pid.txt")).unwrap();
+    let pid = pid.trim();
+    assert!(!pid.is_empty());
+    assert!(!process_exists(pid), "process {pid} is still there");
+    let brief = cycle_of(&report, "brief");
+    assert_eq!(brief["as_expected"], true, "{said}{brief}");
+    assert_eq!(brief["exit"], 0, "{brief}");
+    assert_eq!(report["failed"], json!(["sleeps"]), "{report}");
+    let _ = fs::remove_dir_all(&dir);
+    assert!(started.elapsed() < RUN_BOUND, "the test took {spent:?}");
+}
+
+/// Test 2: the shared run prints a `slowest:` line right after the two summary lines: the cycles
+/// that ran, at most ten, slowest first, each with its seconds.
+#[test]
+fn the_ten_slowest_follow_the_summary() {
+    let ran = ran();
+    let lines: Vec<&str> = ran.stdout.lines().collect();
+    let at = lines
+        .iter()
+        .position(|line| line.starts_with("pending: "))
+        .unwrap_or_else(|| panic!("no summary: {}", ran.stdout));
+    assert!(lines[at - 1].starts_with("cycles: "), "{}", ran.stdout);
+    let slowest = lines
+        .get(at + 1)
+        .and_then(|line| line.strip_prefix("slowest: "))
+        .unwrap_or_else(|| panic!("no slowest line after the summary: {}", ran.stdout));
+    let named: Vec<(&str, f64)> = slowest
+        .split(", ")
+        .map(|part| {
+            let (name, seconds) = part
+                .strip_suffix(" s)")
+                .and_then(|part| part.split_once(" ("))
+                .unwrap_or_else(|| panic!("{part:?} is not <name> (<s> s): {slowest}"));
+            (name, seconds.parse::<f64>().unwrap())
+        })
+        .collect();
+    assert!(named.len() <= 10, "{slowest}");
+    // The four cycles that ran (`allows` waits), each named once.
+    let mut names: Vec<&str> = named.iter().map(|(name, _)| *name).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["arrives", "later", "waits", "wrong"], "{slowest}");
+    assert!(
+        named.windows(2).all(|pair| pair[0].1 >= pair[1].1),
+        "not slowest first: {slowest}"
+    );
+    // Each with the seconds its own line printed.
+    let report = ran.report();
+    for (name, seconds) in &named {
+        assert_eq!(
+            cycle_of(&report, name)["seconds"].as_f64(),
+            Some(*seconds),
+            "{slowest}"
+        );
+    }
+}
+
+/// `tree test --list` of `suite` with `extra`, in `dir` as its current directory, with no
+/// `--protocols`, `--scratch` or `--at`.
+fn list(dir: &Path, suite: &Path, extra: &[&str]) -> Output {
+    fs::create_dir_all(dir.join("home")).unwrap();
+    command(&dir.join("home"))
+        .current_dir(dir)
+        .args(["tree", "test", "--list", "--suite"])
+        .arg(suite)
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+/// What `dir` holds, by name.
+fn entries(dir: &Path) -> Vec<String> {
+    let mut found: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    found.sort();
+    found
+}
+
+/// Test 3: `--list` prints the suite's five cycles in suite order and runs nothing; `--only b`
+/// prints one line.
+#[test]
+fn list_prints_the_cycles_and_runs_nothing() {
+    let started = Instant::now();
+    let dir = fresh_scratch("list");
+    let listed = list(&dir, &Path::new(FIXTURE).join(LIST_SUITE), &[]);
+    let stdout = text(&listed.stdout);
+    assert_eq!(
+        listed.status.code(),
+        Some(0),
+        "{stdout}{}",
+        text(&listed.stderr)
+    );
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        [
+            "a",
+            "b: pending",
+            "c: pending, waits for story:tree-test-decide-and-requests (decide)",
+            "d",
+            "e",
+        ],
+        "{stdout}"
+    );
+    // Nothing is written: the directory holds the empty home it was given.
+    assert_eq!(entries(&dir), ["home"]);
+    assert!(entries(&dir.join("home")).is_empty());
+    let only = list(&dir, &Path::new(FIXTURE).join(LIST_SUITE), &["--only", "b"]);
+    assert_eq!(only.status.code(), Some(0), "{}", text(&only.stderr));
+    assert_eq!(text(&only.stdout), "b: pending\n");
+    assert_eq!(entries(&dir), ["home"]);
+    let _ = fs::remove_dir_all(&dir);
+    assert!(started.elapsed() < RUN_BOUND);
+}
+
+/// Test 4: `--list` of a suite with an unknown step kind is refused, exit 2.
+#[test]
+fn a_refused_suite_is_refused_by_list() {
+    let started = Instant::now();
+    let dir = fresh_scratch("list-refused");
+    let listed = list(
+        &dir,
+        &Path::new(FIXTURE).join("unknown-step.suite.yaml"),
+        &[],
+    );
+    let stderr = text(&listed.stderr);
+    assert_eq!(listed.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.starts_with("b10x-loom: tree test refused:"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("StepKindUnknown"), "{stderr}");
+    assert!(listed.stdout.is_empty(), "{}", text(&listed.stdout));
+    let _ = fs::remove_dir_all(&dir);
+    assert!(started.elapsed() < RUN_BOUND);
+}
+
+/// Test 5: `--cycle-timeout` 61 and 0 are the command's own refusal, before the suite is read;
+/// 60 with `--list` decodes the suite and runs no cycle.
+#[test]
+fn a_cycle_timeout_above_60_is_refused() {
+    let started = Instant::now();
+    let dir = fresh_scratch("cycle-timeout-range");
+    let suite = Path::new(FIXTURE).join(LIST_SUITE);
+    for seconds in ["61", "0"] {
+        let tested = tree_test_in(
+            &dir,
+            "scratch",
+            &suite,
+            Path::new(PROTOCOLS),
+            &["--cycle-timeout", seconds],
+        );
+        let stderr = text(&tested.stderr);
+        assert_eq!(tested.status.code(), Some(2), "{seconds}: {stderr}");
+        assert!(
+            stderr.starts_with("b10x-loom: tree test refused:"),
+            "{seconds}: {stderr}"
+        );
+        assert!(stderr.contains("--cycle-timeout"), "{seconds}: {stderr}");
+        assert!(stderr.contains("1 to 60"), "{seconds}: {stderr}");
+        assert!(!stderr.contains("invalid value"), "{seconds}: {stderr}");
+        assert!(tested.stdout.is_empty(), "{}", text(&tested.stdout));
+        assert!(!dir.join("scratch").exists());
+    }
+    let listed = list(&dir, &suite, &["--cycle-timeout", "60"]);
+    assert_eq!(listed.status.code(), Some(0), "{}", text(&listed.stderr));
+    assert_eq!(text(&listed.stdout).lines().count(), 5);
+    assert!(!dir.join("scratch").exists());
+    let _ = fs::remove_dir_all(&dir);
+    assert!(started.elapsed() < RUN_BOUND);
+}
+
+/// Test 6: no part of the format waits for this story; `decide` and `requests` wait for
+/// `story:tree-test-decide-and-requests`.
+#[test]
+fn nothing_waits_for_this_story() {
+    use b10x_loom_tree::suite::{Availability, KindUse, SUITE_AVAILABILITY};
+    assert!(
+        !SUITE_AVAILABILITY
+            .iter()
+            .any(|entry| entry.availability == Availability::Waits("story:tree-test-command")),
+        "{SUITE_AVAILABILITY:?}"
+    );
+    for (used, name) in [
+        (KindUse::Step, "decide"),
+        (KindUse::Entry, "decide"),
+        (KindUse::Source, "requests"),
+    ] {
+        let entry = SUITE_AVAILABILITY
+            .iter()
+            .find(|entry| entry.used == used && entry.name == name)
+            .unwrap_or_else(|| panic!("no entry {used:?} {name}"));
+        assert_eq!(
+            entry.availability,
+            Availability::Waits("story:tree-test-decide-and-requests"),
+            "{used:?} {name}"
+        );
+    }
 }

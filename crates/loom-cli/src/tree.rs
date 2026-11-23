@@ -10,6 +10,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use clap::ValueEnum as _;
 
@@ -18,7 +19,8 @@ use b10x_loom_intake_slice::run::printable;
 use b10x_loom_tree::embed::{ProtocolCatalog, TreeRunner, host_catalog};
 use b10x_loom_tree::model::{ApprovalDecision, CycleResult, TreeRefusalReason};
 use b10x_loom_tree::suite::{
-    SuiteRefused, SuiteSettings, cycle_line, report_json, run_suite, summary_lines, workers_served,
+    SUITE_AVAILABILITY, SuiteRefused, SuiteSettings, cycle_line, list_suite, report_json,
+    run_suite, slowest_line, summary_lines, workers_served,
 };
 use b10x_loom_tree::{
     ApproveRequest, CloseRequest, HoldRequest, OpenRequest, Reasons, Refused, ReopenRequest,
@@ -30,10 +32,10 @@ use serde_json::json;
 
 use crate::{
     REEXEC_MARKER, REEXEC_READY, TREE_CONFINEMENT_PRECONDITION, TREE_LOG_FAILED, TREE_REFUSED,
-    TREE_REPLAY_DIFFERS, TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_FAILED, TREE_TEST_REFUSED,
-    TreeApproveArgs, TreeCloseArgs, TreeCommand, TreeConfinement, TreeHoldArgs, TreeOpenArgs,
-    TreeReopenArgs, TreeReplayArgs, TreeRunArgs, TreeStoreArgs, TreeTestArgs, start_delegated,
-    tree_run_exit_status,
+    TREE_REPLAY_DIFFERS, TREE_TEST_CONFINEMENT_PRECONDITION, TREE_TEST_CYCLE_TIMEOUT,
+    TREE_TEST_FAILED, TREE_TEST_REFUSED, TreeApproveArgs, TreeCloseArgs, TreeCommand,
+    TreeConfinement, TreeHoldArgs, TreeOpenArgs, TreeReopenArgs, TreeReplayArgs, TreeRunArgs,
+    TreeStoreArgs, TreeTestArgs, start_delegated, tree_run_exit_status,
 };
 
 /// Runs `command` and answers its exit status.
@@ -635,19 +637,32 @@ fn status(arguments: &TreeStoreArgs) -> Result<u8, Refused> {
 /// The suite, protocols, scratch and report paths of `tree test`, resolved.
 type TestPaths = (PathBuf, PathBuf, PathBuf, Option<PathBuf>);
 
-fn test_paths(arguments: &TreeTestArgs) -> Result<TestPaths, Refused> {
+/// The paths of a run that is not `--list`, which clap requires `--protocols` and `--scratch` for.
+fn test_paths(
+    arguments: &TreeTestArgs,
+    protocols: &Path,
+    scratch: &Path,
+) -> Result<TestPaths, Refused> {
     Ok((
         resolved(&arguments.suite)?,
-        resolved(&arguments.protocols)?,
-        resolved(&arguments.scratch)?,
+        resolved(protocols)?,
+        resolved(scratch)?,
         arguments.report.as_deref().map(resolved).transpose()?,
     ))
 }
 
-/// `tree test`: parses nothing more than clap did, places its programs as `tree run` does
-/// ([`place`], with its own remedy) after the worker bound, calls [`run_suite`] with the runner
-/// that holds the root, prints each cycle's line as it ends and the two summary lines, and writes
-/// `--report`.
+/// The detail of the refusal of a `--cycle-timeout` outside 1 to [`TREE_TEST_CYCLE_TIMEOUT`].
+fn cycle_timeout_refused(seconds: u64) -> String {
+    format!(
+        "--cycle-timeout {seconds} is outside 1 to {TREE_TEST_CYCLE_TIMEOUT} seconds: a cycle may \
+not outlive the {TREE_TEST_CYCLE_TIMEOUT} s bound of one test"
+    )
+}
+
+/// `tree test`: checks `--cycle-timeout`, answers `--list` from the suite alone, else places its
+/// programs as `tree run` does ([`place`], with its own remedy) after the worker bound, calls
+/// [`run_suite`] with the runner that holds the root, prints each cycle's line as it ends, the two
+/// summary lines and the `slowest:` line, and writes `--report`.
 fn test(arguments: &TreeTestArgs) -> u8 {
     let refuse_test = |detail: String, document: serde_json::Value| {
         eprintln!("b10x-loom: tree test refused: {}", printable(&detail));
@@ -666,11 +681,40 @@ fn test(arguments: &TreeTestArgs) -> u8 {
             }),
         )
     };
-    let time = match TreeTime::from_flag(Some(&arguments.at)) {
+    // Clap takes any u64; the bounds are this command's, checked before anything is read.
+    if !(1..=TREE_TEST_CYCLE_TIMEOUT).contains(&arguments.cycle_timeout) {
+        let detail = cycle_timeout_refused(arguments.cycle_timeout);
+        let document = json!({"member": "--cycle-timeout", "detail": detail});
+        return refuse_test(detail, document);
+    }
+    if arguments.list {
+        let lines = resolved(&arguments.suite)
+            .map_err(&tree_refused)
+            .and_then(|suite| {
+                list_suite(&suite, &arguments.only, SUITE_AVAILABILITY).map_err(&suite_refused)
+            });
+        return match lines {
+            Ok(lines) => {
+                for line in lines {
+                    println!("{}", printable(&line));
+                }
+                0
+            }
+            Err(status) => status,
+        };
+    }
+    let (Some(protocols), Some(scratch), Some(at)) =
+        (&arguments.protocols, &arguments.scratch, &arguments.at)
+    else {
+        let detail = "--protocols, --scratch and --at are needed without --list".to_owned();
+        let document = json!({"member": null, "detail": detail});
+        return refuse_test(detail, document);
+    };
+    let time = match TreeTime::from_flag(Some(at)) {
         Ok(time) => time,
         Err(refused) => return tree_refused(refused),
     };
-    let (suite, protocols, scratch, report) = match test_paths(arguments) {
+    let (suite, protocols, scratch, report) = match test_paths(arguments, protocols, scratch) {
         Ok(paths) => paths,
         Err(refused) => return tree_refused(refused),
     };
@@ -700,6 +744,7 @@ fn test(arguments: &TreeTestArgs) -> u8 {
     let mut settings = SuiteSettings::new(protocols, scratch, time, runner, confinement);
     settings.workers = workers;
     settings.only = arguments.only.clone();
+    settings.cycle_timeout = Duration::from_secs(arguments.cycle_timeout);
     let mut print = |result: &CycleResult| println!("{}", printable(&cycle_line(result)));
     let report_of = match run_suite(&suite, &settings, Some(&mut print), None) {
         Ok(report) => report,
@@ -708,6 +753,7 @@ fn test(arguments: &TreeTestArgs) -> u8 {
     for line in summary_lines(&report_of) {
         println!("{}", printable(&line));
     }
+    println!("{}", printable(&slowest_line(&report_of)));
     let mut status = if report_of.failed.is_empty() {
         0
     } else {

@@ -11,6 +11,13 @@
 //! are in suite order whatever order the cycles end in. It starts no `b10x-loom` process and no
 //! program of its own, prints nothing, reads no environment variable and no current directory:
 //! every path it is given is absolute.
+//!
+//! Each running cycle has a flag of its own, which its worker hands `run_tree` and reads before
+//! each step. One watcher thread per suite run holds each running cycle's deadline (its start plus
+//! `SuiteSettings::cycle_timeout`) and, every [`CANCEL_WATCH`], sets the flag of each cycle past
+//! its deadline, and of every running cycle once the suite's cancel flag is set; it ends when the
+//! last worker has ended. A flag set while a step runs ends `run_tree` `Cancelled`, its program
+//! killed; the cycle then ends `CycleTimedOut` naming that step, unless the suite was cancelled.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
@@ -18,8 +25,8 @@ use std::io::{self, Read as _, Write as _};
 use std::num::NonZeroUsize;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
-use std::time::Instant;
+use std::sync::{Arc, Condvar, Mutex, PoisonError, mpsc};
+use std::time::{Duration, Instant};
 
 use b10x_loom_intake_slice::confinement::TestRunner;
 use loom::tree::{
@@ -34,6 +41,7 @@ use super::availability::{AvailabilityEntry, SUITE_AVAILABILITY, first_waiting, 
 use super::check::{Captured, capture_after, evaluate_checks, holds};
 use super::decode::{SuiteRefused, read_suite};
 use super::select::{CycleView, select_values};
+use crate::run::CANCEL_WATCH;
 use crate::{
     ApproveRequest, CloseRequest, HoldRequest, KeptProtocol, OpenRequest, Reasons, Refused,
     ReopenRequest, RunSettings, TreeTime, open_tree, read_manifest, read_protocols_directory,
@@ -261,6 +269,63 @@ pub fn summary_lines(report: &SuiteReport) -> [String; 2] {
     ]
 }
 
+/// How many cycles the `slowest:` line names at most.
+pub const SLOWEST_CYCLES: usize = 10;
+
+/// The line printed after the two summary lines: `slowest: <name> (<s> s), …`, the cycles of
+/// `report` that ran, at most [`SLOWEST_CYCLES`], slowest first and ties in suite order, read from
+/// their `seconds`; `slowest: none` when no cycle ran.
+pub fn slowest_line(report: &SuiteReport) -> String {
+    let mut ran: Vec<(&CycleResult, f64)> = report
+        .cycles
+        .iter()
+        .filter(|result| result.run)
+        .map(|result| (result, result.seconds.0.parse::<f64>().unwrap_or(0.0)))
+        .collect();
+    // A stable sort: cycles of equal seconds stay in suite order.
+    ran.sort_by(|left, right| right.1.total_cmp(&left.1));
+    let named: Vec<String> = ran
+        .iter()
+        .take(SLOWEST_CYCLES)
+        .map(|(result, _)| format!("{} ({} s)", result.name, result.seconds.0))
+        .collect();
+    format!("slowest: {}", names(&named))
+}
+
+/// The line `tree test --list` prints for `cycle`: `<name>`, `<name>: pending`, or `<name>:
+/// pending, waits for story:<id> (<kind>)` when it uses a part `availability` marks waiting.
+fn list_line(cycle: &SuiteCycle, availability: &[AvailabilityEntry]) -> String {
+    match first_waiting(cycle, availability) {
+        Some(waiting) => format!(
+            "{}: pending, waits for {} ({})",
+            cycle.name, waiting.story, waiting.kind
+        ),
+        None if cycle.pending => format!("{}: pending", cycle.name),
+        None => cycle.name.clone(),
+    }
+}
+
+/// The lines `tree test --list` prints for the suite file `suite`: one per cycle `only` selects
+/// (every cycle when it is empty), in suite order. It reads the suite and nothing else: no `when`
+/// is evaluated, no protocol read and nothing written.
+///
+/// # Errors
+/// [`SuiteRefused`]: what [`read_suite`] refuses, `CycleUnknown` for an `only` name that is no
+/// cycle of the suite, and `SuiteUnreadable` for a relative `suite`.
+pub fn list_suite(
+    suite: &Path,
+    only: &[String],
+    availability: &[AvailabilityEntry],
+) -> Result<Vec<String>, SuiteRefused> {
+    let suite = absolute_path(suite, "the suite", SuiteRefusalReason::SuiteUnreadable)?;
+    let decoded = read_suite(suite)?;
+    let chosen = selected(&decoded.cycles, only)?;
+    Ok(chosen
+        .iter()
+        .map(|&index| list_line(&decoded.cycles[index], availability))
+        .collect())
+}
+
 fn put(object: &mut Map<String, Value>, name: &str, value: Option<Value>) {
     if let Some(value) = value {
         object.insert(name.to_owned(), value);
@@ -388,10 +453,15 @@ pub struct SuiteSettings {
     /// The names of the cycles to run; empty by default, which runs every cycle. A name that is no
     /// cycle of the suite is refused `CycleUnknown`.
     pub only: Vec<String>,
+    /// How long a cycle may run, from its start: past it, its running program is killed and it
+    /// ends `CycleTimedOut`. [`CYCLE_WALL_SECONDS`] by default; `tree test --cycle-timeout` takes
+    /// 1 to [`CYCLE_WALL_SECONDS`] seconds and refuses any other value.
+    pub cycle_timeout: Duration,
 }
 
 impl SuiteSettings {
-    /// Settings with [`SUITE_AVAILABILITY`], one worker and every cycle.
+    /// Settings with [`SUITE_AVAILABILITY`], one worker, every cycle and a cycle timeout of
+    /// [`CYCLE_WALL_SECONDS`].
     pub fn new(
         protocols: PathBuf,
         scratch: PathBuf,
@@ -408,6 +478,7 @@ impl SuiteSettings {
             availability: SUITE_AVAILABILITY.to_vec(),
             workers: NonZeroUsize::MIN,
             only: Vec::new(),
+            cycle_timeout: Duration::from_secs(CYCLE_WALL_SECONDS),
         }
     }
 }
@@ -423,6 +494,7 @@ impl std::fmt::Debug for SuiteSettings {
             .field("availability", &self.availability.len())
             .field("workers", &self.workers)
             .field("only", &self.only)
+            .field("cycle_timeout", &self.cycle_timeout)
             .finish()
     }
 }
@@ -704,7 +776,8 @@ fn selected(cycles: &[SuiteCycle], only: &[String]) -> Result<Vec<usize>, SuiteR
 /// `settings.availability` marks waiting is pending and not run; one whose `when` fails is not
 /// run. `observer` is given each result in
 /// suite order (see [`SuiteObserver`]); `cancel`, when set, starts no further cycle and ends each
-/// running one before its next step, its difference saying so.
+/// running one, its running program killed or before its next step, its difference saying so. A
+/// cycle that runs past `settings.cycle_timeout` ends the same way with `CycleTimedOut`.
 ///
 /// # Errors
 /// [`SuiteRefused`], before any cycle: `SubstrateWorkersUnserved`, what [`read_suite`] refuses,
@@ -782,6 +855,82 @@ struct SuiteRun<'a> {
     cancel: Option<&'a AtomicBool>,
 }
 
+/// The one watcher of a suite run: the flag and deadline of each running cycle, and how many
+/// workers are still running.
+struct Watcher {
+    watched: Mutex<Watched>,
+    changed: Condvar,
+}
+
+struct Watched {
+    /// Each running cycle's position among the chosen, its flag and its deadline.
+    cycles: Vec<(usize, Arc<AtomicBool>, Instant)>,
+    workers: usize,
+}
+
+impl Watcher {
+    fn new(workers: usize) -> Self {
+        Self {
+            watched: Mutex::new(Watched {
+                cycles: Vec::new(),
+                workers,
+            }),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Watched> {
+        self.watched.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Holds the cycle at position `at` with its `flag`, which is set at `deadline`.
+    fn hold(&self, at: usize, flag: Arc<AtomicBool>, deadline: Instant) {
+        self.lock().cycles.push((at, flag, deadline));
+    }
+
+    /// Takes the cycle at position `at` back.
+    fn release(&self, at: usize) {
+        self.lock().cycles.retain(|(held, _, _)| *held != at);
+    }
+
+    /// One worker ended; the last one ends the watch.
+    fn worker_ended(&self) {
+        let mut watched = self.lock();
+        watched.workers = watched.workers.saturating_sub(1);
+        drop(watched);
+        self.changed.notify_all();
+    }
+
+    /// Every [`CANCEL_WATCH`] until the last worker ended: sets the flag of each held cycle past
+    /// its deadline, and of every held cycle once `cancelled` answers true.
+    fn watch(&self, cancelled: impl Fn() -> bool) {
+        let mut watched = self.lock();
+        while watched.workers > 0 {
+            let suite = cancelled();
+            let now = Instant::now();
+            for (_, flag, deadline) in &watched.cycles {
+                if suite || now >= *deadline {
+                    flag.store(true, Ordering::SeqCst);
+                }
+            }
+            watched = self
+                .changed
+                .wait_timeout(watched, CANCEL_WATCH)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+}
+
+/// Tells the watcher its worker ended, however the worker ends, a panic included.
+struct WorkerEnd<'a>(&'a Watcher);
+
+impl Drop for WorkerEnd<'_> {
+    fn drop(&mut self) {
+        self.0.worker_ended();
+    }
+}
+
 /// What one step ended with.
 struct StepEnd {
     exit: i64,
@@ -829,6 +978,9 @@ struct Cycle<'a> {
     work: PathBuf,
     store: PathBuf,
     started: Instant,
+    /// The cycle's own flag: set by the watcher at its deadline or when the suite is cancelled;
+    /// handed to `run_tree` and read before each step.
+    flag: Arc<AtomicBool>,
     outputs: BTreeMap<String, Value>,
     captured: Captured,
     uses: Vec<i64>,
@@ -968,10 +1120,36 @@ impl SuiteRun<'_> {
             .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
     }
 
+    /// The difference the cycle ends with at the step `label` of `kind` when a flag stops it: the
+    /// suite's (`StepFailed`, the suite was cancelled), else its own, set at its deadline
+    /// (`CycleTimedOut`, found the seconds it ran); `None` when neither is set.
+    fn interrupted(&self, running: &Cycle<'_>, label: &str, kind: &str) -> Option<CheckDifference> {
+        if self.cancelled() {
+            Some(difference(
+                label,
+                kind,
+                DifferenceReason::StepFailed,
+                "the step runs",
+                Some("the suite was cancelled".to_owned()),
+            ))
+        } else if running.flag.load(Ordering::SeqCst) {
+            Some(difference(
+                label,
+                kind,
+                DifferenceReason::CycleTimedOut,
+                format!("an end within {} s", self.settings.cycle_timeout.as_secs()),
+                Some(format!("{:.1}", running.started.elapsed().as_secs_f64())),
+            ))
+        } else {
+            None
+        }
+    }
+
     /// The cycles at the positions `chosen` names, on up to `settings.workers` threads, each
-    /// thread taking the next of them in suite order until none is left or the cancel flag is set.
-    /// The results come back in suite order, and `observer` is given each on this thread as soon
-    /// as every result before it has ended; a cycle that never started has none.
+    /// thread taking the next of them in suite order until none is left or the cancel flag is set,
+    /// beside one watcher thread that sets a running cycle's flag at its deadline (see the module
+    /// documentation). The results come back in suite order, and `observer` is given each on this
+    /// thread as soon as every result before it has ended; a cycle that never started has none.
     fn cycles(
         &self,
         cycles: &[SuiteCycle],
@@ -980,6 +1158,7 @@ impl SuiteRun<'_> {
     ) -> Vec<CycleResult> {
         let threads = self.settings.workers.get().min(chosen.len());
         let next = AtomicUsize::new(0);
+        let watcher = Watcher::new(threads);
         let mut ended: Vec<Option<CycleResult>> = vec![None; chosen.len()];
         let mut observed = 0;
         let mut observe = |result: &CycleResult| {
@@ -989,10 +1168,15 @@ impl SuiteRun<'_> {
         };
         std::thread::scope(|scope| {
             let (sender, receiver) = mpsc::channel();
+            let watcher = &watcher;
+            if threads > 0 {
+                scope.spawn(move || watcher.watch(|| self.cancelled()));
+            }
             for _ in 0..threads {
                 let sender = sender.clone();
                 let next = &next;
                 scope.spawn(move || {
+                    let _ended = WorkerEnd(watcher);
                     while !self.cancelled() {
                         let at = next.fetch_add(1, Ordering::SeqCst);
                         let Some(&index) = chosen.get(at) else {
@@ -1001,7 +1185,7 @@ impl SuiteRun<'_> {
                         if self.cancelled() {
                             break;
                         }
-                        let result = self.result(index, &cycles[index]);
+                        let result = self.result(index, &cycles[index], at, watcher);
                         if sender.send((at, result)).is_err() {
                             break;
                         }
@@ -1023,9 +1207,15 @@ impl SuiteRun<'_> {
         ended.into_iter().flatten().collect()
     }
 
-    /// The result of `cycle`, the `index`th of the suite: waiting when it uses a part that waits,
-    /// not run when a `when` fails, else run.
-    fn result(&self, index: usize, cycle: &SuiteCycle) -> CycleResult {
+    /// The result of `cycle`, the `index`th of the suite and the `at`th chosen: waiting when it
+    /// uses a part that waits, not run when a `when` fails, else run under `watcher`.
+    fn result(
+        &self,
+        index: usize,
+        cycle: &SuiteCycle,
+        at: usize,
+        watcher: &Watcher,
+    ) -> CycleResult {
         if let Some(waiting) = first_waiting(cycle, &self.settings.availability) {
             waiting_result(cycle, waiting)
         } else if let Some(failed) = cycle
@@ -1035,19 +1225,27 @@ impl SuiteRun<'_> {
         {
             not_run_result(cycle, failed)
         } else {
-            self.cycle(index, cycle)
+            self.cycle(index, cycle, at, watcher)
         }
     }
 
-    /// Runs `cycle`, the `index`th of the suite, to its result, in `work/<n>/` and `store/<n>/`
-    /// of the scratch directory, `n` its position.
-    fn cycle(&self, index: usize, cycle: &SuiteCycle) -> CycleResult {
+    /// Runs `cycle`, the `index`th of the suite and the `at`th chosen, to its result, in
+    /// `work/<n>/` and `store/<n>/` of the scratch directory, `n` its position: the watcher holds
+    /// its flag and deadline from its start until its steps and `expect` ended.
+    fn cycle(&self, index: usize, cycle: &SuiteCycle, at: usize, watcher: &Watcher) -> CycleResult {
         let n = (index + 1).to_string();
+        let started = Instant::now();
+        let flag = Arc::new(AtomicBool::new(false));
+        let deadline = started
+            .checked_add(self.settings.cycle_timeout)
+            .unwrap_or(started);
+        watcher.hold(at, Arc::clone(&flag), deadline);
         let mut running = Cycle {
             cycle,
             work: self.scratch.join("work").join(&n),
             store: self.scratch.join("store").join(&n),
-            started: Instant::now(),
+            started,
+            flag,
             outputs: BTreeMap::new(),
             captured: Captured::new(),
             uses: vec![0; cycle.decide.len()],
@@ -1055,6 +1253,7 @@ impl SuiteRun<'_> {
             run_exit: None,
         };
         let difference = self.steps(&mut running).err();
+        watcher.release(at);
         let seconds = running.started.elapsed().as_secs_f64();
         CycleResult {
             name: cycle.name.clone(),
@@ -1099,14 +1298,8 @@ impl SuiteRun<'_> {
                 .name
                 .clone()
                 .unwrap_or_else(|| format!("steps[{index}]"));
-            if self.cancelled() {
-                return Err(difference(
-                    label,
-                    step_name(step.r#do),
-                    DifferenceReason::StepFailed,
-                    "the step runs",
-                    Some("the suite was cancelled".to_owned()),
-                ));
+            if let Some(stopped) = self.interrupted(running, &label, step_name(step.r#do)) {
+                return Err(stopped);
             }
             if step.r#do != StepKind::Write {
                 minute = step.at.unwrap_or(minute + 1);
@@ -1484,21 +1677,25 @@ impl SuiteRun<'_> {
         time: &TreeTime,
     ) -> Result<StepEnd, CheckDifference> {
         let settings = self.round_settings(running, time);
-        let ran = match run_tree(&running.store, self.catalog, &settings, None, self.cancel) {
+        let ran = match run_tree(
+            &running.store,
+            self.catalog,
+            &settings,
+            None,
+            Some(&running.flag),
+        ) {
             Ok(ran) => ran,
             Err(refusal) => return Ok(StepEnd::refused(&refusal)),
         };
         let exit = stop_exit(ran.stop);
-        let cancelled = ran.stop == TreeStop::Cancelled && self.cancelled();
+        let stopped = if ran.stop == TreeStop::Cancelled {
+            self.interrupted(running, label, "resume")
+        } else {
+            None
+        };
         running.last_run = Some(ran);
-        if cancelled {
-            return Err(difference(
-                label,
-                "resume",
-                DifferenceReason::StepFailed,
-                "the step runs",
-                Some("the suite was cancelled".to_owned()),
-            ));
+        if let Some(stopped) = stopped {
+            return Err(stopped);
         }
         Ok(StepEnd {
             exit,
@@ -1519,32 +1716,30 @@ impl SuiteRun<'_> {
         let limit = step.rounds.unwrap_or(running.cycle.max_rounds).max(1);
         let mut round = 0i64;
         loop {
-            if round > 0 && self.cancelled() {
-                return Err(difference(
-                    label,
-                    "run",
-                    DifferenceReason::StepFailed,
-                    "the step runs",
-                    Some("the suite was cancelled".to_owned()),
-                ));
+            if round > 0
+                && let Some(stopped) = self.interrupted(running, label, "run")
+            {
+                return Err(stopped);
             }
             let settings = self.round_settings(running, time);
-            let ran = match run_tree(&running.store, self.catalog, &settings, None, self.cancel) {
+            let ran = match run_tree(
+                &running.store,
+                self.catalog,
+                &settings,
+                None,
+                Some(&running.flag),
+            ) {
                 Ok(ran) => ran,
                 Err(refusal) => return Ok(StepEnd::refused(&refusal)),
             };
             round += 1;
             let exit = stop_exit(ran.stop);
-            if ran.stop == TreeStop::Cancelled && self.cancelled() {
+            if ran.stop == TreeStop::Cancelled
+                && let Some(stopped) = self.interrupted(running, label, "run")
+            {
                 running.run_exit = Some(exit);
                 running.last_run = Some(ran);
-                return Err(difference(
-                    label,
-                    "run",
-                    DifferenceReason::StepFailed,
-                    "the step runs",
-                    Some("the suite was cancelled".to_owned()),
-                ));
+                return Err(stopped);
             }
             let decisions = ran.decisions.clone();
             running.last_run = Some(ran);
