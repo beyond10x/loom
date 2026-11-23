@@ -40,7 +40,7 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/reference/.generated.json
-revision: 20
+revision: 21
 ---
 ## Outcome
 
@@ -145,20 +145,27 @@ entry's `kind`, `subject` and `producer` whose `result` is the one the entry's t
 for good, read from the `Allowance` `prepare` reads (`program.rs:1058-1094`):
 
 - `budget.runs_per` absent or `case`: `window >= max_runs`;
-- `runs_per: rejection`: with **P** the rework count without the interval that unplaced
+- `runs_per: rejection`, with **P** the rework count without the interval that unplaced
   rejections count on their own (`alone`, `program.rs:1213-1220`; P is the rework count when there
-  is none), P is at least `rework_limit`, and either P is above it or `window >= max_runs`.
+  is none): either the rework count is above `rework_limit`, or P is at least `rework_limit` and
+  `window >= max_runs`.
 
-Why P and not the rework count: a rejection placed after the last run absorbs every unplaced one
-(they count only where no placed rejection lies at or after their first interval, `:1216-1219`)
-and opens a window of 0 (`:1221-1224`), so the count stays and `prepare` allows a run again
-(`:795-822`). A count that reaches `rework_limit` through an unplaced rejection counted on its
-own is therefore not final, and writing `spent` there would end a `given_up` protocol with runs
-still to come, against D10. Placed rejections only add intervals; with P at the limit and a full
-window, a rejection that opens a new window lies after the runs of the full one, in a new
-interval, and lifts P above the limit. So P at or above the limit as stated is final. A full
-window with P below `rework_limit` is not spent for good either (a later rejection opens a new
-window) and owes nothing.
+Why the rework count is final above the limit: the lone interval of unplaced rejections exists
+only while no placed rejection lies at or after their first interval (`:1216-1219`), and every
+later placed rejection lands in an interval, never removing one. One at or after that first
+interval lies in a new interval or takes the lone one's place there, so the count never drops; a
+count above `rework_limit` stays above it and `prepare` refuses `RunsSpent` naming the rework
+limit for good (`:795-807`).
+
+Why the window branch reads P: a rejection placed after the last run absorbs every unplaced one
+and opens a window of 0 (`:1221-1224`), so a count that reaches `rework_limit` (not above it)
+through a lone unplaced interval stays at the limit and `prepare` allows a run again
+(`:795-822`). That count with a full window is therefore not final, and writing `spent` there
+would end a `given_up` protocol with runs still to come, against D10. With P at the limit and a
+full window, a rejection that opens a new window lies after the runs of the full one, in a new
+interval, and lifts the count above the limit; one that opens none leaves the window full. So
+both branches as stated are final. A full window with P below `rework_limit` and the count not
+above it owes nothing (a later rejection opens a new window).
 
 A sibling entry of the same binding may share the `from: runs` entry's kind, subject and producer
 (`load.rs:138-199` refuses neither; for example `{kind: result, from: exit, results: {"0": pass,
@@ -189,10 +196,15 @@ with allowance still to come". With "spent for good" D10 holds:
     is written before the next step. 0.60.0 never wrote it on that path;
 - a first run at that count that recorded keeps D10's "only the first run made at that count
   writes it": the case then holds the record, so nothing is owed;
-- a rework count carried to `rework_limit` by an unplaced rejection counted on its own (D2 of
-  that story) owes nothing, full window or not: P is below the limit, and a later placed rejection
+- a rework count carried **to** `rework_limit` by an unplaced rejection counted on its own (D2 of
+  that story, P one below the limit) owes nothing, full window or not: a later placed rejection
   lets the writer run again (above). The case stops `Stuck` there as in 0.60.0 until such a
-  rejection comes; once P itself is spent for good, the record is written before the next step.
+  rejection comes; once the allowance is spent for good, the record is written before the next
+  step;
+- a rework count carried **past** `rework_limit` by an unplaced rejection counted on its own (P at
+  the limit, for example after a first run at the limit that recorded nothing, window not full)
+  is spent for good: `prepare` refuses it for good (above), and the record is written before the
+  next step. 0.60.0 never wrote one there.
 
 Under `runs_per: case` nothing in the rework story is read.
 
@@ -328,38 +340,51 @@ recordless end; the cancel is test 2's.
    window is full; the function writes nothing. Then `reject` (placed after the run): `run`
    performs (the window reopened, the count stayed 1) and records `draft_spent` itself, the first
    run at the limit; the function then writes nothing and `records("draft_spent")` is 1. Failing
-   first under a check on the rework count: a `draft_spent` written before `reject`, 2 at the end.
+   first under a window branch that reads the rework count instead of P: a `draft_spent` written
+   before `reject`, 2 at the end.
+9. `an_unplaced_rejection_past_the_rework_limit_owes_its_record` (the rework-count branch):
+   `max_runs: 2, runs_per: rejection, rework_limit: 1`. `run`; `reject` (P 1, window 0);
+   `run_recording_nothing` (the first run at the limit, window 1, no record); `hold(("draft_check",
+   draft, "invalid"), "checker", false)`, whose first interval is 2: the rework count is 2, P 1,
+   the window 1 of 2, and the next step is refused `RunsSpent` naming `budget.rework_limit`. The
+   function writes one `draft_spent`; a second call writes nothing; `records("draft_spent")` is
+   exactly 1. Failing first under a rule that reads P in both branches: nothing written.
 
 **`crates/loom-tree/src/run.rs`**, its unit tests (`mod tests`, `:1952`):
 
-9. `a_line_that_names_a_record_is_not_read_as_not_called` (D6 a): bindings where `w.move` lists
-   79 and `s.spent` lists 0 in `exits.not_called` (`s.spent` has a `from: runs` entry and no
-   `from: exit` table); lines: `evaluated` at revision r, `w.move`'s `action finished` exit 79
-   with one move, `s.spent`'s exit-0 line naming one record and no move, `evaluated` at r + 1.
-   `set_aside` holds neither action. Failing first: it holds both (the exit-0 line read as
-   not-called, so the interval reads as `w.move`'s own move).
+10. `a_line_that_names_a_record_is_not_read_as_not_called` (D6 a): bindings where `w.move` lists
+    79 and `s.spent` lists 0 in `exits.not_called` (`s.spent` has a `from: runs` entry and no
+    `from: exit` table); lines: `evaluated` at revision r, `w.move`'s `action finished` exit 79
+    with one move, `s.spent`'s exit-0 line naming one record and no move, `evaluated` at r + 1.
+    `set_aside` holds neither action. Failing first: it holds both (the exit-0 line read as
+    not-called, so the interval reads as `w.move`'s own move).
 
 **`crates/loom-tree/tests/runs_spent/mod.rs`**, through `run_tree`, the protocol of
 `an_outcome_waits_for_the_spent_claim` (`:259`) with `work.do` bound `budget: {max_runs: 1}`, no
 `retry_when`, its exit entry `{"0": ok}` (no `*` row) and the fixture's `from: runs` entry; its
 program exits 3:
 
-10. `a_refused_last_run_ends_given_up` (new code): one `run_tree` on a fresh case: the only run is
-   refused `ResultNotInTable`; the run ends `Terminal` with the `given_up` outcome; the log holds,
-   after the refused line, one `action finished` line of `work.do` with `exit: 0` naming the
-   `spent` record and then an `evaluated` line; `replay_tree` over the store reports no difference.
-   Failing first: `Stuck`, no record.
-11. `a_store_left_stuck_by_0_60_ends_given_up`: the test writes a store and log in the shape 0.60.0
-   leaves (that refused run, its refused `action finished` line, no `evaluated` line after it, no
-   `spent` record), then runs `run_tree` once: `Terminal`, `given_up`, one `spent` record. Failing
-   first: `Stuck`.
-12. `the_spent_record_is_written_once_per_case`: with `max_steps: Some(5)` and the outcome removed
-   from the protocol (so the case does not end): the log holds exactly one `action finished` line
-   with `exit: 0` naming a `spent` record and the case one `spent` record.
-13. `no_handoff_check_runs_for_the_spent_record`: as test 10, `work.do` also has a `handoff_when`
-    check that touches a marker file and exits 0: the run ends `Terminal` `given_up`, and the
-    marker file does not exist.
-14. `a_refused_run_below_the_allowance_stays_set_aside` (guard): `max_runs: 3`, a first run refused
+11. `a_refused_last_run_ends_given_up` (new code): one `run_tree` on a fresh case: the only run is
+    refused `ResultNotInTable`; the run ends `Terminal` with the `given_up` outcome; the log holds,
+    after the refused line, one `action finished` line of `work.do` with `exit: 0` naming the
+    `spent` record and then an `evaluated` line; `replay_tree` over the store reports no
+    difference. Failing first: `Stuck`, no record.
+12. `a_store_left_stuck_by_0_60_ends_given_up`: `Tree::run_steps(Some(1))` (`runs_spent/mod.rs:217`)
+    leaves the shape 0.60.0 leaves: the refused run and its `action finished` line, then the
+    max-steps stop, which comes before `refresh` and before the new call (`run.rs:286-312`); the
+    test asserts the case holds no `spent` record then. `run_steps(None)` once more: `Terminal`,
+    `given_up`, one `spent` record. Failing first: `Stuck`.
+13. `the_spent_record_is_written_once_per_case`: with `max_steps: Some(5)` and the outcome removed
+    from the protocol (so the case does not end): the log holds exactly one `action finished` line
+    with `exit: 0` naming a `spent` record and the case one `spent` record.
+14. `no_handoff_check_runs_for_the_spent_record`: as test 11, `work.do` also has a `handoff_when`
+    check (a POSIX sh stub) that appends one line to a file `checks` and exits 1, so it hands the
+    proposal on and the writer runs in that step (exit 0 would take no step and stop
+    `AwaitingPerson`, `AGENTS.md:1803-1804`, `run.rs:343-345`). The run ends `Terminal`
+    `given_up`; `checks` holds exactly one line, and the log exactly one `handoff checked` line,
+    before the refused run's line: the check ran for the run and not for the spent record. Failing
+    first: `Stuck` (no record); a design that offered the writer for the write would make it two.
+15. `a_refused_run_below_the_allowance_stays_set_aside` (guard): `max_runs: 3`, a first run refused
     `ResultNotInTable`: no record is written and the writer is not offered again before the case
     changes, as today.
 
@@ -396,13 +421,15 @@ Derived 2026-11-23 from the source at `49499053`. **Cited**: read at the line na
 - `crates/loom-bindings/src/load.rs` (`:138-199`, `:371-405`) — read, not changed.
 - `crates/loom-tree/src/run.rs` — changed: the step loop `:304-315` (the call and the line) and
   `not_called` `:1103-1116` (D6 a); one unit test in `mod tests` (`:1952`). Read, not changed:
-  `:343-345`, `:877-899`, `:955-969`, `:1018`, `:1041-1101`, `:1124-1164`, `:1329-1331`.
+  `:286-312`, `:343-345`, `:877-899`, `:955-969`, `:1018`, `:1041-1101`, `:1124-1164`,
+  `:1329-1331`.
 - `crates/loom-tree/src/replay.rs` (`:10-11`), `src/history.rs` (`:144-169`),
   `crates/loom-executor/src/selection.rs` (`:291-305`) — read, not changed; `replay.rs` changes
   only if an `exit: 0` line with a record but no run needs a case there (inferred: it does not).
 - `crates/loom-bindings/tests/bound_program.rs` (`:60-93`, `:2511-2512`, `:2627-2665`,
   `:2706-2710`), `crates/loom-bindings/tests/bound_retry.rs` (`:1785-1884`; `Rework` gains
-  `run_recording_nothing`), `crates/loom-tree/tests/runs_spent/mod.rs` (`:57-70`, `:259`) — cited.
+  `run_recording_nothing`), `crates/loom-tree/tests/runs_spent/mod.rs` (`:57-70`, `:217`,
+  `:259`) — cited.
 - `ess/domains/bindings.yaml` (`:78-79`, `:359`) — cited; `generated/ess/loom`,
   `generated/rust/loom`, `website/docs/reference/.generated.json` regenerated.
 - `AGENTS.md` (`:1489-1495`), `website/docs/guides/bindings.md` (`:199-203`) — cited;
