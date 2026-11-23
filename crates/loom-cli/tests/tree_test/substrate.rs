@@ -75,7 +75,10 @@ fn the_substrate_refusal_names_a_remedy_tree_test_accepts() {
         assert!(said.contains("ConfinementRefused"), "{what}: {said}");
         assert!(said.contains("--confinement local"), "{what}: {said}");
         assert!(said.contains("tree test --cgroup-root"), "{what}: {said}");
-        assert!(refused.stdout.is_empty(), "{what}: a refusal printed a cycle");
+        assert!(
+            refused.stdout.is_empty(),
+            "{what}: a refusal printed a cycle"
+        );
         assert!(
             !dir.join("scratch").exists(),
             "{what}: the refused run made --scratch"

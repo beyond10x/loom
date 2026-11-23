@@ -4,11 +4,13 @@
 //! expected, failed or skipped, and a cycle waiting for a story is never run.
 //!
 //! [`run_suite`] runs the cycles a caller selects, up to `workers` at once, each thread taking the
-//! next cycle in suite order; each cycle works in `<scratch>/<n>/` (`store/`, `work/`), `n` its
-//! position in the suite, and runs each step through the function of its `tree` command in
-//! process. The results, and the observer's calls, are in suite order whatever order the cycles
-//! end in. It starts no `b10x-loom` process and no program of its own, prints nothing, reads no
-//! environment variable and no current directory: every path it is given is absolute.
+//! next cycle in suite order; each cycle works in `<scratch>/work/<n>/` and keeps its tree in
+//! `<scratch>/store/<n>/`, `n` its position in the suite, so every cycle's workspace has one
+//! parent and every confined launch of every cycle shares one Substrate driver; it runs each step
+//! through the function of its `tree` command in process. The results, and the observer's calls,
+//! are in suite order whatever order the cycles end in. It starts no `b10x-loom` process and no
+//! program of its own, prints nothing, reads no environment variable and no current directory:
+//! every path it is given is absolute.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
@@ -343,8 +345,12 @@ pub const SUITE_PRINCIPAL: &str = "operator";
 pub const SUITE_ROOT_CASE: &str = "root";
 
 /// The detail of the refusal `SubstrateWorkersUnserved`.
-pub const SUBSTRATE_WORKERS_UNSERVED: &str = "--workers above 1 under --confinement substrate \
-waits for story:suite-runs-cycles-under-one-cgroup-root";
+pub const SUBSTRATE_WORKERS_UNSERVED: &str = "a Substrate driver runs at most 16 executions at \
+once; --workers above 16 under --confinement substrate is refused";
+
+/// The most workers a suite runs under `substrate`: every cycle shares one Substrate driver, which
+/// runs at most this many executions at once, and a cycle has one program in flight at a time.
+const SUBSTRATE_WORKERS: usize = 16;
 
 /// Called with each cycle's result in suite order, on the thread that called [`run_suite`]:
 /// result `n` as soon as results `1..=n` have all ended, so a later result that ended first waits.
@@ -377,7 +383,7 @@ pub struct SuiteSettings {
     /// Which step kinds, sources, event kinds and members run; [`SUITE_AVAILABILITY`] by default.
     pub availability: Vec<AvailabilityEntry>,
     /// How many cycles run at once; 1 by default, which runs them one after another. More than
-    /// one is refused `SubstrateWorkersUnserved` when `confinement` is `substrate`.
+    /// 16 are refused `SubstrateWorkersUnserved` when `confinement` is `substrate`.
     pub workers: NonZeroUsize,
     /// The names of the cycles to run; empty by default, which runs every cycle. A name that is no
     /// cycle of the suite is refused `CycleUnknown`.
@@ -648,10 +654,10 @@ fn replace(temporary: &Path, target: &Path, bytes: &[u8]) -> io::Result<()> {
     written
 }
 
-/// `SubstrateWorkersUnserved` when `workers` is more than one and `confinement` is `substrate`:
-/// Substrate keys its driver by a workspace's parent directory, and each cycle's workspace has a
-/// parent of its own, so a second cycle would open a second driver under the root while the first
-/// one's program runs.
+/// `SubstrateWorkersUnserved` when `workers` is more than 16 and `confinement` is `substrate`:
+/// Substrate keys its driver by a workspace's parent directory, every cycle's workspace is a
+/// child of `<scratch>/work/`, so all cycles share one driver, and a driver runs at most 16
+/// executions at once.
 ///
 /// # Errors
 /// [`SuiteRefused`] `SubstrateWorkersUnserved`, saying [`SUBSTRATE_WORKERS_UNSERVED`].
@@ -659,7 +665,7 @@ pub fn workers_served(
     confinement: Option<&str>,
     workers: NonZeroUsize,
 ) -> Result<(), SuiteRefused> {
-    if workers.get() > 1 && confinement == Some("substrate") {
+    if workers.get() > SUBSTRATE_WORKERS && confinement == Some("substrate") {
         Err(refused(
             SuiteRefusalReason::SubstrateWorkersUnserved,
             None,
@@ -690,7 +696,7 @@ fn selected(cycles: &[SuiteCycle], only: &[String]) -> Result<Vec<usize>, SuiteR
         .collect())
 }
 
-/// Runs the suite file `suite` (see the module documentation): refuses more than one worker under
+/// Runs the suite file `suite` (see the module documentation): refuses more than 16 workers under
 /// `substrate` before it reads anything, reads and decodes the suite, refuses an `only` name that
 /// is no cycle of it, refuses a `scratch` that is not absent or empty before the protocols are
 /// read, reads the protocols once, checks every seed and every `write` step's source, then runs
@@ -1033,13 +1039,14 @@ impl SuiteRun<'_> {
         }
     }
 
-    /// Runs `cycle`, the `index`th of the suite, to its result.
+    /// Runs `cycle`, the `index`th of the suite, to its result, in `work/<n>/` and `store/<n>/`
+    /// of the scratch directory, `n` its position.
     fn cycle(&self, index: usize, cycle: &SuiteCycle) -> CycleResult {
-        let root = self.scratch.join((index + 1).to_string());
+        let n = (index + 1).to_string();
         let mut running = Cycle {
             cycle,
-            work: root.join("work"),
-            store: root.join("store"),
+            work: self.scratch.join("work").join(&n),
+            store: self.scratch.join("store").join(&n),
             started: Instant::now(),
             outputs: BTreeMap::new(),
             captured: Captured::new(),

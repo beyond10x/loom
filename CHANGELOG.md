@@ -23,11 +23,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
 - `b10x-loom tree replay --store S [--case C]` (`b10x_loom_tree::replay_tree`, `rebuild_case`, `replay_difference`, `replay_json`; ESS `loom.tree.TreeReplay`, `CaseReplay`): decides every case again as of its last `evaluated` line and prints per case whether its state and Canon's decision equal that line; reads only, takes no lock; exit 0, 3 when a case differs (first one on stderr), 1 refused `NotATree`, `CaseNotInTree` or `LogRefused` (story:tree-replay-command)
 - `tree test`: the suite step `replay` runs `tree replay`, its JSON output given to `{step: <name>}` (story:tree-replay-command)
+- `tree test --confinement substrate` (the default) runs: `--cgroup-root DIR` is held through `embed::TreeRunner::on_root`, without it the command starts itself again in a delegated scope; `--workers` 2 to 16 share one driver (story:suite-runs-cycles-under-one-cgroup-root)
 
 ### Changed
 
 - Every `action finished` line names the artifact revisions its step moved in `revisions`, also when the step was refused or a person's program ended badly; before, the list was always empty (story:tree-replay-command)
 - **Breaking:** a suite step `replay` that gives `principal` is refused `MemberUndeclared`; `case` is its one member (story:tree-replay-command)
+- **Breaking:** `tree test` and `suite::run_suite` put cycle `n` in `<scratch>/work/<n>/` and `<scratch>/store/<n>/`, no longer `<scratch>/<n>/{work,store}/` (story:suite-runs-cycles-under-one-cgroup-root)
+- `SubstrateWorkersUnserved` refuses more than 16 workers under `substrate`, not more than 1; a refused hold, start again or handshake ends `tree test` with exit 2 (story:suite-runs-cycles-under-one-cgroup-root)
 
 - ESS 0.97.4 (format unchanged)
 - `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)

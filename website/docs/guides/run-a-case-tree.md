@@ -475,9 +475,10 @@ one, and the log still verifies.
 ## Test a tree with a suite of cycles
 
 A suite of scripted tree cycles is a `loom.tree-suite/1` document. `b10x-loom tree test` runs its
-cycles one after another, or up to `--workers` of them at once, each in its own directory
-`<scratch>/<n>/` (`store/` and `work/`), each step through the function of its `tree` command in
-the same process, and prints one line per cycle and two summary lines. The suite below is
+cycles one after another, or up to `--workers` of them at once. Cycle `n`, its position in the
+suite, works in `<scratch>/work/<n>/` and keeps its tree in `<scratch>/store/<n>/`. Each step runs
+through the function of its `tree` command in the same process, and the command prints one line
+per cycle and two summary lines. The suite below is
 `crates/loom-cli/tests/fixtures/tree-suite/suite.yaml`; its paths (`bindings`, the `from` of a
 seed) are below the suite's directory, and a seed's `to` is below the cycle's workspace.
 
@@ -525,16 +526,17 @@ pending: 2 (1 still failing: later; passing, move to expected: none; 1 waiting: 
 result as one `loom.tree.SuiteReport` JSON document. The protocols of `--protocols` are read once,
 as `tree open --protocols` reads them, and every cycle's tree keeps them. The exit status is 0
 when every cycle that ran and is not pending ended as expected, 1 when one did not, and 2 when the
-command line, the suite, the protocols, a seed or the scratch directory is refused before any
-cycle; the refusal names its reason and the member of the suite (`cycles[2].steps[0].do`).
+command line, the suite, the confinement, the protocols, a seed or the scratch directory is refused
+before any cycle; the refusal names its reason and the member of the suite
+(`cycles[2].steps[0].do`).
 
 `--workers <n>` (1 to 64, default 1) runs up to `n` cycles at once, each thread taking the next
 cycle in suite order. `<n>` stays the cycle's position in the suite, the lines and the report stay
 in suite order whatever order the cycles end in, and a cycle's seconds are its own wall time. A
 failing cycle ends only itself. The cycles share only what they read; under `--confinement local`
-a program can read any path the user can, the other cycles' workspaces included. More than one
-worker under `--confinement substrate` is refused `SubstrateWorkersUnserved` (exit 2) before any
-cycle: it waits for `story:suite-runs-cycles-under-one-cgroup-root`.
+a program can read any path the user can, the other cycles' workspaces included. Under
+`--confinement substrate` up to 16 workers run (see below); more are refused
+`SubstrateWorkersUnserved` (exit 2) before any cycle.
 
 `--only <name>` runs the named cycles alone; the flag repeats, and a comma separates names, so
 `--only b --only d` and `--only b,d` are one selection. A selected cycle keeps its position in the
@@ -546,12 +548,17 @@ cycle of the suite is refused `CycleUnknown` (exit 2) and nothing is written. Th
 ```console
 $ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch \
     --at 2026-11-22T08:00:00Z --confinement local --only b,d
-b: as expected (0.2 s)
-d: as expected (0.2 s)
+b: as expected (0.3 s)
+d: as expected (0.3 s)
 cycles: selected 2 of 5, 2 expected, 2 as expected, 0 failed: none
 pending: 0 (0 still failing: none; passing, move to expected: none; 0 waiting: none)
 (exit 0)
-$ ls scratch
+$ ls scratch scratch/work
+scratch:
+store
+work
+
+scratch/work:
 2
 4
 $ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch2 \
@@ -560,9 +567,63 @@ b10x-loom: tree test refused: CycleUnknown: --only names x, which is no cycle of
 {"detail":"--only names x, which is no cycle of the suite","member":null,"reason":"CycleUnknown"}
 (exit 2)
 $ b10x-loom tree test --suite only.suite.yaml --protocols protocols --scratch scratch3 \
+    --at 2026-11-22T08:00:00Z --workers 17
+b10x-loom: tree test refused: SubstrateWorkersUnserved: a Substrate driver runs at most 16 executions at once; --workers above 16 under --confinement substrate is refused
+{"detail":"a Substrate driver runs at most 16 executions at once; --workers above 16 under --confinement substrate is refused","member":null,"reason":"SubstrateWorkersUnserved"}
+(exit 2)
+```
+
+Under `--confinement substrate`, the default, every bound program of every cycle runs confined by
+Substrate under one held, delegated cgroup root, as `tree run`'s programs do. `--cgroup-root <dir>`
+names that root: an empty, writable, delegated cgroup v2 directory with the command in a child of
+it, held by this command alone until the suite ends. Without it, `tree test` starts itself again
+under `systemd-run --user --scope -p Delegate=yes`, the started command moves into a leaf of its
+scope and holds the scope, and the first command exits with its status: 0, 1 or 2. Every cycle's
+workspace is a child of `<scratch>/work/`, so all cycles share one Substrate driver, which runs at
+most 16 executions at once; a cycle has one program in flight at a time, so 16 workers never ask
+for more. A program sees its own workspace and none of another cycle's, neither by its host path
+nor as `../<n>/`, and no process of another cycle. A confined program writes only `target/` of its
+workspace. The suite below is `crates/loom-cli/tests/fixtures/tree-suite/substrate/kept.suite.yaml`:
+two cycles whose program copies the cycle's `tag.txt` to `target/own.txt`.
+
+```console
+$ b10x-loom tree test --suite kept.suite.yaml --protocols protocols --scratch scratch \
     --at 2026-11-22T08:00:00Z --workers 2
-b10x-loom: tree test refused: SubstrateWorkersUnserved: --workers above 1 under --confinement substrate waits for story:suite-runs-cycles-under-one-cgroup-root
-{"detail":"--workers above 1 under --confinement substrate waits for story:suite-runs-cycles-under-one-cgroup-root","member":null,"reason":"SubstrateWorkersUnserved"}
+one: as expected (2.4 s)
+two: as expected (2.4 s)
+cycles: 2 expected, 2 as expected, 0 failed: none
+pending: 0 (0 still failing: none; passing, move to expected: none; 0 waiting: none)
+(exit 0)
+$ ls scratch scratch/work scratch/store
+scratch:
+store
+work
+
+scratch/store:
+1
+2
+
+scratch/work:
+1
+2
+$ cat scratch/work/2/target/own.txt
+two
+```
+
+A root that does not qualify, a start again that fails, or a refused handshake of the command
+started again is refused `ConfinementRefused` (exit 2) before any cycle, naming the rule and
+`tree test`'s own remedy; so is `--cgroup-root` beside `--confinement local`:
+
+```console
+$ b10x-loom tree test --suite kept.suite.yaml --protocols protocols --scratch scratch2 \
+    --at 2026-11-22T08:00:00Z --cgroup-root not-a-cgroup
+b10x-loom: tree test refused: ConfinementRefused: CgroupUndelegated: the cgroup root ~/.cache/scratch/94200cb9-e807-4544-b8fe-80c8ce4c8ba2/wave-2026-11-21-w12/cr/docs-run/substrate/not-a-cgroup is not delegated: it is no cgroup v2 directory; the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree test starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree test --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined
+{"detail":"CgroupUndelegated: the cgroup root ~/.cache/scratch/94200cb9-e807-4544-b8fe-80c8ce4c8ba2/wave-2026-11-21-w12/cr/docs-run/substrate/not-a-cgroup is not delegated: it is no cgroup v2 directory; the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: without --cgroup-root, tree test starts itself again in a scope of its own under systemd-run --user --scope -p Delegate=yes; pass tree test --cgroup-root DIR naming an empty, writable, delegated cgroup v2 directory with this process in a child of it, or --confinement local to run every program unconfined","reason":"ConfinementRefused"}
+(exit 2)
+$ b10x-loom tree test --suite kept.suite.yaml --protocols protocols --scratch scratch2 \
+    --at 2026-11-22T08:00:00Z --confinement local --cgroup-root not-a-cgroup
+b10x-loom: tree test refused: ConfinementRefused: --cgroup-root names the root of the substrate confinement; --confinement local runs no program under one
+{"detail":"--cgroup-root names the root of the substrate confinement; --confinement local runs no program under one","reason":"ConfinementRefused"}
 (exit 2)
 ```
 
@@ -709,3 +770,9 @@ and `only` to every cycle. The observer, a `SuiteObserver` or a closure over `&C
 given each cycle's result in suite order on the caller's thread, as soon as every result before it
 has ended. A set cancel flag starts no further cycle and ends each running one before its next
 step; a running `tree run` stops `Cancelled`, and its step ends "the suite was cancelled".
+
+Under Substrate, an engine builds the runner as `tree test` does, through `embed::TreeRunner`:
+`TreeRunner::on_root(root)?` for a root it names, or `TreeRunner::in_own_scope()?` in a delegated
+scope, and passes `runner()` as `SuiteSettings::runner` with `confinement: Some("substrate")`. That
+runner holds the root, so every worker's launches run under the one hold until the runner and the
+settings are dropped; `SuiteSettings` takes no root of its own.

@@ -1,7 +1,7 @@
 //! [`select`]: the values a selection gives, read from what a cycle left and nothing else: the
-//! cycle's store and workspace (`<scratch>/<n>/store`, `work`), the JSON output of its steps, the
-//! suite's own directory, and the catalog the suite runs with. No program runs, no network is
-//! reached, and a path read from a document, or a link, whose real path leaves its root gives
+//! cycle's store and workspace (`<scratch>/store/<n>`, `<scratch>/work/<n>`), the JSON output of
+//! its steps, the suite's own directory, and the catalog the suite runs with. No program runs, no
+//! network is reached, and a path read from a document, or a link, whose real path leaves its root gives
 //! `PathOutsideCycle`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,9 +38,9 @@ const PROGRAM_SOURCE: &str = "loom/bound-program";
 /// What a cycle left, as the checks read it.
 #[derive(Debug, Clone, Copy)]
 pub struct CycleView<'a> {
-    /// The cycle's workspace, `<scratch>/<n>/work`.
+    /// The cycle's workspace, `<scratch>/work/<n>`.
     pub work: &'a Path,
-    /// The cycle's store, `<scratch>/<n>/store`.
+    /// The cycle's store, `<scratch>/store/<n>`.
     pub store: &'a Path,
     /// The suite's directory.
     pub suite: &'a Path,

@@ -36,8 +36,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_intake_slice::bindings::UNCONFINED_FLAG_REASON;
 use b10x_loom_intake_slice::confinement::{ConfinementAdapter, EngineConfinement, EngineRunner};
-use b10x_loom_tree::model::{CycleResult, DifferenceReason, SuiteReport};
 use b10x_loom_tree::embed::TreeRunner;
+use b10x_loom_tree::model::{CycleResult, DifferenceReason, SuiteReport};
 use b10x_loom_tree::suite::{SuiteSettings, report_json, run_suite, workers_served};
 use b10x_loom_tree::{TreeTime, read_protocols_directory, verify_tree};
 
@@ -1582,7 +1582,8 @@ fn substrate_starts_itself_again() {
 /// binary again in `<scope>/run`, which does the work.
 #[test]
 fn run_suite_takes_the_runner_that_holds_the_root() {
-    if let Some(root) = std::env::var_os(SUITE_ROOT).filter(|_| std::env::var_os(IN_SCOPE).is_some())
+    if let Some(root) =
+        std::env::var_os(SUITE_ROOT).filter(|_| std::env::var_os(IN_SCOPE).is_some())
     {
         run_suite_on_the_held_root(Path::new(&root));
         return;
