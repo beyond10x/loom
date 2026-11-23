@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ci-job-time-budget
 kind: story
-status: draft
+status: active
 title: 'The forge job loom / task check ends within timeout-minutes 30 again: the test targets compiled once, the test step within 120 s'
 summary: 'D146 condition: 14.7 min on 0.59.0, 33.7-42.6 on 0.60.0; measured cause compile at opt-level 1/2 repeated per cargo selection (conform tasks 3.75 to 15.4 min of compile, suites under 2 s, clippy unchanged); D1 a compile once; check.yml:26 back to 30'
 tags:
@@ -25,7 +25,10 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: crates/loom-xtask/src/test_step.rs
-revision: 17
+revision: 19
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T21:48:48Z", actor: "agent:sdc", revision: 18, executor: "agent:loom", correlation: "operator-d146-ci-time-budget-2026-11-23"}
+- {from: "proposed", to: "active", at: "2026-11-23T21:48:48Z", actor: "agent:sdc", revision: 19, executor: "agent:loom", correlation: "operator-d146-ci-time-budget-2026-11-23"}
 ---
 ## Outcome
 

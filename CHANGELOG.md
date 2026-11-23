@@ -14,6 +14,9 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
+- A `program` binding's `timeout_seconds` may be up to 14400 (`MAX_PROGRAM_TIMEOUT_SECONDS`); other executors keep 3600 (story:bound-program-timeout-above-an-hour)
+- A `handoff_when` check and an `arguments_from` program run under at most 3600 s, whatever the binding's timeout (story:bound-program-timeout-above-an-hour)
+- **Breaking:** the `TimeoutOutOfRange` detail of `check` names the executor's range; text matching the old one fails (story:bound-program-timeout-above-an-hour)
 - **Breaking:** a program binding's "*" row no longer matches a run killed at its timeout_seconds: such a run is refused ResultNotInTable, records nothing and its action is set aside, so a case that took the "*" result for a timeout and went on (a retry, a given_up outcome) now stops Stuck. Add a "timeout" row (for example "timeout": failed) to every table that relied on "*" for it (story:wildcard-result-row-does-not-match-timeout)
 
 ## [0.60.0] - 2026-11-23

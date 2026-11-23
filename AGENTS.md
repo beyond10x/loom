@@ -1471,8 +1471,11 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   commas), an `effect` entry whose `results` has a key other than `performed`. `check` refuses an
   action the protocol does not declare, a duplicate, an evidence kind outside `may_produce`, an
   artifact the protocol does not declare, a member that does not belong to the action's executor, a
-  `timeout_seconds` outside 1 to 3600, a path that is absolute or leaves the workspace, and an
-  independence dimension the protocol does not declare. An action with no binding is not an error;
+  `timeout_seconds` outside 1 to 14400 on a `program` (`MAX_PROGRAM_TIMEOUT_SECONDS`) or 1 to 3600
+  on any other executor, a path that is absolute or leaves the workspace, and an
+  independence dimension the protocol does not declare. A `handoff_when` check and an
+  `arguments_from` program run under at most 3600 s (`MAX_TIMEOUT_SECONDS`), and Substrate's CPU
+  bound stays one hour (`story:bound-program-timeout-above-an-hour`). An action with no binding is not an error;
   `unbound` lists them.
 - `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
   returns and expands an alias at each use: `MAX_NESTING` (64, on the decoded values), `MAX_NODES`

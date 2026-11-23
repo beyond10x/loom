@@ -517,9 +517,76 @@ fn the_load_check_refuses_members_that_do_not_fit_the_executor() {
     );
 }
 
+/// A `person` binding of `change.sign` with `timeout_seconds: {seconds}`.
+fn person_timeout(seconds: &str) -> String {
+    document(&format!(
+        "  - action: change.sign\n    executor: {{kind: person, principal: alice}}\n    timeout_seconds: {seconds}\n"
+    ))
+}
+
 #[test]
-fn the_load_check_holds_the_timeout_to_one_to_3600() {
-    for bad in ["0", "-5", "3601", "100000"] {
+fn a_program_may_name_four_hours() {
+    for good in ["14400", "7200"] {
+        let text = document(&format!("{GATE}    timeout_seconds: {good}\n"));
+        assert!(refused(&text).is_none(), "{good}: {:?}", refused(&text));
+    }
+}
+
+#[test]
+fn the_new_ranges_are_refused_by_name() {
+    let program = |seconds: &str| {
+        assert_refused(
+            &document(&format!("{GATE}    timeout_seconds: {seconds}\n")),
+            Reason::TimeoutOutOfRange,
+            Some("spec.gate"),
+            "timeout_seconds",
+        )
+        .0
+        .detail
+    };
+    let person = |seconds: &str| {
+        assert_refused(
+            &person_timeout(seconds),
+            Reason::TimeoutOutOfRange,
+            Some("change.sign"),
+            "timeout_seconds",
+        )
+        .0
+        .detail
+    };
+    assert_eq!(
+        program("14401"),
+        "14401 is not from 1 to 14400, the range of a program executor"
+    );
+    assert_eq!(
+        person("3601"),
+        "3601 is not from 1 to 3600; only a program executor may name up to 14400"
+    );
+    assert_eq!(
+        program("0"),
+        "0 is not from 1 to 14400, the range of a program executor"
+    );
+    assert_eq!(
+        person("0"),
+        "0 is not from 1 to 3600; only a program executor may name up to 14400"
+    );
+}
+
+#[test]
+fn older_documents_load_as_before() {
+    for good in ["1", "3600"] {
+        let program = document(&format!("{GATE}    timeout_seconds: {good}\n"));
+        assert!(refused(&program).is_none(), "program {good}");
+        let person = person_timeout(good);
+        assert!(refused(&person).is_none(), "person {good}");
+    }
+    let doc = decode(&document(GATE)).expect("decodes");
+    assert_eq!(doc.actions[0].timeout_seconds, None);
+}
+
+#[test]
+fn the_load_check_holds_a_programs_timeout_to_one_to_14400() {
+    for bad in ["0", "-5", "14401", "100000"] {
         let text = document(&format!("{GATE}    timeout_seconds: {bad}\n"));
         assert_refused(
             &text,

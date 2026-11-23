@@ -1,7 +1,7 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.98.0",
-  "inputs": "sha256:15ec4cf21c80f64ecc26fb93518c857955ec922058073cadc481419600c42c43",
+  "inputs": "sha256:c70c9831d46fb4ad3c25dd5483a553f07eba698b1e8db585b2e30ad74bc3cbcc",
   "input_files": {
     "Cargo.lock": "sha256:3169b689346290ae07e3bf7b99191c367eecada5038fc3f88f002a30b535ba25",
     "Cargo.toml": "sha256:7d3f2d70a62ed4a89502a8ad5f126df3c5cc372cd9539c5fe1c298024ed37392",
@@ -314,7 +314,7 @@
     "ess/commission/system.yaml": "sha256:83048487bcc8cba9fc4d679220ca5fdc96f11c5c9940a57c2170267aa4e48608",
     "ess/domains/agent.yaml": "sha256:2654536870b2fa63b9baf0a86233c895cdf15fe9bde222b94222f43888183555",
     "ess/domains/authority.yaml": "sha256:022935709423b434e6bbf3ec214814042b1d1a48821438a07f91fa6b3226ef0b",
-    "ess/domains/bindings.yaml": "sha256:0b597efe722efcd27250d7b2e1b4f218b7d2d1302a3b3a4524af79c8b012bf82",
+    "ess/domains/bindings.yaml": "sha256:a7be8cbb75051c6d6469d50681760df4f7388de8c973ef76b80a2dc2bd152f82",
     "ess/domains/datasource.yaml": "sha256:d13c9e1a4d47231566b647e6a6243b78c875988586fe21fa40a7657eaafd520e",
     "ess/domains/decision.yaml": "sha256:c815ef0812944e195d0ee2660c48f5143a476bc9f051095e63bea0eb5dba7efc",
     "ess/domains/evaluation.yaml": "sha256:0282a63f3ef1e5bf24b7fa06b90e02cea3196e22d14d86a488b8a2e7daa26d88",
