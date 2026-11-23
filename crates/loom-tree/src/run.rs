@@ -971,9 +971,10 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
 
 /// What a step of `case` is chosen from: the lines of its log, its revision, its effect port
 /// (every program of it holding `cancel`) and its history, with the actions due again (a writer
-/// with a retry record, a copy whose source holds something new) but those refused since the case
-/// was last evaluated (a cancel is no such refusal), and the idle actions: the copies whose source
-/// holds nothing new and the writers whose only open evidence is a spent allowance
+/// with a retry record, a copy whose source holds something new) but those [`set_aside`]: refused
+/// (a cancel is no such refusal) or not called since the case was last evaluated for a reason
+/// other than a not-called run's own moves. And the idle actions: the copies whose source holds
+/// nothing new and the writers whose only open evidence is a spent allowance
 /// ([`spent_writers_idle`]).
 #[allow(clippy::type_complexity)]
 fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
@@ -988,23 +989,8 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     let id = CaseId(case.case.clone());
     let lines = read_lines(store, &case.case)?;
     let mut due = due_actions(governor, &id, &case.bindings)?;
-    // A step refused since the case was last evaluated is refused again until the case
-    // changes (a spent run budget): it is not due, whatever its retry records say. A step its
-    // cancel ended is no such refusal: it stays due.
-    let refused_since: BTreeSet<String> = lines
-        .iter()
-        .rev()
-        .take_while(|line| !matches!(line.event, RunLogEvent::Evaluated(_)))
-        .filter_map(|line| match &line.event {
-            RunLogEvent::ActionFinished(finished)
-                if finished.refusal.is_some() && !crate::history::cancelled(finished) =>
-            {
-                Some(finished.action.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    due.retain(|action| !refused_since.contains(action));
+    let aside = set_aside(&lines, &case.bindings);
+    due.retain(|action| !aside.contains(action));
     let revision = governor
         .current_revision(&id)
         .map_err(|error| unreadable(format!("case {}", case.case), format!("{error:?}")))?;
@@ -1031,6 +1017,89 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     idle.extend(spent_writers_idle(governor, &id, &case.bindings, &due)?);
     let history = LogHistory::new(&lines, revision, due).with_idle(idle);
     Ok((lines, revision, effects, history))
+}
+
+/// The actions not due for this step, whatever their retry records say: each whose `action
+/// finished` line since the last `evaluated` line is refused (a spent run budget; a step its
+/// cancel ended is no such refusal and stays due) or [`not_called`]
+/// (`story:writer-not-called-leaves-the-due-set`, D1 a). Such an action is set aside until the
+/// case changes, so a not-called writer starts once per evaluation.
+///
+/// An `evaluated` line does not end the set-aside when the interval it closes holds only
+/// not-called lines, at least one of them names a move, and those moves account for its revision
+/// ([`crate::history::accounted`]): that line is the not-called runs' own writing (D4 a). The lines
+/// of that interval are then read too, and so on back. A record received outside the log in such
+/// an interval does not end it either; the next change does.
+fn set_aside(lines: &[RunLogLine], bindings: &BindingsDocument) -> BTreeSet<String> {
+    let opening = |end: usize| {
+        lines[..end]
+            .iter()
+            .rposition(|line| matches!(line.event, RunLogEvent::Evaluated(_)))
+    };
+    let revision = |at: usize| match &lines[at].event {
+        RunLogEvent::Evaluated(evaluated) => Some(evaluated.case_revision),
+        _ => None,
+    };
+    // The `action finished` lines after the `evaluated` line at `from` (from the first line when
+    // there is none) and before `to`.
+    let finished = |from: Option<usize>, to: usize| {
+        lines[from.map_or(0, |at| at + 1)..to]
+            .iter()
+            .filter_map(|line| match &line.event {
+                RunLogEvent::ActionFinished(finished) => Some(finished),
+                _ => None,
+            })
+    };
+    let mut aside = BTreeSet::new();
+    let mut end = lines.len();
+    loop {
+        let start = opening(end);
+        for finished in finished(start, end) {
+            if (finished.refusal.is_some() && !crate::history::cancelled(finished))
+                || not_called(finished, bindings)
+            {
+                aside.insert(finished.action.clone());
+            }
+        }
+        let Some(start) = start else {
+            break;
+        };
+        let previous = opening(start);
+        let mut moves = 0i64;
+        let mut named = false;
+        let mut only_not_called = true;
+        for finished in finished(previous, start) {
+            let moved = i64::try_from(finished.revisions.len()).unwrap_or(i64::MAX);
+            moves = moves.saturating_add(moved);
+            named |= moved > 0;
+            only_not_called &= not_called(finished, bindings);
+        }
+        let own = only_not_called
+            && named
+            && revision(start).is_some_and(|closing| {
+                crate::history::accounted(previous.and_then(revision), moves, closing)
+            });
+        if !own {
+            break;
+        }
+        end = start;
+    }
+    aside
+}
+
+/// Whether `finished` is the line of a not-called end of its program: no refusal, and an exit
+/// its action's binding in `bindings` lists in `exits.not_called`.
+fn not_called(finished: &ActionFinished, bindings: &BindingsDocument) -> bool {
+    finished.refusal.is_none()
+        && finished.exit.is_some_and(|exit| {
+            bindings.actions.iter().any(|bound| {
+                bound.action == finished.action
+                    && bound
+                        .exits
+                        .as_ref()
+                        .is_some_and(|exits| exits.not_called.contains(&exit))
+            })
+        })
 }
 
 /// The writers idle for this step because only a spent allowance is open

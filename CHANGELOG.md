@@ -33,6 +33,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - Every `action finished` line names the artifact revisions its step moved in `revisions`, also when the step was refused or a person's program ended badly; before, the list was always empty (story:tree-replay-command)
 - **Breaking:** a suite step `replay` that gives `principal` is refused `MemberUndeclared`; `case` is its one member (story:tree-replay-command)
 - `tree test`: the `decide` step and entry and the `requests` source wait for `story:tree-test-decide-and-requests` (story:tree-test-command)
+- `tree run`: a writer whose program exits a code its binding lists in `exits.not_called` is not due again until the case is evaluated again for a reason other than its own moves, so it starts once per evaluation and the run goes on to the next useful action or the handoff check; before, it was taken again at once until the step or wall bound; the log line, `max_runs` and the replay are unchanged (story:writer-not-called-leaves-the-due-set)
 
 - ESS 0.97.4 (format unchanged)
 - `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)
