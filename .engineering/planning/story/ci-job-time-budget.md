@@ -3,8 +3,8 @@ format: aep.planning-md/3
 id: story:ci-job-time-budget
 kind: story
 status: draft
-title: The forge job loom / task check ends within timeout-minutes 30 again, the workspace compiled once, the test step within 120 s, the local gate reading what the runner reads
-summary: 'D146 condition: 14.7 min on 0.59.0, 33.7-42.6 on 0.60.0; measured cause compile at opt-level 1/2 repeated per cargo selection (conform tasks 3.75 to 15.4 min of compile, suites under 2 s, clippy unchanged); D1 a compile once; check.yml:26 back to 30; rust-toolchain.toml; one macOS re-run after a no-runner cancel'
+title: 'The forge job loom / task check ends within timeout-minutes 30 again: the test targets compiled once, the test step within 120 s'
+summary: 'D146 condition: 14.7 min on 0.59.0, 33.7-42.6 on 0.60.0; measured cause compile at opt-level 1/2 repeated per cargo selection (conform tasks 3.75 to 15.4 min of compile, suites under 2 s, clippy unchanged); D1 a compile once; check.yml:26 back to 30'
 tags:
 - sdc
 relations:
@@ -25,7 +25,7 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: crates/loom-xtask/src/test_step.rs
-revision: 15
+revision: 17
 ---
 ## Outcome
 
@@ -176,10 +176,14 @@ binary is added.
    this story and the `main` run after its merge, `loom / task check` ends `success` in at most
    25 minutes, read from `gh run view <id> --json jobs`.
 3. **The test step.** Those runs' logs hold `wall time <n> s of 120 s` with n ≤ 120 and the
-   `slowest 10 test(s):` block. The step's JUnit report holds the tests of
+   `slowest 10 test(s):` block. The job log holds nextest's per-test `PASS [ <seconds>s]` lines
+   (the form the 0.60.0 log shows with colour codes removed, for example `PASS [   0.005s] ( 222/4073)
+   b10x-loom-bindings::bindings_document a_budget_member_below_one_is_refused`) for the tests of
    `b10x-loom-conformance::conform`, `b10x-loom-commission-conformance::conform` and
-   `b10x-loom-intake-conformance::conform`, each binary's tests summing to at most 5 s (measured
-   today: 0.58-0.67 s, 0.08-0.10 s, 0.08 s), and none of `ess_gate`. A test over 60 s still fails
+   `b10x-loom-intake-conformance::conform`, each binary's lines summing to at most 5 s (measured
+   today as each binary's `finished in`: 0.58-0.67 s, 0.08-0.10 s, 0.08 s), and no line of an
+   `ess_gate` binary. The JUnit report (`target/nextest/default/junit.xml`, `test_step.rs:335`) is
+   not uploaded by CI and is not read here. A test over 60 s still fails
    the step (`a_test_over_60_s_fails_the_step_and_the_slowest_are_printed`, `test_step.rs:880`,
    unchanged).
 4. **One build of the test targets.** The `task check` log of those runs holds no `task:` line
@@ -196,7 +200,7 @@ minutes (Acceptance 2), under its 30-minute limit.
 - D2 b: the `ess_gate` binaries in the test step before synthesis is cached.
 - The `rust-toolchain.toml` pin and the runner's cargo variables in the local gate
   (`story:local-gate-equals-forge`); a toolchain move (`story:rust-1-100-toolchain`).
-- The macOS build's re-run and its limit (`story:macos-build-reruns-once-when-cancelled`).
+- The macOS build's re-run (`story:macos-build-reruns-once-when-cancelled`) and its limit.
 - Change the ruleset, the required check names or the runner size.
 - Raise any timeout, add shards, or move a test to the slow lane to fit the budget.
 - Lower the test step's bounds (120 s, 60 s) or its thread count.
@@ -211,7 +215,7 @@ Derived 2026-11-23 from the source at `49499053` and runs `45045080562`, `450477
 - `Taskfile.yml` (`:20-45`, `:68-71`, `:80-90`, `:170-185`), `Taskfile.commission.yml` (`:38-51`)
   — cited.
 - `.config/nextest.toml` (`:7`) — cited. `.cargo/config.toml` — read (D1 b only), cited.
-- `crates/loom-xtask/src/test_step.rs` (`:38`, `:40`, `:880`) — cited.
+- `crates/loom-xtask/src/test_step.rs` (`:38`, `:40`, `:335`, `:880`) — cited.
 - `crates/loom-commission/tests/ess_gate.rs` (`:138-150`, `:246-251`, `:276`) — read, not changed,
   cited.
 - `AGENTS.md` (`:284-320`, `:459-469`), `CHANGELOG.md` — cited.
