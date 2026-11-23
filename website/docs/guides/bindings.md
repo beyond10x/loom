@@ -406,9 +406,14 @@ The port is a Commission effect port: it performs the actions bound to `program`
   the program printed, and the refusal ends the run (`EffectRefused`). One in `not_called` records
   nothing and the step is performed. The run's observation holds `class` (`error` or
   `not_called`), and neither class counts against `budget.max_runs`. A run killed at its timeout
-  reads `timeout`, whatever the lists hold. Each step starts the bound program once, so what
-  bounds repeated not-called runs is the loop that drives the port, its step budget and idle
-  bound.
+  reads `timeout`, whatever the lists hold. Each step starts the bound program once. Under
+  `tree run` a writer whose run was not called leaves the due set, as a refused step does, until
+  the case is evaluated again for a reason other than its own moves (a refused line or one that
+  names no move and records nothing is no other reason): `tree run` starts it once per
+  evaluation and goes on to the next useful action or the handoff check. Any other change ends
+  the set-aside, so a not-called writer that moves an artifact and a writer of evidence on that
+  artifact alternate, each one's line ending the other's wait, and only the driving loop's step
+  budget bounds them (`max_steps`; in a suite cycle, its 60 s wall bound).
 - A program a signal ended never answers through its tables. Under Substrate such a run reports
   exit 128 plus the signal (137 for SIGKILL, as an out-of-memory or cgroup kill ends it), so a
   run that ends with an exit from 129 to 192 (`SIGNAL_EXITS`) and was not killed at its timeout

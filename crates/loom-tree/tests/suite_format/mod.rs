@@ -1534,3 +1534,58 @@ fn write_declares_only_its_members() {
     assert!(decode_suite(&named).is_ok(), "{named}");
     assert!(started.elapsed() < BOUND);
 }
+
+/// `story:writer-not-called-leaves-the-due-set` test 6 (Runbook's item b): a suite cycle over the
+/// `nudge@1` tree of `not_called` (open, a run that waits) starts its not-called writer once, and a
+/// `count` check over the root's `ActionFinished` lines of `work.do` reads 1. The cycle's `tree
+/// run` has no step bound, so a writer that stayed due would run until the cycle's wall bound.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_suite_cycle_starts_a_not_called_writer_once_per_revision() {
+    use super::not_called::{NOT_CALLED, bindings, protocol, write_seed};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("suite-not-called-{}-{nanos}", std::process::id()));
+    let suite_dir = dir.join("suite");
+    let protocols = dir.join("protocols");
+    fs::create_dir_all(&protocols).unwrap();
+    fs::write(protocols.join("nudge.yaml"), protocol(false)).unwrap();
+    write_seed(&suite_dir);
+    fs::write(
+        suite_dir.join("nudge.bindings.yaml"),
+        bindings(NOT_CALLED, false),
+    )
+    .unwrap();
+    let suite = "format: loom.tree-suite/1\ndefaults:\n  protocol: nudge@1\n  bindings: nudge.bindings.yaml\n  seed: [{from: stubs, to: stubs}, {from: work.txt, to: work.txt}, {from: notes.txt, to: notes.txt}]\ncycles:\n  - name: not-called-once\n    steps: [{do: open}, {do: run, exit: 3}]\n    expect:\n      checks:\n        - {check: count, name: work-do-once, select: [{log: {case: \".\", event: [ActionFinished]}}, {where: {action: work.do}}], is: 1}\n";
+    fs::write(suite_dir.join("nudge.suite.yaml"), suite).unwrap();
+    let runner = b10x_loom_tree::EngineRunner::open(&b10x_loom_tree::EngineConfinement {
+        adapter: b10x_loom_tree::ConfinementAdapter::Local,
+        local_reason: Some(b10x_loom_tree::UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    let report = b10x_loom_tree::suite::run_suite(
+        &suite_dir.join("nudge.suite.yaml"),
+        &b10x_loom_tree::suite::SuiteSettings::new(
+            protocols,
+            dir.join("scratch"),
+            TreeTime::At(AT.to_owned()),
+            std::sync::Arc::new(runner),
+            Some("local".to_owned()),
+        ),
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(report.cycles.len(), 1, "{report:?}");
+    let cycle = &report.cycles[0];
+    assert!(
+        cycle.run && !cycle.pending && cycle.as_expected,
+        "{}: {cycle:?}",
+        cycle.name
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

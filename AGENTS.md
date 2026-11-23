@@ -1633,8 +1633,16 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   the step `ProgramError` with `ends_run`; one in `exits.not_called` records nothing and is
   performed; `ProgramRun.class` names either, `runs` skips both, and a timeout is in neither. A
   code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
-  `check`. Each step starts the bound program once; repeated not-called runs are bounded by the
-  driving loop's step budget and idle bound. Held by `crates/loom-bindings/tests/program_contract.rs`.
+  `check`. Each step starts the bound program once. A writer whose run was not called leaves the
+  due set, as a refused step does, until the case is evaluated again for a reason other than its
+  own moves (`story:writer-not-called-leaves-the-due-set`, `set_aside` in `run.rs`, "accounted"
+  being `history::accounted`; a refused line or one that names no move and records nothing is no
+  other reason): `tree run` starts it once per evaluation and goes on to the next useful action
+  or the handoff check, and its `action finished` line, `max_runs` and the replay are unchanged.
+  Any other change ends the set-aside, so a not-called writer that moves an artifact and a writer
+  of evidence on that artifact alternate, each one's line ending the other's wait, and only the
+  driving loop's step budget bounds them (`max_steps`; in a suite cycle, its 60 s wall bound).
+  Held by `crates/loom-bindings/tests/program_contract.rs` and `crates/loom-tree/tests/not_called/`.
 - A signalled run (`story:bound-program-signal-exit-is-refused`, `program.rs`): Substrate reports
   a child a signal ended as exit 128 plus the signal (137 for SIGKILL). A run with an exit in
   `SIGNAL_EXITS` (129..=192, `handoff.rs`) that did not time out records nothing, writes the

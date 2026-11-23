@@ -32,6 +32,15 @@ pub(crate) fn cancelled(finished: &ActionFinished) -> bool {
         .is_some_and(|refusal| refusal.starts_with(CANCELLED_PREFIX))
 }
 
+/// Whether the moves of an interval account for the revision of the `evaluated` line that closes
+/// it: the interval opened at an `evaluated` line at `opened` (`None` before the first), and that
+/// revision raised by one per move its lines name (`moves`) is `revision`. The history dates its
+/// lines by it, and `tree run` reads it for a not-called writer's own moves
+/// (`story:writer-not-called-leaves-the-due-set`), so the two keep one meaning.
+pub(crate) fn accounted(opened: Option<i64>, moves: i64, revision: i64) -> bool {
+    opened.is_some_and(|opened| opened.saturating_add(moves) == revision)
+}
+
 /// The history of one case.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LogHistory {
@@ -141,9 +150,7 @@ impl Interval {
 
     /// Counts each step as performed, the interval closing at `revision`.
     fn close(self, revision: i64, performed: &mut BTreeSet<(String, i64)>) {
-        let accounted = self
-            .opened
-            .is_some_and(|opened| opened.saturating_add(self.moves) == revision);
+        let accounted = accounted(self.opened, self.moves, revision);
         for step in self.steps {
             if let Some((taken, left)) = step.dated {
                 performed.insert((step.action.clone(), taken));
