@@ -39,7 +39,7 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 26
+revision: 27
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T02:43:09Z", actor: "agent:sdc", revision: 25, executor: "agent:loom", correlation: "runbook-rework-allowance-2026-11-23"}
 - {from: "proposed", to: "active", at: "2026-11-23T02:43:10Z", actor: "agent:sdc", revision: 26, executor: "agent:loom", correlation: "runbook-rework-allowance-2026-11-23"}
@@ -198,11 +198,15 @@ twice between two rejections; a third run without a new rejection is refused `Ru
 - **The rework count.** The intervals between this action's counted runs (before the first,
   between two, after the last) that hold at least one rejection, placed or not (D9, D2 a).
   A placed rejection lies in the interval its observation's position gives. An unplaced one
-  lies in the interval its receipt order gives among the records of the action's runs (the
-  records citing a counted run's `PROGRAM_SOURCE` observation, in `governor.evidence(case)`
-  order, "in the order received", `crates/loom-governor/src/lib.rs:1208-1216`). A counted run
-  whose step writes no record anchors nothing, so for unplaced records the intervals on its two
-  sides are one (stated limit: fewer counts, never more).
+  lies no earlier than the interval of the latest observation, in `try_observations` order,
+  cited by it or by a record received before it in `governor.evidence(case)` ("in the order
+  received", `crates/loom-governor/src/lib.rs:1208-1216`), and no later than the interval after
+  the last run. Unplaced rejections whose span holds a placed one count with it; the rest count
+  once, at the latest of their earliest intervals (stated limit: fewer counts, never more).
+  A record citing an observation of the action's own person approval (`PERSON_SOURCE`, naming
+  the case and the action) is the action's own record and opens no window (D12, person path).
+  A `retry_when` that lists no result under `runs_per: rejection` is refused with
+  `InvalidBudget` at `budget.runs_per`.
 - **The check**, in `prepare` (`program.rs:783-793`), in this order:
   1. rework count > `rework_limit`: refused `RunsSpent`, detail `"{action} was rejected {k}
      times in case {case}, the latest {evidence_id} by {producer}; its budget.rework_limit is
