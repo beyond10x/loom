@@ -147,7 +147,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `SubstrateWorkersUnserved` refuses more than 16 workers under `substrate`, not more than 1; a refused hold, start again or handshake ends `tree test` with exit 2 (story:suite-runs-cycles-under-one-cgroup-root)
 - `tree test`: the `decide` step and entry and the `requests` source wait for `story:tree-test-decide-and-requests` (story:tree-test-command)
 - `tree run`: a writer that exits a code of its `exits.not_called` is idle, not due, until the case is evaluated again for another reason; before, it was taken again at once until the step or wall bound (story:writer-not-called-leaves-the-due-set)
-- ESS moves from 0.97.3 to 0.97.4 (`requires: ess 0.97.4`, `ess-conformance`, `ess-primitives`, the CLI CI installs); the format is unchanged
+- ESS moves from 0.97.3 to 0.98.0 (`requires: ess 0.98.0`, `ess-conformance`, `ess-primitives`, the CLI CI installs); the format is unchanged
 - `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)
 
 ### Removed

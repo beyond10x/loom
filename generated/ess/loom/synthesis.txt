@@ -1,8 +1,8 @@
 format: loom-ess-synthesis/1
 command: ess verify conform synthesize --path ess --scenarios ess --suite-format 5
 regenerate: task suite-generate
-ess: ess 0.97.4
-inputs: sha256:5a8fbefe22b459a19b25faf4e59ad0d6a3059ceb8bef2623f1880cf7cdbb4dd1
+ess: ess 0.98.0
+inputs: sha256:96c06f02c2606e38bc2655f20bf0b6968e4f17fd333ddccc41995830e99f0373
 exit: 0
 suite: sha256:84fb387f5e5b25080ead212649a24040eb3f560c42460ea7289a21afa52f4e8f
 stdout:
