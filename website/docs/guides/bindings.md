@@ -209,7 +209,12 @@ actions:
 - `tools.allow` lists the tool names an `agent` may be offered. An entry is never empty and holds
   no comma and no white space, because the session executor joins the names with commas.
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
-  `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 3600.
+  `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 14400 on a
+  `program` and from 1 to 3600 on any other executor. A program's `handoff_when` check and an
+  `arguments_from` program run under the binding's `timeout_seconds` but at most 3600 seconds. A
+  program confined by Substrate still gets one hour of CPU time whatever its timeout, so a program
+  that runs longer than an hour must spend most of it waiting. While it runs it holds the tree's
+  store lock for at most its `timeout_seconds` and 30 s more, and the run's cancel ends it.
 - On a `program` or a `person`, `budget.runs_per` says what `max_runs` counts from: `case` (the
   default) counts every run of the case; `rejection` counts the runs since the latest rejection,
   so each rejection gives the action a fresh `max_runs`, and `budget.rework_limit` (a whole
@@ -298,7 +303,10 @@ twice, a tag, a merge key, text nested or expanded past the bounds above, and a 
 empty or holds a comma or white space. Loading against the protocol refuses an action the protocol does not declare, a duplicate
 action, an evidence `kind` outside the action's `may_produce`, a `subject`, `upstream` entry or
 `artifacts` key that is not a declared artifact, a `tools` member, an agent budget member, `inputs`
-or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 3600, an
+or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 14400 on a
+`program` (`14401 is not from 1 to 14400, the range of a program executor`) or outside 1 to 3600
+on any other executor (`3601 is not from 1 to 3600; only a program executor may name up to
+14400`), an
 `artifacts`, `inputs`, `outputs` or `open` `bindings` path that is absolute or leaves the
 workspace, a `retry_when` kind the protocol does not declare, an evidence `from` the executor does
 not take (`MemberNotForExecutor`), a `from: runs` table that lists anything but `spent`
