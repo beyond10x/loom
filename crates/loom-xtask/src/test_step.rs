@@ -1023,7 +1023,10 @@ mod tests {
         );
         let (setups, cases) = setup_scripts_apart(parse_junit(&xml));
         assert_eq!(setups.len(), 1, "{setups:?}");
-        assert_eq!((setups[0].name.as_str(), setups[0].seconds), ("shared-trees", 6.8));
+        assert_eq!(
+            (setups[0].name.as_str(), setups[0].seconds),
+            ("shared-trees", 6.8)
+        );
         assert!(
             cases.iter().all(|case| !case.binary.starts_with("@setup")),
             "{cases:?}"
