@@ -40,7 +40,7 @@ scope:
   path: website/docs/guides/bindings.md
 - confidence: cited
   path: website/docs/reference/.generated.json
-revision: 21
+revision: 22
 ---
 ## Outcome
 
@@ -162,9 +162,12 @@ and opens a window of 0 (`:1221-1224`), so a count that reaches `rework_limit` (
 through a lone unplaced interval stays at the limit and `prepare` allows a run again
 (`:795-822`). That count with a full window is therefore not final, and writing `spent` there
 would end a `given_up` protocol with runs still to come, against D10. With P at the limit and a
-full window, a rejection that opens a new window lies after the runs of the full one, in a new
-interval, and lifts the count above the limit; one that opens none leaves the window full. So
-both branches as stated are final. A full window with P below `rework_limit` and the count not
+full window, a rejection that opens a new window is placed at or after the one the window starts
+at (`:1205-1207`), so it lies after the runs of the full one or between them. In the interval of
+the window's start, before its first run, it leaves the same runs in the window, still full.
+After one or more of them, it lies in an interval no placed rejection holds (none is placed later
+than the window's start), so P and the count rise above the limit. One that opens none leaves the
+window full. So both branches as stated are final. A full window with P below `rework_limit` and the count not
 above it owes nothing (a later rejection opens a new window).
 
 A sibling entry of the same binding may share the `from: runs` entry's kind, subject and producer
@@ -187,7 +190,10 @@ with allowance still to come". With "spent for good" D10 holds:
   refused naming `budget.max_runs`, stops `Stuck` with no record) is unchanged: owes nothing;
 - D12's stated limit (a `retry_when` only the action's own run writes, rework count 0) is
   unchanged: never spent for good;
-- the first run at `rework_count == rework_limit`, cancelled or recording nothing:
+- the first run at `rework_count == rework_limit`, cancelled or recording nothing, with P at the
+  limit (no lone unplaced interval in the count; with one, P is one below the limit and the
+  bullet on a count carried **to** the limit below applies: nothing is owed, for example limit 2,
+  `max_runs: 2`: `run`, `reject`, `run`, an unplaced rejection counted alone, a recordless run):
   - when it filled its window (`window >= max_runs` after it, as with `max_runs: 1`), the allowance
     is spent for good and the record is written before the next step;
   - with runs left in its window, the action runs again as today, and none of those later runs
@@ -377,11 +383,14 @@ program exits 3:
 13. `the_spent_record_is_written_once_per_case`: with `max_steps: Some(5)` and the outcome removed
     from the protocol (so the case does not end): the log holds exactly one `action finished` line
     with `exit: 0` naming a `spent` record and the case one `spent` record.
-14. `no_handoff_check_runs_for_the_spent_record`: as test 11, `work.do` also has a `handoff_when`
-    check (a POSIX sh stub) that appends one line to a file `checks` and exits 1, so it hands the
-    proposal on and the writer runs in that step (exit 0 would take no step and stop
-    `AwaitingPerson`, `AGENTS.md:1803-1804`, `run.rs:343-345`). The run ends `Terminal`
-    `given_up`; `checks` holds exactly one line, and the log exactly one `handoff checked` line,
+14. `no_handoff_check_runs_for_the_spent_record`: as test 11, `work.do` also carries a `handoff`
+    text (required beside `handoff_when`, `crates/loom-bindings/src/decode.rs:332-338`) and
+    `handoff_when: [sh, check.sh, <marks>]`, with `<marks>` a directory of the test's scratch
+    outside the workspace, which the check sees read-only (as the `Halt` fixture's `marks`,
+    `crates/loom-tree/tests/main.rs:309-312`). `check.sh` (POSIX sh) appends one line to
+    `<marks>/checks` and exits 1, so it hands the proposal on and the writer runs in that step
+    (exit 0 would take no step and stop `AwaitingPerson`, `AGENTS.md:1803-1804`,
+    `run.rs:343-345`). The run ends `Terminal` `given_up`; `<marks>/checks` holds exactly one line, and the log exactly one `handoff checked` line,
     before the refused run's line: the check ran for the run and not for the spent record. Failing
     first: `Stuck` (no record); a design that offered the writer for the write would make it two.
 15. `a_refused_run_below_the_allowance_stays_set_aside` (guard): `max_runs: 3`, a first run refused
@@ -418,7 +427,8 @@ Derived 2026-11-23 from the source at `49499053`. **Cited**: read at the line na
   rejection counts on its own (`:1213-1220`, so P can be read; the counts it gives are unchanged);
   `src/lib.rs` exports the function (inferred). Read, not changed: `:347-473`, `:786-822`,
   `:1199-1224`.
-- `crates/loom-bindings/src/load.rs` (`:138-199`, `:371-405`) — read, not changed.
+- `crates/loom-bindings/src/load.rs` (`:138-199`, `:371-405`), `src/decode.rs` (`:332-338`),
+  `crates/loom-tree/tests/main.rs` (`:309-312`) — read, not changed.
 - `crates/loom-tree/src/run.rs` — changed: the step loop `:304-315` (the call and the line) and
   `not_called` `:1103-1116` (D6 a); one unit test in `mod tests` (`:1952`). Read, not changed:
   `:286-312`, `:343-345`, `:877-899`, `:955-969`, `:1018`, `:1041-1101`, `:1124-1164`,
