@@ -996,7 +996,9 @@ types:
   # that does not pass `tree verify`), `ScriptUnused` (a scripted decision not optional and never
   # used), `RoundsSpent`, `OperandNotOne`, `BlobChanged`, `PathOutsideCycle` (also a link at
   # any component of a `write` step's `to`), `SelectionTooLarge`, `SeedUnusable`, `StepFailed` (a
-  # step's command could not run).
+  # step's command could not run), `CycleTimedOut` (the cycle ran past `--cycle-timeout`: its
+  # running program was killed or its next step not started; the check is the step, the kind its
+  # kind, and found the seconds the cycle ran).
   - name: loom.tree.DifferenceReason
     kind: enum
     variants:
@@ -1014,6 +1016,7 @@ types:
       - SelectionTooLarge
       - SeedUnusable
       - StepFailed
+      - CycleTimedOut
 
   # The first difference of a cycle: the check it names (its name, else its place, as
   # `expect.checks[<i>]`), its kind (a check kind, or `exit`, `outcome`, `stop`, `refusal`,

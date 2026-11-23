@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest a55f7e2f8174e246d1ab7c71a2ef66292381add233272e035ec5d203c65c45a8
+// contract digest 01f648b6c88be9460461ca295a475d44ebcfd2106de10e8830d837e927b0c7a7
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Tree — `loom.tree`.
@@ -410,6 +410,8 @@ pub enum DifferenceReason {
     SeedUnusable,
     /// `StepFailed`.
     StepFailed,
+    /// `CycleTimedOut`.
+    CycleTimedOut,
 }
 
 /// DocSource — `loom.tree.DocSource`.

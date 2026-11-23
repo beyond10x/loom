@@ -1,0 +1,7 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: tour@1
+  bindings: bindings/tour.bindings.yaml
+cycles:
+  - name: flies
+    steps: [{do: open}, {do: fly}]

@@ -311,8 +311,15 @@ read once, as tree open --protocols reads them. Each step runs through the funct
 command in this process; no b10x-loom process is started. A cycle that uses a step kind, source \
 or member that waits for a later story is pending and not run; one whose `when` fails is not run. \
 One line is printed per cycle in suite order, as soon as it and every cycle before it ended, then \
-the two summary lines; a found value that is not a number, a boolean or a name Loom declares is \
-printed as its length and digest.
+the two summary lines and `slowest: <name> (<s> s), ...`, up to ten cycles that ran, slowest \
+first; a found value that is not a number, a boolean or a name Loom declares is printed as its \
+length and digest.
+
+--cycle-timeout SECONDS (1 to 60, default 60) bounds each cycle from its start: past it, its \
+running program is killed and the cycle ends CycleTimedOut, naming its step; the other cycles go \
+on. 0 or above 60 is refused before the suite is read. --list prints one line per cycle, `<name>`, \
+`<name>: pending` or `<name>: pending, waits for story:<id> (<kind>)`, reads the suite alone and \
+runs nothing; --protocols, --scratch and --at are not needed with it.
 
 --workers N runs up to N cycles at once, each in its own <scratch>/<n>/, n its position in the \
 suite; under --confinement local nothing is confined, so a program can read the other cycles' \
@@ -322,10 +329,15 @@ names with commas); a name that is no cycle of the suite is refused CycleUnknown
 the first summary line reads `cycles: selected <S> of <C>, <N> expected, ...`.
 
 Exit status:
-  0  every cycle that ran and is not pending ended as expected
+  0  every cycle that ran and is not pending ended as expected; with --list, the suite was listed
   1  a cycle that ran and is not pending did not, or the report could not be written
-  2  refused before any cycle: the command line, the suite, an --only name (CycleUnknown), --workers \
-above 1 under substrate (SubstrateWorkersUnserved), the protocols, a seed or the scratch directory";
+  2  refused before any cycle: the command line, --cycle-timeout outside 1 to 60, the suite, an \
+--only name (CycleUnknown), --workers above 1 under substrate (SubstrateWorkersUnserved), the \
+protocols, a seed or the scratch directory";
+
+/// The default and the largest `tree test --cycle-timeout`, in seconds: a cycle may not outlive the
+/// 60 s bound of one test, from which a `run` step's wall time derives.
+pub const TREE_TEST_CYCLE_TIMEOUT: u64 = b10x_loom_tree::suite::CYCLE_WALL_SECONDS;
 
 /// The exit status of `tree test` when a cycle did not end as expected.
 pub const TREE_TEST_FAILED: u8 = 1;
@@ -346,15 +358,25 @@ pub struct TreeTestArgs {
     /// directory.
     #[arg(long, value_name = "FILE")]
     pub suite: PathBuf,
-    /// The directory whose `.yaml` files are the protocols of every cycle's tree.
-    #[arg(long, value_name = "DIR")]
-    pub protocols: PathBuf,
-    /// The directory the cycles work in: absent or empty.
-    #[arg(long, value_name = "DIR")]
-    pub scratch: PathBuf,
-    /// The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ`.
-    #[arg(long, value_name = "INSTANT")]
-    pub at: String,
+    /// The directory whose `.yaml` files are the protocols of every cycle's tree; not read with
+    /// --list.
+    #[arg(long, value_name = "DIR", required_unless_present = "list")]
+    pub protocols: Option<PathBuf>,
+    /// The directory the cycles work in: absent or empty; not used with --list.
+    #[arg(long, value_name = "DIR", required_unless_present = "list")]
+    pub scratch: Option<PathBuf>,
+    /// The instant a step's `at` counts its minutes from, `YYYY-MM-DDTHH:MM:SSZ`; not read with
+    /// --list.
+    #[arg(long, value_name = "INSTANT", required_unless_present = "list")]
+    pub at: Option<String>,
+    /// Print one line per cycle of the suite and run nothing: `<name>`, `<name>: pending`, or
+    /// `<name>: pending, waits for story:<id> (<kind>)`. Reads the suite alone; --only applies.
+    #[arg(long)]
+    pub list: bool,
+    /// How long a cycle may run, 1 to 60 seconds: past it, its running program is killed and
+    /// the cycle ends CycleTimedOut. Any other value is refused before the suite is read.
+    #[arg(long, value_name = "SECONDS", default_value_t = TREE_TEST_CYCLE_TIMEOUT)]
+    pub cycle_timeout: u64,
     /// The confinement every bound program starts under. `substrate` needs a delegated cgroup
     /// root, which `tree test` does not take yet: it is refused before any cycle; pass `local`.
     #[arg(long, value_enum, default_value = "substrate")]

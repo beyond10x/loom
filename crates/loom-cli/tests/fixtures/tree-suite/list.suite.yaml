@@ -1,0 +1,13 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: tour@1
+  bindings: bindings/tour.bindings.yaml
+  steps: [{do: open}]
+cycles:
+  - name: a
+  - name: b
+    pending: true
+  - name: c
+    steps: [{do: open}, {do: decide}]
+  - name: d
+  - name: e

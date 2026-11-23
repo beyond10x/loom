@@ -16,7 +16,10 @@
 //!   `SuiteSettings::workers` at once (one by default), each step through the function of its
 //!   `tree` command in process, and answers a [`SuiteReport`](loom::tree::SuiteReport) in suite
 //!   order; a [`SuiteObserver`] is given each cycle's result in suite order, on the caller's
-//!   thread.
+//!   thread. A cycle that runs past `SuiteSettings::cycle_timeout` has its running program killed
+//!   and ends `CycleTimedOut`; [`slowest_line`] names the slowest cycles that ran.
+//! - [`list_suite`] gives the line `tree test --list` prints per selected cycle; it reads the
+//!   suite and nothing else.
 //! - A `write` step runs no tree command: it copies a regular file of the suite's directory, at
 //!   most [`MAX_WRITE_BYTES`] and reached through no link, to a path of plain names in the cycle's
 //!   workspace (never its store), through a new file renamed over it, so it never follows a link
@@ -40,8 +43,9 @@ pub use decode::{
     decode_suite, read_suite,
 };
 pub use run::{
-    CYCLE_WALL_SECONDS, MAX_WRITE_BYTES, SUBSTRATE_WORKERS_UNSERVED, SUITE_PRINCIPAL,
-    SUITE_ROOT_CASE, SuiteObserver, SuiteSettings, cycle_line, not_run_result, report_json,
-    run_suite, summarize, summary_lines, waiting_result, when_holds, workers_served,
+    CYCLE_WALL_SECONDS, MAX_WRITE_BYTES, SLOWEST_CYCLES, SUBSTRATE_WORKERS_UNSERVED,
+    SUITE_PRINCIPAL, SUITE_ROOT_CASE, SuiteObserver, SuiteSettings, cycle_line, list_suite,
+    not_run_result, report_json, run_suite, slowest_line, summarize, summary_lines, waiting_result,
+    when_holds, workers_served,
 };
 pub use select::{CycleView, MAX_GLOB_PATHS, MAX_SELECTED_FILE_BYTES, Selected, select};

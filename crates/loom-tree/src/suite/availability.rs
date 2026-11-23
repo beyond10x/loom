@@ -53,7 +53,7 @@ use Availability::{Available, Waits};
 use KindUse::{Entry, Event, Member, Source, Step};
 
 const STOP_AND_LABELS: &str = "story:tree-stop-record-and-labels";
-const TEST_COMMAND: &str = "story:tree-test-command";
+const DECIDE_AND_REQUESTS: &str = "story:tree-test-decide-and-requests";
 const CALLS: &str = "story:agent-node-run-records";
 const ENGINE: &str = "story:engine-configuration-document";
 const AGENTS: &str = "story:engine-agents-section";
@@ -74,10 +74,10 @@ pub const SUITE_AVAILABILITY: &[AvailabilityEntry] = &[
     entry(Step, "allow", Waits(STOP_AND_LABELS)),
     entry(Step, "reopen", Available),
     entry(Step, "replay", Available),
-    entry(Step, "decide", Waits(TEST_COMMAND)),
+    entry(Step, "decide", Waits(DECIDE_AND_REQUESTS)),
     entry(Entry, "approve", Available),
     entry(Entry, "close", Available),
-    entry(Entry, "decide", Waits(TEST_COMMAND)),
+    entry(Entry, "decide", Waits(DECIDE_AND_REQUESTS)),
     entry(Member, "approve.result", Available),
     entry(Member, "approve.reasons", Available),
     entry(Member, "approve.deny", Available),
@@ -92,7 +92,7 @@ pub const SUITE_AVAILABILITY: &[AvailabilityEntry] = &[
     entry(Source, "files", Available),
     entry(Source, "step", Available),
     entry(Source, "suite", Available),
-    entry(Source, "requests", Waits(TEST_COMMAND)),
+    entry(Source, "requests", Waits(DECIDE_AND_REQUESTS)),
     entry(Source, "calls", Waits(CALLS)),
     entry(Event, "CaseOpened", Available),
     entry(Event, "Evaluated", Available),
