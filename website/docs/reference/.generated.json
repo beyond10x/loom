@@ -1,7 +1,7 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.97.4",
-  "inputs": "sha256:8cbd2bbf3d11a77d05848e75588385726e4cfc06c2179b1b2351073fa7bfdae7",
+  "inputs": "sha256:491e46b98f4b92e8879957943d2f48396f3d19f125acf4615757401b6fc4e7c7",
   "input_files": {
     "Cargo.lock": "sha256:ec8b67abdda237b283c9aec51717cd9fc23ef1d18bfcedd0f802cad5db89a495",
     "Cargo.toml": "sha256:602044cf1aff1425a8a991896b004ccb84e82a2dd4a08909de11f6083d2879df",
@@ -21,7 +21,7 @@
     "crates/loom-cli/src/plugin.rs": "sha256:913422eed1cc4672e6065988a74023739f4cd3da8edf45d58d16414ed70e6418",
     "crates/loom-cli/src/regular_file.rs": "sha256:33cc8cb93deb9c47e923ebf6aaf3cd402b91a759063842f548ccc93ee263888a",
     "crates/loom-cli/src/stage.rs": "sha256:c3f6a72f994105e457ae67eba1adc3649e4651af4eb8aa5192e6d4fa6b05ae31",
-    "crates/loom-cli/src/tree.rs": "sha256:96c650a4d2579d74507d28d505396f13049e6afb7eb2d95fb3281c9484a553a5",
+    "crates/loom-cli/src/tree.rs": "sha256:d0267aa9fe094da1ca0bfd9b6409e3497ae08df0caa949d8b7e5263524d7fde1",
     "crates/loom-cli/tests/adv_agent_check.rs": "sha256:93e2c917553db0bc58d821bcee60bd87b2585fe5aaa6e4fc1a42b9fcf0003002",
     "crates/loom-cli/tests/adv_cmdv_u5_prepare_dirs.rs": "sha256:f3abba477617266813e8382aa6de5037f9394f72d06b1570bbcdf7f8d1ad95db",
     "crates/loom-cli/tests/adv_stage.rs": "sha256:6547c7b845ed592d8acbc57157cbfb2a423309f987726e150178a187d2170e6c",

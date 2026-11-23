@@ -1,10 +1,10 @@
 format: loom-ess-synthesis/1
 command: ess verify conform synthesize --path ess --scenarios ess --suite-format 5
 regenerate: task suite-generate
-ess: ess 0.96.0
-inputs: sha256:10efba61c05c61f28e13cb55177e78785834c469146650f031072a6d98756900
+ess: ess 0.97.4
+inputs: sha256:5a8fbefe22b459a19b25faf4e59ad0d6a3059ceb8bef2623f1880cf7cdbb4dd1
 exit: 0
-suite: sha256:99ed35b5c732ccf6b0a09e14b1693ed97dc551aeec9d208ee09e6eee77ab89c1
+suite: sha256:84fb387f5e5b25080ead212649a24040eb3f560c42460ea7289a21afa52f4e8f
 stdout:
 refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/already-recorded`
   no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`
@@ -57,4 +57,4 @@ refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: transition loom.decision.Decisio
 refused[ESS-SYNTH-004]: refusal[ESS-SYNTH-004]: transition loom.decision.DecisionRequest/supersede has no scenario `loom.decision.DecisionRequest/transition/supersede/by/loom.decision.Supersede/superseded`
   it needs an instance of `loom.decision.DecisionRequest` resting in `Escalated`, and the route runs through `loom.decision.Escalate/escalated`, which no input reaches
   help: the route to this state runs through a branch no input reaches; see that outcome's own refusal
-360 selected scenario(s), 110 authored source(s), 17 refusal occurrence(s), 17 covered by authored
+369 selected scenario(s), 110 authored source(s), 17 refusal occurrence(s), 17 covered by authored
