@@ -383,7 +383,8 @@ into the crate's existing integration-test files, the modules of `tests/main.rs`
   - F24: `a_program_without_a_timeout_reads_the_default` (`program_contract.rs:701`) is green.
   - F27: `a_step_refused_result_not_in_table_still_writes_its_moves` (added) is green.
   - `AGENTS.md`'s section on bindings holds one sentence per rule saying ESS cannot state it.
-  - The unit report holds the issue text for beyond10x/ess. It is filed through `host-operator`.
+  - The unit report holds the issue text for beyond10x/ess. It is filed through the operator
+    session of `~/.claude/CLAUDE.md` § Host operator.
 - **A32.** `bindings.md:186` holds the rewritten sentence. The test
   `a_retry_when_result_that_is_empty_is_refused_and_an_empty_list_loads` (loom-bindings) is green.
 - **A33.** `i:confinement/local-without-reason`: `local` with no reason, and `local` with only white
