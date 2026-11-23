@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:rework-allowance-after-a-rejection
 kind: story
-status: draft
+status: active
 title: 'A rejection gives a bound action a fresh max_runs allowance (budget.runs_per: rejection), budget.rework_limit bounds the rejections, and RunsSpent names the bound that ended it'
 summary: Runbook rework-fresh-allowance; a rejection is any case record its retry_when lists, whatever its principal (person, decider:<kind>, rule:<name>, a check), of a kind and result budget.rework_on lists (else retry_when; a listed failed check outside rework_on makes the action due and counts inside the window), never the action's own run; one rejection per interval between runs; window placed by the cited observation; rework_limit default 2; spent once, on the first run at a rework count equal to rework_limit, never on a full window alone; unplaced records count by the same one-per-interval rule; runs_per case unchanged; ESS RunsScope {Case, Rejection} owned here, run-caps-per-arrival adds Arrival; no new run-log kind
 tags:
@@ -39,7 +39,10 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 24
+revision: 26
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T02:43:09Z", actor: "agent:sdc", revision: 25, executor: "agent:loom", correlation: "runbook-rework-allowance-2026-11-23"}
+- {from: "proposed", to: "active", at: "2026-11-23T02:43:10Z", actor: "agent:sdc", revision: 26, executor: "agent:loom", correlation: "runbook-rework-allowance-2026-11-23"}
 ---
 ## Outcome
 
