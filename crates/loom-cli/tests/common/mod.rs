@@ -2,3 +2,4 @@
 //! module, and `tests/tree_run.rs` reaches the same files through `#[path]`.
 
 pub mod delegated_cgroup;
+pub mod delegation_probe;

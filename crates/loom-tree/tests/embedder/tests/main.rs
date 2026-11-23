@@ -7,9 +7,9 @@
 //! Each test starts `embedder` (`src/main.rs`) as child processes. The delegated root comes from
 //! the CLI's fixture `crates/loom-cli/tests/fixtures/tree-delegated/`: `scope.sh` holds a scope of
 //! `systemd-run --user --scope -p Delegate=yes` and prints its directory, and `enter.sh` moves an
-//! `embedder` into a leaf of it. A test that needs bubblewrap and a user systemd manager that
-//! starts a delegated scope prints `skipped: missing prerequisite: …` without them, unless
-//! `LOOM_REQUIRE_DELEGATION` is set: then it fails. The stubs are POSIX sh. Scratch is under
+//! `embedder` into a leaf of it. A test that needs a delegated scope asks `loom-xtask
+//! delegation-probe`'s probe and decision (`delegation_probe`) and prints `skipped: missing
+//! prerequisite: …` where it says no, unless `LOOM_REQUIRE_DELEGATION` is set: then it fails. The stubs are POSIX sh. Scratch is under
 //! `CARGO_TARGET_TMPDIR`; no test reaches the network or a model, and each ends within 60 s.
 
 use std::fs;
@@ -19,6 +19,11 @@ use std::process::{Child, ChildStdout, Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use b10x_loom_tree::UNCONFINED_FLAG_REASON;
+
+/// The one probe of what the delegated tests need and its decision, shared with the CLI's tests
+/// and `loom-xtask delegation-probe`; std only, so this package's dependencies stay as they are.
+#[path = "../../../../loom-cli/tests/common/delegation_probe.rs"]
+mod delegation_probe;
 
 const EMBEDDER: &str = env!("CARGO_BIN_EXE_embedder");
 
@@ -235,19 +240,38 @@ fn missing(what: &str) -> bool {
     false
 }
 
-/// Whether bubblewrap is here and a delegated scope starts.
+/// The decision the guard applies to what the probe saw: `loom-xtask delegation-probe`'s own
+/// ([`delegation_probe::decide`]); `Err` names what is missing.
+fn decision(record: &delegation_probe::Record) -> Result<(), String> {
+    delegation_probe::decide(record)
+}
+
+/// The guard decides as `loom-xtask delegation-probe` does: no on the facts of the runner of CI
+/// run 45194449550, where a scope started and the tests failed, yes in a pool job.
+#[test]
+fn the_guard_decides_as_the_probe_on_recorded_facts() {
+    use delegation_probe::{Record, UNSERVED, decide, pool_job, runner_of_pr_166};
+    let runner = runner_of_pr_166();
+    let why = decision(&runner).expect_err("the delegated tests cannot run on the runner");
+    assert_eq!(Err(why), decide(&runner));
+    let entered = Record {
+        enter: Some(Ok(())),
+        ..runner
+    };
+    let why = decision(&entered).expect_err("Substrate serves no limits");
+    assert!(why.contains(UNSERVED), "{why}");
+    assert_eq!(decision(&pool_job()), Ok(()));
+}
+
+/// Whether the delegated tests can run here, as `loom-xtask delegation-probe` decides it
+/// ([`delegation_probe`]), probing from this test process with the example the workspace's test
+/// build made.
 fn delegation_present() -> bool {
-    if !Path::new("/usr/bin/bwrap").is_file() {
-        return missing("executable /usr/bin/bwrap");
-    }
-    match Command::new("systemd-run").args(SCOPE).arg("true").output() {
-        Ok(output) if output.status.success() => true,
-        Ok(output) => missing(&format!(
-            "a user systemd manager that starts a delegated scope (systemd-run {}: {})",
-            output.status,
-            stderr(&output).trim()
-        )),
-        Err(error) => missing(&format!("systemd-run ({error})")),
+    let record =
+        delegation_probe::probe_from_test(Path::new(DELEGATED), &std::env::current_exe().unwrap());
+    match decision(&record) {
+        Ok(()) => true,
+        Err(what) => missing(&what),
     }
 }
 

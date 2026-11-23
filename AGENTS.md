@@ -343,9 +343,14 @@ Before a change is reported done, in this order:
    holding a scope of `systemd-run --user --scope -p Delegate=yes`; `enter.sh`, started by the
    probing process, moving a process into a child of that scope; and the example
    `delegation_probe` of `b10x-loom-intake-slice`, in a delegated scope of its own, opening
-   Substrate's driver with every family Loom needs (`crates/loom-xtask/src/delegation.rs`). A
-   scope that only starts is not enough: CI run 45194449550's runner started one, could not move a
-   process into it and got no `limits` from Substrate, and so does a plain login session here.
+   Substrate's driver with every family Loom needs. A scope that only starts is not enough: CI run
+   45194449550's runner started one, could not move a process into it and got no `limits` from
+   Substrate, and so does a plain login session here. The probe and its decision are one std-only
+   file, `crates/loom-cli/tests/common/delegation_probe.rs`: `loom-xtask` reaches it through
+   `#[path]` and builds the example first; the guards of the CLI's delegated tests
+   (`common/delegated_cgroup.rs`, `tree_run/handoff_when.rs`) and of the embedder fixture run the
+   same probe from the test process with the example the workspace's test build made, and skip
+   naming the first missing prerequisite where it says no.
    `task consumer-check` copies the root `Cargo.lock` to `consumers/pinned/` and builds and tests
    that crate offline into its own `consumers/pinned/target/`; it is outside the workspace, so
    `cargo test --workspace` does not reach it. Beside it, job `loom / macos build` (`macos-15`) builds
