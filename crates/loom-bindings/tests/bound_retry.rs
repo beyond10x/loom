@@ -67,19 +67,28 @@ evidence_kinds:
   draft_check: {}
   draft_lint: {}
   draft_written: {}
+  draft_spent: {}
+  conformance_run: {}
+  code_review: {}
+  merge_approval: {}
 actions:
   draft.check:
     effect: read
     may_produce:
       - evidence: draft_check
+      - evidence: conformance_run
+      - evidence: code_review
   draft.lint:
     effect: read
     may_produce:
       - evidence: draft_lint
+      - evidence: merge_approval
   draft.write:
     effect: write
     may_produce:
       - evidence: draft_written
+      - evidence: draft_check
+      - evidence: draft_spent
 ";
 
 /// The protocol of the case of another protocol: the same artifacts and check.
@@ -206,6 +215,17 @@ fn open(governor: &CanonGovernor<MemoryCaseStore>, case: &str, registration: &st
 /// The document binding [`CHECK`] to `check`, [`LINT`] to [`LINT_STUB`] and [`WRITE`] to
 /// `write` with the writer `members` (each line indented four spaces), decoded and checked.
 fn document(check_program: &str, write: &str, members: &str) -> BindingsDocument {
+    document_with(check_program, write, members, "")
+}
+
+/// [`document`], the writer's evidence list ending with the lines `entries` (each indented six
+/// spaces).
+fn document_with(
+    check_program: &str,
+    write: &str,
+    members: &str,
+    entries: &str,
+) -> BindingsDocument {
     let argv = |program: &str| serde_json::to_string(&[program]).unwrap();
     let text = format!(
         "format: loom.bindings/1\nprotocol: {REGISTRATION}\nartifacts:\n  brief: docs/brief\n  draft: docs/draft\nactions:\n\
@@ -214,7 +234,7 @@ fn document(check_program: &str, write: &str, members: &str) -> BindingsDocument
          \x20 - action: {LINT}\n    executor: {{kind: program, argv: {lint}}}\n    evidence:\n\
          \x20     - {{kind: draft_lint, subject: draft, producer: linter, from: exit, results: {{\"0\": valid, \"*\": invalid}}, upstream: []}}\n\
          \x20 - action: {WRITE}\n    executor: {{kind: program, argv: {write}}}\n{members}    evidence:\n\
-         \x20     - {{kind: draft_written, subject: draft, producer: writer, from: exit, results: {{\"*\": written}}, upstream: [brief]}}\n",
+         \x20     - {{kind: draft_written, subject: draft, producer: writer, from: exit, results: {{\"*\": written}}, upstream: [brief]}}\n{entries}",
         check = argv(check_program),
         lint = argv(LINT_STUB),
         write = argv(write),
@@ -633,17 +653,20 @@ fn hold(
         (kind, revision, result),
         "test/held",
         Value::Null,
+        "checker",
     )
 }
 
-/// [`hold`], the record citing an observation of `source` whose payload is `payload`.
+/// [`hold`], the record by `producer`, citing an observation of `source` whose payload is
+/// `payload`, received after every observation before it.
 fn hold_citing(
     governor: &CanonGovernor<MemoryCaseStore>,
     case: &str,
     n: u64,
-    (kind, revision, result): (&str, &str, &str),
+    record: (&str, &str, &str),
     source: &str,
     payload: Value,
+    producer: &str,
 ) -> String {
     let observation = ObservationId(uuid(next()));
     ObservationPort::observe(
@@ -657,6 +680,19 @@ fn hold_citing(
         }),
     )
     .unwrap();
+    hold_on(governor, case, n, record, vec![observation], producer)
+}
+
+/// Holds in `case` a record numbered `n` of `kind` about `draft` at `revision` with `result`, by
+/// `producer`, citing the observations `cited`; answers its evidence id.
+fn hold_on(
+    governor: &CanonGovernor<MemoryCaseStore>,
+    case: &str,
+    n: u64,
+    (kind, revision, result): (&str, &str, &str),
+    cited: Vec<ObservationId>,
+    producer: &str,
+) -> String {
     let id = Uuid(format!("00000000-0000-4000-9000-{n:012x}"));
     let facts = serde_json::json!({
         "format": "canon-evidence/1",
@@ -669,14 +705,14 @@ fn hold_citing(
     });
     submit_evidence(
         governor,
-        "checker",
+        producer,
         EvidenceData {
             evidence_id: EvidenceId(id.clone()),
             case_id: CaseId(case.to_owned()),
             kind: kind.to_owned(),
             subject_revision: 0,
-            producer: "checker".to_owned(),
-            observation_ids: vec![observation],
+            producer: producer.to_owned(),
+            observation_ids: cited,
             facts: json::parse(&facts.to_string()).unwrap(),
             provenance: Value::Null,
         },
@@ -1041,8 +1077,24 @@ fn a_record_citing_no_bound_program_run_of_its_case_names_no_action_and_no_exit(
     };
     let listed = ("draft_check", DRAFT_REVISION, "invalid");
     // An observation of another source shaped as a run, and a run of another case.
-    hold_citing(&governor, CASE, 1, listed, "test/held", forged(CASE));
-    hold_citing(&governor, CASE, 2, listed, PROGRAM_SOURCE, forged("case-2"));
+    hold_citing(
+        &governor,
+        CASE,
+        1,
+        listed,
+        "test/held",
+        forged(CASE),
+        "checker",
+    );
+    hold_citing(
+        &governor,
+        CASE,
+        2,
+        listed,
+        PROGRAM_SOURCE,
+        forged("case-2"),
+        "checker",
+    );
     let records = retries(&governor, writer(&document));
     assert_eq!(records.len(), 2, "{records:#?}");
     for record in records {
@@ -1714,4 +1766,382 @@ fn a_handoff_check_a_signal_ended_as_substrate_reports_it_is_a_refusal() {
             "{code}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A fresh allowance after a rejection (story rework-allowance-after-a-rejection)
+
+/// The writer's members: sent back by an `invalid` `draft_check`, with `budget` (flow YAML).
+fn reworked(budget: &str) -> String {
+    format!("    retry_when: {{draft_check: [invalid]}}\n    budget: {budget}\n")
+}
+
+/// The writer's `from: runs` entry: `draft_spent: spent` on the run that spends its allowance.
+const SPENT_ENTRY: &str = "      - {kind: draft_spent, subject: draft, producer: loom, from: runs, results: {spent: spent}}\n";
+
+/// One case of the fixture driven by a recording runner, its writer bound with the given members.
+struct Rework {
+    scratch: Scratch,
+    governor: CanonGovernor<MemoryCaseStore>,
+    document: BindingsDocument,
+    runner: Arc<Recording>,
+}
+
+impl Rework {
+    fn new(members: &str) -> Self {
+        Self::with(members, "")
+    }
+
+    /// The writer's evidence also ends with `entries`.
+    fn with(members: &str, entries: &str) -> Self {
+        Self {
+            scratch: Scratch::new(),
+            governor: governor(),
+            document: document_with(CHECK_STUB, WRITE_STUB, members, entries),
+            runner: Arc::new(Recording::new()),
+        }
+    }
+
+    /// The same case driven under another document from now on.
+    fn rebound(&mut self, members: &str) {
+        self.document = document_with(CHECK_STUB, WRITE_STUB, members, "");
+    }
+
+    fn drive(&self, action: &str) -> LoopEnd {
+        let effects = port(
+            &self.governor,
+            &self.document,
+            &self.scratch,
+            Arc::clone(&self.runner) as Arc<dyn TestRunner>,
+        );
+        drive(&self.governor, &effects, action, "{}")
+    }
+
+    /// A step of the writer that performs.
+    fn run(&self) {
+        assert_performed(&self.drive(WRITE));
+    }
+
+    /// A step of the writer that is refused: the refusal's text.
+    fn refused(&self) -> String {
+        refusal(&self.drive(WRITE))
+    }
+
+    /// The revision the case holds for `draft`.
+    fn draft(&self) -> String {
+        self.governor.revisions(&CaseId(CASE.to_owned())).unwrap()["draft"].clone()
+    }
+
+    /// A record of `kind` with `result` about `draft` at `revision`, by `producer`, citing an
+    /// observation that names this case (`placed`) or another case.
+    fn hold(
+        &self,
+        (kind, revision, result): (&str, &str, &str),
+        producer: &str,
+        placed: bool,
+    ) -> String {
+        let named = if placed { CASE } else { "case-2" };
+        hold_citing(
+            &self.governor,
+            CASE,
+            next(),
+            (kind, revision, result),
+            "test/held",
+            args(&format!(r#"{{"case": "{named}"}}"#)),
+            producer,
+        )
+    }
+
+    /// A rejection by `producer`: an `invalid` `draft_check` about the current `draft`, placed.
+    fn reject_by(&self, producer: &str) -> String {
+        let draft = self.draft();
+        self.hold(("draft_check", &draft, "invalid"), producer, true)
+    }
+
+    fn reject(&self) -> String {
+        self.reject_by("checker")
+    }
+
+    /// The records of `kind` the case holds.
+    fn records(&self, kind: &str) -> usize {
+        self.governor
+            .evidence(&CaseId(CASE.to_owned()))
+            .unwrap()
+            .iter()
+            .filter(|held| held.kind == kind)
+            .count()
+    }
+}
+
+/// The refusal of a writer whose window is full: `runs` runs since the rejection `by` (evidence
+/// id, producer), or since the case's start.
+fn max_runs_text(runs: i64, by: Option<(&str, &str)>, max: i64) -> String {
+    let since = by.map_or_else(String::new, |(id, producer)| {
+        format!(" since the rejection {id} by {producer}")
+    });
+    format!(
+        "RunsSpent: action {WRITE}: {WRITE} has run {runs} times in case {CASE}{since}, its budget.max_runs is {max}"
+    )
+}
+
+/// The refusal of a writer rejected `k` times, the latest `id` by `producer`.
+fn rework_limit_text(k: i64, id: &str, producer: &str, limit: i64) -> String {
+    format!(
+        "RunsSpent: action {WRITE}: {WRITE} was rejected {k} times in case {CASE}, the latest {id} by {producer}; its budget.rework_limit is {limit}"
+    )
+}
+
+#[test]
+fn max_runs_spent_between_rejections_names_max_runs() {
+    for producer in ["checker", "decider:x", "rule:y"] {
+        let case = Rework::new(&reworked("{max_runs: 2, runs_per: rejection}"));
+        case.run();
+        case.run();
+        let rejection = case.reject_by(producer);
+        case.run();
+        case.run();
+        assert_eq!(
+            case.refused(),
+            max_runs_text(2, Some((&rejection, producer)), 2),
+            "{producer}"
+        );
+        assert_eq!(case.runner.children_of(WRITE_STUB).len(), 4, "{producer}");
+    }
+}
+
+#[test]
+fn the_rework_limit_ends_the_allowance() {
+    let case = Rework::new(&reworked("{max_runs: 1, runs_per: rejection}"));
+    case.run();
+    case.reject();
+    case.run();
+    case.reject();
+    case.run();
+    let third = case.reject();
+    assert_eq!(case.refused(), rework_limit_text(3, &third, "checker", 2));
+    assert_eq!(case.runner.children_of(WRITE_STUB).len(), 3);
+}
+
+#[test]
+fn two_rejections_between_two_runs_count_once() {
+    let case = Rework::new(&reworked("{max_runs: 1, runs_per: rejection}"));
+    case.run();
+    case.reject();
+    case.reject();
+    // Rework count 1: the two records lie between the same two runs.
+    case.run();
+    case.reject();
+    // Rework count 2, the default rework_limit.
+    case.run();
+    let last = case.reject();
+    assert_eq!(case.refused(), rework_limit_text(3, &last, "checker", 2));
+}
+
+#[test]
+fn records_that_open_no_window() {
+    let one = reworked("{max_runs: 1, runs_per: rejection}");
+    // A result retry_when does not list, and a kind it does not list.
+    for (kind, result) in [("draft_check", "valid"), ("draft_lint", "invalid")] {
+        let case = Rework::new(&one);
+        case.run();
+        let draft = case.draft();
+        case.hold((kind, &draft, result), "checker", true);
+        assert_eq!(case.refused(), max_runs_text(1, None, 1), "{kind}: {result}");
+    }
+    // Listed records citing an observation of another case: no window, one interval.
+    let case = Rework::new(&one);
+    case.run();
+    for n in 1..=3 {
+        let draft = case.draft();
+        case.hold(("draft_check", &draft, "invalid"), "checker", false);
+        assert_eq!(case.refused(), max_runs_text(1, None, 1), "after record {n}");
+    }
+    // A listed record of the writer's own run.
+    let case = Rework::with(
+        &one,
+        "      - {kind: draft_check, subject: draft, producer: writer, from: exit, results: {\"*\": invalid}}\n",
+    );
+    case.run();
+    assert_eq!(case.records("draft_check"), 1);
+    assert_eq!(retries(&case.governor, writer(&case.document)).len(), 1);
+    assert_eq!(case.refused(), max_runs_text(1, None, 1));
+    // A listed record about an earlier revision of draft, and one about none: each opens a window.
+    for revision in [DRAFT_REVISION, "none"] {
+        let case = Rework::new(&one);
+        case.run();
+        assert_ne!(case.draft(), DRAFT_REVISION, "the run moved draft");
+        case.hold(("draft_check", revision, "invalid"), "checker", true);
+        case.run();
+    }
+}
+
+#[test]
+fn runs_per_case_counts_as_before() {
+    for budget in ["{max_runs: 2}", "{max_runs: 2, runs_per: case}"] {
+        let case = Rework::new(&reworked(budget));
+        case.run();
+        case.run();
+        case.reject();
+        assert_eq!(
+            case.refused(),
+            format!(
+                "RunsSpent: action draft.write: draft.write has run 2 times in case {CASE}, its budget.max_runs is 2"
+            ),
+            "{budget}"
+        );
+    }
+}
+
+#[test]
+fn an_older_store_counts_its_rejections() {
+    let mut case = Rework::new(&reworked("{max_runs: 8}"));
+    case.run();
+    case.reject();
+    case.run();
+    let second = case.reject();
+    case.run();
+    case.rebound(&reworked(
+        "{max_runs: 2, runs_per: rejection, rework_limit: 3}",
+    ));
+    // The window opened at the second record: one run in it so far, and two rejections.
+    case.run();
+    assert_eq!(
+        case.refused(),
+        max_runs_text(2, Some((&second, "checker")), 2)
+    );
+    case.reject();
+    case.run();
+    let fourth = case.reject();
+    assert_eq!(case.refused(), rework_limit_text(4, &fourth, "checker", 3));
+}
+
+#[test]
+fn spent_is_written_when_the_rework_limit_is_reached() {
+    let case = Rework::with(
+        &reworked("{max_runs: 2, runs_per: rejection, rework_limit: 1}"),
+        SPENT_ENTRY,
+    );
+    case.run();
+    case.run();
+    // The window is full and the rework count 0: no spent record.
+    assert_eq!(case.records("draft_spent"), 0);
+    assert_eq!(case.refused(), max_runs_text(2, None, 2));
+    assert_eq!(case.records("draft_spent"), 0);
+    case.reject();
+    case.run();
+    assert_eq!(case.records("draft_spent"), 1);
+    let second = case.reject();
+    assert_eq!(case.refused(), rework_limit_text(2, &second, "checker", 1));
+    assert_eq!(case.records("draft_spent"), 1);
+}
+
+#[test]
+fn unplaced_records_between_two_runs_count_once() {
+    let case = Rework::with(&reworked("{max_runs: 2, runs_per: rejection}"), SPENT_ENTRY);
+    case.run();
+    case.reject();
+    case.run();
+    let draft = case.draft();
+    case.hold(("draft_check", &draft, "invalid"), "checker", false);
+    case.hold(("draft_check", &draft, "invalid"), "checker", false);
+    assert_eq!(case.records("draft_spent"), 0);
+    // Rework count 2, the default rework_limit, and one run in the window.
+    case.run();
+    assert_eq!(case.records("draft_spent"), 1);
+}
+
+#[test]
+fn spent_is_written_once_per_rework_count() {
+    let case = Rework::with(
+        &reworked("{max_runs: 3, runs_per: rejection, rework_limit: 1}"),
+        SPENT_ENTRY,
+    );
+    case.run();
+    assert_eq!(case.records("draft_spent"), 0);
+    let rejection = case.reject();
+    case.run();
+    assert_eq!(case.records("draft_spent"), 1);
+    case.run();
+    case.run();
+    assert_eq!(case.records("draft_spent"), 1);
+    assert_eq!(
+        case.refused(),
+        max_runs_text(3, Some((&rejection, "checker")), 3)
+    );
+}
+
+/// Runbook's `change.implement` members on the fixture's writer: `draft_check` stands for its own
+/// `implementation_change`.
+fn runbook_members(rework_on: bool) -> String {
+    let on = if rework_on {
+        ", rework_on: {code_review: [rejected], merge_approval: [rejected]}"
+    } else {
+        ""
+    };
+    format!(
+        "    retry_when: {{draft_check: [invalid], conformance_run: [failed], code_review: [rejected], merge_approval: [rejected]}}\n    budget: {{max_runs: 3, runs_per: rejection, rework_limit: 3{on}}}\n"
+    )
+}
+
+#[test]
+fn rework_on_tells_a_failed_check_from_a_rejection() {
+    let case = Rework::new(&runbook_members(true));
+    case.run();
+    let draft = case.draft();
+    case.hold(("conformance_run", &draft, "failed"), "ess", true);
+    // The failed check makes the writer due, as before.
+    assert_eq!(retries(&case.governor, writer(&case.document)).len(), 1);
+    case.run();
+    let draft = case.draft();
+    case.hold(("conformance_run", &draft, "failed"), "ess", true);
+    case.run();
+    assert_eq!(case.refused(), max_runs_text(3, None, 3));
+    // A program check's rejection, citing the run of draft.check in the case.
+    assert_performed(&case.drive(CHECK));
+    let check_run = case
+        .governor
+        .try_observations()
+        .unwrap()
+        .into_iter()
+        .filter(|observation| {
+            observation.source == PROGRAM_SOURCE
+                && plain(&observation.payload)["action"] == serde_json::json!(CHECK)
+        })
+        .last()
+        .expect("the check's run")
+        .observation_id;
+    let draft = case.draft();
+    hold_on(
+        &case.governor,
+        CASE,
+        next(),
+        ("code_review", &draft, "rejected"),
+        vec![check_run],
+        "checker",
+    );
+    case.run();
+    // A decider's rejection, citing a person's observation of the case, as an approval writes it.
+    let draft = case.draft();
+    hold_citing(
+        &case.governor,
+        CASE,
+        next(),
+        ("merge_approval", &draft, "rejected"),
+        b10x_loom_bindings::PERSON_SOURCE,
+        args(&format!(
+            r#"{{"case": "{CASE}", "action": "{LINT}", "principal": "decider:x"}}"#
+        )),
+        "decider:x",
+    );
+    case.run();
+    // Without rework_on every retry_when pair is a rejection: the failed checks open windows.
+    let case = Rework::new(&runbook_members(false));
+    case.run();
+    let draft = case.draft();
+    case.hold(("conformance_run", &draft, "failed"), "ess", true);
+    case.run();
+    let draft = case.draft();
+    case.hold(("conformance_run", &draft, "failed"), "ess", true);
+    case.run();
+    case.run();
 }

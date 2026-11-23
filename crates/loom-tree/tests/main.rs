@@ -5,6 +5,7 @@
 
 mod cancel_sec;
 mod replay;
+mod rework;
 mod runs_spent;
 mod suite_format;
 mod take_over;

@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 01f648b6c88be9460461ca295a475d44ebcfd2106de10e8830d837e927b0c7a7
+// contract digest b1059a76e03d9c610f8ec466fc4753d09ac15c538c99fdd88c3e19cd41529600
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -19,6 +19,12 @@ pub struct ActionBudget {
     pub max_tokens: Option<i64>,
     /// `max_budget_micro_usd` — `Optional<Integer>`.
     pub max_budget_micro_usd: Option<i64>,
+    /// `runs_per` — `Optional<loom.bindings.RunsScope>`.
+    pub runs_per: Option<RunsScope>,
+    /// `rework_limit` — `Optional<Integer>`.
+    pub rework_limit: Option<i64>,
+    /// `rework_on` — `Optional<List<loom.bindings.RetryCondition>>`.
+    pub rework_on: Option<Vec<RetryCondition>>,
 }
 
 /// ArtifactPath — `loom.bindings.ArtifactPath`.
@@ -588,6 +594,15 @@ pub enum RevisionRefusalReason {
     ChangedWhileRead,
     /// `Unreadable`.
     Unreadable,
+}
+
+/// RunsScope — `loom.bindings.RunsScope`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunsScope {
+    /// `Case`.
+    Case,
+    /// `Rejection`.
+    Rejection,
 }
 
 /// StepOutcome — `loom.bindings.StepOutcome`: one of a closed set of names.

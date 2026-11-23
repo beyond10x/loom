@@ -834,6 +834,9 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
         max_turns: None,
         max_tokens: None,
         max_budget_micro_usd: None,
+        runs_per: None,
+        rework_limit: None,
+        rework_on: None,
     };
     let Some(value) = value else {
         return Ok(budget);
