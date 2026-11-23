@@ -689,9 +689,9 @@ fn test(arguments: &TreeTestArgs) -> u8 {
     }
     if arguments.list {
         let lines = resolved(&arguments.suite)
-            .map_err(&tree_refused)
+            .map_err(tree_refused)
             .and_then(|suite| {
-                list_suite(&suite, &arguments.only, SUITE_AVAILABILITY).map_err(&suite_refused)
+                list_suite(&suite, &arguments.only, SUITE_AVAILABILITY).map_err(suite_refused)
             });
         return match lines {
             Ok(lines) => {
