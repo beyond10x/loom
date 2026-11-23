@@ -293,40 +293,11 @@ fn the_check_gets_path_and_loom_variables_only() {
     assert!(retried > 0, "no writer step was a retry: {lines:#?}");
 }
 
-/// Whether bubblewrap is here and a delegated scope of the user's manager starts; without them
-/// the test skips, or fails when `LOOM_REQUIRE_DELEGATION` is set.
+/// Whether the delegated tests can run here, as `loom-xtask delegation-probe` decides it
+/// (`crate::common::delegated_cgroup::delegation_present`); where not, the test skips, or fails
+/// when `LOOM_REQUIRE_DELEGATION` is set.
 fn delegation() -> bool {
-    let missing = |what: String| {
-        assert!(
-            std::env::var_os("LOOM_REQUIRE_DELEGATION").is_none(),
-            "LOOM_REQUIRE_DELEGATION is set and a prerequisite is missing: {what}"
-        );
-        eprintln!("skipped: missing prerequisite: {what}");
-        false
-    };
-    if !Path::new("/usr/bin/bwrap").is_file() {
-        return missing("executable /usr/bin/bwrap".to_owned());
-    }
-    match Command::new("systemd-run")
-        .args([
-            "--user",
-            "--scope",
-            "--quiet",
-            "-p",
-            "Delegate=yes",
-            "--",
-            "true",
-        ])
-        .output()
-    {
-        Ok(output) if output.status.success() => true,
-        Ok(output) => missing(format!(
-            "a user systemd manager that starts a delegated scope ({}: {})",
-            output.status,
-            stderr(&output).trim()
-        )),
-        Err(error) => missing(format!("systemd-run ({error})")),
-    }
+    crate::common::delegated_cgroup::delegation_present()
 }
 
 #[test]

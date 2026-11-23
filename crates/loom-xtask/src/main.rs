@@ -57,6 +57,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+mod delegation;
 mod docs_stamp;
 mod durable_check;
 #[path = "../../loom-executor/tests/support/ess_suite.rs"]
@@ -153,6 +154,13 @@ enum Command {
     /// after a build of another scope without `LOOM_TEST_SCOPE`, its `cargo test` may build again
     /// and replace the `b10x-loom` the tests start; the key then names that scope.
     SharedTrees,
+    /// Whether the tests that need a delegated user scope can run here, so the test step and CI
+    /// set `LOOM_REQUIRE_DELEGATION=1`: bubblewrap, a scope of `systemd-run --user --scope -p
+    /// Delegate=yes` this process may move a process into, and Substrate's driver serving every
+    /// family Loom needs in such a scope (it builds the example `delegation_probe` of
+    /// `b10x-loom-intake-slice`). Exits 0 when they can, 1 naming the first missing prerequisite,
+    /// 2 when the probe cannot run.
+    DelegationProbe,
     /// Write `deploy/crd/loomagents.loom.beyond10x.dev.yaml`, the `LoomAgent`
     /// `CustomResourceDefinition` projected from `ess generate --kind schema` of `ess/` by
     /// `b10x_loom_resource::crd::manifest`.
@@ -260,11 +268,41 @@ struct Scratch {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Command::DelegationProbe = cli.command {
+        return delegation_probe(cli.root);
+    }
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
             eprintln!("{message}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// `delegation-probe`: 0 when the delegated tests can run here, 1 naming the first missing
+/// prerequisite, 2 when the probe cannot run.
+fn delegation_probe(root: Option<PathBuf>) -> ExitCode {
+    let probed = match root {
+        Some(root) => Ok(root),
+        None => find_root(),
+    }
+    .and_then(|root| delegation::probe(&root));
+    match probed.map(|record| delegation::decide(&record)) {
+        Ok(Ok(())) => {
+            println!(
+                "delegation probe passed: bubblewrap, a delegated scope a process may enter, and \
+                 Substrate's driver serving every family Loom needs"
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(Err(missing)) => {
+            println!("delegation probe failed: {missing}");
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("delegation probe could not run: {error}");
+            ExitCode::from(2)
         }
     }
 }
@@ -335,6 +373,9 @@ fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::TestStep { packages } => test_step::run(&root, &packages),
+        Command::DelegationProbe => {
+            delegation::probe(&root).and_then(|record| delegation::decide(&record))
+        }
         Command::SharedTrees => {
             let scope =
                 shared_trees::scope_of(std::env::var_os(shared_trees::SCOPE_VARIABLE).as_deref());

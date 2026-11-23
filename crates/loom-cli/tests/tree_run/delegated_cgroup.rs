@@ -171,6 +171,24 @@ fn refused_before_any_step(tree: &Tree, output: &Output, named: &[&str]) {
     assert!(!started(tree).exists(), "a step started: {said}");
 }
 
+/// The guard of these tests decides as `loom-xtask delegation-probe` does: no on the facts of the
+/// runner of CI run 45194449550, where a scope started and the tests failed, yes in a pool job.
+#[test]
+fn the_guard_decides_as_the_probe_on_recorded_facts() {
+    use crate::common::delegated_cgroup::decision;
+    use crate::common::delegation_probe::{Record, UNSERVED, decide, pool_job, runner_of_pr_166};
+    let runner = runner_of_pr_166();
+    let why = decision(&runner).expect_err("the delegated tests cannot run on the runner");
+    assert_eq!(Err(why), decide(&runner));
+    let entered = Record {
+        enter: Some(Ok(())),
+        ..runner
+    };
+    let why = decision(&entered).expect_err("Substrate serves no limits");
+    assert!(why.contains(UNSERVED), "{why}");
+    assert_eq!(decision(&pool_job()), Ok(()));
+}
+
 #[test]
 fn two_tree_runs_never_share_a_cgroup_root() {
     if !delegation_present() {

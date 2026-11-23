@@ -2,8 +2,9 @@
 //! test holds while it moves processes into children of it. The fixtures are
 //! `fixtures/tree-delegated/`: `scope.sh`, which holds a delegated scope of `systemd-run --user
 //! --scope -p Delegate=yes`, and `enter.sh`, which moves a process into a child of it. A test that
-//! needs bubblewrap and a user systemd manager that starts a delegated scope prints `skipped:
-//! missing prerequisite: …` without them, unless `LOOM_REQUIRE_DELEGATION` is set: then it fails.
+//! needs a delegated scope asks `loom-xtask delegation-probe`'s probe and decision
+//! (`delegation_probe.rs`) and prints `skipped: missing prerequisite: …` where it says no, unless
+//! `LOOM_REQUIRE_DELEGATION` is set: then it fails.
 
 use std::io::{BufRead as _, BufReader};
 use std::path::{Path, PathBuf};
@@ -32,19 +33,23 @@ pub fn missing(what: &str) -> bool {
     false
 }
 
-/// Whether bubblewrap is here and a delegated scope starts.
+/// The decision the guard applies to what the probe saw: `loom-xtask delegation-probe`'s own
+/// ([`super::delegation_probe::decide`]); `Err` names what is missing.
+pub fn decision(record: &super::delegation_probe::Record) -> Result<(), String> {
+    super::delegation_probe::decide(record)
+}
+
+/// Whether the delegated tests can run here, as `loom-xtask delegation-probe` decides it
+/// ([`super::delegation_probe`]), probing from this test process with the example the workspace's
+/// test build made.
 pub fn delegation_present() -> bool {
-    if !Path::new("/usr/bin/bwrap").is_file() {
-        return missing("executable /usr/bin/bwrap");
-    }
-    match Command::new("systemd-run").args(SCOPE).arg("true").output() {
-        Ok(output) if output.status.success() => true,
-        Ok(output) => missing(&format!(
-            "a user systemd manager that starts a delegated scope (systemd-run {}: {})",
-            output.status,
-            stderr(&output).trim()
-        )),
-        Err(error) => missing(&format!("systemd-run ({error})")),
+    let record = super::delegation_probe::probe_from_test(
+        Path::new(DELEGATED),
+        &std::env::current_exe().unwrap(),
+    );
+    match decision(&record) {
+        Ok(()) => true,
+        Err(what) => missing(&what),
     }
 }
 
