@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use b10x_loom_bindings::{
     PROGRAM_SOURCE, ProgramEffects, RETRY_FEEDBACK_VARIABLE, TIMEOUT_VARIABLE, check, decode,
-    resolve_programs,
+    resolve_programs, run_handoff_check,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
@@ -724,6 +724,54 @@ fn an_argument_named_loom_timeout_seconds_does_not_change_the_variable() {
     assert_eq!(children[0].environment().set, environment(ROOT, 7, &[]));
     let stdin: serde_json::Value = serde_json::from_slice(children[0].stdin().unwrap()).unwrap();
     assert_eq!(stdin, serde_json::json!({"LOOM_TIMEOUT_SECONDS": "3600"}));
+}
+
+// ---------------------------------------------------------------------------------------------
+// A timeout above an hour (story:bound-program-timeout-above-an-hour)
+
+#[test]
+fn the_declared_timeout_reaches_the_child() {
+    let children = recorded("    timeout_seconds: 14400\n", "{}", &[]);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].timeout().as_secs(), 14400);
+    assert_eq!(children[0].environment().set, environment(ROOT, 14400, &[]));
+    let children = recorded("", "{}", &[]);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].timeout().as_secs(), 60);
+    assert_eq!(children[0].environment().set, environment(ROOT, 60, &[]));
+}
+
+#[test]
+fn helper_programs_keep_the_hour() {
+    let members = "    timeout_seconds: 14400\n    arguments_from: [/opt/stub/args]\n    handoff: Look at it.\n    handoff_when: [/opt/stub/check]\n";
+    let children = recorded(members, "{}", &[b"{}"]);
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].program(), "/opt/stub/args");
+    assert_eq!(children[0].timeout().as_secs(), 3600);
+    assert_eq!(children[0].environment().set, environment(ROOT, 3600, &[]));
+    assert_eq!(children[1].program(), "/opt/stub/program");
+    assert_eq!(children[1].timeout().as_secs(), 14400);
+
+    let scratch = Scratch::new();
+    let document = document("", &bound(&["/opt/stub/program"], members, VALID_TABLE));
+    let governor = governor();
+    let runner = Recording::new(&[]);
+    let check = run_handoff_check(
+        &governor,
+        &CaseId(ROOT.to_owned()),
+        &document,
+        &document.actions[0],
+        &scratch.workspace,
+        &scratch.store,
+        &(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        None,
+    )
+    .expect("the binding carries a check");
+    assert!(check.refusal.is_none(), "{:?}", check.refusal);
+    let children = runner.children();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].program(), "/opt/stub/check");
+    assert_eq!(children[0].timeout().as_secs(), 3600);
 }
 
 // ---------------------------------------------------------------------------------------------

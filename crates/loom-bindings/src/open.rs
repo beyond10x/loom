@@ -42,7 +42,7 @@ use b10x_loom_commission::model::responsibility::{
 };
 use b10x_loom_commission::ports::effect::{AdmittedRequest, EffectError, EffectPort};
 use b10x_loom_commission::ports::evidence::ObservationPort;
-use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
+use b10x_loom_intake_slice::bindings::admit_bound_program_runner;
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{Cancel, ConfinementError, TestRunner};
 use loom::bindings::{
@@ -644,7 +644,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> OpenEffects<'a, S, T> {
     }
 
     /// The object the `arguments_from` program `argv` of `binding` prints for `requested`, run once
-    /// under the binding's timeout, else 60 s; `Ok(Err)` is the step's refusal.
+    /// under the binding's timeout, else 60 s, at most an hour; `Ok(Err)` is the step's refusal.
     fn printed(
         &self,
         binding: &BoundAction,
@@ -665,7 +665,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> OpenEffects<'a, S, T> {
                 "{action}: {program} was not started: arguments_from[0] names a file beside the bindings file, and the document was not resolved with resolve_programs"
             ))));
         }
-        let seconds = binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
+        let seconds = crate::helper_timeout_seconds(binding);
         let timeout = Duration::from_secs(u64::try_from(seconds).unwrap_or(1));
         if Instant::now().checked_add(timeout).is_none() {
             return Ok(Err(refused(format!(

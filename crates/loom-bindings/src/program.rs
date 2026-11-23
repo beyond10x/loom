@@ -556,6 +556,10 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             return Ok("{}".to_owned());
         };
         let action = binding.action.as_str();
+        // A helper program keeps the hour, whatever the bound program may name.
+        let timeout = timeout.min(Duration::from_secs(
+            crate::MAX_TIMEOUT_SECONDS.unsigned_abs(),
+        ));
         match run_arguments_from(
             argv,
             &commission_text(requested),

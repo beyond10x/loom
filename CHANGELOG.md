@@ -14,6 +14,9 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
+- A `program` binding's `timeout_seconds` may be up to 14400 (`MAX_PROGRAM_TIMEOUT_SECONDS`); other executors keep 3600 (story:bound-program-timeout-above-an-hour)
+- A `handoff_when` check and an `arguments_from` program run under at most 3600 s, whatever the binding's timeout (story:bound-program-timeout-above-an-hour)
+- **Breaking:** the `TimeoutOutOfRange` detail of `check` names the executor's range; text matching the old one fails (story:bound-program-timeout-above-an-hour)
 - The gate compiles the workspace's test targets once: the three conformance suites run inside the test step, and CI's loom / task check is bounded at 30 minutes again (story:ci-job-time-budget)
 
 ## [0.60.0] - 2026-11-23

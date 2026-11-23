@@ -384,9 +384,12 @@ earlier merge of the batch brought in makes it stale again. `task suite-generate
 (2026-11-21, ess 0.96.0). ESS has a fix in flight that cuts the synthesis of a whole domain from
 about 254 s to 70 to 90 s of CPU; it is not released. A unit that merges the integration head
 keeps the integration side of `generated/ess/loom/suite.json` and of its digest file
-`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. The tests that
-read the suite after its digest check (`ess_gate` of `b10x-loom-executor` and `conform` of
-`b10x-loom-conformance`) run in the batch gate only, not in a unit's merge round.
+`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. Two tests read
+the suite after its digest check. `ess_gate` of `b10x-loom-executor` is a step of its own
+(`task ess-gate`) and runs in the batch gate only, not in a unit's merge round. `conform` of
+`b10x-loom-conformance` runs inside the test step (`story:ci-job-time-budget`), so a merge round
+that runs the test step runs it too; there it fails on a digest that an earlier merge's change
+under `ess/` made stale, until the batch gate regenerates the suite.
 
 nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
 not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
@@ -1477,8 +1480,11 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   commas), an `effect` entry whose `results` has a key other than `performed`. `check` refuses an
   action the protocol does not declare, a duplicate, an evidence kind outside `may_produce`, an
   artifact the protocol does not declare, a member that does not belong to the action's executor, a
-  `timeout_seconds` outside 1 to 3600, a path that is absolute or leaves the workspace, and an
-  independence dimension the protocol does not declare. An action with no binding is not an error;
+  `timeout_seconds` outside 1 to 14400 on a `program` (`MAX_PROGRAM_TIMEOUT_SECONDS`) or 1 to 3600
+  on any other executor, a path that is absolute or leaves the workspace, and an
+  independence dimension the protocol does not declare. A `handoff_when` check and an
+  `arguments_from` program run under at most 3600 s (`MAX_TIMEOUT_SECONDS`), and Substrate's CPU
+  bound stays one hour (`story:bound-program-timeout-above-an-hour`). An action with no binding is not an error;
   `unbound` lists them.
 - `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
   returns and expands an alias at each use: `MAX_NESTING` (64, on the decoded values), `MAX_NODES`

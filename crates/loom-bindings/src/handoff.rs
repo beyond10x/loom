@@ -3,7 +3,7 @@
 //!
 //! [`run_handoff_check`] runs it once, as a child [`bound_case_child`] builds, through the runner
 //! every bound program of the run starts through, admitted as theirs is, with the binding's
-//! timeout. Its reach is never more than the writer's: the whole workspace read-only, `target/`
+//! timeout, at most [`crate::MAX_TIMEOUT_SECONDS`]. Its reach is never more than the writer's: the whole workspace read-only, `target/`
 //! included (`ChildCommand::with_read_only_workspace`); `PATH` and the `LOOM_*` variables of
 //! the case alone, never the retry feedback; no aperture, no secret slot, no read-only root but
 //! the program file a runner that is not `local` mounts at its own path; empty standard input.
@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use b10x_loom_commission::model::responsibility::CaseId;
-use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
+use b10x_loom_intake_slice::bindings::admit_bound_program_runner;
 use b10x_loom_intake_slice::confinement::{Cancel, ConfinementRefusal, TestRunner};
 use loom::bindings::{BindingsDocument, BoundAction, Executor, ProgramRefusalReason, ProgramRoot};
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
@@ -125,7 +125,7 @@ pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
             "handoff_when[0] names a file beside the bindings file, and the document was not resolved with resolve_programs",
         );
     }
-    let seconds = binding.timeout_seconds.unwrap_or(DEFAULT_TIMEOUT_SECONDS);
+    let seconds = crate::helper_timeout_seconds(binding);
     let timeout = Duration::from_secs(u64::try_from(seconds).unwrap_or(1));
     let names = match case_names(governor, case) {
         Ok(Ok(names)) => names,
