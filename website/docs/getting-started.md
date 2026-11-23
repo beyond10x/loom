@@ -9,7 +9,7 @@ source: crates/loom-cli, .github/workflows/binaries.yml, crates/loom-sdk/example
 # Getting started
 
 Nothing is on a registry. On Linux x86-64 you can download the `b10x-loom` binary a release
-carries; otherwise you build from the repository at the release tag, `0.59.0`, with a Rust
+carries; otherwise you build from the repository at the release tag, `0.60.0`, with a Rust
 toolchain (edition 2024) and `git`. The SDK example below needs the toolchain either way.
 
 ## Download the command line
@@ -39,14 +39,14 @@ instead: `echo "$SHA256  $f" | sha256sum -c -`.
 ## Build the command line
 
 ```console
-git clone --branch 0.59.0 https://github.com/beyond10x/loom.git
+git clone --branch 0.60.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.59.0
+b10x-loom 0.60.0
 ```
 
 `b10x-loom run --help` lists its flags and exit statuses; the [CLI reference](./reference/cli.md)

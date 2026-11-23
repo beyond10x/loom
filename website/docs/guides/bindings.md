@@ -8,7 +8,7 @@ source: crates/loom-bindings/src/lib.rs, crates/loom-bindings/src/decode.rs, cra
 
 # Bind a protocol's actions
 
-Unreleased. `b10x-loom-bindings` decodes and checks a `loom.bindings/1` document, and its program
+As of 0.60.0, `b10x-loom-bindings` decodes and checks a `loom.bindings/1` document, and its program
 effect port, `ProgramEffects`, performs an action bound to a `program` executor (see
 [Running a program binding](#running-a-program-binding)), and `CopyEffects` performs one bound to
 `copy` (see [Copying a record from another case](#copying-a-record-from-another-case)). Decoding and checking start no process,

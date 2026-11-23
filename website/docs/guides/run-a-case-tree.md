@@ -8,7 +8,7 @@ source: crates/loom-tree/src/lib.rs, crates/loom-tree/src/run.rs, crates/loom-tr
 
 # Run a tree of cases
 
-Unreleased. `b10x-loom tree` keeps a tree of protocol cases in one store directory: `tree open`
+Since 0.60.0, `b10x-loom tree` keeps a tree of protocol cases in one store directory: `tree open`
 opens the root case, `tree run` drives every case of the tree, `tree approve` and `tree close`
 answer what a run waits on, and `tree status` and `tree verify` read the store.
 
