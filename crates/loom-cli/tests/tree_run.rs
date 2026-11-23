@@ -40,6 +40,8 @@ use loom_protocols::{InstallStore, ProtocolCatalog};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 
+#[path = "common/mod.rs"]
+mod common;
 #[path = "tree_run/delegated_cgroup.rs"]
 mod delegated_cgroup;
 #[path = "tree_run/handoff_when.rs"]

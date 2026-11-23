@@ -6,9 +6,9 @@
 //!   run log event kind it does not know, a path written in the suite that is absolute or whose
 //!   `..` leaves its root, a `write` step's `to` with any `.` or `..` component, a regex over 1024 bytes or one the regex syntax refuses, a selection that
 //!   does not start with exactly one source, an `after` or `step` naming no step before it.
-//! - [`select`] reads what a cycle left (`<scratch>/<n>/store` and `work`), the steps' JSON output
-//!   and the suite's own files, and nothing else; [`evaluate_checks`] tests what a selection gives
-//!   against the thirteen check kinds and names the first difference. A check is data: no shell, no
+//! - [`select`] reads what a cycle left (`<scratch>/store/<n>` and `<scratch>/work/<n>`), the steps'
+//!   JSON output and the suite's own files, and nothing else; [`evaluate_checks`] tests what a
+//!   selection gives against the thirteen check kinds and names the first difference. A check is data: no shell, no
 //!   query string, no expression language, no network.
 //! - [`SUITE_AVAILABILITY`] marks each step kind, source, event kind and member as available or as
 //!   waiting for a named story; a cycle that uses one that waits is pending and never run.

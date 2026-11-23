@@ -304,16 +304,29 @@ pub enum TreeCommand {
     Test(TreeTestArgs),
 }
 
-/// What `tree test --help` says about the cycles, the output and the exit status.
-pub const TREE_TEST_HELP: &str = "Cycle n works in <scratch>/<n>/ (store/, work/) and nothing but \
-the --report file is written outside --scratch, which must be absent or empty. The protocols are \
-read once, as tree open --protocols reads them. Each step runs through the function of its tree \
-command in this process; no b10x-loom process is started. A cycle that uses a step kind, source \
-or member that waits for a later story is pending and not run; one whose `when` fails is not run. \
-One line is printed per cycle in suite order, as soon as it and every cycle before it ended, then \
-the two summary lines and `slowest: <name> (<s> s), ...`, up to ten cycles that ran, slowest \
-first; a found value that is not a number, a boolean or a name Loom declares is printed as its \
-length and digest.
+/// The precondition of `tree test`'s default confinement and its remedy, which `tree test --help`
+/// and every confinement refusal of `tree test` state.
+macro_rules! tree_test_confinement_precondition {
+    () => {
+        "the default confinement, substrate, needs Linux, bubblewrap and a delegated cgroup v2: \
+without --cgroup-root, tree test starts itself again in a scope of its own under systemd-run --user \
+--scope -p Delegate=yes; pass tree test --cgroup-root DIR naming an empty, writable, delegated \
+cgroup v2 directory with this process in a child of it, or --confinement local to run every \
+program unconfined"
+    };
+}
+
+/// What `tree test --help` says about the cycles, the confinement, the output and the exit status.
+pub const TREE_TEST_HELP: &str = concat!(
+    "Cycle n works in <scratch>/work/<n>/ and keeps its tree in \
+<scratch>/store/<n>/, n its position in the suite, and nothing but the --report file is written \
+outside --scratch, which must be absent or empty. The protocols are read once, as tree open \
+--protocols reads them. Each step runs through the function of its tree command in this process; \
+no b10x-loom process is started. A cycle that uses a step kind, source or member that waits for a \
+later story is pending and not run; one whose `when` fails is not run. One line is printed per \
+cycle in suite order, as soon as it and every cycle before it ended, then the two summary lines \
+and `slowest: <name> (<s> s), ...`, up to ten cycles that ran, slowest first; a found value that \
+is not a number, a boolean or a name Loom declares is printed as its length and digest.
 
 --cycle-timeout SECONDS (1 to 60, default 60) bounds each cycle from its start: past it, its \
 running program is killed and the cycle ends CycleTimedOut, naming its step; the other cycles go \
@@ -321,19 +334,29 @@ on. 0 or above 60 is refused before the suite is read. --list prints one line pe
 `<name>: pending` or `<name>: pending, waits for story:<id> (<kind>)`, reads the suite alone and \
 runs nothing; --protocols, --scratch and --at are not needed with it.
 
---workers N runs up to N cycles at once, each in its own <scratch>/<n>/, n its position in the \
-suite; under --confinement local nothing is confined, so a program can read the other cycles' \
-workspaces. More than one worker under --confinement substrate is refused \
-SubstrateWorkersUnserved. --only NAME runs the named cycles alone (repeat the flag, or separate \
-names with commas); a name that is no cycle of the suite is refused CycleUnknown, and with --only \
-the first summary line reads `cycles: selected <S> of <C>, <N> expected, ...`.
+--workers N runs up to N cycles at once. Under --confinement local nothing is confined, so a \
+program can read the other cycles' workspaces. Under --confinement substrate every program of \
+every cycle runs confined under the one cgroup root this command holds, the cycles share one \
+Substrate driver, and a program sees no other cycle's workspace or process; more than 16 workers \
+under substrate are refused SubstrateWorkersUnserved. --only NAME runs the named cycles alone \
+(repeat the flag, or separate names with commas); a name that is no cycle of the suite is refused \
+CycleUnknown, and with --only the first summary line reads `cycles: selected <S> of <C>, <N> \
+expected, ...`.
+
+Confinement: ",
+    tree_test_confinement_precondition!(),
+    ". Started again, tree test moves into a leaf of its scope, the scope is its cgroup root, and \
+the first process exits with the status of the one started again. A root is held by one process \
+at a time.
 
 Exit status:
   0  every cycle that ran and is not pending ended as expected; with --list, the suite was listed
   1  a cycle that ran and is not pending did not, or the report could not be written
   2  refused before any cycle: the command line, --cycle-timeout outside 1 to 60, the suite, an \
---only name (CycleUnknown), --workers above 1 under substrate (SubstrateWorkersUnserved), the \
-protocols, a seed or the scratch directory";
+--only name (CycleUnknown), --workers above 16 under substrate (SubstrateWorkersUnserved), the \
+confinement (ConfinementRefused: the cgroup root, the start again or its handshake), the \
+protocols, a seed or the scratch directory"
+);
 
 /// The default and the largest `tree test --cycle-timeout`, in seconds: a cycle may not outlive the
 /// 60 s bound of one test, from which a `run` step's wall time derives.
@@ -345,11 +368,9 @@ pub const TREE_TEST_FAILED: u8 = 1;
 /// The exit status of `tree test` when it was refused before any cycle.
 pub const TREE_TEST_REFUSED: u8 = 2;
 
-/// Why `tree test` refuses its default confinement, and the remedy it accepts: the detail of its
-/// `ConfinementRefused` refusal before any cycle.
-pub const TREE_TEST_CONFINEMENT_PRECONDITION: &str = "CgroupUndelegated: tree test takes no \
-cgroup root yet, so its default confinement, substrate, cannot confine a program; pass \
---confinement local to run every program unconfined";
+/// The precondition of `tree test`'s default confinement and its remedy, which every confinement
+/// refusal of `tree test` ends with.
+pub const TREE_TEST_CONFINEMENT_PRECONDITION: &str = tree_test_confinement_precondition!();
 
 /// The arguments of `b10x-loom tree test`.
 #[derive(Debug, Args)]
@@ -377,11 +398,17 @@ pub struct TreeTestArgs {
     /// the cycle ends CycleTimedOut. Any other value is refused before the suite is read.
     #[arg(long, value_name = "SECONDS", default_value_t = TREE_TEST_CYCLE_TIMEOUT)]
     pub cycle_timeout: u64,
-    /// The confinement every bound program starts under. `substrate` needs a delegated cgroup
-    /// root, which `tree test` does not take yet: it is refused before any cycle; pass `local`.
+    /// The confinement every bound program starts under. `substrate` runs every program of every
+    /// cycle under one delegated cgroup root: `--cgroup-root`, or the scope `tree test` starts
+    /// itself again in.
     #[arg(long, value_enum, default_value = "substrate")]
     pub confinement: TreeConfinement,
-    /// How many cycles run at once, 1 to 64. More than 1 under `--confinement substrate` is
+    /// The delegated cgroup v2 directory every confined program runs under: empty, writable,
+    /// delegated, with this process in a child of it, and held by this run alone. Without it,
+    /// tree test starts itself again in a delegated scope of its own.
+    #[arg(long, value_name = "DIR")]
+    pub cgroup_root: Option<PathBuf>,
+    /// How many cycles run at once, 1 to 64. More than 16 under `--confinement substrate` are
     /// refused SubstrateWorkersUnserved before any cycle.
     #[arg(long, value_name = "N", default_value_t = 1, value_parser = clap::value_parser!(u8).range(1..=64))]
     pub workers: u8,
