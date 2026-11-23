@@ -124,8 +124,25 @@ types:
       - name: allow
         type: List<String>
 
+  # What a Program or Person action counts its `max_runs` from (story
+  # rework-allowance-after-a-rejection). `Case`, the default: the runs of the whole case, each a
+  # `PROGRAM_SOURCE` observation naming the case and the action, but a run in an `exits` class.
+  # `Rejection`: the same runs, those after the latest rejection only; a rejection is a case record
+  # whose kind and result `rework_on` lists (else `retry_when`), at any subject revision, by any
+  # producer, but a record citing the action's own run, placed at the latest observation of the
+  # case it cites. The rejections, at most one in each interval between two runs, are bounded by
+  # `rework_limit`.
+  - name: loom.bindings.RunsScope
+    kind: enum
+    variants: [Case, Rejection]
+
   # How many runs an action gets (`max_runs`, 8 when the document names none) and, for an Agent,
-  # the bounds of one run. Each present member is at least 1.
+  # the bounds of one run. Each present member is at least 1. `runs_per` says what `max_runs`
+  # counts from (absent reads as `Case`); under `Rejection`, `rework_limit` bounds the rejections
+  # the action answers (absent reads as 2) and `rework_on` names the kinds and results that are
+  # rejections (absent: every pair of `retry_when`; each pair also in `retry_when`, never empty).
+  # `rework_limit` and `rework_on` are read only under `Rejection`, and the three belong to a
+  # Program or Person action alone.
   - name: loom.bindings.ActionBudget
     kind: struct
     fields:
@@ -137,6 +154,12 @@ types:
         type: Optional<Integer>
       - name: max_budget_micro_usd
         type: Optional<Integer>
+      - name: runs_per
+        type: Optional<loom.bindings.RunsScope>
+      - name: rework_limit
+        type: Optional<Integer>
+      - name: rework_on
+        type: Optional<List<loom.bindings.RetryCondition>>
 
   # The records about what this action wrote that send it back to work: the evidence `kind` and
   # the results that do.
