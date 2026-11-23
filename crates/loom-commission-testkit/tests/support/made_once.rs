@@ -86,8 +86,13 @@ pub fn cargo_output(root: &Path, args: &[&str]) -> String {
         manifests.extend(found);
     }
     for path in manifests {
-        let bytes = fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy();
+        // An absent file (a tree with no `Cargo.lock`) is part of the key, not a panic: cargo
+        // itself refuses that tree, and its refusal is the output the caller reports.
+        let Ok(bytes) = fs::read(&path) else {
+            stream.extend_from_slice(format!("{relative}\nabsent\n").as_bytes());
+            continue;
+        };
         stream.extend_from_slice(format!("{relative}\n{}\n", bytes.len()).as_bytes());
         stream.extend_from_slice(&bytes);
         stream.push(b'\n');
@@ -103,8 +108,11 @@ pub fn cargo_output(root: &Path, args: &[&str]) -> String {
             .output()
             .map_err(|e| format!("run `cargo {}`: {e}", args.join(" ")))?;
         if !output.status.success() {
+            // `cargo <subcommand>` failed, word for word: the dependency guard's own tests
+            // (`adversary2_executor_guard.rs`) read that the guard failed on `cargo tree`.
             return Err(format!(
-                "`cargo {}` failed:\n{}",
+                "`cargo {}` failed (cargo {}):\n{}",
+                args.first().copied().unwrap_or_default(),
                 args.join(" "),
                 String::from_utf8_lossy(&output.stderr)
             ));
