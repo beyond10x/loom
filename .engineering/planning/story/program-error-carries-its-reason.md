@@ -10,11 +10,14 @@ tags:
 relations:
 - decomposes: epic:protocol-tree-on-bindings
 - serves: vision:O1
+- depends_on: story:wildcard-result-row-does-not-match-timeout
 scope:
 - confidence: inferred
   path: AGENTS.md
 - confidence: inferred
   path: CHANGELOG.md
+- confidence: inferred
+  path: Cargo.lock
 - confidence: cited
   path: crates/loom-bindings/src/program.rs
 - confidence: cited
@@ -39,7 +42,13 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 15
+- confidence: cited
+  path: website/docs/reference/.generated.json
+- confidence: inferred
+  path: website/docs/reference/ess/loom-bindings.md
+- confidence: inferred
+  path: website/docs/reference/ess/loom-tree.md
+revision: 20
 ---
 ## Outcome
 
@@ -138,7 +147,7 @@ Before the code, in `ess/domains/`:
   and bounded, instead of "never the program's output".
 - `tree.yaml`: `loom.tree.StatusRun` (`:228`) gains `reason: Optional<String>`.
 
-Then `task generate` and `task suite-generate` (`SLOT_TIMEOUT: 30m`), never by hand.
+Then `task generate`, `task suite-generate` (`SLOT_TIMEOUT: 30m`) and `task docs-generate`, never by hand.
 
 ## Acceptance
 
@@ -153,27 +162,48 @@ port, a stub with `exits: {error: [79]}`:
    stderr and exits 79: the refusal starts `ProgramError: action`, ends with
    `the last lines of its stderr:\nno such epic: E-12`, and the run's observation has
    `reason: "no such epic: E-12"`. Failing first: the text ends with the blob digest; no `reason`.
-2. `a_program_error_withholds_a_token_line`: stderr `token ghp_abc123` then `failed`: the refusal
-   and `reason` hold `failed` and a withheld note, never `ghp_abc123`. Failing first: no reason.
+2. `a_program_error_withholds_a_token_line`: stderr `token ghp_abc123` then `failed`, exit 79: the
+   refusal and `reason` end with
+   `[a line withheld: it holds a credential's shape]\nfailed` (the session executor's note,
+   `crates/loom-session-executor/src/lib.rs:3001`), and neither holds `ghp_abc123`. Failing first:
+   the text holds no `failed` and no note.
 3. `a_program_error_withholds_a_cut_pem_block`: stderr holds a PEM block of 5000 bytes whose
-   opening is outside the last 4096 bytes, then `failed`: no body line of the block is shown.
-4. `a_long_stderr_is_cut_to_its_last_whole_lines`: 20 000 lines: the tail is at most 4096 bytes
-   and ends with the last line.
-5. `a_program_error_with_no_stderr_has_no_reason`: the text is today's, byte for byte, and
-   `reason` is absent. Guard.
+   `-----BEGIN` line is outside the last 4096 bytes, then `failed`, exit 79: the refusal and
+   `reason` end with a withheld note followed by `failed`, and hold no body line of the block.
+   Failing first: the text holds no `failed` and no note.
+4. `a_long_stderr_is_cut_to_its_last_whole_lines`: 20 000 numbered lines, exit 79: `reason` is at
+   most 4096 bytes, starts at a whole line and ends with the last line. Failing first: no `reason`.
+5. `a_program_error_with_no_stderr_has_no_reason`: exit 79, nothing on stderr: the text is today's,
+   byte for byte, and `reason` is absent. Guard.
+6. `a_run_outside_the_error_class_has_no_reason`: the stub writes `warning: slow` on stderr and
+   exits 0 (table `{"0": valid}`): performed, `valid` recorded, the run's observation has no
+   `reason`. Guard (failing only if `reason` were set on every run).
 
-**`crates/loom-tree/tests/main.rs`**, module `not_called` (`classed_errors_and_unclassed_exits_behave_as_before`,
-`tests/not_called/mod.rs:480-506`, extended): the `action finished` line of `work.do` holds the
-stub's stderr line, and `tree status` (`status`, in process) lists the run with that `reason`.
+**`crates/loom-tree/tests/main.rs`**, module `not_called`: in
+`classed_errors_and_unclassed_exits_behave_as_before` (`tests/not_called/mod.rs:480-507`) the
+error tree opens with a stub of its own instead of `DO` (`:121`, which writes nothing on stderr):
+`mkdir -p target\ntouch target/called\necho 'no such epic: E-12' >&2\nexit 79\n`. The
+`action finished` line of `work.do` then holds `no such epic: E-12` in its `refusal`, and `status`
+(in process) lists `work.do`'s run with `reason: "no such epic: E-12"`. Failing first: neither
+holds it.
 
-**`crates/loom-session-executor`**: its tail tests pass unchanged after the move (D3 a).
+**The walk lives in one place (D3 a).** `rg -n 'fn stderr_tail|fn credential_lines|fn walked|fn walk_lines'
+crates` prints one line per function, all in the moved module under `crates/loom-commission/src`;
+`rg -n 'pub const TOKEN_PREFIXES' crates` prints the moved module and
+`crates/loom-agent/src/lib.rs` only (the agent's copy stays, held equal by
+`crates/loom-agent/tests/token_prefixes.rs`); and the session executor's tail tests
+(`crates/loom-session-executor/src/lib.rs`, among them `a_records_reason_keeps_its_start_within_the_bound`, `:3926-3933`) pass unchanged.
 
 **Gate.** `task check` exits 0; `task slow` passes after the ESS change.
 
 ## Does not do
 
-- Show stdout, or the blob, in any text.
-- Change `ProgramSignalled` (D5 a), `ResultNotInTable` or any other refusal's text.
+- D1 b: a declared `loom-reason:` line. D1 c: an `exits.reason_from` report pointer.
+- D2 b: the reason in the refusal text only, with no typed member.
+- D3 b: `b10x-loom-bindings` depending on `b10x-loom-session-executor`. D3 c: a copy of the walk.
+- D4 b: a 1024-byte bound.
+- D5 b: a stderr tail on `ProgramSignalled`.
+- Show stdout, or the blob, in any text; change `ResultNotInTable` or any other refusal's text.
 - Change the intake slice's own tail (`crates/loom-intake-slice/src/bindings.rs:90`).
 
 ## Scope
@@ -181,22 +211,34 @@ stub's stderr line, and `tree status` (`status`, in process) lists the run with 
 Derived 2026-11-23 from the source at `49499053`. **Cited**: read at the line named.
 **Inferred**: a reading that could be wrong.
 
-- `crates/loom-bindings/src/program.rs` (`:375-378`, `:983-986`, `:1491-1512`, `:1550-1569`) — cited.
+- `crates/loom-bindings/src/program.rs` (`:375-378`, `:1491-1512`, `:1550-1569`; read `:983-986`) — cited.
 - `crates/loom-bindings/tests/program_contract.rs` — cited file.
-- `crates/loom-session-executor/src/lib.rs` (`:142-165`, `:2878-2929`, `:2963`, `:3088`, `:3143`) —
-  cited; the move.
-- `crates/loom-commission/src` — inferred home of the walk (D3 a); `crates/loom-commission/Cargo.toml` — inferred.
+- `crates/loom-session-executor/src/lib.rs` (`:142-165`, `:2878-2929`, `:2963`, `:3001`, `:3088`,
+  `:3143`) — cited; the move.
+- `crates/loom-commission/src`, `crates/loom-commission/Cargo.toml`, `Cargo.lock` (the `url`
+  dependency) — inferred.
 - `crates/loom-tree/src/status.rs` (`:283-325`) — cited;
-  `crates/loom-tree/tests/not_called/mod.rs` (`:480-506`) — cited.
+  `crates/loom-tree/tests/not_called/mod.rs` (`:121`, `:480-507`) — cited.
 - `ess/domains/bindings.yaml` (`:362-380`, `:465-467`), `ess/domains/tree.yaml` (`:228`) — cited;
-  `generated/` regenerated.
+  `generated/ess/loom`, `generated/rust/loom`, `website/docs/reference/.generated.json`,
+  `website/docs/reference/ess/loom-bindings.md`, `website/docs/reference/ess/loom-tree.md`
+  regenerated (inferred: the reference pages follow the two new members).
 - `website/docs/guides/bindings.md` (`:405-408`) — cited; `AGENTS.md`, `CHANGELOG.md` — inferred.
 
 ## Edges
 
-- No `depends_on`.
-- **ESS regeneration.** ESS-changing stories merge one at a time, the second regenerating after the
-  first lands.
-- **Would collide with**, no edge: `story:spent-program-has-its-spent-record` and
-  `story:wildcard-result-row-does-not-match-timeout` change `program.rs` in other regions; textual
-  merge. Runbook's order puts this story after the wildcard story.
+- **depends_on `story:wildcard-result-row-does-not-match-timeout`** (Runbook's order: the timeout
+  story, the wildcard story, then this one). The wildcard story edits the same ESS comment
+  paragraph of `ProgramRefusalReason` (`ess/domains/bindings.yaml:456-474`) and the adjacent guide
+  paragraphs (`website/docs/guides/bindings.md:395-410`); this story rebases on it.
+- **ESS and generated files.** `story:bound-program-timeout-above-an-hour`, the wildcard story,
+  `story:spent-program-has-its-spent-record` and this story change `ess/` and so the one inputs
+  digest of `generated/ess/loom/synthesis.txt:5`: they merge one at a time, and each after the
+  first rebuilds `generated/ess/loom`, `generated/rust/loom` and the docs stamp (`task generate`,
+  `task suite-generate`, `task docs-generate`, then `task check`, whose `docs-check` reads the
+  stamp, `Taskfile.yml:45`, `:204-207`). Not a textual merge.
+- **Shared files.** `crates/loom-bindings/src/program.rs` with the wildcard story (`look_up`
+  region) and the spent story (offer path). `CHANGELOG.md` `[Unreleased]` and `AGENTS.md` with all
+  five stories (timeout, wildcard, spent, CI budget, this): one bullet each, each rebased on the
+  one merged before. The timeout story's `AGENTS.md:1461` cite has drifted (its text is at
+  `:1474`), and its Edges do not name the docs stamp; it is not edited here.
