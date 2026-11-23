@@ -2162,3 +2162,181 @@ fn rework_on_tells_a_failed_check_from_a_rejection() {
     case.run();
     case.run();
 }
+
+// Adversary (wave 7, unit rw): the story's stated limit for records placed nowhere is "fewer
+// counts, never more" (D9, The rule). A counted run that writes no record (a cancelled run here;
+// in Runbook's shape every exit-0 run of `change.implement`, `results: {"0": null}`) anchors
+// nothing, so a record placed nowhere received after it falls into the interval before it. Beside
+// a placed rejection received in the same interval, the one interval is counted twice.
+#[test]
+fn adv_an_unplaced_rejection_beside_a_placed_one_after_a_recordless_run_counts_once() {
+    let scratch = Scratch::new();
+    let document = document_with(
+        CHECK_STUB,
+        WRITE_STUB,
+        &reworked("{max_runs: 1, runs_per: rejection, rework_limit: 1}"),
+        "",
+    );
+    let governor = governor();
+    let recording = Arc::new(Recording::new());
+    let runner = Arc::new(CancelsFirst {
+        inner: Arc::clone(&recording),
+        program: WRITE_STUB,
+        cancelled: std::sync::atomic::AtomicBool::new(false),
+    });
+    let effects = port(
+        &governor,
+        &document,
+        &scratch,
+        Arc::clone(&runner) as Arc<dyn TestRunner>,
+    );
+    // Run 1: cancelled, counted against max_runs, no record.
+    let reason = refusal(&drive(&governor, &effects, WRITE, "{}"));
+    assert!(
+        reason.starts_with("Cancelled: action draft.write: "),
+        "{reason}"
+    );
+    let full = refusal(&drive(&governor, &effects, WRITE, "{}"));
+    assert!(full.contains("budget.max_runs is 1"), "{full}");
+    // After run 1: one placed rejection and one placed nowhere. Both lie between run 1 and the
+    // next run, one interval: rework count 1, equal to rework_limit 1, and the window is open.
+    let draft = governor.revisions(&CaseId(CASE.to_owned())).unwrap()["draft"].clone();
+    hold_citing(
+        &governor,
+        CASE,
+        next(),
+        ("draft_check", &draft, "invalid"),
+        "test/held",
+        args(&format!(r#"{{"case": "{CASE}"}}"#)),
+        "checker",
+    );
+    hold_citing(
+        &governor,
+        CASE,
+        next(),
+        ("draft_check", &draft, "invalid"),
+        "test/held",
+        args(r#"{"case": "case-2"}"#),
+        "checker",
+    );
+    let end = drive(&governor, &effects, WRITE, "{}");
+    match only_effect(&end) {
+        EffectOutcome::Performed(_) => {}
+        other => panic!("one interval holds both rejections, so the step performs: {other:?}"),
+    }
+}
+
+/// Security review of unit RW (wave 7), D12 on the person path: `tree approve` writes a person
+/// action's own record citing its `PERSON_SOURCE` observation alone, which names the case and the
+/// action (`crates/loom-tree/src/person.rs:159-178`), after its program's run observation. That
+/// record is the action's own step, so it is no rejection and opens no window: the next step is
+/// refused naming `budget.max_runs is 1`, with no rejection named.
+#[test]
+fn security_rw_an_actions_own_person_record_opens_no_window() {
+    let case = Rework::new(&reworked("{max_runs: 1, runs_per: rejection}"));
+    case.run();
+    let draft = case.draft();
+    hold_citing(
+        &case.governor,
+        CASE,
+        next(),
+        ("draft_check", &draft, "invalid"),
+        b10x_loom_bindings::PERSON_SOURCE,
+        args(&format!(
+            r#"{{"case": "{CASE}", "action": "{WRITE}", "principal": "ada"}}"#
+        )),
+        "ada",
+    );
+    assert_eq!(case.refused(), max_runs_text(1, None, 1));
+    assert_eq!(case.runner.children_of(WRITE_STUB).len(), 1);
+}
+
+/// Correction round of unit rw (adversary mutant M1): a rejection is a record whose `kind` fact is
+/// its own kind. A `draft_lint` record whose facts name `draft_check: invalid`, a pair the writer
+/// lists, is none: it opens no window.
+#[test]
+fn a_record_whose_facts_name_another_kind_is_no_rejection() {
+    let case = Rework::new(&reworked("{max_runs: 1, runs_per: rejection}"));
+    case.run();
+    let observation = ObservationId(uuid(next()));
+    ObservationPort::observe(
+        &case.governor,
+        Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "test/held".to_owned(),
+            subject: "draft".to_owned(),
+            observed_at: Timestamp(HELD_AT.to_owned()),
+            payload: args(&format!(r#"{{"case": "{CASE}"}}"#)),
+        }),
+    )
+    .unwrap();
+    let facts = serde_json::json!({
+        "format": "canon-evidence/1",
+        "id": "held-other-kind",
+        "kind": "draft_check",
+        "subject": "draft",
+        "subject_revision": case.draft(),
+        "observed_at": HELD_AT,
+        "result": "invalid",
+    });
+    submit_evidence(
+        &case.governor,
+        "checker",
+        EvidenceData {
+            evidence_id: EvidenceId(uuid(next())),
+            case_id: CaseId(CASE.to_owned()),
+            kind: "draft_lint".to_owned(),
+            subject_revision: 0,
+            producer: "checker".to_owned(),
+            observation_ids: vec![observation],
+            facts: json::parse(&facts.to_string()).unwrap(),
+            provenance: Value::Null,
+        },
+    )
+    .expect("the record is held");
+    assert_eq!(case.records("draft_lint"), 1);
+    assert_eq!(case.refused(), max_runs_text(1, None, 1));
+}
+
+/// Correction round of unit rw (adversary mutant M3): two rejections placed at one observation lie
+/// at one position; the window starts at the later received, and the refusal names it.
+#[test]
+fn of_two_rejections_at_one_observation_the_later_opens_the_window() {
+    let case = Rework::new(&reworked("{max_runs: 1, runs_per: rejection}"));
+    case.run();
+    let observation = ObservationId(uuid(next()));
+    ObservationPort::observe(
+        &case.governor,
+        Observation::new(ObservationData {
+            observation_id: observation.clone(),
+            source: "test/held".to_owned(),
+            subject: "draft".to_owned(),
+            observed_at: Timestamp(HELD_AT.to_owned()),
+            payload: args(&format!(r#"{{"case": "{CASE}"}}"#)),
+        }),
+    )
+    .unwrap();
+    let draft = case.draft();
+    let listed = ("draft_check", draft.as_str(), "invalid");
+    hold_on(
+        &case.governor,
+        CASE,
+        next(),
+        listed,
+        vec![observation.clone()],
+        "checker",
+    );
+    let later = hold_on(
+        &case.governor,
+        CASE,
+        next(),
+        listed,
+        vec![observation],
+        "decider:x",
+    );
+    case.run();
+    assert_eq!(
+        case.refused(),
+        max_runs_text(1, Some((&later, "decider:x")), 1)
+    );
+}
