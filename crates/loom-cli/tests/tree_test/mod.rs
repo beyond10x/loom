@@ -805,13 +805,24 @@ fn only_repeated_equals_only_with_a_comma() {
         "{}",
         text(&repeated.stderr)
     );
-    // The output, each cycle's wall time apart.
+    // The output, each cycle's wall time apart: the `slowest:` line, whose order is that of the
+    // wall times, as the names it holds in byte order.
     let lines = |output: &Output| -> Vec<String> {
         text(&output.stdout)
             .lines()
-            .map(|line| match line.rfind(" (") {
-                Some(at) if line.ends_with(" s)") => line[..at].to_owned(),
-                _ => line.to_owned(),
+            .map(|line| {
+                if let Some(slowest) = line.strip_prefix("slowest: ") {
+                    let mut named: Vec<&str> = slowest
+                        .split(", ")
+                        .map(|part| part.split(" (").next().unwrap_or(part))
+                        .collect();
+                    named.sort_unstable();
+                    return format!("slowest: {}", named.join(", "));
+                }
+                match line.rfind(" (") {
+                    Some(at) if line.ends_with(" s)") => line[..at].to_owned(),
+                    _ => line.to_owned(),
+                }
             })
             .collect()
     };
@@ -1348,7 +1359,11 @@ fn list_prints_the_cycles_and_runs_nothing() {
 fn a_refused_suite_is_refused_by_list() {
     let started = Instant::now();
     let dir = fresh_scratch("list-refused");
-    let listed = list(&dir, &Path::new(FIXTURE).join("unknown-step.suite.yaml"), &[]);
+    let listed = list(
+        &dir,
+        &Path::new(FIXTURE).join("unknown-step.suite.yaml"),
+        &[],
+    );
     let stderr = text(&listed.stderr);
     assert_eq!(listed.status.code(), Some(2), "{stderr}");
     assert!(

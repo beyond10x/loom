@@ -23,11 +23,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - `tree test`: an `approve` step or entry passes `result`, `reasons` (joined by line feeds) and `deny` to `tree approve` (story:tree-suite-approve-result-and-reasons)
 - `b10x-loom tree replay --store S [--case C]` (`b10x_loom_tree::replay_tree`, `rebuild_case`, `replay_difference`, `replay_json`; ESS `loom.tree.TreeReplay`, `CaseReplay`): decides every case again as of its last `evaluated` line and prints per case whether its state and Canon's decision equal that line; reads only, takes no lock; exit 0, 3 when a case differs (first one on stderr), 1 refused `NotATree`, `CaseNotInTree` or `LogRefused` (story:tree-replay-command)
 - `tree test`: the suite step `replay` runs `tree replay`, its JSON output given to `{step: <name>}` (story:tree-replay-command)
+- `tree test --cycle-timeout <1..60>` (`SuiteSettings::cycle_timeout`, default 60): a cycle past it has its program killed and ends `CycleTimedOut` (story:tree-test-command)
+- `tree test` prints `slowest: <name> (<s> s), …` after the summary, up to ten cycles slowest first (`suite::slowest_line`) (story:tree-test-command)
+- `tree test --list` prints one line per cycle and runs nothing, reading the suite alone (`suite::list_suite`) (story:tree-test-command)
+- **Breaking:** `loom::tree::DifferenceReason` gains `CycleTimedOut`, `SuiteSettings` gains `cycle_timeout` (story:tree-test-command)
 
 ### Changed
 
 - Every `action finished` line names the artifact revisions its step moved in `revisions`, also when the step was refused or a person's program ended badly; before, the list was always empty (story:tree-replay-command)
 - **Breaking:** a suite step `replay` that gives `principal` is refused `MemberUndeclared`; `case` is its one member (story:tree-replay-command)
+- `tree test`: the `decide` step and entry and the `requests` source wait for `story:tree-test-decide-and-requests` (story:tree-test-command)
 
 - ESS 0.97.4 (format unchanged)
 - `SubstrateRunner` and `EngineRunner` on `linux`: every runner of a process shares one driver per cgroup root, workspace directory and egress, so trees in one process run confined programs at once (story:concurrent-confined-runs)
