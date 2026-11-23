@@ -25,7 +25,7 @@ const A_BINDING: &str = r#"  - action: work.a
 
 impl Tree {
     /// A one-case tree from the given protocol and bindings text and `do.sh`, with `extra` stubs.
-    fn open_with(
+    pub(super) fn open_with(
         label: &str,
         protocol: &str,
         bindings: &str,

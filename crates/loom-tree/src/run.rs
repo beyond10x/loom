@@ -974,8 +974,9 @@ fn due_actions<S: loom_governor::FallibleCaseStore>(
 /// with a retry record, a copy whose source holds something new) but those [`set_aside`]: refused
 /// since the case was last evaluated (a cancel is no such refusal), or not called since it was
 /// last evaluated for a reason other than a not-called run's own moves. And the idle actions: the
-/// copies whose source holds nothing new and the writers whose only open evidence is a spent
-/// allowance ([`spent_writers_idle`]).
+/// copies whose source holds nothing new, the writers whose only open evidence is a spent
+/// allowance ([`spent_writers_idle`]) and the actions set aside, never useful until the set-aside
+/// ends.
 #[allow(clippy::type_complexity)]
 fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
     governor: &'a CanonGovernor<S>,
@@ -1015,11 +1016,15 @@ fn step_inputs<'a, S: loom_governor::FallibleCaseStore>(
         }
     }
     idle.extend(spent_writers_idle(governor, &id, &case.bindings, &due)?);
+    // A set-aside action is idle too: out of `due` alone, a moving not-called writer would be
+    // useful again through its open evidence once another one's move raised the revision.
+    idle.extend(aside);
     let history = LogHistory::new(&lines, revision, due).with_idle(idle);
     Ok((lines, revision, effects, history))
 }
 
-/// The actions not due for this step, whatever their retry records say: each whose `action
+/// The actions neither due nor useful for this step, whatever their retry records and open
+/// evidence say ([`step_inputs`] makes them idle): each whose `action
 /// finished` line since the last `evaluated` line is refused (a spent run budget; a step its
 /// cancel ended is no such refusal and stays due) or [`not_called`]
 /// (`story:writer-not-called-leaves-the-due-set`, D1 a). Such an action is set aside until the

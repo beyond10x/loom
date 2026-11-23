@@ -12,6 +12,7 @@
 //! when nothing is useful. No network, no model, no credential.
 
 mod beside;
+mod read_back;
 
 use std::path::{Path, PathBuf};
 
