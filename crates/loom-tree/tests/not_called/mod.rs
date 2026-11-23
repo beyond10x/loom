@@ -214,38 +214,51 @@ impl Tree {
     /// Receives a `tidied: ok` record on `notes` through the governor's `receive`, writing no log
     /// line: a person's answer that moves no artifact.
     fn receive_tidied(&self) {
+        self.receive("tidier", "tidied", "notes", "ok");
+    }
+
+    /// Receives from `producer` a `kind: result` record on `subject` at its current revision
+    /// through the governor's `receive`, writing no log line.
+    fn receive(&self, producer: &str, kind: &str, subject: &str, result: &str) {
         let governor = super::replay::fixture::governor(&self.store);
         let id = CaseId("root".to_owned());
-        let observation =
-            ObservationId(b10x_loom_tree::derived_uuid(&["not-called", "observation"]));
+        let observation = ObservationId(b10x_loom_tree::derived_uuid(&[
+            "not-called",
+            kind,
+            "observation",
+        ]));
         governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
                 source: "test:not-called".into(),
-                subject: "notes".into(),
+                subject: subject.into(),
                 observed_at: CommissionTimestamp(AT.into()),
                 payload: commission_json::Value::Null,
             }))
             .unwrap();
-        let revision = governor.revisions(&id).unwrap()["notes"].clone();
+        let revision = governor.revisions(&id).unwrap()[subject].clone();
         submit_evidence(
             &governor,
-            "tidier",
+            producer,
             EvidenceData {
-                evidence_id: EvidenceId(b10x_loom_tree::derived_uuid(&["not-called", "evidence"])),
+                evidence_id: EvidenceId(b10x_loom_tree::derived_uuid(&[
+                    "not-called",
+                    kind,
+                    "evidence",
+                ])),
                 case_id: id.clone(),
-                kind: "tidied".into(),
+                kind: kind.into(),
                 subject_revision: governor.current_revision(&id).unwrap(),
-                producer: "tidier".into(),
+                producer: producer.into(),
                 observation_ids: vec![observation],
                 facts: commission_json::parse(
                     &serde_json::json!({
                         "format": "canon-evidence/1",
-                        "id": "tidied-outside-the-log",
-                        "kind": "tidied",
-                        "subject": "notes",
+                        "id": format!("{kind}-outside-the-log"),
+                        "kind": kind,
+                        "subject": subject,
                         "subject_revision": revision,
-                        "result": "ok",
+                        "result": result,
                     })
                     .to_string(),
                 )

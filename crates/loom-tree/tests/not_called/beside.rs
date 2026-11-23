@@ -89,17 +89,23 @@ impl Tree {
     }
 }
 
-/// Guard for the `accounted` condition of `set_aside`, which no test of the unit reaches: a run
-/// whose step budget ends right after a moving not-called run leaves that line open (no
-/// `evaluated` line after it); a person then edits `notes.txt`, so the next run's `evaluated`
-/// line is two moves above the opening one while the interval names one. That line is not the
-/// writer's own writing, so `work.do` is due again and starts once. Dropping `accounted` from
-/// the `own` test of `set_aside` keeps it set aside and turns this red.
+/// Guard for the `accounted` condition of `set_aside`: a run whose step budget ends right after a
+/// moving not-called run leaves that line open (no `evaluated` line after it); a person then
+/// edits `notes.txt`, so the next run's `evaluated` line is two moves above the opening one while
+/// the interval names one. That line is not the writer's own writing, so `work.do` is due again
+/// and starts once. Dropping `accounted` from the `own` test of `set_aside` keeps it set aside
+/// and turns this red.
+///
+/// A `done: failed` record on `work`, received before the first run, makes `work.do` useful only
+/// through its retry record: with `done` open, the history alone would make it useful at the
+/// edited revision (its moved line counts at no unaccounted closing revision), and the guard
+/// would pass whatever `set_aside` said.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn an_edit_in_the_interval_of_a_moving_not_called_run_ends_the_set_aside() {
     let moving = format!("echo more >> notes.txt\n{DO}");
     let tree = Tree::open("nc-beside-accounted", &moving, NOT_CALLED, false);
+    tree.receive("doer", "done", "work", "failed");
     let first = tree.run_steps(2);
     let lines = tree.lines();
     assert_eq!(
