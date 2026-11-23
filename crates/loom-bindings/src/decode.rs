@@ -5,7 +5,7 @@ use crate::{DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, FORMAT, MAX_DOCUMENT_BYTES, R
 use loom::bindings::{
     ActionBudget, ArtifactPath, BindingsDocument, BindingsRefusalReason as Reason, BoundAction,
     EvidenceEntry, Executor, ExecutorSpec, ExitClasses, ProducerIndependence, ProgramRoot,
-    ResultRule, ResultSource, RetryCondition, ToolAllowList,
+    ResultRule, ResultSource, RetryCondition, RunsScope, ToolAllowList,
 };
 use loom::json::Value as Json;
 
@@ -65,11 +65,14 @@ enum Placeholder {
     /// It may, as a whole entry after the first: a person's `executor.argv`.
     Principal,
 }
-const BUDGET: [&str; 4] = [
+const BUDGET: [&str; 7] = [
     "max_runs",
     "max_turns",
     "max_tokens",
     "max_budget_micro_usd",
+    "runs_per",
+    "rework_limit",
+    "rework_on",
 ];
 
 /// Decodes a `loom.bindings/1` document from YAML (or JSON).
@@ -317,6 +320,7 @@ fn bound_action(value: &Value, index: usize) -> Decoded<BoundAction> {
         None => Vec::new(),
         Some(value) => retry_when(value, action)?,
     };
+    rework(&budget, &retry_when, action)?;
     let handoff = map
         .get("handoff")
         .map(|value| non_empty(value, action, "handoff"))
@@ -834,6 +838,9 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
         max_turns: None,
         max_tokens: None,
         max_budget_micro_usd: None,
+        runs_per: None,
+        rework_limit: None,
+        rework_on: None,
     };
     let Some(value) = value else {
         return Ok(budget);
@@ -842,6 +849,17 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
     known(map, &BUDGET, action, "budget.")?;
     for (key, member) in map.iter() {
         let name = key.clone();
+        match name.as_str() {
+            "runs_per" => {
+                budget.runs_per = Some(runs_scope(member, action)?);
+                continue;
+            }
+            "rework_on" => {
+                budget.rework_on = Some(rework_on(member, action)?);
+                continue;
+            }
+            _ => {}
+        }
         let number = member.as_i64().filter(|n| *n >= 1).ok_or_else(|| {
             refuse(
                 Reason::InvalidBudget,
@@ -854,22 +872,131 @@ fn budget(value: Option<&Value>, action: Option<&str>) -> Decoded<ActionBudget> 
             "max_runs" => budget.max_runs = number,
             "max_turns" => budget.max_turns = Some(number),
             "max_tokens" => budget.max_tokens = Some(number),
+            "rework_limit" => budget.rework_limit = Some(number),
             _ => budget.max_budget_micro_usd = Some(number),
         }
     }
     Ok(budget)
 }
 
+/// `budget.runs_per`: `case` or `rejection` (`story:rework-allowance-after-a-rejection`).
+fn runs_scope(value: &Value, action: Option<&str>) -> Decoded<RunsScope> {
+    match value {
+        Value::String(scope) if scope == "case" => Ok(RunsScope::Case),
+        Value::String(scope) if scope == "rejection" => Ok(RunsScope::Rejection),
+        other => Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            "budget.runs_per",
+            format!("is {}; it is case or rejection", shown(other)),
+        )),
+    }
+}
+
+/// `budget.rework_on`: the shape of `retry_when`, never empty and naming no kind with an empty
+/// list, or it would name no rejection.
+fn rework_on(value: &Value, action: Option<&str>) -> Decoded<Vec<RetryCondition>> {
+    let member = "budget.rework_on";
+    let conditions = conditions(value, action, member, Reason::InvalidBudget)?;
+    if conditions.is_empty() {
+        return Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            member,
+            "is empty; it names the kinds and results that are rejections",
+        ));
+    }
+    if let Some(empty) = conditions
+        .iter()
+        .find(|condition| condition.results.is_empty())
+    {
+        return Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            format!("{member}.{}", empty.kind),
+            "is empty; it lists the results of the kind that are rejections",
+        ));
+    }
+    Ok(conditions)
+}
+
+/// The rework members against `runs_per` and the decoded `retry_when`: `rework_limit` and
+/// `rework_on` are read only under `runs_per: rejection`, which needs a `retry_when` to name a
+/// rejection, and each pair `rework_on` lists is one `retry_when` lists.
+fn rework(
+    budget: &ActionBudget,
+    retry_when: &[RetryCondition],
+    action: Option<&str>,
+) -> Decoded<()> {
+    if budget.runs_per != Some(RunsScope::Rejection) {
+        for (member, present) in [
+            ("rework_limit", budget.rework_limit.is_some()),
+            ("rework_on", budget.rework_on.is_some()),
+        ] {
+            if present {
+                return Err(refuse(
+                    Reason::InvalidBudget,
+                    action,
+                    format!("budget.{member}"),
+                    "is read only under runs_per: rejection",
+                ));
+            }
+        }
+        return Ok(());
+    }
+    if retry_when.is_empty() {
+        return Err(refuse(
+            Reason::InvalidBudget,
+            action,
+            "budget.runs_per",
+            "is rejection and retry_when lists nothing, so no record could open an allowance",
+        ));
+    }
+    for condition in budget.rework_on.iter().flatten() {
+        for result in &condition.results {
+            if !crate::retry::lists(retry_when, &condition.kind, result) {
+                return Err(refuse(
+                    Reason::InvalidBudget,
+                    action,
+                    "budget.rework_on",
+                    format!(
+                        "lists {} {result}, which retry_when does not list; a rejection is a record that sends the action back",
+                        condition.kind
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn retry_when(value: &Value, action: Option<&str>) -> Decoded<Vec<RetryCondition>> {
-    let map = object(value, action, "retry_when")?;
+    conditions(value, action, "retry_when", Reason::Malformed)
+}
+
+/// A map of evidence kinds to lists of results at `member`, a defect refused `reason`.
+fn conditions(
+    value: &Value,
+    action: Option<&str>,
+    member: &str,
+    reason: Reason,
+) -> Decoded<Vec<RetryCondition>> {
+    let map = value.as_mapping().ok_or_else(|| {
+        refuse(
+            reason,
+            action,
+            member,
+            format!("is {}; it is an object", shown(value)),
+        )
+    })?;
     let mut out = Vec::new();
     for (key, results) in map.iter() {
         let kind = key.clone();
-        let member = format!("retry_when.{kind}");
-        let results = strings(results, action, &member, Reason::Malformed)?;
+        let member = format!("{member}.{kind}");
+        let results = strings(results, action, &member, reason)?;
         if let Some(index) = results.iter().position(String::is_empty) {
             return Err(refuse(
-                Reason::Malformed,
+                reason,
                 action,
                 format!("{member}[{index}]"),
                 "is empty",

@@ -197,6 +197,7 @@ actions:
   --result` names);
   a JSON pointer such as `/summary/state` reads the program's report; `from: runs` is Loom's
   count of the action's runs, whose value is `spent` on the run that reaches `budget.max_runs`
+  (under `budget.runs_per: rejection`, the run that reaches `rework_limit`, below)
   and which records nothing on any other run (a cancelled run counts and records nothing, so a
   cancelled last run writes no `spent` record); its table lists `spent` and nothing else, and the
   record is written after the run's other records, about the revision the run left. A protocol
@@ -209,6 +210,29 @@ actions:
   no comma and no white space, because the session executor joins the names with commas.
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
   `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 3600.
+- On a `program` or a `person`, `budget.runs_per` says what `max_runs` counts from: `case` (the
+  default) counts every run of the case; `rejection` counts the runs since the latest rejection,
+  so each rejection gives the action a fresh `max_runs`, and `budget.rework_limit` (a whole
+  number from 1, 2 when absent) bounds how many rejections it answers. A rejection is a record of
+  the case whose kind and result `budget.rework_on` lists, or `retry_when` when `rework_on` is
+  absent, whoever wrote it (a person, `decider:<kind>`, `rule:<name>`, a program check) and about
+  any revision, but never a record of the action's own run. `rework_on` has the shape of
+  `retry_when`, every pair also in `retry_when`, and is never empty: a record `retry_when` lists
+  and `rework_on` does not, such as a failed check, still sends the action back and counts its run
+  in the current window. Two rejections between the same two runs count once, and a rejection
+  that cites no observation of the case counts but gives no run. The step past either bound is
+  refused `RunsSpent`, naming the bound:
+
+  ```text
+  RunsSpent: action change.implement: change.implement was rejected 4 times in case root, the latest <evidence id> by decider:x; its budget.rework_limit is 3
+  RunsSpent: action draft.write: draft.write has run 2 times in case case-1 since the rejection <evidence id> by checker, its budget.max_runs is 2
+  ```
+
+  Under `rejection` a `from: runs` entry writes `spent` once, on the first run made at a rework
+  count equal to `rework_limit`, never because a window is full. `runs_per: rejection` with an
+  empty `retry_when`, `rework_limit` or `rework_on` without it, and a `rework_on` pair that
+  `retry_when` does not list are refused `InvalidBudget`; any of the three on an `agent`, an
+  `open` or a `copy` is refused `MemberNotForExecutor`.
 - `exits`, on a `program` alone, holds `error` and `not_called`, each a list of exit codes from 0
   to 255 (a list left out is empty). An exit `error` lists is a program error and one
   `not_called` lists a run that did nothing; neither goes through the `results` tables. Loom

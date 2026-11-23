@@ -23,6 +23,8 @@ evidence_kinds:
   child_outcome: {}
   signoff: {}
   imported: {}
+  conformance_run: {}
+  merge_approval: {}
 independence_dimensions:
   different_principal: {}
 actions:
@@ -1325,4 +1327,192 @@ fn principal_is_refused_in_handoff_when() {
         "handoff_when",
     );
     assert!(refusal.0.detail.contains("{principal}"), "{refusal}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// budget.runs_per, budget.rework_limit and budget.rework_on
+// (story rework-allowance-after-a-rejection)
+
+/// `change.implement` bound to a program with `retry_when` (none when `None`) and `budget`, each
+/// written as flow YAML.
+fn implement(retry_when: Option<&str>, budget: &str) -> String {
+    let retry = retry_when.map_or_else(String::new, |r| format!("    retry_when: {r}\n"));
+    document(&format!(
+        "  - action: change.implement\n    executor: {{kind: program, argv: [tools/implement.sh]}}\n{retry}    budget: {budget}\n"
+    ))
+}
+
+/// Runbook's `change.implement` (`bindings/sdc-story.yaml`): four `retry_when` entries, and the
+/// budget its `rework-fresh-allowance` case needs.
+const RUNBOOK_IMPLEMENT: &str = "  - action: change.implement\n    executor: {kind: program, argv: [tools/implement.sh]}\n\
+\x20   retry_when:\n      implementation_change: [coverage_refused]\n      conformance_run: [failed]\n      code_review: [rejected]\n      merge_approval: [rejected]\n\
+\x20   budget: {max_runs: 3, runs_per: rejection, rework_limit: 3, rework_on: {code_review: [rejected], merge_approval: [rejected]}}\n\
+\x20   evidence:\n      - {kind: implementation_change, subject: impl, producer: implementer, from: exit, results: {\"0\": null, \"8\": coverage_refused}}\n";
+
+/// The one bound action `text` decodes to, checked against the fixture protocol.
+fn decoded_one(text: &str) -> loom::bindings::BoundAction {
+    let doc = decode(text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    check(&doc, REGISTRATION, &protocol()).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+    doc.actions.into_iter().next().expect("one action")
+}
+
+#[test]
+fn runs_per_and_rework_limit_decode() {
+    use loom::bindings::{RetryCondition, RunsScope};
+    let absent = decoded_one(&implement(
+        Some("{code_review: [rejected]}"),
+        "{max_runs: 2}",
+    ));
+    assert_eq!(absent.budget.runs_per, None);
+    assert_eq!(absent.budget.rework_limit, None);
+    assert_eq!(absent.budget.rework_on, None);
+    let rejection = decoded_one(&implement(
+        Some("{code_review: [rejected]}"),
+        "{max_runs: 1, runs_per: rejection, rework_limit: 3}",
+    ));
+    assert_eq!(rejection.budget.runs_per, Some(RunsScope::Rejection));
+    assert_eq!(rejection.budget.rework_limit, Some(3));
+    assert_eq!(rejection.budget.rework_on, None);
+    let case = decoded_one(&implement(None, "{max_runs: 2, runs_per: case}"));
+    assert_eq!(case.budget.runs_per, Some(RunsScope::Case));
+    assert_eq!(case.budget.rework_limit, None);
+    let runbook = decoded_one(&document(RUNBOOK_IMPLEMENT));
+    assert_eq!(runbook.retry_when.len(), 4);
+    assert_eq!(runbook.budget.max_runs, 3);
+    assert_eq!(runbook.budget.runs_per, Some(RunsScope::Rejection));
+    assert_eq!(runbook.budget.rework_limit, Some(3));
+    assert_eq!(
+        runbook.budget.rework_on,
+        Some(vec![
+            RetryCondition {
+                kind: "code_review".to_owned(),
+                results: vec!["rejected".to_owned()],
+            },
+            RetryCondition {
+                kind: "merge_approval".to_owned(),
+                results: vec!["rejected".to_owned()],
+            },
+        ])
+    );
+    let person = decoded_one(&document(
+        "  - action: change.sign\n    executor: {kind: person, principal: p}\n    retry_when: {code_review: [rejected]}\n\
+\x20   budget: {runs_per: rejection, rework_limit: 2, rework_on: {code_review: [rejected]}}\n",
+    ));
+    assert_eq!(person.budget.runs_per, Some(RunsScope::Rejection));
+    assert_eq!(person.budget.rework_limit, Some(2));
+    assert_eq!(person.budget.rework_on.map(|on| on.len()), Some(1));
+}
+
+#[test]
+fn runs_per_and_rework_limit_refusals() {
+    let listed = Some("{code_review: [rejected]}");
+    let budget = |member: &str, text: String| {
+        assert_refused(
+            &text,
+            Reason::InvalidBudget,
+            Some("change.implement"),
+            &format!("budget.{member}"),
+        );
+    };
+    for value in ["arrival", "revision", "3"] {
+        budget(
+            "runs_per",
+            implement(listed, &format!("{{max_runs: 1, runs_per: {value}}}")),
+        );
+    }
+    // No record could open an allowance.
+    budget(
+        "runs_per",
+        implement(None, "{max_runs: 1, runs_per: rejection}"),
+    );
+    for value in ["0", "\"2\""] {
+        budget(
+            "rework_limit",
+            implement(
+                listed,
+                &format!("{{max_runs: 1, runs_per: rejection, rework_limit: {value}}}"),
+            ),
+        );
+    }
+    budget(
+        "rework_limit",
+        implement(listed, "{max_runs: 1, rework_limit: 2}"),
+    );
+    budget(
+        "rework_limit",
+        implement(listed, "{max_runs: 1, runs_per: case, rework_limit: 2}"),
+    );
+    // Alone, the retry_when the rework_on cases sit beside loads.
+    assert!(refused(&implement(listed, "{max_runs: 1, runs_per: rejection}")).is_none());
+    for rework_on in [
+        "{code_review: [accepted]}",
+        "{signoff: [rejected]}",
+        "[code_review]",
+        "rejected",
+        "{}",
+    ] {
+        budget(
+            "rework_on",
+            implement(
+                listed,
+                &format!("{{max_runs: 1, runs_per: rejection, rework_on: {rework_on}}}"),
+            ),
+        );
+    }
+    budget(
+        "rework_on.code_review",
+        implement(
+            listed,
+            "{max_runs: 1, runs_per: rejection, rework_on: {code_review: []}}",
+        ),
+    );
+    budget(
+        "rework_on",
+        implement(
+            listed,
+            "{max_runs: 1, rework_on: {code_review: [rejected]}}",
+        ),
+    );
+    budget(
+        "rework_on",
+        implement(
+            listed,
+            "{max_runs: 1, runs_per: case, rework_on: {code_review: [rejected]}}",
+        ),
+    );
+    // Only a program and a person take the three members; each document decodes, so the refusal
+    // is the load check's. `rework_limit` and `rework_on` stand beside `runs_per: rejection`,
+    // which the check names last.
+    let members = [
+        ("runs_per", "{runs_per: rejection}"),
+        ("rework_limit", "{runs_per: rejection, rework_limit: 2}"),
+        (
+            "rework_on",
+            "{runs_per: rejection, rework_on: {code_review: [rejected]}}",
+        ),
+    ];
+    for (action, executor) in [
+        ("change.implement", "{kind: agent, adapter: a}"),
+        ("change.open", "{kind: open, name: n, bindings: c.yaml}"),
+        (
+            "change.copy",
+            "{kind: copy, evidence: imported, from: other@1}",
+        ),
+    ] {
+        for (member, budget) in members {
+            let text = document(&format!(
+                "  - action: {action}\n    executor: {executor}\n    retry_when: {{code_review: [rejected]}}\n    budget: {budget}\n"
+            ));
+            decode(&text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
+            assert_refused(
+                &text,
+                Reason::MemberNotForExecutor,
+                Some(action),
+                &format!("budget.{member}"),
+            );
+        }
+    }
+    // Guard: retry_when itself keeps accepting an empty map and an empty result list.
+    assert!(refused(&implement(Some("{}"), "{max_runs: 1}")).is_none());
+    assert!(refused(&implement(Some("{code_review: []}"), "{max_runs: 1}")).is_none());
 }

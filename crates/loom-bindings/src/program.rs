@@ -39,6 +39,13 @@
 //! (cancelled, or in an exit class) writes none either, so a cancelled last run spends the
 //! allowance and leaves no such record.
 //!
+//! A fresh allowance after a rejection (`story:rework-allowance-after-a-rejection`): under
+//! `budget.runs_per: rejection` the runs counted against `budget.max_runs` are those since the
+//! latest rejection, and `budget.rework_limit` bounds the rejections; the step past either bound
+//! is `RunsSpent`, its detail naming the bound. A `from: runs` entry then records `spent` once,
+//! on the first run made at a rework count equal to `rework_limit`. The rule is
+//! `Allowance`'s, one count for the refusal and the entry.
+//!
 //! A step, in order: the case held under the document's protocol, else `CaseOfAnotherProtocol`
 //! and nothing starts; the action's run count (the observations this port kept for the action in
 //! the case, [`PROGRAM_SOURCE`]) below its `budget.max_runs`, else `RunsSpent` and nothing starts; the
@@ -86,7 +93,7 @@
 //! feedback ([`ChildInputs::empty`]).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -114,7 +121,7 @@ use b10x_loom_intake_slice::confinement::{
 use loom::bindings::{
     ArtifactPlacement, ArtifactRevision, BindingsDocument, BoundAction, BoundStep, DiscardReason,
     EvidenceEntry, Executor, ExitClass, ExitClasses, ProgramRefusal, ProgramRefusalReason,
-    ProgramRoot, ProgramRun, RecordedEvidence, ResultSource, StepOutcome,
+    ProgramRoot, ProgramRun, RecordedEvidence, ResultSource, RunsScope, StepOutcome,
 };
 use loom_governor::{
     CanonGovernor, EvaluationTime, FallibleCaseStore, NoEvaluationTime, StepWritten,
@@ -126,6 +133,7 @@ use sha2::{Digest as _, Sha256};
 use crate::arguments::{NotPrinted, case_names, one_object, run_arguments_from};
 use crate::handoff::SIGNAL_EXITS;
 use crate::resolve::beside;
+use crate::retry::{lists, only_text};
 use crate::{CaseNames, bound_case_child};
 
 /// The `source` of every observation the port keeps: one per run of a bound program. The run count
@@ -418,10 +426,11 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             + i64::try_from(moving).unwrap_or(i64::MAX);
         revisions.extend(targets.clone());
         // This run is counted now (its observation is kept and it has no class): it spent the
-        // allowance when the count reached `budget.max_runs`.
+        // allowance when the count reached `budget.max_runs`, or, under `runs_per: rejection`,
+        // when it is the first run at a rework count equal to `rework_limit`.
         let counted = |entry: &&EvidenceEntry| entry.from == ResultSource::Runs;
         let spent = binding.evidence.iter().any(|entry| counted(&entry))
-            && runs(self.governor, &self.case, action)? >= binding.budget.max_runs;
+            && allowance(self.governor, &self.case, binding)?.spent_by_the_last_run(binding);
         let mut report = None;
         let mut recorded = Vec::new();
         // The `from: runs` entries after the others, so their records follow the run's other
@@ -763,8 +772,9 @@ impl Started {
 }
 
 /// Every refusal of `binding`'s step that comes before a start, then the child, in this order
-/// (`story:person-action-runs-a-program`): the run count below `budget.max_runs` (`RunsSpent`),
-/// the cancel handle unset (`Cancelled`), an argv, the program resolved under `program_root:
+/// (`story:person-action-runs-a-program`): under `runs_per: rejection` the rework count within
+/// `budget.rework_limit`, then the run count below `budget.max_runs` (`RunsSpent`, naming the
+/// bound; see `Allowance`), the cancel handle unset (`Cancelled`), an argv, the program resolved under `program_root:
 /// bindings`, a timeout this host's clock holds, the placed artifacts digested
 /// (`ArtifactUnreadable`), the case names, the child's inputs from `inputs` (given the timeout and
 /// the names), each argv entry that is exactly [`crate::PRINCIPAL_PLACEHOLDER`] replaced by
@@ -780,14 +790,34 @@ pub fn prepare<S: FallibleCaseStore, T: EvaluationTime>(
     inputs: impl FnOnce(Duration, &CaseNames) -> Result<ChildInputs, NotPrepared>,
 ) -> Result<Prepared, NotPrepared> {
     let action = binding.action.as_str();
-    let runs = runs(place.governor, place.case, action).map_err(NotPrepared::Failed)?;
-    if runs >= binding.budget.max_runs {
+    let allowance = allowance(place.governor, place.case, binding).map_err(NotPrepared::Failed)?;
+    let limit = rework_limit(binding);
+    if allowance.rework() > limit
+        && let Some((evidence, producer)) = &allowance.latest
+    {
         return Err(NotPrepared::Refused(refusal(
             ProgramRefusalReason::RunsSpent,
             action,
             format!(
-                "{action} has run {runs} times in case {}, its budget.max_runs is {}",
-                place.case.0, binding.budget.max_runs
+                "{action} was rejected {} times in case {}, the latest {evidence} by {producer}; its budget.rework_limit is {limit}",
+                allowance.rework(),
+                place.case.0,
+            ),
+        )));
+    }
+    if allowance.window >= binding.budget.max_runs {
+        let since = allowance
+            .opened_by
+            .as_ref()
+            .map_or_else(String::new, |(evidence, producer)| {
+                format!(" since the rejection {evidence} by {producer}")
+            });
+        return Err(NotPrepared::Refused(refusal(
+            ProgramRefusalReason::RunsSpent,
+            action,
+            format!(
+                "{action} has run {} times in case {}{since}, its budget.max_runs is {}",
+                allowance.window, place.case.0, binding.budget.max_runs
             ),
         )));
     }
@@ -995,31 +1025,185 @@ pub fn start<S: FallibleCaseStore, T: EvaluationTime>(
     })
 }
 
-/// The runs of `action` in `case`: the observations kept under [`PROGRAM_SOURCE`] naming both,
-/// but those of a run whose exit the binding classes (`exits`), which are not counted.
-fn runs<S: FallibleCaseStore, T: EvaluationTime>(
+/// The rework limit of a binding under `runs_per: rejection` that names none.
+const DEFAULT_REWORK_LIMIT: i64 = 2;
+
+/// The `budget.rework_limit` of `binding`, [`DEFAULT_REWORK_LIMIT`] when it names none.
+fn rework_limit(binding: &BoundAction) -> i64 {
+    binding.budget.rework_limit.unwrap_or(DEFAULT_REWORK_LIMIT)
+}
+
+/// A rejection as a refusal names it: its evidence id and its producer.
+type Rejection = (String, String);
+
+/// Where the run allowance of an action stands in a case: the one count `prepare` refuses by and
+/// the `from: runs` entry reads (`story:rework-allowance-after-a-rejection`).
+///
+/// The runs of an action in a case are the observations kept under [`PROGRAM_SOURCE`] naming
+/// both, but those of a run whose exit the binding classes (`exits`), which are not counted.
+/// Under `runs_per: case` (or none) the window is all of them and there is no rejection. Under
+/// `rejection`, a rejection is a held record of the case whose `kind` member is its kind and whose
+/// kind and result `budget.rework_on` lists, else `retry_when` ([`lists`]), at any subject
+/// revision and by any producer, but a record citing a [`PROGRAM_SOURCE`] observation naming the
+/// case and the action (the action's own run). It is placed at the latest position, in the order
+/// the governor received its observations, of an observation it cites that names the case. The
+/// window is the runs after the latest placed rejection, all of them with none. The rework count
+/// is the number of intervals between the runs (before the first, between two, after the last)
+/// that hold a rejection: a placed one by its position, one placed nowhere by its order among the
+/// records citing a counted run of the action, in the order the case received them.
+struct Allowance {
+    /// The runs counted against `budget.max_runs` now.
+    window: i64,
+    /// The runs of the whole case.
+    runs: usize,
+    /// The intervals that hold a rejection, each named by the number of runs before it.
+    intervals: BTreeSet<usize>,
+    /// The latest placed rejection: the one the window starts at.
+    opened_by: Option<Rejection>,
+    /// The latest rejection the case received, placed or not.
+    latest: Option<Rejection>,
+}
+
+impl Allowance {
+    /// The rework count.
+    fn rework(&self) -> i64 {
+        i64::try_from(self.intervals.len()).unwrap_or(i64::MAX)
+    }
+
+    /// Whether the latest run spent `binding`'s allowance, read once its observation is kept:
+    /// under `runs_per: case`, when the count reached `budget.max_runs`; under `rejection`, when
+    /// the interval just before it holds the rejection that brought the rework count to
+    /// `rework_limit`, so only the first run made at that count spends it and a full window alone
+    /// never does.
+    fn spent_by_the_last_run(&self, binding: &BoundAction) -> bool {
+        if binding.budget.runs_per != Some(RunsScope::Rejection) {
+            return self.window >= binding.budget.max_runs;
+        }
+        let Some(before) = self.runs.checked_sub(1) else {
+            return false;
+        };
+        let reached = self.intervals.range(..=before).count();
+        self.intervals.contains(&before)
+            && i64::try_from(reached).unwrap_or(i64::MAX) == rework_limit(binding)
+    }
+}
+
+/// The [`Allowance`] of `binding` in `case`.
+fn allowance<S: FallibleCaseStore, T: EvaluationTime>(
     governor: &CanonGovernor<S, T>,
     case: &CaseId,
-    action: &str,
-) -> Result<i64, EffectError> {
+    binding: &BoundAction,
+) -> Result<Allowance, EffectError> {
+    let action = binding.action.as_str();
     let observations = governor
         .try_observations()
         .map_err(|error| EffectError::new(format!("the observations: {error:?}")))?;
-    let count = observations
+    let of_case =
+        |payload: &commission_json::Value| text_member(payload, "case") == Some(case.0.as_str());
+    let own = |source: &str, payload: &commission_json::Value| {
+        source == PROGRAM_SOURCE
+            && of_case(payload)
+            && text_member(payload, "action") == Some(action)
+    };
+    // The position of each counted run in the order received.
+    let positions: Vec<usize> = observations
         .iter()
-        .filter(|observation| observation.source == PROGRAM_SOURCE)
-        .filter(|observation| {
-            text_member(&observation.payload, "case") == Some(case.0.as_str())
-                && text_member(&observation.payload, "action") == Some(action)
+        .enumerate()
+        .filter(|(_, observation)| {
+            own(&observation.source, &observation.payload)
+                && matches!(
+                    observation.payload.member("class"),
+                    None | Some(commission_json::Value::Null)
+                )
         })
-        .filter(|observation| {
-            matches!(
-                observation.payload.member("class"),
-                None | Some(commission_json::Value::Null)
-            )
-        })
-        .count();
-    Ok(i64::try_from(count).unwrap_or(i64::MAX))
+        .map(|(position, _)| position)
+        .collect();
+    let runs = positions.len();
+    let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+    let mut allowance = Allowance {
+        window: count(runs),
+        runs,
+        intervals: BTreeSet::new(),
+        opened_by: None,
+        latest: None,
+    };
+    if binding.budget.runs_per != Some(RunsScope::Rejection) {
+        return Ok(allowance);
+    }
+    let listed = binding
+        .budget
+        .rework_on
+        .as_deref()
+        .unwrap_or(&binding.retry_when);
+    let id = |position: usize| observations[position].observation_id.0.0.as_str();
+    // Each observation naming the case by its position; each of the action's own runs (counted
+    // or not); each counted run by the number of runs up to it.
+    let placed: BTreeMap<&str, usize> = observations
+        .iter()
+        .enumerate()
+        .filter(|(_, observation)| of_case(&observation.payload))
+        .map(|(position, _)| (id(position), position))
+        .collect();
+    let own_runs: BTreeSet<&str> = observations
+        .iter()
+        .enumerate()
+        .filter(|(_, observation)| own(&observation.source, &observation.payload))
+        .map(|(position, _)| id(position))
+        .collect();
+    let numbered: BTreeMap<&str, usize> = positions
+        .iter()
+        .enumerate()
+        .map(|(index, position)| (id(*position), index + 1))
+        .collect();
+    let held = governor
+        .evidence(case)
+        .map_err(|error| EffectError::new(format!("the evidence of case {}: {error:?}", case.0)))?;
+    // The interval a record placed nowhere lies in: after the latest run a record received
+    // before it cites.
+    let mut anchor = 0;
+    let mut opened: Option<(usize, Rejection)> = None;
+    for record in &held {
+        if record.case_id != *case {
+            continue;
+        }
+        let cited = || {
+            record
+                .observation_ids
+                .iter()
+                .map(|cited| cited.0.0.as_str())
+        };
+        if let Some(run) = cited().filter_map(|cited| numbered.get(cited)).max() {
+            anchor = anchor.max(*run);
+        }
+        if cited().any(|cited| own_runs.contains(cited)) {
+            continue;
+        }
+        let (Some(kind), Some(result)) = (
+            only_text(&record.facts, "kind"),
+            only_text(&record.facts, "result"),
+        ) else {
+            continue;
+        };
+        if kind != record.kind || !lists(listed, kind, result) {
+            continue;
+        }
+        let rejection = (record.evidence_id.0.0.clone(), record.producer.clone());
+        let at = cited().filter_map(|cited| placed.get(cited).copied()).max();
+        allowance.intervals.insert(at.map_or(anchor, |at| {
+            positions.partition_point(|position| *position < at)
+        }));
+        if let Some(at) = at
+            && opened.as_ref().is_none_or(|(before, _)| at >= *before)
+        {
+            opened = Some((at, rejection.clone()));
+        }
+        allowance.latest = Some(rejection);
+    }
+    if let Some((at, rejection)) = opened {
+        allowance.window = count(positions.iter().filter(|position| **position > at).count());
+        allowance.opened_by = Some(rejection);
+    }
+    Ok(allowance)
 }
 
 /// The member of `binding` that names a program beside the bindings file when `document`'s

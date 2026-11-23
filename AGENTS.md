@@ -1482,7 +1482,28 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `a_cancelled_last_run_writes_no_spent_record`). `tree run`'s `step_inputs` puts a writer that is
   not due and whose open evidence (`action_facts`) is not empty and holds only its own `from: runs`
   kinds in the idle set, so the spent kind never makes it useful (`crates/loom-tree/tests/runs_spent/`).
-  `argv` belongs to a `program` and a `person`; `{principal}` (`PRINCIPAL_PLACEHOLDER`) is
+- `budget.runs_per` (`story:rework-allowance-after-a-rejection`, `loom.bindings.RunsScope`):
+  `case` (the default) counts as above; `rejection` counts only the runs after the latest
+  rejection, so a rejection gives a fresh `max_runs`, and `budget.rework_limit` (a whole number
+  from 1, default 2) bounds the rejections. A rejection is a case record whose kind and result
+  `budget.rework_on` lists (same shape as `retry_when`, each pair also in `retry_when`, never
+  empty), else `retry_when`; at any subject revision (`none` included) and by any producer (a
+  person, `decider:<kind>`, `rule:<name>`, a program check), but never a record citing the
+  action's own run. It is placed at the latest observation of the case it cites; one that cites
+  none opens no window. The rework count counts at most one rejection in each interval between
+  two runs. `prepare` (through `allowance` in `program.rs`, the one count of the runs, which
+  the `from: runs` entry reads too) refuses `RunsSpent`
+  with `"{action} was rejected {k} times in case {case}, the latest {id} by {producer}; its
+  budget.rework_limit is {n}"` when the count is over the limit, else with `"{action} has run
+  {runs} times in case {case} since the rejection {id} by {producer}, its budget.max_runs is
+  {n}"` (today's text with no placed rejection, and byte for byte under `case`). Under
+  `rejection` a `from: runs` entry writes `spent` once, on the first run made at a rework count
+  equal to `rework_limit`, never on a full window alone. `runs_per: rejection` with an empty
+  `retry_when`, `rework_limit` or `rework_on` without it, and a `rework_on` pair outside
+  `retry_when` are `InvalidBudget`; the three on an `agent`, `open` or `copy` binding are
+  `MemberNotForExecutor`. No run-log kind is added. Held by `crates/loom-tree/tests/rework/`,
+  `bound_retry.rs` and `bindings_document.rs`.
+- `argv` belongs to a `program` and a `person`; `{principal}` (`PRINCIPAL_PLACEHOLDER`) is
   decoded only in a person's argv, as a whole entry other than `argv[0]`, else `InvalidArgv`.
 - A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no
   `budget.max_runs` holds 8.
