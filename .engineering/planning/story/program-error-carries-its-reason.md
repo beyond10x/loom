@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:program-error-carries-its-reason
 kind: story
-status: draft
+status: active
 title: A ProgramError refusal carries the program's stderr tail, walked for credentials and bounded, in its text and on the run tree status lists
 summary: 'Promised to Runbook: the reason text in the result, not only the last log line; the stderr tail as the session executor walks it (credential lines, cut PEM blocks, escapes withheld; 4096 bytes); ProgramRun.reason and StatusRun.reason; the walk moves to one shared module'
 tags:
@@ -48,7 +48,10 @@ scope:
   path: website/docs/reference/ess/loom-bindings.md
 - confidence: inferred
   path: website/docs/reference/ess/loom-tree.md
-revision: 20
+revision: 22
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T23:56:26Z", actor: "agent:sdc", revision: 21, executor: "agent:loom", correlation: "wave-2026-11-23-w8-program-error-carries-its-reason"}
+- {from: "proposed", to: "active", at: "2026-11-23T23:56:27Z", actor: "agent:sdc", revision: 22, executor: "agent:loom", correlation: "wave-2026-11-23-w8-program-error-carries-its-reason"}
 ---
 ## Outcome
 
