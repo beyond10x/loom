@@ -10,106 +10,16 @@
 //! prints `skipped: missing prerequisite: …` without them, unless `LOOM_REQUIRE_DELEGATION` is
 //! set: then it fails. No test reaches the network or a model, and each ends within 60 s.
 
-use std::io::{BufRead as _, BufReader};
 use std::process::{Child, Stdio};
 
 use super::*;
-
-const DELEGATED: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/tree-delegated");
+pub use crate::common::delegated_cgroup::delegation_present;
+use crate::common::delegated_cgroup::{DELEGATED, Scope};
 
 const BINARY: &str = env!("CARGO_BIN_EXE_b10x-loom");
 
-/// Set, a missing prerequisite fails the test instead of skipping it.
-const REQUIRE: &str = "LOOM_REQUIRE_DELEGATION";
-
-/// The flags of a delegated scope of the user's systemd manager.
-const SCOPE: [&str; 6] = ["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"];
-
 /// The hint `run`'s refusal gives, which names a flag `tree run` did not have.
 const RUN_HINT: &str = "use systemd-run --user -p Delegate=yes --scope or --cgroup-root";
-
-/// Skips the test naming `what`, or fails it when [`REQUIRE`] is set.
-fn missing(what: &str) -> bool {
-    assert!(
-        std::env::var_os(REQUIRE).is_none(),
-        "{REQUIRE} is set and a prerequisite is missing: {what}"
-    );
-    eprintln!("skipped: missing prerequisite: {what}");
-    false
-}
-
-/// Whether bubblewrap is here and a delegated scope starts.
-pub fn delegation_present() -> bool {
-    if !Path::new("/usr/bin/bwrap").is_file() {
-        return missing("executable /usr/bin/bwrap");
-    }
-    match Command::new("systemd-run").args(SCOPE).arg("true").output() {
-        Ok(output) if output.status.success() => true,
-        Ok(output) => missing(&format!(
-            "a user systemd manager that starts a delegated scope (systemd-run {}: {})",
-            output.status,
-            stderr(&output).trim()
-        )),
-        Err(error) => missing(&format!("systemd-run ({error})")),
-    }
-}
-
-/// A delegated scope a test holds: `scope.sh` waits in `keeper/` until it is dropped.
-struct Scope {
-    root: PathBuf,
-    keeper: Child,
-}
-
-impl Scope {
-    /// A fresh delegated scope, cpu, memory and pids handed to its children, into which this
-    /// test may move a process; `None` when a prerequisite is missing.
-    fn start() -> Option<Self> {
-        if !delegation_present() {
-            return None;
-        }
-        let mut keeper = Command::new("systemd-run")
-            .args(SCOPE)
-            .arg("sh")
-            .arg(Path::new(DELEGATED).join("scope.sh"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .unwrap();
-        let mut line = String::new();
-        BufReader::new(keeper.stdout.take().unwrap())
-            .read_line(&mut line)
-            .unwrap();
-        let root = PathBuf::from(line.trim());
-        assert!(
-            root.starts_with("/sys/fs/cgroup") && root.join("keeper").is_dir(),
-            "scope.sh printed no scope: {line:?}"
-        );
-        let scope = Self { root, keeper };
-        let probe = Command::new("sh")
-            .arg(Path::new(DELEGATED).join("enter.sh"))
-            .arg(scope.root.join("probe"))
-            .arg("true")
-            .output()
-            .unwrap();
-        let _ = fs::remove_dir(scope.root.join("probe"));
-        if !probe.status.success() {
-            missing(&format!(
-                "a test process that may move a process into a scope of the user's manager, as under systemd-run --user --scope ({})",
-                stderr(&probe).trim()
-            ));
-            return None;
-        }
-        Some(scope)
-    }
-}
-
-impl Drop for Scope {
-    fn drop(&mut self) {
-        drop(self.keeper.stdin.take());
-        let _ = self.keeper.wait();
-    }
-}
 
 /// A child the test started, killed when the test ends before it did.
 struct Running(Option<Child>);

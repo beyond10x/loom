@@ -1,0 +1,15 @@
+format: loom.bindings/1
+protocol: step@1
+artifacts:
+  work: name.txt
+actions:
+  - action: step.run
+    executor:
+      kind: program
+      argv: [sh, stubs/program.sh, TOKEN-TWO]
+    evidence:
+      - kind: step_ran
+        subject: work
+        producer: program
+        from: exit
+        results: {"0": ran, "*": failed}

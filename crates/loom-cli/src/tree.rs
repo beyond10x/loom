@@ -148,42 +148,63 @@ fn substrate_runner(held: Option<&TreeRunner>) -> Result<Arc<dyn TestRunner>, Re
         .ok_or_else(|| confinement_refused("CgroupUndelegated: tree run holds no cgroup root"))
 }
 
-/// The runner of `tree test`'s `confinement`: `local` as `tree run` opens it; `substrate` refused
-/// with `tree test`'s own precondition and remedy ([`TREE_TEST_CONFINEMENT_PRECONDITION`]), since
-/// `tree test` takes no cgroup root and never names `tree run`'s.
-fn test_runner(confinement: TreeConfinement) -> Result<Arc<dyn TestRunner>, Refused> {
-    match confinement {
-        TreeConfinement::Substrate => Err(Refused::new(
+/// A `ConfinementRefused` refusal saying `detail`, then the precondition and remedy of `tree run`.
+fn confinement_refused(detail: impl std::fmt::Display) -> Refused {
+    TREE_RUN_PLACER.refused(detail)
+}
+
+/// The command that places its programs ([`place`]): its name, which a refusal of its start again
+/// says, the precondition and remedy its confinement refusals end with, and the exit status it
+/// ends with when the run started again ended without one.
+#[derive(Clone, Copy)]
+struct Placer {
+    name: &'static str,
+    precondition: &'static str,
+    no_status: u8,
+}
+
+/// `tree run`, and `tree approve` of a person action that runs a program.
+const TREE_RUN_PLACER: Placer = Placer {
+    name: "tree run",
+    precondition: TREE_CONFINEMENT_PRECONDITION,
+    no_status: TREE_REFUSED,
+};
+
+/// `tree test`, whose refusals name its own remedy ([`TREE_TEST_CONFINEMENT_PRECONDITION`]),
+/// never `tree run`'s.
+const TREE_TEST_PLACER: Placer = Placer {
+    name: "tree test",
+    precondition: TREE_TEST_CONFINEMENT_PRECONDITION,
+    no_status: TREE_TEST_REFUSED,
+};
+
+impl Placer {
+    /// A `ConfinementRefused` refusal saying `detail`, then this command's precondition and
+    /// remedy.
+    fn refused(self, detail: impl std::fmt::Display) -> Refused {
+        Refused::new(
             TreeRefusalReason::ConfinementRefused,
-            TREE_TEST_CONFINEMENT_PRECONDITION,
-        )),
-        TreeConfinement::Local => tree_runner(confinement, None),
+            format!("{detail}; {}", self.precondition),
+        )
     }
 }
 
-/// A `ConfinementRefused` refusal saying `detail`, then the precondition and remedy of `tree run`.
-fn confinement_refused(detail: impl std::fmt::Display) -> Refused {
-    Refused::new(
-        TreeRefusalReason::ConfinementRefused,
-        format!("{detail}; {TREE_CONFINEMENT_PRECONDITION}"),
-    )
-}
-
-/// Where a `tree run` under `substrate` runs its confined programs.
+/// Where a command under `substrate` runs its confined programs.
 enum Placement {
     /// Under the root this process holds, through the runner that holds it.
     Held(TreeRunner),
-    /// Nowhere here: the run was started again in a delegated scope of its own and ended with
+    /// Nowhere here: the command was started again in a delegated scope of its own and ended with
     /// this exit status.
     StartedAgain(u8),
 }
 
-/// The placement of a command's programs under `confinement`, `None` under `local`:
+/// The placement of `placer`'s programs under `confinement`, `None` under `local`:
 /// `cgroup_root`, held; in a command started again, the scope it moved into a leaf of, held;
 /// otherwise the command started again in a delegated scope of its own. No root is ever
-/// discovered. `tree run` and the `tree approve` of a person action that runs a program place
-/// their programs here.
+/// discovered. `tree run`, `tree test` and the `tree approve` of a person action that runs a
+/// program place their programs here; each refusal ends with `placer`'s precondition and remedy.
 fn place(
+    placer: Placer,
     confinement: TreeConfinement,
     cgroup_root: Option<&Path>,
 ) -> Result<Option<Placement>, Refused> {
@@ -199,21 +220,22 @@ fn place(
     let held = match cgroup_root {
         Some(root) => TreeRunner::on_root(&resolved(root)?),
         None if std::env::var_os(REEXEC_MARKER).is_some() => {
-            started_again()?;
+            started_again(placer)?;
             TreeRunner::in_own_scope()
         }
-        None => return start_again().map(|status| Some(Placement::StartedAgain(status))),
+        None => return start_again(placer).map(|status| Some(Placement::StartedAgain(status))),
     };
     held.map(|runner| Some(Placement::Held(runner)))
-        .map_err(|refused| confinement_refused(refused.0.detail))
+        .map_err(|refused| placer.refused(refused.0.detail))
 }
 
-/// Starts this `tree run` again in a delegated scope of its own and answers the exit status it
+/// Starts this command again in a delegated scope of its own and answers the exit status it
 /// ended with; refused, naming why, when it never started there.
-fn start_again() -> Result<u8, Refused> {
+fn start_again(placer: Placer) -> Result<u8, Refused> {
+    let name = placer.name;
     let failed = |why: String| {
-        confinement_refused(format!(
-            "CgroupUndelegated: tree run could not start itself again under systemd-run --user --scope -p Delegate=yes: {why}"
+        placer.refused(format!(
+            "CgroupUndelegated: {name} could not start itself again under systemd-run --user --scope -p Delegate=yes: {why}"
         ))
     };
     let state = tempfile::Builder::new()
@@ -232,22 +254,22 @@ fn start_again() -> Result<u8, Refused> {
         .map_err(|e| failed(format!("systemd-run unavailable: {e}")))?;
     if !ready.exists() {
         return Err(failed(format!(
-            "systemd-run exited {status} before tree run started in the scope"
+            "systemd-run exited {status} before {name} started in the scope"
         )));
     }
     Ok(
         match status.code().and_then(|code| u8::try_from(code).ok()) {
             Some(code) => code,
             None => {
-                eprintln!("b10x-loom: tree run: the run started again ended {status}");
-                TREE_REFUSED
+                eprintln!("b10x-loom: {name}: the run started again ended {status}");
+                placer.no_status
             }
         },
     )
 }
 
-/// In a `tree run` started again: says it runs in its scope, creating the file its starter named.
-fn started_again() -> Result<(), Refused> {
+/// In a command started again: says it runs in its scope, creating the file its starter named.
+fn started_again(placer: Placer) -> Result<(), Refused> {
     let ready = std::env::var_os(REEXEC_READY)
         .map(PathBuf::from)
         .filter(|ready| {
@@ -259,7 +281,7 @@ fn started_again() -> Result<(), Refused> {
                     .is_some_and(|name| name.starts_with("loom-delegation-"))
         })
         .ok_or_else(|| {
-            confinement_refused("CgroupUndelegated: the delegation handshake path is missing")
+            placer.refused("CgroupUndelegated: the delegation handshake path is missing")
         })?;
     std::fs::OpenOptions::new()
         .write(true)
@@ -267,7 +289,7 @@ fn started_again() -> Result<(), Refused> {
         .open(&ready)
         .map(drop)
         .map_err(|e| {
-            confinement_refused(format!(
+            placer.refused(format!(
                 "CgroupUndelegated: delegation handshake failed: {e}"
             ))
         })
@@ -276,7 +298,11 @@ fn started_again() -> Result<(), Refused> {
 fn run(arguments: &TreeRunArgs) -> Result<u8, Refused> {
     let time = TreeTime::from_flag(arguments.at.as_deref())?;
     // Held until the run ends: no other tree run uses this root meanwhile.
-    let held = match place(arguments.confinement, arguments.cgroup_root.as_deref())? {
+    let held = match place(
+        TREE_RUN_PLACER,
+        arguments.confinement,
+        arguments.cgroup_root.as_deref(),
+    )? {
         Some(Placement::StartedAgain(status)) => return Ok(status),
         Some(Placement::Held(runner)) => Some(runner),
         None => None,
@@ -425,7 +451,11 @@ fn approve(arguments: &TreeApproveArgs) -> Result<u8, Refused> {
     };
     let mut held = None;
     let runner = if program {
-        match place(arguments.confinement, arguments.cgroup_root.as_deref())? {
+        match place(
+            TREE_RUN_PLACER,
+            arguments.confinement,
+            arguments.cgroup_root.as_deref(),
+        )? {
             Some(Placement::StartedAgain(status)) => return Ok(status),
             Some(Placement::Held(runner)) => held = Some(runner),
             None => {}
@@ -629,9 +659,10 @@ not outlive the {TREE_TEST_CYCLE_TIMEOUT} s bound of one test"
     )
 }
 
-/// `tree test`: checks `--cycle-timeout`, answers `--list` from the suite alone, else calls
-/// [`run_suite`], prints each cycle's line as it ends, the two summary lines and the `slowest:`
-/// line, and writes `--report`.
+/// `tree test`: checks `--cycle-timeout`, answers `--list` from the suite alone, else places its
+/// programs as `tree run` does ([`place`], with its own remedy) after the worker bound, calls
+/// [`run_suite`] with the runner that holds the root, prints each cycle's line as it ends, the two
+/// summary lines and the `slowest:` line, and writes `--report`.
 fn test(arguments: &TreeTestArgs) -> u8 {
     let refuse_test = |detail: String, document: serde_json::Value| {
         eprintln!("b10x-loom: tree test refused: {}", printable(&detail));
@@ -695,7 +726,18 @@ fn test(arguments: &TreeTestArgs) -> u8 {
     if let Err(refused) = workers_served(confinement.as_deref(), workers) {
         return suite_refused(refused);
     }
-    let runner = match test_runner(arguments.confinement) {
+    // Held until the suite ends: every worker's launches run under this one hold.
+    let held = match place(
+        TREE_TEST_PLACER,
+        arguments.confinement,
+        arguments.cgroup_root.as_deref(),
+    ) {
+        Ok(Some(Placement::StartedAgain(status))) => return status,
+        Ok(Some(Placement::Held(runner))) => Some(runner),
+        Ok(None) => None,
+        Err(refused) => return tree_refused(refused),
+    };
+    let runner = match tree_runner(arguments.confinement, held.as_ref()) {
         Ok(runner) => runner,
         Err(refused) => return tree_refused(refused),
     };
@@ -795,17 +837,25 @@ mod tests {
         );
         assert!(tree_runner(TreeConfinement::Substrate, None).is_err());
 
-        let Err(refused) = test_runner(TreeConfinement::Substrate) else {
-            panic!("a substrate runner for tree test");
-        };
+        // `tree test` places its programs as `tree run` does, and each of its refusals names its
+        // own remedy, never `tree run`'s.
+        let refused = TREE_TEST_PLACER.refused("CgroupUndelegated: the detail");
         assert_eq!(refused.0.reason, TreeRefusalReason::ConfinementRefused);
         assert!(
             refused.0.detail.contains("--confinement local")
-                && !refused.0.detail.contains("tree run")
-                && !refused.0.detail.contains("--cgroup-root"),
+                && refused.0.detail.contains("tree test --cgroup-root")
+                && !refused.0.detail.contains("tree run"),
             "{}",
             refused.0.detail
         );
+        let Err(refused) = place(
+            TREE_TEST_PLACER,
+            TreeConfinement::Local,
+            Some(Path::new("/sys/fs/cgroup")),
+        ) else {
+            panic!("--confinement local placed under a cgroup root");
+        };
+        assert_eq!(refused.0.reason, TreeRefusalReason::ConfinementRefused);
 
         let root = Path::new("/sys/fs/cgroup/loom-held-root");
         let refused = TreeRunner::on_root(root).unwrap_err();

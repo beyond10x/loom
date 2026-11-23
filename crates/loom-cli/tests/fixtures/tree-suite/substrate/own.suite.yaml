@@ -1,0 +1,10 @@
+format: loom.tree-suite/1
+defaults:
+  protocol: step@1
+  bindings: bindings/step.bindings.yaml
+  steps: [{do: open}, {do: run}]
+cycles:
+  - name: one
+    seed: [{from: stubs/own.sh, to: stubs/program.sh}, {from: names/one.txt, to: name.txt}, {from: names/one.txt, to: tag.txt}]
+  - name: two
+    seed: [{from: stubs/own.sh, to: stubs/program.sh}, {from: names/two.txt, to: name.txt}, {from: names/two.txt, to: tag.txt}]
