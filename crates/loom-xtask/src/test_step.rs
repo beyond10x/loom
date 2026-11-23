@@ -658,7 +658,7 @@ pub(crate) fn target_dir(root: &Path) -> PathBuf {
 /// the Taskfiles do, so a test that starts `ess` runs the pin under a newer dispatcher.
 /// Without the variables `cargo run` set for this program: a build script that reruns when one
 /// changes (ring's on `CARGO_MANIFEST_DIR` and `CARGO_PKG_*`) would otherwise rebuild its crate and
-/// everything above it here, after `task ess-gate` and `task conform` built them without.
+/// everything above it here, after `task ess-gate` built them without.
 fn cargo(root: &Path, args: &[String]) -> Result<Option<i32>, String> {
     let status = cargo_command(root)
         .args(args)
@@ -1226,6 +1226,117 @@ running 1 test
             per_test + Duration::from_secs(10 * 60) <= POOL_MOST,
             "the slow profile lets one test run {per_test:?}, too close to the pool's {POOL_MOST:?}"
         );
+    }
+
+    /// The test binaries `task check` runs inside the test step's one nextest run rather than as
+    /// cargo calls of their own (`story:ci-job-time-budget`): each such call selected other
+    /// packages, so cargo unified other features and built crates the step's build built again.
+    const IN_THE_STEP: [&str; 4] = [
+        "b10x-loom-conformance::conform",
+        "b10x-loom-commission-conformance::conform",
+        "b10x-loom-intake-conformance::conform",
+        "b10x-loom-commission-testkit::executor_port",
+    ];
+
+    /// The test binaries that stay out of the step, each with the task of `check` that runs it:
+    /// the commission one synthesizes a suite per test (D2 a of `story:ci-job-time-budget`).
+    const OWN_TASKS: [(&str, &str); 2] = [
+        ("b10x-loom-executor::ess_gate", "ess-gate"),
+        ("b10x-loom-commission::ess_gate", "commission:ess-gate"),
+    ];
+
+    /// The tasks `task check` no longer runs: [`IN_THE_STEP`] runs their tests. Each stays for a
+    /// person to run alone.
+    const FOLDED: [&str; 4] = [
+        "conform",
+        "commission:conform",
+        "intake-conform",
+        "commission:deps-guard",
+    ];
+
+    /// The steps of the root Taskfile's `check`, a task as `task: <name>`, a command as written.
+    fn check_steps(root: &Path) -> Vec<String> {
+        let taskfile: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&fs::read_to_string(root.join("Taskfile.yml")).unwrap())
+                .unwrap();
+        taskfile["tasks"]["check"]["cmds"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|step| match step.as_str() {
+                Some(command) => command.to_owned(),
+                None => format!("task: {}", step["task"].as_str().unwrap()),
+            })
+            .collect()
+    }
+
+    /// `task check` builds the workspace's test targets once: the conformance suites and the
+    /// dependency guard run in the test step's nextest run (its default filter does not leave
+    /// them out) and none of their tasks is a step of `check`; both `ess_gate` binaries stay out
+    /// of the step and keep their tasks in `check`.
+    #[test]
+    fn the_gate_builds_the_test_targets_once() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let steps = check_steps(&root);
+        assert!(
+            steps.iter().any(|step| step == "task: test-step"),
+            "{steps:?}"
+        );
+        for task in FOLDED {
+            assert!(
+                !steps.iter().any(|step| *step == format!("task: {task}")),
+                "task check runs `{task}`, a cargo build of its own: {steps:?}"
+            );
+            let defined: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+                &fs::read_to_string(root.join(if task.starts_with("commission:") {
+                    "Taskfile.commission.yml"
+                } else {
+                    "Taskfile.yml"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let name = task.trim_start_matches("commission:");
+            assert!(
+                defined["tasks"][name]["cmds"].as_sequence().is_some(),
+                "the task `{task}` is gone; it stays for a person to run alone"
+            );
+        }
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let filter = config["profile"]["default"]["default-filter"]
+            .as_str()
+            .unwrap();
+        for binary in IN_THE_STEP {
+            assert!(
+                !filter.contains(binary),
+                "the test step leaves out {binary}: {filter}"
+            );
+        }
+        for (binary, task) in OWN_TASKS {
+            assert!(
+                filter.contains(&format!("binary_id({binary})")),
+                "the test step runs {binary}, which stays out of it: {filter}"
+            );
+            assert!(
+                steps.iter().any(|step| *step == format!("task: {task}")),
+                "task check does not run `{task}`: {steps:?}"
+            );
+        }
+    }
+
+    /// CI's job `loom / task check` is bounded at 30 minutes (`story:ci-job-time-budget`).
+    #[test]
+    fn the_task_check_job_is_bounded_at_30_minutes() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let workflow: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &fs::read_to_string(root.join(".github/workflows/check.yml")).unwrap(),
+        )
+        .unwrap();
+        let job = &workflow["jobs"]["check"];
+        assert_eq!(job["name"].as_str(), Some("loom / task check"), "{job:?}");
+        assert_eq!(job["timeout-minutes"].as_u64(), Some(30), "{job:?}");
     }
 
     #[test]

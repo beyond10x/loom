@@ -914,8 +914,8 @@ fn derived_statuses_rate_reports_as_ess_does() {
     );
 }
 
-/// `task conform` runs [`ess_conformance_report`], and `task check` lists `conform` as a step of
-/// its own.
+/// `task conform` runs [`ess_conformance_report`], and `task check` runs it in the test step: it
+/// lists `test-step`, whose nextest run does not leave this binary out (`story:ci-job-time-budget`).
 #[test]
 fn taskfile_check_runs_conform() {
     let path = root().join("Taskfile.yml");
@@ -937,7 +937,14 @@ fn taskfile_check_runs_conform() {
         "task conform does not run `{CONFORM}`"
     );
     assert!(
-        body("check").iter().any(|line| line == "- task: conform"),
-        "task check does not list `conform` as its own step"
+        body("check").iter().any(|line| line == "- task: test-step"),
+        "task check does not list `test-step`"
+    );
+    let nextest = root().join(".config/nextest.toml");
+    let nextest = fs::read_to_string(&nextest)
+        .unwrap_or_else(|error| panic!("read {}: {error}", nextest.display()));
+    assert!(
+        !nextest.contains("binary_id(b10x-loom-conformance::conform)"),
+        "the test step leaves out b10x-loom-conformance::conform"
     );
 }

@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- The gate compiles the workspace's test targets once: the three conformance suites run inside the test step, and CI's loom / task check is bounded at 30 minutes again (story:ci-job-time-budget)
+
 ## [0.60.0] - 2026-11-23
 
 ### Added
