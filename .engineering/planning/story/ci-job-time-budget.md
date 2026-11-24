@@ -25,7 +25,7 @@ scope:
   path: Taskfile.yml
 - confidence: cited
   path: crates/loom-xtask/src/test_step.rs
-revision: 19
+revision: 20
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T21:48:48Z", actor: "agent:sdc", revision: 18, executor: "agent:loom", correlation: "operator-d146-ci-time-budget-2026-11-23"}
 - {from: "proposed", to: "active", at: "2026-11-23T21:48:48Z", actor: "agent:sdc", revision: 19, executor: "agent:loom", correlation: "operator-d146-ci-time-budget-2026-11-23"}
@@ -158,7 +158,7 @@ The test step meets its budget on the runner: "4073 test(s) in 502 binaries by n
   - d. Split `task check` into parallel jobs behind one aggregator named `loom / task check` (the
     required name unchanged, the ruleset untouched): wall time about the longest job, runner
     minutes about three times today's, and the local gate no longer the forge's shape.
-  - e. A larger runner: money, so Timo's decision.
+  - e. A larger runner: money, so the owner's decision.
 - **D2. The two `ess_gate` binaries.** Default **a**: they stay out of the test step and keep their
   tasks, because the commission one synthesizes per test with no cache; they move in only after a
   story caches synthesis (queue entry below). **b**: move them in now (about 1.6 s today), against
