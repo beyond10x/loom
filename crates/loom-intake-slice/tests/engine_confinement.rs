@@ -10,8 +10,7 @@
 //! again with `SUBSTRATE_CONFINEMENT_LOCAL=refuse` on that child process alone, so no other case
 //! sees the variable.
 
-#[path = "support/mod.rs"]
-mod support;
+use crate::support;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -775,8 +774,9 @@ fn host_policy_refusal_runs_in_its_own_process() {
         );
         return;
     }
+    let name = full_name!(NAME);
     let output = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", NAME, "--nocapture", "--test-threads=1"])
+        .args(["--exact", name.as_str(), "--nocapture", "--test-threads=1"])
         .env(POLICY_CASE, "1")
         .env("SUBSTRATE_CONFINEMENT_LOCAL", "refuse")
         .output()
@@ -791,7 +791,7 @@ fn host_policy_refusal_runs_in_its_own_process() {
     assert!(
         printed
             .lines()
-            .any(|line| line == format!("test {NAME} ... ok"))
+            .any(|line| line == format!("test {name} ... ok"))
             && printed.contains("test result: ok. 1 passed;"),
         "the child ran exactly the case: {printed}"
     );
@@ -904,7 +904,7 @@ fn linux_confinement() -> EngineConfinement {
 fn building_a_linux_runner_ends_no_run() {
     // Gated: runs in a delegated scope, or skips naming what is missing.
     support::delegated(
-        "building_a_linux_runner_ends_no_run",
+        &full_name!("building_a_linux_runner_ends_no_run"),
         &[],
         |_, workspace| {
             let first = EngineRunner::open(&linux_confinement()).expect("linux builds");
@@ -926,16 +926,20 @@ fn building_a_linux_runner_ends_no_run() {
 )]
 fn a_linux_record_has_no_reason() {
     // Gated: runs in a delegated scope, or skips naming what is missing.
-    support::delegated("a_linux_record_has_no_reason", &[], |_, workspace| {
-        let runner = EngineRunner::open(&linux_confinement()).expect("linux builds");
-        assert_eq!(runner.backend(), Backend::Substrate);
-        let result = runner
-            .run_child(&shell("true", workspace, &[]))
-            .expect("the child runs confined");
-        assert_eq!(result.exit_code, Some(0), "{}", result.output);
-        assert_eq!(result.applied.adapter.as_deref(), Some("linux"));
-        assert_eq!(result.applied.local_reason, None);
-    });
+    support::delegated(
+        &full_name!("a_linux_record_has_no_reason"),
+        &[],
+        |_, workspace| {
+            let runner = EngineRunner::open(&linux_confinement()).expect("linux builds");
+            assert_eq!(runner.backend(), Backend::Substrate);
+            let result = runner
+                .run_child(&shell("true", workspace, &[]))
+                .expect("the child runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(result.applied.adapter.as_deref(), Some("linux"));
+            assert_eq!(result.applied.local_reason, None);
+        },
+    );
 }
 
 #[test]
@@ -979,7 +983,7 @@ fn an_undelegated_root_is_refused_and_nothing_falls_back() {
 fn a_second_hold_of_a_root_in_this_process_is_refused() {
     // Gated: runs in a delegated scope, or skips naming what is missing.
     support::delegated(
-        "a_second_hold_of_a_root_in_this_process_is_refused",
+        &full_name!("a_second_hold_of_a_root_in_this_process_is_refused"),
         &[],
         |runner, workspace| {
             let root = runner.cgroup_root().expect("the harness names its root");
@@ -1018,7 +1022,7 @@ fn a_second_hold_of_a_root_in_this_process_is_refused() {
 fn a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated() {
     // Gated: runs in a delegated scope, or skips naming what is missing.
     support::delegated(
-        "a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated",
+        &full_name!("a_root_that_does_not_hold_this_process_is_refused_cgroup_undelegated"),
         &[],
         |runner, workspace| {
             let root = runner.cgroup_root().expect("the harness names its root");

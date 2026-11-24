@@ -11,7 +11,7 @@
 //! The cases run through the delegated harness in `tests/support`, as `tests/confined_child.rs`
 //! does, and skip naming what is missing where bubblewrap or a delegated scope is absent.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 
@@ -77,7 +77,7 @@ fn conforms(path: &str, applied: &AppliedConfinement, record: &substrate_wire::A
 }
 
 fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
-    support::delegated(name, &[], case);
+    support::delegated(&full_name!(name), &[], case);
 }
 
 #[test]

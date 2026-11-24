@@ -6,9 +6,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+autotests = false
 
 [lib]
 name = "b10x_loom_decision"
 
 [dependencies]
 loom = { path = "../../generated/rust/loom" }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+autotests = false
 
 [lib]
 name = "b10x_loom_intake_slice"
@@ -41,3 +42,7 @@ test-clock = []
 [dev-dependencies]
 b10x-loom-intake-slice = { path = ".", features = ["test-clock"] }
 tokio = { version = "1.53", features = ["test-util"] }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

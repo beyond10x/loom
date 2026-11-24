@@ -196,7 +196,12 @@ fn delegated(name: &str, tools: &[&str], case: impl FnOnce(&SubstrateRunner, &Pa
     let started = Command::new("systemd-run")
         .args(["--user", "--scope", "--quiet", "-p", "Delegate=yes", "--"])
         .arg(std::env::current_exe().unwrap())
-        .args(["--exact", name, "--nocapture", "--test-threads=1"])
+        .args([
+            "--exact",
+            full_name!(name).as_str(),
+            "--nocapture",
+            "--test-threads=1",
+        ])
         .env(DELEGATED, "1")
         .env(REPORT, &report)
         .output();

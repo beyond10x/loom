@@ -104,8 +104,9 @@ const SHELL_MADE: [&str; 4] = ["PWD", "OLDPWD", "SHLVL", "_"];
 
 /// Runs this binary again for the case `name` alone, with `env` set on that process only.
 fn rerun(name: &str, env: &[(&str, &str)]) -> (bool, String) {
+    let name = full_name!(name);
     let mut command = Command::new(std::env::current_exe().unwrap());
-    command.args(["--exact", name, "--nocapture", "--test-threads=1"]);
+    command.args(["--exact", name.as_str(), "--nocapture", "--test-threads=1"]);
     for (key, value) in env {
         command.env(key, value);
     }
@@ -405,7 +406,10 @@ fn security_w20261121w4_u1_a_process_that_left_the_group_is_refused_not_hidden()
     let fixture = Fixture::new();
     let pidfile = fixture.outside.join("escaped.pid");
     let exe = std::env::current_exe().unwrap();
-    let script = format!("\"$1\" --exact {NAME} --nocapture --test-threads=1 & sleep 30");
+    let script = format!(
+        "\"$1\" --exact {} --nocapture --test-threads=1 & sleep 30",
+        full_name!(NAME)
+    );
     let child = ChildCommand::new(
         "/bin/sh",
         vec![

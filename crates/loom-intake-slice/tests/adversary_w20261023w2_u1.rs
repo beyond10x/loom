@@ -8,7 +8,7 @@
 //! The delegated case runs against the real backend through `tests/support`, as the
 //! confined-child cases do, and skips naming what is missing; its hosts are loopback listeners.
 
-mod support;
+use crate::support;
 
 use std::io::Write as _;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
@@ -108,7 +108,9 @@ const EGRESS_UNSERVED: &str = "Substrate does not serve the egress aperture";
 #[test]
 fn adversary_a_child_dialling_a_hex_named_aperture_never_reaches_the_first_apertures_host() {
     support::delegated(
-        "adversary_a_child_dialling_a_hex_named_aperture_never_reaches_the_first_apertures_host",
+        &full_name!(
+            "adversary_a_child_dialling_a_hex_named_aperture_never_reaches_the_first_apertures_host"
+        ),
         &[],
         |runner, workspace| {
             if !Path::new(BASH).is_file() {

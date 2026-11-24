@@ -508,9 +508,15 @@ fn two_processes_append(test: &str, per_process: usize) {
     let dir = store_dir(test);
     let log = RunLog::open(&dir).expect("the store opens");
     let _ = fs::remove_file(start_file(&dir));
+    let full_name = format!("run_log::{test}");
     let spawn = |name: &str| -> Child {
         Command::new(std::env::current_exe().expect("the test binary"))
-            .args([test, "--exact", "--nocapture", "--test-threads=1"])
+            .args([
+                full_name.as_str(),
+                "--exact",
+                "--nocapture",
+                "--test-threads=1",
+            ])
             .env(APPENDER_DIR, &dir)
             .env(APPENDER_NAME, name)
             .stdout(std::process::Stdio::piped())

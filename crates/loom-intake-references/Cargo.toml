@@ -6,9 +6,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+autotests = false
 
 [lib]
 name = "b10x_loom_intake_references"
 
 [dependencies]
 regex = { version = "1", default-features = false, features = ["std", "unicode-gencat", "unicode-perl"] }
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

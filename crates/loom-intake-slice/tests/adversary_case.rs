@@ -138,7 +138,7 @@ fn adversary_an_inherited_git_dir_does_not_redirect_the_workspace() {
     let output = Command::new(std::env::current_exe().expect("the test binary"))
         .args([
             "--exact",
-            "adversary_git_dir_child_process",
+            full_name!("adversary_git_dir_child_process").as_str(),
             "--ignored",
             "--test-threads=1",
             "--nocapture",

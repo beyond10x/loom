@@ -5,7 +5,7 @@
 //! bubblewrap, a user systemd manager or the Substrate driver is absent; such a skip establishes
 //! no qualification.
 
-mod support;
+use crate::support;
 
 use b10x_loom_intake_slice::confinement::{Backend, ConfinementRefusal, TestRunner as _};
 use b10x_loom_intake_slice::executor::TestCommand;
@@ -20,7 +20,7 @@ const SYNTHETIC: [(&str, &str); 2] = [
 #[test]
 fn target_hardlinks_cannot_mutate_source_git_or_external_files() {
     delegated(
-        "target_hardlinks_cannot_mutate_source_git_or_external_files",
+        &full_name!("target_hardlinks_cannot_mutate_source_git_or_external_files"),
         &[],
         |runner, workspace| {
             std::fs::create_dir_all(workspace.join("target")).unwrap();
@@ -68,7 +68,7 @@ fn target_hardlinks_cannot_mutate_source_git_or_external_files() {
 #[test]
 fn inherited_synthetic_credentials_are_cleared() {
     delegated(
-        "inherited_synthetic_credentials_are_cleared",
+        &full_name!("inherited_synthetic_credentials_are_cleared"),
         &SYNTHETIC,
         |runner, workspace| {
             for (name, value) in SYNTHETIC {
@@ -88,7 +88,7 @@ fn inherited_synthetic_credentials_are_cleared() {
 #[test]
 fn workspace_rust_toolchain_override_never_executes_on_the_host() {
     delegated(
-        "workspace_rust_toolchain_override_never_executes_on_the_host",
+        &full_name!("workspace_rust_toolchain_override_never_executes_on_the_host"),
         &[],
         |runner, workspace| {
             use std::os::unix::fs::PermissionsExt as _;
@@ -130,7 +130,7 @@ fn fixture_socket_client() {
 #[test]
 fn target_socket_cannot_reach_an_unconfined_host_service() {
     delegated(
-        "target_socket_cannot_reach_an_unconfined_host_service",
+        &full_name!("target_socket_cannot_reach_an_unconfined_host_service"),
         &[],
         |runner, workspace| {
             use std::io::Read as _;
@@ -153,7 +153,7 @@ fn target_socket_cannot_reach_an_unconfined_host_service() {
                     "/workspace/target/probe",
                     [
                         "--exact",
-                        "fixture_socket_client",
+                        full_name!("fixture_socket_client").as_str(),
                         "--ignored",
                         "--nocapture",
                     ],

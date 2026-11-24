@@ -15,7 +15,7 @@
 //! `openssl` or `curl` is. Their hosts are loopback listeners the test starts; nothing connects
 //! past loopback.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, BufReader, Write as _};
@@ -52,7 +52,7 @@ fn named() -> ExecEnvironment {
 /// Run `case` against the real backend in a delegated scope, or skip naming what is missing; the
 /// process that launches the child holds [`UNNAMED`].
 fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
-    support::delegated(name, &[(UNNAMED, "leak")], case);
+    support::delegated(&full_name!(name), &[(UNNAMED, "leak")], case);
 }
 
 #[test]
@@ -2142,7 +2142,7 @@ fn the_three_cargo_caches_are_admitted_on_the_new_pin() {
     }
     let home_text = text(&home);
     support::delegated(
-        "the_three_cargo_caches_are_admitted_on_the_new_pin",
+        &full_name!("the_three_cargo_caches_are_admitted_on_the_new_pin"),
         &[(UNNAMED, "leak"), ("CARGO_HOME", home_text.as_str())],
         |runner, workspace| {
             let home = PathBuf::from(std::env::var_os("CARGO_HOME").expect("the fixture's home"));

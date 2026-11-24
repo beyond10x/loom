@@ -8,7 +8,7 @@
 //! The delegated cases run against the real backend through `tests/support`, as the
 //! confined-child cases do, and skip naming what is missing.
 
-mod support;
+use crate::support;
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
@@ -131,7 +131,7 @@ fn workdir_result(
 #[test]
 fn adversary_a_child_that_cannot_enter_its_workdir_reports_no_exit_of_its_own() {
     support::delegated(
-        "adversary_a_child_that_cannot_enter_its_workdir_reports_no_exit_of_its_own",
+        &full_name!("adversary_a_child_that_cannot_enter_its_workdir_reports_no_exit_of_its_own"),
         &[],
         |runner, workspace| {
             locked_directory(&workspace.join("locked"));
@@ -163,7 +163,7 @@ fn adversary_a_child_that_cannot_enter_its_workdir_reports_no_exit_of_its_own() 
 #[test]
 fn adversary_a_child_starts_in_the_target_the_launch_creates() {
     support::delegated(
-        "adversary_a_child_starts_in_the_target_the_launch_creates",
+        &full_name!("adversary_a_child_starts_in_the_target_the_launch_creates"),
         &[],
         |runner, workspace| {
             // The preflight created the given workspace's `target`; a fresh workspace has none.

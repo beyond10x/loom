@@ -12,8 +12,7 @@
 //! naming what is missing. Scratch goes under `CARGO_TARGET_TMPDIR`, which lies outside every
 //! mount Substrate owns, so a bound script there can be mounted read-only at its own path.
 
-#[path = "support/mod.rs"]
-mod support;
+use crate::support;
 
 use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt as _;
@@ -406,7 +405,7 @@ const SECRET: &str = "the-host-file-outside-the-workspace";
 fn under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace() {
     // Gated: runs in a delegated scope, or skips naming what is missing.
     support::delegated(
-        "under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace",
+        &full_name!("under_linux_a_bound_command_reads_no_host_file_and_writes_its_workspace"),
         &[],
         |runner, workspace| {
             let runner: Arc<dyn TestRunner> = Arc::new(runner.clone());
@@ -498,7 +497,7 @@ const E4DEFRAG: &str = "e4defrag";
 )]
 fn under_linux_a_bound_program_cannot_move_file_blocks() {
     support::delegated(
-        "under_linux_a_bound_program_cannot_move_file_blocks",
+        &full_name!("under_linux_a_bound_program_cannot_move_file_blocks"),
         &[],
         |runner, workspace| {
             let tool = match ioctl_prerequisite(workspace) {

@@ -93,7 +93,10 @@ fn adversary_a_timed_out_command_leaves_no_process_when_no_kill_program_is_on_pa
     std::fs::create_dir(&empty).unwrap();
     let mut child = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
-            "adversary_a_timed_out_command_leaves_no_process_when_no_kill_program_is_on_path",
+            full_name!(
+                "adversary_a_timed_out_command_leaves_no_process_when_no_kill_program_is_on_path"
+            )
+            .as_str(),
             "--exact",
             "--nocapture",
             "--test-threads",
@@ -192,7 +195,13 @@ fn adversary_a_group_kill_after_its_leader_was_reaped_reaches_no_other_group() {
     let mut child = match std::process::Command::new("/usr/bin/unshare")
         .args(["-rpf", "--kill-child", "--mount-proc"])
         .arg(std::env::current_exe().unwrap())
-        .args([NAME, "--exact", "--nocapture", "--test-threads", "1"])
+        .args([
+            full_name!(NAME).as_str(),
+            "--exact",
+            "--nocapture",
+            "--test-threads",
+            "1",
+        ])
         .env(IN_NAMESPACE, "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

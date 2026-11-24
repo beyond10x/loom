@@ -5,7 +5,7 @@
 //! to that promise on a host where all three are present: a case the scope never reached, and a
 //! refusal that names no missing prerequisite, must fail the parent instead of passing as a skip.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 use std::process::Command;
@@ -56,7 +56,7 @@ fn security_a_case_the_scope_never_reached_is_not_a_missing_prerequisite() {
 fn security_a_refusal_naming_no_missing_prerequisite_fails_the_parent() {
     if std::env::var_os(DELEGATED).is_some() {
         support::delegated(
-            "security_a_refusal_naming_no_missing_prerequisite_fails_the_parent",
+            &full_name!("security_a_refusal_naming_no_missing_prerequisite_fails_the_parent"),
             &[],
             |_: &SubstrateRunner, _: &Path| {},
         );
@@ -73,7 +73,7 @@ fn security_a_refusal_naming_no_missing_prerequisite_fails_the_parent() {
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let outcome = std::panic::catch_unwind(|| {
         support::delegated(
-            "security_a_refusal_naming_no_missing_prerequisite_fails_the_parent",
+            &full_name!("security_a_refusal_naming_no_missing_prerequisite_fails_the_parent"),
             &[("TMPDIR", link.to_str().unwrap())],
             |_: &SubstrateRunner, _: &Path| {},
         );

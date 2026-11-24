@@ -32,7 +32,11 @@ fn host_clock_child() {
 fn child(timezone: Option<&std::ffi::OsStr>, expectation: &str) {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command
-        .args(["--exact", "host_clock_child", "--nocapture"])
+        .args([
+            "--exact",
+            full_name!("host_clock_child").as_str(),
+            "--nocapture",
+        ])
         .env("LOOM_CLOCK_TEST_EXPECT", expectation)
         .env_remove("TZ");
     if let Some(timezone) = timezone {

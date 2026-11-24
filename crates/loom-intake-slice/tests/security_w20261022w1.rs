@@ -6,7 +6,7 @@
 //! the test binary starts itself again under `systemd-run --user --scope -p Delegate=yes` and
 //! skips only naming a missing prerequisite.
 
-mod support;
+use crate::support;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
@@ -25,7 +25,7 @@ fn release(workspace: &std::path::Path) {
 }
 
 fn delegated(name: &str, case: impl FnOnce(&SubstrateRunner, &Path)) {
-    support::delegated(name, &[], case);
+    support::delegated(&full_name!(name), &[], case);
 }
 
 /// A host-supplied timeout is a value to refuse or bound, never a panic: a live child named with

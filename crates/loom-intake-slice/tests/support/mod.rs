@@ -43,7 +43,7 @@ pub fn bubblewrap_present() -> bool {
 }
 
 /// Run the test `name`'s `case` against the real backend in a delegated scope, or skip naming
-/// what is missing. The binary the scope starts holds `environment` beside the harness's own
+/// what is missing. `name` is the test's full name, `<module>::<test>` (`full_name!`). The binary the scope starts holds `environment` beside the harness's own
 /// variables. There `case` gets a runner on the scope's cgroup and an empty workspace, `target/`
 /// created, in a directory of its own that the runner's driver already adopted.
 pub fn delegated(
