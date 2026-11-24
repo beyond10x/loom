@@ -224,7 +224,10 @@ types:
   # runner refused it), its attempt in the action's own chain from 1, whether the next run of the
   # action was a retry, and the evidence ids the run was given as the records that sent it back.
   # `cancelled` (story cancel-a-running-bound-program) is true on a run its cancel handle ended, and
-  # absent on every other run.
+  # absent on every other run. `reason` (story program-error-carries-its-reason) is the run's
+  # `loom.bindings.ProgramRun.reason`, read from its observation: the stderr tail of a run whose
+  # exit the binding's `exits.error` lists, walked for credentials and bounded; absent on every
+  # other run.
   - name: loom.tree.StatusRun
     kind: struct
     fields:
@@ -240,6 +243,8 @@ types:
         type: List<String>
       - name: cancelled
         type: Optional<Boolean>
+      - name: reason
+        type: Optional<String>
 
   # One `tree approve` on a case, in the order recorded: the capability, the action `--action`
   # named (absent without it), the answer, the principal and the instant.

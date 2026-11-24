@@ -359,7 +359,13 @@ types:
   # runner answered the refusal `Cancelled`, `runner_refusal` names it, and the run holds no exit
   # and no blob. A cancelled run counts against `budget.max_runs`. `principal` (story
   # person-action-runs-a-program) is the principal whose approval started the run of a Person
-  # executor's `argv`; it is absent on a program step.
+  # executor's `argv`; it is absent on a program step. `reason` (story
+  # program-error-carries-its-reason) is the last whole lines of the run's standard error within
+  # 4096 bytes, each line that holds a credential's shape withheld (a note stands in for each run
+  # of them, read over the whole stderr, so a PEM block whose opening the window cut is withheld
+  # too) and its terminal escape sequences replaced: the same walk the session executor shows a
+  # harness child's stderr with. It is present only on a run whose `class` is `error` and whose
+  # standard error holds a line, and absent on every other run.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -382,6 +388,8 @@ types:
       - name: cancelled
         type: Boolean
       - name: principal
+        type: Optional<String>
+      - name: reason
         type: Optional<String>
 
   # The environment of a program the program effect port starts (story bound-program-case-id),
@@ -465,7 +473,10 @@ types:
   # artifact cannot be digested (`ArtifactUnreadable`, story bound-artifact-revisions: before the
   # run nothing is started, after it no revision moves and nothing is recorded); the run's exit is
   # one the binding's `exits.error` lists (`ProgramError`, story bound-program-contract: the step
-  # ends the run, its text names the exit code and the blob digest, never the program's output); the
+  # ends the run, its text names the exit code and the blob digest, and, story
+  # program-error-carries-its-reason, ends with the run's `reason` after "the last lines of its
+  # stderr:" and a line break when the program wrote a line on its standard error: its stderr
+  # tail, walked for credentials and bounded, never its standard output); the
   # port's cancel handle was set before a program started or ended the bound program or its
   # `arguments_from` program while it ran (`Cancelled`, story cancel-a-running-bound-program: the
   # step ends the run, and a program it ended is a run that counts); the run's exit is one
