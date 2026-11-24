@@ -10,7 +10,9 @@
 //! [`TEST_BUDGET`], the tests of [`BINARY_BUDGETS`] longer than their summed budget, the tests of
 //! [`START_BUDGETS`] started `b10x-loom` more often than their bound (each start a line of the file
 //! the budget's variable names, which the step sets on its nextest run), or the step longer than
-//! [`STEP_BUDGET`]. Its summary line counts the tests that skipped for a missing
+//! [`STEP_BUDGET`], or its report holds no case of a test of [`REQUIRED`] (the conformance suites and
+//! the dependency guard, which `task check` runs only here: [`left_out`]), whatever way the run left
+//! it out. Its summary line counts the tests that skipped for a missing
 //! prerequisite (a line `skipped:` in their output), and it names each; where the delegated tests
 //! can run (`loom-xtask delegation-probe`, [`crate::delegation`]) it sets [`REQUIRE_DELEGATION`]
 //! on its nextest run, so a delegated test that would skip fails instead ([`require_delegation`]). It refuses to start while the test sync switch
@@ -227,6 +229,151 @@ pub struct Case {
     pub skipped: bool,
 }
 
+/// A test binary `task check` runs only in the step (`story:ci-job-time-budget`), and the tests of
+/// it the step's report must hold.
+#[derive(Debug, Clone, Copy)]
+pub struct Required {
+    /// `<package>::<binary>`, as the report names it.
+    pub binary: &'static str,
+    /// The tests of the binary that make its claim.
+    pub tests: &'static [&'static str],
+}
+
+/// The test binaries of the tasks `task check` no longer runs (`conform`, `commission:conform`,
+/// `intake-conform`, `commission:deps-guard`): the step fails unless its report holds a case of
+/// each test named, whatever way the run left it out (a filter, a package selection, an ignored
+/// test, a target switched off).
+pub const REQUIRED: &[Required] = &[
+    Required {
+        binary: "b10x-loom-conformance::conform",
+        tests: &["ess_conformance_report"],
+    },
+    Required {
+        binary: "b10x-loom-commission-conformance::conform",
+        tests: &["ess_conformance_report"],
+    },
+    Required {
+        binary: "b10x-loom-intake-conformance::conform",
+        tests: &["ess_conformance_report"],
+    },
+    Required {
+        binary: "b10x-loom-commission-testkit::executor_port",
+        tests: &[
+            "executor_port_contract",
+            "commission_depends_on_no_connectors_crate",
+        ],
+    },
+];
+
+/// What the step's report lacks of [`REQUIRED`], one line each, for a run over the workspace
+/// (`packages` empty) or over `packages`, whose binaries only are required.
+pub fn left_out(cases: &[Case], packages: &[String]) -> Vec<String> {
+    let mut lacking = Vec::new();
+    for required in REQUIRED {
+        let package = required.binary.split("::").next().unwrap_or_default();
+        if !packages.is_empty() && !packages.iter().any(|named| named == package) {
+            continue;
+        }
+        for test in required.tests {
+            let ran = cases
+                .iter()
+                .any(|case| case.binary == required.binary && case.name == *test);
+            if !ran {
+                lacking.push(format!(
+                    "{} {test} is not in the report: the step left it out (a filter, a package \
+                     selection, an ignore or a target switched off), and `task check` runs it \
+                     nowhere else",
+                    required.binary
+                ));
+            }
+        }
+    }
+    lacking
+}
+
+/// How many tests of [`REQUIRED`] a run over `packages` (the workspace when none) requires.
+fn required_count(packages: &[String]) -> usize {
+    REQUIRED
+        .iter()
+        .filter(|required| {
+            let package = required.binary.split("::").next().unwrap_or_default();
+            packages.is_empty() || packages.iter().any(|named| named == package)
+        })
+        .map(|required| required.tests.len())
+        .sum()
+}
+
+/// The test binaries `.config/nextest.toml`'s default filter leaves out: each has a task of its
+/// own in `task check`.
+#[cfg(test)]
+pub const OUT_OF_THE_STEP: [&str; 2] = [
+    "b10x-loom-executor::ess_gate",
+    "b10x-loom-commission::ess_gate",
+];
+
+/// The slow lane's test selector in the default filter.
+#[cfg(test)]
+const SLOW_SELECTOR: &str = "/(^|::)slow_/";
+
+/// The predicates of a nextest filter expression other than the two it is known to hold: the slow
+/// lane's `test(…)` and a `binary_id(…)` of [`OUT_OF_THE_STEP`]. Each is `name(argument)`, the
+/// blanks of the text ignored. Any other predicate (`package`, `binary`, `kind`, a wildcard, a
+/// regular expression, a `test` that names a required test) may leave a required binary out, so
+/// the filter is not read further: the step's report decides ([`left_out`]).
+#[cfg(test)]
+pub fn unknown_predicates(filter: &str) -> Vec<String> {
+    let chars: Vec<char> = filter.chars().collect();
+    let mut unknown = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        if !chars[at].is_alphabetic() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < chars.len() && (chars[at].is_alphanumeric() || chars[at] == '_') {
+            at += 1;
+        }
+        let name: String = chars[start..at].iter().collect();
+        let mut open = at;
+        while open < chars.len() && chars[open].is_whitespace() {
+            open += 1;
+        }
+        if chars.get(open) != Some(&'(') || matches!(name.as_str(), "and" | "or" | "not") {
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut close = open;
+        while close < chars.len() {
+            match chars[close] {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            close += 1;
+        }
+        let argument: String = chars[open + 1..close.min(chars.len())]
+            .iter()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        let known = match name.as_str() {
+            "test" => argument == SLOW_SELECTOR,
+            "binary_id" => OUT_OF_THE_STEP.contains(&argument.as_str()),
+            _ => false,
+        };
+        if !known {
+            unknown.push(format!("{name}({argument})"));
+        }
+        at = close + 1;
+    }
+    unknown
+}
+
 /// The step over the workspace, or over `packages` when any are named.
 pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     refuse_the_switch(std::env::var_os(TEST_SWITCH).as_deref())?;
@@ -424,6 +571,13 @@ pub fn run(root: &Path, packages: &[String]) -> Result<(), String> {
     }
     let (mut text, mut failures) =
         verdict(&cases, nextest, doc, wall, nextest_seconds, doc_seconds);
+    let lacking = left_out(&cases, packages);
+    text.push_str(&format!(
+        "\ntest step: {} of {} required test(s) of the folded conformance and guard binaries ran",
+        required_count(packages) - lacking.len(),
+        required_count(packages)
+    ));
+    failures.extend(lacking);
     for (budget, file) in &starts {
         let (line, failure) =
             start_verdict(budget, &cases, fs::read_to_string(file).ok().as_deref());
@@ -1308,12 +1462,19 @@ running 1 test
         let filter = config["profile"]["default"]["default-filter"]
             .as_str()
             .unwrap();
-        for binary in IN_THE_STEP {
-            assert!(
-                !filter.contains(binary),
-                "the test step leaves out {binary}: {filter}"
-            );
-        }
+        // Not a search for the binaries' names: any spelling of an exclusion (`package(…)`,
+        // `binary(…)`, a wildcard, a regular expression) is a predicate nobody here knows, and the
+        // step's report of its run decides (`left_out`).
+        assert_eq!(
+            unknown_predicates(filter),
+            Vec::<String>::new(),
+            "the test step's filter may leave out {IN_THE_STEP:?}: {filter}"
+        );
+        assert_eq!(
+            OWN_TASKS.map(|(binary, _)| binary),
+            OUT_OF_THE_STEP,
+            "the binaries the filter may leave out are the ones with a task of their own"
+        );
         for (binary, task) in OWN_TASKS {
             assert!(
                 filter.contains(&format!("binary_id({binary})")),
@@ -1337,6 +1498,306 @@ running 1 test
         let job = &workflow["jobs"]["check"];
         assert_eq!(job["name"].as_str(), Some("loom / task check"), "{job:?}");
         assert_eq!(job["timeout-minutes"].as_u64(), Some(30), "{job:?}");
+    }
+
+    /// Each test of [`IN_THE_STEP`]'s binaries the step must run, written out here on its own, so
+    /// that emptying [`REQUIRED`] is a change to this list as well.
+    const PINNED: [(&str, &str); 5] = [
+        ("b10x-loom-conformance::conform", "ess_conformance_report"),
+        (
+            "b10x-loom-commission-conformance::conform",
+            "ess_conformance_report",
+        ),
+        (
+            "b10x-loom-intake-conformance::conform",
+            "ess_conformance_report",
+        ),
+        (
+            "b10x-loom-commission-testkit::executor_port",
+            "executor_port_contract",
+        ),
+        (
+            "b10x-loom-commission-testkit::executor_port",
+            "commission_depends_on_no_connectors_crate",
+        ),
+    ];
+
+    /// A report of the whole workspace's run: a case of every [`PINNED`] test but those of the
+    /// binaries in `without`, beside tests of other binaries (as `ess_gate`'s are not in it).
+    fn report_without(without: &[&str]) -> Vec<Case> {
+        let case = |binary: &str, name: &str| Case {
+            binary: binary.to_owned(),
+            name: name.to_owned(),
+            seconds: 0.1,
+            failed: false,
+            skipped: false,
+        };
+        let mut cases = vec![
+            case("loom-xtask::checks", "a_check"),
+            case("b10x-loom-conformance::conform", "derived_statuses_rate"),
+            case("b10x-loom-cli::main", "tree_run::a_case"),
+        ];
+        for (binary, name) in PINNED {
+            if !without.contains(&binary) {
+                cases.push(case(binary, name));
+            }
+        }
+        cases
+    }
+
+    fn named(packages: &[&str]) -> Vec<String> {
+        packages.iter().map(|&p| p.to_owned()).collect()
+    }
+
+    /// The step's own report decides, whatever way a binary was left out of the run: a binary
+    /// without a case of its test fails the step, naming it, and the whole report passes.
+    #[test]
+    fn the_step_fails_when_a_binary_of_the_folded_tasks_is_not_in_its_report() {
+        assert_eq!(left_out(&report_without(&[]), &[]), Vec::<String>::new());
+        for binary in IN_THE_STEP {
+            let failures = left_out(&report_without(&[binary]), &[]);
+            assert!(!failures.is_empty(), "{binary} left out, the step passes");
+            for failure in &failures {
+                assert!(failure.contains(binary), "{binary}: {failure}");
+                for other in IN_THE_STEP.iter().filter(|other| **other != binary) {
+                    assert!(!failure.contains(other), "{binary}: {failure}");
+                }
+            }
+        }
+        let mut one_test = report_without(&[]);
+        one_test.retain(|case| case.name != "commission_depends_on_no_connectors_crate");
+        let failures = left_out(&one_test, &[]);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("b10x-loom-commission-testkit::executor_port")
+                && failures[0].contains("commission_depends_on_no_connectors_crate"),
+            "{failures:?}"
+        );
+        let mut nothing = report_without(&[]);
+        nothing.clear();
+        assert_eq!(left_out(&nothing, &[]).len(), PINNED.len());
+    }
+
+    /// A binary of another package's case, or a case of its own binary under another test's name,
+    /// is no case of the required test.
+    #[test]
+    fn a_case_of_another_binary_or_test_does_not_stand_for_a_required_one() {
+        let mut cases = report_without(&["b10x-loom-intake-conformance::conform"]);
+        for (binary, name) in [
+            (
+                "b10x-loom-intake-conformance::other",
+                "ess_conformance_report",
+            ),
+            ("b10x-loom-intake-conformance::conform", "another_test"),
+            ("b10x-loom-cli::main", "ess_conformance_report"),
+        ] {
+            cases.push(Case {
+                binary: binary.to_owned(),
+                name: name.to_owned(),
+                seconds: 0.1,
+                failed: false,
+                skipped: false,
+            });
+        }
+        let failures = left_out(&cases, &[]);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("b10x-loom-intake-conformance::conform"),
+            "{failures:?}"
+        );
+    }
+
+    /// Over named packages the step requires the binaries of those packages only: a package left
+    /// out of `-p` is the person's choice for that run (the gate's step names none, see
+    /// `the_test_step_task_runs_the_whole_workspace`), one named whose binary is missing fails.
+    #[test]
+    fn over_named_packages_the_step_requires_their_binaries_only() {
+        let only = |binary: &str| -> Vec<Case> {
+            report_without(&IN_THE_STEP)
+                .into_iter()
+                .chain(
+                    report_without(&[])
+                        .into_iter()
+                        .filter(|c| c.binary == binary),
+                )
+                .collect()
+        };
+        for binary in IN_THE_STEP {
+            let package = binary.split("::").next().unwrap();
+            assert_eq!(
+                left_out(&only(binary), &named(&[package])),
+                Vec::<String>::new(),
+                "{binary}"
+            );
+            assert!(
+                !left_out(&report_without(&IN_THE_STEP), &named(&[package])).is_empty(),
+                "{package} named, its binary {binary} missing, and the step passes"
+            );
+        }
+        assert_eq!(
+            left_out(&report_without(&IN_THE_STEP), &named(&["loom-xtask"])),
+            Vec::<String>::new()
+        );
+    }
+
+    /// [`REQUIRED`] holds exactly the binaries and tests of [`PINNED`].
+    #[test]
+    fn the_required_list_is_the_pinned_one() {
+        let required: Vec<(&str, &str)> = REQUIRED
+            .iter()
+            .flat_map(|r| r.tests.iter().map(|test| (r.binary, *test)))
+            .collect();
+        assert_eq!(required, PINNED.to_vec());
+        let binaries: Vec<&str> = REQUIRED.iter().map(|r| r.binary).collect();
+        assert_eq!(binaries, IN_THE_STEP.to_vec());
+    }
+
+    /// The command of a task of `file`, as `cargo test --locked -p <package> --test <binary>`
+    /// names its test binary: `<package>::<binary>`.
+    fn binary_of_task(root: &Path, file: &str, task: &str) -> String {
+        let taskfile: serde_yaml_ng::Value =
+            serde_yaml_ng::from_str(&fs::read_to_string(root.join(file)).unwrap()).unwrap();
+        let commands = taskfile["tasks"][task]["cmds"].as_sequence().unwrap();
+        assert_eq!(commands.len(), 1, "{file} task {task}: {commands:?}");
+        let words: Vec<&str> = commands[0].as_str().unwrap().split_whitespace().collect();
+        let after = |flag: &str| {
+            let at = words.iter().position(|word| *word == flag).unwrap();
+            words[at + 1]
+        };
+        format!("{}::{}", after("-p"), after("--test"))
+    }
+
+    /// The class: every test binary a task of [`FOLDED`] runs is required of the step, derived
+    /// from the Taskfiles, and each required test is a test of its file.
+    #[test]
+    fn every_binary_a_folded_task_runs_is_required_and_its_tests_exist() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for task in FOLDED {
+            let (file, name) = match task.strip_prefix("commission:") {
+                Some(name) => ("Taskfile.commission.yml", name),
+                None => ("Taskfile.yml", task),
+            };
+            let binary = binary_of_task(&root, file, name);
+            assert!(
+                REQUIRED.iter().any(|required| required.binary == binary),
+                "task `{task}` runs {binary}, which the step does not require: {REQUIRED:?}"
+            );
+        }
+        for required in REQUIRED {
+            let (package, binary) = required.binary.split_once("::").unwrap();
+            let manifest = fs::read_dir(root.join("crates"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path().join("Cargo.toml"))
+                .find(|path| {
+                    fs::read_to_string(path)
+                        .is_ok_and(|text| text.contains(&format!("name = \"{package}\"")))
+                })
+                .unwrap_or_else(|| panic!("no crate is the package {package}"));
+            let source = manifest
+                .parent()
+                .unwrap()
+                .join(format!("tests/{binary}.rs"));
+            let text = fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
+            for test in required.tests {
+                assert!(
+                    text.contains(&format!("fn {test}(")),
+                    "{} has no test {test}",
+                    source.display()
+                );
+            }
+        }
+    }
+
+    /// The default filter of the step names no predicate the guard does not know, so no spelling
+    /// of an exclusion of a required binary (a `package(…)`, a `binary(…)`, a wildcard or a
+    /// regular expression, blanks inside) goes unread; the step's report is the guard behind it.
+    #[test]
+    fn the_default_filter_names_no_predicate_the_guard_does_not_know() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let filter = config["profile"]["default"]["default-filter"]
+            .as_str()
+            .unwrap();
+        assert_eq!(unknown_predicates(filter), Vec::<String>::new(), "{filter}");
+        let slow = "not test(/(^|::)slow_/)";
+        let gates =
+            "binary_id(b10x-loom-executor::ess_gate) | binary_id(b10x-loom-commission::ess_gate)";
+        assert_eq!(
+            unknown_predicates(&format!("{slow} and not ({gates})")),
+            Vec::<String>::new()
+        );
+        for (spelling, what) in [
+            ("package(b10x-loom-conformance)", "package"),
+            ("package(=b10x-loom-conformance)", "package"),
+            ("binary_id(b10x-loom-conformance::*)", "binary_id"),
+            ("binary_id(b10x-loom-conformance::conform)", "binary_id"),
+            ("binary_id( b10x-loom-conformance::conform )", "binary_id"),
+            ("binary_id\t(b10x-loom-conformance::conform)", "binary_id"),
+            ("binary_id(/conform$/)", "binary_id"),
+            ("binary(conform)", "binary"),
+            ("binary(=executor_port)", "binary"),
+            ("kind(test)", "kind"),
+            ("rdeps(b10x-loom-conformance)", "rdeps"),
+            ("test(/conformance/)", "test"),
+            ("test(ess_conformance_report)", "test"),
+            ("test(=ess_conformance_report)", "test"),
+        ] {
+            let unknown = unknown_predicates(&format!("{slow} and not ({gates} | {spelling})"));
+            assert_eq!(unknown.len(), 1, "{spelling}: {unknown:?}");
+            assert!(unknown[0].starts_with(what), "{spelling}: {unknown:?}");
+        }
+    }
+
+    /// The gate's step runs the whole workspace: `task test-step` is the one command with no
+    /// package named, `task check` runs that task and nothing else calls the step, and CI runs
+    /// `task check`. Naming a package (`-- test-step -p …`) would require only that one's binaries.
+    #[test]
+    fn the_test_step_task_runs_the_whole_workspace() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut callers = Vec::new();
+        for file in ["Taskfile.yml", "Taskfile.commission.yml"] {
+            let taskfile: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(&fs::read_to_string(root.join(file)).unwrap()).unwrap();
+            for (name, task) in taskfile["tasks"].as_mapping().unwrap() {
+                for command in task["cmds"].as_sequence().into_iter().flatten() {
+                    if let Some(line) = command.as_str()
+                        && line.contains("test-step")
+                    {
+                        callers.push((name.as_str().unwrap().to_owned(), line.to_owned()));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            callers,
+            [(
+                "test-step".to_owned(),
+                "cargo run -q --locked -p loom-xtask -- test-step".to_owned()
+            )]
+        );
+        let steps = check_steps(&root);
+        assert_eq!(
+            steps
+                .iter()
+                .filter(|step| *step == "task: test-step")
+                .count(),
+            1,
+            "{steps:?}"
+        );
+        let workflow: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+            &fs::read_to_string(root.join(".github/workflows/check.yml")).unwrap(),
+        )
+        .unwrap();
+        let runs: Vec<&str> = workflow["jobs"]["check"]["steps"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .filter_map(|step| step["run"].as_str())
+            .collect();
+        assert!(runs.contains(&"task check"), "{runs:?}");
     }
 
     #[test]

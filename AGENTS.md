@@ -313,7 +313,15 @@ Before a change is reported done, in this order:
    guard, `executor_port` of `b10x-loom-commission-testkit`, run in it, so their test targets are
    compiled once, in the step's build) and `cargo test --doc --workspace --locked`, prints the ten
    slowest tests on every run and fails over 120 s
-   (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
+   (`crates/loom-xtask/src/test_step.rs`). It also fails unless its JUnit report holds a case of
+   each test those folded tasks ran (`REQUIRED`: `ess_conformance_report` of the three `conform`
+   binaries, `executor_port_contract` and `commission_depends_on_no_connectors_crate` of
+   `executor_port`), whatever way the run left it out (a filter in any spelling, `-p`, an ignore, a
+   target switched off), since `task check` runs them nowhere else; `task test-step` is the one
+   unscoped command and names no package, a test of `loom-xtask` and one in each of the three
+   crates hold that, the filter names no predicate but the slow lane's and the two `ess_gate`
+   binaries, and every binary a folded task runs is in `REQUIRED`
+   (`story:ci-job-time-budget`). It also fails when the tests of
    `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s,
    in their own binary and as the module `tree_run::` of `b10x-loom-cli::main` alike. It fails too
    when they start `b10x-loom` more than 66 times (`START_BUDGETS`): `with_the_switch` appends a
