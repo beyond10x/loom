@@ -4,7 +4,7 @@ id: story:forge-build-cache
 kind: story
 status: draft
 title: loom / task check restores the locked dependencies' build from a forge cache that only a push to main writes, and ends within 25 minutes on a warm entry
-summary: 'story:ci-job-time-budget D1 c as its own story; warm vs cold on EPYC 7763: test build 1182 to 585 s, clippy 82 to 35, consumer 344 to 60, restore 21 s for 1.36 GB; separate main-push job writes, check restores only; actions/cache pinned 55cc8345 (v6.1.0)'
+summary: story:ci-job-time-budget D1 c, carrying its Acceptance 2 and Gate on warm runs; separate main-push job (40 min, own concurrency group) writes, check restores only; key ubuntu-24.04 + rustc cachekey + hashFiles(rust-toolchain.toml, Cargo.lock, .cargo/config.toml, **/Cargo.toml); actions/cache pinned 55cc8345 (v6.1.0); loom-xtask guard over the workflows
 tags:
 - gate
 relations:
@@ -21,8 +21,10 @@ scope:
 - confidence: cited
   path: CHANGELOG.md
 - confidence: inferred
-  path: crates/loom-xtask/src
-revision: 4
+  path: crates/loom-xtask/src/forge_cache.rs
+- confidence: cited
+  path: crates/loom-xtask/src/main.rs
+revision: 8
 ---
 ## Outcome
 
@@ -79,14 +81,17 @@ holds the limit; release_check's `every_action_of_the_release_and_images_workflo
 
 1. A workflow of its own (D2 a; `.github/workflows/deps-cache.yml`, job
    `loom / dependency cache`), `on: push: branches: [main]` and nothing else, `permissions:
-   contents: read`, `timeout-minutes: 45`, `runs-on: ubuntu-24.04`, and its own `concurrency:`
-   group, one per workflow and not per ref (`group: deps-cache`), with `cancel-in-progress: false`
-   (D6 a). It installs the toolchain from the same source `check.yml` uses at the time (D7). It
-   looks the exact key up first (`lookup-only: true`) and ends on a hit. On a miss it restores by
-   the key's prefix (`restore-keys`), runs the builds `task check` runs without running tests
-   (the test build `cargo test --workspace --locked --no-run`, clippy `--workspace --all-targets`,
-   the `durable-check` selections, the `consumer-check` build), removes every workspace artifact,
-   then saves (D1 a).
+   contents: read`, `timeout-minutes: 40` (D8), `runs-on: ubuntu-24.04`, and its own
+   `concurrency:` group, one per workflow and not per ref (`group: deps-cache`), with
+   `cancel-in-progress: false` (D6 a). It installs the toolchain from the same source `check.yml`
+   uses at the time, in a step with `id: rust` (D7). It looks the exact key up first
+   (`lookup-only: true`) and ends on a hit. On a miss it restores by the `restore-keys` prefix,
+   runs the builds `task check` runs without running tests (the test build `cargo test
+   --workspace --locked --no-run`, clippy `--workspace --all-targets`, the `durable-check`
+   selections, the `consumer-check` build), removes every workspace artifact, then saves under the
+   key the restore step resolved (`steps.restore.outputs.cache-primary-key`, an output of
+   `actions/cache/restore` at the pinned commit), not a key computed again after the builds
+   (D1 a). Its 40 minutes are the limit of a new job; `loom / task check` keeps its 30.
 2. The entry holds `~/.cargo/registry`, `~/.cargo/git`, `target/` and `consumers/pinned/target/`,
    each `target` with every workspace artifact removed before the save (the diag workflow's step
    `Keep only the dependencies' build`: `.fingerprint`, `build` and `deps` entries of
@@ -94,22 +99,30 @@ holds the limit; release_check's `every_action_of_the_release_and_images_workflo
    `target/nextest`, `target/tmp`, `target/cargo-timings`, `target/release`).
    `consumers/pinned/target/` is in because it was measured useful (344 to 60 s).
 3. The key (D4 a): `loom-deps-ubuntu-24.04-${{ steps.rust.outputs.cachekey }}-${{
-   hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml',
-   'consumers/pinned/Cargo.toml') }}`; the `restore-keys` prefix is everything before the hash.
+   hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', '**/Cargo.toml') }}`.
+   The key holds the image name, the rustc hash and the hashed files; `restore-keys` holds the
+   image name and the rustc hash (`loom-deps-ubuntu-24.04-${{ steps.rust.outputs.cachekey }}-`).
    `steps.rust.outputs.cachekey` is the output of the `dtolnay/rust-toolchain` step (`id: rust`),
    "A short hash of the rustc version, appropriate for use as a cache key" (its `action.yml` at
    the pinned commit `4360b52568e2003a75bf9bc1d59f33a8e3fc893c`, read 2026-11-24). On
    `origin/main` `rust-toolchain.toml` does not exist and `hashFiles` skips it; `Cargo.lock`,
-   `.cargo/config.toml` and `consumers/pinned/Cargo.toml` exist. No version literal and no `env:`
-   value is in the key.
+   `.cargo/config.toml` and the manifests exist (`**/Cargo.toml` holds `consumers/pinned/Cargo.toml`).
+   No version literal and no `env:` value is in the key.
 4. `loom / task check` runs on `ubuntu-24.04` (`check.yml:25` moves from `ubuntu-latest` in this
-   story unless `story:local-gate-equals-forge` moved it first; same value). It gains one step
-   `Restore the dependency build` (`actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9`,
-   same paths, key and `restore-keys`) before `cargo fetch --locked`, and one step that prints the
-   runner's CPU model (`lscpu`, `Model name`), which Acceptance 2 reads. It has no save step: no
-   `actions/cache/save` and no combined `actions/cache` anywhere in `check.yml`. Step order: the
-   classification step of `story:planning-only-pull-requests-skip-build`, where it has landed,
-   comes first; the restore step goes before `cargo fetch --locked`.
+   story unless `story:local-gate-equals-forge` moved it first; same value). Its
+   `dtolnay/rust-toolchain` step gets `id: rust`; without it the key loses the rustc hash and never
+   equals `deps-cache.yml`'s. It gains one step `Restore the dependency build`
+   (`actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9`, same paths, key and
+   `restore-keys`), after the `id: rust` step and before `cargo fetch --locked`, and one step that
+   prints the runner's CPU model (`lscpu`, `Model name`), which Acceptance 2 reads. Both steps carry
+   `if: steps.changes.outputs.class != 'skip'`, the condition `story:planning-only-pull-requests-skip-build`
+   gives the install and fetch steps, so a planning-only run skips both and that story's guard
+   `both_jobs_classify_first_and_skip_by_class` (every step after `changes` has an `if:` naming
+   `steps.changes.outputs.class`) holds. Before that story lands there is no `changes` step: the
+   output is empty, the condition is true and both steps run, so the `if:` is written in either
+   landing order. It has no save step: no `actions/cache/save` and no combined `actions/cache`
+   anywhere in `check.yml`. Step order: `changes` (where it has landed) first, then the toolchain
+   step `id: rust`, then the restore step, then `cargo fetch --locked`.
 5. A guard of `loom-xtask` holds 1 to 4 as Acceptance 1 lists its cases; the 30-minute limit stays
    held by `the_task_check_job_is_bounded_at_30_minutes`, unchanged.
 6. Documents (Acceptance 6).
@@ -145,9 +158,13 @@ holds the limit; release_check's `every_action_of_the_release_and_images_workflo
     repository's own, which `~/beyond10x/AGENTS.md` § One compile cache forbids.
 - **D4. The key.** Default **a**: the pinned image name, the rustc hash of the install step and
   the hashed files (`rust-toolchain.toml` where it exists, `Cargo.lock`, `.cargo/config.toml`,
-  `consumers/pinned/Cargo.toml`), and a `restore-keys` prefix up to the files' hash, so a lock
-  change restores the last entry of the same rustc and image and rebuilds only the dependencies
-  that changed. Reason: files and the installed rustc hold in either landing order with
+  `**/Cargo.toml`), and a `restore-keys` prefix of the image name and the rustc hash, so a lock or
+  manifest change restores the last entry of the same rustc and image and rebuilds only the
+  dependencies that changed. Every `Cargo.toml` is hashed, not only the lock: a feature change
+  that leaves `Cargo.lock` unchanged changes which dependency artifacts the build needs, and with
+  the lock alone the exact key would hit a stale entry that `deps-cache.yml` never refreshes. A
+  version bump (every crate's `Cargo.toml` and `Cargo.lock`) changes the key once; the
+  push-to-`main` run of `deps-cache.yml` on that commit writes the new entry. Reason: files and the installed rustc hold in either landing order with
   `story:local-gate-equals-forge` (D7), where a version literal or an `env:` value would not.
   The build settings `check.yml`'s `env:` sets today (`CARGO_INCREMENTAL=0`,
   `CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0`) are not copied into `deps-cache.yml`
@@ -170,11 +187,23 @@ holds the limit; release_check's `every_action_of_the_release_and_images_workflo
   time it is written. If `story:local-gate-equals-forge` has landed: its step `id: toolchain`
   reading `rust-toolchain.toml`, and `dtolnay/rust-toolchain` with `toolchain: ${{
   steps.toolchain.outputs.channel }}`. If not: the same `dtolnay/rust-toolchain` step `check.yml`
-  uses, the one place this story repeats the version, and `story:local-gate-equals-forge`, landing
-  second, rewrites that step in `deps-cache.yml` with the four jobs it names (its forge-parity
-  `workflows` check requires the `id: toolchain` step in every job that installs Rust). Either
-  way the dtolnay step carries `id: rust` for the key. **b**: wait for
-  `story:local-gate-equals-forge`: the release would wait on a story that is not merged.
+  uses, the one place this story repeats the version. Whichever of the two stories lands second
+  rewrites `deps-cache.yml`'s toolchain step to the `id: toolchain` form. That duty is recorded
+  here only: `story:local-gate-equals-forge`'s scope and body do not list `deps-cache.yml`
+  (inferred: its forge-parity `workflows` check, which requires the `id: toolchain` step in every
+  job that installs Rust, would go red on the file and show it). Either way the dtolnay step
+  carries `id: rust` for the key. **b**: wait for `story:local-gate-equals-forge`: the release
+  would wait on a story that is not merged.
+- **D8. The limit of `loom / dependency cache`.** **40 minutes**, derived from the measured cold
+  build of the writer's steps on the slowest runner model seen (Xeon Platinum 8370C, diag job
+  `138385715022`, step times from `gh api …/actions/jobs/<id>`): setup, checkout and installs 19 s,
+  `cargo fetch` 76 s, test build 1172 s, clippy 82 s, the two durable-check steps 123 + 144 s (an
+  upper bound for the writer's durable-check build), consumer build in its own target 344 s; save
+  13 s for 1.36 GB (job `138420007408`). Sum 1973 s (32.9 min); times 1.2, rounded up to a whole
+  5 minutes: 40. A limit of at most 30 is not supported: the measured cold sum on that model is
+  over 30 minutes, so the writer would be killed cold there and write no entry, the failure D2 a
+  exists to prevent. It is the limit of a new job and raises no existing one; `loom / task check`
+  keeps `timeout-minutes: 30`.
 
 ## Trust
 
@@ -209,7 +238,8 @@ holds the limit; release_check's `every_action_of_the_release_and_images_workflo
 ## Cold case
 
 The first run after an eviction (7 days without a read), a lock change, a `.cargo/config.toml`
-change, a `rust-toolchain.toml` or rustc change, or an image change runs cold: about 28 to 37 min,
+change, a change to any `Cargo.toml`, a `rust-toolchain.toml` or rustc change, or an image
+change runs cold or from the prefix: about 28 to 37 min,
 as today. This story does not claim to fix it. The `restore-keys` prefix limits a lock change to
 the dependencies that changed; the warm-entry job runs on the same `main` push, so a run that
 starts after it has saved (a re-run of a cancelled one included) is warm.
@@ -247,13 +277,18 @@ is unit tests in `loom-xtask`'s existing target. The forge is the verifier of 2 
      (source: `~/beyond10x/AGENTS.md` § One compile cache; the forge has no wrapper, and the
      folder rule binds every repository);
    - when job `check` of `check.yml` has no step `Restore the dependency build` with the exact key
-     of After 3, or that step comes after `cargo fetch --locked`;
-   - when `deps-cache.yml` lacks `permissions: contents: read`, `timeout-minutes: 45`, or a
+     of After 3, or that step does not sit after the step `id: rust` and before `cargo fetch
+     --locked`;
+   - when the restore step or the `lscpu` step of job `check` has no `if:` naming
+     `steps.changes.outputs.class`;
+   - when a job reads `steps.rust.outputs` and its `dtolnay/rust-toolchain` step has no `id: rust`;
+   - when `deps-cache.yml` lacks `permissions: contents: read`, `timeout-minutes: 40`, or a
      workflow-level `concurrency:` group with `cancel-in-progress: false`;
-   - when the key or `restore-keys` of either workflow does not hold the job's pinned `runs-on`
-     image name (`ubuntu-24.04`) and the hashed files of After 3 (`rust-toolchain.toml`,
-     `Cargo.lock`, `.cargo/config.toml`, `consumers/pinned/Cargo.toml`), or the two workflows'
-     keys differ.
+   - when the key of either workflow does not hold the job's pinned `runs-on` image name
+     (`ubuntu-24.04`), the rustc hash (`steps.rust.outputs.cachekey`) and the hashed files of
+     After 3 (`rust-toolchain.toml`, `Cargo.lock`, `.cargo/config.toml`, `**/Cargo.toml`); when
+     its `restore-keys` does not hold the image name and the rustc hash; or when the two
+     workflows' keys differ.
    The 30-minute limit of `loom / task check` is not a case here: the existing
    `the_task_check_job_is_bounded_at_30_minutes` (`test_step.rs:1491-1501`) holds it, unchanged.
    Each case has a passing and a failing input on inline YAML, each under 5 s, plus one case over
@@ -318,11 +353,12 @@ Derived 2026-11-24 from `origin/main` (`0c454abed`) and `origin/diag/check-time`
 runs `45365476832`, `45366185420`, `45386884832`, `45392527898`. **Cited**: read at the line or
 heading named. **Inferred**: a reading that could be wrong.
 
-- `.github/workflows/check.yml` (job `check`: `runs-on`, the restore and `lscpu` steps; the
-  `timeout-minutes` line unchanged) — cited.
+- `.github/workflows/check.yml` (job `check`: `runs-on`, `id: rust`, the restore and `lscpu`
+  steps; the `timeout-minutes` line unchanged) — cited.
 - `.github/workflows/deps-cache.yml` (new) — inferred name.
-- `crates/loom-xtask/src/` (`forge_cache.rs`, new, and its `mod` line in `main.rs`;
-  `test_step.rs`'s 30-minute test read, not changed) — inferred file, cited surface.
+- `crates/loom-xtask/src/forge_cache.rs` (new) — inferred file.
+- `crates/loom-xtask/src/main.rs` (one `mod forge_cache;` line in the `mod` block, `:60-72`) —
+  cited. `test_step.rs`'s 30-minute test is read, not changed.
 - `AGENTS.md` (§ Gate, new sub-heading `### The forge's dependency cache`), `CHANGELOG.md` (the
   section Acceptance 6 names) — cited.
 - `.github/workflows/release.yml` (job `check`) — read, not changed, cited.
@@ -335,26 +371,31 @@ heading named. **Inferred**: a reading that could be wrong.
   the margin).
 - **Ordering with `story:local-gate-equals-forge`** (active), a note and not an edge: the
   vocabulary's only ordering edges are `depends_on` and `blocks`, and neither holds, since either
-  may land first and the release must not wait for it. Landing order: D7. If this story lands
-  second, it takes the `id: toolchain` form and the `ubuntu-24.04` that story already set; if that
-  story lands second, it rewrites `deps-cache.yml`'s toolchain step and drops `check.yml`'s
-  `env:` build settings, and the key changes through `rust-toolchain.toml` and
+  may land first and the release must not wait for it. Landing order: D7. Whichever story lands
+  second rewrites `deps-cache.yml`'s toolchain step to the `id: toolchain` form; the duty is
+  recorded here only, since that story's scope and body do not list `deps-cache.yml`. When
+  `story:local-gate-equals-forge` lands, `check.yml`'s `env:` build settings move into
+  `.cargo/config.toml` (its change) and the key changes through `rust-toolchain.toml` and
   `.cargo/config.toml` (one cold run).
 - **Shared files, textual merge.**
   - `.github/workflows/check.yml`: `story:local-gate-equals-forge` (active; `runs-on`, the
     toolchain steps, `env:`), `story:planning-only-pull-requests-skip-build` (active; its
-    classification step comes first, the restore step goes before `cargo fetch --locked`, and a
-    skipped run should skip the restore too, inferred), `story:macos-build-reruns-once-when-cancelled`
+    `changes` step comes first, and the restore and `lscpu` steps carry its `if:` on
+    `steps.changes.outputs.class`, After 4), `story:macos-build-reruns-once-when-cancelled`
     (draft; another job), `story:release-binaries-macos` (proposed; a job beside `macos`) and
     `story:rust-1-100-toolchain` (draft; its toolchain move changes the key's rustc hash, so its
     first run is cold).
   - `crates/loom-xtask/src/main.rs`: `story:local-gate-equals-forge` adds `forge_parity` and
-    `forge_watch` `mod` and subcommand lines in the same alphabetical `mod` block, and
-    `story:one-test-binary-per-crate` edits the file too (`TestLayout`). One `mod` line each; the
-    guard module stays `forge_cache.rs`.
+    `forge_watch` `mod` and subcommand lines in the same alphabetical `mod` block,
+    `story:one-test-binary-per-crate` edits the file too (`TestLayout`), and so does
+    `story:readme-logo-and-badges` (proposed; `main.rs` in its typed scope,
+    `readme-logo-and-badges.md:29`). One `mod` line each; the guard module stays
+    `forge_cache.rs`.
   - `AGENTS.md` § Gate: `story:local-gate-equals-forge` (§ Gate's two toolchain paragraphs and its
-    table), `story:planning-only-pull-requests-skip-build`, `story:macos-build-reruns-once-when-cancelled`
-    and `story:one-test-binary-per-crate`. The cache paragraph sits under its own sub-heading
+    table), `story:planning-only-pull-requests-skip-build`, `story:macos-build-reruns-once-when-cancelled`,
+    `story:one-test-binary-per-crate` and `story:readme-logo-and-badges` (each lists `AGENTS.md`
+    in its typed scope). The cache paragraph sits under its own sub-heading
     `### The forge's dependency cache`, so the hunks do not overlap.
-  - `CHANGELOG.md`: the same four stories; one bullet each, rebased on the one merged before, and
+  - `CHANGELOG.md`: the stories whose typed scope lists it, `story:macos-build-reruns-once-when-cancelled`
+    and `story:readme-logo-and-badges`; one bullet each, rebased on the one merged before, and
     each story creates the `### Changed` header where its section lacks it.
