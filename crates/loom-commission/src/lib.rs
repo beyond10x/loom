@@ -16,3 +16,4 @@ pub mod outcome;
 pub mod ports;
 mod rfc3339;
 pub mod runtime;
+pub mod stderr;

@@ -2,9 +2,9 @@ format: loom-ess-synthesis/1
 command: ess verify conform synthesize --path ess --scenarios ess --suite-format 5
 regenerate: task suite-generate
 ess: ess 0.98.0
-inputs: sha256:4ae6e6eaa3624a9033fb2943009a0b79daee9da30a0238e24a2a88bdc45434c1
+inputs: sha256:66858e34f353b139880cc6c3b45362f3ab222eaa63513f8cd98f46084ab022c4
 exit: 0
-suite: sha256:84fb387f5e5b25080ead212649a24040eb3f560c42460ea7289a21afa52f4e8f
+suite: sha256:ce8ef70407bd84fdb4e6182741e06e5b949beaae2d9de2ed83d21de7f161f671
 stdout:
 refused[ESS-SYNTH-003]: refusal[ESS-SYNTH-003]: entity loom.decision.DecisionRequest has no scenario `loom.decision.DecisionRequest/invariant/after/loom.decision.RecordProduced/already-recorded`
   no candidate of the 11 tried satisfies ``loom.decision.DecisionRequest` stored decided_option,options,produced_record selecting this branch, over the rows 11 bounded arrangements left`

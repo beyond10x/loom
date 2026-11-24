@@ -1653,10 +1653,13 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   (`PARENT_CASE_NAME_VARIABLE`) beside `LOOM_CASE`, after the child is built, from `CaseNames`,
   which the port reads from the governor's stored `parent` links alone, refusing a name that is
   not one child name of at most 4096 bytes. An exit in `exits.error` records nothing and refuses
-  the step `ProgramError` with `ends_run`; one in `exits.not_called` records nothing and is
-  performed; `ProgramRun.class` names either, `runs` skips both, and a timeout is in neither. A
-  code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
-  `check`. Each step starts the bound program once. A writer whose run was not called leaves the
+  the step `ProgramError` with `ends_run`, its text ending with the run's stderr tail when there is
+  one, which `ProgramRun.reason` and `StatusRun.reason` keep
+  (`story:program-error-carries-its-reason`; the walk is `b10x_loom_commission::stderr`, the one
+  the session executor shows a harness's stderr with, never a copy); one in `exits.not_called`
+  records nothing and is performed; `ProgramRun.class` names either, `runs` skips both, and a
+  timeout is in neither. A code in both lists, or in one and as a `from: exit` table key, is
+  `ExitClassConflict` at `check`. Each step starts the bound program once. A writer whose run was not called leaves the
   due set, as a refused step does, until the case is evaluated again for a reason other than its
   own moves (`story:writer-not-called-leaves-the-due-set`, `set_aside` in `run.rs`, "accounted"
   being `history::accounted`; a refused line or one that names no move and records nothing is no
