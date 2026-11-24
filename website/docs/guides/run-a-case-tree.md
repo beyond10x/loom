@@ -188,7 +188,8 @@ store keeps every byte.
 
 An outcome's decision can wait for a writer's spent allowance: with a `from: runs` entry on the
 writer (see [Bindings](./bindings.md)), `requires: {decision: give_up, when: {claim: work.spent}}`
-counts `give_up` only once the run that reaches `budget.max_runs` wrote its `spent` record. Before
+counts `give_up` only once the run that reaches `budget.max_runs` wrote its `spent` record (or,
+when that run recorded nothing, `tree run` wrote it before its next step). Before
 that the outcome is blocked by the claim, and Canon neither counts `give_up` nor lists it under
 `pending_decisions`; after it `give_up` is pending. A decision recorded early is kept at the case
 revision it was taken at and counts once the writer is spent, provided no step moved an artifact

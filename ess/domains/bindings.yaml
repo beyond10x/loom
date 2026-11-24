@@ -77,7 +77,9 @@ types:
   # when it names none; a value its table does not list is refused and records nothing.
   # `Report` is a JSON pointer into the program's report. `Runs` Loom's count of the action's
   # runs: `spent` on the run that reaches `budget.max_runs`; a Program executor's entry only
-  # (story outcome-when-reads-the-run-count). A Program executor's entries read `Exit`,
+  # (story outcome-when-reads-the-run-count). Its record is also the one `tree run` writes
+  # before a step when the allowance is spent for good and the case holds none, attributed to
+  # the last counted run (story spent-program-has-its-spent-record). A Program executor's entries read `Exit`,
   # `Report` or `Runs`, never `Effect`; a Person or Open executor's entries read `Effect` alone;
   # an Agent's and a Copy's read anything but `Runs`.
   - name: loom.bindings.ResultSource
@@ -224,7 +226,8 @@ types:
 
   # One action's binding: the action id of the protocol, its executor, the arguments (a literal
   # JSON object, or `arguments_from`, an argv whose standard output is the object), the records it
-  # writes, the tools an Agent may be offered, budget and timeout (1 to 3600 seconds), the retry
+  # writes, the tools an Agent may be offered, budget and timeout (1 to 14400 seconds on a
+  # Program executor, 1 to 3600 on any other), the retry
   # conditions, the handoff text a run shows when this writer has done what it may and a person
   # continues, and a Program executor's exit classes. `handoff_when` (story
   # handoff-when-a-program-decides) is the argv of a Program executor's check, held to the
@@ -356,9 +359,21 @@ types:
   # run: it counts against `budget.max_runs` like any other run without a `class`. `cancelled`
   # (story cancel-a-running-bound-program) is true when the run's cancel handle ended it: the
   # runner answered the refusal `Cancelled`, `runner_refusal` names it, and the run holds no exit
-  # and no blob. A cancelled run counts against `budget.max_runs`. `principal` (story
+  # and no blob. A cancelled run counts against `budget.max_runs`; when it spent the allowance for
+  # good, `tree run` writes the `from: runs` record it did not (story
+  # spent-program-has-its-spent-record). `principal` (story
   # person-action-runs-a-program) is the principal whose approval started the run of a Person
-  # executor's `argv`; it is absent on a program step.
+  # executor's `argv`; it is absent on a program step. `reason` (story
+  # program-error-carries-its-reason) is the last whole lines of the run's standard error within
+  # 4096 bytes, each line that holds a credential's shape withheld (a note stands in for each run
+  # of them, read over the whole stderr, so a PEM block whose opening the window cut is withheld
+  # too) and its terminal escape sequences replaced: the same walk the session executor shows a
+  # harness child's stderr with (a line holding a JSON Web Token's shape is withheld too). When the
+  # program wrote more on its standard error than the runner keeps (1 MiB, the start kept), the
+  # reason starts with "[it wrote more on its standard error than the runner keeps: the runner kept
+  # the start, and what follows are the last kept lines, not its last lines]" and a line break, and
+  # its lines are the walked last whole lines of what the runner kept. It is present only on a run
+  # whose `class` is `error` and whose standard error holds a line, and absent on every other run.
   - name: loom.bindings.ProgramRun
     kind: struct
     fields:
@@ -381,6 +396,8 @@ types:
       - name: cancelled
         type: Boolean
       - name: principal
+        type: Optional<String>
+      - name: reason
         type: Optional<String>
 
   # The environment of a program the program effect port starts (story bound-program-case-id),
@@ -454,7 +471,8 @@ types:
         type: List<loom.bindings.ArtifactRevision>
 
   # Why the program effect port refuses a step: the value read is a key neither the table nor its
-  # `*` lists (`ResultNotInTable`, a timeout reads the key `timeout`); the report is not one JSON
+  # `*` lists (`ResultNotInTable`, a timeout reads the key `timeout`, and `*` does not match a run
+  # killed at its timeout); the report is not one JSON
   # object within 1 MiB or lacks the pointer (`ReportUnreadable`); the `arguments_from` argv did
   # not exit 0 or printed anything but one JSON object within 1 MiB (`ArgumentsUnreadable`, the
   # bound program is not started); the action has run its `budget.max_runs` times in the case
@@ -463,7 +481,12 @@ types:
   # artifact cannot be digested (`ArtifactUnreadable`, story bound-artifact-revisions: before the
   # run nothing is started, after it no revision moves and nothing is recorded); the run's exit is
   # one the binding's `exits.error` lists (`ProgramError`, story bound-program-contract: the step
-  # ends the run, its text names the exit code and the blob digest, never the program's output); the
+  # ends the run, its text names the exit code and the blob digest, and, story
+  # program-error-carries-its-reason, ends with the run's `reason` after "the last lines of its
+  # stderr:" and a line break when the program wrote a line on its standard error: its stderr
+  # tail, walked for credentials and bounded, never its standard output; after "the last kept
+  # lines of its stderr:" when the runner cut its stderr, the reason then starting with the cut
+  # statement); the
   # port's cancel handle was set before a program started or ended the bound program or its
   # `arguments_from` program while it ran (`Cancelled`, story cancel-a-running-bound-program: the
   # step ends the run, and a program it ended is a run that counts); the run's exit is one

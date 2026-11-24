@@ -1,7 +1,8 @@
 //! The load-time check: a decoded document held against the compiled protocol it names.
 
 use crate::{
-    FORMAT, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, RUNS_SPENT, Refusal, refuse, workspace_path,
+    FORMAT, MAX_PROGRAM_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, MIN_TIMEOUT_SECONDS, RUNS_SPENT,
+    Refusal, refuse, workspace_path,
 };
 use b10x_canon::model::Protocol;
 use loom::bindings::{
@@ -20,7 +21,8 @@ use std::collections::BTreeSet;
 /// kind, `exits` on any but a program), an exit code `exits` lists in both classes or in a class
 /// and as a key of a `from: exit` table of the binding, an evidence `kind` outside the action's
 /// `may_produce`, a `subject` or `upstream` entry
-/// that is not a declared artifact, a `timeout_seconds` outside 1 to 3600, and an `inputs` or
+/// that is not a declared artifact, a `timeout_seconds` outside 1 to 14400 on a `program` and
+/// outside 1 to 3600 on any other executor, and an `inputs` or
 /// `outputs` path that is absolute or leaves the workspace, and an `open` executor's `bindings` path
 /// that is absolute, leaves the directory of the bindings file or names no file (`.`, a trailing
 /// `/`);
@@ -207,15 +209,30 @@ pub fn check(
                 registration,
             ));
         }
-        if let Some(seconds) = bound.timeout_seconds
-            && !(MIN_TIMEOUT_SECONDS..=MAX_TIMEOUT_SECONDS).contains(&seconds)
-        {
-            return Err(refuse(
-                Reason::TimeoutOutOfRange,
-                Some(id),
-                "timeout_seconds",
-                format!("{seconds} is not from {MIN_TIMEOUT_SECONDS} to {MAX_TIMEOUT_SECONDS}"),
-            ));
+        if let Some(seconds) = bound.timeout_seconds {
+            let program = bound.executor.kind == Executor::Program;
+            let most = if program {
+                MAX_PROGRAM_TIMEOUT_SECONDS
+            } else {
+                MAX_TIMEOUT_SECONDS
+            };
+            if !(MIN_TIMEOUT_SECONDS..=most).contains(&seconds) {
+                let detail = if program {
+                    format!(
+                        "{seconds} is not from {MIN_TIMEOUT_SECONDS} to {most}, the range of a program executor"
+                    )
+                } else {
+                    format!(
+                        "{seconds} is not from {MIN_TIMEOUT_SECONDS} to {most}; only a program executor may name up to {MAX_PROGRAM_TIMEOUT_SECONDS}"
+                    )
+                };
+                return Err(refuse(
+                    Reason::TimeoutOutOfRange,
+                    Some(id),
+                    "timeout_seconds",
+                    detail,
+                ));
+            }
         }
         for (name, paths) in [
             ("inputs", &bound.executor.inputs),

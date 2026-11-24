@@ -274,7 +274,7 @@ changing `ess/`. Every story names that change and that test in its `## ESS firs
 change with no behaviour change is exempt, and its story says so.
 
 `ess_gate.rs` (both copies) reads this section and fails when a phrase it checks is gone; reword
-with the tests open. CI installs `ess` 0.98.0 (`.github/workflows/check.yml`); move that pin when a
+with the tests open. CI installs `ess` 0.98.1 (`.github/workflows/check.yml`); move that pin when a
 newer ESS ships. The pin is two lines in each step that installs `ess`, the jobs `check` and
 `docs-slow` of `check.yml` and the job of `pages.yml`: `ESS_VERSION` and `ESS_SHA256`. Move both in
 all three in one commit; the digest is the
@@ -298,7 +298,6 @@ Before a change is reported done, in this order:
 
 1. `task check`: the three specification validations, both ESS gates, all four drift checks,
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
-   Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    the test step (`task test-step`), `task durable-check`, `task consumer-check`,
    `task embedder-check` (`cargo check --offline --locked` of the embedder fixture, an engine on
@@ -308,11 +307,21 @@ Before a change is reported done, in this order:
    installs cargo-nextest by a pinned version and digest). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
    `cargo nextest run --workspace --locked` (`.config/nextest.toml`: a test is killed and fails at
-   60 s; `slow_` tests are left out, and so are the test binaries `task check` runs as their own
-   steps: `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`, `conform` of the three
-   conformance crates) and `cargo test --doc --workspace --locked`, prints the ten
+   60 s; `slow_` tests are left out, and so are the two test binaries `task check` runs as their
+   own steps, `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`; Loom's, Commission's
+   and intake's conformance suites, `conform` of the three conformance crates, and the dependency
+   guard, `executor_port` of `b10x-loom-commission-testkit`, run in it, so their test targets are
+   compiled once, in the step's build) and `cargo test --doc --workspace --locked`, prints the ten
    slowest tests on every run and fails over 120 s
-   (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
+   (`crates/loom-xtask/src/test_step.rs`). It also fails unless its JUnit report holds a case of
+   each test those folded tasks ran (`REQUIRED`: `ess_conformance_report` of the three `conform`
+   binaries, `executor_port_contract` and `commission_depends_on_no_connectors_crate` of
+   `executor_port`), whatever way the run left it out (a filter in any spelling, `-p`, an ignore, a
+   target switched off), since `task check` runs them nowhere else; `task test-step` is the one
+   unscoped command and names no package, a test of `loom-xtask` and one in each of the three
+   crates hold that, the filter names no predicate but the slow lane's and the two `ess_gate`
+   binaries, and every binary a folded task runs is in `REQUIRED`
+   (`story:ci-job-time-budget`). It also fails when the tests of
    `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s,
    in their own binary and as the module `tree_run::` of `b10x-loom-cli::main` alike. It fails too
    when they start `b10x-loom` more than 66 times (`START_BUDGETS`): `with_the_switch` appends a
@@ -383,9 +392,12 @@ earlier merge of the batch brought in makes it stale again. `task suite-generate
 (2026-11-21, ess 0.96.0). ESS has a fix in flight that cuts the synthesis of a whole domain from
 about 254 s to 70 to 90 s of CPU; it is not released. A unit that merges the integration head
 keeps the integration side of `generated/ess/loom/suite.json` and of its digest file
-`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. The tests that
-read the suite after its digest check (`ess_gate` of `b10x-loom-executor` and `conform` of
-`b10x-loom-conformance`) run in the batch gate only, not in a unit's merge round.
+`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. Two tests read
+the suite after its digest check. `ess_gate` of `b10x-loom-executor` is a step of its own
+(`task ess-gate`) and runs in the batch gate only, not in a unit's merge round. `conform` of
+`b10x-loom-conformance` runs inside the test step (`story:ci-job-time-budget`), so a merge round
+that runs the test step runs it too; there it fails on a digest that an earlier merge's change
+under `ess/` made stale, until the batch gate regenerates the suite.
 
 nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
 not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
@@ -467,6 +479,11 @@ against a bound of 40; with both optimized it is about 18. The workspace's own c
 `b10x-loom-intake-slice` and `b10x-loom-runlog` took 349 s of test time and 92 s of wall time at
 `opt-level = 0`, 252 s and 66 s at 1 (2026-11-22, one loaded host, one run each); rebuilding
 those crates at 1 over built dependencies took 184 s.
+On CI's runner these levels made each step that compiles 3 to 4 times slower (runs 45047758440
+of 0.59.0 and 45248142889 of 0.60.0): the three conformance tasks went from 3.8 to 15.4 min,
+nearly all of it compile, because each `cargo test -p` selection unified other features and
+rebuilt crates another had built (`intake-conform` 63 of its 64, the test step 38 of its 61), so
+they run in the test step's build (`story:ci-job-time-budget`).
 
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
@@ -1471,8 +1488,15 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   commas), an `effect` entry whose `results` has a key other than `performed`. `check` refuses an
   action the protocol does not declare, a duplicate, an evidence kind outside `may_produce`, an
   artifact the protocol does not declare, a member that does not belong to the action's executor, a
-  `timeout_seconds` outside 1 to 3600, a path that is absolute or leaves the workspace, and an
-  independence dimension the protocol does not declare. An action with no binding is not an error;
+  `timeout_seconds` outside 1 to 14400 on a `program` (`MAX_PROGRAM_TIMEOUT_SECONDS`) or 1 to 3600
+  on any other executor, a path that is absolute or leaves the workspace, and an
+  independence dimension the protocol does not declare. A `handoff_when` check and an
+  `arguments_from` program run under the binding's `timeout_seconds` but at most 3600 s
+  (`MAX_TIMEOUT_SECONDS`), their `LOOM_TIMEOUT_SECONDS` the same value, and Substrate's CPU
+  bound stays one hour in total (`story:bound-program-timeout-above-an-hour`; `cpu_millis` of
+  `limits` in `crates/loom-intake-slice/src/confinement.rs`): Substrate's `exec_cpu_quota` spreads
+  it over the timeout, so a program that names more than 3600 s
+  runs at the rate 3600 / `timeout_seconds` of one core. An action with no binding is not an error;
   `unbound` lists them.
 - `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
   returns and expands an alias at each use: `MAX_NESTING` (64, on the decoded values), `MAX_NODES`
@@ -1490,11 +1514,21 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   record, result its table's value for `RUNS_SPENT` (`spent`), only on the run whose count
   reaches `budget.max_runs`, in the same `record_step` after the run's other records, about the
   revision the run left, attributed at the step's case revision. A run that writes no records
-  (cancelled, or in an `exits` class) writes none, so a cancelled last run leaves the allowance
-  spent with no `spent` record and the case stops `Stuck` at the next `RunsSpent` (D2 a, held by
-  `a_cancelled_last_run_writes_no_spent_record`). `tree run`'s `step_inputs` puts a writer that is
-  not due and whose open evidence (`action_facts`) is not empty and holds only its own `from: runs`
-  kinds in the idle set, so the spent kind never makes it useful (`crates/loom-tree/tests/runs_spent/`).
+  (cancelled, or in an `exits` class) writes none, and the port refuses the next offer `RunsSpent`
+  (held by `a_cancelled_last_run_writes_no_spent_record`). `tree run`'s `step_inputs` puts a
+  writer that is not due and whose open evidence (`action_facts`) is not empty and holds only its
+  own `from: runs` kinds in the idle set, so the spent kind never makes it useful
+  (`crates/loom-tree/tests/runs_spent/`).
+- `settle_spent` (`story:spent-program-has-its-spent-record`) writes the record an allowance spent
+  for good owes (`runs_per: case`: a full window; `rejection`: a rework count above the limit, or a
+  full window with the count without the lone unplaced interval at least the limit), when the case
+  holds none of the entry's kind, subject, producer and result citing this action's run: at the
+  instant of the last counted run's observation, citing it, in one `record_step` with no move.
+  `tree run` calls it for each `from: runs` writer after `PlacedRevisions::refresh` and before
+  `evaluated`, and writes one `action finished` line per write (exit 0, no refusal, blob or move,
+  naming the record); no action is offered, so no `handoff_when` check runs. `not_called` reads only
+  a line that names no record (D6 a). Held by `bound_program.rs`, `bound_retry.rs` and
+  `crates/loom-tree/tests/runs_spent/`.
 - `budget.runs_per` (`story:rework-allowance-after-a-rejection`, `loom.bindings.RunsScope`):
   `case` (the default) counts as above; `rejection` counts only the runs after the latest
   rejection, so a rejection gives a fresh `max_runs`, and `budget.rework_limit` (a whole number
@@ -1559,7 +1593,10 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   observation (the step then answers the store's error, uncounted), then per entry the
   value (exit code, `timeout` for a killed run, or the pointer into the report, one JSON object
   within 1 MiB naming no member twice) looked up in `results` falling to
-  `*`: `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry
+  `*`, except that for a run killed at its timeout (`execution.timed_out`, not the string) only the
+  `timeout` row matches and an entry without one is `ResultNotInTable`, the run not ended
+  (`story:wildcard-result-row-does-not-match-timeout`; a `from: runs` entry is not affected):
+  `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry
   (`loom.bindings.RecordedEvidence`) with the entry's producer, the observation's instant and, in
   `facts`, the revisions the case held for the subject and as `upstream_revisions`. Nothing the
   program prints names a result, revision, producer or instant. The cap holds for one port that
@@ -1647,10 +1684,13 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   (`PARENT_CASE_NAME_VARIABLE`) beside `LOOM_CASE`, after the child is built, from `CaseNames`,
   which the port reads from the governor's stored `parent` links alone, refusing a name that is
   not one child name of at most 4096 bytes. An exit in `exits.error` records nothing and refuses
-  the step `ProgramError` with `ends_run`; one in `exits.not_called` records nothing and is
-  performed; `ProgramRun.class` names either, `runs` skips both, and a timeout is in neither. A
-  code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
-  `check`. Each step starts the bound program once. A writer whose run was not called leaves the
+  the step `ProgramError` with `ends_run`, its text ending with the run's stderr tail when there is
+  one, which `ProgramRun.reason` and `StatusRun.reason` keep
+  (`story:program-error-carries-its-reason`; the walk is `b10x_loom_commission::stderr`, the one
+  the session executor shows a harness's stderr with, never a copy); one in `exits.not_called`
+  records nothing and is performed; `ProgramRun.class` names either, `runs` skips both, and a
+  timeout is in neither. A code in both lists, or in one and as a `from: exit` table key, is
+  `ExitClassConflict` at `check`. Each step starts the bound program once. A writer whose run was not called leaves the
   due set, as a refused step does, until the case is evaluated again for a reason other than its
   own moves (`story:writer-not-called-leaves-the-due-set`, `set_aside` in `run.rs`, "accounted"
   being `history::accounted`; a refused line or one that names no move and records nothing is no

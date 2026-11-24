@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bound-program-timeout-above-an-hour
 kind: story
-status: draft
+status: active
 title: A program binding may name a timeout_seconds up to four hours
 summary: 'Runbook''s consumer ingest over an hour: MAX_PROGRAM_TIMEOUT_SECONDS 14400 for a program executor''s own program; every other executor, handoff_when and arguments_from keep 3600; default 60 s and older documents unchanged; TimeoutOutOfRange texts name both ranges; limits() keeps cpu_millis one hour; ESS comment only'
 tags:
@@ -39,7 +39,10 @@ scope:
   path: generated/rust/loom
 - confidence: cited
   path: website/docs/guides/bindings.md
-revision: 16
+revision: 18
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-23T21:02:42Z", actor: "agent:sdc", revision: 17, executor: "agent:loom", correlation: "runbook-timeout-above-an-hour-2026-11-23"}
+- {from: "proposed", to: "active", at: "2026-11-23T21:02:43Z", actor: "agent:sdc", revision: 18, executor: "agent:loom", correlation: "runbook-timeout-above-an-hour-2026-11-23"}
 ---
 ## Outcome
 

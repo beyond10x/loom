@@ -24,7 +24,7 @@ control-plane path, and fails when either table here and the code disagree.
 
   ```toml
   [dependencies]
-  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.60.0" }
+  b10x-loom-sdk = { git = "https://github.com/beyond10x/loom", tag = "0.61.0" }
   ```
 
 - Outside the promise:
@@ -71,6 +71,7 @@ Canon release renders for the same case (`crates/loom-governor/tests/canon_decis
 | 0.58.0 | 0.9.0 | 0.16.0 |
 | 0.59.0 | 0.9.0 | 0.16.0 |
 | 0.60.0 | 0.11.0 | 0.16.0 |
+| 0.61.0 | 0.11.0 | 0.16.0 |
 
 A release that moves either pin names it in its `CHANGELOG.md` entry.
 

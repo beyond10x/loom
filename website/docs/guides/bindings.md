@@ -198,9 +198,14 @@ actions:
   a JSON pointer such as `/summary/state` reads the program's report; `from: runs` is Loom's
   count of the action's runs, whose value is `spent` on the run that reaches `budget.max_runs`
   (under `budget.runs_per: rejection`, the run that reaches `rework_limit`, below)
-  and which records nothing on any other run (a cancelled run counts and records nothing, so a
-  cancelled last run writes no `spent` record); its table lists `spent` and nothing else, and the
-  record is written after the run's other records, about the revision the run left. A protocol
+  and which records nothing on any other run; its table lists `spent` and nothing else, and the
+  record is written after the run's other records, about the revision the run left. When the run
+  that spent the allowance for good recorded nothing (cancelled, refused by its runner, ended by a
+  signal, a value outside the table, a report that cannot be read), `tree run` writes the record
+  before its next step, at the instant of that run and citing it, with an `action finished` line
+  that names it (exit 0); a host that drives the port itself calls `settle_spent`. Under
+  `runs_per: rejection` that is a rework count above `rework_limit`, or a full window with the
+  limit reached by placed rejections; a full window below the limit writes nothing. A protocol
   reads it through a claim over the entry's kind, such as an outcome's `requires`; the kind alone
   never makes the writer useful again. A `program` executor's entries read `exit`, a pointer or
   `runs` and never `effect`; a `person` or `open` executor's entries read `effect` alone; an
@@ -209,7 +214,14 @@ actions:
 - `tools.allow` lists the tool names an `agent` may be offered. An entry is never empty and holds
   no comma and no white space, because the session executor joins the names with commas.
 - `budget` holds `max_runs` (8 when absent) and, for an `agent`, `max_turns`, `max_tokens` and
-  `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 3600.
+  `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 14400 on a
+  `program` and from 1 to 3600 on any other executor. A program's `handoff_when` check and an
+  `arguments_from` program run under the binding's `timeout_seconds` but at most 3600 seconds. A
+  program confined by Substrate gets one hour of CPU time in total whatever its timeout, spread
+  over the whole run: a program that names more than 3600 s runs at the rate 3600 /
+  `timeout_seconds` of one core (14400 s: a quarter core; 7200 s: half a core), so a long program
+  must spend most of its time waiting. While it runs it holds the tree's
+  store lock for at most its `timeout_seconds` and 30 s more, and the run's cancel ends it.
 - On a `program` or a `person`, `budget.runs_per` says what `max_runs` counts from: `case` (the
   default) counts every run of the case; `rejection` counts the runs since the latest rejection,
   so each rejection gives the action a fresh `max_runs`, and `budget.rework_limit` (a whole
@@ -260,7 +272,7 @@ actions:
   rules of any bound program's argv. Before each step of the action, and when the case is otherwise
   stuck, `tree run` runs it through the run's runner with the whole workspace read-only (`target/`
   included), `PATH` and the `LOOM_*` variables alone, no retry feedback, empty standard input and
-  the binding's `timeout_seconds`. Exit 0 offers the handoff and takes no step; any other exit lets
+  the binding's `timeout_seconds` but at most 3600 seconds. Exit 0 offers the handoff and takes no step; any other exit lets
   the writer run in that step, or leaves a stuck case `Stuck`. A check that cannot be started
   (exit 126 or 127 included), is killed at its timeout or by a signal is never a skip: the run
   stops `HandoffCheckFailed`, naming the action, and the writer does not run. Under `local` a
@@ -298,7 +310,10 @@ twice, a tag, a merge key, text nested or expanded past the bounds above, and a 
 empty or holds a comma or white space. Loading against the protocol refuses an action the protocol does not declare, a duplicate
 action, an evidence `kind` outside the action's `may_produce`, a `subject`, `upstream` entry or
 `artifacts` key that is not a declared artifact, a `tools` member, an agent budget member, `inputs`
-or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 3600, an
+or `outputs` on an executor that is not an `agent`, a `timeout_seconds` outside 1 to 14400 on a
+`program` (`14401 is not from 1 to 14400, the range of a program executor`) or outside 1 to 3600
+on any other executor (`3601 is not from 1 to 3600; only a program executor may name up to
+14400`), an
 `artifacts`, `inputs`, `outputs` or `open` `bindings` path that is absolute or leaves the
 workspace, a `retry_when` kind the protocol does not declare, an evidence `from` the executor does
 not take (`MemberNotForExecutor`), a `from: runs` table that lists anything but `spent`
@@ -324,7 +339,7 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `argv` (no shell), the arguments as one JSON object on standard input, `PATH`, `LOOM_CASE`,
   `LOOM_CASE_NAME` (a case a parent opened), `LOOM_PARENT_CASE_NAME` (a case whose parent a case
   opened) and `LOOM_TIMEOUT_SECONDS` alone in its environment, the binding's `timeout_seconds` (60
-  when absent), and the workspace root as its start directory. Under a runner that is not `local`, a program at an absolute path
+  when absent; at most 3600 for the `arguments_from` argv), and the workspace root as its start directory. Under a runner that is not `local`, a program at an absolute path
   outside `/usr`, `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH`
   that is not UTF-8 refuses the step, `<program> was not started: the host's PATH is not UTF-8`,
   and starts nothing.
@@ -337,7 +352,8 @@ The port is a Commission effect port: it performs the actions bound to `program`
   nothing starts or is recorded. The commands of `b10x-loom run --action-bindings` keep `PATH`
   alone.
 - `LOOM_TIMEOUT_SECONDS` is the whole seconds of that run's timeout, the binding's
-  `timeout_seconds` or 60. `LOOM_CASE_NAME` is the name the case's opening gave it, as the
+  `timeout_seconds` or 60, and at most 3600 for a `handoff_when` check or an `arguments_from`
+  program. `LOOM_CASE_NAME` is the name the case's opening gave it, as the
   governor stored it in the case's `parent` link: the `open` executor's `name` or the entry of its
   `each` argument, without the repeat suffix, so the child `P.story.2` reads `story` as `P.story`
   does. `LOOM_PARENT_CASE_NAME` is the name stored in the `parent` link of that parent, one level
@@ -401,10 +417,26 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `arguments_from` output is read by the same rule. It looks the value up in `results`,
   falling to `*`. A value neither lists refuses the step `ResultNotInTable`; a report that cannot be
   read, or that lacks the pointer, refuses it `ReportUnreadable`. A refused step records no
-  evidence.
+  evidence. For a program killed at its timeout only a `timeout` row matches, never `*`: an entry
+  whose `results` name no `timeout` refuses the step `ResultNotInTable`, the run is not ended, and
+  under `tree run` the action is set aside and the case stops `Stuck` until something else changes
+  it. A report value that is the text `timeout` from a run that ended by itself still falls to
+  `*`. To keep the `*` result for a timeout, add a `timeout` row such as `"timeout": failed`.
 - An exit the binding's `exits` lists is read before the tables. One in `error` records nothing
-  and refuses the step `ProgramError`, naming the exit code and the blob's SHA-256 and never what
-  the program printed, and the refusal ends the run (`EffectRefused`). One in `not_called` records
+  and refuses the step `ProgramError`, naming the exit code and the blob's SHA-256, and the refusal
+  ends the run (`EffectRefused`). When the program wrote on its standard error, the text then ends
+  with `; the last lines of its stderr:`, a line break and the program's reason: the last whole
+  lines of its stderr within 4096 bytes, each line that holds a credential's shape (a token
+  prefix, a URL with user information or a query, a PEM block, even one whose opening the window
+  cut, a JSON Web Token) withheld behind a note, and terminal escape sequences replaced, as the
+  session executor shows a harness's stderr. The runner keeps the first 1 MiB of a stream: when
+  the program wrote more on its stderr, the text says `; the last kept lines of its stderr:`
+  instead, and the reason starts with `[it wrote more on its standard error than the runner keeps:
+  the runner kept the start, and what follows are the last kept lines, not its last lines]` and a
+  line break before the last whole lines of what was kept. Its standard output is never shown. The run's observation keeps the
+  same text as `reason`, and `tree status` lists it on the run (`runs[].reason`); no other run has
+  one. Print why the program failed on stderr, and `tree run`'s `action finished` line and
+  `tree status` say it. One in `not_called` records
   nothing and the step is performed. The run's observation holds `class` (`error` or
   `not_called`), and neither class counts against `budget.max_runs`. A run killed at its timeout
   reads `timeout`, whatever the lists hold. Each step starts the bound program once. Under

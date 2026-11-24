@@ -33,8 +33,9 @@ fn task_block(taskfile: &str, name: &str) -> Vec<String> {
 /// were repointed at `Taskfile.commission.yml`'s `check`, which neither the root `task check` nor
 /// CI (`check.yml` runs `task check`) ever invokes. Nothing then pins that the root `check` runs
 /// Commission's non-cargo-test steps. This case pins it: every Commission gate step is a step of
-/// the root `check` (or the root `check` runs `commission:check`), and Commission's drift and
-/// no-hand-model run before the first cargo build/lint/test step, as Commission's own check had it.
+/// the root `check` or runs in its test step (or the root `check` runs `commission:check`), and
+/// Commission's drift and no-hand-model run before the first cargo build/lint/test step, as
+/// Commission's own check had it.
 #[test]
 fn adversary_root_check_runs_every_commission_gate_step() {
     let taskfile = read("Taskfile.yml");
@@ -46,13 +47,27 @@ fn adversary_root_check_runs_every_commission_gate_step() {
     if check.iter().any(|line| line == "- task: commission:check") {
         return;
     }
+    // Commission's conformance suite and dependency guard run in the test step, which the root
+    // `check` lists (`story:ci-job-time-budget`). The step must run the whole workspace, so that
+    // it requires their binaries: a `-p` after `test-step` would require only the binaries of the
+    // packages named. That it then runs them, however a filter, a package selection or an ignore
+    // would leave them out, is the step's own check of its report (`loom-xtask`,
+    // `test_step::left_out`, `REQUIRED`).
+    let runs: Vec<_> = task_block(&taskfile, "test-step")
+        .into_iter()
+        .filter(|line| line.contains("loom-xtask"))
+        .collect();
+    assert_eq!(
+        runs,
+        ["- cargo run -q --locked -p loom-xtask -- test-step"],
+        "the test step task does not run the whole workspace"
+    );
     let steps = [
         "commission:spec",
         "commission:ess-gate",
         "commission:drift",
         "commission:no-hand-model",
-        "commission:conform",
-        "commission:deps-guard",
+        "test-step",
         "commission:docs-drift",
     ];
     let position = |step: &str| {

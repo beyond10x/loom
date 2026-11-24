@@ -4622,6 +4622,13 @@ mod tests {
     }
 
     #[test]
+    fn limits_of_four_hours_keep_an_hour_of_cpu() {
+        let four_hours = limits(Duration::from_secs(14400));
+        assert_eq!(four_hours.timeout_ms, 14_400_000);
+        assert_eq!(four_hours.cpu_millis, 3_600_000);
+    }
+
+    #[test]
     fn a_root_named_another_way_is_counted_as_one_root() {
         let fixture = tempfile::tempdir().unwrap();
         let cgroup = fixture.path().join("cgroup");

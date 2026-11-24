@@ -320,6 +320,8 @@ fn runs(case: &str, observations: &[ObservationData]) -> Vec<StatusRun> {
             retry_of,
             // A run its cancel handle ended, and no other, says so.
             cancelled: (payload["cancelled"] == true).then_some(true),
+            // The stderr tail a program error's run keeps, as the port walked it.
+            reason: payload["reason"].as_str().map(str::to_owned),
         });
     }
     runs

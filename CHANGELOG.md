@@ -12,6 +12,22 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.61.0] - 2026-11-24
+
+### Changed
+
+- A `program` binding's `timeout_seconds` may reach 14400 (`MAX_PROGRAM_TIMEOUT_SECONDS`; others keep 3600), at 3600/timeout_seconds of one core past 3600 s (story:bound-program-timeout-above-an-hour)
+- A `handoff_when` check and an `arguments_from` program run under at most 3600 s whatever the timeout, and `LOOM_TIMEOUT_SECONDS` says it (story:bound-program-timeout-above-an-hour)
+- **Breaking:** the `TimeoutOutOfRange` detail of `check` names the executor's range; text matching the old one fails (story:bound-program-timeout-above-an-hour)
+- **Breaking:** a binding's `*` row no longer matches a run killed at its timeout (`ResultNotInTable`, the case may stop `Stuck`); add a `timeout` row where `*` served (story:wildcard-result-row-does-not-match-timeout)
+- The gate compiles the workspace's test targets once: the three conformance suites run inside the test step, and CI's loom / task check is bounded at 30 minutes again (story:ci-job-time-budget)
+- A `ProgramError` refusal ends with the program's stderr tail (4096 bytes, credential lines withheld; a notice when cut at 1 MiB), kept in `ProgramRun.reason` and `StatusRun.reason` (story:program-error-carries-its-reason)
+- The stderr walk moved to `b10x_loom_commission::stderr` (`stderr_tail`, `walked`, `STDERR_TAIL_BYTES`, `TOKEN_PREFIXES`) and withholds a JSON Web Token line too (story:program-error-carries-its-reason)
+
+### Fixed
+
+- A program whose run allowance is spent gets its `from: runs` record even when the spending run recorded nothing: `tree run` writes it, `b10x_loom_bindings::settle_spent` for hosts (story:spent-program-has-its-spent-record)
+
 ## [0.60.0] - 2026-11-23
 
 ### Added
@@ -1640,7 +1656,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.60.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.61.0...HEAD
+[0.61.0]: https://github.com/beyond10x/loom/releases/tag/0.61.0
 [0.60.0]: https://github.com/beyond10x/loom/releases/tag/0.60.0
 [0.59.0]: https://github.com/beyond10x/loom/releases/tag/0.59.0
 [0.58.0]: https://github.com/beyond10x/loom/releases/tag/0.58.0

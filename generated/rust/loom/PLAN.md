@@ -1,6 +1,6 @@
 <!--
   generated from loom v1
-  contract digest b1059a76e03d9c610f8ec466fc4753d09ac15c538c99fdd88c3e19cd41529600
+  contract digest 60a971f947faeb5025ac7d4b5ce291ef27b27e3f5adcad002d3f31013b49afb7
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1

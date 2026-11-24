@@ -23,7 +23,7 @@
 //! naming a scenario the report records as passed.
 //!
 //! [`taskfile_check_runs_intake_conform`] holds the other half of the claim: `task check` runs
-//! this test, through the task `intake-conform`, as a step of its own.
+//! this test in its test step, and the task `intake-conform` runs it alone.
 //!
 //! [`IntakeTarget`]: b10x_loom_intake_conformance::IntakeTarget
 
@@ -308,8 +308,9 @@ fn ess_conformance_report() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// `task intake-conform` runs [`ess_conformance_report`], and `task check` lists `intake-conform`
-/// as a step of its own.
+/// `task intake-conform` runs [`ess_conformance_report`], and `task check` runs it in the test
+/// step: it lists `test-step`, whose nextest run does not leave this binary out
+/// (`story:ci-job-time-budget`).
 #[test]
 fn taskfile_check_runs_intake_conform() {
     let path = root().join("Taskfile.yml");
@@ -331,9 +332,19 @@ fn taskfile_check_runs_intake_conform() {
         "task intake-conform does not run `{INTAKE_CONFORM}`"
     );
     assert!(
-        body("check")
+        body("check").iter().any(|line| line == "- task: test-step"),
+        "task check does not list `test-step`"
+    );
+    // The step must run the whole workspace, so that it requires this binary: a `-p` after
+    // `test-step` would require only the binaries of the packages named. That the step then runs
+    // this binary, however a filter, a package selection or an ignore would leave it out, is the
+    // step's own check of its report (`loom-xtask`, `test_step::left_out`, `REQUIRED`).
+    assert_eq!(
+        body("test-step")
             .iter()
-            .any(|line| line == "- task: intake-conform"),
-        "task check does not list `intake-conform` as its own step"
+            .filter(|line| line.contains("loom-xtask"))
+            .collect::<Vec<_>>(),
+        ["- cargo run -q --locked -p loom-xtask -- test-step"],
+        "the test step task does not run the whole workspace"
     );
 }

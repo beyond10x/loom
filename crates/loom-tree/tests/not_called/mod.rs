@@ -27,7 +27,7 @@ use b10x_loom_tree::model::{DecisionKind, TreeRun, TreeStop};
 use b10x_loom_tree::runlog::{RunLogEvent, RunLogLine};
 use b10x_loom_tree::{
     ConfinementAdapter, EngineConfinement, EngineRunner, OpenRequest, RunSettings, TreeTime,
-    UNCONFINED_FLAG_REASON, open_tree, read_protocols_directory, run_tree,
+    UNCONFINED_FLAG_REASON, open_tree, read_protocols_directory, run_tree, tree_status,
 };
 use loom_protocols::ProtocolCatalog;
 
@@ -474,11 +474,22 @@ fn a_not_called_run_that_moves_its_artifact_stays_set_aside() {
     handed_off(&second);
 }
 
-/// Test 5: an exit in `exits.error` and an exit in no list behave as before this story.
+/// `work.do`'s program for the error tree: [`DO`], saying why on its standard error.
+const DO_SAYING_WHY: &str =
+    "mkdir -p target\ntouch target/called\necho 'no such epic: E-12' >&2\nexit 79\n";
+
+/// Test 5: an exit in `exits.error` and an exit in no list behave as before this story; the
+/// error's refusal and its run in `tree status` carry what the program said on its standard error
+/// (`story:program-error-carries-its-reason`).
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn classed_errors_and_unclassed_exits_behave_as_before() {
-    let error = Tree::open("nc-error", DO, "    exits: {error: [79]}\n", false);
+    let error = Tree::open(
+        "nc-error",
+        DO_SAYING_WHY,
+        "    exits: {error: [79]}\n",
+        false,
+    );
     let run = error.run();
     let lines = error.lines();
     assert_eq!(
@@ -505,6 +516,14 @@ fn classed_errors_and_unclassed_exits_behave_as_before() {
         refusal.1.starts_with("ProgramError: action work.do:") && refusal.1.contains("79"),
         "{refusal:?}"
     );
+    assert!(refusal.1.contains("no such epic: E-12"), "{refusal:?}");
+    let status = tree_status(&error.store, &error.catalog).unwrap();
+    let run = status.cases[0]
+        .runs
+        .iter()
+        .find(|run| run.action == "work.do")
+        .expect("work.do ran");
+    assert_eq!(run.reason.as_deref(), Some("no such epic: E-12"), "{run:?}");
 
     // With no `exits`, exit 79 goes through the table and records `done: failed`, and each run
     // counts against `budget.max_runs` (8 when the binding names none): the 9th start is refused

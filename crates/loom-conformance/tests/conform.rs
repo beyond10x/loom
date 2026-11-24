@@ -914,8 +914,8 @@ fn derived_statuses_rate_reports_as_ess_does() {
     );
 }
 
-/// `task conform` runs [`ess_conformance_report`], and `task check` lists `conform` as a step of
-/// its own.
+/// `task conform` runs [`ess_conformance_report`], and `task check` runs it in the test step: it
+/// lists `test-step`, whose nextest run does not leave this binary out (`story:ci-job-time-budget`).
 #[test]
 fn taskfile_check_runs_conform() {
     let path = root().join("Taskfile.yml");
@@ -937,7 +937,19 @@ fn taskfile_check_runs_conform() {
         "task conform does not run `{CONFORM}`"
     );
     assert!(
-        body("check").iter().any(|line| line == "- task: conform"),
-        "task check does not list `conform` as its own step"
+        body("check").iter().any(|line| line == "- task: test-step"),
+        "task check does not list `test-step`"
+    );
+    // The step must run the whole workspace, so that it requires this binary: a `-p` after
+    // `test-step` would require only the binaries of the packages named. That the step then runs
+    // this binary, however a filter, a package selection or an ignore would leave it out, is the
+    // step's own check of its report (`loom-xtask`, `test_step::left_out`, `REQUIRED`).
+    assert_eq!(
+        body("test-step")
+            .iter()
+            .filter(|line| line.contains("loom-xtask"))
+            .collect::<Vec<_>>(),
+        ["- cargo run -q --locked -p loom-xtask -- test-step"],
+        "the test step task does not run the whole workspace"
     );
 }

@@ -1,7 +1,9 @@
 //! Acceptance for `story:bound-program-contract`: a bound program can be named beside its bindings
 //! file (`program_root: bindings`, `resolve_programs`), sees its run's timeout in its environment
 //! (`LOOM_TIMEOUT_SECONDS`), and an exit its binding classes as a program error or as not called
-//! (`exits`) records nothing and is not counted.
+//! (`exits`) records nothing and is not counted. For `story:program-error-carries-its-reason`, a
+//! program error's refusal and its run's observation (`reason`) carry its stderr tail, walked for
+//! credentials and bounded.
 //!
 //! Every step reaches the program effect port through Commission's own loop
 //! (`run_until_blocked`), a scripted executor and a `CanonGovernor` over a `MemoryCaseStore`, with
@@ -22,7 +24,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use b10x_loom_bindings::{
     PROGRAM_SOURCE, ProgramEffects, RETRY_FEEDBACK_VARIABLE, TIMEOUT_VARIABLE, check, decode,
-    resolve_programs,
+    resolve_programs, run_handoff_check,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
@@ -727,6 +729,54 @@ fn an_argument_named_loom_timeout_seconds_does_not_change_the_variable() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// A timeout above an hour (story:bound-program-timeout-above-an-hour)
+
+#[test]
+fn the_declared_timeout_reaches_the_child() {
+    let children = recorded("    timeout_seconds: 14400\n", "{}", &[]);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].timeout().as_secs(), 14400);
+    assert_eq!(children[0].environment().set, environment(ROOT, 14400, &[]));
+    let children = recorded("", "{}", &[]);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].timeout().as_secs(), 60);
+    assert_eq!(children[0].environment().set, environment(ROOT, 60, &[]));
+}
+
+#[test]
+fn helper_programs_keep_the_hour() {
+    let members = "    timeout_seconds: 14400\n    arguments_from: [/opt/stub/args]\n    handoff: Look at it.\n    handoff_when: [/opt/stub/check]\n";
+    let children = recorded(members, "{}", &[b"{}"]);
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].program(), "/opt/stub/args");
+    assert_eq!(children[0].timeout().as_secs(), 3600);
+    assert_eq!(children[0].environment().set, environment(ROOT, 3600, &[]));
+    assert_eq!(children[1].program(), "/opt/stub/program");
+    assert_eq!(children[1].timeout().as_secs(), 14400);
+
+    let scratch = Scratch::new();
+    let document = document("", &bound(&["/opt/stub/program"], members, VALID_TABLE));
+    let governor = governor();
+    let runner = Recording::new(&[]);
+    let check = run_handoff_check(
+        &governor,
+        &CaseId(ROOT.to_owned()),
+        &document,
+        &document.actions[0],
+        &scratch.workspace,
+        &scratch.store,
+        &(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        None,
+    )
+    .expect("the binding carries a check");
+    assert!(check.refusal.is_none(), "{:?}", check.refusal);
+    let children = runner.children();
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].program(), "/opt/stub/check");
+    assert_eq!(children[0].timeout().as_secs(), 3600);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Exit classes
 
 /// Runs the script `body` bound to [`CHECK`] with the extra `members` and `table` for [`ROOT`],
@@ -912,15 +962,18 @@ fn exit_classes_belong_to_a_program() {
     }
 }
 
+/// Standard output never enters a refusal or the run's observation; since
+/// `story:program-error-carries-its-reason` the stderr tail does, as the tests below hold.
 #[test]
 #[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
 fn program_output_never_enters_a_refusal() {
     const CANARY: &str = "canary-6f1d";
+    const SAID: &str = "said-on-stderr";
     let (governor, _scratch, ends) = exit_steps(
         |scratch| {
             path_text(&scratch.script(
                 "stub",
-                &format!("echo {CANARY}\necho {CANARY} >&2\nexit 127\n"),
+                &format!("echo {CANARY}\necho {SAID} >&2\nexit 127\n"),
             ))
         },
         PROGRAM_ERRORS,
@@ -930,9 +983,246 @@ fn program_output_never_enters_a_refusal() {
     let (reason, _) = refusal(&ends[0]);
     assert!(reason.starts_with("ProgramError"), "{reason}");
     assert!(!reason.contains(CANARY), "{reason}");
+    assert!(reason.ends_with(SAID), "{reason}");
     let runs = runs(&governor);
     assert_eq!(runs.len(), 1);
     assert!(!runs[0].to_string().contains(CANARY), "{}", runs[0]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The reason a program error carries (`story:program-error-carries-its-reason`)
+
+/// The `exits` member listing 79 as a program error.
+const ERROR_79: &str = "    exits: {error: [79]}\n";
+
+/// What the refusal says before the stderr tail.
+const STDERR_SAID: &str = "; the last lines of its stderr:\n";
+
+/// The note the walk stands in for one withheld line with.
+const ONE_WITHHELD: &str = "[a line withheld: it holds a credential's shape]";
+
+/// One step of [`CHECK`] bound with [`ERROR_79`] and `table` to a script that writes `stderr` on
+/// its standard error, nothing on its standard output, and exits `code`: the step's end, the run's
+/// observation and the results the case recorded.
+fn run_writing(stderr: &str, code: u8, table: &str) -> (LoopEnd, serde_json::Value, Vec<String>) {
+    let stderr = stderr.to_owned();
+    let (governor, _scratch, mut ends) = exit_steps(
+        move |scratch| {
+            let said = scratch.root.join("stderr.txt");
+            std::fs::write(&said, &stderr).unwrap();
+            path_text(&scratch.script(
+                "stub",
+                &format!("/usr/bin/cat '{}' >&2\nexit {code}\n", said.display()),
+            ))
+        },
+        ERROR_79,
+        table,
+        1,
+    );
+    let runs = runs(&governor);
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    (ends.remove(0), runs[0].clone(), results(&governor, ROOT))
+}
+
+/// A run of [`run_writing`] that exits 79: the refusal text, which ends the run, and the run's
+/// observation.
+fn error_writing(stderr: &str) -> (String, serde_json::Value) {
+    let (end, run, recorded) = run_writing(stderr, 79, VALID_TABLE);
+    assert!(recorded.is_empty(), "{recorded:?}");
+    let (text, ends_run) = refusal(&end);
+    assert!(ends_run, "a program error ends the run: {text}");
+    assert_eq!(run["class"], "error", "{run}");
+    (text, run)
+}
+
+/// The `reason` of a run's observation.
+fn reason_of(run: &serde_json::Value) -> &str {
+    run["reason"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the run has a reason: {run}"))
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_program_error_carries_its_stderr_tail() {
+    let (text, run) = error_writing("no such epic: E-12\n");
+    assert!(text.starts_with("ProgramError: action"), "{text}");
+    assert!(
+        text.ends_with("the last lines of its stderr:\nno such epic: E-12"),
+        "{text}"
+    );
+    assert_eq!(reason_of(&run), "no such epic: E-12");
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_program_error_withholds_a_token_line() {
+    let token = ["ghp", "_abc123"].concat();
+    let (text, run) = error_writing(&format!("token {token}\nfailed\n"));
+    let ending = format!("{ONE_WITHHELD}\nfailed");
+    for shown in [text.as_str(), reason_of(&run)] {
+        assert!(shown.ends_with(&ending), "{shown}");
+        assert!(!shown.contains(&token), "{shown}");
+    }
+    assert!(!run.to_string().contains(&token), "{run}");
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_program_error_withholds_a_cut_pem_block() {
+    let body = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj";
+    let mut stderr = ["-----BEGIN ", "PRIVATE", " KEY-----\n"].concat();
+    while stderr.len() < 5000 {
+        stderr.push_str(body);
+        stderr.push('\n');
+    }
+    stderr.push_str(&["-----END ", "PRIVATE", " KEY-----\n"].concat());
+    stderr.push_str("failed\n");
+    assert!(
+        stderr.len() - "failed\n".len() > 5000,
+        "the block alone is over 5000 bytes"
+    );
+    assert!(
+        stderr.len() > 4096 + "-----BEGIN PRIVATE KEY-----\n".len(),
+        "the last 4096 bytes do not hold the block's opening"
+    );
+    let (text, run) = error_writing(&stderr);
+    for shown in [text.as_str(), reason_of(&run)] {
+        assert!(
+            shown.ends_with(" withheld: they hold a credential's shape]\nfailed"),
+            "{shown}"
+        );
+        assert!(!shown.contains(body), "{shown}");
+        assert!(!shown.contains("PRIVATE KEY"), "{shown}");
+    }
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_long_stderr_is_cut_to_its_last_whole_lines() {
+    let stderr: String = (1..=20_000).map(|n| format!("line {n}\n")).collect();
+    let (text, run) = error_writing(&stderr);
+    let reason = reason_of(&run);
+    assert!(reason.len() <= 4096, "{}", reason.len());
+    let numbers: Vec<u32> = reason
+        .lines()
+        .map(|line| {
+            line.strip_prefix("line ")
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_else(|| panic!("a whole line: {line:?}"))
+        })
+        .collect();
+    assert_eq!(numbers.last(), Some(&20_000), "it ends with the last line");
+    assert!(
+        numbers.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "whole lines in order: {numbers:?}"
+    );
+    assert!(
+        numbers.len() > 300,
+        "the bound is filled: {}",
+        numbers.len()
+    );
+    assert!(text.ends_with(&format!("{STDERR_SAID}{reason}")), "{text}");
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_program_error_with_no_stderr_has_no_reason() {
+    let (text, run) = error_writing("");
+    let digest = run["blob_sha256"].as_str().expect("a blob");
+    let program = text
+        .strip_prefix(&format!("ProgramError: action {CHECK}: "))
+        .and_then(|rest| rest.split_once(" ended exit status "))
+        .map(|(program, _)| program.to_owned())
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(program.ends_with("/stub"), "{program}");
+    assert_eq!(
+        text,
+        format!(
+            "ProgramError: action {CHECK}: {program} ended exit status 79, which exits.error lists; nothing was recorded, and its output is the blob {digest}"
+        )
+    );
+    assert!(run.get("reason").is_none(), "{run}");
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_run_outside_the_error_class_has_no_reason() {
+    let (end, run, recorded) = run_writing("warning: slow\n", 0, r#"{"0": valid}"#);
+    assert_performed(&end);
+    assert_eq!(recorded, ["valid"]);
+    assert_eq!(run["exit"], 0, "{run}");
+    assert!(run.get("reason").is_none(), "{run}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Security review of wave 2026-11-23-w8 (`story:program-error-carries-its-reason`): conformance
+// cases the review added, red against `9ce6949e`.
+
+/// The refusal says "the last lines of its stderr" and the guide says the reason is the run's
+/// stderr tail. A program that writes more than the runner keeps of a stream (1 MiB, the first
+/// bytes: Substrate's `Retention::Head`) and then its error must still end the reason with that
+/// error, or the reason must say its stderr was cut.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn security_w8_a_stderr_past_the_runners_bound_still_shows_its_last_line() {
+    const LAST: &str = "no such epic: E-12";
+    let mut stderr: String = (1..=100_000).map(|n| format!("progress {n}\n")).collect();
+    assert!(stderr.len() > 1_048_576 + 4096, "{}", stderr.len());
+    stderr.push_str(LAST);
+    stderr.push('\n');
+    let (text, run) = error_writing(&stderr);
+    let reason = reason_of(&run);
+    // The runner kept the start of the stream only: the reason says so in this exact text, then
+    // shows the last whole lines it kept, never the line the bound cut.
+    let kept = reason
+        .strip_prefix(STDERR_CUT)
+        .unwrap_or_else(|| panic!("the reason starts with the cut statement: {reason:?}"));
+    assert!(!reason.contains(LAST), "{reason}");
+    let numbers: Vec<u32> = kept
+        .lines()
+        .map(|line| {
+            line.strip_prefix("progress ")
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_else(|| panic!("a whole kept line: {line:?}"))
+        })
+        .collect();
+    assert!(
+        numbers.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "whole lines in order: {numbers:?}"
+    );
+    // The window is full to within one kept line ("progress 70000\n": 15 bytes).
+    assert!((4096 - 15..=4096).contains(&kept.len()), "{}", kept.len());
+    assert!(
+        text.ends_with(&format!("{STDERR_KEPT_SAID}{reason}")),
+        "{text}"
+    );
+    assert!(!text.contains(STDERR_SAID), "{text}");
+}
+
+/// What the reason of a run whose stderr the runner cut says before the last kept lines.
+const STDERR_CUT: &str = "[it wrote more on its standard error than the runner keeps: the runner kept the start, and what follows are the last kept lines, not its last lines]\n";
+
+/// What the refusal says before the reason of a run whose stderr the runner cut.
+const STDERR_KEPT_SAID: &str = "; the last kept lines of its stderr:\n";
+
+/// A JSON Web Token on stderr is a bearer credential with no prefix in `TOKEN_PREFIXES`: it
+/// reaches the `ProgramError` refusal, the run's observation (`reason`) and `tree status`.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn security_w8_a_jwt_on_stderr_is_withheld() {
+    let jwt = [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        ".",
+        "eyJzdWIiOiJydW5ib29rIiwiaWF0IjoxNzAwMDAwMDAwfQ",
+        ".",
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    ]
+    .concat();
+    let (text, run) = error_writing(&format!("calling the API with {jwt}\nfailed: 401\n"));
+    for shown in [text.as_str(), reason_of(&run)] {
+        assert!(!shown.contains(&jwt), "{shown}");
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
