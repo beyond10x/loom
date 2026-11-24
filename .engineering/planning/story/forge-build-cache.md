@@ -11,6 +11,7 @@ relations:
 - serves: vision:O1
 - informed_by: story:ci-job-time-budget
 - informed_by: story:one-test-binary-per-crate
+- blocks: story:local-gate-equals-forge
 scope:
 - confidence: cited
   path: .github/workflows/check.yml
@@ -24,7 +25,7 @@ scope:
   path: crates/loom-xtask/src/forge_cache.rs
 - confidence: cited
   path: crates/loom-xtask/src/main.rs
-revision: 8
+revision: 9
 ---
 ## Outcome
 
@@ -369,13 +370,20 @@ heading named. **Inferred**: a reading that could be wrong.
   carries forward its Acceptance 2 and Gate) and `story:one-test-binary-per-crate` (the fold,
   measured with it; not a dependency: each story shortens the job alone, the cache is what gives
   the margin).
-- **Ordering with `story:local-gate-equals-forge`** (active), a note and not an edge: the
-  vocabulary's only ordering edges are `depends_on` and `blocks`, and neither holds, since either
-  may land first and the release must not wait for it. Landing order: D7. Whichever story lands
-  second rewrites `deps-cache.yml`'s toolchain step to the `id: toolchain` form; the duty is
-  recorded here only, since that story's scope and body do not list `deps-cache.yml`. When
-  `story:local-gate-equals-forge` lands, `check.yml`'s `env:` build settings move into
-  `.cargo/config.toml` (its change) and the key changes through `rust-toolchain.toml` and
+- **Ordering with `story:local-gate-equals-forge`** (active): this story lands first, because it
+  is the release blocker. The edge is `blocks: story:local-gate-equals-forge` on this story (the
+  relation vocabulary lists `blocks`, "Prevents progress on something"). Its reason is the new
+  file `.github/workflows/deps-cache.yml`: `story:local-gate-equals-forge`, landing second, has
+  its `workflows` check read it and rewrites its toolchain step to the `id: toolchain` form (D7).
+  That duty is recorded here only; that story's scope and body are its own and are not edited
+  here, and they do not list `deps-cache.yml`. Whether its `forge-parity` check `workflows`
+  iterates `.github/workflows/` or a fixed list is not written there: its Outcome names the four
+  jobs that install Rust today in three files (`check.yml` `check` and `macos`, `pages.yml`
+  `build`, `release.yml` `verify`) and states the check as "every `dtolnay/rust-toolchain` step
+  reads the `toolchain` step's output and every job with one has that step", naming no file set
+  (cited, `local-gate-equals-forge.md` § Outcome); that it would reach `deps-cache.yml` only if
+  it iterates the directory is inferred. When it lands, `check.yml`'s `env:` build settings move
+  into `.cargo/config.toml` (its change) and the key changes through `rust-toolchain.toml` and
   `.cargo/config.toml` (one cold run).
 - **Shared files, textual merge.**
   - `.github/workflows/check.yml`: `story:local-gate-equals-forge` (active; `runs-on`, the
@@ -399,3 +407,20 @@ heading named. **Inferred**: a reading that could be wrong.
   - `CHANGELOG.md`: the stories whose typed scope lists it, `story:macos-build-reruns-once-when-cancelled`
     and `story:readme-logo-and-badges`; one bullet each, rebased on the one merged before, and
     each story creates the `### Changed` header where its section lacks it.
+- **Stale-scope neighbours.** `aep plan artifact waves` reports a collision with each of these
+  five active stories on the file named. In each case their change to that file is already on
+  `origin/main` (the commit named, an ancestor of `origin/main` `0c454abed`, cited), so the
+  collision comes from a scope never closed, and this story holds no hunk of theirs to merge
+  with; that no further change of theirs to the file is pending is inferred from the commits.
+  - `story:test-step-within-budget`: `check.yml` and `main.rs`, both in `8c3607883` ("gate: the
+    test step runs under nextest …", 2026-11-22) — cited.
+  - `story:docs-check-builds-once-per-fresh-tree`: `check.yml` (cited) and `main.rs` (inferred in
+    `waves`), both in `d395ddc61`, merged by `7483cdb29` — cited.
+  - `story:tree-run-binary-fits-its-start-bound`: `main.rs`, merged by `7d50e45a1` — cited.
+  - `story:drop-the-substrate-git-feature`: `main.rs` (`48b68f99e`, cited) and `forge_cache.rs`
+    (inferred: its typed scope is the directory `crates/loom-xtask/`, which holds the new file;
+    it never wrote it).
+  - `story:ci-job-time-budget`: `check.yml` in `127d8fbca` ("ci: compile the gate's test targets
+    once; loom / task check back to 30 min"), merged by `efe8839b3` — cited. It is a `check.yml`
+    neighbour as well as `informed_by`; its open Acceptance 2 and Gate are carried here, not a
+    pending change to the file.
