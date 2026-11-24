@@ -217,8 +217,10 @@ actions:
   `max_budget_micro_usd`, each a whole number from 1. `timeout_seconds` is from 1 to 14400 on a
   `program` and from 1 to 3600 on any other executor. A program's `handoff_when` check and an
   `arguments_from` program run under the binding's `timeout_seconds` but at most 3600 seconds. A
-  program confined by Substrate still gets one hour of CPU time whatever its timeout, so a program
-  that runs longer than an hour must spend most of it waiting. While it runs it holds the tree's
+  program confined by Substrate gets one hour of CPU time in total whatever its timeout, spread
+  over the whole run: a program that names more than 3600 s runs at the rate 3600 /
+  `timeout_seconds` of one core (14400 s: a quarter core; 7200 s: half a core), so a long program
+  must spend most of its time waiting. While it runs it holds the tree's
   store lock for at most its `timeout_seconds` and 30 s more, and the run's cancel ends it.
 - On a `program` or a `person`, `budget.runs_per` says what `max_runs` counts from: `case` (the
   default) counts every run of the case; `rejection` counts the runs since the latest rejection,
@@ -270,7 +272,7 @@ actions:
   rules of any bound program's argv. Before each step of the action, and when the case is otherwise
   stuck, `tree run` runs it through the run's runner with the whole workspace read-only (`target/`
   included), `PATH` and the `LOOM_*` variables alone, no retry feedback, empty standard input and
-  the binding's `timeout_seconds`. Exit 0 offers the handoff and takes no step; any other exit lets
+  the binding's `timeout_seconds` but at most 3600 seconds. Exit 0 offers the handoff and takes no step; any other exit lets
   the writer run in that step, or leaves a stuck case `Stuck`. A check that cannot be started
   (exit 126 or 127 included), is killed at its timeout or by a signal is never a skip: the run
   stops `HandoffCheckFailed`, naming the action, and the writer does not run. Under `local` a
@@ -337,7 +339,7 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `argv` (no shell), the arguments as one JSON object on standard input, `PATH`, `LOOM_CASE`,
   `LOOM_CASE_NAME` (a case a parent opened), `LOOM_PARENT_CASE_NAME` (a case whose parent a case
   opened) and `LOOM_TIMEOUT_SECONDS` alone in its environment, the binding's `timeout_seconds` (60
-  when absent), and the workspace root as its start directory. Under a runner that is not `local`, a program at an absolute path
+  when absent; at most 3600 for the `arguments_from` argv), and the workspace root as its start directory. Under a runner that is not `local`, a program at an absolute path
   outside `/usr`, `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH`
   that is not UTF-8 refuses the step, `<program> was not started: the host's PATH is not UTF-8`,
   and starts nothing.
@@ -350,7 +352,8 @@ The port is a Commission effect port: it performs the actions bound to `program`
   nothing starts or is recorded. The commands of `b10x-loom run --action-bindings` keep `PATH`
   alone.
 - `LOOM_TIMEOUT_SECONDS` is the whole seconds of that run's timeout, the binding's
-  `timeout_seconds` or 60. `LOOM_CASE_NAME` is the name the case's opening gave it, as the
+  `timeout_seconds` or 60, and at most 3600 for a `handoff_when` check or an `arguments_from`
+  program. `LOOM_CASE_NAME` is the name the case's opening gave it, as the
   governor stored it in the case's `parent` link: the `open` executor's `name` or the entry of its
   `each` argument, without the repeat suffix, so the child `P.story.2` reads `story` as `P.story`
   does. `LOOM_PARENT_CASE_NAME` is the name stored in the `parent` link of that parent, one level
@@ -425,8 +428,12 @@ The port is a Commission effect port: it performs the actions bound to `program`
   with `; the last lines of its stderr:`, a line break and the program's reason: the last whole
   lines of its stderr within 4096 bytes, each line that holds a credential's shape (a token
   prefix, a URL with user information or a query, a PEM block, even one whose opening the window
-  cut) withheld behind a note, and terminal escape sequences replaced, as the session executor
-  shows a harness's stderr. Its standard output is never shown. The run's observation keeps the
+  cut, a JSON Web Token) withheld behind a note, and terminal escape sequences replaced, as the
+  session executor shows a harness's stderr. The runner keeps the first 1 MiB of a stream: when
+  the program wrote more on its stderr, the text says `; the last kept lines of its stderr:`
+  instead, and the reason starts with `[it wrote more on its standard error than the runner keeps:
+  the runner kept the start, and what follows are the last kept lines, not its last lines]` and a
+  line break before the last whole lines of what was kept. Its standard output is never shown. The run's observation keeps the
   same text as `reason`, and `tree status` lists it on the run (`runs[].reason`); no other run has
   one. Print why the program failed on stderr, and `tree run`'s `action finished` line and
   `tree status` say it. One in `not_called` records

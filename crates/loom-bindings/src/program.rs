@@ -381,7 +381,12 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         match run.class {
             Some(ExitClass::Error) => {
                 self.write(&targets, Vec::new())?;
-                return Ok(program_error(action, program, &run));
+                return Ok(program_error(
+                    action,
+                    program,
+                    &run,
+                    execution.child_output.stderr_truncated,
+                ));
             }
             Some(ExitClass::NotCalled) => {
                 let written = self.write(&targets, Vec::new())?;
@@ -1025,8 +1030,7 @@ pub fn start<S: FallibleCaseStore, T: EvaluationTime>(
             // A program error's run keeps why the program said it failed: its stderr tail, walked
             // as every stderr Loom shows is. No other run keeps one.
             if run.class == Some(ExitClass::Error) {
-                run.reason = Some(stderr_tail(&String::from_utf8_lossy(&output.stderr)))
-                    .filter(|tail| !tail.is_empty());
+                run.reason = error_reason(&output.stderr, output.stderr_truncated);
             }
             match keep_blob(place.store, &digest, &blob) {
                 Ok(()) => run.blob_sha256 = Some(digest),
@@ -1693,11 +1697,46 @@ fn class_of(exits: Option<&ExitClasses>, execution: &TestExecution) -> Option<Ex
 /// What a `ProgramError` text puts between the blob digest and the run's stderr tail.
 const STDERR_SAID: &str = "; the last lines of its stderr:\n";
 
+/// What a `ProgramError` text puts between the blob digest and the reason of a run whose stderr
+/// the runner cut ([`STDERR_CUT`]).
+const STDERR_KEPT_SAID: &str = "; the last kept lines of its stderr:\n";
+
+/// What the reason of a run whose standard error the runner cut starts with: the runner keeps the
+/// start of a stream up to its bound, so the lines after it are the last ones it kept, not the
+/// program's last lines.
+const STDERR_CUT: &str = "[it wrote more on its standard error than the runner keeps: the runner kept the start, and what follows are the last kept lines, not its last lines]";
+
+/// The reason a program error's run keeps: its stderr tail, walked and bounded
+/// ([`stderr_tail`]), none when it wrote nothing. When the runner cut the stream (`truncated`),
+/// the reason says so ([`STDERR_CUT`]) and the tail is read from what it kept without the line
+/// its bound cut, so no cut line is ever shown as the program's own.
+fn error_reason(stderr: &[u8], truncated: bool) -> Option<String> {
+    if !truncated {
+        return Some(stderr_tail(&String::from_utf8_lossy(stderr))).filter(|tail| !tail.is_empty());
+    }
+    let whole = stderr
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(&stderr[..0], |end| &stderr[..=end]);
+    let tail = stderr_tail(&String::from_utf8_lossy(whole));
+    Some(if tail.is_empty() {
+        STDERR_CUT.to_owned()
+    } else {
+        format!("{STDERR_CUT}\n{tail}")
+    })
+}
+
 /// The step refused `ProgramError`, ending the run: `run`'s exit is one the binding's
 /// `exits.error` lists. The text names the exit code and the blob digest and, when the program
-/// wrote on its standard error, ends with the run's `reason`, its stderr tail walked and bounded
-/// ([`stderr_tail`]); never what it printed on its standard output.
-fn program_error(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome {
+/// wrote on its standard error, ends with the run's `reason` ([`error_reason`]): after
+/// [`STDERR_SAID`], or after [`STDERR_KEPT_SAID`] when the runner cut its stderr
+/// (`stderr_truncated`); never what it printed on its standard output.
+fn program_error(
+    action: &str,
+    program: &str,
+    run: &ProgramRun,
+    stderr_truncated: bool,
+) -> EffectOutcome {
     let mut detail = format!(
         "{program} ended exit status {}, which exits.error lists; nothing was recorded, and its output is the blob {}",
         run.exit
@@ -1705,7 +1744,11 @@ fn program_error(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome
         run.blob_sha256.as_deref().unwrap_or("(none)")
     );
     if let Some(reason) = &run.reason {
-        detail.push_str(STDERR_SAID);
+        detail.push_str(if stderr_truncated {
+            STDERR_KEPT_SAID
+        } else {
+            STDERR_SAID
+        });
         detail.push_str(reason);
     }
     let refusal = ProgramRefusal {

@@ -1,8 +1,8 @@
 //! How Loom shows a child's standard error: its last whole lines within [`STDERR_TAIL_BYTES`]
 //! ([`stderr_tail`]), or every line of it ([`walked`]), each line that holds a credential's shape
-//! withheld and never repeated ([`TOKEN_PREFIXES`], a URL with user information or a query
-//! component, a PEM block, read over the whole text, so a block whose opening the tail's window
-//! cut is withheld too), each terminal escape sequence and every other control character but a
+//! withheld and never repeated ([`TOKEN_PREFIXES`], a JSON Web Token's shape, a URL with user
+//! information or a query component, a PEM block, read over the whole text, so a block whose
+//! opening the tail's window cut is withheld too), each terminal escape sequence and every other control character but a
 //! tab removed and replaced, so what is shown is one inert text.
 //!
 //! One walk for every stderr Loom shows: the session executor's reason and failure record, and a
@@ -271,7 +271,8 @@ fn inert(line: &str) -> (String, String) {
 
 /// Which of `lines` hold a credential's shape: a URL with user information or a query
 /// component, a word that starts with one of [`TOKEN_PREFIXES`] in either case (a word starting
-/// where the line does or after a character that is neither a letter nor a digit), or a line of a
+/// where the line does or after a character that is neither a letter nor a digit), a JSON Web
+/// Token's shape ([`holds_jwt`]), or a line of a
 /// PEM block, from its `-----BEGIN` line to its `-----END` line; an `-----END` line whose
 /// `-----BEGIN` the tail does not hold withholds every line before it too.
 fn credential_lines(lines: &[&str]) -> Vec<bool> {
@@ -314,7 +315,47 @@ fn holds_credential(line: &str) -> bool {
                 .is_none_or(|before| !before.is_alphanumeric())
         })
     });
-    prefixed || holds_credential_url(line)
+    prefixed || holds_credential_url(line) || holds_jwt(line)
+}
+
+/// The fewest characters of each segment of a JSON Web Token's shape ([`holds_jwt`]).
+const JWT_SEGMENT_CHARS: usize = 8;
+
+/// Whether `line` holds a JSON Web Token's shape, a bearer credential with no prefix of its own:
+/// three base64url segments (`A-Z`, `a-z`, `0-9`, `-`, `_`) of at least [`JWT_SEGMENT_CHARS`]
+/// characters each, joined by two dots, the first starting `eyJ` (the encoding of `{"`) where no
+/// base64url character comes before it. A version number or a dotted path holds no such shape.
+/// Each candidate reads forward over at most three segments, so a line is read in linear time.
+fn holds_jwt(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let base64url = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_';
+    // The end of the segment that starts at `from`, when it holds enough characters.
+    let segment = |from: usize| {
+        let end = bytes[from..]
+            .iter()
+            .position(|byte| !base64url(*byte))
+            .map_or(bytes.len(), |length| from + length);
+        (end - from >= JWT_SEGMENT_CHARS).then_some(end)
+    };
+    line.match_indices("eyJ").any(|(at, _)| {
+        if at > 0 && base64url(bytes[at - 1]) {
+            return false;
+        }
+        let mut end = at;
+        for index in 0..3 {
+            if index > 0 {
+                if bytes.get(end) != Some(&b'.') {
+                    return false;
+                }
+                end += 1;
+            }
+            match segment(end) {
+                Some(next) => end = next,
+                None => return false,
+            }
+        }
+        true
+    })
 }
 
 /// Whether `line` holds a URL that carries user information or a query component. A URL is each
@@ -480,5 +521,35 @@ mod tests {
             walked("see \u{1b}]8;;https://h.example/e?q=7\u{1b}\\guide\u{1b}]8;;\u{1b}\\ now"),
             ["see \u{fffd}guide\u{fffd} now"]
         );
+    }
+
+    #[test]
+    fn a_jwt_shape_is_withheld_and_a_version_or_a_dotted_path_is_not() {
+        let withheld = |line: &str| walked(line) != [line.to_owned()];
+        let header = ["eyJ", "hbGciOiJIUzI1NiJ9"].concat();
+        let jwt = format!("{header}.eyJzdWIiOiJ4In0.SflKxwRJSMeKKF2Q_-x");
+        for line in [
+            jwt.clone(),
+            format!("Authorization: {jwt}"),
+            format!("token={jwt}, retrying"),
+            format!("({jwt})"),
+            format!("\u{1b}[1m{jwt}\u{1b}[0m"),
+        ] {
+            assert!(withheld(&line), "{line:?} is withheld");
+        }
+        for line in [
+            "loom 1.2.3 ready",
+            "version 1.2.3.4",
+            "loaded config.settings.production.yaml",
+            "at crates/loom-commission/src/stderr.rs:18",
+            "com.example.service.Handler failed",
+            // Each segment needs 8 characters, and the first starts `eyJ`.
+            &format!("{header}.short.SflKxwRJSMeKKF2Q"),
+            "abcdefghij.eyJzdWIiOiJ4In0.SflKxwRJSMeKKF2Q",
+            // Two segments are no JWT.
+            &format!("{header}.eyJzdWIiOiJ4In0"),
+        ] {
+            assert!(!withheld(line), "{line:?} is kept");
+        }
     }
 }

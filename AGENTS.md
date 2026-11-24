@@ -1483,8 +1483,12 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   `timeout_seconds` outside 1 to 14400 on a `program` (`MAX_PROGRAM_TIMEOUT_SECONDS`) or 1 to 3600
   on any other executor, a path that is absolute or leaves the workspace, and an
   independence dimension the protocol does not declare. A `handoff_when` check and an
-  `arguments_from` program run under at most 3600 s (`MAX_TIMEOUT_SECONDS`), and Substrate's CPU
-  bound stays one hour (`story:bound-program-timeout-above-an-hour`). An action with no binding is not an error;
+  `arguments_from` program run under the binding's `timeout_seconds` but at most 3600 s
+  (`MAX_TIMEOUT_SECONDS`), their `LOOM_TIMEOUT_SECONDS` the same value, and Substrate's CPU
+  bound stays one hour in total (`story:bound-program-timeout-above-an-hour`; `cpu_millis` of
+  `limits` in `crates/loom-intake-slice/src/confinement.rs`): Substrate's `exec_cpu_quota` spreads
+  it over the timeout, so a program that names more than 3600 s
+  runs at the rate 3600 / `timeout_seconds` of one core. An action with no binding is not an error;
   `unbound` lists them.
 - `tree.rs` reads the text under bounds, because the YAML parser reads a whole document before it
   returns and expands an alias at each use: `MAX_NESTING` (64, on the decoded values), `MAX_NODES`

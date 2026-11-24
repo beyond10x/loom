@@ -1156,6 +1156,76 @@ fn a_run_outside_the_error_class_has_no_reason() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Security review of wave 2026-11-23-w8 (`story:program-error-carries-its-reason`): conformance
+// cases the review added, red against `9ce6949e`.
+
+/// The refusal says "the last lines of its stderr" and the guide says the reason is the run's
+/// stderr tail. A program that writes more than the runner keeps of a stream (1 MiB, the first
+/// bytes: Substrate's `Retention::Head`) and then its error must still end the reason with that
+/// error, or the reason must say its stderr was cut.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn security_w8_a_stderr_past_the_runners_bound_still_shows_its_last_line() {
+    const LAST: &str = "no such epic: E-12";
+    let mut stderr: String = (1..=100_000).map(|n| format!("progress {n}\n")).collect();
+    assert!(stderr.len() > 1_048_576 + 4096, "{}", stderr.len());
+    stderr.push_str(LAST);
+    stderr.push('\n');
+    let (text, run) = error_writing(&stderr);
+    let reason = reason_of(&run);
+    // The runner kept the start of the stream only: the reason says so in this exact text, then
+    // shows the last whole lines it kept, never the line the bound cut.
+    let kept = reason
+        .strip_prefix(STDERR_CUT)
+        .unwrap_or_else(|| panic!("the reason starts with the cut statement: {reason:?}"));
+    assert!(!reason.contains(LAST), "{reason}");
+    let numbers: Vec<u32> = kept
+        .lines()
+        .map(|line| {
+            line.strip_prefix("progress ")
+                .and_then(|n| n.parse().ok())
+                .unwrap_or_else(|| panic!("a whole kept line: {line:?}"))
+        })
+        .collect();
+    assert!(
+        numbers.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "whole lines in order: {numbers:?}"
+    );
+    // The window is full to within one kept line ("progress 70000\n": 15 bytes).
+    assert!((4096 - 15..=4096).contains(&kept.len()), "{}", kept.len());
+    assert!(
+        text.ends_with(&format!("{STDERR_KEPT_SAID}{reason}")),
+        "{text}"
+    );
+    assert!(!text.contains(STDERR_SAID), "{text}");
+}
+
+/// What the reason of a run whose stderr the runner cut says before the last kept lines.
+const STDERR_CUT: &str = "[it wrote more on its standard error than the runner keeps: the runner kept the start, and what follows are the last kept lines, not its last lines]\n";
+
+/// What the refusal says before the reason of a run whose stderr the runner cut.
+const STDERR_KEPT_SAID: &str = "; the last kept lines of its stderr:\n";
+
+/// A JSON Web Token on stderr is a bearer credential with no prefix in `TOKEN_PREFIXES`: it
+/// reaches the `ProgramError` refusal, the run's observation (`reason`) and `tree status`.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn security_w8_a_jwt_on_stderr_is_withheld() {
+    let jwt = [
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        ".",
+        "eyJzdWIiOiJydW5ib29rIiwiaWF0IjoxNzAwMDAwMDAwfQ",
+        ".",
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    ]
+    .concat();
+    let (text, run) = error_writing(&format!("calling the API with {jwt}\nfailed: 401\n"));
+    for shown in [text.as_str(), reason_of(&run)] {
+        assert!(!shown.contains(&jwt), "{shown}");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
 // The names the openings gave the case and its parent
 
 /// One level of the tree's protocols: `<id>@1`, the writer [`CHECK`] and, but for the last level,
