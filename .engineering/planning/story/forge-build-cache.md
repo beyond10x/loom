@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:forge-build-cache
 kind: story
-status: draft
+status: active
 title: loom / task check restores the locked dependencies' build from a forge cache that only a push to main writes, and ends within 25 minutes on a warm entry
 summary: story:ci-job-time-budget D1 c, carrying its Acceptance 2 and Gate on warm runs; separate main-push job (40 min, own concurrency group) writes, check restores only; key ubuntu-24.04 + rustc cachekey + hashFiles(rust-toolchain.toml, Cargo.lock, .cargo/config.toml, **/Cargo.toml); actions/cache pinned 55cc8345 (v6.1.0); loom-xtask guard over the workflows
 tags:
@@ -25,7 +25,10 @@ scope:
   path: crates/loom-xtask/src/forge_cache.rs
 - confidence: cited
   path: crates/loom-xtask/src/main.rs
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-24T13:27:43Z", actor: "agent:sdc", revision: 10, executor: "agent:loom", correlation: "loom-check-30-minute-defect-2026-11-24"}
+- {from: "proposed", to: "active", at: "2026-11-24T13:27:43Z", actor: "agent:sdc", revision: 11, executor: "agent:loom", correlation: "loom-check-30-minute-defect-2026-11-24"}
 ---
 ## Outcome
 
