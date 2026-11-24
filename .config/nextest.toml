@@ -4,7 +4,7 @@ experimental = ["setup-scripts"]
 command = "cargo run --locked -p loom-xtask -- shared-trees"
 
 [profile.default]
-default-filter = "not test(/(^|::)slow_/) and not (binary_id(b10x-loom-executor::ess_gate) | binary_id(b10x-loom-commission::ess_gate))"
+default-filter = "not test(/(^|::)slow_/) and not ((binary_id(/^b10x-loom-executor::(ess_gate|main)$/) and (not binary(=main) or test(/^ess_gate::/))) | (binary_id(/^b10x-loom-commission::(ess_gate|main)$/) and (not binary(=main) or test(/^ess_gate::/))))"
 slow-timeout = { period = "60s", terminate-after = 1 }
 fail-fast = false
 
@@ -17,7 +17,7 @@ filter = "(binary_id(b10x-loom-cli::tree_run) or (binary_id(b10x-loom-cli::main)
 slow-timeout = { period = "20s", terminate-after = 1 }
 
 [[profile.default.scripts]]
-filter = "binary_id(b10x-loom-cli::tree_run)"
+filter = "(binary_id(/^b10x-loom-cli::(tree_run|main)$/) and (not binary(=main) or test(/^tree_run::/)))"
 setup = "shared-trees"
 
 [profile.slow]

@@ -106,7 +106,7 @@ pub struct Tests {
     /// The name the step prints for them: `<package>::<module>`.
     pub label: &'static str,
     /// Each `(binary id, name prefix)` that selects them.
-    pub layouts: [(&'static str, &'static str); 2],
+    pub layouts: &'static [(&'static str, &'static str)],
 }
 
 impl Tests {
@@ -116,12 +116,39 @@ impl Tests {
             .iter()
             .any(|(binary, prefix)| case.binary == *binary && case.name.starts_with(prefix))
     }
+
+    /// Whether `case` is the test these tests name `test`: in a layout's binary, named the
+    /// layout's prefix and `test` exactly.
+    pub fn holds_test(&self, case: &Case, test: &str) -> bool {
+        self.layouts.iter().any(|(binary, prefix)| {
+            case.binary == *binary && case.name.strip_prefix(prefix) == Some(test)
+        })
+    }
+
+    /// The package of these tests, the head of [`Tests::label`].
+    pub fn package(&self) -> &'static str {
+        self.label.split("::").next().unwrap_or_default()
+    }
+}
+
+/// The tests of the module `module` of `package` in both layouts: the test binary
+/// `<package>::<module>`, or the module of `<package>::main`, named `<module>::<test>`.
+macro_rules! in_both_layouts {
+    ($package:literal, $module:literal) => {
+        Tests {
+            label: concat!($package, "::", $module),
+            layouts: &[
+                (concat!($package, "::", $module), ""),
+                (concat!($package, "::main"), concat!($module, "::")),
+            ],
+        }
+    };
 }
 
 /// The tests of `crates/loom-cli/tests/tree_run.rs`, in either layout.
 pub const TREE_RUN: Tests = Tests {
     label: "b10x-loom-cli::tree_run",
-    layouts: [
+    layouts: &[
         ("b10x-loom-cli::tree_run", ""),
         ("b10x-loom-cli::main", "tree_run::"),
     ],
@@ -229,35 +256,40 @@ pub struct Case {
     pub skipped: bool,
 }
 
-/// A test binary `task check` runs only in the step (`story:ci-job-time-budget`), and the tests of
-/// it the step's report must hold.
+/// A test module `task check` runs only in the step (`story:ci-job-time-budget`), in its own test
+/// binary or as a module of its package's `main` (`story:one-test-binary-per-crate`), and the tests
+/// of it the step's report must hold.
 #[derive(Debug, Clone, Copy)]
 pub struct Required {
-    /// `<package>::<binary>`, as the report names it.
-    pub binary: &'static str,
-    /// The tests of the binary that make its claim.
+    /// The module in each layout; its label, `<package>::<module>`, is what the step prints.
+    pub module: Tests,
+    /// The tests of the module that make its claim, without the module's prefix.
     pub tests: &'static [&'static str],
 }
 
-/// The test binaries of the tasks `task check` no longer runs (`conform`, `commission:conform`,
+/// The test modules of the tasks `task check` no longer runs (`conform`, `commission:conform`,
 /// `intake-conform`, `commission:deps-guard`): the step fails unless its report holds a case of
-/// each test named, whatever way the run left it out (a filter, a package selection, an ignored
-/// test, a target switched off).
+/// each test named, in either layout, whatever way the run left it out (a filter, a package
+/// selection, an ignored test, a target switched off). The intake suite is its crate's one test
+/// file and keeps its binary.
 pub const REQUIRED: &[Required] = &[
     Required {
-        binary: "b10x-loom-conformance::conform",
+        module: in_both_layouts!("b10x-loom-conformance", "conform"),
         tests: &["ess_conformance_report"],
     },
     Required {
-        binary: "b10x-loom-commission-conformance::conform",
+        module: in_both_layouts!("b10x-loom-commission-conformance", "conform"),
         tests: &["ess_conformance_report"],
     },
     Required {
-        binary: "b10x-loom-intake-conformance::conform",
+        module: Tests {
+            label: "b10x-loom-intake-conformance::conform",
+            layouts: &[("b10x-loom-intake-conformance::conform", "")],
+        },
         tests: &["ess_conformance_report"],
     },
     Required {
-        binary: "b10x-loom-commission-testkit::executor_port",
+        module: in_both_layouts!("b10x-loom-commission-testkit", "executor_port"),
         tests: &[
             "executor_port_contract",
             "commission_depends_on_no_connectors_crate",
@@ -266,24 +298,24 @@ pub const REQUIRED: &[Required] = &[
 ];
 
 /// What the step's report lacks of [`REQUIRED`], one line each, for a run over the workspace
-/// (`packages` empty) or over `packages`, whose binaries only are required.
+/// (`packages` empty) or over `packages`, whose modules only are required.
 pub fn left_out(cases: &[Case], packages: &[String]) -> Vec<String> {
     let mut lacking = Vec::new();
     for required in REQUIRED {
-        let package = required.binary.split("::").next().unwrap_or_default();
+        let package = required.module.package();
         if !packages.is_empty() && !packages.iter().any(|named| named == package) {
             continue;
         }
         for test in required.tests {
             let ran = cases
                 .iter()
-                .any(|case| case.binary == required.binary && case.name == *test);
+                .any(|case| required.module.holds_test(case, test));
             if !ran {
                 lacking.push(format!(
                     "{} {test} is not in the report: the step left it out (a filter, a package \
                      selection, an ignore or a target switched off), and `task check` runs it \
                      nowhere else",
-                    required.binary
+                    required.module.label
                 ));
             }
         }
@@ -296,33 +328,53 @@ fn required_count(packages: &[String]) -> usize {
     REQUIRED
         .iter()
         .filter(|required| {
-            let package = required.binary.split("::").next().unwrap_or_default();
+            let package = required.module.package();
             packages.is_empty() || packages.iter().any(|named| named == package)
         })
         .map(|required| required.tests.len())
         .sum()
 }
 
-/// The test binaries `.config/nextest.toml`'s default filter leaves out: each has a task of its
-/// own in `task check`.
+/// The test modules `.config/nextest.toml`'s default filter leaves out, in either layout: each has
+/// a task of its own in `task check`.
 #[cfg(test)]
-pub const OUT_OF_THE_STEP: [&str; 2] = [
-    "b10x-loom-executor::ess_gate",
-    "b10x-loom-commission::ess_gate",
+pub const OUT_OF_THE_STEP: [Tests; 2] = [
+    in_both_layouts!("b10x-loom-executor", "ess_gate"),
+    in_both_layouts!("b10x-loom-commission", "ess_gate"),
 ];
+
+/// The nextest filter that selects `tests` (made by [`in_both_layouts!`]) in either layout, and
+/// parses in both: nextest refuses a filter whose `binary_id(…)`, in any spelling, matches no test
+/// binary of the workspace, so neither layout's binary is named alone. The one expression that
+/// matches whichever of `<package>::<module>` and `<package>::main` exists, takes all of the
+/// first, and of `main` the tests named `<module>::…`; `binary(=main)` matches the `main` of
+/// `b10x-loom-cli` in both layouts.
+#[cfg(test)]
+pub fn selector(tests: &Tests) -> String {
+    let (package, module) = tests.label.split_once("::").unwrap_or_default();
+    format!(
+        "(binary_id(/^{package}::({module}|main)$/) and (not binary(=main) or \
+         test(/^{module}::/)))"
+    )
+}
 
 /// The slow lane's test selector in the default filter.
 #[cfg(test)]
 const SLOW_SELECTOR: &str = "/(^|::)slow_/";
 
-/// The predicates of a nextest filter expression other than the two it is known to hold: the slow
-/// lane's `test(…)` and a `binary_id(…)` of [`OUT_OF_THE_STEP`]. Each is `name(argument)`, the
-/// blanks of the text ignored. Any other predicate (`package`, `binary`, `kind`, a wildcard, a
-/// regular expression, a `test` that names a required test) may leave a required binary out, so
-/// the filter is not read further: the step's report decides ([`left_out`]).
+/// The predicates of a nextest filter expression other than those it is known to hold: the slow
+/// lane's `test(…)`, the [`selector`] of a module of [`OUT_OF_THE_STEP`] (as its whole text), and a
+/// `binary_id(…)` of such a module's own binary. Each is `name(argument)`, the blanks of the text
+/// ignored. Any other predicate (`package`, `binary`, `kind`, a wildcard, a regular expression, a
+/// `test` that names a required test, a part of a selector on its own) may leave a required module
+/// out, so the filter is not read further: the step's report decides ([`left_out`]).
 #[cfg(test)]
 pub fn unknown_predicates(filter: &str) -> Vec<String> {
-    let chars: Vec<char> = filter.chars().collect();
+    let mut rest = filter.to_owned();
+    for tests in &OUT_OF_THE_STEP {
+        rest = rest.replace(&selector(tests), " ");
+    }
+    let chars: Vec<char> = rest.chars().collect();
     let mut unknown = Vec::new();
     let mut at = 0;
     while at < chars.len() {
@@ -363,7 +415,9 @@ pub fn unknown_predicates(filter: &str) -> Vec<String> {
             .collect();
         let known = match name.as_str() {
             "test" => argument == SLOW_SELECTOR,
-            "binary_id" => OUT_OF_THE_STEP.contains(&argument.as_str()),
+            "binary_id" => OUT_OF_THE_STEP
+                .iter()
+                .any(|tests| tests.label == argument.as_str()),
             _ => false,
         };
         if !known {
@@ -1472,12 +1526,12 @@ running 1 test
         );
         assert_eq!(
             OWN_TASKS.map(|(binary, _)| binary),
-            OUT_OF_THE_STEP,
+            OUT_OF_THE_STEP.map(|tests| tests.label),
             "the binaries the filter may leave out are the ones with a task of their own"
         );
-        for (binary, task) in OWN_TASKS {
+        for (tests, (binary, task)) in OUT_OF_THE_STEP.iter().zip(OWN_TASKS) {
             assert!(
-                filter.contains(&format!("binary_id({binary})")),
+                filter.contains(&selector(tests)),
                 "the test step runs {binary}, which stays out of it: {filter}"
             );
             assert!(
@@ -1640,16 +1694,387 @@ running 1 test
         );
     }
 
-    /// [`REQUIRED`] holds exactly the binaries and tests of [`PINNED`].
+    /// The id a [`PINNED`] test has once its crate's test files are modules of the one test binary
+    /// `main` (`story:one-test-binary-per-crate`): `(<package>::main, <module>::<test>)`. The
+    /// intake suite is its crate's one test file and keeps its binary.
+    fn folded_id(binary: &str, name: &str) -> (String, String) {
+        let (package, module) = binary.split_once("::").unwrap();
+        if package == "b10x-loom-intake-conformance" {
+            return (binary.to_owned(), name.to_owned());
+        }
+        (format!("{package}::main"), format!("{module}::{name}"))
+    }
+
+    fn a_case(binary: &str, name: &str) -> Case {
+        Case {
+            binary: binary.to_owned(),
+            name: name.to_owned(),
+            seconds: 0.1,
+            failed: false,
+            skipped: false,
+        }
+    }
+
+    /// [`report_without`] with every crate folded: each [`PINNED`] test under its [`folded_id`].
+    fn folded_report_without(without: &[&str]) -> Vec<Case> {
+        let mut cases = vec![
+            a_case("loom-xtask::checks", "a_check"),
+            a_case(
+                "b10x-loom-conformance::main",
+                "conform::derived_statuses_rate",
+            ),
+            a_case("b10x-loom-cli::main", "tree_run::a_case"),
+        ];
+        for (binary, name) in PINNED {
+            if !without.contains(&binary) {
+                let (binary, name) = folded_id(binary, name);
+                cases.push(a_case(&binary, &name));
+            }
+        }
+        cases
+    }
+
+    /// The guard holds in the folded layout as in the old one: a report with every required test
+    /// as `<module>::<test>` of `<package>::main` passes, and a planted defect (a report with no
+    /// case of one module's required test) fails the step naming that module and no other.
+    #[test]
+    fn the_step_fails_when_a_folded_module_of_the_folded_tasks_is_not_in_its_report() {
+        assert_eq!(
+            left_out(&folded_report_without(&[]), &[]),
+            Vec::<String>::new()
+        );
+        for module in IN_THE_STEP {
+            let failures = left_out(&folded_report_without(&[module]), &[]);
+            assert!(!failures.is_empty(), "{module} left out, the step passes");
+            for failure in &failures {
+                assert!(failure.contains(module), "{module}: {failure}");
+                for other in IN_THE_STEP.iter().filter(|other| **other != module) {
+                    assert!(!failure.contains(other), "{module}: {failure}");
+                }
+            }
+        }
+        let mut one_test = folded_report_without(&[]);
+        one_test
+            .retain(|case| case.name != "executor_port::commission_depends_on_no_connectors_crate");
+        let failures = left_out(&one_test, &[]);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("b10x-loom-commission-testkit::executor_port")
+                && failures[0].contains("commission_depends_on_no_connectors_crate"),
+            "{failures:?}"
+        );
+        assert_eq!(left_out(&[], &[]).len(), PINNED.len());
+    }
+
+    /// Some crates folded and some not, as while the units of the story merge one by one: each
+    /// required test is found in the layout its crate has.
+    #[test]
+    fn the_step_accepts_a_report_of_both_layouts_at_once() {
+        for folded in IN_THE_STEP {
+            let mut cases = report_without(&[folded]);
+            cases.extend(
+                folded_report_without(&[])
+                    .into_iter()
+                    .filter(|case| case.binary.starts_with(folded.split("::").next().unwrap())),
+            );
+            assert_eq!(left_out(&cases, &[]), Vec::<String>::new(), "{folded}");
+        }
+    }
+
+    /// In the folded layout a case counts only as `<module>::<test>` of its own package's `main`:
+    /// the bare name, another module, a longer name, another package's `main` or the prefixed name
+    /// in the old binary does not stand for the required test.
+    #[test]
+    fn a_folded_case_counts_only_under_its_own_module_and_package() {
+        let mut cases = folded_report_without(&["b10x-loom-conformance::conform"]);
+        for (binary, name) in [
+            ("b10x-loom-conformance::main", "ess_conformance_report"),
+            (
+                "b10x-loom-conformance::main",
+                "other::ess_conformance_report",
+            ),
+            (
+                "b10x-loom-conformance::main",
+                "conform::ess_conformance_report_x",
+            ),
+            (
+                "b10x-loom-conformance::main",
+                "x::conform::ess_conformance_report",
+            ),
+            ("b10x-loom-cli::main", "conform::ess_conformance_report"),
+            (
+                "b10x-loom-commission-conformance::main",
+                "conform::ess_conformance_report_of_loom",
+            ),
+            (
+                "b10x-loom-conformance::conform",
+                "conform::ess_conformance_report",
+            ),
+            (
+                "b10x-loom-conformance::other",
+                "conform::ess_conformance_report",
+            ),
+        ] {
+            cases.push(a_case(binary, name));
+        }
+        let failures = left_out(&cases, &[]);
+        assert_eq!(failures.len(), 1, "{failures:?}");
+        assert!(
+            failures[0].contains("b10x-loom-conformance::conform")
+                && failures[0].contains("ess_conformance_report"),
+            "{failures:?}"
+        );
+    }
+
+    /// Over named packages the folded layout is read as the old one is.
+    #[test]
+    fn over_named_packages_the_step_requires_their_folded_modules_only() {
+        for module in IN_THE_STEP {
+            let package = module.split("::").next().unwrap();
+            let only: Vec<Case> = folded_report_without(&IN_THE_STEP)
+                .into_iter()
+                .chain(
+                    folded_report_without(&[])
+                        .into_iter()
+                        .filter(|case| case.binary.starts_with(&format!("{package}::"))),
+                )
+                .collect();
+            assert_eq!(
+                left_out(&only, &named(&[package])),
+                Vec::<String>::new(),
+                "{module}"
+            );
+            assert!(
+                !left_out(&folded_report_without(&IN_THE_STEP), &named(&[package])).is_empty(),
+                "{package} named, its module {module} missing, and the step passes"
+            );
+        }
+    }
+
+    /// The default filter's exclusion of both `ess_gate` suites, each in the one spelling nextest
+    /// parses in both layouts: the binary `ess_gate` of the package, or the module `ess_gate` of
+    /// its `main` (nextest 0.9.143 refuses `binary_id(b10x-loom-executor::main)` while that binary
+    /// does not exist, "operator didn't match any binary IDs", and so every other spelling of a
+    /// missing binary).
+    const GATES_IN_BOTH_LAYOUTS: [&str; 2] = [
+        "(binary_id(/^b10x-loom-executor::(ess_gate|main)$/) and (not binary(=main) or \
+         test(/^ess_gate::/)))",
+        "(binary_id(/^b10x-loom-commission::(ess_gate|main)$/) and (not binary(=main) or \
+         test(/^ess_gate::/)))",
+    ];
+
+    /// The guard knows the exclusion of an `ess_gate` suite in both layouts only as the whole
+    /// [`selector`] of a module of [`OUT_OF_THE_STEP`]: a part of it alone, the selector of another
+    /// module or package, one with another operator, or the folded pair spelled with the name of
+    /// `main` is a predicate it does not know.
+    #[test]
+    fn the_guard_knows_the_ess_gate_selectors_and_nothing_wider() {
+        assert_eq!(
+            OUT_OF_THE_STEP.map(|tests| selector(&tests)),
+            GATES_IN_BOTH_LAYOUTS.map(str::to_owned)
+        );
+        let slow = "not test(/(^|::)slow_/)";
+        let both = GATES_IN_BOTH_LAYOUTS.join(" | ");
+        let gates =
+            "binary_id(b10x-loom-executor::ess_gate) | binary_id(b10x-loom-commission::ess_gate)";
+        assert_eq!(
+            unknown_predicates(&format!("{slow} and not ({both})")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            unknown_predicates(&format!("{slow} and not ({gates} | {both})")),
+            Vec::<String>::new()
+        );
+        for (spelling, what) in [
+            (
+                "binary_id(/^b10x-loom-executor::(ess_gate|main)$/)",
+                "binary_id",
+            ),
+            ("binary(=main)", "binary"),
+            ("test(/^ess_gate::/)", "test"),
+            ("binary_id(b10x-loom-executor::main)", "binary_id"),
+            (
+                "(binary_id(b10x-loom-executor::main) and test(/^ess_gate::/))",
+                "binary_id",
+            ),
+            (
+                "(binary_id(/^b10x-loom-conformance::(conform|main)$/) and (not binary(=main) or \
+                 test(/^conform::/)))",
+                "binary_id",
+            ),
+            (
+                "(binary_id(/^b10x-loom-executor::(conform|main)$/) and (not binary(=main) or \
+                 test(/^conform::/)))",
+                "binary_id",
+            ),
+            (
+                "(binary_id(/^b10x-loom-commission-testkit::(ess_gate|main)$/) and (not \
+                 binary(=main) or test(/^ess_gate::/)))",
+                "binary_id",
+            ),
+            (
+                "(binary_id(/^b10x-loom-executor::(ess_gate|main)$/) and (binary(=main) or \
+                 test(/^ess_gate::/)))",
+                "binary_id",
+            ),
+            (
+                "(binary_id(/^b10x-loom-executor::(ess_gate|main)$/) or (not binary(=main) or \
+                 test(/^ess_gate::/)))",
+                "binary_id",
+            ),
+        ] {
+            let unknown = unknown_predicates(&format!("{slow} and not ({both} | {spelling})"));
+            assert!(
+                unknown.first().is_some_and(|first| first.starts_with(what)),
+                "{spelling}: {unknown:?}"
+            );
+        }
+    }
+
+    /// `.config/nextest.toml` leaves both `ess_gate` suites out of the step in both layouts, and
+    /// names nothing the guard does not know.
+    #[test]
+    fn the_default_filter_leaves_out_ess_gate_in_both_layouts() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let filter = config["profile"]["default"]["default-filter"]
+            .as_str()
+            .unwrap();
+        for selector in GATES_IN_BOTH_LAYOUTS {
+            assert!(filter.contains(selector), "{selector} not in {filter}");
+        }
+        assert_eq!(unknown_predicates(filter), Vec::<String>::new(), "{filter}");
+    }
+
+    /// The setup script that builds the shared trees runs for the `tree_run` tests in both
+    /// layouts.
+    #[test]
+    fn the_shared_trees_setup_runs_for_tree_run_in_both_layouts() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join(".config/nextest.toml")).unwrap())
+                .unwrap();
+        let scripts: Vec<&toml::Value> = config["profile"]["default"]["scripts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|table| table["setup"].as_str() == Some("shared-trees"))
+            .collect();
+        assert_eq!(scripts.len(), 1, "{scripts:?}");
+        let tree_run = "(binary_id(/^b10x-loom-cli::(tree_run|main)$/) and (not binary(=main) or \
+                        test(/^tree_run::/)))";
+        assert_eq!(tree_run, selector(&TREE_RUN));
+        assert_eq!(scripts[0]["filter"].as_str(), Some(tree_run));
+    }
+
+    /// A task's command names its test binary in the old layout, or the module of `main` it runs
+    /// in the folded one (`--test main <module>::`); both give `<package>::<module>`.
+    #[test]
+    fn a_task_names_its_module_in_both_layouts() {
+        for (line, binary) in [
+            (
+                "cargo test --locked -p b10x-loom-conformance --test conform",
+                "b10x-loom-conformance::conform",
+            ),
+            (
+                "cargo test --locked -p b10x-loom-conformance --test main conform::",
+                "b10x-loom-conformance::conform",
+            ),
+            (
+                "cargo test --locked -p b10x-loom-commission-testkit --test main executor_port::",
+                "b10x-loom-commission-testkit::executor_port",
+            ),
+            (
+                "cargo test -p b10x-loom-executor --test main --locked ess_gate:: -- --skip slow_",
+                "b10x-loom-executor::ess_gate",
+            ),
+        ] {
+            assert_eq!(binary_of_command(line).as_deref(), Ok(binary), "{line}");
+        }
+        for line in [
+            "cargo test --locked -p b10x-loom-conformance --test main",
+            "cargo test --locked -p b10x-loom-conformance --test main -- --skip slow_",
+            "cargo test --locked -p b10x-loom-conformance --test main conform",
+        ] {
+            assert!(binary_of_command(line).is_err(), "{line}");
+        }
+    }
+
+    /// Every test id that stands for a required test, `(binary, name)` as the JUnit report gives
+    /// them, in both layouts, written out on its own as [`PINNED`] is.
+    const PINNED_IDS: [(&str, &str); 9] = [
+        ("b10x-loom-conformance::conform", "ess_conformance_report"),
+        (
+            "b10x-loom-conformance::main",
+            "conform::ess_conformance_report",
+        ),
+        (
+            "b10x-loom-commission-conformance::conform",
+            "ess_conformance_report",
+        ),
+        (
+            "b10x-loom-commission-conformance::main",
+            "conform::ess_conformance_report",
+        ),
+        (
+            "b10x-loom-intake-conformance::conform",
+            "ess_conformance_report",
+        ),
+        (
+            "b10x-loom-commission-testkit::executor_port",
+            "executor_port_contract",
+        ),
+        (
+            "b10x-loom-commission-testkit::main",
+            "executor_port::executor_port_contract",
+        ),
+        (
+            "b10x-loom-commission-testkit::executor_port",
+            "commission_depends_on_no_connectors_crate",
+        ),
+        (
+            "b10x-loom-commission-testkit::main",
+            "executor_port::commission_depends_on_no_connectors_crate",
+        ),
+    ];
+
+    /// [`REQUIRED`] holds exactly the modules and tests of [`PINNED`], and in its layouts exactly
+    /// the ids of [`PINNED_IDS`], each of which is the case of its test.
     #[test]
     fn the_required_list_is_the_pinned_one() {
         let required: Vec<(&str, &str)> = REQUIRED
             .iter()
-            .flat_map(|r| r.tests.iter().map(|test| (r.binary, *test)))
+            .flat_map(|r| r.tests.iter().map(|test| (r.module.label, *test)))
             .collect();
         assert_eq!(required, PINNED.to_vec());
-        let binaries: Vec<&str> = REQUIRED.iter().map(|r| r.binary).collect();
-        assert_eq!(binaries, IN_THE_STEP.to_vec());
+        let modules: Vec<&str> = REQUIRED.iter().map(|r| r.module.label).collect();
+        assert_eq!(modules, IN_THE_STEP.to_vec());
+        let mut ids: Vec<(String, String)> = Vec::new();
+        for required in REQUIRED {
+            for test in required.tests {
+                for (binary, prefix) in required.module.layouts {
+                    ids.push(((*binary).to_owned(), format!("{prefix}{test}")));
+                }
+            }
+        }
+        let pinned: Vec<(String, String)> = PINNED_IDS
+            .iter()
+            .map(|(binary, name)| ((*binary).to_owned(), (*name).to_owned()))
+            .collect();
+        assert_eq!(ids, pinned);
+        for (binary, name) in PINNED_IDS {
+            let case = a_case(binary, name);
+            assert_eq!(
+                REQUIRED
+                    .iter()
+                    .filter(|r| r.tests.iter().any(|test| r.module.holds_test(&case, test)))
+                    .count(),
+                1,
+                "{binary} {name}"
+            );
+        }
     }
 
     /// The command of a task of `file`, as `cargo test --locked -p <package> --test <binary>`
@@ -1659,12 +2084,37 @@ running 1 test
             serde_yaml_ng::from_str(&fs::read_to_string(root.join(file)).unwrap()).unwrap();
         let commands = taskfile["tasks"][task]["cmds"].as_sequence().unwrap();
         assert_eq!(commands.len(), 1, "{file} task {task}: {commands:?}");
-        let words: Vec<&str> = commands[0].as_str().unwrap().split_whitespace().collect();
+        binary_of_command(commands[0].as_str().unwrap())
+            .unwrap_or_else(|error| panic!("{file} task {task}: {error}"))
+    }
+
+    /// `<package>::<module>` of a `cargo test … -p <package> --test <module>` command, or of one
+    /// that runs the module of the package's one test binary, `--test main … <module>::` (the
+    /// first word ending in `::` before a `--`).
+    fn binary_of_command(line: &str) -> Result<String, String> {
+        let words: Vec<&str> = line.split_whitespace().collect();
         let after = |flag: &str| {
-            let at = words.iter().position(|word| *word == flag).unwrap();
-            words[at + 1]
+            words
+                .iter()
+                .position(|word| *word == flag)
+                .and_then(|at| words.get(at + 1).copied())
+                .ok_or_else(|| format!("`{line}` names no {flag}"))
         };
-        format!("{}::{}", after("-p"), after("--test"))
+        let package = after("-p")?;
+        let target = after("--test")?;
+        if target != "main" {
+            return Ok(format!("{package}::{target}"));
+        }
+        let module = words
+            .iter()
+            .skip_while(|word| **word != "main")
+            .take_while(|word| **word != "--")
+            .find_map(|word| word.strip_suffix("::"))
+            .filter(|module| !module.is_empty() && !module.contains("::"))
+            .ok_or_else(|| {
+                format!("`{line}` runs `--test main` and names no module `<module>::`")
+            })?;
+        Ok(format!("{package}::{module}"))
     }
 
     /// The class: every test binary a task of [`FOLDED`] runs is required of the step, derived
@@ -1679,12 +2129,14 @@ running 1 test
             };
             let binary = binary_of_task(&root, file, name);
             assert!(
-                REQUIRED.iter().any(|required| required.binary == binary),
+                REQUIRED
+                    .iter()
+                    .any(|required| required.module.label == binary),
                 "task `{task}` runs {binary}, which the step does not require: {REQUIRED:?}"
             );
         }
         for required in REQUIRED {
-            let (package, binary) = required.binary.split_once("::").unwrap();
+            let (package, binary) = required.module.label.split_once("::").unwrap();
             let manifest = fs::read_dir(root.join("crates"))
                 .unwrap()
                 .map(|entry| entry.unwrap().path().join("Cargo.toml"))
