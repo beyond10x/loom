@@ -48,17 +48,20 @@ fn adversary_root_check_runs_every_commission_gate_step() {
         return;
     }
     // Commission's conformance suite and dependency guard run in the test step, which the root
-    // `check` lists and whose nextest run does not leave them out (`story:ci-job-time-budget`).
-    let nextest = read(".config/nextest.toml");
-    for binary in [
-        "b10x-loom-commission-conformance::conform",
-        "b10x-loom-commission-testkit::executor_port",
-    ] {
-        assert!(
-            !nextest.contains(&format!("binary_id({binary})")),
-            "the test step leaves out {binary}"
-        );
-    }
+    // `check` lists (`story:ci-job-time-budget`). The step must run the whole workspace, so that
+    // it requires their binaries: a `-p` after `test-step` would require only the binaries of the
+    // packages named. That it then runs them, however a filter, a package selection or an ignore
+    // would leave them out, is the step's own check of its report (`loom-xtask`,
+    // `test_step::left_out`, `REQUIRED`).
+    let runs: Vec<_> = task_block(&taskfile, "test-step")
+        .into_iter()
+        .filter(|line| line.contains("loom-xtask"))
+        .collect();
+    assert_eq!(
+        runs,
+        ["- cargo run -q --locked -p loom-xtask -- test-step"],
+        "the test step task does not run the whole workspace"
+    );
     let steps = [
         "commission:spec",
         "commission:ess-gate",

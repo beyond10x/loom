@@ -940,11 +940,16 @@ fn taskfile_check_runs_conform() {
         body("check").iter().any(|line| line == "- task: test-step"),
         "task check does not list `test-step`"
     );
-    let nextest = root().join(".config/nextest.toml");
-    let nextest = fs::read_to_string(&nextest)
-        .unwrap_or_else(|error| panic!("read {}: {error}", nextest.display()));
-    assert!(
-        !nextest.contains("binary_id(b10x-loom-conformance::conform)"),
-        "the test step leaves out b10x-loom-conformance::conform"
+    // The step must run the whole workspace, so that it requires this binary: a `-p` after
+    // `test-step` would require only the binaries of the packages named. That the step then runs
+    // this binary, however a filter, a package selection or an ignore would leave it out, is the
+    // step's own check of its report (`loom-xtask`, `test_step::left_out`, `REQUIRED`).
+    assert_eq!(
+        body("test-step")
+            .iter()
+            .filter(|line| line.contains("loom-xtask"))
+            .collect::<Vec<_>>(),
+        ["- cargo run -q --locked -p loom-xtask -- test-step"],
+        "the test step task does not run the whole workspace"
     );
 }
