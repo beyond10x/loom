@@ -285,8 +285,8 @@ are modules of `tests/main.rs` under `story:one-test-binary-per-crate`; no test 
 - A redesign of the documentation site.
 - Publishing to a registry.
 - Signing a release or a badge.
-- Uploading the social preview in the repository's settings, a GitHub setting that waits for Timo
-  or the operator session of `~/.claude/CLAUDE.md` § Host operator.
+- Uploading the social preview in the repository's settings, a GitHub setting that waits for the
+  owner or the operator session of `~/.claude/CLAUDE.md` § Host operator.
 - A coverage gate or ratchet, and coverage in CI.
 - Badges from any service.
 - A quick start that runs a case tree: it needs `story:tree-run-command` and a delegated cgroup,
