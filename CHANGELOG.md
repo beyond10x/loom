@@ -23,6 +23,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - The gate compiles the workspace's test targets once: the three conformance suites run inside the test step, and CI's loom / task check is bounded at 30 minutes again (story:ci-job-time-budget)
 - A `ProgramError` refusal ends with the program's stderr tail (4096 bytes, credential lines withheld; a notice when cut at 1 MiB), kept in `ProgramRun.reason` and `StatusRun.reason` (story:program-error-carries-its-reason)
 - The stderr walk moved to `b10x_loom_commission::stderr` (`stderr_tail`, `walked`, `STDERR_TAIL_BYTES`, `TOKEN_PREFIXES`) and withholds a JSON Web Token line too (story:program-error-carries-its-reason)
+- CI's loom / task check restores the locked dependencies' build from a cache that only a push to main writes (story:forge-build-cache)
 
 ### Fixed
 
