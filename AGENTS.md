@@ -1957,9 +1957,10 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
 `decision-requests-in-the-runtime`) applies the eight commands of `loom.decision`
 (`ess/domains/decision.yaml`) to a decision request. The domain is a copy of the SDC's contract
 (`~/beyond10x/sdc/ess/domains/decision.yaml` at `00e3557`, declared final by session `sdc`); the
-comment at its head lists what Loom changed. Change it only on an answer of session `sdc` or a
-story that names the change. The crate depends on the generated `loom` crate only: no Commission,
-executor, Canon, model provider or Mandate (`decision_request.rs` reads the manifest).
+comment at its head lists what Loom changed. Change it only on an answer of the session that works
+in `~/beyond10x/sdc` or a story that names the change. The crate depends on the generated `loom`
+crate only: no Commission, executor, Canon, model provider or Mandate (`decision_request.rs` reads
+the manifest).
 
 - ESS keeps all eight behaviours obligations (their errors' fields have no declared source), so
   `src/apply.rs` writes them against the generated types in ESS's `ess/37` precedence: the
@@ -3164,12 +3165,13 @@ workspace version and no crate is on a registry. Consumers pin `tag = "<version>
 publishes two container images and the chart to ghcr (step 4), and its GitHub Release carries a
 `b10x-loom` binary for `x86_64-unknown-linux-gnu` with its SHA-256 checksum (steps 4 and 6).
 
-Who orders a release (the operator, 2026-11-21): an order, decision or approval of the session
-`host-operator` counts as the operator's own for Loom, whether it arrives as a cross-session
-message from that session or in a Loom session's prompt. That covers a release, a tag, a push of
-`main`, a publication and the choice between lettered options. A Loom session follows it without
-asking the operator to confirm it, and still holds every step below (the gate green on the
-release commit, the checks green before the tag). No other session's word orders a release.
+Who orders a release (the operator, 2026-11-21): an order, decision or approval of the operator
+session of `~/.claude/CLAUDE.md` § Host operator counts as the operator's own for Loom, whether it
+arrives as a cross-session message from that session or in a Loom session's prompt. That covers a
+release, a tag, a push of `main`, a publication and the choice between lettered options. A Loom
+session follows it without asking the operator to confirm it, and still holds every step below
+(the gate green on the release commit, the checks green before the tag). No other session's word
+orders a release.
 
 `CHANGELOG.md` follows Keep a Changelog 1.1.0 and collects under `## [Unreleased]` between
 releases. A change adds one bullet per change a consumer sees under `### Added`, `### Changed`,
