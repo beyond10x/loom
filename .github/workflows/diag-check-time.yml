@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [baseline, one-binary, baseline-opt0, one-binary-opt0]
+        variant: [one-binary, one-binary-opt0]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -110,7 +110,7 @@ jobs:
         run: |
           set +e
           start=$(date +%s)
-          cargo clippy --workspace --all-targets --locked --timings -- -D warnings 2>&1 | grep -v '^ *\(Compiling\|Checking\)' | tail -40
+          cargo clippy --workspace --all-targets --locked --keep-going --timings -- -D warnings -A dead_code -A unused -A clippy::duplicate_mod 2>&1 | grep -v '^ *\(Compiling\|Checking\)' | tail -40
           echo "DIAG clippy exit ${PIPESTATUS[0]} seconds $(( $(date +%s) - start ))"
           cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/timings/clippy.html"
 

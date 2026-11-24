@@ -24,3 +24,8 @@ for dir in crates/*/; do
   printf '\n[[test]]\nname = "main"\npath = "tests/main.rs"\n' >> "$manifest"
   echo "$dir: $count files"
 done
+# The selectors that name the folded binary b10x-loom-cli::tree_run (diagnosis only).
+sed -i 's#binary_id(b10x-loom-cli::tree_run)#(binary_id(b10x-loom-cli::main) and test(/^tree_run::/))#g' .config/nextest.toml
+sed -i 's#("tree_run", "the_shared_trees_are_made")#("main", "tree_run::the_shared_trees_are_made")#' crates/loom-xtask/src/shared_trees.rs
+grep -n 'BUILDER_TEST: ' crates/loom-xtask/src/shared_trees.rs
+grep -n 'binary_id' .config/nextest.toml
