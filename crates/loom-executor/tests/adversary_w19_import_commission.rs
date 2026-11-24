@@ -33,8 +33,9 @@ fn task_block(taskfile: &str, name: &str) -> Vec<String> {
 /// were repointed at `Taskfile.commission.yml`'s `check`, which neither the root `task check` nor
 /// CI (`check.yml` runs `task check`) ever invokes. Nothing then pins that the root `check` runs
 /// Commission's non-cargo-test steps. This case pins it: every Commission gate step is a step of
-/// the root `check` (or the root `check` runs `commission:check`), and Commission's drift and
-/// no-hand-model run before the first cargo build/lint/test step, as Commission's own check had it.
+/// the root `check` or runs in its test step (or the root `check` runs `commission:check`), and
+/// Commission's drift and no-hand-model run before the first cargo build/lint/test step, as
+/// Commission's own check had it.
 #[test]
 fn adversary_root_check_runs_every_commission_gate_step() {
     let taskfile = read("Taskfile.yml");
@@ -46,13 +47,24 @@ fn adversary_root_check_runs_every_commission_gate_step() {
     if check.iter().any(|line| line == "- task: commission:check") {
         return;
     }
+    // Commission's conformance suite and dependency guard run in the test step, which the root
+    // `check` lists and whose nextest run does not leave them out (`story:ci-job-time-budget`).
+    let nextest = read(".config/nextest.toml");
+    for binary in [
+        "b10x-loom-commission-conformance::conform",
+        "b10x-loom-commission-testkit::executor_port",
+    ] {
+        assert!(
+            !nextest.contains(&format!("binary_id({binary})")),
+            "the test step leaves out {binary}"
+        );
+    }
     let steps = [
         "commission:spec",
         "commission:ess-gate",
         "commission:drift",
         "commission:no-hand-model",
-        "commission:conform",
-        "commission:deps-guard",
+        "test-step",
         "commission:docs-drift",
     ];
     let position = |step: &str| {
