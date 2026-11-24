@@ -1,0 +1,164 @@
+name: diag check time
+
+on:
+  push:
+    branches: [diag/check-time]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  measure:
+    name: diag / ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, one-binary, baseline-opt0, one-binary-opt0]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the variant's tree
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -eu
+          case "$VARIANT" in
+            baseline*) git checkout HEAD~1 -- crates ;;
+          esac
+          case "$VARIANT" in
+            *opt0) printf '[profile.dev]\ndebug = false\n\n[profile.dev.package."*"]\nopt-level = 2\n\n[profile.dev.package.b10x-loom-governor]\nopt-level = 2\n' > .cargo/config.toml ;;
+          esac
+          cat .cargo/config.toml
+          git status --short | wc -l
+          find crates -maxdepth 3 -path "*/tests/*.rs" | wc -l
+          nproc; lscpu | grep -E 'Model name|^CPU\(s\)'; free -g | head -2; df -h . | tail -1
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+
+      - name: Install test backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap e2fsprogs
+
+      - name: Install ess
+        env:
+          ESS_VERSION: "0.98.1"
+          ESS_SHA256: 36b9684b4e2e9608e2707dad04505e14f7f1c55731f653c5e45f554ddd62dff4
+        run: |
+          set -euo pipefail
+          asset="ess-$ESS_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+          release="https://github.com/beyond10x/ess/releases/download/$ESS_VERSION"
+          cd "$RUNNER_TEMP"
+          curl --fail --silent --show-error --location --output "$asset" "$release/$asset"
+          curl --fail --silent --show-error --location --output SHA256SUMS "$release/SHA256SUMS"
+          grep -Fx "$ESS_SHA256  $asset" SHA256SUMS
+          grep -F "  $asset" SHA256SUMS | sha256sum --check --strict
+          tar -xzf "$asset"
+          echo "$RUNNER_TEMP/ess-$ESS_VERSION-x86_64-unknown-linux-gnu" >> "$GITHUB_PATH"
+
+      - name: Install cargo-nextest
+        env:
+          NEXTEST_VERSION: "0.9.143"
+          NEXTEST_SHA256: 66786b9abe23920d022a182d1416b1bbc8130dd4872a9553d76985a1708dcd1e
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/nextest.tar.gz" \
+            "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-$NEXTEST_VERSION/cargo-nextest-$NEXTEST_VERSION-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/nextest-bin"
+          tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin" cargo-nextest
+          echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
+
+      - name: Fetch locked dependencies
+        run: cargo fetch --locked
+
+      - name: Test build, cold, with timings
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/timings"
+          start=$(date +%s)
+          cargo test --workspace --locked --no-run --timings 2>&1 | grep -v '^ *Compiling' || true
+          echo "DIAG test-build seconds $(( $(date +%s) - start ))"
+          cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/timings/test-build.html"
+          echo "DIAG executables in deps $(find target/debug/deps -maxdepth 1 -type f -executable ! -name '*.*' | wc -l)"
+          echo "DIAG deps bytes $(du -sb target/debug/deps | cut -f1)"
+
+      - name: Test step
+        run: |
+          set +e
+          start=$(date +%s)
+          cargo run -q --locked -p loom-xtask -- test-step > "$RUNNER_TEMP/test-step.log" 2>&1
+          echo "DIAG test-step exit $? seconds $(( $(date +%s) - start ))"
+          grep -E '^test step:|^ +[0-9.]+ s |wall time|FAIL|SIGSEGV|TIMEOUT' "$RUNNER_TEMP/test-step.log" | head -80
+          tail -5 "$RUNNER_TEMP/test-step.log"
+
+      - name: Clippy with timings
+        run: |
+          set +e
+          start=$(date +%s)
+          cargo clippy --workspace --all-targets --locked --timings -- -D warnings 2>&1 | grep -v '^ *\(Compiling\|Checking\)' | tail -40
+          echo "DIAG clippy exit ${PIPESTATUS[0]} seconds $(( $(date +%s) - start ))"
+          cp target/cargo-timings/cargo-timing.html "$RUNNER_TEMP/timings/clippy.html"
+
+      - name: Durable-check build of the count tests' targets only
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set +e
+          case "$VARIANT" in
+            baseline*) runlog=run_log ;;
+            *) runlog=main ;;
+          esac
+          start=$(date +%s)
+          cargo nextest run --locked --no-fail-fast -p b10x-loom-governor -p b10x-loom-runlog -p b10x-loom-tree -p b10x-loom-bindings --lib --test "$runlog" -E 'test(/(^|::)(each_governor_write_syncs_its_file_and_directory|a_run_log_append_syncs_its_file_and_directory|a_tree_store_write_syncs_its_file_and_directory|a_kept_blob_is_synced)$/)' 2>&1 | grep -v '^ *Compiling' | tail -15
+          echo "DIAG durable-targets exit ${PIPESTATUS[0]} seconds $(( $(date +%s) - start ))"
+
+      - name: Durable-check as task check runs it
+        run: |
+          set +e
+          start=$(date +%s)
+          cargo run -q --locked -p loom-xtask -- durable-check 2>&1 | grep -v '^ *Compiling' | tail -12
+          echo "DIAG durable-check exit ${PIPESTATUS[0]} seconds $(( $(date +%s) - start ))"
+
+      - name: Consumer-check in its own target
+        run: |
+          set +e
+          cp Cargo.lock consumers/pinned/Cargo.lock
+          start=$(date +%s)
+          cargo test --manifest-path consumers/pinned/Cargo.toml --offline --no-run > "$RUNNER_TEMP/consumer-own.log" 2>&1
+          echo "DIAG consumer-own exit $? seconds $(( $(date +%s) - start )) compiling $(grep -c '^ *Compiling' "$RUNNER_TEMP/consumer-own.log")"
+
+      - name: Consumer-check in the workspace target
+        run: |
+          set +e
+          start=$(date +%s)
+          cargo test --manifest-path consumers/pinned/Cargo.toml --offline --no-run --target-dir target > "$RUNNER_TEMP/consumer-shared.log" 2>&1
+          echo "DIAG consumer-shared exit $? seconds $(( $(date +%s) - start )) compiling $(grep -c '^ *Compiling' "$RUNNER_TEMP/consumer-shared.log")"
+          grep '^ *Compiling' "$RUNNER_TEMP/consumer-shared.log" | head -40
+          cargo test --manifest-path consumers/pinned/Cargo.toml --offline --target-dir target 2>&1 | tail -5
+
+      - name: Sizes
+        if: always()
+        run: |
+          du -sh target target/debug target/debug/deps consumers/pinned/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: timings-${{ matrix.variant }}
+          path: ${{ runner.temp }}/timings
+          retention-days: 7
