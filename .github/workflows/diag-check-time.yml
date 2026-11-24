@@ -34,7 +34,7 @@ jobs:
         run: |
           set -eu
           case "$VARIANT" in
-            baseline*) git checkout HEAD~1 -- crates ;;
+            one-binary*) sh .github/diag/one-binary.sh ;;
           esac
           case "$VARIANT" in
             *opt0) printf '[profile.dev]\ndebug = false\n\n[profile.dev.package."*"]\nopt-level = 2\n\n[profile.dev.package.b10x-loom-governor]\nopt-level = 2\n' > .cargo/config.toml ;;
