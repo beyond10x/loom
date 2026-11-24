@@ -77,7 +77,9 @@ types:
   # when it names none; a value its table does not list is refused and records nothing.
   # `Report` is a JSON pointer into the program's report. `Runs` Loom's count of the action's
   # runs: `spent` on the run that reaches `budget.max_runs`; a Program executor's entry only
-  # (story outcome-when-reads-the-run-count). A Program executor's entries read `Exit`,
+  # (story outcome-when-reads-the-run-count). Its record is also the one `tree run` writes
+  # before a step when the allowance is spent for good and the case holds none, attributed to
+  # the last counted run (story spent-program-has-its-spent-record). A Program executor's entries read `Exit`,
   # `Report` or `Runs`, never `Effect`; a Person or Open executor's entries read `Effect` alone;
   # an Agent's and a Copy's read anything but `Runs`.
   - name: loom.bindings.ResultSource
@@ -357,7 +359,9 @@ types:
   # run: it counts against `budget.max_runs` like any other run without a `class`. `cancelled`
   # (story cancel-a-running-bound-program) is true when the run's cancel handle ended it: the
   # runner answered the refusal `Cancelled`, `runner_refusal` names it, and the run holds no exit
-  # and no blob. A cancelled run counts against `budget.max_runs`. `principal` (story
+  # and no blob. A cancelled run counts against `budget.max_runs`; when it spent the allowance for
+  # good, `tree run` writes the `from: runs` record it did not (story
+  # spent-program-has-its-spent-record). `principal` (story
   # person-action-runs-a-program) is the principal whose approval started the run of a Person
   # executor's `argv`; it is absent on a program step.
   - name: loom.bindings.ProgramRun
