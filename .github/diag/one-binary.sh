@@ -27,5 +27,6 @@ done
 # The selectors that name the folded binary b10x-loom-cli::tree_run (diagnosis only).
 sed -i 's#binary_id(b10x-loom-cli::tree_run)#(binary_id(b10x-loom-cli::main) and test(/^tree_run::/))#g' .config/nextest.toml
 sed -i 's#("tree_run", "the_shared_trees_are_made")#("main", "tree_run::the_shared_trees_are_made")#' crates/loom-xtask/src/shared_trees.rs
+sed -i 's#binary_id(b10x-loom-executor::ess_gate)#(binary_id(b10x-loom-executor::main) and test(/^ess_gate::/))#; s#binary_id(b10x-loom-commission::ess_gate)#(binary_id(b10x-loom-commission::main) and test(/^ess_gate::/))#' .config/nextest.toml
 grep -n 'BUILDER_TEST: ' crates/loom-xtask/src/shared_trees.rs
 grep -n 'binary_id' .config/nextest.toml

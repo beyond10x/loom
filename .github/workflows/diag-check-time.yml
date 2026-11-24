@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [one-binary, one-binary-opt0]
+        variant: [one-binary, cache-baseline, cache-one-binary]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -34,7 +34,7 @@ jobs:
         run: |
           set -eu
           case "$VARIANT" in
-            one-binary*) sh .github/diag/one-binary.sh ;;
+            one-binary*|cache-one-binary) sh .github/diag/one-binary.sh ;;
           esac
           case "$VARIANT" in
             *opt0) printf '[profile.dev]\ndebug = false\n\n[profile.dev.package."*"]\nopt-level = 2\n\n[profile.dev.package.b10x-loom-governor]\nopt-level = 2\n' > .cargo/config.toml ;;
@@ -83,8 +83,23 @@ jobs:
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$RUNNER_TEMP/nextest-bin" cargo-nextest
           echo "$RUNNER_TEMP/nextest-bin" >> "$GITHUB_PATH"
 
+      - name: Restore the dependency build
+        id: restore
+        if: startsWith(matrix.variant, 'cache-')
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            consumers/pinned/target
+          key: diag-deps-${{ matrix.variant }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml') }}
+
       - name: Fetch locked dependencies
-        run: cargo fetch --locked
+        run: |
+          echo "DIAG cache hit '${{ steps.restore.outputs.cache-hit }}'"
+          du -sh target consumers/pinned/target 2>/dev/null || true
+          cargo fetch --locked
 
       - name: Test build, cold, with timings
         run: |
@@ -105,6 +120,11 @@ jobs:
           echo "DIAG test-step exit $? seconds $(( $(date +%s) - start ))"
           grep -E '^test step:|^ +[0-9.]+ s |wall time|FAIL|SIGSEGV|TIMEOUT' "$RUNNER_TEMP/test-step.log" | head -80
           tail -5 "$RUNNER_TEMP/test-step.log"
+          start=$(date +%s)
+          cargo nextest run --workspace --locked --no-fail-fast --test-threads=4 > "$RUNNER_TEMP/nextest.log" 2>&1
+          echo "DIAG nextest-direct exit $? seconds $(( $(date +%s) - start ))"
+          grep -E '^ *Summary|^ *Starting' "$RUNNER_TEMP/nextest.log" | tail -3
+          grep -E '^ *(FAIL|TIMEOUT|SIGSEGV|SIGKILL) ' "$RUNNER_TEMP/nextest.log" | sort | uniq | head -40
 
       - name: Clippy with timings
         run: |
@@ -120,7 +140,7 @@ jobs:
         run: |
           set +e
           case "$VARIANT" in
-            baseline*) runlog=run_log ;;
+            baseline*|cache-baseline) runlog=run_log ;;
             *) runlog=main ;;
           esac
           start=$(date +%s)
@@ -155,6 +175,29 @@ jobs:
         if: always()
         run: |
           du -sh target target/debug target/debug/deps consumers/pinned/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
+
+      - name: Keep only the dependencies' build
+        if: startsWith(matrix.variant, 'cache-') && steps.restore.outputs.cache-hit != 'true'
+        run: |
+          set +e
+          for t in target/debug consumers/pinned/target/debug; do
+            rm -rf "$t"/.fingerprint/b10x-loom-* "$t"/.fingerprint/loom-* "$t"/build/b10x-loom-* "$t"/build/loom-* \
+              "$t"/deps/b10x_loom* "$t"/deps/libb10x_loom* "$t"/deps/loom_* "$t"/deps/libloom_* "$t"/incremental
+            find "$t"/deps -maxdepth 1 -type f -executable ! -name '*.*' -delete
+          done
+          rm -rf target/nextest target/tmp target/cargo-timings target/release
+          du -sh target consumers/pinned/target ~/.cargo/registry ~/.cargo/git 2>/dev/null || true
+
+      - name: Save the dependency build
+        if: startsWith(matrix.variant, 'cache-') && steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            consumers/pinned/target
+          key: diag-deps-${{ matrix.variant }}-${{ hashFiles('Cargo.lock', '.cargo/config.toml') }}
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
