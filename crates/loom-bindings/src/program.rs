@@ -18,7 +18,10 @@
 //! it still names beside its bindings file refuses the step and nothing starts.
 //!
 //! Exit classes (`story:bound-program-contract`): a run whose exit the binding's `exits.error`
-//! lists records nothing and refuses the step `ProgramError`, ending the run; one whose exit
+//! lists records nothing and refuses the step `ProgramError`, ending the run, its text ending with
+//! the run's stderr tail (`story:program-error-carries-its-reason`: the walk of
+//! [`b10x_loom_commission::stderr`], within its 4096 bytes), which the run's observation keeps as
+//! `reason` and no other run's does; one whose exit
 //! `exits.not_called` lists records nothing and the step is performed. Neither is counted against
 //! `budget.max_runs`; a run killed at its timeout is in neither class. Each step starts the bound
 //! program once, so repeated not-called runs are bounded by the loop that drives the port (its
@@ -116,6 +119,7 @@ use b10x_loom_commission::ports::evidence::{
     AttributedEvidence, EvidencePort, ObservationPort, submit_evidence,
 };
 use b10x_loom_commission::ports::governor::Governor;
+use b10x_loom_commission::stderr::stderr_tail;
 use b10x_loom_intake_slice::bindings::{DEFAULT_TIMEOUT_SECONDS, admit_bound_program_runner};
 use b10x_loom_intake_slice::clock::{SystemClock, instant};
 use b10x_loom_intake_slice::confinement::{
@@ -1006,6 +1010,7 @@ pub fn start<S: FallibleCaseStore, T: EvaluationTime>(
         class: None,
         cancelled: false,
         principal,
+        reason: None,
     };
     let mut blob_failure = None;
     match &answer {
@@ -1017,6 +1022,12 @@ pub fn start<S: FallibleCaseStore, T: EvaluationTime>(
             run.exit = execution.exit_code.map(i64::from);
             run.timed_out = execution.timed_out;
             run.class = class_of(exits.as_ref(), execution);
+            // A program error's run keeps why the program said it failed: its stderr tail, walked
+            // as every stderr Loom shows is. No other run keeps one.
+            if run.class == Some(ExitClass::Error) {
+                run.reason = Some(stderr_tail(&String::from_utf8_lossy(&output.stderr)))
+                    .filter(|tail| !tail.is_empty());
+            }
             match keep_blob(place.store, &digest, &blob) {
                 Ok(()) => run.blob_sha256 = Some(digest),
                 Err(error) => blob_failure = Some(format!("the blob {digest}: {error}")),
@@ -1679,19 +1690,28 @@ fn class_of(exits: Option<&ExitClasses>, execution: &TestExecution) -> Option<Ex
     }
 }
 
+/// What a `ProgramError` text puts between the blob digest and the run's stderr tail.
+const STDERR_SAID: &str = "; the last lines of its stderr:\n";
+
 /// The step refused `ProgramError`, ending the run: `run`'s exit is one the binding's
-/// `exits.error` lists. The text names the exit code and the blob digest, never what the program
-/// printed.
+/// `exits.error` lists. The text names the exit code and the blob digest and, when the program
+/// wrote on its standard error, ends with the run's `reason`, its stderr tail walked and bounded
+/// ([`stderr_tail`]); never what it printed on its standard output.
 fn program_error(action: &str, program: &str, run: &ProgramRun) -> EffectOutcome {
+    let mut detail = format!(
+        "{program} ended exit status {}, which exits.error lists; nothing was recorded, and its output is the blob {}",
+        run.exit
+            .map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
+        run.blob_sha256.as_deref().unwrap_or("(none)")
+    );
+    if let Some(reason) = &run.reason {
+        detail.push_str(STDERR_SAID);
+        detail.push_str(reason);
+    }
     let refusal = ProgramRefusal {
         reason: ProgramRefusalReason::ProgramError,
         action: action.to_owned(),
-        detail: format!(
-            "{program} ended exit status {}, which exits.error lists; nothing was recorded, and its output is the blob {}",
-            run.exit
-                .map_or_else(|| "unknown".to_owned(), |code| code.to_string()),
-            run.blob_sha256.as_deref().unwrap_or("(none)")
-        ),
+        detail,
     };
     EffectOutcome::Refused(EffectOutcomeRefused {
         reason: format!(
@@ -1756,6 +1776,10 @@ fn run_json(run: &ProgramRun) -> serde_json::Value {
     // Only a person's run names a principal: a program's run keeps the payload it always had.
     if let Some(principal) = &run.principal {
         json["principal"] = serde_json::Value::String(principal.clone());
+    }
+    // Only a program error's run names a reason: every other run keeps the payload it always had.
+    if let Some(reason) = &run.reason {
+        json["reason"] = serde_json::Value::String(reason.clone());
     }
     json
 }

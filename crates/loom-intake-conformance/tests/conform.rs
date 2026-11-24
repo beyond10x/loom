@@ -23,7 +23,7 @@
 //! naming a scenario the report records as passed.
 //!
 //! [`taskfile_check_runs_intake_conform`] holds the other half of the claim: `task check` runs
-//! this test, through the task `intake-conform`, as a step of its own.
+//! this test in its test step, and the task `intake-conform` runs it alone.
 //!
 //! [`IntakeTarget`]: b10x_loom_intake_conformance::IntakeTarget
 
@@ -308,8 +308,9 @@ fn ess_conformance_report() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// `task intake-conform` runs [`ess_conformance_report`], and `task check` lists `intake-conform`
-/// as a step of its own.
+/// `task intake-conform` runs [`ess_conformance_report`], and `task check` runs it in the test
+/// step: it lists `test-step`, whose nextest run does not leave this binary out
+/// (`story:ci-job-time-budget`).
 #[test]
 fn taskfile_check_runs_intake_conform() {
     let path = root().join("Taskfile.yml");
@@ -331,9 +332,14 @@ fn taskfile_check_runs_intake_conform() {
         "task intake-conform does not run `{INTAKE_CONFORM}`"
     );
     assert!(
-        body("check")
-            .iter()
-            .any(|line| line == "- task: intake-conform"),
-        "task check does not list `intake-conform` as its own step"
+        body("check").iter().any(|line| line == "- task: test-step"),
+        "task check does not list `test-step`"
+    );
+    let nextest = root().join(".config/nextest.toml");
+    let nextest = fs::read_to_string(&nextest)
+        .unwrap_or_else(|error| panic!("read {}: {error}", nextest.display()));
+    assert!(
+        !nextest.contains("binary_id(b10x-loom-intake-conformance::conform)"),
+        "the test step leaves out b10x-loom-intake-conformance::conform"
     );
 }

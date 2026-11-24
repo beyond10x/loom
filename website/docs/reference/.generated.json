@@ -1,7 +1,7 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.98.0",
-  "inputs": "sha256:a3e09c4ef85a3e8c4052aaa6b9a7424693f4d9043abd8687bc7b2ccd79a5eff6",
+  "inputs": "sha256:cee320385009496abf82f721a5279a2f643413f4fd5840395db5949d3b0db0d4",
   "input_files": {
     "Cargo.lock": "sha256:3169b689346290ae07e3bf7b99191c367eecada5038fc3f88f002a30b535ba25",
     "Cargo.toml": "sha256:7d3f2d70a62ed4a89502a8ad5f126df3c5cc372cd9539c5fe1c298024ed37392",
@@ -314,7 +314,7 @@
     "ess/commission/system.yaml": "sha256:83048487bcc8cba9fc4d679220ca5fdc96f11c5c9940a57c2170267aa4e48608",
     "ess/domains/agent.yaml": "sha256:2654536870b2fa63b9baf0a86233c895cdf15fe9bde222b94222f43888183555",
     "ess/domains/authority.yaml": "sha256:022935709423b434e6bbf3ec214814042b1d1a48821438a07f91fa6b3226ef0b",
-    "ess/domains/bindings.yaml": "sha256:183345bb9d005d3b55b5836199932363c78bae345c43637b15d66072b2947e58",
+    "ess/domains/bindings.yaml": "sha256:41721742a4e6ef986bb3f24639d7c5e8cdf661dfab6d55bc811d766036a78060",
     "ess/domains/datasource.yaml": "sha256:d13c9e1a4d47231566b647e6a6243b78c875988586fe21fa40a7657eaafd520e",
     "ess/domains/decision.yaml": "sha256:c815ef0812944e195d0ee2660c48f5143a476bc9f051095e63bea0eb5dba7efc",
     "ess/domains/evaluation.yaml": "sha256:0282a63f3ef1e5bf24b7fa06b90e02cea3196e22d14d86a488b8a2e7daa26d88",
@@ -327,7 +327,7 @@
     "ess/domains/runlog.yaml": "sha256:1f7afca601ba55e099ba2f7587b133f913ca9283ba435ebac226af3456b61a5a",
     "ess/domains/session.yaml": "sha256:5a51d1c32877a2bdbf433ba9ab5940eb700a3a6f451c2f4b984a3eb3a8be739b",
     "ess/domains/slack.yaml": "sha256:f6d2c99efc315cc06e637f977d807a8371d5f9f2cfaa6e8fb8c704095093ae50",
-    "ess/domains/tree.yaml": "sha256:4e206216562433945574e52f51a0e4f8d583269fcf143289aaefc8b3606697e4",
+    "ess/domains/tree.yaml": "sha256:bbf279e5f361874ae572f005bff9e53e45195246a48af3419c1c50a05667f70c",
     "ess/domains/workflow.yaml": "sha256:d31dcee53726a157ebb2dbfababc4d27c2e9766acdce33561ce74391a2db82e3",
     "ess/ess-inputs.yaml": "sha256:3f33a0b971650cb21e6441249ac22f277ff77ee812172f90987f7813225799d2",
     "ess/intake/domains/bindings.yaml": "sha256:825f9474755481d887e414ad3106ad6f6683579cf0b5eebc43ac3b9f2c4c9bdf",
@@ -558,7 +558,7 @@
     "website/docs/reference/ess/intake-routing.md": "sha256:dae30940f8232069cf4c647ec0b62f00983c1da04499faa6b2e572e45ea3fad7",
     "website/docs/reference/ess/loom-agent.md": "sha256:dad9e99f62555caeb6ba9090c3dfa416703c965ba920a4664bc3de8efe8707cf",
     "website/docs/reference/ess/loom-authority.md": "sha256:591d47e238ec2c7d58c1cd164cbe0ef7beaf3127332fe55c58f8b6457cc3e071",
-    "website/docs/reference/ess/loom-bindings.md": "sha256:3306b164c0aa8ff5ba353c8cd45c9ece589fb313a6bc83c490683371fb1f0f8b",
+    "website/docs/reference/ess/loom-bindings.md": "sha256:3d8e79d87f7c3c979bf28ff4143561ceab68ff07e6d2af1c63b59ffea1626d56",
     "website/docs/reference/ess/loom-datasource.md": "sha256:ef9d6f0a647b84c4b3318d892227fd27408f48b6423b811ae753e6bfd3d97400",
     "website/docs/reference/ess/loom-decision.md": "sha256:3321a30dd46101de72b12041310d4902eaa46c3401503cc21677125e80079cce",
     "website/docs/reference/ess/loom-evaluation.md": "sha256:40763783ab3c91370edb26be46131a1ead9a1761b1164aa4ddf81552400d81b6",
@@ -571,7 +571,7 @@
     "website/docs/reference/ess/loom-runlog.md": "sha256:25f673df7aca6846f9bdecf896d7a5929d6f2d5c0dd41b182b673913a9cf8207",
     "website/docs/reference/ess/loom-session.md": "sha256:5d5b98be314bca4486bc792ed1bba2bc20bc4758f17016af1046ae3775305545",
     "website/docs/reference/ess/loom-slack.md": "sha256:53ef66fcd4c39c4adc1894eb65f6a800fc281748d500b7b3b6d003b729fb8292",
-    "website/docs/reference/ess/loom-tree.md": "sha256:aaf31050fae6dd43259cb33033c70925573c26f1617a494bdac9d9013ebba2f9",
+    "website/docs/reference/ess/loom-tree.md": "sha256:b7879e8b5693928fe8d703f4124c4510bc0de5aad9e2c0f9fa80df91f20b6f93",
     "website/docs/reference/ess/loom-workflow.md": "sha256:27c949a08bff14bb3302dd3fd6d3db1c0260eafeca5a5b284a2415716446d75d",
     "website/docs/reference/operator-cli.md": "sha256:ba2d54a1b1db0fa2f6f268c5910f6bab250c97cf1a234775281a8ec0279b85a4"
   }

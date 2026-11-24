@@ -111,6 +111,7 @@ fn run(value: &Value, at: &str) -> Read<StatusRun> {
                     .ok_or_else(|| Bad(format!("{at}.cancelled: not a boolean")))?,
             ),
         },
+        reason: optional_text(value, at, "reason")?,
     })
 }
 

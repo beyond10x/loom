@@ -18,6 +18,9 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - A `handoff_when` check and an `arguments_from` program run under at most 3600 s, whatever the binding's timeout (story:bound-program-timeout-above-an-hour)
 - **Breaking:** the `TimeoutOutOfRange` detail of `check` names the executor's range; text matching the old one fails (story:bound-program-timeout-above-an-hour)
 - **Breaking:** a program binding's "*" row no longer matches a run killed at its timeout_seconds: such a run is refused ResultNotInTable, records nothing and its action is set aside, so a case that took the "*" result for a timeout and went on (a retry, a given_up outcome) now stops Stuck. Add a "timeout" row (for example "timeout": failed) to every table that relied on "*" for it (story:wildcard-result-row-does-not-match-timeout)
+- The gate compiles the workspace's test targets once: the three conformance suites run inside the test step, and CI's loom / task check is bounded at 30 minutes again (story:ci-job-time-budget)
+- A `ProgramError` refusal ends with the program's stderr tail (`; the last lines of its stderr:` and its last whole lines within 4096 bytes, credential lines withheld); `loom.bindings.ProgramRun.reason` and `loom.tree.StatusRun.reason` (`tree status`) keep it, on a program error's run only (story:program-error-carries-its-reason)
+- The stderr walk the session executor shows a harness's stderr with moved to `b10x_loom_commission::stderr` (`stderr_tail`, `walked`, `STDERR_TAIL_BYTES`, `TOKEN_PREFIXES`); the session executor re-exports both constants, its output unchanged (story:program-error-carries-its-reason)
 
 ### Fixed
 

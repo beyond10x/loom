@@ -298,7 +298,6 @@ Before a change is reported done, in this order:
 
 1. `task check`: the three specification validations, both ESS gates, all four drift checks,
    `task chart-check` (Helm lint and render of `charts/loom-agents`), both no-hand-model checks,
-   Loom's, Commission's and intake's conformance suites, the dependency guard,
    `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
    the test step (`task test-step`), `task durable-check`, `task consumer-check`,
    `task embedder-check` (`cargo check --offline --locked` of the embedder fixture, an engine on
@@ -308,9 +307,11 @@ Before a change is reported done, in this order:
    installs cargo-nextest by a pinned version and digest). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
    `cargo nextest run --workspace --locked` (`.config/nextest.toml`: a test is killed and fails at
-   60 s; `slow_` tests are left out, and so are the test binaries `task check` runs as their own
-   steps: `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`, `conform` of the three
-   conformance crates) and `cargo test --doc --workspace --locked`, prints the ten
+   60 s; `slow_` tests are left out, and so are the two test binaries `task check` runs as their
+   own steps, `ess_gate` of `b10x-loom-executor` and `b10x-loom-commission`; Loom's, Commission's
+   and intake's conformance suites, `conform` of the three conformance crates, and the dependency
+   guard, `executor_port` of `b10x-loom-commission-testkit`, run in it, so their test targets are
+   compiled once, in the step's build) and `cargo test --doc --workspace --locked`, prints the ten
    slowest tests on every run and fails over 120 s
    (`crates/loom-xtask/src/test_step.rs`). It also fails when the tests of
    `b10x-loom-cli::tree_run` sum to over 60 s, and `.config/nextest.toml` kills one of them at 20 s,
@@ -383,9 +384,12 @@ earlier merge of the batch brought in makes it stale again. `task suite-generate
 (2026-11-21, ess 0.96.0). ESS has a fix in flight that cuts the synthesis of a whole domain from
 about 254 s to 70 to 90 s of CPU; it is not released. A unit that merges the integration head
 keeps the integration side of `generated/ess/loom/suite.json` and of its digest file
-`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. The tests that
-read the suite after its digest check (`ess_gate` of `b10x-loom-executor` and `conform` of
-`b10x-loom-conformance`) run in the batch gate only, not in a unit's merge round.
+`generated/ess/loom/synthesis.txt` on a conflict and runs no `task suite-generate`. Two tests read
+the suite after its digest check. `ess_gate` of `b10x-loom-executor` is a step of its own
+(`task ess-gate`) and runs in the batch gate only, not in a unit's merge round. `conform` of
+`b10x-loom-conformance` runs inside the test step (`story:ci-job-time-budget`), so a merge round
+that runs the test step runs it too; there it fails on a digest that an earlier merge's change
+under `ess/` made stale, until the batch gate regenerates the suite.
 
 nextest starts each test in a process of its own, so a `OnceLock` fixture is made once a test,
 not once a binary. A product that takes seconds is kept in a cache under `CARGO_TARGET_TMPDIR`,
@@ -467,6 +471,11 @@ against a bound of 40; with both optimized it is about 18. The workspace's own c
 `b10x-loom-intake-slice` and `b10x-loom-runlog` took 349 s of test time and 92 s of wall time at
 `opt-level = 0`, 252 s and 66 s at 1 (2026-11-22, one loaded host, one run each); rebuilding
 those crates at 1 over built dependencies took 184 s.
+On CI's runner these levels made each step that compiles 3 to 4 times slower (runs 45047758440
+of 0.59.0 and 45248142889 of 0.60.0): the three conformance tasks went from 3.8 to 15.4 min,
+nearly all of it compile, because each `cargo test -p` selection unified other features and
+rebuilt crates another had built (`intake-conform` 63 of its 64, the test step 38 of its 61), so
+they run in the test step's build (`story:ci-job-time-budget`).
 
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
@@ -1663,10 +1672,13 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   (`PARENT_CASE_NAME_VARIABLE`) beside `LOOM_CASE`, after the child is built, from `CaseNames`,
   which the port reads from the governor's stored `parent` links alone, refusing a name that is
   not one child name of at most 4096 bytes. An exit in `exits.error` records nothing and refuses
-  the step `ProgramError` with `ends_run`; one in `exits.not_called` records nothing and is
-  performed; `ProgramRun.class` names either, `runs` skips both, and a timeout is in neither. A
-  code in both lists, or in one and as a `from: exit` table key, is `ExitClassConflict` at
-  `check`. Each step starts the bound program once. A writer whose run was not called leaves the
+  the step `ProgramError` with `ends_run`, its text ending with the run's stderr tail when there is
+  one, which `ProgramRun.reason` and `StatusRun.reason` keep
+  (`story:program-error-carries-its-reason`; the walk is `b10x_loom_commission::stderr`, the one
+  the session executor shows a harness's stderr with, never a copy); one in `exits.not_called`
+  records nothing and is performed; `ProgramRun.class` names either, `runs` skips both, and a
+  timeout is in neither. A code in both lists, or in one and as a `from: exit` table key, is
+  `ExitClassConflict` at `check`. Each step starts the bound program once. A writer whose run was not called leaves the
   due set, as a refused step does, until the case is evaluated again for a reason other than its
   own moves (`story:writer-not-called-leaves-the-due-set`, `set_aside` in `run.rs`, "accounted"
   being `history::accounted`; a refused line or one that names no move and records nothing is no
