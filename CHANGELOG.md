@@ -19,6 +19,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 - **Breaking:** the `TimeoutOutOfRange` detail of `check` names the executor's range; text matching the old one fails (story:bound-program-timeout-above-an-hour)
 - **Breaking:** a program binding's "*" row no longer matches a run killed at its timeout_seconds: such a run is refused ResultNotInTable, records nothing and its action is set aside, so a case that took the "*" result for a timeout and went on (a retry, a given_up outcome) now stops Stuck. Add a "timeout" row (for example "timeout": failed) to every table that relied on "*" for it (story:wildcard-result-row-does-not-match-timeout)
 
+### Fixed
+
+- A program whose run allowance is spent for good gets its `from: runs` record when the run that spent it recorded nothing (cancelled, a signal, `ResultNotInTable`, …): `tree run` writes it before the next evaluation with one exit-0 `action finished` line, so the case, a store 0.60.0 left `Stuck` included, ends through the outcome that needs it; `b10x_loom_bindings::settle_spent` for a host driving the port (story:spent-program-has-its-spent-record)
+
 ## [0.60.0] - 2026-11-23
 
 ### Added

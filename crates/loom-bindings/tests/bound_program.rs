@@ -23,7 +23,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use b10x_loom_bindings::{PROGRAM_SOURCE, ProgramEffects, check, decode};
+use b10x_loom_bindings::{
+    PROGRAM_SOURCE, ProgramEffects, SpentRecord, check, decode, settle_spent,
+};
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
 use b10x_loom_commission::model::primitives::{Timestamp, Uuid};
@@ -2698,6 +2700,257 @@ fn a_cancelled_last_run_writes_no_spent_record() {
         "{:#?}",
         records(&step.governor)
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The record an allowance spent for good owes (`story:spent-program-has-its-spent-record`)
+
+/// One budget member line: `budget: {max_runs: <max>}`.
+fn max_runs(max: i64) -> String {
+    format!("    budget: {{max_runs: {max}}}\n")
+}
+
+/// [`settle_spent`] on `action`'s binding in `document`, for [`CASE`].
+fn settle<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    document: &BindingsDocument,
+    action: &str,
+) -> Vec<SpentRecord> {
+    let binding = document
+        .actions
+        .iter()
+        .find(|bound| bound.action == action)
+        .expect("the document binds the action");
+    settle_spent(governor, &CaseId(CASE.to_owned()), binding).expect("the record is written")
+}
+
+/// A runner that starts nothing and answers every child with `exit`.
+fn answering(exit: i32) -> Arc<dyn TestRunner> {
+    Arc::new(Recording {
+        ending: Some((Some(exit), false)),
+        ..Recording::default()
+    })
+}
+
+/// One step of `action` under `runner`, through a port of its own over `governor`.
+fn step_under(
+    governor: &CanonGovernor<MemoryCaseStore>,
+    document: &BindingsDocument,
+    scratch: &Scratch,
+    action: &str,
+    runner: Arc<dyn TestRunner>,
+) -> LoopEnd {
+    let effects = port(governor, document, scratch, CASE, Some(runner)).unwrap();
+    drive(governor, &effects, CASE, action, args("{}"))
+}
+
+/// The observations the port kept for `action`.
+fn runs_of<S: FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    action: &str,
+) -> Vec<ObservationData> {
+    port_observations(governor)
+        .into_iter()
+        .filter(|observation| plain(&observation.payload)["action"] == json!(action))
+        .collect()
+}
+
+/// D1 a, D3 a: after a cancelled last run the function writes the record once, at the instant of
+/// the cancelled run's observation and attributed to it; a second call writes nothing.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_cancelled_last_run_owes_its_spent_record() {
+    let entries = [entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()];
+    let step = CancelledStep::run(&max_runs(1), &entries);
+    assert_cancelled_within_seven_seconds(&step);
+    assert!(records(&step.governor).is_empty());
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        &max_runs(1),
+        &entries,
+    ));
+
+    let written = settle(&step.governor, &document, CHECK);
+    assert_eq!(written.len(), 1, "{written:#?}");
+    let spent = records_of(&step.governor, "review");
+    assert_eq!(spent.len(), 1, "{spent:#?}");
+    assert_eq!(written[0].evidence_id, spent[0].evidence_id);
+    let facts = plain(&spent[0].facts);
+    assert_eq!(facts["result"], json!("spent"), "{facts}");
+    assert_eq!(facts["subject"], json!("spec"), "{facts}");
+    assert_eq!(spent[0].producer, "loom");
+    let case = CaseId(CASE.to_owned());
+    let held = step.governor.revisions(&case).unwrap()["spec"].clone();
+    assert_eq!(facts["subject_revision"], json!(held), "{facts}");
+    let observations = port_observations(&step.governor);
+    assert_eq!(observations.len(), 1, "{observations:#?}");
+    assert_eq!(plain(&observations[0].payload)["cancelled"], json!(true));
+    assert_eq!(
+        facts["observed_at"],
+        json!(observations[0].observed_at.0),
+        "{facts}"
+    );
+    assert_eq!(
+        spent[0].observation_ids,
+        [observations[0].observation_id.clone()]
+    );
+
+    assert!(settle(&step.governor, &document, CHECK).is_empty());
+    assert_eq!(records_of(&step.governor, "review").len(), 1);
+}
+
+#[test]
+fn a_last_run_outside_the_table_owes_its_spent_record() {
+    let scratch = Scratch::new();
+    let entries = [
+        entry("gate", "exit", r#"{"0": valid}"#),
+        RUNS_ENTRY.to_owned(),
+    ];
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        &max_runs(1),
+        &entries,
+    ));
+    let governor = governor();
+    let reason = refusal(&step_under(
+        &governor,
+        &document,
+        &scratch,
+        CHECK,
+        answering(3),
+    ));
+    assert!(reason.starts_with("ResultNotInTable"), "{reason}");
+    assert!(records(&governor).is_empty());
+
+    let written = settle(&governor, &document, CHECK);
+    assert_eq!(written.len(), 1, "{written:#?}");
+    let spent = records_of(&governor, "review");
+    assert_eq!(spent.len(), 1, "{spent:#?}");
+    assert_eq!(result_of(&spent[0]), json!("spent"));
+    assert_eq!(
+        spent[0].observation_ids,
+        [runs_of(&governor, CHECK)[0].observation_id.clone()]
+    );
+}
+
+#[test]
+fn a_recorded_last_run_owes_nothing() {
+    let scratch = Scratch::new();
+    let entries = [entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()];
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        &max_runs(1),
+        &entries,
+    ));
+    let governor = governor();
+    assert_performed(&step_under(
+        &governor,
+        &document,
+        &scratch,
+        CHECK,
+        answering(0),
+    ));
+    assert_eq!(records_of(&governor, "review").len(), 1);
+
+    assert!(settle(&governor, &document, CHECK).is_empty());
+    assert_eq!(records_of(&governor, "review").len(), 1);
+}
+
+/// D4 a: `spec.check` and `impl.write` share the `from: runs` entry's kind, subject and producer;
+/// the record `spec.check` wrote does not settle `impl.write`'s.
+#[test]
+fn another_writers_spent_record_does_not_settle_this_one() {
+    const WRITE: &str = "impl.write";
+    let scratch = Scratch::new();
+    let document = document(&format!(
+        "{}{}",
+        bound(
+            CHECK,
+            &["/opt/stub/check"],
+            &max_runs(1),
+            &[entry("gate", "exit", VALID_TABLE), RUNS_ENTRY.to_owned()],
+        ),
+        bound(
+            WRITE,
+            &["/opt/stub/write"],
+            &max_runs(1),
+            &[RUNS_ENTRY.to_owned()]
+        ),
+    ));
+    let governor = governor();
+    assert_performed(&step_under(
+        &governor,
+        &document,
+        &scratch,
+        CHECK,
+        answering(0),
+    ));
+    assert_eq!(records_of(&governor, "review").len(), 1);
+    let reason = refusal(&step_under(
+        &governor,
+        &document,
+        &scratch,
+        WRITE,
+        answering(137),
+    ));
+    assert!(reason.starts_with("ProgramSignalled"), "{reason}");
+    assert_eq!(records_of(&governor, "review").len(), 1);
+
+    let written = settle(&governor, &document, WRITE);
+    assert_eq!(written.len(), 1, "{written:#?}");
+    let spent = records_of(&governor, "review");
+    assert_eq!(spent.len(), 2, "{spent:#?}");
+    let run = runs_of(&governor, WRITE);
+    assert_eq!(run.len(), 1, "{run:#?}");
+    assert_eq!(spent[1].observation_ids, [run[0].observation_id.clone()]);
+    assert_eq!(result_of(&spent[1]), json!("spent"));
+
+    assert!(settle(&governor, &document, CHECK).is_empty());
+    assert_eq!(records_of(&governor, "review").len(), 2);
+}
+
+/// D4 a, the result: a sibling entry of the same kind, subject and producer recorded `pass` on
+/// the first run; the `from: runs` entry's `exhausted` is still owed.
+#[test]
+fn a_sibling_entrys_record_does_not_settle_the_spent_record() {
+    let scratch = Scratch::new();
+    let document = document(&bound(
+        CHECK,
+        &["/opt/stub/program"],
+        &max_runs(2),
+        &[
+            r#"{kind: review, subject: spec, producer: loom, from: exit, results: {"0": pass, "*": fail}}"#.to_owned(),
+            "{kind: review, subject: spec, producer: loom, from: runs, results: {spent: exhausted}}"
+                .to_owned(),
+        ],
+    ));
+    let governor = governor();
+    assert_performed(&step_under(
+        &governor,
+        &document,
+        &scratch,
+        CHECK,
+        answering(0),
+    ));
+    let reason = refusal(&step_under(
+        &governor,
+        &document,
+        &scratch,
+        CHECK,
+        answering(137),
+    ));
+    assert!(reason.starts_with("ProgramSignalled"), "{reason}");
+
+    let written = settle(&governor, &document, CHECK);
+    assert_eq!(written.len(), 1, "{written:#?}");
+    let results: Vec<serde_json::Value> = records_of(&governor, "review")
+        .iter()
+        .map(result_of)
+        .collect();
+    assert_eq!(results, [json!("pass"), json!("exhausted")]);
 }
 
 // ---------------------------------------------------------------------------------------------

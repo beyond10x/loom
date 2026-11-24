@@ -37,7 +37,8 @@
 //! `budget.max_runs` its value is [`RUNS_SPENT`] and its record is written in the step's one write
 //! after the run's other records; on any other run it records nothing. A run that records nothing
 //! (cancelled, or in an exit class) writes none either, so a cancelled last run spends the
-//! allowance and leaves no such record.
+//! allowance and leaves no such record; [`settle_spent`] writes it once the allowance is spent for
+//! good (`story:spent-program-has-its-spent-record`), and the port still refuses the next offer.
 //!
 //! A fresh allowance after a rejection (`story:rework-allowance-after-a-rejection`): under
 //! `budget.runs_per: rejection` the runs counted against `budget.max_runs` are those since the
@@ -603,52 +604,63 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
         case_revision: i64,
         observation: &ObservationId,
     ) -> Result<AttributedEvidence, EffectError> {
-        let id = EvidenceId(fresh_uuid("program-evidence", &self.case.0));
-        let mut facts = serde_json::json!({
-            "format": "canon-evidence/1",
-            "id": format!("program-{}", id.0.0),
-            "kind": record.kind,
-            "subject": record.subject,
-            "subject_revision": record.subject_revision,
-            "observed_at": record.observed_at.0,
-        });
-        if let Some(result) = &record.result {
-            facts["result"] = serde_json::Value::String(result.clone());
-        }
-        if !record.upstream_revisions.is_empty() {
-            facts["upstream_revisions"] = record
-                .upstream_revisions
-                .iter()
-                .map(|upstream| {
-                    (
-                        upstream.artifact.clone(),
-                        serde_json::Value::String(upstream.revision.clone()),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>()
-                .into();
-        }
-        let held = Held::default();
-        submit_evidence(
-            &held,
-            &record.producer,
-            EvidenceData {
-                evidence_id: id,
-                case_id: self.case.clone(),
-                kind: record.kind.clone(),
-                subject_revision: case_revision,
-                producer: record.producer.clone(),
-                observation_ids: vec![observation.clone()],
-                facts: commission_value(&facts)?,
-                provenance: commission_value(&serde_json::json!({"source": PROGRAM_SOURCE}))?,
-            },
-        )
-        .map_err(|error| EffectError::new(format!("the {} record: {error}", record.kind)))?;
-        held.0
-            .into_inner()
-            .pop()
-            .ok_or_else(|| EffectError::new(format!("the {} record was not held", record.kind)))
+        attribute(&self.case, record, case_revision, observation)
     }
+}
+
+/// `record` as evidence of `case` at `case_revision`, citing `observation`, attributed to its
+/// producer by Commission's `submit_evidence`, held for one store write.
+fn attribute(
+    case: &CaseId,
+    record: &RecordedEvidence,
+    case_revision: i64,
+    observation: &ObservationId,
+) -> Result<AttributedEvidence, EffectError> {
+    let id = EvidenceId(fresh_uuid("program-evidence", &case.0));
+    let mut facts = serde_json::json!({
+        "format": "canon-evidence/1",
+        "id": format!("program-{}", id.0.0),
+        "kind": record.kind,
+        "subject": record.subject,
+        "subject_revision": record.subject_revision,
+        "observed_at": record.observed_at.0,
+    });
+    if let Some(result) = &record.result {
+        facts["result"] = serde_json::Value::String(result.clone());
+    }
+    if !record.upstream_revisions.is_empty() {
+        facts["upstream_revisions"] = record
+            .upstream_revisions
+            .iter()
+            .map(|upstream| {
+                (
+                    upstream.artifact.clone(),
+                    serde_json::Value::String(upstream.revision.clone()),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into();
+    }
+    let held = Held::default();
+    submit_evidence(
+        &held,
+        &record.producer,
+        EvidenceData {
+            evidence_id: id,
+            case_id: case.clone(),
+            kind: record.kind.clone(),
+            subject_revision: case_revision,
+            producer: record.producer.clone(),
+            observation_ids: vec![observation.clone()],
+            facts: commission_value(&facts)?,
+            provenance: commission_value(&serde_json::json!({"source": PROGRAM_SOURCE}))?,
+        },
+    )
+    .map_err(|error| EffectError::new(format!("the {} record: {error}", record.kind)))?;
+    held.0
+        .into_inner()
+        .pop()
+        .ok_or_else(|| EffectError::new(format!("the {} record was not held", record.kind)))
 }
 
 /// Where the bound programs of one case start, which [`prepare`] and [`start`] read: the governor
@@ -1084,12 +1096,33 @@ struct Allowance {
     opened_by: Option<Rejection>,
     /// The latest rejection the case received, placed or not.
     latest: Option<Rejection>,
+    /// The interval the rejections placed nowhere count in on their own, when they meet no placed
+    /// one; it is one of `intervals`.
+    alone: Option<usize>,
+    /// The observation of the latest counted run and its instant.
+    last_run: Option<(ObservationId, Timestamp)>,
 }
 
 impl Allowance {
     /// The rework count.
     fn rework(&self) -> i64 {
         i64::try_from(self.intervals.len()).unwrap_or(i64::MAX)
+    }
+
+    /// Whether `binding`'s allowance is spent for good (`story:spent-program-has-its-spent-record`):
+    /// under `runs_per: case`, when the window is full; under `rejection`, when the rework count
+    /// is above `rework_limit`, or the count without the interval the unplaced rejections count
+    /// on their own is at least `rework_limit` and the window is full. A later rejection never
+    /// lowers the count, and a full window at a count an unplaced rejection carried to the limit
+    /// opens again on the next placed one, so that is not spent for good.
+    fn spent_for_good(&self, binding: &BoundAction) -> bool {
+        let full = self.window >= binding.budget.max_runs;
+        if binding.budget.runs_per != Some(RunsScope::Rejection) {
+            return full;
+        }
+        let limit = rework_limit(binding);
+        let placed = self.rework() - i64::from(self.alone.is_some());
+        self.rework() > limit || (placed >= limit && full)
     }
 
     /// Whether the latest run spent `binding`'s allowance, read once its observation is kept:
@@ -1108,6 +1141,136 @@ impl Allowance {
         self.intervals.contains(&before)
             && i64::try_from(reached).unwrap_or(i64::MAX) == rework_limit(binding)
     }
+}
+
+/// A `spent` record [`settle_spent`] wrote: the id the case holds it under, and the record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpentRecord {
+    /// The record's evidence id.
+    pub evidence_id: EvidenceId,
+    /// The record as written.
+    pub record: RecordedEvidence,
+}
+
+/// Writes the record each `from: runs` entry of `binding` owes in `case`, all in one
+/// [`CanonGovernor::record_step`] with no move, and answers them; writes nothing and answers none
+/// when nothing is owed (`story:spent-program-has-its-spent-record`). It never refuses.
+///
+/// An entry owes its record when the allowance is spent for good (`Allowance`, the count
+/// [`prepare`] refuses by: under `runs_per: case` a full window; under `rejection` a rework count
+/// above `rework_limit`, or a full window with the count at least `rework_limit` without the
+/// interval unplaced rejections count on their own) and the case holds no record of the entry's
+/// kind, subject and producer whose result is its table's for [`RUNS_SPENT`], citing a
+/// [`PROGRAM_SOURCE`] observation of this case and action. The record is the one the run that
+/// spent the allowance would have written: at the instant of the action's last counted run's
+/// observation, citing it, about the revisions the case holds now. A case with no counted run of
+/// the action owes nothing. Once written, nothing is owed, so a second call writes nothing.
+/// `tree run` calls it before each evaluation; a host that drives [`ProgramEffects`] without it
+/// calls it itself, since the port still refuses the next offer `RunsSpent`.
+///
+/// # Errors
+/// A read of the governor or the store write failed; nothing was written.
+pub fn settle_spent<S: FallibleCaseStore, T: EvaluationTime>(
+    governor: &CanonGovernor<S, T>,
+    case: &CaseId,
+    binding: &BoundAction,
+) -> Result<Vec<SpentRecord>, EffectError> {
+    let failed = |error: GovernorError| EffectError::new(format!("the governor: {error:?}"));
+    let entries: Vec<&EvidenceEntry> = binding
+        .evidence
+        .iter()
+        .filter(|entry| entry.from == ResultSource::Runs)
+        .collect();
+    if entries.is_empty() {
+        return Ok(Vec::new());
+    }
+    let allowance = allowance(governor, case, binding)?;
+    let Some((run, observed_at)) = allowance
+        .last_run
+        .clone()
+        .filter(|_| allowance.spent_for_good(binding))
+    else {
+        return Ok(Vec::new());
+    };
+    let action = binding.action.as_str();
+    let observations = governor
+        .try_observations()
+        .map_err(|error| EffectError::new(format!("the observations: {error:?}")))?;
+    // The action's own runs in the case, counted or not: what its `spent` record cites.
+    let own: BTreeSet<&str> = observations
+        .iter()
+        .filter(|observation| {
+            observation.source == PROGRAM_SOURCE
+                && text_member(&observation.payload, "case") == Some(case.0.as_str())
+                && text_member(&observation.payload, "action") == Some(action)
+        })
+        .map(|observation| observation.observation_id.0.0.as_str())
+        .collect();
+    let held = governor.evidence(case).map_err(failed)?;
+    let owed: Vec<(&EvidenceEntry, Option<String>)> = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let result = look_up(entry, Some(RUNS_SPENT), false)?;
+            let present = held.iter().any(|record| {
+                record.kind == entry.kind
+                    && record.producer == entry.producer
+                    && only_text(&record.facts, "subject") == Some(entry.subject.as_str())
+                    && only_text(&record.facts, "result") == result.as_deref()
+                    && record
+                        .observation_ids
+                        .iter()
+                        .any(|cited| own.contains(cited.0.0.as_str()))
+            });
+            (!present).then_some((entry, result))
+        })
+        .collect();
+    if owed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let revisions = governor.revisions(case).map_err(failed)?;
+    let case_revision = governor.current_revision(case).map_err(failed)?;
+    let revision_of = |artifact: &str| {
+        revisions.get(artifact).cloned().ok_or_else(|| {
+            EffectError::new(format!("case {} holds no revision for {artifact}", case.0))
+        })
+    };
+    let mut written = Vec::new();
+    let mut attributed = Vec::new();
+    for (entry, result) in owed {
+        let record = RecordedEvidence {
+            kind: entry.kind.clone(),
+            subject: entry.subject.clone(),
+            producer: entry.producer.clone(),
+            result,
+            subject_revision: revision_of(&entry.subject)?,
+            observed_at: loom::primitives::Timestamp(observed_at.0.clone()),
+            upstream_revisions: entry
+                .upstream
+                .iter()
+                .map(|artifact| {
+                    Ok(ArtifactRevision {
+                        artifact: artifact.clone(),
+                        revision: revision_of(artifact)?,
+                    })
+                })
+                .collect::<Result<_, EffectError>>()?,
+        };
+        let evidence = attribute(case, &record, case_revision, &run)?;
+        written.push(SpentRecord {
+            evidence_id: evidence.evidence().data().evidence_id.clone(),
+            record,
+        });
+        attributed.push(evidence);
+    }
+    governor
+        .record_step(case, &BTreeMap::new(), attributed)
+        .map_err(|error| {
+            EffectError::new(format!(
+                "the spent record of {action} in case {} was not written: {error}",
+                case.0
+            ))
+        })?;
+    Ok(written)
 }
 
 /// The [`Allowance`] of `binding` in `case`.
@@ -1148,6 +1311,11 @@ fn allowance<S: FallibleCaseStore, T: EvaluationTime>(
         intervals: BTreeSet::new(),
         opened_by: None,
         latest: None,
+        alone: None,
+        last_run: positions.last().map(|&position| {
+            let run = &observations[position];
+            (run.observation_id.clone(), run.observed_at.clone())
+        }),
     };
     if binding.budget.runs_per != Some(RunsScope::Rejection) {
         return Ok(allowance);
@@ -1236,6 +1404,7 @@ fn allowance<S: FallibleCaseStore, T: EvaluationTime>(
         .filter(|first| allowance.intervals.range(first..).next().is_none())
         .max();
     allowance.intervals.extend(alone);
+    allowance.alone = alone;
     if let Some((at, rejection)) = opened {
         allowance.window = count(positions.iter().filter(|position| **position > at).count());
         allowance.opened_by = Some(rejection);

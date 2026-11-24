@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use b10x_loom_bindings::{
     LAUNCH_FAILURE_EXITS, PROGRAM_SOURCE, ProgramEffects, RETRY_FEEDBACK_FORMAT,
     RETRY_FEEDBACK_VARIABLE, RETRY_LOG_BYTES, RETRY_LOG_LINES, check, decode, retry_records,
-    run_handoff_check,
+    run_handoff_check, settle_spent,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::{self, Value};
@@ -1837,6 +1837,27 @@ impl Rework {
         refusal(&self.drive(WRITE))
     }
 
+    /// A step of the writer under a second runner that answers it 137, as Substrate reports a
+    /// child a signal ended: refused `ProgramSignalled`, counted, nothing recorded.
+    fn run_recording_nothing(&self) {
+        let runner: Arc<dyn TestRunner> =
+            Arc::new(Recording::new().answering(WRITE_STUB, 137, b""));
+        let effects = port(&self.governor, &self.document, &self.scratch, runner);
+        let reason = refusal(&drive(&self.governor, &effects, WRITE, "{}"));
+        assert!(reason.starts_with("ProgramSignalled"), "{reason}");
+    }
+
+    /// `settle_spent` on the writer: the number of records it wrote.
+    fn settle(&self) -> usize {
+        settle_spent(
+            &self.governor,
+            &CaseId(CASE.to_owned()),
+            writer(&self.document),
+        )
+        .expect("the record is written")
+        .len()
+    }
+
     /// The revision the case holds for `draft`.
     fn draft(&self) -> String {
         self.governor.revisions(&CaseId(CASE.to_owned())).unwrap()["draft"].clone()
@@ -2086,6 +2107,102 @@ fn spent_is_written_once_per_rework_count() {
         case.refused(),
         max_runs_text(3, Some((&rejection, "checker")), 3)
     );
+}
+
+// The record an allowance spent for good owes (story spent-program-has-its-spent-record). A signal
+// stands for any recordless end: the function reads only the allowance.
+
+/// The writer under `runs_per: rejection` with `max_runs` and `rework_limit`, and the spent entry.
+fn spent_rework(max_runs: i64, rework_limit: i64) -> Rework {
+    Rework::with(
+        &reworked(&format!(
+            "{{max_runs: {max_runs}, runs_per: rejection, rework_limit: {rework_limit}}}"
+        )),
+        SPENT_ENTRY,
+    )
+}
+
+/// D10 of the rework story kept: a full window below the rework limit owes nothing.
+#[test]
+fn a_full_window_below_the_rework_limit_owes_nothing() {
+    let case = spent_rework(1, 2);
+    case.run();
+    case.reject();
+    case.run();
+    assert_eq!(case.settle(), 0);
+    assert_eq!(case.records("draft_spent"), 0);
+}
+
+#[test]
+fn a_recordless_run_at_the_rework_limit_owes_its_record() {
+    let case = spent_rework(1, 2);
+    case.run();
+    case.reject();
+    case.run();
+    case.reject();
+    case.run_recording_nothing();
+    assert_eq!(case.records("draft_spent"), 0);
+    assert_eq!(case.settle(), 1);
+    assert_eq!(case.records("draft_spent"), 1);
+    assert_eq!(case.settle(), 0);
+    assert_eq!(case.records("draft_spent"), 1);
+}
+
+#[test]
+fn a_recordless_first_run_at_the_limit_with_runs_left_owes_nothing_yet() {
+    let case = spent_rework(2, 2);
+    case.run();
+    case.reject();
+    case.run();
+    case.reject();
+    case.run_recording_nothing();
+    assert_eq!(case.settle(), 0);
+    let written = case.records("draft_written");
+    case.run();
+    assert_eq!(case.records("draft_written"), written + 1);
+    assert_eq!(
+        case.records("draft_spent"),
+        0,
+        "not the first run at that count"
+    );
+    assert_eq!(case.settle(), 1);
+    assert_eq!(case.records("draft_spent"), 1);
+}
+
+/// The guard of "P": a rework count an unplaced rejection carried to the limit, with a full
+/// window, owes nothing; the next placed rejection lets the writer run and record `spent` itself.
+#[test]
+fn an_unplaced_rejection_at_the_rework_limit_owes_nothing() {
+    let case = spent_rework(1, 1);
+    case.run();
+    let draft = case.draft();
+    case.hold(("draft_check", &draft, "invalid"), "checker", false);
+    assert_eq!(case.settle(), 0);
+    assert_eq!(case.records("draft_spent"), 0);
+    case.reject();
+    case.run();
+    assert_eq!(case.records("draft_spent"), 1);
+    assert_eq!(case.settle(), 0);
+    assert_eq!(case.records("draft_spent"), 1);
+}
+
+/// The rework-count branch: an unplaced rejection carries the count past the limit after the
+/// first run at the limit recorded nothing, its window not full.
+#[test]
+fn an_unplaced_rejection_past_the_rework_limit_owes_its_record() {
+    let case = spent_rework(2, 1);
+    case.run();
+    case.reject();
+    case.run_recording_nothing();
+    let draft = case.draft();
+    let unplaced = case.hold(("draft_check", &draft, "invalid"), "checker", false);
+    assert_eq!(
+        case.refused(),
+        rework_limit_text(2, &unplaced, "checker", 1)
+    );
+    assert_eq!(case.settle(), 1);
+    assert_eq!(case.settle(), 0);
+    assert_eq!(case.records("draft_spent"), 1);
 }
 
 /// Runbook's `change.implement` members on the fixture's writer: `draft_check` stands for its own

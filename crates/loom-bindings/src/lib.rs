@@ -61,7 +61,7 @@ pub use load::{check, unbound};
 pub use open::{OPEN_SOURCE, OpenEffects, OpenPortError, check_case_open};
 pub use program::{
     ANY_KEY, BLOBS, ChildInputs, NotPrepared, PROGRAM_SOURCE, Prepared, ProgramEffects, RUNS_SPENT,
-    RunPlace, Started, TIMEOUT_KEY, prepare, start,
+    RunPlace, SpentRecord, Started, TIMEOUT_KEY, prepare, settle_spent, start,
 };
 pub use resolve::resolve_programs;
 pub use retry::{

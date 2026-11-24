@@ -1493,11 +1493,21 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   record, result its table's value for `RUNS_SPENT` (`spent`), only on the run whose count
   reaches `budget.max_runs`, in the same `record_step` after the run's other records, about the
   revision the run left, attributed at the step's case revision. A run that writes no records
-  (cancelled, or in an `exits` class) writes none, so a cancelled last run leaves the allowance
-  spent with no `spent` record and the case stops `Stuck` at the next `RunsSpent` (D2 a, held by
-  `a_cancelled_last_run_writes_no_spent_record`). `tree run`'s `step_inputs` puts a writer that is
-  not due and whose open evidence (`action_facts`) is not empty and holds only its own `from: runs`
-  kinds in the idle set, so the spent kind never makes it useful (`crates/loom-tree/tests/runs_spent/`).
+  (cancelled, or in an `exits` class) writes none, and the port refuses the next offer `RunsSpent`
+  (held by `a_cancelled_last_run_writes_no_spent_record`). `tree run`'s `step_inputs` puts a
+  writer that is not due and whose open evidence (`action_facts`) is not empty and holds only its
+  own `from: runs` kinds in the idle set, so the spent kind never makes it useful
+  (`crates/loom-tree/tests/runs_spent/`).
+- `settle_spent` (`story:spent-program-has-its-spent-record`) writes the record an allowance spent
+  for good owes (`runs_per: case`: a full window; `rejection`: a rework count above the limit, or a
+  full window with the count without the lone unplaced interval at least the limit), when the case
+  holds none of the entry's kind, subject, producer and result citing this action's run: at the
+  instant of the last counted run's observation, citing it, in one `record_step` with no move.
+  `tree run` calls it for each `from: runs` writer after `PlacedRevisions::refresh` and before
+  `evaluated`, and writes one `action finished` line per write (exit 0, no refusal, blob or move,
+  naming the record); no action is offered, so no `handoff_when` check runs. `not_called` reads only
+  a line that names no record (D6 a). Held by `bound_program.rs`, `bound_retry.rs` and
+  `crates/loom-tree/tests/runs_spent/`.
 - `budget.runs_per` (`story:rework-allowance-after-a-rejection`, `loom.bindings.RunsScope`):
   `case` (the default) counts as above; `rejection` counts only the runs after the latest
   rejection, so a rejection gives a fresh `max_runs`, and `budget.rework_limit` (a whole number

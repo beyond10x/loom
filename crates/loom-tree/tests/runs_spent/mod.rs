@@ -153,7 +153,11 @@ struct Tree {
 
 impl Tree {
     fn open(label: &str, protocol: &str, bindings: &str, program: &str) -> Self {
-        let dir = super::scratch(label);
+        Self::open_in(&super::scratch(label), protocol, bindings, program)
+    }
+
+    /// [`Tree::open`] in the scratch directory `dir`.
+    fn open_in(dir: &std::path::Path, protocol: &str, bindings: &str, program: &str) -> Self {
         let protocols = dir.join("protocols");
         let workspace = dir.join("workspace");
         std::fs::create_dir_all(&protocols).unwrap();
@@ -441,6 +445,206 @@ fn an_early_decision_counts_once_the_writer_is_spent() {
         state.termination.map(|termination| termination.outcome),
         Some("given_up".to_owned())
     );
+}
+
+// The record an allowance spent for good owes (`story:spent-program-has-its-spent-record`): the
+// protocol of `an_outcome_waits_for_the_spent_claim`, `work.do` bound with no `retry_when` and an
+// exit table with no `*` row, so a program that exits 3 is refused `ResultNotInTable`.
+
+/// `work.do` with `budget.max_runs` `max_runs`, the extra members `members` (lines indented four
+/// spaces), the exit table `{"0": ok}` and the fixture's `from: runs` entry.
+fn refused_bindings(max_runs: i64, members: &str) -> String {
+    format!(
+        r#"format: loom.bindings/1
+protocol: halt@1
+artifacts:
+  work: work.txt
+actions:
+  - action: work.do
+    executor: {{kind: program, argv: [sh, do.sh]}}
+    budget: {{max_runs: {max_runs}}}
+{members}    evidence:
+      - {{kind: done, subject: work, producer: doer, from: exit, results: {{"0": ok}}}}
+      - {{kind: spent, subject: work, producer: loom, from: runs, results: {{spent: spent}}}}
+"#
+    )
+}
+
+/// The program of these trees: its exit is in no row of `work.do`'s exit table.
+const EXITS_3: &str = "exit 3\n";
+
+/// The ids of the root's `spent` records.
+fn spent_ids(tree: &Tree) -> Vec<String> {
+    tree.governor()
+        .evidence(&CaseId("root".into()))
+        .unwrap()
+        .into_iter()
+        .filter(|record| record.kind == "spent")
+        .map(|record| record.evidence_id.0.0)
+        .collect()
+}
+
+/// The `action finished` lines of `work.do` that name a record with exit 0 and no refusal.
+fn spent_lines(lines: &[RunLogLine]) -> Vec<&b10x_loom_tree::runlog::ActionFinished> {
+    lines
+        .iter()
+        .filter_map(|line| match &line.event {
+            RunLogEvent::ActionFinished(finished)
+                if finished.action == "work.do"
+                    && finished.exit == Some(0)
+                    && finished.refusal.is_none()
+                    && !finished.evidence.is_empty() =>
+            {
+                Some(finished)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The position of the `action finished` line of `work.do` refused `ResultNotInTable`.
+fn refused_line(lines: &[RunLogLine]) -> usize {
+    lines
+        .iter()
+        .position(|line| {
+            matches!(&line.event, RunLogEvent::ActionFinished(finished)
+                if finished.action == "work.do"
+                    && finished.refusal.as_deref().is_some_and(|refusal| refusal.starts_with("ResultNotInTable")))
+        })
+        .unwrap_or_else(|| panic!("no refused run: {lines:#?}"))
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_refused_last_run_ends_given_up() {
+    let tree = Tree::open(
+        "spent-refused-last",
+        GIVE_UP_PROTOCOL,
+        &refused_bindings(1, ""),
+        EXITS_3,
+    );
+    let (run, lines) = tree.run();
+    assert_eq!(run.stop, TreeStop::Terminal, "{run:?}\n{lines:#?}");
+    assert_eq!(run.detail.as_deref(), Some("given_up"), "{run:?}");
+    let spent = spent_ids(&tree);
+    assert_eq!(spent.len(), 1, "{spent:?}");
+    let refused = refused_line(&lines);
+    let RunLogEvent::ActionFinished(written) = &lines[refused + 1].event else {
+        panic!("no action finished line after the refused run: {lines:#?}");
+    };
+    assert_eq!(written.action, "work.do");
+    assert_eq!(written.exit, Some(0));
+    assert_eq!(written.refusal, None);
+    assert_eq!(written.blob_digest, None);
+    assert_eq!(written.evidence, spent);
+    assert!(written.revisions.is_empty(), "{written:?}");
+    assert!(
+        matches!(lines[refused + 2].event, RunLogEvent::Evaluated(_)),
+        "{lines:#?}"
+    );
+    let replayed = b10x_loom_tree::replay_tree(&tree.store, &tree.catalog, None).unwrap();
+    assert_eq!(
+        b10x_loom_tree::replay_difference(&replayed),
+        None,
+        "{replayed:?}"
+    );
+}
+
+/// A store 0.60.0 left stuck: the refused last run and its line, then a stop before the next
+/// step. The next run writes the record before its first evaluation.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_store_left_stuck_by_0_60_ends_given_up() {
+    let tree = Tree::open(
+        "spent-left-stuck",
+        GIVE_UP_PROTOCOL,
+        &refused_bindings(1, ""),
+        EXITS_3,
+    );
+    let (first, lines) = tree.run_steps(Some(1));
+    assert_eq!(first.stop, TreeStop::BudgetSpent, "{first:?}\n{lines:#?}");
+    refused_line(&lines);
+    assert!(spent_ids(&tree).is_empty());
+
+    let (second, lines) = tree.run();
+    assert_eq!(second.stop, TreeStop::Terminal, "{second:?}\n{lines:#?}");
+    assert_eq!(second.detail.as_deref(), Some("given_up"), "{second:?}");
+    assert_eq!(spent_ids(&tree).len(), 1);
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn the_spent_record_is_written_once_per_case() {
+    let outcome = "  given_up:\n    requires: {claim: work.spent}\n";
+    assert!(GIVE_UP_PROTOCOL.contains(outcome));
+    let tree = Tree::open(
+        "spent-once",
+        &GIVE_UP_PROTOCOL.replace(outcome, ""),
+        &refused_bindings(1, ""),
+        EXITS_3,
+    );
+    let (first, mut lines) = tree.run_steps(Some(5));
+    assert_ne!(first.stop, TreeStop::Terminal, "{first:?}\n{lines:#?}");
+    let (_, again) = tree.run_steps(Some(5));
+    lines.extend(again);
+    assert_eq!(spent_lines(&lines).len(), 1, "{lines:#?}");
+    assert_eq!(spent_ids(&tree).len(), 1);
+}
+
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn no_handoff_check_runs_for_the_spent_record() {
+    let dir = super::scratch("spent-no-handoff-check");
+    let marks = dir.join("marks");
+    std::fs::create_dir_all(&marks).unwrap();
+    let members = format!(
+        "    handoff: a person finishes the work\n    handoff_when: [sh, check.sh, {}]\n",
+        marks.display()
+    );
+    let tree = Tree::open_in(
+        &dir,
+        GIVE_UP_PROTOCOL,
+        &refused_bindings(1, &members),
+        EXITS_3,
+    );
+    // Hands the proposal on (exit 1), so the writer runs in that step.
+    std::fs::write(
+        dir.join("workspace/check.sh"),
+        "echo checked >> \"$1/checks\"\nexit 1\n",
+    )
+    .unwrap();
+    let (run, lines) = tree.run();
+    assert_eq!(run.stop, TreeStop::Terminal, "{run:?}\n{lines:#?}");
+    assert_eq!(run.detail.as_deref(), Some("given_up"), "{run:?}");
+    let checks = std::fs::read_to_string(marks.join("checks")).unwrap_or_default();
+    assert_eq!(checks.lines().count(), 1, "{checks:?}");
+    let checked: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| matches!(line.event, RunLogEvent::HandoffChecked(_)))
+        .map(|(at, _)| at)
+        .collect();
+    assert_eq!(checked.len(), 1, "{lines:#?}");
+    assert!(checked[0] < refused_line(&lines), "{lines:#?}");
+}
+
+/// Today's behaviour below the allowance: a refused run writes no record, and the writer is not
+/// offered again before the case changes.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_refused_run_below_the_allowance_stays_set_aside() {
+    let tree = Tree::open(
+        "spent-below-allowance",
+        GIVE_UP_PROTOCOL,
+        &refused_bindings(3, ""),
+        EXITS_3,
+    );
+    let (run, lines) = tree.run();
+    assert_eq!(run.stop, TreeStop::Stuck, "{run:?}\n{lines:#?}");
+    assert_eq!(steps_of(&lines, "work.do"), 1, "{lines:#?}");
+    refused_line(&lines);
+    assert!(spent_ids(&tree).is_empty());
+    assert!(spent_lines(&lines).is_empty(), "{lines:#?}");
 }
 
 #[test]

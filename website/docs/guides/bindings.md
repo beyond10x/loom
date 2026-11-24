@@ -198,9 +198,14 @@ actions:
   a JSON pointer such as `/summary/state` reads the program's report; `from: runs` is Loom's
   count of the action's runs, whose value is `spent` on the run that reaches `budget.max_runs`
   (under `budget.runs_per: rejection`, the run that reaches `rework_limit`, below)
-  and which records nothing on any other run (a cancelled run counts and records nothing, so a
-  cancelled last run writes no `spent` record); its table lists `spent` and nothing else, and the
-  record is written after the run's other records, about the revision the run left. A protocol
+  and which records nothing on any other run; its table lists `spent` and nothing else, and the
+  record is written after the run's other records, about the revision the run left. When the run
+  that spent the allowance for good recorded nothing (cancelled, refused by its runner, ended by a
+  signal, a value outside the table, a report that cannot be read), `tree run` writes the record
+  before its next step, at the instant of that run and citing it, with an `action finished` line
+  that names it (exit 0); a host that drives the port itself calls `settle_spent`. Under
+  `runs_per: rejection` that is a rework count above `rework_limit`, or a full window with the
+  limit reached by placed rejections; a full window below the limit writes nothing. A protocol
   reads it through a claim over the entry's kind, such as an outcome's `requires`; the kind alone
   never makes the writer useful again. A `program` executor's entries read `exit`, a pointer or
   `runs` and never `effect`; a `person` or `open` executor's entries read `effect` alone; an

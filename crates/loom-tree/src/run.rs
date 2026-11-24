@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 
 use b10x_loom_bindings::{
     CopyEffects, OpenEffects, OpenPortError, PlacedRevisions, ProgramEffects, retry_records,
+    settle_spent,
 };
 use b10x_loom_commission::model::behaviour::Generated;
 use b10x_loom_commission::model::json::Value as CommissionJson;
@@ -310,6 +311,8 @@ fn run_cancellable(
                 Refused::new(TreeRefusalReason::StoreUnreadable, error.to_string())
                     .case(case.case.clone())
             })?;
+        // An allowance spent for good gets its `spent` record before the case is evaluated.
+        settled(&governor, &logs, case, &mut emit)?;
         if let Some(line) = evaluated(&governor, &logs, &store, &case.case)? {
             emit(&case.case, line);
         }
@@ -874,6 +877,51 @@ fn terminated(store: &Path, case: &str) -> bool {
     })
 }
 
+/// Writes the `spent` record each `from: runs` writer of `case` owes ([`settle_spent`]) and, for
+/// each writer that got one, one `action finished` line naming it: exit 0, no refusal, no blob,
+/// no move (`story:spent-program-has-its-spent-record`, D2 a, D5 c). No action is offered for it,
+/// so no `handoff_when` check runs; once written nothing is owed, so it is written once per case.
+/// A store error ends the run, as a failed refresh does.
+fn settled<S: loom_governor::FallibleCaseStore>(
+    governor: &CanonGovernor<S>,
+    logs: &Logs,
+    case: &Held,
+    emit: &mut impl FnMut(&str, RunLogLine),
+) -> Result<(), Refused> {
+    let id = CaseId(case.case.clone());
+    for binding in case.bindings.actions.iter().filter(|bound| {
+        bound.executor.kind == Executor::Program
+            && bound
+                .evidence
+                .iter()
+                .any(|entry| entry.from == ResultSource::Runs)
+    }) {
+        let written = settle_spent(governor, &id, binding).map_err(|error| {
+            Refused::new(TreeRefusalReason::StoreUnreadable, error.to_string())
+                .case(case.case.clone())
+        })?;
+        if written.is_empty() {
+            continue;
+        }
+        let line = logs.append(
+            &case.case,
+            RunLogEvent::ActionFinished(ActionFinished {
+                action: binding.action.clone(),
+                exit: Some(0),
+                refusal: None,
+                blob_digest: None,
+                evidence: written
+                    .into_iter()
+                    .map(|spent| spent.evidence_id.0.0)
+                    .collect(),
+                revisions: Vec::new(),
+            }),
+        )?;
+        emit(&case.case, line);
+    }
+    Ok(())
+}
+
 /// Appends `evaluated` to `case`'s log when the case revision or the decision differs from the
 /// last `evaluated` line's.
 fn evaluated<S: loom_governor::FallibleCaseStore>(
@@ -1100,10 +1148,13 @@ fn set_aside(lines: &[RunLogLine], bindings: &BindingsDocument) -> BTreeSet<Stri
     aside
 }
 
-/// Whether `finished` is the line of a not-called end of its program: no refusal, and an exit
-/// its action's binding in `bindings` lists in `exits.not_called`.
+/// Whether `finished` is the line of a not-called end of its program: no refusal, no record, and
+/// an exit its action's binding in `bindings` lists in `exits.not_called`. A not-called end
+/// records nothing; the exit-0 line of a `spent` record names one
+/// (`story:spent-program-has-its-spent-record`, D6 a).
 fn not_called(finished: &ActionFinished, bindings: &BindingsDocument) -> bool {
     finished.refusal.is_none()
+        && finished.evidence.is_empty()
         && finished.exit.is_some_and(|exit| {
             bindings.actions.iter().any(|bound| {
                 bound.action == finished.action
@@ -2016,6 +2067,82 @@ mod tests {
         assert_eq!(
             handoff_command(store, &settings(None, None)),
             ["b10x-loom", "tree", "run", "--store", "/srv/tree/store"]
+        );
+    }
+
+    /// `story:spent-program-has-its-spent-record` D6 a: the exit-0 line of a spent record names
+    /// its record, so it is no not-called end even where `exits.not_called` lists 0, and it ends
+    /// the set-aside of another not-called writer as any record does.
+    #[test]
+    fn a_line_that_names_a_record_is_not_read_as_not_called() {
+        use loom::runlog::{ActionFinished, Evaluated, RevisionMove, RunLogEvent, RunLogLine};
+        let bindings = b10x_loom_bindings::decode(
+            r#"format: loom.bindings/1
+protocol: p@1
+artifacts:
+  w: w.txt
+  s: s.txt
+actions:
+  - action: w.move
+    executor: {kind: program, argv: [sh, w.sh]}
+    exits: {not_called: [79]}
+    evidence:
+      - {kind: moved, subject: w, producer: mover, from: exit, results: {"0": ok}}
+  - action: s.spent
+    executor: {kind: program, argv: [sh, s.sh]}
+    exits: {not_called: [0]}
+    evidence:
+      - {kind: spent, subject: s, producer: loom, from: runs, results: {spent: spent}}
+"#,
+        )
+        .expect("the bindings decode");
+        let line = |seq: i64, event: RunLogEvent| RunLogLine {
+            seq,
+            prev: None,
+            at: loom::primitives::Timestamp("2026-11-22T08:00:00Z".into()),
+            event,
+        };
+        let evaluated = |case_revision: i64| {
+            RunLogEvent::Evaluated(Evaluated {
+                case_revision,
+                frontier: "f".into(),
+                decision_digest: format!("d{case_revision}"),
+            })
+        };
+        let finished = |action: &str, exit: i64, evidence: Vec<String>, revisions| {
+            RunLogEvent::ActionFinished(ActionFinished {
+                action: action.into(),
+                exit: Some(exit),
+                refusal: None,
+                blob_digest: None,
+                evidence,
+                revisions,
+            })
+        };
+        let lines = [
+            line(0, evaluated(4)),
+            line(
+                1,
+                finished(
+                    "w.move",
+                    79,
+                    Vec::new(),
+                    vec![RevisionMove {
+                        artifact: "w".into(),
+                        from: Some("w1".into()),
+                        to: "w2".into(),
+                    }],
+                ),
+            ),
+            line(
+                2,
+                finished("s.spent", 0, vec!["program-evidence-1".into()], Vec::new()),
+            ),
+            line(3, evaluated(5)),
+        ];
+        assert_eq!(
+            super::set_aside(&lines, &bindings),
+            std::collections::BTreeSet::new()
         );
     }
 }
