@@ -409,7 +409,11 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `arguments_from` output is read by the same rule. It looks the value up in `results`,
   falling to `*`. A value neither lists refuses the step `ResultNotInTable`; a report that cannot be
   read, or that lacks the pointer, refuses it `ReportUnreadable`. A refused step records no
-  evidence.
+  evidence. For a program killed at its timeout only a `timeout` row matches, never `*`: an entry
+  whose `results` name no `timeout` refuses the step `ResultNotInTable`, the run is not ended, and
+  under `tree run` the action is set aside and the case stops `Stuck` until something else changes
+  it. A report value that is the text `timeout` from a run that ended by itself still falls to
+  `*`. To keep the `*` result for a timeout, add a `timeout` row such as `"timeout": failed`.
 - An exit the binding's `exits` lists is read before the tables. One in `error` records nothing
   and refuses the step `ProgramError`, naming the exit code and the blob's SHA-256 and never what
   the program printed, and the refusal ends the run (`EffectRefused`). One in `not_called` records

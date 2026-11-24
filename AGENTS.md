@@ -1571,7 +1571,10 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   observation (the step then answers the store's error, uncounted), then per entry the
   value (exit code, `timeout` for a killed run, or the pointer into the report, one JSON object
   within 1 MiB naming no member twice) looked up in `results` falling to
-  `*`: `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry
+  `*`, except that for a run killed at its timeout (`execution.timed_out`, not the string) only the
+  `timeout` row matches and an entry without one is `ResultNotInTable`, the run not ended
+  (`story:wildcard-result-row-does-not-match-timeout`; a `from: runs` entry is not affected):
+  `ResultNotInTable` or `ReportUnreadable` record nothing; otherwise one record per entry
   (`loom.bindings.RecordedEvidence`) with the entry's producer, the observation's instant and, in
   `facts`, the revisions the case held for the subject and as `upstream_revisions`. Nothing the
   program prints names a result, revision, producer or instant. The cap holds for one port that
