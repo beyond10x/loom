@@ -304,7 +304,8 @@ Before a change is reported done, in this order:
    `b10x-loom-tree` alone), then `task docs-check` and
    `task commission:docs-drift`. `task docs-check` is `loom-xtask docs-stamp --check` and builds no
    `loom-docs` (§ Generated files). CI runs exactly this (`check.yml`, job `loom / task check`, which
-   installs cargo-nextest by a pinned version and digest). The test step holds the budget of
+   installs cargo-nextest by a pinned version and digest and restores the dependencies' build from
+   the forge's cache, § The forge's dependency cache). The test step holds the budget of
    `~/beyond10x/AGENTS.md` § Tests stay fast: after building the test binaries (not counted) it runs
    `cargo nextest run --workspace --locked` (`.config/nextest.toml`: a test is killed and fails at
    60 s; `slow_` tests are left out, and so are the two test binaries `task check` runs as their
@@ -524,6 +525,42 @@ Where a test puts its scratch depends on what it needs from the directories abov
 - `crates/loom-xtask/tests/release_check.rs` needs the opposite: its fixture repositories live
   under the build directory and must be inside a git tree. The test fails when
   `CARGO_TARGET_DIR` points outside the checkout.
+
+### The forge's dependency cache
+
+`loom / task check` restores the build of the locked dependencies from a GitHub Actions cache entry
+(`story:forge-build-cache`). The entry holds `~/.cargo/registry`, `~/.cargo/git`, `target/` and
+`consumers/pinned/target/`, each `target` with every workspace artifact removed before the save
+(`.fingerprint`, `build` and `deps` entries of `b10x-loom-*`, `loom-*`, `b10x_loom*` and `loom_*`,
+every executable of `deps`, `incremental`, `target/nextest`, `target/tmp`, `target/cargo-timings`,
+`target/release`), so only the dependencies' artifacts are cached.
+
+- Only job `loom / dependency cache` (`deps-cache.yml`) writes it, on a push to `main` and nothing
+  else, under its own concurrency group `deps-cache` that never cancels a run in progress, with
+  `timeout-minutes: 40`. It looks the exact key up first and ends on a hit; on a miss it restores
+  by the prefix, builds what `task check` builds without running tests (the workspace's test
+  targets, clippy over every target, the `durable-check` selection, the `consumer-check` crate),
+  strips the workspace's artifacts and saves under the key the restore step resolved.
+- `loom / task check` restores only (step `Restore the dependency build`, after the toolchain step
+  `id: rust` and before `cargo fetch --locked`); no step of `check.yml` saves, so a pull request
+  never writes the shared entry. Pull requests, `main` pushes and the release's check run all read
+  it.
+- The key is `loom-deps-ubuntu-24.04-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('rust-toolchain.toml',
+  'Cargo.lock', '.cargo/config.toml', '**/Cargo.toml') }}`: the pinned runner image, the rustc hash
+  of the `dtolnay/rust-toolchain` step and the hashed files. `restore-keys` is the same without the
+  hash of the files. Both jobs run on `ubuntu-24.04`, and the two workflows' keys are equal.
+- Cold case: the first run after an eviction (an entry nobody read for 7 days), or after a change
+  to the lock, `.cargo/config.toml`, any `Cargo.toml`, the toolchain or the image, builds the
+  dependencies itself or from the prefix's entry; the `main` push of that change writes the new
+  entry, and runs that start after it has saved are warm.
+- "The local gate equals the forge" does not cover this cache: it changes how long a forge step
+  takes, not what it builds or checks, and the local gate keeps the host's compile cache.
+
+The guard `crates/loom-xtask/src/forge_cache.rs` holds this over every workflow: no save outside a
+push to `main`, no combined `actions/cache`, every cache action pinned by commit digest, no
+`RUSTC_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER` or `SCCACHE_`, the restore step, its place and key,
+the `if:` on `steps.changes.outputs.class` of the restore and `lscpu` steps, `id: rust`, and the
+writer's permissions, limit and concurrency.
 
 ## Generated files
 

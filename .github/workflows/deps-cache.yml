@@ -1,0 +1,103 @@
+name: deps-cache
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deps-cache
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deps:
+    name: loom / dependency cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        id: rust
+        with:
+          toolchain: 1.99.1
+          components: clippy, rustfmt
+
+      - name: Look the dependency build up
+        id: lookup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            consumers/pinned/target
+          key: loom-deps-ubuntu-24.04-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', '**/Cargo.toml') }}
+          lookup-only: true
+
+      - name: Restore an earlier dependency build
+        id: restore
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            consumers/pinned/target
+          key: loom-deps-ubuntu-24.04-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '.cargo/config.toml', '**/Cargo.toml') }}
+          restore-keys: |
+            loom-deps-ubuntu-24.04-${{ steps.rust.outputs.cachekey }}-
+
+      - name: Fetch locked dependencies
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: cargo fetch --locked
+
+      - name: Build the test targets
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: cargo test --workspace --locked --no-run
+
+      - name: Build clippy's check of every target
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: cargo clippy --workspace --all-targets --locked
+
+      - name: Build the durable-check selection
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: cargo test --locked --no-run -p b10x-loom-governor -p b10x-loom-runlog -p b10x-loom-tree -p b10x-loom-bindings
+
+      - name: Build the consumer-check
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          set -eu
+          cp Cargo.lock consumers/pinned/Cargo.lock
+          cargo test --manifest-path consumers/pinned/Cargo.toml --offline --no-run
+
+      - name: Keep only the dependencies' build
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          set -eu
+          for t in target/debug consumers/pinned/target/debug; do
+            [ -d "$t" ] || continue
+            rm -rf "$t"/.fingerprint/b10x-loom-* "$t"/.fingerprint/loom-* "$t"/build/b10x-loom-* "$t"/build/loom-* \
+              "$t"/deps/b10x_loom* "$t"/deps/libb10x_loom* "$t"/deps/loom_* "$t"/deps/libloom_* "$t"/incremental
+            find "$t"/deps -maxdepth 1 -type f -executable ! -name '*.*' -delete
+          done
+          rm -rf target/nextest target/tmp target/cargo-timings target/release
+          du -sh target consumers/pinned/target ~/.cargo/registry ~/.cargo/git || true
+
+      - name: Save the dependency build
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            consumers/pinned/target
+          key: ${{ steps.restore.outputs.cache-primary-key }}

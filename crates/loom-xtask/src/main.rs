@@ -62,6 +62,7 @@ mod docs_stamp;
 mod durable_check;
 #[path = "../../loom-executor/tests/support/ess_suite.rs"]
 mod ess_suite;
+mod forge_cache;
 mod linked_libraries;
 mod protocols_vendor;
 mod release;
