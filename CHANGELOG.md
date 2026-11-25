@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Fixed
+
+- `StoreLock` unlocks `tree.lock` when dropped, so a process forked while it was held no longer keeps the store `StoreInUse`
+
 ## [0.61.0] - 2026-11-24
 
 ### Changed

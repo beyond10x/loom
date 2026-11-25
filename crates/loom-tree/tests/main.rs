@@ -8,6 +8,7 @@ mod not_called;
 mod replay;
 mod rework;
 mod runs_spent;
+mod store_lock;
 mod suite_format;
 mod take_over;
 

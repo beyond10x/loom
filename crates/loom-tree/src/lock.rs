@@ -23,8 +23,9 @@ const MAX_HOLDER_BYTES: u64 = 32;
 /// A store held for one writer until this is dropped.
 #[derive(Debug)]
 pub struct StoreLock {
-    /// The open lock file; its lock is released when it is closed.
-    _file: File,
+    /// The open lock file; its lock is released when this is dropped, by an explicit unlock, so a
+    /// process forked while it was held and holding a duplicate of the file keeps nothing.
+    file: File,
     holder: PathBuf,
 }
 
@@ -119,10 +120,7 @@ impl StoreLock {
             let _ = fs::remove_file(&temporary);
             unreadable(holder.display(), error)
         })?;
-        Ok(Self {
-            _file: file,
-            holder,
-        })
+        Ok(Self { file, holder })
     }
 }
 
@@ -130,6 +128,9 @@ impl Drop for StoreLock {
     fn drop(&mut self) {
         // Removed before the lock is released, so a later writer never reads this process's id.
         let _ = fs::remove_file(&self.holder);
+        // flock ties the lock to the open file description, which a child forked while it was
+        // held shares until it execs: closing this file alone would leave the lock to the child.
+        let _ = self.file.unlock();
     }
 }
 
