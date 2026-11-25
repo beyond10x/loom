@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-25T12:46:09Z",
+  "actor": "agent:loom",
+  "artifact": "story:program-exits-error-has-a-default",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "c15de198d781469a78760f52482bac96c651dec77512c11657dcb336fa480ca0",
+    "literal_chars": 12,
+    "replacement": "a downstream consumer",
+    "count": 4,
+    "reason": "a public story names the consumer in neutral words"
+  }
+}
