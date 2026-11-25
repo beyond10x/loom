@@ -4,7 +4,7 @@ id: story:program-env-passes-named-names
 kind: story
 status: draft
 title: A bound program gets HOME and the environment names its binding lists, and nothing else
-summary: 'dev-operator A10: today every program gets PATH and LOOM_* alone, no HOME, so caps set in the environment never reach it; D1 a pass_env lists names read from tree run''s environment, D2 a HOME set by the port, D3 a load refuses PATH, HOME, LOOM_*, LD_*, BASH_ENV, ENV; values never recorded; Added'
+summary: 'a downstream consumer A10: today every program gets PATH and LOOM_* alone, no HOME, so caps set in the environment never reach it; D1 a pass_env lists names read from tree run''s environment, D2 a HOME set by the port, D3 a load refuses PATH, HOME, LOOM_*, LD_*, BASH_ENV, ENV; values never recorded; Added'
 tags:
 - sdc
 relations:
@@ -46,14 +46,14 @@ scope:
   path: website/docs/reference/.generated.json
 - confidence: cited
   path: website/docs/reference/ess/loom-bindings.md
-revision: 20
+revision: 21
 ---
 ## Outcome
 
 A binding names the environment variables its programs need, and only those reach them, at the
 values `tree run` itself was started with; every program also gets a `HOME` it may write. A cap
 override the operator sets in the environment of `tree run` then reaches the program whose binding
-lists its name, and no consumer rebuilds `HOME` in its programs. Asked by dev-operator (A10): by
+lists its name, and no consumer rebuilds `HOME` in its programs. Asked by a downstream consumer (A10): by
 its report, measured with runbook 0.9.0, it rebuilds `HOME` and `PATH` in 17 places, and cap
 overrides set in the environment never reach a program. Cites are at `03f64d4e` (0.60.0 with the
 wave-8 timeout and wildcard units); `child.rs` and the intake slice's `bindings.rs` are as at

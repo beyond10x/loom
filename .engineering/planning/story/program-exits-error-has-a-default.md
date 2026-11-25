@@ -4,7 +4,7 @@ id: story:program-exits-error-has-a-default
 kind: story
 status: draft
 title: A bindings document names one exits list that every program binding without its own takes
-summary: 'dev-operator A11 asks a Loom default exits.error [75, 126, 127]: that is Breaking and reverses bound-program-contract''s no-default rule; D1 a a document-level exits member each program binding without exits takes, exits: {} opts out; D2 b a code its from: exit table lists is left out; expanded at decode; Added'
+summary: 'a downstream consumer A11 asks a Loom default exits.error [75, 126, 127]: that is Breaking and reverses bound-program-contract''s no-default rule; D1 a a document-level exits member each program binding without exits takes, exits: {} opts out; D2 b a code its from: exit table lists is left out; expanded at decode; Added'
 tags:
 - sdc
 relations:
@@ -34,12 +34,12 @@ scope:
   path: website/docs/reference/.generated.json
 - confidence: inferred
   path: website/docs/reference/ess/loom-bindings.md
-revision: 14
+revision: 15
 ---
 ## Outcome
 
 A bindings document can name its exit classes once, at the top, and every `program` binding that
-names no `exits` of its own takes them. dev-operator states `exits: {error: [75, 126, 127]}` on
+names no `exits` of its own takes them. a downstream consumer states `exits: {error: [75, 126, 127]}` on
 every action today (its ask A11, its report); with this story it states it once. Loom itself
 still ships no default list: a document that names none means what it means today. Cites are at
 `03f64d4e` (0.60.0 with the timeout and wildcard units of wave 8 merged).
@@ -78,7 +78,7 @@ still ships no default list: a document that names none means what it means toda
 `exits` (D1 b) would make a loaded binding mean something else: an exit 75, 126 or 127 that today
 reaches a `*` row and records a result would record nothing and end the run, and a binding whose
 `from: exit` table lists `"75"` would be refused `ExitClassConflict`. Both are Breaking and reverse
-a recorded decision. 75 is no exit Loom gives a meaning; it is dev-operator's.
+a recorded decision. 75 is no exit Loom gives a meaning; it is a downstream consumer's.
 
 **After.**
 
@@ -115,7 +115,7 @@ a recorded decision. 75 is no exit Loom gives a meaning; it is dev-operator's.
   - c. No change: the YAML alias form (Before) in the guide only. Leaves `exits: *errors` on every
     action, the repetition the ask is about.
   - d. Loom ships `[126, 127]` only (the launcher's codes, as `LAUNCH_FAILURE_EXITS`): Breaking
-    for the same reason as b, and dev-operator's 75 still on every action.
+    for the same reason as b, and a downstream consumer's 75 still on every action.
 - **D2. A code the document lists and a binding's `from: exit` table names.** Default **b**.
   - a. Refused `ExitClassConflict`, as if written on the binding: the refusal would name a list
     the binding does not hold, and one table row would refuse a document-wide default.

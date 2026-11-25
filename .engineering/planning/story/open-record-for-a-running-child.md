@@ -4,7 +4,7 @@ id: story:open-record-for-a-running-child
 kind: story
 status: draft
 title: Opening a child copies the parent's records its protocol requires at open (Canon required_at_open), or opens nothing
-summary: 'dev-operator A13: the open case_outcome record for a running child already exists; Canon 0.15.0 required_at_open is a copy of required parent records into the child at open; needs a Canon pin upgrade from 0.11.0 first (not drafted); D1 a the governor''s open_children copies, D4 a refuses the opening with MissingAtOpen; no bindings ESS change; Added'
+summary: 'a downstream consumer A13: the open case_outcome record for a running child already exists; Canon 0.15.0 required_at_open is a copy of required parent records into the child at open; needs a Canon pin upgrade from 0.11.0 first (not drafted); D1 a the governor''s open_children copies, D4 a refuses the opening with MissingAtOpen; no bindings ESS change; Added'
 tags:
 - sdc
 relations:
@@ -23,7 +23,7 @@ scope:
   path: crates/loom-governor/src/lib.rs
 - confidence: cited
   path: crates/loom-governor/tests/child_cases.rs
-revision: 9
+revision: 10
 ---
 ## Outcome
 
@@ -32,7 +32,7 @@ When Loom opens a child case whose protocol marks an evidence kind `required_at_
 opens no child and says which kind is missing. That is the runner's half of Canon's
 `story:supplied-evidence-required-at-open`: "Runner at case open: copies a current record of the
 kind into the child, or refuses to open it; Canon offers `eval::missing_at_open`" (Canon `0.15.0`,
-`.engineering/planning/story/supplied-evidence-required-at-open.md:96`). Asked by dev-operator
+`.engineering/planning/story/supplied-evidence-required-at-open.md:96`). Asked by a downstream consumer
 (A13). Cites are at `03f64d4e` (the wave 2026-11-23-w8 plan head, after 0.60.0) unless they name
 Canon.
 
@@ -45,7 +45,7 @@ Canon.
   states the rule and what Loom reads of each Canon release. Canon 0.11.0 has no
   `required_at_open` and refuses unknown keys of a protocol (`#[serde(deny_unknown_fields)]`,
   Canon `0.11.0` `crates/canon/src/model/mod.rs:73`, `:112`, `:127`). So a protocol of
-  dev-operator that uses the key does not register in Loom at all today.
+  a downstream consumer that uses the key does not register in Loom at all today.
 - **In Canon 0.15.0** the key is an evidence-kind field that needs `supplied_by` on the same kind
   (`crates/canon/src/model/mod.rs:222`, `ir/mod.rs:225`, `:352`). `eval::missing_at_open(ir, case,
   evidence, at)` returns the required kinds of which no record applies to the case at `at`, read
