@@ -289,10 +289,16 @@ The `ess` release every step runs comes from the line `requires: ess X.Y.Z` of
 `loom-xtask` set it on each `ess` they start (`Ess` in `crates/loom-executor/tests/support/ess_suite.rs`),
 unless the caller set it, so an `ess` dispatcher newer than the pin runs the pinned release.
 CI installs the backend before
-running the delegation-refusal tests. Every workflow installs Rust 1.99.1, the toolchain the local
-gate runs on, and the pin moves by a story that also fixes the tests that depend on Cargo's layout
-(`adversary2_executor_guard.rs` finds its test binary by path); a local gate runs on the pinned
-version (`rustc --version`). Run `cargo fetch --locked` before the gate, as CI does:
+running the delegation-refusal tests. `rust-toolchain.toml` pins the one Rust release the local gate
+and CI build with (`channel`, by number, with `clippy` and `rustfmt`); rustup reads it in every
+directory of the tree, `consumers/pinned/` included, and no `RUSTUP_TOOLCHAIN` or `+<toolchain>`
+overrides it. Every job that installs Rust reads `channel` from the file in a step `id: toolchain`
+and passes it to `dtolnay/rust-toolchain`; every `rust:` image a workflow or Dockerfile builds in
+carries that release in its tag (`every_workflow_builds_with_the_rust_release_rust_toolchain_toml_pins`
+in `crates/loom-xtask/tests/release_check.rs`). The pin moves by a story that also fixes the tests
+that depend on Cargo's layout (`adversary2_executor_guard.rs` finds its test binary by path; the
+test step finds the tree's sources through the dep-info files under `target/debug`, and on 1.100.0
+it found none and `task check` exited 201). Run `cargo fetch --locked` before the gate, as CI does:
 the offline dependency guard inspects the full graph, including platform-specific crates.
 Before a change is reported done, in this order:
 
@@ -489,10 +495,6 @@ they run in the test step's build (`story:ci-job-time-budget`).
 `task test-step` runs the test step on 4 threads, the CPUs of CI's `ubuntu-latest` runner for a
 public repository, and asks the build pool for 4 slots (`SLOT_TOKENS`), so the local gate and CI
 run the same thread count.
-
-There is no `rust-toolchain.toml`: CI builds on `stable` (`dtolnay/rust-toolchain`), and a local
-toolchain newer than CI's `stable` can add Clippy lints CI does not have. Run the gate on CI's
-version (`RUSTUP_TOOLCHAIN=<version> task check`) when Clippy disagrees.
 
 `task install` builds and installs the current checkout into `~/.local/bin` through locked
 `cargo install --path`; it does not fetch or move a branch. Run the gates before installing a
