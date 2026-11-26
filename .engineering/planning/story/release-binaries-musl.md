@@ -8,7 +8,7 @@ relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:release-binaries-glibc-floor
-revision: 1
+revision: 2
 ---
 ## Outcome
 
@@ -24,10 +24,22 @@ either one the default download.
 
 ## Blocked on
 
-Loom cannot build for musl at its substrate pin. `b10x-substrate-host` (rev `85da2e2b`,
-`crates/loom-intake-slice/Cargo.toml`) calls `SYS_renameat2` in `rename.rs`, which the `libc` crate
-does not define for musl. The fix is substrate's pull request 309. This story starts when Loom's
-pin moves to a substrate commit that holds it; Loom neither patches around it nor vendors or forks
+Loom cannot build for musl at its substrate pin (rev `85da2e2b`, `crates/loom-intake-slice/Cargo.toml`).
+Measured once in CI, 2026-11-26, on the throwaway branch `probe/release-binaries-musl` (run
+45828038948, job `binaries / x86_64-unknown-linux-musl`, `cargo zigbuild --release --locked -p
+b10x-loom-cli --bin b10x-loom --target x86_64-unknown-linux-musl`):
+`error: could not compile b10x-substrate-host (lib) due to 13 previous errors`:
+
+- E0425 `cannot find function renameat2 in module nix::fcntl` at `src/lib.rs:1114` and
+  `src/quota.rs:219`, and E0433 `cannot find RenameFlags in fcntl` at `src/lib.rs:1119` and
+  `src/quota.rs:224`: nix 0.31.3 gates `renameat2` on `target_env = "gnu"`.
+- E0308 `mismatched types: expected i32, found u64` at `src/egress.rs:644, 715, 906, 1616, 1623,
+  1625, 1676, 1694`: `libc::ioctl`'s request is a `c_int` on musl (`SIOCGIFFLAGS`,
+  `NS_GET_USERNS`, …), and E0277 `can't compare u32 with usize` at `src/egress.rs:1694`.
+
+Substrate's pull request 309 addresses the rename; the `ioctl` errors in `egress.rs` need a fix of
+their own unless that pull request covers them. This story starts when Loom's pin moves to a
+substrate commit that compiles for musl; Loom neither patches around it nor vendors or forks
 substrate.
 
 ## Design
