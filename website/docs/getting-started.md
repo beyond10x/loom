@@ -9,7 +9,7 @@ source: crates/loom-cli, .github/workflows/binaries.yml, crates/loom-sdk/example
 # Getting started
 
 Nothing is on a registry. On Linux x86-64 you can download the `b10x-loom` binary a release
-carries; otherwise you build from the repository at the release tag, `0.62.1`, with a Rust
+carries; otherwise you build from the repository at the release tag, `0.63.0`, with a Rust
 toolchain (edition 2024) and `git`. The SDK example below needs the toolchain either way.
 
 ## Download the command line
@@ -23,16 +23,16 @@ earlier: 2.34), and the libraries the `loom-agent` image installs for it (`libss
 the host, with its checksum; download and check it the same way.
 
 ```console
-curl -fLO https://github.com/beyond10x/loom/releases/download/0.62.1/b10x-loom-0.62.1-x86_64-unknown-linux-gnu.tar.gz
-curl -fLO https://github.com/beyond10x/loom/releases/download/0.62.1/b10x-loom-0.62.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c b10x-loom-0.62.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar -xzf b10x-loom-0.62.1-x86_64-unknown-linux-gnu.tar.gz
-./b10x-loom-0.62.1-x86_64-unknown-linux-gnu/b10x-loom --version
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.63.0/b10x-loom-0.63.0-x86_64-unknown-linux-gnu.tar.gz
+curl -fLO https://github.com/beyond10x/loom/releases/download/0.63.0/b10x-loom-0.63.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c b10x-loom-0.63.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf b10x-loom-0.63.0-x86_64-unknown-linux-gnu.tar.gz
+./b10x-loom-0.63.0-x86_64-unknown-linux-gnu/b10x-loom --version
 ```
 
 ```text
-b10x-loom-0.62.1-x86_64-unknown-linux-gnu.tar.gz: OK
-b10x-loom 0.62.1
+b10x-loom-0.63.0-x86_64-unknown-linux-gnu.tar.gz: OK
+b10x-loom 0.63.0
 ```
 
 The checksum file comes from the same place as the archive. A CI that installs Loom keeps the
@@ -42,14 +42,14 @@ instead: `echo "$SHA256  $f" | sha256sum -c -`.
 ## Build the command line
 
 ```console
-git clone --branch 0.62.1 https://github.com/beyond10x/loom.git
+git clone --branch 0.63.0 https://github.com/beyond10x/loom.git
 cd loom
 cargo install --locked --path crates/loom-cli
 b10x-loom --version
 ```
 
 ```text
-b10x-loom 0.62.1
+b10x-loom 0.63.0
 ```
 
 `b10x-loom run --help` lists its flags and exit statuses; the [CLI reference](./reference/cli.md)
