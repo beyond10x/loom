@@ -16,8 +16,8 @@ toolchain (edition 2024) and `git`. The SDK example below needs the toolchain ei
 
 Each release from `0.60.0` on carries `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz`, the
 binary and Loom's `LICENSE`, with its SHA-256 checksum beside it; an earlier release has none.
-The binary needs the glibc of Debian bookworm (2.36) or newer, and the libraries the `loom-agent`
-image installs for it (`libssl3`, `libcurl4`, `ca-certificates`).
+The binary of a release after `0.62.0` needs glibc 2.17 or newer (`0.62.0` and earlier: 2.34), and
+the libraries the `loom-agent` image installs for it (`libssl3`, `libcurl4`, `ca-certificates`).
 
 ```console
 curl -fLO https://github.com/beyond10x/loom/releases/download/0.62.0/b10x-loom-0.62.0-x86_64-unknown-linux-gnu.tar.gz
