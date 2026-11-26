@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use b10x_loom_commission::model::responsibility::CaseId;
-use b10x_loom_tree::model::{TreeRun, TreeStop};
+use b10x_loom_tree::model::{TreeRefusalReason, TreeRun, TreeStop};
 use b10x_loom_tree::runlog::RunLogEvent;
 use b10x_loom_tree::{
     ConfinementAdapter, EngineConfinement, EngineRunner, OpenRequest, RunSettings, TreeTime,
@@ -111,21 +111,63 @@ impl Tree {
     }
 
     fn run(&self, flag: &AtomicBool) -> TreeRun {
-        let runner = EngineRunner::open(&EngineConfinement {
-            adapter: ConfinementAdapter::Local,
-            local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
-            cgroup_root: None,
-        })
-        .unwrap();
-        let settings = RunSettings {
-            max_steps: None,
-            max_wall_seconds: None,
-            time: TreeTime::At("2026-11-22T08:00:00Z".into()),
-            runner: std::sync::Arc::new(runner),
-            confinement: None,
-            cgroup_root: None,
-        };
-        run_tree(&self.store, &self.catalog, &settings, None, Some(flag)).expect("the tree runs")
+        run_tree(&self.store, &self.catalog, &settings(), None, Some(flag)).expect("the tree runs")
+    }
+}
+
+/// A run's settings: no budget, the `local` adapter.
+fn settings() -> RunSettings {
+    let runner = EngineRunner::open(&EngineConfinement {
+        adapter: ConfinementAdapter::Local,
+        local_reason: Some(UNCONFINED_FLAG_REASON.to_owned()),
+        cgroup_root: None,
+    })
+    .unwrap();
+    RunSettings {
+        max_steps: None,
+        max_wall_seconds: None,
+        time: TreeTime::At("2026-11-22T08:00:00Z".into()),
+        runner: std::sync::Arc::new(runner),
+        confinement: None,
+        cgroup_root: None,
+    }
+}
+
+/// `run_tree` with a cancel flag returns when the run ends, not when its cancel watcher next
+/// wakes (`story:run-tree-returns-when-the-run-ends`). The measured runs are of a tree whose root
+/// is already terminated: each reads the store and ends `Terminal` without a step, in about
+/// 10 ms. A run that waits out the watcher's poll (`CANCEL_WATCH`, 100 ms) takes 100 ms or more,
+/// every time, so the fastest of 20 is held below half of it. A run refused at once (an early
+/// return) is held to the same bound.
+#[test]
+#[cfg_attr(not(target_os = "linux"), ignore = "runs Linux host processes")]
+fn a_run_with_a_cancel_flag_returns_when_it_ends() {
+    let tree = Tree::open("rs-cancel-returns", "exit 0\n", "", "exit 1\n");
+    let flag = AtomicBool::new(false);
+    assert_eq!(tree.run(&flag).stop, TreeStop::Terminal);
+    let settings = settings();
+    let missing = tree.store.with_file_name("no-store");
+    let mut ended = Vec::new();
+    let mut refused = Vec::new();
+    for _ in 0..20 {
+        let started = Instant::now();
+        let run = run_tree(&tree.store, &tree.catalog, &settings, None, Some(&flag))
+            .expect("the tree runs");
+        ended.push(started.elapsed());
+        assert_eq!(run.stop, TreeStop::Terminal, "{run:?}");
+        let started = Instant::now();
+        let refusal = run_tree(&missing, &tree.catalog, &settings, None, Some(&flag))
+            .expect_err("no store there");
+        refused.push(started.elapsed());
+        assert_eq!(refusal.reason(), TreeRefusalReason::NotATree, "{refusal:?}");
+    }
+    let bound = Duration::from_millis(100) / 2;
+    for (what, taken) in [("ended", &ended), ("refused", &refused)] {
+        let fastest = taken.iter().min().copied().unwrap_or_default();
+        assert!(
+            fastest < bound,
+            "the fastest of 20 runs with a cancel flag that {what} at once took {fastest:?}: {taken:?}"
+        );
     }
 }
 
