@@ -1,12 +1,23 @@
 name: binaries
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/binaries.yml
+      - .github/workflows/release.yml
+      - deploy/images/loom-agent/Dockerfile
+      - Cargo.lock
+      - crates/loom-xtask/**
   workflow_call:
     inputs:
       version:
         description: The release version, the tag the calling run was started for.
         type: string
         required: true
+
+concurrency:
+  group: binaries-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,19 +40,54 @@ jobs:
     container: rust:1.99-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b
     env:
       VERSION: ${{ inputs.version }}
+      BINARY: target/x86_64-unknown-linux-gnu/release/b10x-loom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
-      - name: Build b10x-loom from the locked dependencies
-        run: cargo build --release --locked -p b10x-loom-cli --bin b10x-loom
+      - name: On a pull request, take the workspace version
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install Zig and cargo-zigbuild, each by a pinned version and digest
+        env:
+          ZIG_VERSION: "0.17.1"
+          ZIG_SHA256: 3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a
+          ZIGBUILD_VERSION: "0.24.1"
+          ZIGBUILD_SHA256: f09b180a517af0e4dd4bffc921bb88e5ab705452a9dd948c61e489b3020c68c2
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/release-tools"
+          mkdir -p "$tools/zig" "$tools/bin"
+          curl --fail --silent --show-error --location --output "$tools/zig.tar.xz" \
+            "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz"
+          echo "$ZIG_SHA256  $tools/zig.tar.xz" | sha256sum --check --strict
+          tar -xJf "$tools/zig.tar.xz" -C "$tools/zig" --strip-components=1
+          curl --fail --silent --show-error --location --output "$tools/zigbuild.tar.xz" \
+            "https://github.com/rust-cross/cargo-zigbuild/releases/download/v$ZIGBUILD_VERSION/cargo-zigbuild-x86_64-unknown-linux-musl.tar.xz"
+          echo "$ZIGBUILD_SHA256  $tools/zigbuild.tar.xz" | sha256sum --check --strict
+          tar -xJf "$tools/zigbuild.tar.xz" -C "$tools/bin" --strip-components=1 \
+            cargo-zigbuild-x86_64-unknown-linux-musl/cargo-zigbuild
+          echo "$tools/zig" >> "$GITHUB_PATH"
+          echo "$tools/bin" >> "$GITHUB_PATH"
+          "$tools/zig/zig" version
+          "$tools/bin/cargo-zigbuild" --version
+
+      - name: Build b10x-loom from the locked dependencies against glibc 2.27
+        run: cargo zigbuild --release --locked -p b10x-loom-cli --bin b10x-loom --target x86_64-unknown-linux-gnu.2.27
 
       - name: Refuse a binary that links libgit2, libssh2, OpenSSL or zlib
-        run: cargo run -q --locked -p loom-xtask -- linked-libraries target/release/b10x-loom
+        run: cargo run -q --locked -p loom-xtask -- linked-libraries "$BINARY"
 
       - name: Refuse a binary that holds the test sync switch
-        run: cargo run -q --locked -p loom-xtask -- unsynced-store target/release/b10x-loom
+        run: cargo run -q --locked -p loom-xtask -- unsynced-store "$BINARY"
+
+      - name: Refuse a binary that needs a glibc newer than 2.27
+        run: cargo run -q --locked -p loom-xtask -- glibc-floor "$BINARY" --max 2.27
 
       - name: Pack the binary with its license, and write the archive's SHA-256 checksum
         run: |
@@ -50,21 +96,22 @@ jobs:
             echo "not a release version: $VERSION" >&2
             exit 1
           fi
-          test "$(target/release/b10x-loom --version)" = "b10x-loom $VERSION"
+          test "$("$BINARY" --version)" = "b10x-loom $VERSION"
           name="b10x-loom-$VERSION-x86_64-unknown-linux-gnu"
           mkdir "$name"
-          install -m 0755 target/release/b10x-loom "$name/b10x-loom"
+          install -m 0755 "$BINARY" "$name/b10x-loom"
           install -m 0644 LICENSE "$name/LICENSE"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          ls -l "$BINARY" "$name.tar.gz"
           cat "$name.tar.gz.sha256"
 
       - name: Keep the archive and its checksum as the workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: b10x-loom-${{ inputs.version }}
+          name: b10x-loom-${{ env.VERSION }}
           path: |
-            b10x-loom-${{ inputs.version }}-x86_64-unknown-linux-gnu.tar.gz
-            b10x-loom-${{ inputs.version }}-x86_64-unknown-linux-gnu.tar.gz.sha256
+            b10x-loom-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+            b10x-loom-${{ env.VERSION }}-x86_64-unknown-linux-gnu.tar.gz.sha256
           retention-days: 30
           if-no-files-found: error

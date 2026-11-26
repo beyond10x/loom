@@ -33,6 +33,12 @@
 //! secret or uploads to a release, because the bot attaches the files (AGENTS.md § Releases). The
 //! README and the getting-started page download that archive and check it with `sha256sum -c`.
 //!
+//! `story:release-binaries-glibc-floor`: `binaries.yml` builds with `cargo zigbuild` for
+//! `x86_64-unknown-linux-gnu.2.27`, installing Zig and cargo-zigbuild by pinned version and
+//! SHA-256, and `loom-xtask glibc-floor --max 2.27` refuses the binary before it is packed when it
+//! needs a newer glibc. A pull request that touches the release build runs the same job, packing
+//! the workspace version, and uploads nothing to a release.
+//!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time; fixtures land under
 //! `CARGO_TARGET_TMPDIR`.
 
@@ -1223,6 +1229,21 @@ fn step_running(steps: &[serde_yaml_ng::Value], fragment: &str) -> usize {
         .unwrap_or_else(|| panic!("no step runs {fragment}"))
 }
 
+/// The glibc floor of the `x86_64-unknown-linux-gnu` binary (`story:release-binaries-glibc-floor`):
+/// `cargo zigbuild` links against it, and `loom-xtask glibc-floor` holds the built binary to it.
+/// It is the lowest the dependency graph links: `b10x-substrate-host` calls `memfd_create`, which
+/// glibc has from 2.27; at 2.17 the link fails with `undefined symbol: memfd_create`.
+const GLIBC_FLOOR: &str = "2.27";
+
+/// The paths whose change on a pull request runs `binaries.yml` without a release.
+const BINARIES_PULL_REQUEST_PATHS: [&str; 5] = [
+    ".github/workflows/binaries.yml",
+    ".github/workflows/release.yml",
+    "deploy/images/loom-agent/Dockerfile",
+    "Cargo.lock",
+    "crates/loom-xtask/**",
+];
+
 #[test]
 fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
     let binaries = workflow("binaries.yml");
@@ -1234,9 +1255,16 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
         .collect();
     assert_eq!(
         triggers,
-        ["workflow_call"],
-        "binaries.yml must run only when called"
+        ["pull_request", "workflow_call"],
+        "binaries.yml must run when called and on a pull request that touches the release build"
     );
+    let paths: Vec<&str> = binaries["on"]["pull_request"]["paths"]
+        .as_sequence()
+        .unwrap_or_else(|| panic!("binaries.yml runs on every pull request"))
+        .iter()
+        .filter_map(serde_yaml_ng::Value::as_str)
+        .collect();
+    assert_eq!(paths, BINARIES_PULL_REQUEST_PATHS);
     let input = &binaries["on"]["workflow_call"]["inputs"]["version"];
     assert_eq!(input["type"].as_str(), Some("string"));
     assert_eq!(input["required"].as_bool(), Some(true));
@@ -1252,6 +1280,11 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
         Some("${{ inputs.version }}"),
         "the job reads the version from its input through the environment"
     );
+    assert_eq!(
+        job["env"]["BINARY"].as_str(),
+        Some("target/x86_64-unknown-linux-gnu/release/b10x-loom"),
+        "every step reads the built binary from where `cargo zigbuild` puts it"
+    );
     let steps = steps(job);
 
     // The tagged commit, as the caller's run checked it out: no `ref` names another.
@@ -1265,37 +1298,58 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
         "the checkout must build the commit the release run was started for"
     );
 
+    // A pull request has no tag: it packs the workspace version, and only a pull request does.
+    let pull_request = step_running(steps, r#"echo "VERSION=$version" >> "$GITHUB_ENV""#);
+    assert_eq!(
+        steps[pull_request]["if"].as_str(),
+        Some("github.event_name == 'pull_request'"),
+        "only a pull request may name the version the archive carries"
+    );
+
+    // story:release-binaries-glibc-floor: built by `cargo zigbuild` against the floor.
+    let install = step_running(steps, r#""$tools/bin/cargo-zigbuild" --version"#);
     let build = step_running(
         steps,
-        "cargo build --release --locked -p b10x-loom-cli --bin b10x-loom",
+        &format!(
+            "cargo zigbuild --release --locked -p b10x-loom-cli --bin b10x-loom --target \
+             {TARGET}.{GLIBC_FLOOR}"
+        ),
     );
     // story:drop-the-substrate-git-feature: the built binary links no libgit2, libssh2, OpenSSL
     // or zlib, checked before it is packed.
     let linked = step_running(
         steps,
-        "cargo run -q --locked -p loom-xtask -- linked-libraries target/release/b10x-loom",
-    );
-    let package = step_running(steps, "sha256sum");
-    assert!(
-        build < linked && linked < package,
-        "binaries.yml must check the linked libraries after the build and before packing"
+        r#"cargo run -q --locked -p loom-xtask -- linked-libraries "$BINARY""#,
     );
     // story:tree-run-tests-fit-the-budget: the built binary holds no test sync switch.
     let unsynced = step_running(
         steps,
-        "cargo run -q --locked -p loom-xtask -- unsynced-store target/release/b10x-loom",
+        r#"cargo run -q --locked -p loom-xtask -- unsynced-store "$BINARY""#,
     );
-    assert!(
-        build < unsynced && unsynced < package,
-        "binaries.yml must refuse a binary holding the test sync switch after the build and \
-         before packing"
+    // story:release-binaries-glibc-floor: and needs no glibc above the floor it was built for.
+    let floor = step_running(
+        steps,
+        &format!(
+            r#"cargo run -q --locked -p loom-xtask -- glibc-floor "$BINARY" --max {GLIBC_FLOOR}"#
+        ),
     );
+    let package = step_running(steps, "sha256sum \"$name.tar.gz\"");
+    for (check, what) in [
+        (linked, "check the linked libraries"),
+        (unsynced, "refuse a binary holding the test sync switch"),
+        (floor, "hold the binary to the glibc floor"),
+    ] {
+        assert!(
+            build < check && check < package,
+            "binaries.yml must {what} after the build and before packing"
+        );
+    }
     let run = steps[package]["run"].as_str().unwrap();
     for fragment in [
         r#"[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]"#,
-        r#"test "$(target/release/b10x-loom --version)" = "b10x-loom $VERSION""#,
+        r#"test "$("$BINARY" --version)" = "b10x-loom $VERSION""#,
         r#"name="b10x-loom-$VERSION-x86_64-unknown-linux-gnu""#,
-        r#"install -m 0755 target/release/b10x-loom "$name/b10x-loom""#,
+        r#"install -m 0755 "$BINARY" "$name/b10x-loom""#,
         r#"install -m 0644 LICENSE "$name/LICENSE""#,
         r#"tar -czf "$name.tar.gz" "$name""#,
         r#"sha256sum "$name.tar.gz" > "$name.tar.gz.sha256""#,
@@ -1309,15 +1363,17 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
 
     let upload = step_using(steps, "actions/upload-artifact");
     assert!(
-        checkout < build && build < package && package < upload,
-        "binaries.yml must check out, build, package and then upload, in that order"
+        checkout < pull_request
+            && pull_request < install
+            && install < build
+            && build < package
+            && package < upload,
+        "binaries.yml must check out, name the version, install, build, package and then upload, \
+         in that order"
     );
     let with = &steps[upload]["with"];
-    assert_eq!(
-        with["name"].as_str(),
-        Some("b10x-loom-${{ inputs.version }}")
-    );
-    let archive = format!("b10x-loom-${{{{ inputs.version }}}}-{TARGET}.tar.gz");
+    assert_eq!(with["name"].as_str(), Some("b10x-loom-${{ env.VERSION }}"));
+    let archive = format!("b10x-loom-${{{{ env.VERSION }}}}-{TARGET}.tar.gz");
     let paths: Vec<&str> = with["path"]
         .as_str()
         .unwrap_or_default()
@@ -1332,6 +1388,80 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
     );
     assert_eq!(with["if-no-files-found"].as_str(), Some("error"));
     assert_eq!(with["retention-days"].as_i64(), Some(30));
+}
+
+/// story:release-binaries-glibc-floor: Zig and cargo-zigbuild come by a pinned version, each
+/// download checked against a pinned SHA-256 before it is unpacked; nothing is piped into a shell
+/// and nothing is installed from a package index.
+#[test]
+fn binaries_workflow_installs_zig_and_cargo_zigbuild_by_pinned_version_and_digest() {
+    let binaries = workflow("binaries.yml");
+    let steps = steps(binaries_job(&binaries));
+    let install = &steps[step_running(steps, r#""$tools/bin/cargo-zigbuild" --version"#)];
+    let env = &install["env"];
+    for (version, digest) in [
+        ("ZIG_VERSION", "ZIG_SHA256"),
+        ("ZIGBUILD_VERSION", "ZIGBUILD_SHA256"),
+    ] {
+        let pinned = env[version].as_str().unwrap_or_default();
+        assert!(
+            pinned.split('.').count() == 3
+                && pinned.split('.').all(|part| part.parse::<u32>().is_ok()),
+            "{version} is not an exact version: {pinned:?}"
+        );
+        let sha = env[digest].as_str().unwrap_or_default();
+        assert!(
+            sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{digest} is not a SHA-256: {sha:?}"
+        );
+    }
+    let run = install["run"].as_str().unwrap_or_default();
+    let lines: Vec<&str> = run.lines().map(str::trim).collect();
+    for (download, digest) in [
+        ("zig.tar.xz", "ZIG_SHA256"),
+        ("zigbuild.tar.xz", "ZIGBUILD_SHA256"),
+    ] {
+        let fetched = lines
+            .iter()
+            .position(|line| line.starts_with("curl ") && line.contains(download))
+            .unwrap_or_else(|| panic!("the install step does not download {download}:\n{run}"));
+        let checked = lines
+            .iter()
+            .position(|line| {
+                line.contains(&format!("${digest}"))
+                    && line.contains(download)
+                    && line.ends_with("sha256sum --check --strict")
+            })
+            .unwrap_or_else(|| panic!("the install step does not check {download}:\n{run}"));
+        let unpacked = lines
+            .iter()
+            .position(|line| line.starts_with("tar ") && line.contains(download))
+            .unwrap_or_else(|| panic!("the install step does not unpack {download}:\n{run}"));
+        assert!(
+            fetched < checked && checked < unpacked,
+            "{download} must be checked against {digest} after the download and before unpacking"
+        );
+    }
+    assert_eq!(
+        run.matches("curl ").count(),
+        2,
+        "the install step downloads Zig and cargo-zigbuild, and nothing else:\n{run}"
+    );
+    for line in &lines {
+        let piped = line.split('|').skip(1).map(str::trim);
+        for command in piped {
+            assert!(
+                command.starts_with("sha256sum "),
+                "the install step pipes into `{command}`, not sha256sum:\n{run}"
+            );
+        }
+        for word in ["pip ", "pip3 ", "cargo install", "apt-get", "python"] {
+            assert!(
+                !line.contains(word),
+                "the install step runs `{word}`:\n{run}"
+            );
+        }
+    }
 }
 
 /// story:tree-run-tests-fit-the-budget: `unsynced-store` refuses a file holding the marker a build
@@ -1376,6 +1506,54 @@ fn a_binary_with_the_test_sync_switch_is_refused() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// story:release-binaries-glibc-floor: `glibc-floor` and `static-binary` read a binary the host
+/// linked, `loom-xtask` itself: it needs a glibc above the x86-64 baseline `2.2.5` and none at
+/// `999.0`, and it has glibc's program interpreter, so it is not static. A file that is no ELF is
+/// refused by name.
+#[cfg(all(target_os = "linux", target_env = "gnu", target_arch = "x86_64"))]
+#[test]
+fn glibc_floor_and_static_binary_read_a_binary_the_host_linked() {
+    let xtask = Path::new(env!("CARGO_BIN_EXE_loom-xtask"));
+    let run =
+        |args: &[&str], binary: &Path| Command::new(xtask).args(args).arg(binary).output().unwrap();
+    let shown = xtask.display().to_string();
+
+    let refused = run(&["glibc-floor", "--max", "2.2.5"], xtask);
+    let said = stderr(&refused);
+    assert_ne!(refused.status.code(), Some(0), "{said}");
+    assert!(said.contains(&shown), "{said}");
+    assert!(said.contains("above the glibc floor 2.2.5: "), "{said}");
+
+    let passed = run(&["glibc-floor", "--max", "999.0"], xtask);
+    let said = String::from_utf8_lossy(&passed.stdout);
+    assert_eq!(passed.status.code(), Some(0), "{}", stderr(&passed));
+    assert!(said.contains("within the glibc floor 999.0"), "{said}");
+
+    let dynamic = run(&["static-binary"], xtask);
+    let said = stderr(&dynamic);
+    assert_ne!(dynamic.status.code(), Some(0), "{said}");
+    assert!(
+        said.contains("is not static: it names the program interpreter "),
+        "{said}"
+    );
+    assert!(said.contains("the shared library libc.so.6"), "{said}");
+
+    let script = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "glibc-floor-{}-{}.sh",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::write(&script, "#!/bin/sh\n").unwrap();
+    let foreign = run(&["glibc-floor", "--max", "2.17"], &script);
+    let said = stderr(&foreign);
+    assert_ne!(foreign.status.code(), Some(0), "{said}");
+    assert!(said.contains("not an ELF file"), "{said}");
+    let _ = fs::remove_file(&script);
+}
+
 #[test]
 fn binaries_workflow_reads_no_secret_uploads_to_no_release_and_puts_no_expression_in_a_shell() {
     let path = repository().join(".github/workflows/binaries.yml");
@@ -1403,8 +1581,24 @@ fn binaries_workflow_reads_no_secret_uploads_to_no_release_and_puts_no_expressio
             !run.contains("${{"),
             "a step puts an expression into its shell line: {run}"
         );
-        for word in ["gh ", "curl", "wget", "github.com"] {
+        for word in ["gh ", "wget", "api.github.com", "uploads.github.com"] {
             assert!(!run.contains(word), "a step reaches GitHub ({word}): {run}");
+        }
+        // story:release-binaries-glibc-floor: the one download is the pinned toolchain's, and
+        // from GitHub it reads only cargo-zigbuild's release files.
+        if run.contains("curl") {
+            assert!(
+                run.contains(r#""$tools/bin/cargo-zigbuild" --version"#),
+                "a step other than the toolchain install downloads: {run}"
+            );
+        }
+        for (at, _) in run.match_indices("github.com") {
+            assert!(
+                run[..at].ends_with("https://")
+                    && run[at..]
+                        .starts_with("github.com/rust-cross/cargo-zigbuild/releases/download/"),
+                "a step reaches GitHub beyond cargo-zigbuild's release files: {run}"
+            );
         }
     }
 }

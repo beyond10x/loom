@@ -42,6 +42,10 @@
 //! `linked-libraries <binary>` runs `ldd` on a built binary and fails, naming the library, when it
 //! links `libgit2`, `libssh2`, `libssl`, `libcrypto` or `libz` (see `linked_libraries`).
 //!
+//! `glibc-floor <binary> --max <version>` fails when a built binary needs a `GLIBC_` symbol version
+//! above the floor, naming the highest; `static-binary <binary>` fails when it has a program
+//! interpreter or names a shared library. Both read the ELF in Rust (see `binary_linkage`).
+//!
 //! `docs-stamp --check` (`task docs-check`) compares the working tree with the stamp of the
 //! generated documentation and builds nothing; `docs-stamp --slow-needed` decides whether CI runs
 //! `task docs-slow` (see `docs_stamp`).
@@ -57,6 +61,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use syn::ext::IdentExt;
 use syn::visit::Visit;
 
+mod binary_linkage;
 mod delegation;
 mod docs_stamp;
 mod durable_check;
@@ -226,6 +231,22 @@ enum Command {
         /// The binary, e.g. `target/release/b10x-loom`.
         binary: PathBuf,
     },
+    /// Fail when a built binary needs a `GLIBC_x.y` symbol version above `--max`, naming the
+    /// highest, or needs none (it is then no glibc build). Reads the ELF in Rust. Needs no
+    /// repository root.
+    GlibcFloor {
+        /// The binary, e.g. `target/x86_64-unknown-linux-gnu/release/b10x-loom`.
+        binary: PathBuf,
+        /// The highest glibc version the binary may need, e.g. `2.17`.
+        #[arg(long)]
+        max: String,
+    },
+    /// Fail, naming them, when a built binary has a program interpreter (`PT_INTERP`) or names a
+    /// shared library (`DT_NEEDED`). Reads the ELF in Rust. Needs no repository root.
+    StaticBinary {
+        /// The binary, e.g. `target/x86_64-unknown-linux-musl/release/b10x-loom`.
+        binary: PathBuf,
+    },
     /// The lane `task durable-check`: the count tests of the tree path's stores run once each and
     /// pass without the test sync switch's feature, a release build of `b10x-loom-governor` with it
     /// fails to compile, and `b10x-loom-cli`'s normal dependencies do not hold it.
@@ -314,6 +335,12 @@ fn run(cli: Cli) -> Result<(), String> {
     }
     if let Command::UnsyncedStore { binary } = &cli.command {
         return unsynced_store::unsynced_store(binary);
+    }
+    if let Command::GlibcFloor { binary, max } = &cli.command {
+        return binary_linkage::glibc_floor(binary, max);
+    }
+    if let Command::StaticBinary { binary } = &cli.command {
+        return binary_linkage::static_binary(binary);
     }
     let root = match cli.root {
         Some(root) => root,
@@ -405,6 +432,8 @@ fn run(cli: Cli) -> Result<(), String> {
         }
         Command::LinkedLibraries { binary } => linked_libraries::linked_libraries(&binary),
         Command::UnsyncedStore { binary } => unsynced_store::unsynced_store(&binary),
+        Command::GlibcFloor { binary, max } => binary_linkage::glibc_floor(&binary, &max),
+        Command::StaticBinary { binary } => binary_linkage::static_binary(&binary),
         Command::DurableCheck => durable_check::durable_check(&root),
         Command::DocsStamp { check: true, .. } => {
             docs_stamp::check(&root, &ess_suite::Ess::new(&cli.ess, &root))
