@@ -169,8 +169,11 @@ establish live quality or cost savings. See [working context](website/docs/conce
 
 Each release from `0.60.0` on carries `b10x-loom` for Linux on x86-64 as a release asset, with
 its SHA-256 checksum beside it (an earlier release has none: build it from source below). A
-release after `0.62.0` needs glibc 2.27 or newer (`0.62.0` and earlier: 2.34), and the libraries
-the `loom-agent` image installs for it (`libssl3`, `libcurl4`, `ca-certificates`):
+release after `0.62.1` needs glibc 2.17 or newer (`0.62.1`: 2.27; `0.62.0` and earlier: 2.34), and the
+libraries the `loom-agent` image installs for it (`libssl3`, `libcurl4`, `ca-certificates`). A
+release after `0.62.1` also carries `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz`, a
+static binary that needs no C library on the host, with its checksum, downloaded and checked
+the same way:
 
 ```console
 curl -fLO https://github.com/beyond10x/loom/releases/download/0.62.1/b10x-loom-0.62.1-x86_64-unknown-linux-gnu.tar.gz

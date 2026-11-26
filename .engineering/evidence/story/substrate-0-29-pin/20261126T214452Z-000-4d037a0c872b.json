@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T21:44:52Z",
+  "actor": "human:operator",
+  "artifact": "story:substrate-0-29-pin",
+  "kind": "story",
+  "revision": 3,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "acceptance held at ef86c851 (PR 180): host_git_hardening every_host_git_command_goes_through_a_hardened_helper reads 0.29.0 at rev 1a10a30d; b10x-loom-intake-slice nextest with LOOM_REQUIRE_DELEGATION=1: 462 passed, 0 failed; CI loom / task check green; binaries / x86_64-unknown-linux-gnu prints 'needs GLIBC_2.17 at most, within the glibc floor 2.17'",
+    "reference": "ef86c851"
+  }
+}

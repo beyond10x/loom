@@ -825,16 +825,16 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-exec-gate"
-version = "0.24.0"
-source = "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774"
+version = "0.29.0"
+source = "git+https://github.com/beyond10x/substrate?rev=1a10a30d6856e6b4e20d55104638d26d37a1b992#1a10a30d6856e6b4e20d55104638d26d37a1b992"
 dependencies = [
  "libc",
 ]
 
 [[package]]
 name = "b10x-substrate-guarded"
-version = "0.24.0"
-source = "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774"
+version = "0.29.0"
+source = "git+https://github.com/beyond10x/substrate?rev=1a10a30d6856e6b4e20d55104638d26d37a1b992#1a10a30d6856e6b4e20d55104638d26d37a1b992"
 dependencies = [
  "b10x-substrate-wire",
  "base64 0.23.1",
@@ -848,8 +848,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-host"
-version = "0.24.0"
-source = "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774"
+version = "0.29.0"
+source = "git+https://github.com/beyond10x/substrate?rev=1a10a30d6856e6b4e20d55104638d26d37a1b992#1a10a30d6856e6b4e20d55104638d26d37a1b992"
 dependencies = [
  "async-trait",
  "b10x-substrate-exec-gate",
@@ -876,8 +876,8 @@ dependencies = [
 
 [[package]]
 name = "b10x-substrate-wire"
-version = "0.24.0"
-source = "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774"
+version = "0.29.0"
+source = "git+https://github.com/beyond10x/substrate?rev=1a10a30d6856e6b4e20d55104638d26d37a1b992#1a10a30d6856e6b4e20d55104638d26d37a1b992"
 dependencies = [
  "base64 0.23.1",
  "chrono",

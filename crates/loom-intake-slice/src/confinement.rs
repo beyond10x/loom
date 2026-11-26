@@ -1972,6 +1972,10 @@ impl ChildCommand {
                 profile: self.profile,
                 required: true,
                 requires: None,
+                // Loom asks for no executable list (Substrate 0.28.0), and `check_record` holds
+                // the record to none.
+                exec_subpaths: None,
+                exec_denied_paths: Vec::new(),
             },
             limits: limits(self.timeout),
             wait: true,
@@ -3251,7 +3255,9 @@ fn check_workdir_served(
 /// ([`network_applied`]), the apertures `input` asked for by name being exactly `egress`, in
 /// order; exactly the working directory requested, or none when none was
 /// ([`ChildCommand::with_workdir`]); no confinement requirement (`requires`, Substrate 0.18.0),
-/// which Loom never sends, in the request or echoed in the record; no writable root
+/// which Loom never sends, in the request or echoed in the record; no executable allow-list or
+/// deny-list (`exec_subpaths`, `exec_denied_paths`, Substrate 0.28.0), which Loom never sends,
+/// in the request or echoed in the record; no writable root
 /// or execution capsule, which Loom never requests, and so the filesystem Substrate applies without a capsule. A test's launch and a child's are held to the
 /// same record. The record is taken apart without `..`, so a member a later Substrate adds does
 /// not compile until it is judged here.
@@ -3274,6 +3280,8 @@ fn check_record(
         workdir,
         writable_roots,
         requires,
+        exec_subpaths,
+        exec_denied_paths,
     } = record;
     if *workspace_access != input.workspace_access
         || !network_applied(input.sandbox.network, egress, network)
@@ -3292,6 +3300,10 @@ fn check_record(
         || cgroup.as_deref().is_none_or(str::is_empty)
         || input.sandbox.requires.is_some()
         || requires.is_some()
+        || input.sandbox.exec_subpaths.is_some()
+        || !input.sandbox.exec_denied_paths.is_empty()
+        || exec_subpaths.is_some()
+        || !exec_denied_paths.is_empty()
     {
         return Err(refuse(
             ConfinementRefusal::CapabilityUnserved,
@@ -3721,6 +3733,8 @@ impl RustClosure {
                 profile: SandboxProfile::Workspace,
                 required: true,
                 requires: None,
+                exec_subpaths: None,
+                exec_denied_paths: Vec::new(),
             },
             limits: limits(command.timeout()),
             wait: true,
@@ -4723,6 +4737,8 @@ mod tests {
                 profile: SandboxProfile::Workspace,
                 required: true,
                 requires: None,
+                exec_subpaths: None,
+                exec_denied_paths: Vec::new(),
             }
         );
         assert_eq!(
@@ -5453,6 +5469,8 @@ mod tests {
             workdir: None,
             writable_roots: Vec::new(),
             requires: None,
+            exec_subpaths: None,
+            exec_denied_paths: Vec::new(),
         }
     }
 
@@ -6106,6 +6124,8 @@ mod tests {
                 profile: SandboxProfile::Workspace,
                 required: true,
                 requires: None,
+                exec_subpaths: None,
+                exec_denied_paths: Vec::new(),
             }
         );
         let profile = requested_profile(&input, &[model()]);

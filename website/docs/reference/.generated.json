@@ -1,9 +1,9 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.99.7",
-  "inputs": "sha256:5e649817ca90c9a848b481fbdd27b346534bd5d67719deff682d7172b09280fa",
+  "inputs": "sha256:f54cce2b5c473edeebacaf210038f98fb9d88b7800530a1299b61ee80abe5fd4",
   "input_files": {
-    "Cargo.lock": "sha256:a37d9b89735784e25b6764a3a5c47cf24ddc8649bb03a10f7c28ea3d6b85da70",
+    "Cargo.lock": "sha256:0936597cb74cb441af28d51b1b4efa6fddb47ddcec8a86d096c51cb5cb2e97e6",
     "Cargo.toml": "sha256:aadad6775d9b5273f16af077c38e12eee1598eb1cbe22908481681cf124d93c2",
     "crates/loom-a2a/Cargo.toml": "sha256:a85fdf84ce68063450314915c8fa43a5962dfac9550786dd1b0a31a1286e93cd",
     "crates/loom-agent/Cargo.toml": "sha256:302270490d6bcb9a6e670379027839fc30a8f485465f395f832ff505d36ed00d",
@@ -245,7 +245,7 @@
     "crates/loom-intake-conformance/Cargo.toml": "sha256:c1ae480ec0b8cd077e4c1a6b9af65f9a61b32e8894c0c036eb0471bafbaf5636",
     "crates/loom-intake-references/Cargo.toml": "sha256:cf1be3675a7fe67b4d064a994fa26e89cecc7742217c77bd189bab5299ea7a01",
     "crates/loom-intake-router/Cargo.toml": "sha256:922534f9b7c141676b92b7a81fe6000ba7a2b1a05684ecd8aec9c06d28170ad6",
-    "crates/loom-intake-slice/Cargo.toml": "sha256:18365eef03a6f9d152801494c2689ac8a5e502e12140b4fdbf302fee9be5d72a",
+    "crates/loom-intake-slice/Cargo.toml": "sha256:703508f254f40ad5d6455442b053d1d6a0637efeab53351e941f771ee51ecf7c",
     "crates/loom-mandate/Cargo.toml": "sha256:70110132df3ed1c40fc09689d6dd180d2b2869bc2a781edea33b7eeac6d9fecd",
     "crates/loom-operator/Cargo.toml": "sha256:fe61e92cf46fe16b6b68f03cb8b9d92a76350251307da0bc953befc2ce140335",
     "crates/loom-operator/src/admission.rs": "sha256:970ea0a483546cd8e417fc956fb19a02148d6a2d8eb566d07a9ae64152c64c24",

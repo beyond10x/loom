@@ -27,8 +27,8 @@ serde = "1"
 sha2 = "0.10"
 tokio = { version = "1.53", features = ["rt", "rt-multi-thread", "time", "macros"] }
 # Substrate's embedded host and wire are one released contract, ported from Harness.
-substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "85da2e2be46b690993007990905d6d3934650774", version = "=0.24.0", default-features = false }
-substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "85da2e2be46b690993007990905d6d3934650774", version = "=0.24.0" }
+substrate-host = { package = "b10x-substrate-host", git = "https://github.com/beyond10x/substrate", rev = "1a10a30d6856e6b4e20d55104638d26d37a1b992", version = "=0.29.0", default-features = false }
+substrate-wire = { package = "b10x-substrate-wire", git = "https://github.com/beyond10x/substrate", rev = "1a10a30d6856e6b4e20d55104638d26d37a1b992", version = "=0.29.0" }
 intake_model = { package = "intake", path = "../../generated/rust/intake" }
 libc = "0.2"
 nix = { version = "0.31", default-features = false, features = ["process", "signal"] }

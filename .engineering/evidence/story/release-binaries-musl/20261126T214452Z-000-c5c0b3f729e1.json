@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T21:44:52Z",
+  "actor": "human:operator",
+  "artifact": "story:release-binaries-musl",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "acceptance held at ef86c851 (PR 180): release_check binaries_workflow_builds_a_static_musl_binary_beside_the_gnu_one, agents_md_releases_names_the_attach_and_verify_commands, readme_and_site_download_the_release_binary_with_its_checksum pass (loom-xtask 173 passed); CI binaries / x86_64-unknown-linux-musl green, prints 'is static: no program interpreter and no shared library'; the binary starts in alpine:3.22 (Measured section)",
+    "reference": "ef86c851"
+  }
+}

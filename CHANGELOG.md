@@ -12,6 +12,16 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- Each release carries a static `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz` and its `.sha256` (story:release-binaries-musl)
+
+### Changed
+
+- **Breaking:** `ChildResult::driver_record` and `TestExecution::driver_record`, Substrate's `AppliedConfinement`, gain `exec_subpaths` and `exec_denied_paths` (story:substrate-0-29-pin)
+- Substrate moves from 0.24.0 to 0.29.0 (`b10x-substrate-host`, `-wire`); Loom sends no executable list and refuses a record that has one (story:substrate-0-29-pin)
+- The `x86_64-unknown-linux-gnu` release binary needs glibc 2.17 or newer, was 2.27: Substrate 0.29.0 makes `memfd_create` a system call (story:substrate-0-29-pin)
+
 ## [0.62.1] - 2026-11-26
 
 No breaking changes.

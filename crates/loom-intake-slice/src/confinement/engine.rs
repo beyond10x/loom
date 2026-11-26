@@ -1198,10 +1198,12 @@ mod tests {
                 Wait::Lost => {
                     let waited = self.inner.wait(run);
                     Box::pin(async move {
-                        waited.await.map(|observed| RunObservation {
-                            state: RunState::Unknown,
-                            exit: None,
-                            ..observed
+                        // `RunObservation` is `#[non_exhaustive]` (Substrate 0.27.0): the lost
+                        // end is the real one with its state and exit taken away.
+                        waited.await.map(|mut observed| {
+                            observed.state = RunState::Unknown;
+                            observed.exit = None;
+                            observed
                         })
                     })
                 }

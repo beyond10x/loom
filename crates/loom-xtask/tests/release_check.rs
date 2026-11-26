@@ -34,10 +34,16 @@
 //! README and the getting-started page download that archive and check it with `sha256sum -c`.
 //!
 //! `story:release-binaries-glibc-floor`: `binaries.yml` builds with `cargo zigbuild` for
-//! `x86_64-unknown-linux-gnu.2.27`, installing Zig and cargo-zigbuild by pinned version and
-//! SHA-256, and `loom-xtask glibc-floor --max 2.27` refuses the binary before it is packed when it
+//! `x86_64-unknown-linux-gnu.2.17`, installing Zig and cargo-zigbuild by pinned version and
+//! SHA-256, and `loom-xtask glibc-floor --max 2.17` refuses the binary before it is packed when it
 //! needs a newer glibc. A pull request that touches the release build runs the same job, packing
 //! the workspace version, and uploads nothing to a release.
+//!
+//! `story:release-binaries-musl`: beside it a second job builds a static `b10x-loom` for
+//! `x86_64-unknown-linux-musl`, refuses it unless `loom-xtask static-binary` passes, packs it with
+//! `LICENSE` and musl's `COPYRIGHT` as `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz`
+//! beside its `.sha256`, and keeps both as the workflow artifact of that name; AGENTS.md
+//! § Releases downloads, attaches and verifies both archives.
 //!
 //! The repository is read from `CARGO_MANIFEST_DIR` at run time; fixtures land under
 //! `CARGO_TARGET_TMPDIR`.
@@ -1164,8 +1170,10 @@ fn each_image_runs_its_locked_release_binary_as_a_non_root_user_on_pinned_bases(
     }
 }
 
-/// The one target a release builds `b10x-loom` for (`story:release-binaries`).
+/// The glibc target a release builds `b10x-loom` for (`story:release-binaries`).
 const TARGET: &str = "x86_64-unknown-linux-gnu";
+/// The static target beside it (`story:release-binaries-musl`).
+const MUSL: &str = "x86_64-unknown-linux-musl";
 
 /// The file names of every workflow under `.github/workflows/`.
 fn workflow_names() -> Vec<String> {
@@ -1185,17 +1193,31 @@ fn workflow_names() -> Vec<String> {
     names
 }
 
-/// The one job of `binaries.yml`.
-fn binaries_job(binaries: &serde_yaml_ng::Value) -> &serde_yaml_ng::Value {
+/// The jobs of `binaries.yml`, one per target: [`TARGET`] and [`MUSL`], in that order.
+fn binaries_jobs(binaries: &serde_yaml_ng::Value) -> Vec<&serde_yaml_ng::Value> {
     let jobs = binaries["jobs"]
         .as_mapping()
         .unwrap_or_else(|| panic!("binaries.yml has no jobs"));
+    let names: Vec<&str> = jobs
+        .keys()
+        .filter_map(serde_yaml_ng::Value::as_str)
+        .collect();
     assert_eq!(
-        jobs.len(),
-        1,
-        "binaries.yml must hold one job, binaries / {TARGET}"
+        names,
+        [TARGET, MUSL],
+        "binaries.yml must hold one job per target, named after it"
     );
-    jobs.values().next().unwrap()
+    jobs.values().collect()
+}
+
+/// The job of `binaries.yml` that builds for [`TARGET`].
+fn binaries_job(binaries: &serde_yaml_ng::Value) -> &serde_yaml_ng::Value {
+    binaries_jobs(binaries)[0]
+}
+
+/// The job of `binaries.yml` that builds for [`MUSL`].
+fn musl_job(binaries: &serde_yaml_ng::Value) -> &serde_yaml_ng::Value {
+    binaries_jobs(binaries)[1]
 }
 
 fn steps(job: &serde_yaml_ng::Value) -> &[serde_yaml_ng::Value] {
@@ -1231,9 +1253,10 @@ fn step_running(steps: &[serde_yaml_ng::Value], fragment: &str) -> usize {
 
 /// The glibc floor of the `x86_64-unknown-linux-gnu` binary (`story:release-binaries-glibc-floor`):
 /// `cargo zigbuild` links against it, and `loom-xtask glibc-floor` holds the built binary to it.
-/// It is the lowest the dependency graph links: `b10x-substrate-host` calls `memfd_create`, which
-/// glibc has from 2.27; at 2.17 the link fails with `undefined symbol: memfd_create`.
-const GLIBC_FLOOR: &str = "2.27";
+/// It is the oldest glibc Rust supports on x86-64 (`story:substrate-0-29-pin`): from Substrate
+/// 0.29.0 `b10x-substrate-host` makes `memfd_create` and `renameat2` as system calls, so the graph
+/// needs no `GLIBC_2.27` or `GLIBC_2.28` symbol (before, `memfd_create` held it at 2.27).
+const GLIBC_FLOOR: &str = "2.17";
 
 /// The paths whose change on a pull request runs `binaries.yml` without a release.
 const BINARIES_PULL_REQUEST_PATHS: [&str; 5] = [
@@ -1386,6 +1409,123 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
         [archive.clone(), format!("{archive}.sha256")],
         "the artifact must hold the archive and its checksum, and nothing else"
     );
+    assert_eq!(with["if-no-files-found"].as_str(), Some("error"));
+    assert_eq!(with["retention-days"].as_i64(), Some(30));
+}
+
+/// story:release-binaries-musl: beside the gnu job, `binaries.yml` builds a static `b10x-loom` for
+/// `x86_64-unknown-linux-musl` with the same pinned toolchain, refuses it unless
+/// `loom-xtask static-binary` finds no program interpreter and no shared library, and keeps
+/// `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz` with its `.sha256` as an artifact of its
+/// own.
+#[test]
+fn binaries_workflow_builds_a_static_musl_binary_beside_the_gnu_one() {
+    let binaries = workflow("binaries.yml");
+    let gnu = steps(binaries_job(&binaries));
+    let job = musl_job(&binaries);
+    assert_eq!(
+        job["name"].as_str(),
+        Some("binaries / x86_64-unknown-linux-musl")
+    );
+    assert_eq!(job["runs-on"].as_str(), Some("ubuntu-24.04"));
+    assert_eq!(job["container"], binaries_job(&binaries)["container"]);
+    assert_eq!(
+        job["env"]["VERSION"].as_str(),
+        Some("${{ inputs.version }}")
+    );
+    assert_eq!(
+        job["env"]["BINARY"].as_str(),
+        Some("target/x86_64-unknown-linux-musl/release/b10x-loom")
+    );
+    let steps = steps(job);
+
+    let checkout = step_using(steps, "actions/checkout");
+    assert_eq!(steps[checkout], gnu[step_using(gnu, "actions/checkout")]);
+    let pull_request = step_running(steps, r#"echo "VERSION=$version" >> "$GITHUB_ENV""#);
+    assert_eq!(
+        steps[pull_request],
+        gnu[step_running(gnu, r#"echo "VERSION=$version" >> "$GITHUB_ENV""#)],
+        "both jobs name the version of a pull request alike"
+    );
+    let install = step_running(steps, r#""$tools/bin/cargo-zigbuild" --version"#);
+    assert_eq!(
+        steps[install],
+        gnu[step_running(gnu, r#""$tools/bin/cargo-zigbuild" --version"#)],
+        "both jobs install the same pinned Zig and cargo-zigbuild"
+    );
+    let target = step_running(steps, &format!("rustup target add {MUSL}"));
+    let build = step_running(
+        steps,
+        &format!(
+            "cargo zigbuild --release --locked -p b10x-loom-cli --bin b10x-loom --target {MUSL}"
+        ),
+    );
+    let linked = step_running(
+        steps,
+        r#"cargo run -q --locked -p loom-xtask -- linked-libraries "$BINARY""#,
+    );
+    let unsynced = step_running(
+        steps,
+        r#"cargo run -q --locked -p loom-xtask -- unsynced-store "$BINARY""#,
+    );
+    let static_binary = step_running(
+        steps,
+        r#"cargo run -q --locked -p loom-xtask -- static-binary "$BINARY""#,
+    );
+    let package = step_running(steps, "sha256sum \"$name.tar.gz\"");
+    for (check, what) in [
+        (linked, "check the linked libraries"),
+        (unsynced, "refuse a binary holding the test sync switch"),
+        (static_binary, "refuse a binary that is not static"),
+    ] {
+        assert!(
+            build < check && check < package,
+            "the musl job must {what} after the build and before packing"
+        );
+    }
+    let run = steps[package]["run"].as_str().unwrap();
+    for fragment in [
+        r#"test "$("$BINARY" --version)" = "b10x-loom $VERSION""#,
+        r#"[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]"#,
+        r#"name="b10x-loom-$VERSION-x86_64-unknown-linux-musl""#,
+        r#"install -m 0755 "$BINARY" "$name/b10x-loom""#,
+        r#"install -m 0644 LICENSE "$name/LICENSE""#,
+        // musl is linked into the binary: its licence goes with it, from the pinned Zig that
+        // supplied it.
+        r#"install -m 0644 "$RUNNER_TEMP/release-tools/zig/lib/libc/musl/COPYRIGHT" "$name/musl-COPYRIGHT""#,
+        r#"tar -czf "$name.tar.gz" "$name""#,
+        r#"sha256sum "$name.tar.gz" > "$name.tar.gz.sha256""#,
+        r#"cat "$name.tar.gz.sha256""#,
+    ] {
+        assert!(
+            run.contains(fragment),
+            "the musl packaging step does not run `{fragment}`:\n{run}"
+        );
+    }
+    let upload = step_using(steps, "actions/upload-artifact");
+    assert!(
+        checkout < pull_request
+            && pull_request < install
+            && install < target
+            && target < build
+            && package < upload,
+        "the musl job must check out, name the version, install, add the target, build, package \
+         and then upload, in that order"
+    );
+    let with = &steps[upload]["with"];
+    assert_eq!(
+        with["name"].as_str(),
+        Some("b10x-loom-${{ env.VERSION }}-x86_64-unknown-linux-musl")
+    );
+    let archive = format!("b10x-loom-${{{{ env.VERSION }}}}-{MUSL}.tar.gz");
+    let paths: Vec<&str> = with["path"]
+        .as_str()
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    assert_eq!(paths, [archive.clone(), format!("{archive}.sha256")]);
     assert_eq!(with["if-no-files-found"].as_str(), Some("error"));
     assert_eq!(with["retention-days"].as_i64(), Some(30));
 }
@@ -1567,12 +1707,13 @@ fn binaries_workflow_reads_no_secret_uploads_to_no_release_and_puts_no_expressio
         .map(|action| action.split('@').next().unwrap_or_default().to_owned())
         .collect();
     actions.sort();
+    actions.dedup();
     assert_eq!(
         actions,
         ["actions/checkout", "actions/upload-artifact"],
         "binaries.yml may only check out and keep a workflow artifact"
     );
-    for step in steps(binaries_job(&binaries)) {
+    for step in binaries_jobs(&binaries).into_iter().flat_map(steps) {
         let Some(run) = step["run"].as_str() else {
             continue;
         };
@@ -1656,7 +1797,7 @@ fn no_workflow_is_granted_contents_write() {
             );
         }
         if name == "binaries.yml" {
-            assert_eq!(blocks.len(), 2, "binaries.yml holds one job");
+            assert_eq!(blocks.len(), 3, "binaries.yml holds one job per target");
             for (owner, permissions) in &blocks {
                 assert_eq!(
                     *permissions, &read_only,
@@ -1717,6 +1858,28 @@ fn agents_md_releases_names_the_attach_and_verify_commands() {
             "AGENTS.md § Releases does not name `{command}`"
         );
     }
+    // story:release-binaries-musl: both archives are fetched, attached and verified alike.
+    for command in [
+        "--name b10x-loom-<version> --dir .".to_owned(),
+        format!("--name b10x-loom-<version>-{MUSL} --dir ."),
+    ] {
+        assert!(
+            releases.contains(&command),
+            "AGENTS.md § Releases does not fetch the artifact with `{command}`"
+        );
+    }
+    for target in [TARGET, MUSL] {
+        let archive = format!("b10x-loom-<version>-{target}.tar.gz");
+        for command in [
+            format!("sha256sum -c {archive}.sha256"),
+            format!("{archive} {archive}.sha256"),
+        ] {
+            assert!(
+                releases.contains(&command),
+                "AGENTS.md § Releases does not run `{command}`"
+            );
+        }
+    }
     let finished = releases
         .split_once("A release is finished only once")
         .map(|(_, rest)| rest.split(". ").next().unwrap_or_default())
@@ -1752,6 +1915,11 @@ fn readme_and_site_download_the_release_binary_with_its_checksum() {
             text.lines()
                 .any(|line| line.trim().starts_with("sha256sum -c") && line.contains(&archive)),
             "{page} has no `sha256sum -c` line for {archive}"
+        );
+        // story:release-binaries-musl: the static archive is named beside it.
+        assert!(
+            text.contains(&format!("b10x-loom-<version>-{MUSL}.tar.gz")),
+            "{page} does not name the static {MUSL} archive"
         );
     }
 }
