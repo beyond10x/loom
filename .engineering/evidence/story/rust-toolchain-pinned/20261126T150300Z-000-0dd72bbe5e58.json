@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T15:03:00Z",
+  "actor": "agent:loom",
+  "artifact": "story:rust-toolchain-pinned",
+  "kind": "story",
+  "revision": 4,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "https://github.com/beyond10x/loom/actions/runs/45840167826/job/139979568574",
+    "reference": "loom / task check green at 165064a62f603b53247d6a94eee25253114cca9f, PR 177"
+  }
+}

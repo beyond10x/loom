@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:rust-toolchain-pinned
 kind: story
-status: active
+status: implemented
 title: rust-toolchain.toml pins the one rustc Loom's local gate and every workflow build with
 summary: 'rust-toolchain.toml channel 1.99.1 (clippy, rustfmt, minimal); 6 jobs read it through a step id: toolchain into dtolnay/rust-toolchain; rust: images held to its release by a test in release_check.rs; AGENTS.md § Gate names the file'
 tags:
@@ -25,10 +25,11 @@ scope:
   path: crates/loom-xtask/tests/release_check.rs
 - confidence: cited
   path: rust-toolchain.toml
-revision: 4
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T14:09:20Z", actor: "agent:loom", revision: 3, correlation: "chore/rust-toolchain-pin"}
 - {from: "proposed", to: "active", at: "2026-11-26T14:09:21Z", actor: "agent:loom", revision: 4, correlation: "chore/rust-toolchain-pin"}
+- {from: "active", to: "implemented", at: "2026-11-26T15:03:00Z", actor: "agent:loom", revision: 5, decided_on: {"recorded":{"test_result":1}}, correlation: "chore/rust-toolchain-pin"}
 ---
 ## Outcome
 
