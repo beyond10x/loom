@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 60a971f947faeb5025ac7d4b5ce291ef27b27e3f5adcad002d3f31013b49afb7
+// contract digest 3507a46b6773ab76bcd42e01af7dbbdc5c4901e9c7d1125fb92b5bdb5ce623d3
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Bindings — `loom.bindings`.
@@ -65,6 +65,8 @@ pub struct BindingsDocument {
     pub protocol: String,
     /// `program_root` — `Optional<loom.bindings.ProgramRoot>`.
     pub program_root: Option<ProgramRoot>,
+    /// `workspace` — `Optional<loom.bindings.WorkspaceWrites>`.
+    pub workspace: Option<WorkspaceWrites>,
     /// `artifacts` — `List<loom.bindings.ArtifactPath>`.
     pub artifacts: Vec<ArtifactPath>,
     /// `independence` — `List<loom.bindings.ProducerIndependence>`.
@@ -621,4 +623,11 @@ pub enum StepOutcome {
 pub struct ToolAllowList {
     /// `allow` — `List<String>`.
     pub allow: Vec<String>,
+}
+
+/// WorkspaceWrites — `loom.bindings.WorkspaceWrites`: one of a closed set of names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceWrites {
+    /// `ReadWrite`.
+    ReadWrite,
 }

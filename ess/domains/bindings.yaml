@@ -234,7 +234,7 @@ types:
   # contract of any bound program and empty when the document leaves it out; it requires
   # `handoff` (`MissingMember`) and belongs to the Program executor (`MemberNotForExecutor`).
   # Before a step of the action, and at a stuck stop, `tree run` runs it with read-only access
-  # to the whole workspace, `PATH` and the `LOOM_*` variables alone and no retry feedback: exit 0
+  # to the whole workspace (read-write under the document's `workspace: read_write`), `PATH` and the `LOOM_*` variables alone and no retry feedback: exit 0
   # offers the handoff, any other exit skips it, and a launch error, a timeout or a signal refuses
   # the run.
   - name: loom.bindings.BoundAction
@@ -265,10 +265,22 @@ types:
       - name: exits
         type: Optional<loom.bindings.ExitClasses>
 
+  # What every program a document binds may write in its workspace (story
+  # bound-program-writes-its-workspace): `ReadWrite`, written `read_write`, the whole workspace,
+  # its root and directories the program makes included. A document that leaves the member out
+  # keeps the default: a program writes only `target`, and a `handoff_when` check nothing.
+  - name: loom.bindings.WorkspaceWrites
+    kind: enum
+    variants: [ReadWrite]
+
   # The document: `format` is `loom.bindings/1`; `protocol` a registration, `name@major`;
-  # `program_root` where a relative program path is read from (absent: `Workspace`); `artifacts`
-  # maps artifact ids to workspace paths; `independence` maps producers to dimensions of the
-  # protocol; `actions` holds one binding per action, in document order.
+  # `program_root` where a relative program path is read from (absent: `Workspace`); `workspace`
+  # what its programs may write there (absent: the default); `artifacts` maps artifact ids to
+  # workspace paths; `independence` maps producers to dimensions of the protocol; `actions` holds
+  # one binding per action, in document order. With `workspace: read_write` every program the
+  # document binds (a Program or Person executor's `argv`, `arguments_from` and `handoff_when`)
+  # writes the whole workspace; a child bindings file an `open` executor names declares its own
+  # and inherits nothing.
   - name: loom.bindings.BindingsDocument
     kind: struct
     fields:
@@ -278,6 +290,8 @@ types:
         type: String
       - name: program_root
         type: Optional<loom.bindings.ProgramRoot>
+      - name: workspace
+        type: Optional<loom.bindings.WorkspaceWrites>
       - name: artifacts
         type: List<loom.bindings.ArtifactPath>
       - name: independence

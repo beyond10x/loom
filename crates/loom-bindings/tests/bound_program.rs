@@ -138,8 +138,13 @@ fn open<S: FallibleCaseStore>(governor: &CanonGovernor<S>, case: &str) {
 
 /// The document holding `actions`, decoded and checked against the fixture protocol.
 fn document(actions: &str) -> BindingsDocument {
+    document_headed("", actions)
+}
+
+/// [`document`] with the top-level lines `head` (each ending in a line break) after `protocol`.
+fn document_headed(head: &str, actions: &str) -> BindingsDocument {
     let text = format!(
-        "format: loom.bindings/1\nprotocol: {REGISTRATION}\nartifacts:\n  spec: docs/spec\n  impl: src\nactions:\n{actions}"
+        "format: loom.bindings/1\nprotocol: {REGISTRATION}\n{head}artifacts:\n  spec: docs/spec\n  impl: src\nactions:\n{actions}"
     );
     let document = decode(&text).unwrap_or_else(|refusal| panic!("{refusal}\n{text}"));
     check(&document, REGISTRATION, &protocol())
@@ -3249,14 +3254,21 @@ impl Tree {
     /// One step of this tree's case, which binds [`CHECK`] to `argv`, through an `EngineRunner` of
     /// its own on `linux` over the held root `root`, run on the calling thread.
     fn step(&self, root: &Path, argv: &[&str]) -> TreeStep {
+        self.step_of(
+            root,
+            &document(&bound(
+                CHECK,
+                argv,
+                SIXTY_SECONDS,
+                &[entry("gate", "exit", VALID_TABLE)],
+            )),
+        )
+    }
+
+    /// [`Tree::step`] of `document`, which binds [`CHECK`].
+    fn step_of(&self, root: &Path, document: &BindingsDocument) -> TreeStep {
         let governor = governor_over(FileCaseStore::open(&self.scratch.store).unwrap());
         open(&governor, CASE);
-        let document = document(&bound(
-            CHECK,
-            argv,
-            SIXTY_SECONDS,
-            &[entry("gate", "exit", VALID_TABLE)],
-        ));
         let runner: Arc<dyn TestRunner> = Arc::new(
             EngineRunner::open(&EngineConfinement {
                 adapter: ConfinementAdapter::Linux,
@@ -3268,7 +3280,7 @@ impl Tree {
         let effects = ProgramEffects::new(
             &governor,
             CaseId(CASE.to_owned()),
-            &document,
+            document,
             &self.workspace,
             &self.scratch.store,
             Some(runner),
@@ -3432,6 +3444,115 @@ fn a_confined_program_sees_no_process_of_the_other_tree() {
             );
             first.assert_exit_zero("a");
             second.assert_exit_zero("b");
+        },
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A document's `workspace: read_write` (`story:bound-program-writes-its-workspace`)
+
+/// The top-level member that gives every program of a document the whole workspace.
+const READ_WRITE: &str = "workspace: read_write\n";
+
+/// Under `workspace: read_write` the port builds the `arguments_from` program and the bound
+/// program each with the whole workspace writable and no named path; without the member, neither.
+#[test]
+fn a_read_write_document_gives_its_program_and_arguments_from_the_whole_workspace() {
+    for (head, read_write) in [(READ_WRITE, true), ("", false)] {
+        let scratch = Scratch::new();
+        let document = document_headed(
+            head,
+            &bound(
+                CHECK,
+                &["/usr/bin/true"],
+                "    arguments_from: [\"/usr/bin/true\"]\n",
+                &[entry("gate", "exit", VALID_TABLE)],
+            ),
+        );
+        assert_eq!(document.workspace.is_some(), read_write);
+        let governor = governor();
+        let runner = Arc::new(Recording::default());
+        let effects = port(
+            &governor,
+            &document,
+            &scratch,
+            CASE,
+            Some(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        )
+        .unwrap();
+        assert_performed(&drive(&governor, &effects, CASE, CHECK, args("{}")));
+        let children = runner.children();
+        assert_eq!(children.len(), 2, "arguments_from, then the program");
+        for child in &children {
+            assert_eq!(child.read_write_workspace(), read_write, "{child:?}");
+            assert!(!child.read_only_workspace(), "{child:?}");
+            assert!(child.writable().is_empty(), "{child:?}");
+        }
+    }
+}
+
+/// The program of the read-write case: it writes a file at the workspace root and one in a
+/// directory it makes, then tries a file outside the workspace (`$1`). Exit 3, 4 or 5 names the
+/// write that went otherwise than allowed.
+const WRITES_THE_WORKSPACE: &str = "echo root > root.txt || exit 3\n\
+     /usr/bin/mkdir -p made/inner || exit 4\n\
+     echo inner > made/inner/file.txt || exit 4\n\
+     if echo outside > \"$1\" 2>/dev/null; then exit 5; fi\n\
+     exit 0\n";
+
+/// Under Substrate's `linux` adapter a bound program of a `workspace: read_write` document writes
+/// the workspace root and a directory it makes there, and still nothing outside the workspace; the
+/// same program of a document without the member cannot write the root.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_confined_program_of_a_read_write_document_writes_its_whole_workspace() {
+    two_trees(
+        "a_confined_program_of_a_read_write_document_writes_its_whole_workspace",
+        |root, a, b| {
+            let outside = a.workspace.parent().unwrap().join("outside.txt");
+            let outside_arg = outside.to_str().unwrap();
+            let program_a = a.scratch.script("program.sh", WRITES_THE_WORKSPACE);
+            let bound_a = bound(
+                CHECK,
+                &[&program_a, outside_arg],
+                SIXTY_SECONDS,
+                &[entry("gate", "exit", VALID_TABLE)],
+            );
+            let step = a.step_of(root, &document_headed(READ_WRITE, &bound_a));
+            step.assert_exit_zero("read_write");
+            assert_eq!(
+                std::fs::read_to_string(a.workspace.join("root.txt")).unwrap(),
+                "root\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(a.workspace.join("made/inner/file.txt")).unwrap(),
+                "inner\n"
+            );
+            assert!(
+                !outside.exists(),
+                "nothing is written outside the workspace"
+            );
+
+            let program_b = b.scratch.script("program.sh", WRITES_THE_WORKSPACE);
+            let step = b.step_of(
+                root,
+                &document(&bound(
+                    CHECK,
+                    &[&program_b, outside_arg],
+                    SIXTY_SECONDS,
+                    &[entry("gate", "exit", VALID_TABLE)],
+                )),
+            );
+            let run = step.run.as_ref().expect("the run is observed");
+            assert_eq!(run["exit"], json!(3), "the root is not writable: {run}");
+            assert!(!b.workspace.join("root.txt").exists());
+            assert!(
+                !outside.exists(),
+                "nothing is written outside the workspace"
+            );
         },
     );
 }

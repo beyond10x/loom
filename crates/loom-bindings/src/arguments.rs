@@ -17,6 +17,7 @@ use b10x_loom_intake_slice::bindings::MAX_REPORT_BYTES;
 use b10x_loom_intake_slice::confinement::{
     Cancel, ConfinementError, ConfinementRefusal, TestRunner,
 };
+use loom::bindings::WorkspaceWrites;
 use loom_governor::{CanonGovernor, EvaluationTime, FallibleCaseStore};
 
 use crate::program::sha256;
@@ -46,13 +47,15 @@ pub(crate) enum NotPrinted {
 /// Runs `argv`, the `arguments_from` program of a binding, once for `case` (whose opening names
 /// are `names`) through `runner`, in `workspace`, with `input` on standard input and `timeout`;
 /// its printed object, or why not, naming `argv[0]` and never the text it printed. Given `cancel`,
-/// the child holds it (`ChildCommand::with_cancel`).
+/// the child holds it (`ChildCommand::with_cancel`). It writes in `workspace` what its document
+/// declares (`writes`, [`crate::child::in_document_workspace`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_arguments_from(
     argv: &[String],
     input: &str,
     timeout: Duration,
     workspace: &Path,
+    writes: Option<WorkspaceWrites>,
     runner: &dyn TestRunner,
     case: &CaseId,
     names: &CaseNames,
@@ -71,6 +74,7 @@ pub(crate) fn run_arguments_from(
         names,
     )
     .map_err(|why| NotPrinted::NotStarted(format!("{program} was not started: {why}")))?;
+    let child = crate::child::in_document_workspace(child, writes);
     let child = match cancel {
         Some(cancel) => child.with_cancel(cancel.clone()),
         None => child,

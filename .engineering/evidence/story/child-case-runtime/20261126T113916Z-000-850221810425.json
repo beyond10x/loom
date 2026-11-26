@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-26T11:39:16Z",
+  "actor": "agent:loom",
+  "artifact": "story:child-case-runtime",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "shipped in Loom 0.60.0 and 0.61.0 (tags contain 8c97ed86e, merge impl/child-case-runtime, and edd2eb801, tree run opens, copies into and closes child cases); cargo test -p b10x-loom-bindings --test bound_open (8 passed) and -p b10x-loom-governor --test child_cases (29 passed) on e42a496d8"
+  }
+}

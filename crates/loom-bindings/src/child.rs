@@ -12,7 +12,7 @@ use std::time::Duration;
 use b10x_loom_commission::model::responsibility::CaseId;
 use b10x_loom_intake_slice::bindings::bound_program_child;
 use b10x_loom_intake_slice::confinement::{ChildCommand, ExecEnvironment};
-use loom::bindings::ProgramEnvironment;
+use loom::bindings::{ProgramEnvironment, WorkspaceWrites};
 
 /// The variable that holds the id of the case a program runs for.
 pub const CASE_VARIABLE: &str = "LOOM_CASE";
@@ -96,6 +96,21 @@ pub fn bound_case_child(
         loom_parent_case_name: names.parent_case_name.clone(),
     };
     Ok(child.with_environment(environment(&described)))
+}
+
+/// `child`, a program `document` binds, with the workspace access the document declares
+/// (`story:bound-program-writes-its-workspace`): the whole workspace writable under
+/// `workspace: read_write` ([`ChildCommand::with_read_write_workspace`]), else `child` as it was
+/// built. A child bindings file an `open` executor names is a document of its own and declares
+/// its own.
+pub(crate) fn in_document_workspace(
+    child: ChildCommand,
+    workspace: Option<WorkspaceWrites>,
+) -> ChildCommand {
+    match workspace {
+        Some(WorkspaceWrites::ReadWrite) => child.with_read_write_workspace(),
+        None => child,
+    }
 }
 
 /// Whether `name` is one child name: one or more ASCII letters, digits, `-` and `_`, at most

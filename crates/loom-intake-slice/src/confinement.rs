@@ -739,7 +739,8 @@ impl SubstrateRunner {
     /// has. A guarantee Substrate does not serve is a [`ConfinementError`] and nothing runs, never
     /// an unconfined fall-back. The child's environment is exactly [`ChildCommand::environment`],
     /// it writes only under `target` and the workspace paths the host named
-    /// ([`ChildCommand::with_writable`]), and its network is none or exactly the egress apertures
+    /// ([`ChildCommand::with_writable`]), or anywhere in the workspace when the host says so
+    /// ([`ChildCommand::with_read_write_workspace`]), and its network is none or exactly the egress apertures
     /// it names, at most [`MAX_EGRESS_APERTURES`] ([`ChildCommand::with_egress`]), where it trusts
     /// the certificate bundle the host names ([`ChildCommand::with_ca_bundle`]); an aperture
     /// declaration Substrate never makes or the child could not reach by name, a bundle the child
@@ -774,7 +775,7 @@ impl SubstrateRunner {
         // Read once, here: the child trusts these bytes, whatever the path holds later.
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
-        check_read_only(child)?;
+        check_workspace_access(child)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         check_workdir(child)?;
@@ -835,7 +836,7 @@ impl SubstrateRunner {
         check_network(child.network, &child.egress)?;
         let ca_bundle = check_ca_bundle(child)?;
         let writable = check_writable(&child.writable)?;
-        check_read_only(child)?;
+        check_workspace_access(child)?;
         let child = check_mounts(child, ca_bundle.as_ref())?;
         let child = child.as_ref();
         check_workdir(child)?;
@@ -1366,7 +1367,8 @@ impl TestRunner for SubstrateRunner {
 /// workspace and is the child's working directory, `/workspace`; the child writes only under its
 /// `target/`, as a test does, and under the workspace directories the host names
 /// ([`ChildCommand::with_writable`]), `.git` only when named, or nowhere in it, `target` included
-/// ([`ChildCommand::with_read_only_workspace`]), and no toolchain or cache is
+/// ([`ChildCommand::with_read_only_workspace`]), or anywhere in it when the host says so
+/// ([`ChildCommand::with_read_write_workspace`]), and no toolchain or cache is
 /// mounted. Its environment is exactly the one the host names as Substrate's
 /// [`ExecEnvironment`], empty unless it names one. It asks
 /// Substrate for [`SandboxProfile::Workspace`] with [`NetworkMode::None`] unless the host names
@@ -1406,6 +1408,7 @@ pub struct ChildCommand {
     workdir: Option<PathBuf>,
     cancel: Option<Cancel>,
     read_only_workspace: bool,
+    read_write_workspace: bool,
 }
 
 /// A host directory or file a [`ChildCommand`] reads, and where the child sees it: its host path
@@ -1454,6 +1457,7 @@ impl ChildCommand {
             workdir: None,
             cancel: None,
             read_only_workspace: false,
+            read_write_workspace: false,
         }
     }
 
@@ -1573,11 +1577,36 @@ impl ChildCommand {
         self.read_only_workspace
     }
 
-    /// What the child asks Substrate to write in the workspace: nothing when it is read-only, else
-    /// `target` and the paths the host named.
+    /// The same child writing anywhere in its workspace: its root, a directory it makes, `target`
+    /// and `.git` included. Substrate is asked for a read-write workspace
+    /// (`WorkspaceAccess::ReadWrite`), and a record reporting any other access is refused as a
+    /// wider or narrower one is. Every other guarantee holds: nothing outside the workspace is
+    /// writable, and a child that may write `.git` may plant hooks or configuration that a later
+    /// git call on the host runs. Beside a path named writable ([`ChildCommand::with_writable`])
+    /// or a read-only workspace ([`ChildCommand::with_read_only_workspace`]) the launch is refused
+    /// [`ConfinementRefusal::ScopeInvalid`] before anything starts, whatever the order they were
+    /// named in. A `local` runner runs unconfined and writes wherever the operator may.
+    #[must_use]
+    pub fn with_read_write_workspace(self) -> Self {
+        Self {
+            read_write_workspace: true,
+            ..self
+        }
+    }
+
+    /// Whether the child writes anywhere in its workspace
+    /// ([`ChildCommand::with_read_write_workspace`]).
+    pub fn read_write_workspace(&self) -> bool {
+        self.read_write_workspace
+    }
+
+    /// What the child asks Substrate to write in the workspace: nothing when it is read-only, all
+    /// of it when it is read-write, else `target` and the paths the host named.
     fn workspace_access(&self) -> WorkspaceAccess {
         if self.read_only_workspace {
             WorkspaceAccess::ReadOnly
+        } else if self.read_write_workspace {
+            WorkspaceAccess::ReadWrite
         } else {
             WorkspaceAccess::Scoped {
                 writable_subtrees: writable_request(&self.writable),
@@ -2129,9 +2158,21 @@ fn writable_request(named: &[PathBuf]) -> Vec<String> {
     paths
 }
 
-/// Refuse a child that is read-only in its workspace ([`ChildCommand::with_read_only_workspace`])
-/// and names a writable path beside: it would be given neither.
-fn check_read_only(child: &ChildCommand) -> Result<(), ConfinementError> {
+/// Refuse a child that names more than one access to its workspace: read-only
+/// ([`ChildCommand::with_read_only_workspace`]) or read-write
+/// ([`ChildCommand::with_read_write_workspace`]) beside a named writable path, or both at once. It
+/// would be given none of them.
+pub(crate) fn check_workspace_access(child: &ChildCommand) -> Result<(), ConfinementError> {
+    if child.read_write_workspace && child.read_only_workspace {
+        return Err(scope_error(
+            "a child is read-only (with_read_only_workspace) or read-write (with_read_write_workspace) in its workspace, never both; name one",
+        ));
+    }
+    if child.read_write_workspace && !child.writable.is_empty() {
+        return Err(scope_error(
+            "a child read-write in its whole workspace (with_read_write_workspace) names no writable path (with_writable); name one or the other",
+        ));
+    }
     if child.read_only_workspace && !child.writable.is_empty() {
         return Err(scope_error(
             "a child read-only in its workspace names no writable path; name one or the other",
@@ -4439,6 +4480,85 @@ mod tests {
                 "{access:?}"
             );
         }
+    }
+
+    /// A child with a read-write workspace asks Substrate for `WorkspaceAccess::ReadWrite`, for a
+    /// child run to its end and a live child alike; a record reporting that access is accepted,
+    /// and one reporting any other is refused as a wider or narrower one is.
+    #[test]
+    fn a_read_write_workspace_is_requested_and_only_its_record_is_accepted() {
+        let child =
+            ChildCommand::new("true", [] as [&str; 0], "/work/space").with_read_write_workspace();
+        assert!(child.read_write_workspace());
+        assert!(!child.read_only_workspace());
+        assert!(child.writable().is_empty());
+        let run = child.input("space", "snapshot".to_owned());
+        let live = child.session_input("space", "snapshot".to_owned()).exec;
+        for input in [&run, &live] {
+            assert_eq!(input.workspace_access, WorkspaceAccess::ReadWrite);
+            let exact = record_for(input, AppliedNetwork::None);
+            check_record(input, &[], &exact).unwrap();
+            for access in [
+                WorkspaceAccess::ReadOnly,
+                WorkspaceAccess::Scoped {
+                    writable_subtrees: vec!["target".to_owned()],
+                },
+            ] {
+                let record = substrate_wire::AppliedConfinement {
+                    workspace_access: access.clone(),
+                    ..exact.clone()
+                };
+                let error = check_record(input, &[], &record).unwrap_err();
+                assert_eq!(
+                    error.reason,
+                    ConfinementRefusal::CapabilityUnserved,
+                    "{access:?}"
+                );
+            }
+        }
+        // A child of the default access asks for `target` alone, and a record reporting the whole
+        // workspace writable is refused.
+        let scoped = ChildCommand::new("true", [] as [&str; 0], "/work/space")
+            .input("space", "snapshot".to_owned());
+        let record = substrate_wire::AppliedConfinement {
+            workspace_access: WorkspaceAccess::ReadWrite,
+            ..record_for(&scoped, AppliedNetwork::None)
+        };
+        assert_eq!(
+            check_record(&scoped, &[], &record).unwrap_err().reason,
+            ConfinementRefusal::CapabilityUnserved
+        );
+    }
+
+    /// A read-write workspace beside a path named writable, or beside a read-only workspace, is
+    /// refused `ScopeInvalid` before anything starts, naming both builders.
+    #[test]
+    fn a_read_write_workspace_beside_another_access_is_refused_before_launch() {
+        let base = || ChildCommand::new("true", [] as [&str; 0], "/work/space");
+        for child in [
+            base().with_read_write_workspace().with_writable("scratch"),
+            base().with_writable("scratch").with_read_write_workspace(),
+            base()
+                .with_read_write_workspace()
+                .with_read_only_workspace(),
+            base()
+                .with_read_only_workspace()
+                .with_read_write_workspace(),
+        ] {
+            let error = check_workspace_access(&child).unwrap_err();
+            assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{child:?}");
+            assert!(
+                error.detail.contains("with_read_write_workspace"),
+                "{}",
+                error.detail
+            );
+        }
+        check_workspace_access(&base().with_read_write_workspace()).unwrap();
+        // The refusal comes before any driver opens: a runner over no cgroup answers it.
+        let error = SubstrateRunner::new(None)
+            .run_child(&base().with_read_write_workspace().with_writable("scratch"))
+            .unwrap_err();
+        assert_eq!(error.reason, ConfinementRefusal::ScopeInvalid, "{error}");
     }
 
     /// Substrate 0.10.0 can apply a working directory, writable roots and several apertures. Loom

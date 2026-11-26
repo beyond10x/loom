@@ -1,7 +1,7 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.98.1",
-  "inputs": "sha256:c61338498fd7e1cce9669c1a9fd4175c5e83c7f4e3113b8de4b330f352e73b93",
+  "inputs": "sha256:2a6c9dae41a34ffe5147db304b478630f5e5c1501738ab2be8728950f853352c",
   "input_files": {
     "Cargo.lock": "sha256:774fbb147579ce5854bffc751a6079582c464dcff2c8171781cc4cc9f498c846",
     "Cargo.toml": "sha256:57cb1f5ee66b6c9f81dcf9a9af96135d11f54adc8ab9feefdbf3c5250584d527",
@@ -314,7 +314,7 @@
     "ess/commission/system.yaml": "sha256:83048487bcc8cba9fc4d679220ca5fdc96f11c5c9940a57c2170267aa4e48608",
     "ess/domains/agent.yaml": "sha256:2654536870b2fa63b9baf0a86233c895cdf15fe9bde222b94222f43888183555",
     "ess/domains/authority.yaml": "sha256:022935709423b434e6bbf3ec214814042b1d1a48821438a07f91fa6b3226ef0b",
-    "ess/domains/bindings.yaml": "sha256:ef26c4696379bbc39364d0d70bf60d7e885f9ca9150dfc3fca60901bc0dbf12f",
+    "ess/domains/bindings.yaml": "sha256:6eedd13bf5cb0dab83abbc154914a7f6f8e7b08a01ac5d3b4a4aa30f4e5a7e3f",
     "ess/domains/datasource.yaml": "sha256:d13c9e1a4d47231566b647e6a6243b78c875988586fe21fa40a7657eaafd520e",
     "ess/domains/decision.yaml": "sha256:c815ef0812944e195d0ee2660c48f5143a476bc9f051095e63bea0eb5dba7efc",
     "ess/domains/evaluation.yaml": "sha256:0282a63f3ef1e5bf24b7fa06b90e02cea3196e22d14d86a488b8a2e7daa26d88",
@@ -558,7 +558,7 @@
     "website/docs/reference/ess/intake-routing.md": "sha256:dae30940f8232069cf4c647ec0b62f00983c1da04499faa6b2e572e45ea3fad7",
     "website/docs/reference/ess/loom-agent.md": "sha256:dad9e99f62555caeb6ba9090c3dfa416703c965ba920a4664bc3de8efe8707cf",
     "website/docs/reference/ess/loom-authority.md": "sha256:591d47e238ec2c7d58c1cd164cbe0ef7beaf3127332fe55c58f8b6457cc3e071",
-    "website/docs/reference/ess/loom-bindings.md": "sha256:3d8e79d87f7c3c979bf28ff4143561ceab68ff07e6d2af1c63b59ffea1626d56",
+    "website/docs/reference/ess/loom-bindings.md": "sha256:074209c0d893ae0ab2a97a24577bbbfde8594a5e3e8816cbeeeb92bdb16e0bc7",
     "website/docs/reference/ess/loom-datasource.md": "sha256:ef9d6f0a647b84c4b3318d892227fd27408f48b6423b811ae753e6bfd3d97400",
     "website/docs/reference/ess/loom-decision.md": "sha256:3321a30dd46101de72b12041310d4902eaa46c3401503cc21677125e80079cce",
     "website/docs/reference/ess/loom-evaluation.md": "sha256:40763783ab3c91370edb26be46131a1ead9a1761b1164aa4ddf81552400d81b6",

@@ -297,6 +297,7 @@ fn check_refuses_a_hand_built_document_of_another_format() {
         format: "loom.bindings/2".to_owned(),
         protocol: "story@1".to_owned(),
         program_root: None,
+        workspace: None,
         artifacts: Vec::new(),
         independence: Vec::new(),
         actions: Vec::new(),
