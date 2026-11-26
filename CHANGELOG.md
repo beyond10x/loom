@@ -12,6 +12,11 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `ChildResult::driver_record` and `TestExecution::driver_record`, Substrate's `AppliedConfinement`, gain `exec_subpaths` and `exec_denied_paths` (story:substrate-0-29-pin)
+- Substrate moves from 0.24.0 to 0.29.0 (`b10x-substrate-host`, `-wire`); Loom sends no executable list and refuses a record that has one (story:substrate-0-29-pin)
+
 ## [0.62.1] - 2026-11-26
 
 No breaking changes.

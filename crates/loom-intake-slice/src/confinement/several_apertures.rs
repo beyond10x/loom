@@ -249,6 +249,8 @@ fn record(input: &ExecStartInput, network: AppliedNetwork) -> substrate_wire::Ap
         workdir: None,
         writable_roots: Vec::new(),
         requires: None,
+        exec_subpaths: None,
+        exec_denied_paths: Vec::new(),
     }
 }
 

@@ -567,8 +567,8 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
         .collect();
     let mut seen = std::collections::BTreeSet::new();
     let mut host_walked = false;
-    // story:substrate-0-24-0-pin: each Substrate crate Loom reaches is one copy, at the tag
-    // `0.24.0`'s commit.
+    // story:substrate-0-29-pin: each Substrate crate Loom reaches is one copy, at the tag
+    // `0.29.0`'s commit.
     let mut substrate = std::collections::BTreeMap::<String, Vec<(String, String)>>::new();
     while let Some(id) = pending.pop() {
         if !seen.insert(id.clone()) {
@@ -611,12 +611,12 @@ fn every_host_git_command_goes_through_a_hardened_helper() {
             substrate.get(name).map(Vec::as_slice),
             Some(
                 [(
-                    "0.24.0".to_owned(),
-                    "git+https://github.com/beyond10x/substrate?rev=85da2e2be46b690993007990905d6d3934650774#85da2e2be46b690993007990905d6d3934650774".to_owned()
+                    "0.29.0".to_owned(),
+                    "git+https://github.com/beyond10x/substrate?rev=1a10a30d6856e6b4e20d55104638d26d37a1b992#1a10a30d6856e6b4e20d55104638d26d37a1b992".to_owned()
                 )]
                 .as_slice()
             ),
-            "one copy of {name}, at Substrate 0.24.0: {substrate:?}"
+            "one copy of {name}, at Substrate 0.29.0: {substrate:?}"
         );
     }
     let mut manifests = vec![root.join("Cargo.toml")];

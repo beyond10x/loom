@@ -318,6 +318,8 @@ fn record(input: &ExecStartInput, workdir: Option<&str>) -> substrate_wire::Appl
         workdir: workdir.map(str::to_owned),
         writable_roots: Vec::new(),
         requires: None,
+        exec_subpaths: None,
+        exec_denied_paths: Vec::new(),
     }
 }
 
