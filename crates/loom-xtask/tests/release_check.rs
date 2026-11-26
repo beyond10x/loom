@@ -912,6 +912,11 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
             let Some(run) = step["run"].as_str() else {
                 continue;
             };
+            // The step that reads rust-toolchain.toml, the same script in every job
+            // (`the_toolchain_step_writes_the_pinned_release_or_fails`).
+            if step["id"].as_str() == Some("toolchain") {
+                continue;
+            }
             let run = run.trim();
             assert!(
                 !run.contains('\n')
@@ -1748,5 +1753,234 @@ fn readme_and_site_download_the_release_binary_with_its_checksum() {
                 .any(|line| line.trim().starts_with("sha256sum -c") && line.contains(&archive)),
             "{page} has no `sha256sum -c` line for {archive}"
         );
+    }
+}
+
+/// The value every `dtolnay/rust-toolchain` step passes as `toolchain` (`story:rust-toolchain-pinned`).
+const PINNED_TOOLCHAIN: &str = "${{ steps.toolchain.outputs.channel }}";
+
+/// `channel` of `rust-toolchain.toml`, which must be a release named by number (`X.Y.Z`).
+fn pinned_channel() -> String {
+    let path = repository().join("rust-toolchain.toml");
+    let file: toml::Value =
+        toml::from_str(&read(&path)).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+    let channel = file["toolchain"]["channel"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{} names no [toolchain] channel", path.display()))
+        .to_owned();
+    let parts: Vec<&str> = channel.split('.').collect();
+    assert!(
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())),
+        "rust-toolchain.toml must pin a release by number (X.Y.Z), not `{channel}`"
+    );
+    channel
+}
+
+/// The Rust release in the tag of an official `rust:` image (`rust:1.99-bookworm@sha256:…` is
+/// `1.99`), or `None` for another image.
+fn rust_image_release(image: &str) -> Option<&str> {
+    let tag = image.strip_prefix("rust:")?;
+    let tag = tag.split('@').next().unwrap_or(tag);
+    Some(tag.split('-').next().unwrap_or(tag))
+}
+
+/// A `rust:` image's release equals the pinned channel or is its `X.Y` prefix.
+fn assert_image_matches(image: &str, channel: &str, place: &str) {
+    if let Some(release) = rust_image_release(image) {
+        assert!(
+            !release.is_empty()
+                && release.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+                && (release == channel || channel.starts_with(&format!("{release}."))),
+            "{place} builds in {image}, whose release {release} is not the {channel} rust-toolchain.toml pins"
+        );
+    }
+}
+
+/// The text of the `toolchain` step of every job that installs Rust, with the job named.
+fn toolchain_steps() -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for name in workflow_names() {
+        let workflow = workflow(&name);
+        let Some(jobs) = workflow["jobs"].as_mapping() else {
+            continue;
+        };
+        for (id, job) in jobs {
+            let job_name = format!("{name} job {}", id.as_str().unwrap_or("?"));
+            let Some(steps) = job["steps"].as_sequence() else {
+                continue;
+            };
+            for (index, step) in steps.iter().enumerate() {
+                if let Some(toolchain) = step["with"]["toolchain"].as_str() {
+                    assert_eq!(
+                        toolchain, PINNED_TOOLCHAIN,
+                        "{job_name}: step {index} names its own toolchain; read rust-toolchain.toml"
+                    );
+                }
+                let installs = step["uses"]
+                    .as_str()
+                    .is_some_and(|uses| uses.starts_with("dtolnay/rust-toolchain@"));
+                if !installs {
+                    continue;
+                }
+                assert_eq!(
+                    step["with"]["toolchain"].as_str(),
+                    Some(PINNED_TOOLCHAIN),
+                    "{job_name}: dtolnay/rust-toolchain must install {PINNED_TOOLCHAIN}"
+                );
+                let reader = steps[..index]
+                    .iter()
+                    .find(|earlier| earlier["id"].as_str() == Some("toolchain"))
+                    .unwrap_or_else(|| {
+                        panic!("{job_name}: no step `id: toolchain` before dtolnay/rust-toolchain")
+                    });
+                let run = reader["run"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{job_name}: the toolchain step runs nothing"));
+                found.push((job_name.clone(), run.to_owned()));
+            }
+        }
+    }
+    found
+}
+
+/// `story:rust-toolchain-pinned`: `rust-toolchain.toml` pins one release, every job that installs
+/// Rust installs the release it reads from that file, no workflow names another toolchain, and
+/// every `rust:` image a workflow or Dockerfile builds in carries the pinned release in its tag.
+#[test]
+fn every_workflow_builds_with_the_rust_release_rust_toolchain_toml_pins() {
+    let channel = pinned_channel();
+    let steps = toolchain_steps();
+    let jobs: Vec<&str> = steps.iter().map(|(job, _)| job.as_str()).collect();
+    for job in [
+        "check.yml job check",
+        "check.yml job docs-slow",
+        "check.yml job macos",
+        "deps-cache.yml job deps",
+        "pages.yml job build",
+        "release.yml job verify",
+    ] {
+        assert!(
+            jobs.contains(&job),
+            "{job} does not install Rust from rust-toolchain.toml; found {jobs:?}"
+        );
+    }
+    for name in workflow_names() {
+        let text = read(&repository().join(".github/workflows").join(&name));
+        for word in [
+            "RUSTUP_TOOLCHAIN",
+            "rustup default",
+            "rustup override",
+            "cargo +",
+        ] {
+            assert!(
+                !text.contains(word),
+                "{name} chooses a toolchain with `{word}`; rust-toolchain.toml is the one pin"
+            );
+        }
+        let workflow = workflow(&name);
+        let Some(jobs) = workflow["jobs"].as_mapping() else {
+            continue;
+        };
+        for (id, job) in jobs {
+            let image = job["container"]
+                .as_str()
+                .or_else(|| job["container"]["image"].as_str());
+            if let Some(image) = image {
+                let place = format!("{name} job {}", id.as_str().unwrap_or("?"));
+                assert_image_matches(image, &channel, &place);
+            }
+        }
+    }
+    let images = repository().join("deploy/images");
+    let mut rust_bases = 0;
+    for entry in fs::read_dir(&images).unwrap_or_else(|e| panic!("read {}: {e}", images.display()))
+    {
+        let path = entry
+            .unwrap_or_else(|e| panic!("read {}: {e}", images.display()))
+            .path()
+            .join("Dockerfile");
+        if !path.is_file() {
+            continue;
+        }
+        for line in read(&path).lines() {
+            let Some(image) = line
+                .strip_prefix("FROM ")
+                .and_then(|rest| rest.split_whitespace().next())
+            else {
+                continue;
+            };
+            if rust_image_release(image).is_some() {
+                rust_bases += 1;
+                assert_image_matches(image, &channel, &path.display().to_string());
+            }
+        }
+    }
+    assert!(
+        rust_bases > 0,
+        "no Dockerfile under deploy/images builds in a rust: image"
+    );
+}
+
+/// `story:rust-toolchain-pinned`: every job runs the same `toolchain` step, and that step writes
+/// `channel=X.Y.Z` to `GITHUB_OUTPUT` for a pinned release and fails for a channel that is not one.
+#[test]
+fn the_toolchain_step_writes_the_pinned_release_or_fails() {
+    let steps = toolchain_steps();
+    let (first_job, script) = steps
+        .first()
+        .unwrap_or_else(|| panic!("no workflow reads rust-toolchain.toml"));
+    for (job, run) in &steps {
+        assert_eq!(
+            run, script,
+            "{job} reads rust-toolchain.toml with another script than {first_job}"
+        );
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let base = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("toolchain-step-{}-{nanos}", std::process::id()));
+    for (case, file, expected) in [
+        (
+            "pinned",
+            "[toolchain]\nchannel = \"1.99.1\"\ncomponents = [\"clippy\"]\n",
+            Some("channel=1.99.1\n"),
+        ),
+        ("stable", "[toolchain]\nchannel = \"stable\"\n", None),
+        ("partial", "[toolchain]\nchannel = \"1.99\"\n", None),
+        ("absent", "[toolchain]\ncomponents = [\"clippy\"]\n", None),
+    ] {
+        let dir = base.join(case);
+        fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+        write(&dir.join("rust-toolchain.toml"), file);
+        let output_file = dir.join("github-output");
+        write(&output_file, "");
+        let output = Command::new("bash")
+            .args(["-c", script])
+            .current_dir(&dir)
+            .env("GITHUB_OUTPUT", &output_file)
+            .output()
+            .unwrap_or_else(|e| panic!("run bash: {e}"));
+        match expected {
+            Some(line) => {
+                assert!(
+                    output.status.success(),
+                    "{case}: the toolchain step failed: {}",
+                    stderr(&output)
+                );
+                assert_eq!(read(&output_file), line, "{case}: GITHUB_OUTPUT");
+            }
+            None => {
+                assert!(
+                    !output.status.success(),
+                    "{case}: the toolchain step accepted a channel that is not X.Y.Z"
+                );
+                assert_eq!(read(&output_file), "", "{case}: GITHUB_OUTPUT was written");
+            }
+        }
     }
 }

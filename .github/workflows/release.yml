@@ -26,9 +26,20 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
+      - name: Read the Rust release rust-toolchain.toml pins
+        id: toolchain
+        run: |
+          set -euo pipefail
+          channel=$(sed -n 's/^channel = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"$/\1/p' rust-toolchain.toml)
+          if [ -z "$channel" ]; then
+            echo "rust-toolchain.toml pins no channel of the form X.Y.Z" >&2
+            exit 1
+          fi
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
-          toolchain: 1.99.1
+          toolchain: ${{ steps.toolchain.outputs.channel }}
 
       - name: The tag is the workspace version and its CHANGELOG.md entry names what breaks
         env:
