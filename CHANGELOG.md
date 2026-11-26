@@ -12,9 +12,14 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.62.1] - 2026-11-26
+
+No breaking changes.
+
 ### Changed
 
 - The `x86_64-unknown-linux-gnu` release binary needs glibc 2.27 or newer, was 2.34: built by `cargo zigbuild`, held by `glibc-floor` (story:release-binaries-glibc-floor)
+- ESS moves from 0.99.6 to 0.99.7 (`requires: ess 0.99.7`, `ess-conformance`, `ess-primitives`, the CLI CI installs); the format is unchanged, generated Rust is unchanged
 
 ### Fixed
 
@@ -1681,7 +1686,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.62.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.62.1...HEAD
+[0.62.1]: https://github.com/beyond10x/loom/releases/tag/0.62.1
 [0.62.0]: https://github.com/beyond10x/loom/releases/tag/0.62.0
 [0.61.0]: https://github.com/beyond10x/loom/releases/tag/0.61.0
 [0.60.0]: https://github.com/beyond10x/loom/releases/tag/0.60.0

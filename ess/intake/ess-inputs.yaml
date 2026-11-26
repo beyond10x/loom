@@ -1,5 +1,5 @@
 format: ess-inputs/2
-requires: ess 0.99.6
+requires: ess 0.99.7
 specification:
   - system.yaml
   - domains/routing.yaml
