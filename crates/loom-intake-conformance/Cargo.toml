@@ -10,6 +10,6 @@ repository.workspace = true
 [dependencies]
 b10x-loom-intake-slice = { path = "../loom-intake-slice" }
 intake_model = { package = "intake", path = "../../generated/rust/intake" }
-ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.98.1" }
-ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.98.1" }
+ess-conformance = { git = "https://github.com/beyond10x/ess.git", tag = "0.99.6" }
+ess-primitives = { git = "https://github.com/beyond10x/ess.git", tag = "0.99.6" }
 serde_json = "1"

@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.62.0] - 2026-11-26
+
 ### Added
 
 - `ChildCommand::with_read_write_workspace`: a confined child writes its whole workspace; beside `with_writable` it is refused `ScopeInvalid` (story:bound-program-writes-its-workspace)
@@ -20,6 +22,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 ### Changed
 
 - **Breaking:** the generated `loom::bindings::BindingsDocument` has the field `workspace`; a struct literal of it adds `workspace: None` (story:bound-program-writes-its-workspace)
+- ESS moves from 0.98.1 to 0.99.6 (`requires: ess 0.99.6`, `ess-conformance`, `ess-primitives`, the CLI CI installs); the format is unchanged, generated Rust changes in one doc comment
 
 ### Fixed
 
@@ -1670,7 +1673,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.61.0...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.62.0...HEAD
+[0.62.0]: https://github.com/beyond10x/loom/releases/tag/0.62.0
 [0.61.0]: https://github.com/beyond10x/loom/releases/tag/0.61.0
 [0.60.0]: https://github.com/beyond10x/loom/releases/tag/0.60.0
 [0.59.0]: https://github.com/beyond10x/loom/releases/tag/0.59.0
