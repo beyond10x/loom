@@ -12,6 +12,8 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+## [0.63.0] - 2026-11-26
+
 ### Added
 
 - Each release carries a static `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz` and its `.sha256` (story:release-binaries-musl)
@@ -1696,7 +1698,8 @@ No breaking changes.
 
 - **Breaking:** `b10x-intake-model` is removed; its forced tool call and Codex preset are `b10x-llm-tool-call`
 
-[Unreleased]: https://github.com/beyond10x/loom/compare/0.62.1...HEAD
+[Unreleased]: https://github.com/beyond10x/loom/compare/0.63.0...HEAD
+[0.63.0]: https://github.com/beyond10x/loom/releases/tag/0.63.0
 [0.62.1]: https://github.com/beyond10x/loom/releases/tag/0.62.1
 [0.62.0]: https://github.com/beyond10x/loom/releases/tag/0.62.0
 [0.61.0]: https://github.com/beyond10x/loom/releases/tag/0.61.0

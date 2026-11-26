@@ -1,10 +1,10 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.99.7",
-  "inputs": "sha256:f54cce2b5c473edeebacaf210038f98fb9d88b7800530a1299b61ee80abe5fd4",
+  "inputs": "sha256:a2bcfd05fce7172425e1cda1d0d069b5a7e1e0e1ed3e6b7fa9401891e5ce3a1a",
   "input_files": {
-    "Cargo.lock": "sha256:0936597cb74cb441af28d51b1b4efa6fddb47ddcec8a86d096c51cb5cb2e97e6",
-    "Cargo.toml": "sha256:aadad6775d9b5273f16af077c38e12eee1598eb1cbe22908481681cf124d93c2",
+    "Cargo.lock": "sha256:14cf3a2970e265946e48f58e059c3414e73de408780a02d218185720100db7a4",
+    "Cargo.toml": "sha256:684b094ea13b7d1081ae2e4868497f6b6f6e0acd25ebdbfc2d9ef761da8529d2",
     "crates/loom-a2a/Cargo.toml": "sha256:a85fdf84ce68063450314915c8fa43a5962dfac9550786dd1b0a31a1286e93cd",
     "crates/loom-agent/Cargo.toml": "sha256:302270490d6bcb9a6e670379027839fc30a8f485465f395f832ff505d36ed00d",
     "crates/loom-bindings/Cargo.toml": "sha256:3a270e8080cc4b072b5f7da95bd41fe1f86a7fc14e836623ab13d0d6b3684f4f",
