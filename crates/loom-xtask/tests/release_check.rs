@@ -1300,7 +1300,7 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
     );
 
     // story:release-binaries-glibc-floor: built by `cargo zigbuild` against the floor.
-    let install = step_running(steps, "cargo-zigbuild --version");
+    let install = step_running(steps, r#""$tools/bin/cargo-zigbuild" --version"#);
     let build = step_running(
         steps,
         &format!(
@@ -1390,7 +1390,7 @@ fn binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum() {
 fn binaries_workflow_installs_zig_and_cargo_zigbuild_by_pinned_version_and_digest() {
     let binaries = workflow("binaries.yml");
     let steps = steps(binaries_job(&binaries));
-    let install = &steps[step_running(steps, "cargo-zigbuild --version")];
+    let install = &steps[step_running(steps, r#""$tools/bin/cargo-zigbuild" --version"#)];
     let env = &install["env"];
     for (version, digest) in [
         ("ZIG_VERSION", "ZIG_SHA256"),
@@ -1440,11 +1440,20 @@ fn binaries_workflow_installs_zig_and_cargo_zigbuild_by_pinned_version_and_diges
         2,
         "the install step downloads Zig and cargo-zigbuild, and nothing else:\n{run}"
     );
-    for word in ["| sh", "| bash", "pip ", "cargo install", "apt-get"] {
-        assert!(
-            !run.contains(word),
-            "the install step runs `{word}`:\n{run}"
-        );
+    for line in &lines {
+        let piped = line.split('|').skip(1).map(str::trim);
+        for command in piped {
+            assert!(
+                command.starts_with("sha256sum "),
+                "the install step pipes into `{command}`, not sha256sum:\n{run}"
+            );
+        }
+        for word in ["pip ", "pip3 ", "cargo install", "apt-get", "python"] {
+            assert!(
+                !line.contains(word),
+                "the install step runs `{word}`:\n{run}"
+            );
+        }
     }
 }
 
@@ -1572,7 +1581,7 @@ fn binaries_workflow_reads_no_secret_uploads_to_no_release_and_puts_no_expressio
         // from GitHub it reads only cargo-zigbuild's release files.
         if run.contains("curl") {
             assert!(
-                run.contains("cargo-zigbuild --version"),
+                run.contains(r#""$tools/bin/cargo-zigbuild" --version"#),
                 "a step other than the toolchain install downloads: {run}"
             );
         }
