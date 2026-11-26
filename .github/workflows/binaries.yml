@@ -77,8 +77,8 @@ jobs:
           "$tools/zig/zig" version
           "$tools/bin/cargo-zigbuild" --version
 
-      - name: Build b10x-loom from the locked dependencies against glibc 2.17
-        run: cargo zigbuild --release --locked -p b10x-loom-cli --bin b10x-loom --target x86_64-unknown-linux-gnu.2.17
+      - name: Build b10x-loom from the locked dependencies against glibc 2.27
+        run: cargo zigbuild --release --locked -p b10x-loom-cli --bin b10x-loom --target x86_64-unknown-linux-gnu.2.27
 
       - name: Refuse a binary that links libgit2, libssh2, OpenSSL or zlib
         run: cargo run -q --locked -p loom-xtask -- linked-libraries "$BINARY"
@@ -86,8 +86,8 @@ jobs:
       - name: Refuse a binary that holds the test sync switch
         run: cargo run -q --locked -p loom-xtask -- unsynced-store "$BINARY"
 
-      - name: Refuse a binary that needs a glibc newer than 2.17
-        run: cargo run -q --locked -p loom-xtask -- glibc-floor "$BINARY" --max 2.17
+      - name: Refuse a binary that needs a glibc newer than 2.27
+        run: cargo run -q --locked -p loom-xtask -- glibc-floor "$BINARY" --max 2.27
 
       - name: Pack the binary with its license, and write the archive's SHA-256 checksum
         run: |

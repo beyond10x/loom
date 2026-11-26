@@ -14,7 +14,7 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ### Changed
 
-- The `x86_64-unknown-linux-gnu` release binary needs glibc 2.17 or newer, was 2.34: built by `cargo zigbuild`, held by `glibc-floor` (story:release-binaries-glibc-floor)
+- The `x86_64-unknown-linux-gnu` release binary needs glibc 2.27 or newer, was 2.34: built by `cargo zigbuild`, held by `glibc-floor` (story:release-binaries-glibc-floor)
 
 ## [0.62.0] - 2026-11-26
 

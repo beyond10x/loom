@@ -34,8 +34,8 @@
 //! README and the getting-started page download that archive and check it with `sha256sum -c`.
 //!
 //! `story:release-binaries-glibc-floor`: `binaries.yml` builds with `cargo zigbuild` for
-//! `x86_64-unknown-linux-gnu.2.17`, installing Zig and cargo-zigbuild by pinned version and
-//! SHA-256, and `loom-xtask glibc-floor --max 2.17` refuses the binary before it is packed when it
+//! `x86_64-unknown-linux-gnu.2.27`, installing Zig and cargo-zigbuild by pinned version and
+//! SHA-256, and `loom-xtask glibc-floor --max 2.27` refuses the binary before it is packed when it
 //! needs a newer glibc. A pull request that touches the release build runs the same job, packing
 //! the workspace version, and uploads nothing to a release.
 //!
@@ -1226,7 +1226,9 @@ fn step_running(steps: &[serde_yaml_ng::Value], fragment: &str) -> usize {
 
 /// The glibc floor of the `x86_64-unknown-linux-gnu` binary (`story:release-binaries-glibc-floor`):
 /// `cargo zigbuild` links against it, and `loom-xtask glibc-floor` holds the built binary to it.
-const GLIBC_FLOOR: &str = "2.17";
+/// It is the lowest the dependency graph links: `b10x-substrate-host` calls `memfd_create`, which
+/// glibc has from 2.27; at 2.17 the link fails with `undefined symbol: memfd_create`.
+const GLIBC_FLOOR: &str = "2.27";
 
 /// The paths whose change on a pull request runs `binaries.yml` without a release.
 const BINARIES_PULL_REQUEST_PATHS: [&str; 5] = [

@@ -3,20 +3,20 @@ format: aep.planning-md/3
 id: story:release-binaries-glibc-floor
 kind: story
 status: active
-title: The x86_64-unknown-linux-gnu release binary starts on glibc 2.17 or newer, held there by a check
+title: The x86_64-unknown-linux-gnu release binary starts on glibc 2.27 or newer, held there by a check
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
-revision: 3
+revision: 5
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T13:12:15Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-26T13:12:15Z", actor: "human:operator", revision: 3}
 ---
 ## Outcome
 
-The `x86_64-unknown-linux-gnu` binary a release carries starts on any Linux with glibc 2.17 or
-newer, not only on glibc 2.34 or newer. `binaries.yml` builds it with `cargo zigbuild` for
-`x86_64-unknown-linux-gnu.2.17`, and `loom-xtask glibc-floor <binary> --max 2.17` refuses the
+The `x86_64-unknown-linux-gnu` binary a release carries starts on any Linux with glibc 2.27 or
+newer (Ubuntu 18.04, Debian 10, RHEL 8 and later), not only on glibc 2.34 or newer. `binaries.yml` builds it with `cargo zigbuild` for
+`x86_64-unknown-linux-gnu.2.27`, and `loom-xtask glibc-floor <binary> --max 2.27` refuses the
 built binary before it is packed when it needs a newer `GLIBC_` symbol version, naming the
 highest. The archive keeps its name, `b10x-loom-<version>-x86_64-unknown-linux-gnu.tar.gz`.
 
@@ -31,6 +31,13 @@ Measured on the release assets: `0.60.0` and `0.61.0` need `GLIBC_2.34` (`objdum
 version: `__libc_start_main`, `pthread_create` and others at 2.34), because `binaries.yml` links
 them in `rust:1.99-bookworm`. README and the getting-started page said bookworm's 2.36.
 
+**The floor is 2.27, not the 2.17 the operator named.** Measured on this story's pull request (run
+45827283404): at `x86_64-unknown-linux-gnu.2.17` the link fails with `ld.lld: error: undefined
+symbol: memfd_create`, referenced by `b10x-substrate-host` (`secrets.rs:254`, `exec_gate.rs:292`,
+`libc::memfd_create`), which glibc has from 2.27. Every other symbol above 2.17 in the `0.61.0`
+binary is weak (Rust's std probes it) or an older symbol under a newer version. A floor of 2.17
+needs substrate to call `memfd_create` through `libc::syscall`; Loom does not patch substrate.
+
 ## Design
 
 1. **Toolchain.** One step installs Zig and cargo-zigbuild, each by a pinned version and a pinned
@@ -38,10 +45,10 @@ them in `rust:1.99-bookworm`. README and the getting-started page said bookworm'
    `sha256sum --check --strict`, then `tar`. Zig from `ziglang.org/download/<v>/`, cargo-zigbuild's
    musl build from its GitHub release. No installer script, no package index, no Python.
 2. **Build.** `cargo zigbuild --release --locked -p b10x-loom-cli --bin b10x-loom --target
-   x86_64-unknown-linux-gnu.2.17` in the same container as before (the `loom-agent` image's
+   x86_64-unknown-linux-gnu.2.27` in the same container as before (the `loom-agent` image's
    builder, so the Rust toolchain is the image's). The binary is
    `target/x86_64-unknown-linux-gnu/release/b10x-loom`, the job's `BINARY`.
-3. **Check.** `loom-xtask glibc-floor "$BINARY" --max 2.17`, after `linked-libraries` and
+3. **Check.** `loom-xtask glibc-floor "$BINARY" --max 2.27`, after `linked-libraries` and
    `unsynced-store` and before packing. It reads the ELF in Rust (`binary_linkage.rs`): program
    headers, the dynamic section, `DT_VERNEED`; no `objdump` at run time and no new dependency
    (`object` is not in the lock). It fails above the floor and when no `GLIBC_` version is there.
@@ -63,7 +70,7 @@ documentation. The red step is the changed
 
 - `crates/loom-xtask/tests/release_check.rs`:
   `binaries_workflow_builds_read_only_and_keeps_the_archive_and_its_checksum` (zigbuild target
-  `x86_64-unknown-linux-gnu.2.17`, `glibc-floor "$BINARY" --max 2.17` between the build and the
+  `x86_64-unknown-linux-gnu.2.27`, `glibc-floor "$BINARY" --max 2.27` between the build and the
   packing, the pull-request paths, the upload name `b10x-loom-${{ env.VERSION }}`),
   `binaries_workflow_installs_zig_and_cargo_zigbuild_by_pinned_version_and_digest`,
   `binaries_workflow_reads_no_secret_uploads_to_no_release_and_puts_no_expression_in_a_shell`
@@ -73,7 +80,7 @@ documentation. The red step is the changed
   highest, compares `2.3 < 2.10`; `static-binary` refuses an interpreter or a needed library and
   passes static and static-pie layouts; every prefix of a fixture reads without a panic.
 - The pull request's `binaries / x86_64-unknown-linux-gnu` run is green, and its log prints
-  `needs GLIBC_2.17 at most, within the glibc floor 2.17`.
+  `needs GLIBC_2.27 at most, within the glibc floor 2.27`.
 
 All tests read files or fixtures built in memory; none builds a release binary, downloads or
 calls GitHub.
