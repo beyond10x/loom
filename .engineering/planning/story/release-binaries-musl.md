@@ -2,17 +2,18 @@
 format: aep.planning-md/3
 id: story:release-binaries-musl
 kind: story
-status: active
+status: implemented
 title: Every release carries a static x86_64-unknown-linux-musl b10x-loom beside the gnu one
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:release-binaries-glibc-floor
 - depends_on: story:substrate-0-29-pin
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T21:11:26Z", actor: "human:operator", revision: 3, executor: "agent:loom", correlation: "substrate-0-29-musl"}
 - {from: "proposed", to: "active", at: "2026-11-26T21:11:27Z", actor: "human:operator", revision: 4, executor: "agent:loom", correlation: "substrate-0-29-musl"}
+- {from: "active", to: "implemented", at: "2026-11-26T21:44:52Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1}}, executor: "agent:loom", correlation: "substrate-0-29-musl"}
 ---
 ## Outcome
 

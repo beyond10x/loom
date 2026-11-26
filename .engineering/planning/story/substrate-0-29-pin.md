@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:substrate-0-29-pin
 kind: story
-status: active
+status: implemented
 title: 'Loom pins Substrate 0.29.0: the exec-list members judged, the gnu floor at glibc 2.17, musl unblocked'
 summary: =0.24.0 85da2e2b to =0.29.0 1a10a30d; exec_subpaths/exec_denied_paths sent empty and refused in the record; RunObservation non_exhaustive in a test fake
 tags:
@@ -11,10 +11,11 @@ relations:
 - serves: vision:O1
 - decomposes: epic:protocol-tree-on-bindings
 - depends_on: story:substrate-0-24-0-pin
-revision: 3
+revision: 4
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T21:11:26Z", actor: "human:operator", revision: 2, executor: "agent:loom", correlation: "substrate-0-29-musl"}
 - {from: "proposed", to: "active", at: "2026-11-26T21:11:26Z", actor: "human:operator", revision: 3, executor: "agent:loom", correlation: "substrate-0-29-musl"}
+- {from: "active", to: "implemented", at: "2026-11-26T21:44:52Z", actor: "human:operator", revision: 4, decided_on: {"recorded":{"test_result":1}}, executor: "agent:loom", correlation: "substrate-0-29-musl"}
 ---
 ## Outcome
 
