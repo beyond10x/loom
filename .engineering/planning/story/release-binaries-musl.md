@@ -2,13 +2,17 @@
 format: aep.planning-md/3
 id: story:release-binaries-musl
 kind: story
-status: draft
+status: active
 title: Every release carries a static x86_64-unknown-linux-musl b10x-loom beside the gnu one
 relations:
 - decomposes: epic:loom-sdk-for-products
 - serves: vision:governed-autonomy
 - depends_on: story:release-binaries-glibc-floor
-revision: 2
+- depends_on: story:substrate-0-29-pin
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T21:11:26Z", actor: "human:operator", revision: 3, executor: "agent:loom", correlation: "substrate-0-29-musl"}
+- {from: "proposed", to: "active", at: "2026-11-26T21:11:27Z", actor: "human:operator", revision: 4, executor: "agent:loom", correlation: "substrate-0-29-musl"}
 ---
 ## Outcome
 
@@ -24,23 +28,12 @@ either one the default download.
 
 ## Blocked on
 
-Loom cannot build for musl at its substrate pin (rev `85da2e2b`, `crates/loom-intake-slice/Cargo.toml`).
-Measured once in CI, 2026-11-26, on the throwaway branch `probe/release-binaries-musl` (run
-45828038948, job `binaries / x86_64-unknown-linux-musl`, `cargo zigbuild --release --locked -p
-b10x-loom-cli --bin b10x-loom --target x86_64-unknown-linux-musl`):
-`error: could not compile b10x-substrate-host (lib) due to 13 previous errors`:
+Unblocked by `story:substrate-0-29-pin`: Substrate `0.29.0` builds `b10x-substrate-host` for
+`x86_64-unknown-linux-musl` (`renameat2` as a system call, `ioctl` requests typed per C library).
 
-- E0425 `cannot find function renameat2 in module nix::fcntl` at `src/lib.rs:1114` and
-  `src/quota.rs:219`, and E0433 `cannot find RenameFlags in fcntl` at `src/lib.rs:1119` and
-  `src/quota.rs:224`: nix 0.31.3 gates `renameat2` on `target_env = "gnu"`.
-- E0308 `mismatched types: expected i32, found u64` at `src/egress.rs:644, 715, 906, 1616, 1623,
-  1625, 1676, 1694`: `libc::ioctl`'s request is a `c_int` on musl (`SIOCGIFFLAGS`,
-  `NS_GET_USERNS`, …), and E0277 `can't compare u32 with usize` at `src/egress.rs:1694`.
-
-Substrate's pull request 309 addresses the rename; the `ioctl` errors in `egress.rs` need a fix of
-their own unless that pull request covers them. This story starts when Loom's pin moves to a
-substrate commit that compiles for musl; Loom neither patches around it nor vendors or forks
-substrate.
+Before, measured once in CI, 2026-11-26, on the throwaway branch `probe/release-binaries-musl`
+(run 45828038948): at rev `85da2e2b` `b10x-substrate-host` did not compile for musl (nix 0.31.3
+gates `renameat2` on `target_env = "gnu"`; `libc::ioctl`'s request is a `c_int` on musl).
 
 ## Design
 
@@ -51,11 +44,15 @@ substrate.
 2. `loom-xtask static-binary "$BINARY"` (in place since `story:release-binaries-glibc-floor`)
    refuses a binary with `PT_INTERP` or `DT_NEEDED`; `linked-libraries` and `unsynced-store` run
    as on gnu.
-3. It packs `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz` and its `.sha256` into the same
-   artifact `b10x-loom-<version>`; AGENTS.md § Releases step 6 attaches and verifies four files.
-4. The job is written on the branch `feat/release-binaries-musl` and merged once the pin moves.
-   It is not in `release.yml` or on a pull request before: a lane that always fails would be
-   marked green by `continue-on-error` and say nothing.
+3. It packs `b10x-loom`, `LICENSE` and the `COPYRIGHT` of the musl Zig linked in (as
+   `musl-COPYRIGHT`) as `b10x-loom-<version>-x86_64-unknown-linux-musl.tar.gz` with its `.sha256`,
+   kept as the workflow artifact `b10x-loom-<version>-x86_64-unknown-linux-musl` (two jobs cannot
+   upload one artifact name); AGENTS.md § Releases step 6 fetches both artifacts and attaches and
+   verifies four files.
+4. The job runs wherever the gnu job runs: in `release.yml`'s `binaries` call and on a pull
+   request that touches the release build. It landed with `story:substrate-0-29-pin`.
+5. The documented download stays gnu unless the measurement (both binaries on one CI runner:
+   build time, binary and archive size, `--help` and `protocols list` timed) says otherwise.
 
 ## ESS first
 
