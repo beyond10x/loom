@@ -16,6 +16,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 - The `x86_64-unknown-linux-gnu` release binary needs glibc 2.27 or newer, was 2.34: built by `cargo zigbuild`, held by `glibc-floor` (story:release-binaries-glibc-floor)
 
+### Fixed
+
+- `run_tree` with a cancel flag returns when its run ends, was up to 100 ms later (story:run-tree-returns-when-the-run-ends)
+
 ## [0.62.0] - 2026-11-26
 
 ### Added

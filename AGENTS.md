@@ -3255,8 +3255,9 @@ moves the minor version before 1.0, never only the patch version. A release is:
    so the job checks out the full history and its tags) and then `check.yml` on the tagged
    commit, then `images.yml` with `push: true`, the one job granted `packages: write`
    (`story:release-publishes-images`): it refuses a version ghcr already holds, builds
-   `deploy/images/loom-agent` (`b10x-loom`) and `deploy/images/loom-operator`
-   (`b10x-loom-operator`) for `linux/amd64`, pushes `ghcr.io/beyond10x/<image>:<version>`, then
+   `deploy/images/loom-agent` (binary `b10x-loom`) and `deploy/images/loom-operator` (binary
+   `b10x-loom-operator`) for `linux/amd64`, pushes them as `ghcr.io/beyond10x/loom-agent:<version>`
+   and `ghcr.io/beyond10x/loom-operator:<version>` (the image is named after its directory), then
    packages `charts/loom-agents` and pushes it to `oci://ghcr.io/beyond10x/charts`. Beside it the
    job `binaries` calls `./.github/workflows/binaries.yml` with `version: ${{ github.ref_name }}`
    and `contents: read` only (`story:release-binaries`): in the `loom-agent` image's builder

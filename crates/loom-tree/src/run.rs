@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use b10x_loom_bindings::{
@@ -158,31 +159,27 @@ pub fn run_tree(
         return run_cancellable(store, catalog, settings, observer, &handle, None);
     };
     // The bridge from the caller's flag to the run's handle: a thread that reads the flag every
-    // `CANCEL_WATCH` and sets the handle, until the run returns.
-    let returned = AtomicBool::new(false);
+    // `CANCEL_WATCH` and sets the handle, until the run returns. It waits on a channel, not a
+    // sleep, so the run's return wakes it at once and the scope does not wait out its poll.
+    let (returned, watching) = mpsc::channel::<()>();
+    let watched = &handle;
     std::thread::scope(|scope| {
-        scope.spawn(|| {
-            while !returned.load(Ordering::SeqCst) {
+        scope.spawn(move || {
+            loop {
                 if flag.load(Ordering::SeqCst) {
-                    handle.cancel();
+                    watched.cancel();
                     return;
                 }
-                std::thread::sleep(CANCEL_WATCH);
+                match watching.recv_timeout(CANCEL_WATCH) {
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+                }
             }
         });
-        // Set however the run returns, a panic included, so the scope ends.
-        let _returned = SetOnDrop(&returned);
+        // Dropped however the run returns, a panic included: the watcher wakes and the scope ends.
+        let _returned = returned;
         run_cancellable(store, catalog, settings, observer, &handle, Some(flag))
     })
-}
-
-/// Sets its flag when dropped.
-struct SetOnDrop<'a>(&'a AtomicBool);
-
-impl Drop for SetOnDrop<'_> {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::SeqCst);
-    }
 }
 
 /// [`run_tree`] with `cancel`, the handle every port of the run holds, and `flag`, the caller's.
