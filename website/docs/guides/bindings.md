@@ -264,6 +264,14 @@ actions:
   the member (`executor.argv[0]`, `arguments_from[0]` or `handoff_when[0]`), an entry with a
   `..` segment, one that names no regular file, and one whose real path, links resolved, lies outside the directory. A
   port given a document with `program_root: bindings` that was not resolved starts nothing.
+- `workspace`, at the top of the document, is `read_write` or left out. Left out, a program writes
+  only `target/` of its workspace and a `handoff_when` check writes nothing. With
+  `workspace: read_write`, every program the document binds (a `program` or `person` executor's
+  `argv`, every `arguments_from` and every `handoff_when`) writes anywhere in its workspace: a file
+  at its root, a directory it makes, `.git`. Nothing outside the workspace becomes writable, and a
+  program that writes `.git` can plant hooks or configuration that a later git call on the host
+  runs. A child bindings file that an `open` executor names declares its own `workspace` and
+  inherits nothing.
 - `retry_when` maps an evidence kind of the protocol to the results that send the action back to
   work; a result is never empty. A retried `program` is given those records as
   `LOOM_RETRY_FEEDBACK` (below).
@@ -271,7 +279,7 @@ actions:
 - `handoff_when`, on a `program` binding beside its `handoff`, is the argv of a check, held to the
   rules of any bound program's argv. Before each step of the action, and when the case is otherwise
   stuck, `tree run` runs it through the run's runner with the whole workspace read-only (`target/`
-  included), `PATH` and the `LOOM_*` variables alone, no retry feedback, empty standard input and
+  included; read-write under `workspace: read_write`), `PATH` and the `LOOM_*` variables alone, no retry feedback, empty standard input and
   the binding's `timeout_seconds` but at most 3600 seconds. Exit 0 offers the handoff and takes no step; any other exit lets
   the writer run in that step, or leaves a stuck case `Stuck`. A check that cannot be started
   (exit 126 or 127 included), is killed at its timeout or by a signal is never a skip: the run
@@ -320,7 +328,7 @@ not take (`MemberNotForExecutor`), a `from: runs` table that lists anything but 
 (`InvalidEvidence`, naming `evidence[<i>].results`), `exits` on an executor that is not a `program`, an exit code in both `exits` lists or in
 one and as a key of a `from: exit` table (`ExitClassConflict`), and an `independence` dimension the
 protocol does not declare. Decoding also refuses a `program_root` other than `workspace` or
-`bindings` and an `exits` entry that is not a code from 0 to 255. Each refusal names the action and the
+`bindings`, a `workspace` other than `read_write` (`Malformed`, naming `workspace`) and an `exits` entry that is not a code from 0 to 255. Each refusal names the action and the
 member, such as `action draft.write, member tools.allow[1]`. The reasons are the members of
 `loom.bindings.BindingsRefusalReason` in the [reference](../reference/ess/loom-bindings.md).
 
@@ -339,7 +347,7 @@ The port is a Commission effect port: it performs the actions bound to `program`
   `argv` (no shell), the arguments as one JSON object on standard input, `PATH`, `LOOM_CASE`,
   `LOOM_CASE_NAME` (a case a parent opened), `LOOM_PARENT_CASE_NAME` (a case whose parent a case
   opened) and `LOOM_TIMEOUT_SECONDS` alone in its environment, the binding's `timeout_seconds` (60
-  when absent; at most 3600 for the `arguments_from` argv), and the workspace root as its start directory. Under a runner that is not `local`, a program at an absolute path
+  when absent; at most 3600 for the `arguments_from` argv), and the workspace root as its start directory. Under `linux` it writes only `target/` of the workspace, or the whole workspace when the document says `workspace: read_write`. Under a runner that is not `local`, a program at an absolute path
   outside `/usr`, `/bin`, `/lib` and `/lib64` is mounted read-only at its own path. A host `PATH`
   that is not UTF-8 refuses the step, `<program> was not started: the host's PATH is not UTF-8`,
   and starts nothing.

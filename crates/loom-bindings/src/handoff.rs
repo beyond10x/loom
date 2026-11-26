@@ -4,8 +4,9 @@
 //! [`run_handoff_check`] runs it once, as a child [`bound_case_child`] builds, through the runner
 //! every bound program of the run starts through, admitted as theirs is, with the binding's
 //! timeout, at most [`crate::MAX_TIMEOUT_SECONDS`]. Its reach is never more than the writer's: the whole workspace read-only, `target/`
-//! included (`ChildCommand::with_read_only_workspace`); `PATH` and the `LOOM_*` variables of
-//! the case alone, never the retry feedback; no aperture, no secret slot, no read-only root but
+//! included (`ChildCommand::with_read_only_workspace`), or read-write when the document declares
+//! `workspace: read_write` (`story:bound-program-writes-its-workspace`), as its writer is then;
+//! `PATH` and the `LOOM_*` variables of the case alone, never the retry feedback; no aperture, no secret slot, no read-only root but
 //! the program file a runner that is not `local` mounts at its own path; empty standard input.
 //! Its standard output followed by its standard error is kept as `blobs/<sha256>` in the store
 //! directory. It records nothing in the case and is not counted as a run of the action.
@@ -141,6 +142,9 @@ pub fn run_handoff_check<S: FallibleCaseStore, T: EvaluationTime>(
         case,
         &names,
     ) {
+        Ok(child) if document.workspace.is_some() => {
+            crate::child::in_document_workspace(child, document.workspace)
+        }
         Ok(child) => child.with_read_only_workspace(),
         Err(why) => return not_started(&why),
     };

@@ -45,7 +45,9 @@ use b10x_loom_intake_slice::confinement::{
     ConfinementRefusal, EngineConfinement, EngineRunner, TestExecution, TestRunner,
 };
 use b10x_loom_intake_slice::executor::TestCommand;
-use loom::bindings::{BindingsDocument, BoundAction, RetryFeedback, RetryLog, RetryRecord};
+use loom::bindings::{
+    BindingsDocument, BoundAction, RetryFeedback, RetryLog, RetryRecord, WorkspaceWrites,
+};
 use loom_governor::{CanonGovernor, CaseInputs, MemoryCaseStore};
 use sha2::{Digest as _, Sha256};
 
@@ -1720,6 +1722,38 @@ fn a_handoff_check_launch_failure_is_a_refusal_and_its_child_no_more_than_the_wr
         assert_eq!(variable(&child), None, "{child:?}");
         assert!(child.stdin().unwrap_or_default().is_empty(), "{child:?}");
     }
+}
+
+/// Under the document's `workspace: read_write` (`story:bound-program-writes-its-workspace`) the
+/// check reaches what its writer does then: the whole workspace writable, no named path beside,
+/// never read-only.
+#[test]
+fn a_handoff_check_of_a_read_write_document_writes_the_workspace_as_its_writer_does() {
+    let scratch = Scratch::new();
+    let members =
+        format!("{RETRY}    handoff: Answer the finding.\n    handoff_when: [{HANDOFF_STUB}]\n");
+    let mut document = recorded_document(&members);
+    document.workspace = Some(WorkspaceWrites::ReadWrite);
+    let governor = governor();
+    let runner = Arc::new(Recording::new().answering(HANDOFF_STUB, 0, b"said\n"));
+    let check = run_handoff_check(
+        &governor,
+        &CaseId(CASE.to_owned()),
+        &document,
+        writer(&document),
+        &scratch.workspace,
+        &scratch.store,
+        &(Arc::clone(&runner) as Arc<dyn TestRunner>),
+        None,
+    )
+    .expect("the writer carries a check");
+    assert!(check.hands_off(), "{check:?}");
+    let children = runner.children();
+    assert_eq!(children.len(), 1, "the check starts once");
+    let child = &children[0];
+    assert!(child.read_write_workspace(), "{child:?}");
+    assert!(!child.read_only_workspace(), "{child:?}");
+    assert!(child.writable().is_empty(), "{child:?}");
 }
 
 /// A check killed at its timeout, whatever status it reported, and a check a signal ended (no

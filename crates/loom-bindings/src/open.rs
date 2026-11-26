@@ -686,6 +686,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> OpenEffects<'a, S, T> {
                 &commission_text(requested),
                 timeout,
                 &self.workspace,
+                self.document.workspace,
                 runner.as_ref(),
                 &self.case,
                 &names,

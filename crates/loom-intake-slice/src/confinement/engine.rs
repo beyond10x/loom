@@ -37,8 +37,8 @@ use super::{
     ConfinementAdapter, ConfinementError, ConfinementRefusal, EngineConfinement, NetworkMode,
     QUEUED_FRAMES, READ_STEP, SANDBOX_WORKSPACE, SubstrateRunner, TestExecution, TestRunner,
     cancelled_before_launch, canonical_workspace, check_program, check_stdin, check_workdir,
-    check_writable, enum_name, escape_reason, is_set, killed_by_cancel, local_label, refuse,
-    scope_error, tail,
+    check_workspace_access, check_writable, enum_name, escape_reason, is_set, killed_by_cancel,
+    local_label, refuse, scope_error, tail,
 };
 use crate::executor::TestCommand;
 
@@ -381,6 +381,7 @@ impl LocalRoute {
             ));
         }
         check_writable(&child.writable)?;
+        check_workspace_access(child)?;
         check_workdir(child)?;
         let workspace = canonical_workspace(&child.directory)?;
         Ok((workspace, relative_workdir(child.workdir.as_deref())))

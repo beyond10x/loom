@@ -452,6 +452,67 @@ fn a_child_writes_only_the_paths_the_host_named() {
     );
 }
 
+/// A child read-write in its workspace (`ChildCommand::with_read_write_workspace`,
+/// `story:bound-program-writes-its-workspace`) writes a file at the workspace root, makes a
+/// directory and writes in it, and still writes nothing outside the workspace. The driver's record
+/// reports the whole workspace writable. The same script without it cannot write the root.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Substrate's linux adapter serves Linux only"
+)]
+fn a_read_write_child_writes_its_whole_workspace_and_nothing_outside() {
+    delegated(
+        "a_read_write_child_writes_its_whole_workspace_and_nothing_outside",
+        |runner, workspace| {
+            let outside = workspace.parent().unwrap().join("outside");
+            let script = format!(
+                "{}; /usr/bin/mkdir made && echo made:made || echo made:refused; {}",
+                write_each(&["root.txt"]),
+                write_each(&["made/file", outside.to_str().unwrap()]),
+            );
+            let child = ChildCommand::new("sh", ["-c", script.as_str()], workspace)
+                .with_read_write_workspace();
+            let result = runner.run_child(&child).expect("the child runs confined");
+            assert_eq!(result.exit_code, Some(0), "{}", result.output);
+            assert_eq!(
+                result.output,
+                format!(
+                    "root.txt:written\nmade:made\nmade/file:written\n{}:refused\n",
+                    outside.display()
+                ),
+                "the root and a made directory are written, the host path outside is not"
+            );
+            assert_eq!(
+                std::fs::read_to_string(workspace.join("root.txt")).unwrap(),
+                "written"
+            );
+            assert_eq!(
+                std::fs::read_to_string(workspace.join("made/file")).unwrap(),
+                "written"
+            );
+            assert!(
+                !outside.exists(),
+                "nothing is written outside the workspace"
+            );
+            let record = result.driver_record.as_ref().expect("the driver's record");
+            assert_eq!(
+                record.workspace_access,
+                substrate_wire::WorkspaceAccess::ReadWrite
+            );
+            assert!(result.applied.writable_scopes.is_empty());
+
+            let script = write_each(&["second.txt"]);
+            let scoped = runner
+                .run_child(&ChildCommand::new("sh", ["-c", script.as_str()], workspace))
+                .expect("the child runs confined");
+            assert_eq!(scoped.exit_code, Some(0), "{}", scoped.output);
+            assert_eq!(scoped.output, "second.txt:refused\n");
+            assert!(!workspace.join("second.txt").exists());
+        },
+    );
+}
+
 /// A writable path the child could leave the workspace through, or that names no directory of it,
 /// is refused `ScopeInvalid` before anything starts, naming the path: an absolute path, one that
 /// climbs out with `..`, one through a symbolic link (to outside the workspace or inside it), an

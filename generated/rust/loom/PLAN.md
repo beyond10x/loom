@@ -1,13 +1,13 @@
 <!--
   generated from loom v1
-  contract digest 60a971f947faeb5025ac7d4b5ce291ef27b27e3f5adcad002d3f31013b49afb7
+  contract digest 3507a46b6773ab76bcd42e01af7dbbdc5c4901e9c7d1125fb92b5bdb5ce623d3
   do not edit: regenerate with `ess synthesize --layout crate`
 -->
 # Synthesis plan — loom v1
 
 Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regenerate with `ess synthesize --layout crate`.
 
-525 capabilities: **509 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+526 capabilities: **510 generated**, **13 obligations**, **3 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -102,6 +102,7 @@ Scope: `component-skeletons`, laid out as `crate`, planned by `ess-synth`. Regen
 | domain type | `loom.bindings.RunsScope` |
 | domain type | `loom.bindings.StepOutcome` |
 | domain type | `loom.bindings.ToolAllowList` |
+| domain type | `loom.bindings.WorkspaceWrites` |
 | domain type | `loom.datasource.AdapterAlias` |
 | domain type | `loom.datasource.ConnectionId` |
 | domain type | `loom.datasource.ConnectorsCliConfig` |

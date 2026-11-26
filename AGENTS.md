@@ -1595,6 +1595,12 @@ crate opens no network connection. It depends on `b10x-canon` by the reference
   decoded only in a person's argv, as a whole entry other than `argv[0]`, else `InvalidArgv`.
 - A decoded `agent` executor with no `model` holds `claude-haiku-5-5`; an action with no
   `budget.max_runs` holds 8.
+- `workspace: read_write` (top level, `loom.bindings.WorkspaceWrites`,
+  `story:bound-program-writes-its-workspace`) gives every program the document binds (program and
+  person `argv`, `arguments_from`, `handoff_when`) the whole workspace writable
+  (`ChildCommand::with_read_write_workspace`, applied in `child.rs` `in_document_workspace`);
+  absent, a program writes `target/` alone and a check nothing. Any other value is refused
+  `Malformed` naming `workspace`. A child bindings file of an `open` executor declares its own.
 - Every `BindingsRefusalReason` is reachable from a document: `every_refusal_reason_is_reachable_from_a_document`
   matches the enum exhaustively, so a reason added to the specification fails the file's compilation until a
   case reaches it. The guide page `website/docs/guides/bindings.md` holds one complete file, and the
@@ -1874,7 +1880,8 @@ the clap types in `lib.rs`) holds only its flags, output and exit status. Its ty
   carries one, `b10x_loom_bindings::run_handoff_check` runs it before the loop performs the step,
   as a `bound_case_child` through the run's runner, admitted as a bound program's is, with
   `ChildCommand::with_read_only_workspace` (Substrate `WorkspaceAccess::ReadOnly`: nothing in the
-  workspace writable, `target/` included), `PATH` and `LOOM_*` alone, no retry feedback, no
+  workspace writable, `target/` included; `with_read_write_workspace` instead when the document
+  says `workspace: read_write`), `PATH` and `LOOM_*` alone, no retry feedback, no
   aperture, empty standard input and the binding's timeout; its output is a blob of the store and
   it records nothing in the case. Its `handoff checked` line comes before the step or the stop.
   Exit 0 takes no step and stops `AwaitingPerson` with the writer's `Handoff`; another exit hands
@@ -2990,7 +2997,11 @@ writes only under `target/` and the directories named (Substrate's `WorkspaceAcc
 `.git` only when named; a path that is absolute, climbs out with `..`, passes a symlink, is absent
 or no directory, holds a special file or a hard link from outside, or overlaps another is refused
 `ScopeInvalid` before launch; `TestRunner::run` keeps `target/` alone, and the applied
-confinement's `writable_scopes` lists them, a record naming another set refused), no toolchain or
+confinement's `writable_scopes` lists them, a record naming another set refused; or, with
+`with_read_write_workspace` (`story:bound-program-writes-its-workspace`), anywhere in the
+workspace, Substrate's `WorkspaceAccess::ReadWrite`, a record naming another access refused and
+`writable_scopes` empty, the driver record holding the access; beside `with_writable` or
+`with_read_only_workspace` it is refused `ScopeInvalid` before launch, under `local` too), no toolchain or
 cache mounted, exactly the named environment (with a bundle, plus `SSL_CERT_FILE`), a typed
 refusal for a missing guarantee, only the requested network accepted as applied, no network or
 exactly the named apertures, in order (name, pinned destination, mechanism, ceiling, and for

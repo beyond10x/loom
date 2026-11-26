@@ -5,7 +5,7 @@ use b10x_canon::model::{self, Protocol};
 use b10x_loom_bindings::{
     DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, FORMAT, Refusal, check, decode, unbound,
 };
-use loom::bindings::{BindingsRefusalReason as Reason, Executor, ResultSource};
+use loom::bindings::{BindingsRefusalReason as Reason, Executor, ResultSource, WorkspaceWrites};
 use std::collections::BTreeSet;
 
 const PROTOCOL: &str = r#"
@@ -249,6 +249,43 @@ fn a_missing_or_other_format_is_refused() {
     for other in ["loom.bindings/2", "intake.bindings/1", "1", ""] {
         let text = format!("format: \"{other}\"\nprotocol: story@1\nactions: []\n");
         assert_refused(&text, Reason::UnsupportedFormat, None, "format");
+    }
+}
+
+/// `workspace: read_write` (`story:bound-program-writes-its-workspace`) decodes into the document,
+/// passes the load check, and a document without it holds none.
+#[test]
+fn a_read_write_workspace_is_accepted_and_its_absence_is_the_default() {
+    let text = document(GATE).replace("artifacts:", "workspace: read_write\nartifacts:");
+    let doc = decode(&text).expect("decodes");
+    assert_eq!(doc.workspace, Some(WorkspaceWrites::ReadWrite));
+    check(&doc, REGISTRATION, &protocol()).expect("checks");
+    let json = r#"{"format": "loom.bindings/1", "protocol": "story@1", "workspace": "read_write", "actions": []}"#;
+    assert_eq!(
+        decode(json).expect("JSON decodes").workspace,
+        Some(WorkspaceWrites::ReadWrite)
+    );
+    assert_eq!(decode(&document(GATE)).expect("decodes").workspace, None);
+}
+
+/// Any `workspace` other than `read_write` is refused at decoding, naming the member and the value.
+#[test]
+fn a_workspace_other_than_read_write_is_refused_naming_it() {
+    for other in [
+        "read_only",
+        "ReadWrite",
+        "read-write",
+        "\"\"",
+        "true",
+        "[read_write]",
+        "{mode: read_write}",
+    ] {
+        let text = document(GATE).replace("artifacts:", &format!("workspace: {other}\nartifacts:"));
+        let refusal = assert_refused(&text, Reason::Malformed, None, "workspace");
+        assert!(
+            refusal.to_string().contains("read_write"),
+            "{refusal} names the one value"
+        );
     }
 }
 

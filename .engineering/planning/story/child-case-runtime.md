@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:child-case-runtime
 kind: story
-status: active
+status: implemented
 title: Performing a case_open action opens the child case and its outcome is written into the parent as case_outcome
 summary: Parent-child link and termination in the case store; subject_revision is the revision the outcome was computed against
 tags:
@@ -38,10 +38,11 @@ scope:
   path: ess/domains/governor.yaml
 - confidence: inferred
   path: website/docs/concepts/governor-and-intake.md
-revision: 14
+revision: 15
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-20T23:55:46Z", actor: "human:timo", revision: 9, decided_on: {"recorded":{"review_outcome":3}}}
 - {from: "proposed", to: "active", at: "2026-11-21T21:13:21Z", actor: "agent:sdc", revision: 13, decided_on: {"recorded":{"review_outcome":3}}, executor: "agent:loom", correlation: "loom-wave-2026-11-21-w8"}
+- {from: "active", to: "implemented", at: "2026-11-26T11:39:16Z", actor: "agent:loom", revision: 15, decided_on: {"recorded":{"test_result":1,"review_outcome":3}}, correlation: "feat/bound-program-writable-workspace"}
 ---
 ## Outcome
 

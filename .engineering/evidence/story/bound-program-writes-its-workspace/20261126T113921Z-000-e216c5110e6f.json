@@ -1,0 +1,12 @@
+{
+  "at": "2026-11-26T11:39:21Z",
+  "actor": "agent:loom",
+  "artifact": "story:bound-program-writes-its-workspace",
+  "kind": "story",
+  "revision": 5,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "cargo test -p b10x-loom-intake-slice --locked and -p b10x-loom-bindings --locked green on e42a496d8 plus this change; delegated cases ran with LOOM_REQUIRE_DELEGATION=1 (a_read_write_child_writes_its_whole_workspace_and_nothing_outside, a_confined_program_of_a_read_write_document_writes_its_whole_workspace); red with the document member disabled"
+  }
+}

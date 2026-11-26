@@ -5,16 +5,17 @@ use crate::{DEFAULT_AGENT_MODEL, DEFAULT_MAX_RUNS, FORMAT, MAX_DOCUMENT_BYTES, R
 use loom::bindings::{
     ActionBudget, ArtifactPath, BindingsDocument, BindingsRefusalReason as Reason, BoundAction,
     EvidenceEntry, Executor, ExecutorSpec, ExitClasses, ProducerIndependence, ProgramRoot,
-    ResultRule, ResultSource, RetryCondition, RunsScope, ToolAllowList,
+    ResultRule, ResultSource, RetryCondition, RunsScope, ToolAllowList, WorkspaceWrites,
 };
 use loom::json::Value as Json;
 
 type Decoded<T> = Result<T, Refusal>;
 
-const TOP: [&str; 6] = [
+const TOP: [&str; 7] = [
     "format",
     "protocol",
     "program_root",
+    "workspace",
     "artifacts",
     "independence",
     "actions",
@@ -79,7 +80,8 @@ const BUDGET: [&str; 7] = [
 ///
 /// # Errors
 /// The first defect: text that is not a YAML object, an undeclared member, a missing or other
-/// `format`, a malformed `protocol`, `program_root` (`workspace` or `bindings`), `argv`, result
+/// `format`, a malformed `protocol`, `program_root` (`workspace` or `bindings`), `workspace`
+/// (`read_write`), `argv`, result
 /// table, tool name, budget, timeout or `exits` list (exit codes from 0 to 255), or an
 /// executor without the members its kind needs. Whether the actions and artifacts exist in a
 /// protocol is [`crate::check`]'s.
@@ -150,10 +152,26 @@ pub fn decode(text: &str) -> Decoded<BindingsDocument> {
             ));
         }
     };
+    let workspace = match top.get("workspace") {
+        None => None,
+        Some(Value::String(writes)) if writes == "read_write" => Some(WorkspaceWrites::ReadWrite),
+        Some(other) => {
+            return Err(refuse(
+                Reason::Malformed,
+                None,
+                "workspace",
+                format!(
+                    "is {}; it is read_write, or left out for the default",
+                    shown(other)
+                ),
+            ));
+        }
+    };
     Ok(BindingsDocument {
         format,
         protocol,
         program_root,
+        workspace,
         artifacts: artifacts(top)?,
         independence: independence(top)?,
         actions: actions(top)?,

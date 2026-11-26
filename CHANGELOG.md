@@ -12,6 +12,15 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- `ChildCommand::with_read_write_workspace`: a confined child writes its whole workspace; beside `with_writable` it is refused `ScopeInvalid` (story:bound-program-writes-its-workspace)
+- `workspace: read_write` in a `loom.bindings/1` document gives every program it binds its whole workspace under `linux` (story:bound-program-writes-its-workspace)
+
+### Changed
+
+- **Breaking:** the generated `loom::bindings::BindingsDocument` has the field `workspace`; a struct literal of it adds `workspace: None` (story:bound-program-writes-its-workspace)
+
 ### Fixed
 
 - `StoreLock` unlocks `tree.lock` when dropped, so a process forked while it was held no longer keeps the store `StoreInUse`

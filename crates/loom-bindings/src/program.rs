@@ -589,6 +589,7 @@ impl<'a, S: FallibleCaseStore, T: EvaluationTime> ProgramEffects<'a, S, T> {
             &commission_text(requested),
             timeout,
             &self.workspace,
+            self.document.workspace,
             self.runner.as_ref(),
             &self.case,
             names,
@@ -925,6 +926,7 @@ pub fn prepare<S: FallibleCaseStore, T: EvaluationTime>(
             &names,
         )
         .map_err(|why| not_started(&why))?;
+        let child = crate::child::in_document_workspace(child, place.document.workspace);
         let child =
             crate::retry::given(child, inputs.feedback.as_ref(), place.runner.local_reason());
         let child = match place.cancel {
