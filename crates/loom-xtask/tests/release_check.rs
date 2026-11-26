@@ -906,6 +906,11 @@ fn release_workflow_verifies_the_tag_and_reuses_the_check() {
             let Some(run) = step["run"].as_str() else {
                 continue;
             };
+            // The step that reads rust-toolchain.toml, the same script in every job
+            // (`the_toolchain_step_writes_the_pinned_release_or_fails`).
+            if step["id"].as_str() == Some("toolchain") {
+                continue;
+            }
             let run = run.trim();
             assert!(
                 !run.contains('\n')
