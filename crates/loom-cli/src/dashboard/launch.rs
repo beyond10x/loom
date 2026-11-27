@@ -239,13 +239,15 @@ fn generation_held(scope: &Scope, id: &str, expected: &str) -> io::Result<bool> 
 }
 
 fn durable(path: &Path, data: &impl Serialize) -> io::Result<()> {
+    use loom_governor::durable::sync_file;
+
     save(path, data)?;
-    fs::File::open(path)?.sync_all()?;
-    fs::File::open(
-        path.parent()
-            .ok_or_else(|| invalid("missing journal directory"))?,
-    )?
-    .sync_all()
+    sync_file(&fs::File::open(path)?)?;
+    let directory = path
+        .parent()
+        .ok_or_else(|| invalid("missing journal directory"))?;
+    // A launch receipt must also propagate failures syncing the directory entry.
+    sync_file(&fs::File::open(directory)?)
 }
 
 fn result(p: &Prepared, id: &str, instance: &str, status: &str) -> Value {
