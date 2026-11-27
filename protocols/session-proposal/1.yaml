@@ -1,0 +1,39 @@
+format: protocol/1
+protocol:
+  id: session.proposal
+  revision: 1
+  description: Record one governed session proposal for an authenticated message.
+artifacts:
+  item:
+    description: The input item at the revision derived from the A2A message ID.
+evidence_kinds:
+  session_proposed:
+    description: The host received the bounded workspace proposal and captured its contents.
+claims:
+  proposal.captured:
+    true_when:
+      evidence: {kind: session_proposed, subject: item}
+actions:
+  session.propose:
+    description: Capture the proposed files and summary for the caller. No change is applied.
+    effect: none
+    requires: [{capability: session.propose}]
+    arguments:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              path: {type: string}
+              content: {}
+            required: [path, content]
+            additionalProperties: false
+      required: [files]
+      additionalProperties: false
+    may_produce: [{evidence: session_proposed}]
+outcomes:
+  proposed:
+    description: A proposal was captured, including the empty proposal when the session changed no files.
+    requires: {claim: proposal.captured}

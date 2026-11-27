@@ -1,5 +1,5 @@
 format: ess/37
 system: loom
 version: v1
-summary: The read-only server dashboard.
+summary: The server dashboard for observing agents and operating configured hosts.
 domains: [loom.dashboard, loom.observation]

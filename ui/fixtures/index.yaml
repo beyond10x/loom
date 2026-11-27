@@ -1,4 +1,5 @@
 views:
+  loom.dashboard.LaunchTemplates: templates.json
   loom.dashboard.AgentSpecById: agent-spec.json
   loom.dashboard.Agents: agents.json
   loom.dashboard.Runs: runs.json

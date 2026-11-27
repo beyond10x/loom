@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 3507a46b6773ab76bcd42e01af7dbbdc5c4901e9c7d1125fb92b5bdb5ce623d3
+// contract digest 93b10ebd872515f89e059d5e64f0981490f97077345b6e02a01f38c191f911d0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! What the specification fully determines, generated: the behaviour of every command the plan
@@ -343,6 +343,36 @@ impl<P> crate::agent::obligations::AdmitServeBehavior for Generated<P>
     }
 }
 
+/// `loom.agent.AdmitServedSessionTurn`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::AdmitServedSessionTurnBehavior for Generated<P>
+{
+    fn admit_served_session_turn(&mut self, input: crate::agent::AdmitServedSessionTurn) -> Result<crate::agent::AdmitServedSessionTurnOutcome, UnmetObligation> {
+        let _ = &input;
+        // `unsupported`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.kind).map(|value| match value { crate::session::SessionKind::ClaudeCode => "ClaudeCode", crate::session::SessionKind::Codex => "Codex", crate::session::SessionKind::Harness => "Harness" }.to_owned()), Some("Harness".to_owned())), "loom.agent.AdmitServedSessionTurn")? {
+            return Ok(crate::agent::AdmitServedSessionTurnOutcome::Unsupported);
+        }
+        // `no-ingress`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.a2a_only).map(|value| *value), Some(false)), "loom.agent.AdmitServedSessionTurn")? {
+            return Ok(crate::agent::AdmitServedSessionTurnOutcome::NoIngress);
+        }
+        // `invalid-workspace`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.workspace_ready).map(|value| *value), Some(false)), "loom.agent.AdmitServedSessionTurn")? {
+            return Ok(crate::agent::AdmitServedSessionTurnOutcome::InvalidWorkspace);
+        }
+        // `refused-policy`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.policy_ready).map(|value| *value), Some(false)), "loom.agent.AdmitServedSessionTurn")? {
+            return Ok(crate::agent::AdmitServedSessionTurnOutcome::RefusedPolicy);
+        }
+        // `claude-session`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.kind).map(|value| match value { crate::session::SessionKind::ClaudeCode => "ClaudeCode", crate::session::SessionKind::Codex => "Codex", crate::session::SessionKind::Harness => "Harness" }.to_owned()), Some("ClaudeCode".to_owned())), "loom.agent.AdmitServedSessionTurn")? {
+            return Ok(crate::agent::AdmitServedSessionTurnOutcome::ClaudeSession);
+        }
+        // `codex-session`: the default.
+        return Ok(crate::agent::AdmitServedSessionTurnOutcome::CodexSession);
+    }
+}
+
 /// `loom.agent.BoundHttpAnswer`, generated: every outcome is one the specification fully determines.
 impl<P> crate::agent::obligations::BoundHttpAnswerBehavior for Generated<P>
 {
@@ -368,6 +398,24 @@ impl<P> crate::agent::obligations::BoundHttpAnswerBehavior for Generated<P>
 impl<P: crate::agent::obligations::CheckAgentSpecBehavior> crate::agent::obligations::CheckAgentSpecBehavior for Generated<P> {
     fn check_agent_spec(&mut self, input: crate::agent::CheckAgentSpec) -> Result<crate::agent::CheckAgentSpecOutcome, UnmetObligation> {
         crate::agent::obligations::CheckAgentSpecBehavior::check_agent_spec(&mut self.ports, input)
+    }
+}
+
+/// `loom.agent.EndServedSessionTurn`, generated: every outcome is one the specification fully determines.
+impl<P> crate::agent::obligations::EndServedSessionTurnBehavior for Generated<P>
+{
+    fn end_served_session_turn(&mut self, input: crate::agent::EndServedSessionTurn) -> Result<crate::agent::EndServedSessionTurnOutcome, UnmetObligation> {
+        let _ = &input;
+        // `held`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.suspended).map(|value| *value), Some(true)), "loom.agent.EndServedSessionTurn")? {
+            return Ok(crate::agent::EndServedSessionTurnOutcome::Held);
+        }
+        // `proposed`: an accepting branch, in declaration order.
+        if decided(equal(Some(&input.proposed_change).map(|value| *value), Some(true)), "loom.agent.EndServedSessionTurn")? {
+            return Ok(crate::agent::EndServedSessionTurnOutcome::Proposed);
+        }
+        // `completed-without-change`: the default.
+        return Ok(crate::agent::EndServedSessionTurnOutcome::CompletedWithoutChange);
     }
 }
 

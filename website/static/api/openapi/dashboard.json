@@ -20,11 +20,31 @@
             },
             "type": "array"
           },
+          "harness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/loom.dashboard.Harness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "type": "string"
           },
           "instance": {
             "type": "string"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/loom.dashboard.AgentKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "last_seen": {
             "format": "date-time",
@@ -83,8 +103,10 @@
         "required": [
           "a2a_protocol",
           "current",
+          "harness",
           "id",
           "instance",
+          "kind",
           "last_seen",
           "model",
           "name",
@@ -98,6 +120,39 @@
         "type": "object",
         "x-ess-kind": "struct",
         "x-ess-name": "loom.dashboard.Agent"
+      },
+      "loom.dashboard.AgentKind": {
+        "enum": [
+          "agent_spec",
+          "session"
+        ],
+        "title": "AgentKind",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.dashboard.AgentKind"
+      },
+      "loom.dashboard.AgentRouting": {
+        "additionalProperties": false,
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/loom.dashboard.ModelRoute"
+          },
+          "classifier": {
+            "$ref": "#/components/schemas/loom.dashboard.ModelRoute"
+          },
+          "source": {
+            "$ref": "#/components/schemas/loom.dashboard.RoutingSource"
+          }
+        },
+        "required": [
+          "agent",
+          "classifier",
+          "source"
+        ],
+        "title": "AgentRouting",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.AgentRouting"
       },
       "loom.dashboard.AgentStatus": {
         "enum": [
@@ -140,6 +195,178 @@
         "type": "object",
         "x-ess-kind": "struct",
         "x-ess-name": "loom.dashboard.Coverage"
+      },
+      "loom.dashboard.Harness": {
+        "enum": [
+          "native",
+          "claude",
+          "codex"
+        ],
+        "title": "Harness",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.dashboard.Harness"
+      },
+      "loom.dashboard.LaunchStatus": {
+        "enum": [
+          "started",
+          "already_running"
+        ],
+        "title": "LaunchStatus",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.dashboard.LaunchStatus"
+      },
+      "loom.dashboard.LaunchTemplate": {
+        "additionalProperties": false,
+        "properties": {
+          "default_harness": {
+            "$ref": "#/components/schemas/loom.dashboard.Harness"
+          },
+          "harnesses": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.Harness"
+            },
+            "type": "array"
+          },
+          "id": {
+            "$ref": "#/components/schemas/loom.observation.LaunchKey"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/loom.dashboard.AgentKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "default_harness",
+          "harnesses",
+          "id",
+          "kind",
+          "name",
+          "protocol",
+          "spec_id"
+        ],
+        "title": "LaunchTemplate",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.LaunchTemplate"
+      },
+      "loom.dashboard.ModelProtocol": {
+        "enum": [
+          "chat-completions",
+          "responses",
+          "messages"
+        ],
+        "title": "ModelProtocol",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.dashboard.ModelProtocol"
+      },
+      "loom.dashboard.ModelRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "base_origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "binding_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/loom.dashboard.ModelProtocol"
+          },
+          "provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "upstream_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "base_origin",
+          "binding_revision",
+          "endpoint_id",
+          "protocol",
+          "provider_id",
+          "selection",
+          "upstream_model"
+        ],
+        "title": "ModelRoute",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.ModelRoute"
+      },
+      "loom.dashboard.RoutingSource": {
+        "enum": [
+          "launch_catalog",
+          "spec_routes"
+        ],
+        "title": "RoutingSource",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.dashboard.RoutingSource"
       },
       "loom.dashboard.Run": {
         "additionalProperties": false,
@@ -188,7 +415,7 @@
             "type": "array"
           },
           "id": {
-            "type": "string"
+            "$ref": "#/components/schemas/loom.observation.RunId"
           },
           "input_tokens": {
             "anyOf": [
@@ -557,6 +784,478 @@
         "x-ess-kind": "struct",
         "x-ess-name": "loom.dashboard.TurnEvent"
       },
+      "loom.observation.DispatchState": {
+        "enum": [
+          "TASK_STATE_COMPLETED",
+          "TASK_STATE_REJECTED",
+          "TASK_STATE_FAILED"
+        ],
+        "title": "DispatchState",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.observation.DispatchState"
+      },
+      "loom.observation.DispatchWork.Input": {
+        "additionalProperties": false,
+        "description": "Send one bounded text message to a registered host with the dashboard operator credential and the host’s A2A bearer.",
+        "properties": {
+          "message_id": {
+            "$ref": "#/components/schemas/loom.observation.MessageId"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id",
+          "text"
+        ],
+        "title": "DispatchWork input",
+        "type": "object",
+        "x-ess-kind": "command-input",
+        "x-ess-name": "loom.observation.DispatchWork"
+      },
+      "loom.observation.DispatchWork.Result": {
+        "additionalProperties": false,
+        "description": "Send one bounded text message to a registered host with the dashboard operator credential and the host’s A2A bearer.",
+        "properties": {
+          "run_id": {
+            "$ref": "#/components/schemas/loom.observation.RunId"
+          },
+          "state": {
+            "$ref": "#/components/schemas/loom.observation.DispatchState"
+          }
+        },
+        "required": [
+          "run_id",
+          "state"
+        ],
+        "title": "DispatchWork response",
+        "type": "object",
+        "x-ess-kind": "command-response",
+        "x-ess-name": "loom.observation.DispatchWork"
+      },
+      "loom.observation.DispatchWork.agent-denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The caller lacks the target agent bearer..",
+        "properties": {
+          "error": {
+            "const": "agent_unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The operator did not authenticate..",
+        "properties": {
+          "error": {
+            "const": "unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.forbidden.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: A scoped viewer attempted to dispatch..",
+        "properties": {
+          "error": {
+            "const": "forbidden",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.invalid.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request is malformed or its message is blank or exceeds 16384 UTF-8 bytes..",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.not-found.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The registered agent does not exist..",
+        "properties": {
+          "error": {
+            "const": "not_found",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.offline.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The host is offline or lacks an A2A listener..",
+        "properties": {
+          "error": {
+            "const": "agent_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.unavailable-dispatch.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The listener could not return a terminal task..",
+        "properties": {
+          "error": {
+            "const": "dispatch_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.DispatchWork.unavailable-viewers.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private viewer configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "viewer_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.Input": {
+        "additionalProperties": false,
+        "properties": {
+          "harness": {
+            "$ref": "#/components/schemas/loom.dashboard.Harness"
+          },
+          "request_id": {
+            "$ref": "#/components/schemas/loom.observation.LaunchKey"
+          },
+          "template": {
+            "$ref": "#/components/schemas/loom.observation.LaunchKey"
+          }
+        },
+        "required": [
+          "template",
+          "request_id"
+        ],
+        "title": "LaunchAgent input",
+        "type": "object",
+        "x-ess-kind": "command-input",
+        "x-ess-name": "loom.observation.LaunchAgent"
+      },
+      "loom.observation.LaunchAgent.Result": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "harness": {
+            "$ref": "#/components/schemas/loom.dashboard.Harness"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/loom.dashboard.AgentKind"
+          },
+          "status": {
+            "$ref": "#/components/schemas/loom.dashboard.LaunchStatus"
+          }
+        },
+        "required": [
+          "agent_id",
+          "instance",
+          "status",
+          "kind",
+          "harness"
+        ],
+        "title": "LaunchAgent response",
+        "type": "object",
+        "x-ess-kind": "command-response",
+        "x-ess-name": "loom.observation.LaunchAgent"
+      },
+      "loom.observation.LaunchAgent.denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The operator did not authenticate..",
+        "properties": {
+          "error": {
+            "const": "unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.forbidden.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: A scoped viewer attempted to launch a host..",
+        "properties": {
+          "error": {
+            "const": "forbidden",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.invalid.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The query or JSON request is invalid..",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.request-conflict.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request ID belongs to a different launch..",
+        "properties": {
+          "error": {
+            "const": "request_conflict",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.state-conflict.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The template state directory is held by an incompatible registration..",
+        "properties": {
+          "error": {
+            "const": "state_conflict",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.unavailable-launch.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The process could not start or register..",
+        "properties": {
+          "error": {
+            "const": "launch_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.unavailable-templates.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private launch configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "template_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.unavailable-viewers.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private viewer configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "viewer_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchAgent.unknown-template.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The template ID is unknown..",
+        "properties": {
+          "error": {
+            "const": "template_not_found",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.LaunchKey": {
+        "maxLength": 96,
+        "minLength": 1,
+        "pattern": "^[\\u002D0-9A-Z\\u005Fa-z]*$",
+        "title": "LaunchKey",
+        "type": "string",
+        "x-ess-alphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_",
+        "x-ess-kind": "newtype",
+        "x-ess-name": "loom.observation.LaunchKey"
+      },
+      "loom.observation.MessageId": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[\\u002D\\u002E0-9A-Z\\u005Fa-z]*$",
+        "title": "MessageId",
+        "type": "string",
+        "x-ess-alphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-",
+        "x-ess-kind": "newtype",
+        "x-ess-name": "loom.observation.MessageId"
+      },
+      "loom.observation.ReadAgentRouting.denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request did not authenticate a viewer..",
+        "properties": {
+          "error": {
+            "const": "unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentRouting.forbidden.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: A scoped viewer attempted to read resolved model routing..",
+        "properties": {
+          "error": {
+            "const": "forbidden",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentRouting.invalid.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request supplies a query string or malformed request headers..",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentRouting.not-found.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The agent ID has no registered routing..",
+        "properties": {
+          "error": {
+            "const": "not_found",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentRouting.read.Response": {
+        "$ref": "#/components/schemas/loom.dashboard.AgentRouting"
+      },
+      "loom.observation.ReadAgentRouting.unavailable-routing.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private routing record could not be read..",
+        "properties": {
+          "error": {
+            "const": "routing_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentRouting.unavailable-viewers.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private viewer configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "viewer_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "loom.observation.ReadAgentSpec.denied.Response": {
         "additionalProperties": false,
         "description": "Decided outside the request: The request did not authenticate a viewer..",
@@ -636,6 +1335,99 @@
         "type": "object"
       },
       "loom.observation.ReadAgentSpec.unavailable-viewers.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private viewer configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "viewer_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadLaunchTemplates.Result": {
+        "additionalProperties": false,
+        "properties": {
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.LaunchTemplate"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "title": "ReadLaunchTemplates response",
+        "type": "object",
+        "x-ess-kind": "command-response",
+        "x-ess-name": "loom.observation.ReadLaunchTemplates"
+      },
+      "loom.observation.ReadLaunchTemplates.denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The operator did not authenticate..",
+        "properties": {
+          "error": {
+            "const": "unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadLaunchTemplates.forbidden.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: A scoped viewer attempted to list templates..",
+        "properties": {
+          "error": {
+            "const": "forbidden",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadLaunchTemplates.invalid.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The operator supplied a query parameter..",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadLaunchTemplates.unavailable-templates.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private launch configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "template_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadLaunchTemplates.unavailable-viewers.Response": {
         "additionalProperties": false,
         "description": "Decided outside the request: The private viewer configuration cannot be read..",
         "properties": {
@@ -742,11 +1534,27 @@
           "error"
         ],
         "type": "object"
+      },
+      "loom.observation.RunId": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]*$",
+        "title": "RunId",
+        "type": "string",
+        "x-ess-alphabet": "0123456789abcdef",
+        "x-ess-kind": "newtype",
+        "x-ess-name": "loom.observation.RunId"
       }
     },
     "securitySchemes": {
+      "agentBearer": {
+        "description": "The target A2A listener's bearer, in addition to the dashboard operator credential.",
+        "in": "header",
+        "name": "X-Loom-Agent-Bearer",
+        "type": "apiKey"
+      },
       "operatorBearer": {
-        "description": "The operator credential in the dashboard's private viewer-token file. Scoped viewer tokens cannot read agent source.",
+        "description": "The operator credential in the dashboard's private viewer-token file. It grants inspection of private configuration and access to operator actions.",
         "scheme": "bearer",
         "type": "http"
       },
@@ -757,12 +1565,12 @@
     }
   },
   "info": {
-    "description": "Read-only dashboard HTTP API. Parameters and data types are projected from Loom's ESS model. A2A runs on each individual agent listener.",
-    "summary": "The dashboard observation API on one server.",
+    "description": "Loom's dashboard observation and operator HTTP API. Parameters and data types are projected from its ESS model. A2A runs on each individual agent listener.",
+    "summary": "The dashboard observation and operator API on one server.",
     "title": "Loom server dashboard",
     "version": "v1",
     "x-ess-provenance": {
-      "contract_digest": "slice-sha256/2:59402e0b8c39120f688adfda7fd83ca5f9ccc2075d172ef4ca7b77c331d8d736",
+      "contract_digest": "slice-sha256/2:cd4ad7e5e2d50d198f2c434fa76f307a519de4efed25c8f7d13d02afc2ba8a64",
       "specification_version": "v1",
       "system": "loom"
     },
@@ -770,6 +1578,358 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/agents/{agent}/dispatch": {
+      "post": {
+        "description": "Send one bounded text message to a registered host with the dashboard operator credential and the host’s A2A bearer.",
+        "operationId": "dispatchWork",
+        "parameters": [
+          {
+            "description": "The input field `agent`, carried in the path rather than the request body.",
+            "in": "path",
+            "name": "agent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/loom.observation.DispatchWork.Input"
+              }
+            }
+          },
+          "description": "The input `loom.observation.DispatchWork` declares.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.DispatchWork.Result"
+                }
+              }
+            },
+            "description": "Outcome `dispatched`, answered 200 as the `ess-http/1` binding declares, with the command's response, bare: no `outcome` names the branch and no `published` lists what it published.",
+            "x-ess-outcomes": [
+              "dispatched"
+            ]
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.DispatchWork.invalid.Response"
+                }
+              }
+            },
+            "description": "Outcome `invalid`, answered 400 as the `ess-http/1` binding declares, with an object whose `error` is `invalid_request`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "invalid"
+            ]
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.DispatchWork.denied.Response"
+                }
+              }
+            },
+            "description": "Outcome `denied`, answered 401 as the `ess-http/1` binding declares, with an object whose `error` is `unauthorized`, beside the error's own fields under their wire names.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "One `Bearer` challenge (RFC 9110 §11.6.1).",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "denied"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.DispatchWork.forbidden.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.DispatchWork.agent-denied.Response"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actor": {
+                          "description": "The qualified name of the actor the request was authenticated as, or null where it was authenticated as none.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "refused": {
+                          "description": "The standard refusal for an actor no grant admits.",
+                          "enum": [
+                            "not granted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "refused",
+                        "actor"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `forbidden`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `forbidden`, beside the error's own fields under their wire names. Outcome `agent-denied`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `agent_unauthorized`, beside the error's own fields under their wire names. No declared outcome: the standard refusal for an actor no grant admits: the request was authenticated as no actor, or as one `x-ess-may-invoke` does not list. It is checked before the command runs, so nothing was read, written or published, and the same request from a granted actor is decided by the command. Its body carries `refused` and `actor`, never the `outcome` and `error` a declared branch carries.",
+            "x-ess-outcomes": [
+              "forbidden",
+              "agent-denied"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.DispatchWork.not-found.Response"
+                }
+              }
+            },
+            "description": "Outcome `not-found`, answered 404 as the `ess-http/1` binding declares, with an object whose `error` is `not_found`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "not-found"
+            ]
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.DispatchWork.offline.Response"
+                }
+              }
+            },
+            "description": "Outcome `offline`, answered 409 as the `ess-http/1` binding declares, with an object whose `error` is `agent_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "offline"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "dispatch_unavailable": "#/components/schemas/loom.observation.DispatchWork.unavailable-dispatch.Response",
+                      "viewer_configuration_unavailable": "#/components/schemas/loom.observation.DispatchWork.unavailable-viewers.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.DispatchWork.unavailable-viewers.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.DispatchWork.unavailable-dispatch.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `unavailable-viewers`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `viewer_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-dispatch`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `dispatch_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unavailable-viewers",
+              "unavailable-dispatch"
+            ]
+          }
+        },
+        "security": [
+          {
+            "agentBearer": [],
+            "operatorBearer": []
+          }
+        ],
+        "summary": "Dispatch a text message to the registered agent and read the terminal receipt",
+        "tags": [
+          "observation"
+        ],
+        "x-ess-may-invoke": [
+          "loom.observation.Operator"
+        ],
+        "x-ess-route-source": "binding"
+      }
+    },
+    "/api/agents/{agent}/routing": {
+      "get": {
+        "operationId": "readRegisteredAgentRouting",
+        "parameters": [
+          {
+            "description": "The input field `agent`, carried in the path rather than the request body.",
+            "in": "path",
+            "name": "agent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.read.Response"
+                }
+              }
+            },
+            "description": "Outcome `read`, answered 200 as the `ess-http/1` binding declares, with the command's response field `routing`, bare: its value alone, with no object around it.",
+            "x-ess-outcomes": [
+              "read"
+            ]
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.invalid.Response"
+                }
+              }
+            },
+            "description": "Outcome `invalid`, answered 400 as the `ess-http/1` binding declares, with an object whose `error` is `invalid_request`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "invalid"
+            ]
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.denied.Response"
+                }
+              }
+            },
+            "description": "Outcome `denied`, answered 401 as the `ess-http/1` binding declares, with an object whose `error` is `unauthorized`, beside the error's own fields under their wire names.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "One `Bearer` challenge (RFC 9110 §11.6.1).",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "denied"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.forbidden.Response"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actor": {
+                          "description": "The qualified name of the actor the request was authenticated as, or null where it was authenticated as none.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "refused": {
+                          "description": "The standard refusal for an actor no grant admits.",
+                          "enum": [
+                            "not granted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "refused",
+                        "actor"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `forbidden`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `forbidden`, beside the error's own fields under their wire names. No declared outcome: the standard refusal for an actor no grant admits: the request was authenticated as no actor, or as one `x-ess-may-invoke` does not list. It is checked before the command runs, so nothing was read, written or published, and the same request from a granted actor is decided by the command. Its body carries `refused` and `actor`, never the `outcome` and `error` a declared branch carries.",
+            "x-ess-outcomes": [
+              "forbidden"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.not-found.Response"
+                }
+              }
+            },
+            "description": "Outcome `not-found`, answered 404 as the `ess-http/1` binding declares, with an object whose `error` is `not_found`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "not-found"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "routing_unavailable": "#/components/schemas/loom.observation.ReadAgentRouting.unavailable-routing.Response",
+                      "viewer_configuration_unavailable": "#/components/schemas/loom.observation.ReadAgentRouting.unavailable-viewers.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.unavailable-viewers.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadAgentRouting.unavailable-routing.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `unavailable-viewers`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `viewer_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-routing`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `routing_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unavailable-viewers",
+              "unavailable-routing"
+            ]
+          }
+        },
+        "security": [
+          {
+            "operatorBearer": []
+          }
+        ],
+        "summary": "Read the effective model routes registered by the serving agent",
+        "tags": [
+          "observation"
+        ],
+        "x-ess-may-invoke": [
+          "loom.observation.Operator"
+        ],
+        "x-ess-route-source": "binding"
+      }
+    },
     "/api/agents/{agent}/spec": {
       "get": {
         "operationId": "readRegisteredAgentSpec",
@@ -930,6 +2090,350 @@
           }
         ],
         "summary": "Read the validated source of a registered agent as the server operator",
+        "tags": [
+          "observation"
+        ],
+        "x-ess-may-invoke": [
+          "loom.observation.Operator"
+        ],
+        "x-ess-route-source": "binding"
+      }
+    },
+    "/api/launch": {
+      "post": {
+        "operationId": "launchConfiguredAgent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/loom.observation.LaunchAgent.Input"
+              }
+            }
+          },
+          "description": "The input `loom.observation.LaunchAgent` declares.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.LaunchAgent.Result"
+                }
+              }
+            },
+            "description": "Outcome `existing`, answered 200 as the `ess-http/1` binding declares, with the command's response, bare: no `outcome` names the branch and no `published` lists what it published.",
+            "x-ess-outcomes": [
+              "existing"
+            ]
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.LaunchAgent.Result"
+                }
+              }
+            },
+            "description": "Outcome `started`, answered 201 as the `ess-http/1` binding declares, with the command's response, bare: no `outcome` names the branch and no `published` lists what it published.",
+            "x-ess-outcomes": [
+              "started"
+            ]
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.LaunchAgent.invalid.Response"
+                }
+              }
+            },
+            "description": "Outcome `invalid`, answered 400 as the `ess-http/1` binding declares, with an object whose `error` is `invalid_request`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "invalid"
+            ]
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.LaunchAgent.denied.Response"
+                }
+              }
+            },
+            "description": "Outcome `denied`, answered 401 as the `ess-http/1` binding declares, with an object whose `error` is `unauthorized`, beside the error's own fields under their wire names.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "One `Bearer` challenge (RFC 9110 §11.6.1).",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "denied"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.LaunchAgent.forbidden.Response"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actor": {
+                          "description": "The qualified name of the actor the request was authenticated as, or null where it was authenticated as none.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "refused": {
+                          "description": "The standard refusal for an actor no grant admits.",
+                          "enum": [
+                            "not granted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "refused",
+                        "actor"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `forbidden`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `forbidden`, beside the error's own fields under their wire names. No declared outcome: the standard refusal for an actor no grant admits: the request was authenticated as no actor, or as one `x-ess-may-invoke` does not list. It is checked before the command runs, so nothing was read, written or published, and the same request from a granted actor is decided by the command. Its body carries `refused` and `actor`, never the `outcome` and `error` a declared branch carries.",
+            "x-ess-outcomes": [
+              "forbidden"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.LaunchAgent.unknown-template.Response"
+                }
+              }
+            },
+            "description": "Outcome `unknown-template`, answered 404 as the `ess-http/1` binding declares, with an object whose `error` is `template_not_found`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unknown-template"
+            ]
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "request_conflict": "#/components/schemas/loom.observation.LaunchAgent.request-conflict.Response",
+                      "state_conflict": "#/components/schemas/loom.observation.LaunchAgent.state-conflict.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.LaunchAgent.request-conflict.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.LaunchAgent.state-conflict.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `request-conflict`, answered 409 as the `ess-http/1` binding declares, with an object whose `error` is `request_conflict`, beside the error's own fields under their wire names. Outcome `state-conflict`, answered 409 as the `ess-http/1` binding declares, with an object whose `error` is `state_conflict`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "request-conflict",
+              "state-conflict"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "launch_unavailable": "#/components/schemas/loom.observation.LaunchAgent.unavailable-launch.Response",
+                      "template_configuration_unavailable": "#/components/schemas/loom.observation.LaunchAgent.unavailable-templates.Response",
+                      "viewer_configuration_unavailable": "#/components/schemas/loom.observation.LaunchAgent.unavailable-viewers.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.LaunchAgent.unavailable-viewers.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.LaunchAgent.unavailable-templates.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.LaunchAgent.unavailable-launch.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `unavailable-viewers`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `viewer_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-templates`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `template_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-launch`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `launch_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unavailable-viewers",
+              "unavailable-templates",
+              "unavailable-launch"
+            ]
+          }
+        },
+        "security": [
+          {
+            "operatorBearer": []
+          }
+        ],
+        "summary": "Start a configured agent host or return its existing registration",
+        "tags": [
+          "observation"
+        ],
+        "x-ess-may-invoke": [
+          "loom.observation.Operator"
+        ],
+        "x-ess-route-source": "binding"
+      }
+    },
+    "/api/launch-templates": {
+      "get": {
+        "operationId": "readLaunchTemplates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadLaunchTemplates.Result"
+                }
+              }
+            },
+            "description": "Outcome `listed`, answered 200 as the `ess-http/1` binding declares, with the command's response, bare: no `outcome` names the branch and no `published` lists what it published.",
+            "x-ess-outcomes": [
+              "listed"
+            ]
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadLaunchTemplates.invalid.Response"
+                }
+              }
+            },
+            "description": "Outcome `invalid`, answered 400 as the `ess-http/1` binding declares, with an object whose `error` is `invalid_request`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "invalid"
+            ]
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadLaunchTemplates.denied.Response"
+                }
+              }
+            },
+            "description": "Outcome `denied`, answered 401 as the `ess-http/1` binding declares, with an object whose `error` is `unauthorized`, beside the error's own fields under their wire names.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "One `Bearer` challenge (RFC 9110 §11.6.1).",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "denied"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadLaunchTemplates.forbidden.Response"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actor": {
+                          "description": "The qualified name of the actor the request was authenticated as, or null where it was authenticated as none.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "refused": {
+                          "description": "The standard refusal for an actor no grant admits.",
+                          "enum": [
+                            "not granted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "refused",
+                        "actor"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `forbidden`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `forbidden`, beside the error's own fields under their wire names. No declared outcome: the standard refusal for an actor no grant admits: the request was authenticated as no actor, or as one `x-ess-may-invoke` does not list. It is checked before the command runs, so nothing was read, written or published, and the same request from a granted actor is decided by the command. Its body carries `refused` and `actor`, never the `outcome` and `error` a declared branch carries.",
+            "x-ess-outcomes": [
+              "forbidden"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "template_configuration_unavailable": "#/components/schemas/loom.observation.ReadLaunchTemplates.unavailable-templates.Response",
+                      "viewer_configuration_unavailable": "#/components/schemas/loom.observation.ReadLaunchTemplates.unavailable-viewers.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadLaunchTemplates.unavailable-viewers.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadLaunchTemplates.unavailable-templates.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `unavailable-viewers`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `viewer_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-templates`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `template_configuration_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unavailable-viewers",
+              "unavailable-templates"
+            ]
+          }
+        },
+        "security": [
+          {
+            "operatorBearer": []
+          }
+        ],
+        "summary": "List the agent launches configured by the operator",
         "tags": [
           "observation"
         ],
@@ -1163,7 +2667,7 @@
   },
   "tags": [
     {
-      "description": "The read-only HTTP boundary for a viewer of one Loom server. The query filters authorized observations before constructing a response. An absent query result still produces a snapshot.",
+      "description": "The dashboard HTTP boundary for one Loom server. Scoped viewers read authorized observations. Operators can inspect host configuration, dispatch work and launch a configured agent.",
       "name": "observation"
     }
   ]

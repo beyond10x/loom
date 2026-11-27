@@ -1,5 +1,5 @@
 // generated from loom v1
-// contract digest 3507a46b6773ab76bcd42e01af7dbbdc5c4901e9c7d1125fb92b5bdb5ce623d3
+// contract digest 93b10ebd872515f89e059d5e64f0981490f97077345b6e02a01f38c191f911d0
 // do not edit: regenerate with `ess synthesize --layout crate`
 
 //! Agent — `loom.agent`.
@@ -765,6 +765,42 @@ pub enum AdmitServeOutcome {
     Answers,
 }
 
+/// AdmitServedSessionTurn — the input of `loom.agent.AdmitServedSessionTurn`.
+///
+/// Everything it can result in is [`AdmitServedSessionTurnOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdmitServedSessionTurn {
+    /// `kind` — `loom.session.SessionKind`.
+    pub kind: crate::session::SessionKind,
+    /// `a2a_only` — `Boolean`.
+    pub a2a_only: bool,
+    /// `workspace_ready` — `Boolean`.
+    pub workspace_ready: bool,
+    /// `policy_ready` — `Boolean`.
+    pub policy_ready: bool,
+}
+
+/// Everything `loom.agent.AdmitServedSessionTurn` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AdmitServedSessionTurnOutcome {
+    /// `unsupported` — when `kind == Harness`.
+    Unsupported,
+    /// `no-ingress` — when `a2a_only == false`.
+    NoIngress,
+    /// `invalid-workspace` — when `workspace_ready == false`.
+    InvalidWorkspace,
+    /// `refused-policy` — when `policy_ready == false`.
+    RefusedPolicy,
+    /// `claude-session` — when `kind == ClaudeCode`.
+    ClaudeSession,
+    /// `codex-session` — otherwise.
+    CodexSession,
+}
+
 /// BoundHttpAnswer — the input of `loom.agent.BoundHttpAnswer`.
 ///
 /// Everything it can result in is [`BoundHttpAnswerOutcome`].
@@ -889,6 +925,32 @@ pub enum CheckAgentSpecOutcome {
     },
     /// `serveable` — otherwise.
     Serveable,
+}
+
+/// EndServedSessionTurn — the input of `loom.agent.EndServedSessionTurn`.
+///
+/// Everything it can result in is [`EndServedSessionTurnOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EndServedSessionTurn {
+    /// `suspended` — `Boolean`.
+    pub suspended: bool,
+    /// `proposed_change` — `Boolean`.
+    pub proposed_change: bool,
+}
+
+/// Everything `loom.agent.EndServedSessionTurn` can result in — one variant per declared outcome.
+///
+/// An infrastructure failure is deliberately not in here: a refusal is a fact about the domain,
+/// a transport fault is a fact about the run, and conflating the two is what the declared
+/// outcomes exist to prevent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EndServedSessionTurnOutcome {
+    /// `held` — when `suspended == true`.
+    Held,
+    /// `proposed` — when `proposed_change == true`.
+    Proposed,
+    /// `completed-without-change` — otherwise.
+    CompletedWithoutChange,
 }
 
 /// RecordA2aTurn — the input of `loom.agent.RecordA2aTurn`.
@@ -1090,6 +1152,17 @@ pub mod obligations {
         fn admit_serve(&mut self, input: super::AdmitServe) -> Result<super::AdmitServeOutcome, crate::obligation::UnmetObligation>;
     }
 
+    /// The behaviour `loom.agent.AdmitServedSessionTurn` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait AdmitServedSessionTurnBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.AdmitServedSessionTurn`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn admit_served_session_turn(&mut self, input: super::AdmitServedSessionTurn) -> Result<super::AdmitServedSessionTurnOutcome, crate::obligation::UnmetObligation>;
+    }
+
     /// The behaviour `loom.agent.BoundHttpAnswer` — generated.
     ///
     /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
@@ -1112,6 +1185,17 @@ pub mod obligations {
         /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
         /// implementation never returns it.
         fn check_agent_spec(&mut self, input: super::CheckAgentSpec) -> Result<super::CheckAgentSpecOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `loom.agent.EndServedSessionTurn` — generated.
+    ///
+    /// The specification fully determines it: [`crate::behaviour::Generated`] implements it
+    /// over the storage and context ports. Implement it yourself to replace that behaviour.
+    pub trait EndServedSessionTurnBehavior {
+        /// Decides and enacts exactly one declared outcome of `loom.agent.EndServedSessionTurn`.
+        ///
+        /// `Err` is the typed refusal of a request the model declares no outcome for.
+        fn end_served_session_turn(&mut self, input: super::EndServedSessionTurn) -> Result<super::EndServedSessionTurnOutcome, crate::obligation::UnmetObligation>;
     }
 
     /// The behaviour `loom.agent.RecordA2aTurn` — generated.

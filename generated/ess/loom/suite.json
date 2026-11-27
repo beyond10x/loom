@@ -666,7 +666,7 @@
     },
     "counts": {
       "authored": 110,
-      "generated": 259,
+      "generated": 268,
       "outside": 0,
       "refused": 17
     },
@@ -695,6 +695,12 @@
       "loom.agent.AdmitServe/outcome/nothing-to-serve",
       "loom.agent.AdmitServe/outcome/polls",
       "loom.agent.AdmitServe/outcome/polls-and-answers",
+      "loom.agent.AdmitServedSessionTurn/outcome/claude-session",
+      "loom.agent.AdmitServedSessionTurn/outcome/codex-session",
+      "loom.agent.AdmitServedSessionTurn/outcome/invalid-workspace",
+      "loom.agent.AdmitServedSessionTurn/outcome/no-ingress",
+      "loom.agent.AdmitServedSessionTurn/outcome/refused-policy",
+      "loom.agent.AdmitServedSessionTurn/outcome/unsupported",
       "loom.agent.BoundHttpAnswer/outcome/cut",
       "loom.agent.BoundHttpAnswer/outcome/failed-status",
       "loom.agent.BoundHttpAnswer/outcome/redirected",
@@ -714,6 +720,9 @@
       "loom.agent.CheckAgentSpec/outcome/unknown-action",
       "loom.agent.CheckAgentSpec/outcome/unknown-format",
       "loom.agent.CheckAgentSpec/outcome/unknown-protocol",
+      "loom.agent.EndServedSessionTurn/outcome/completed-without-change",
+      "loom.agent.EndServedSessionTurn/outcome/held",
+      "loom.agent.EndServedSessionTurn/outcome/proposed",
       "loom.agent.RecordA2aTurn/outcome/replayed",
       "loom.agent.RecordA2aTurn/outcome/turned",
       "loom.agent.RecordA2aTurn/outcome/unrecorded",
@@ -1279,9 +1288,9 @@
     "loom.session.SessionFailed"
   ],
   "provenance": {
-    "contract_digest": "3507a46b6773ab76bcd42e01af7dbbdc5c4901e9c7d1125fb92b5bdb5ce623d3",
+    "contract_digest": "93b10ebd872515f89e059d5e64f0981490f97077345b6e02a01f38c191f911d0",
     "scenario_initial_state": "empty",
-    "spec_digest": "7bb20b7366f9de269fd594c0e721815e58bc8a828e4c76483a740fc09d359301",
+    "spec_digest": "8fa55f27826b6da4dcb1ef737b6a6c58188a40e19b1bc2841c150311a18ecb11",
     "specification_version": "v1",
     "suite_version": "ess-conformance/65",
     "system": "loom"
@@ -8134,6 +8143,2166 @@
         }
       ]
     },
+    "loom.agent.AdmitServedSessionTurn/outcome/claude-session": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.AdmitServedSessionTurn` answers `claude-session` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "type",
+          "name": "loom.session.SessionKind"
+        },
+        {
+          "kind": "command",
+          "name": "loom.agent.AdmitServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "claude-session"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "claude-session"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        }
+      ]
+    },
+    "loom.agent.AdmitServedSessionTurn/outcome/codex-session": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.AdmitServedSessionTurn` answers `codex-session` for an input no other branch's guard claims",
+      "source": [
+        {
+          "kind": "type",
+          "name": "loom.session.SessionKind"
+        },
+        {
+          "kind": "command",
+          "name": "loom.agent.AdmitServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "codex-session"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "Codex"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "codex-session"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        }
+      ]
+    },
+    "loom.agent.AdmitServedSessionTurn/outcome/invalid-workspace": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.AdmitServedSessionTurn` answers `invalid-workspace` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "type",
+          "name": "loom.session.SessionKind"
+        },
+        {
+          "kind": "command",
+          "name": "loom.agent.AdmitServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "invalid-workspace"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "invalid-workspace"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": false
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "invalid-workspace"
+          },
+          "step": "expect_outcome"
+        }
+      ]
+    },
+    "loom.agent.AdmitServedSessionTurn/outcome/no-ingress": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.AdmitServedSessionTurn` answers `no-ingress` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "type",
+          "name": "loom.session.SessionKind"
+        },
+        {
+          "kind": "command",
+          "name": "loom.agent.AdmitServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "no-ingress"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": false
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "no-ingress"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": false
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "no-ingress"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": false
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": false
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "no-ingress"
+          },
+          "step": "expect_outcome"
+        }
+      ]
+    },
+    "loom.agent.AdmitServedSessionTurn/outcome/refused-policy": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.AdmitServedSessionTurn` answers `refused-policy` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "type",
+          "name": "loom.session.SessionKind"
+        },
+        {
+          "kind": "command",
+          "name": "loom.agent.AdmitServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "refused-policy"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "ClaudeCode"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": false
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "refused-policy"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        }
+      ]
+    },
+    "loom.agent.AdmitServedSessionTurn/outcome/unsupported": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.AdmitServedSessionTurn` answers `unsupported` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "type",
+          "name": "loom.session.SessionKind"
+        },
+        {
+          "kind": "command",
+          "name": "loom.agent.AdmitServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "unsupported"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "Harness"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "unsupported"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": false
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "Harness"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "unsupported"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "Harness"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": true
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "unsupported"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "command": "loom.agent.AdmitServedSessionTurn",
+          "input": {
+            "a2a_only": {
+              "kind": "literal",
+              "value": true
+            },
+            "kind": {
+              "kind": "literal",
+              "value": "Harness"
+            },
+            "policy_ready": {
+              "kind": "literal",
+              "value": false
+            },
+            "workspace_ready": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.AdmitServedSessionTurn",
+            "outcome": "unsupported"
+          },
+          "step": "expect_outcome"
+        }
+      ]
+    },
     "loom.agent.BoundHttpAnswer/outcome/cut": {
       "absent_events": [
         {
@@ -12278,6 +14447,963 @@
             "reason": "UnknownProtocol"
           },
           "step": "expect_error"
+        }
+      ]
+    },
+    "loom.agent.EndServedSessionTurn/outcome/completed-without-change": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.EndServedSessionTurn` answers `completed-without-change` for an input no other branch's guard claims",
+      "source": [
+        {
+          "kind": "command",
+          "name": "loom.agent.EndServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.EndServedSessionTurn",
+            "outcome": "completed-without-change"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.EndServedSessionTurn",
+          "input": {
+            "proposed_change": {
+              "kind": "literal",
+              "value": false
+            },
+            "suspended": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.EndServedSessionTurn",
+            "outcome": "completed-without-change"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        }
+      ]
+    },
+    "loom.agent.EndServedSessionTurn/outcome/held": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.EndServedSessionTurn` answers `held` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "command",
+          "name": "loom.agent.EndServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.EndServedSessionTurn",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.EndServedSessionTurn",
+          "input": {
+            "proposed_change": {
+              "kind": "literal",
+              "value": true
+            },
+            "suspended": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.EndServedSessionTurn",
+            "outcome": "held"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
+        }
+      ]
+    },
+    "loom.agent.EndServedSessionTurn/outcome/proposed": {
+      "absent_events": [
+        {
+          "before": 18,
+          "except": []
+        }
+      ],
+      "purpose": "`loom.agent.EndServedSessionTurn` answers `proposed` for an input that satisfies that branch's guard",
+      "source": [
+        {
+          "kind": "command",
+          "name": "loom.agent.EndServedSessionTurn"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "loom.agent.EndServedSessionTurn",
+            "outcome": "proposed"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionExpired"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionSuperseded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.DecisionTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.ProducedRecordRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationTaken"
+        },
+        {
+          "kind": "event",
+          "name": "loom.decision.RecommendationWithheld"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentApplied"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentCompleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDegraded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentDeleted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentFailed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentLastRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRecovered"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRefused"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunObserved"
+        },
+        {
+          "kind": "event",
+          "name": "loom.resource.LoomAgentRunning"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ActionSelected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsMismatched"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.ArgumentsRequested"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.CatalogueProjected"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionAdmitted"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionNotInFrontier"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionOverruled"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionRecorded"
+        },
+        {
+          "kind": "event",
+          "name": "loom.run.SelectionStale"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionChangeProposed"
+        },
+        {
+          "kind": "event",
+          "name": "loom.session.SessionFailed"
+        },
+        {
+          "kind": "view",
+          "name": "loom.decision.DecisionRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.resource.LoomAgents"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.ArgumentRequests"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Catalogues"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.SelectionRecords"
+        },
+        {
+          "kind": "view",
+          "name": "loom.run.Selections"
+        },
+        {
+          "kind": "view",
+          "name": "loom.session.AgentSessions"
+        }
+      ],
+      "steps": [
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "snapshot_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "command": "loom.agent.EndServedSessionTurn",
+          "input": {
+            "proposed_change": {
+              "kind": "literal",
+              "value": true
+            },
+            "suspended": {
+              "kind": "literal",
+              "value": false
+            }
+          },
+          "step": "execute_command"
+        },
+        {
+          "outcome": {
+            "command": "loom.agent.EndServedSessionTurn",
+            "outcome": "proposed"
+          },
+          "step": "expect_outcome"
+        },
+        {
+          "step": "expect_no_error"
+        },
+        {
+          "step": "expect_no_events"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.decision.DecisionRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.resource.LoomAgents"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.ArgumentRequests"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Catalogues"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.SelectionRecords"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.run.Selections"
+        },
+        {
+          "step": "query_view",
+          "view": "loom.session.AgentSessions"
+        },
+        {
+          "step": "expect_view_unchanged",
+          "view": "loom.session.AgentSessions"
         }
       ]
     },

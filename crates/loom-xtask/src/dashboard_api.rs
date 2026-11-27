@@ -44,16 +44,20 @@ pub(super) fn run(root: &Path, ess: &Path, scratch: &Scratch, check: bool) -> Re
     Ok(())
 }
 
-fn bound_get<'a>(doc: &'a mut Value, path: &str) -> Result<&'a mut Value, String> {
+fn bound_operation<'a>(
+    doc: &'a mut Value,
+    method: &str,
+    path: &str,
+) -> Result<&'a mut Value, String> {
     let operation = doc
         .get_mut("paths")
         .and_then(|p| p.get_mut(path))
-        .and_then(|endpoint| endpoint.get_mut("get"))
-        .ok_or_else(|| format!("the ESS projection does not bind GET {path}"))?;
+        .and_then(|endpoint| endpoint.get_mut(method))
+        .ok_or_else(|| format!("the ESS projection does not bind {method} {path}"))?;
     let responses = operation["responses"]
         .as_object_mut()
         .ok_or("no bound responses")?;
-    // ESS includes a fallback of its synthesized server. Loom handles these reads itself.
+    // ESS includes a fallback of its synthesized server. Loom handles these operations itself.
     if responses
         .get("501")
         .is_some_and(|r| r["x-ess-outcomes"] == json!([]))
@@ -64,7 +68,32 @@ fn bound_get<'a>(doc: &'a mut Value, path: &str) -> Result<&'a mut Value, String
 }
 
 fn serve_presentation(doc: &mut Value) -> Result<(), String> {
-    let source = bound_get(doc, "/api/agents/{agent}/spec")?;
+    let dispatch = bound_operation(doc, "post", "/api/agents/{agent}/dispatch")?;
+    dispatch["summary"] =
+        json!("Dispatch a text message to the registered agent and read the terminal receipt");
+    dispatch["security"] = json!([{"operatorBearer": [], "agentBearer": []}]);
+    for (method, path, summary) in [
+        (
+            "get",
+            "/api/agents/{agent}/routing",
+            "Read the effective model routes registered by the serving agent",
+        ),
+        (
+            "get",
+            "/api/launch-templates",
+            "List the agent launches configured by the operator",
+        ),
+        (
+            "post",
+            "/api/launch",
+            "Start a configured agent host or return its existing registration",
+        ),
+    ] {
+        let op = bound_operation(doc, method, path)?;
+        op["summary"] = json!(summary);
+        op["security"] = json!([{"operatorBearer": []}]);
+    }
+    let source = bound_operation(doc, "get", "/api/agents/{agent}/spec")?;
     source["summary"] =
         json!("Read the validated source of a registered agent as the server operator");
     source["security"] = json!([{"operatorBearer": []}]);
@@ -81,7 +110,7 @@ fn serve_presentation(doc: &mut Value) -> Result<(), String> {
         "The complete UTF-8 bytes validated on registration, including original formatting and comments. The response also carries charset=utf-8."
     );
     success["headers"]["ETag"] = json!({"description":"Quoted lowercase SHA-256 digest of the exact response bytes.","schema":{"type":"string"}});
-    let operation = bound_get(doc, "/api/snapshot")?;
+    let operation = bound_operation(doc, "get", "/api/snapshot")?;
     operation["summary"] = json!("Read the authenticated viewer's server snapshot");
     operation["security"] = json!([{"viewerBearer": []}]);
     operation["parameters"]
@@ -104,13 +133,17 @@ fn serve_presentation(doc: &mut Value) -> Result<(), String> {
         }),
     );
     doc["components"]["securitySchemes"]["viewerBearer"] = json!({"type":"http","scheme":"bearer"});
+    doc["components"]["securitySchemes"]["agentBearer"] = json!({
+        "type":"apiKey","in":"header","name":"X-Loom-Agent-Bearer",
+        "description":"The target A2A listener's bearer, in addition to the dashboard operator credential."
+    });
     doc["components"]["securitySchemes"]["operatorBearer"] = json!({
         "type":"http","scheme":"bearer",
-        "description":"The operator credential in the dashboard's private viewer-token file. Scoped viewer tokens cannot read agent source."
+        "description":"The operator credential in the dashboard's private viewer-token file. It grants inspection of private configuration and access to operator actions."
     });
     doc["info"]["title"] = json!("Loom server dashboard");
     doc["info"]["description"] = json!(
-        "Read-only dashboard HTTP API. Parameters and data types are projected from Loom's ESS model. A2A runs on each individual agent listener."
+        "Loom's dashboard observation and operator HTTP API. Parameters and data types are projected from its ESS model. A2A runs on each individual agent listener."
     );
     doc["paths"]["/api/openapi.json"] = json!({"get":{
         "operationId":"readDashboardContract", "summary":"Read this OpenAPI document",
@@ -124,6 +157,17 @@ fn serve_presentation(doc: &mut Value) -> Result<(), String> {
         .pointer_mut("/components/schemas")
         .and_then(Value::as_object_mut)
         .ok_or("the ESS projection contains no schemas")?;
+    for (name, min, max) in [
+        ("loom.observation.LaunchKey", 1, 96),
+        ("loom.observation.MessageId", 1, 128),
+        ("loom.observation.RunId", 64, 64),
+    ] {
+        let schema = schemas
+            .get_mut(name)
+            .ok_or_else(|| format!("missing {name}"))?;
+        schema["minLength"] = json!(min);
+        schema["maxLength"] = json!(max);
+    }
     for schema in schemas
         .values_mut()
         .filter(|s| s["x-ess-kind"] == "struct" && s["x-ess-name"] != "loom.dashboard.TurnEvent")

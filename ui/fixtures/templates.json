@@ -1,0 +1,38 @@
+{
+  "view": "loom.dashboard.LaunchTemplates",
+  "rows": [
+    {
+      "id": "scout",
+      "name": "Scout",
+      "spec_id": "research",
+      "kind": "agent_spec",
+      "default_harness": "native",
+      "harnesses": [
+        "native"
+      ],
+      "protocol": "system-query@1"
+    },
+    {
+      "id": "claude-review",
+      "name": "Claude review",
+      "spec_id": "code-review",
+      "kind": "session",
+      "default_harness": "claude",
+      "harnesses": [
+        "claude"
+      ],
+      "protocol": null
+    },
+    {
+      "id": "codex-review",
+      "name": "Codex review",
+      "spec_id": "code-review",
+      "kind": "session",
+      "default_harness": "codex",
+      "harnesses": [
+        "codex"
+      ],
+      "protocol": null
+    }
+  ]
+}

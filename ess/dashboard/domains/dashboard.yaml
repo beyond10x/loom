@@ -4,6 +4,47 @@ summary: >-
   The browser uses these views of its authorized snapshot.
 
 types:
+  - name: loom.dashboard.AgentKind
+    kind: enum
+    variants: [agent_spec, session]
+  - name: loom.dashboard.Harness
+    kind: enum
+    variants: [native, claude, codex]
+  - name: loom.dashboard.LaunchTemplate
+    kind: struct
+    fields:
+      - {name: id, type: loom.observation.LaunchKey}
+      - {name: name, type: String}
+      - {name: spec_id, type: String}
+      - {name: kind, type: loom.dashboard.AgentKind}
+      - {name: default_harness, type: loom.dashboard.Harness}
+      - {name: harnesses, type: List<loom.dashboard.Harness>}
+      - {name: protocol, type: Optional<String>}
+  - name: loom.dashboard.LaunchStatus
+    kind: enum
+    variants: [started, already_running]
+  - name: loom.dashboard.RoutingSource
+    kind: enum
+    variants: [launch_catalog, spec_routes]
+  - name: loom.dashboard.ModelProtocol
+    kind: enum
+    variants: [chat-completions, responses, messages]
+  - name: loom.dashboard.ModelRoute
+    kind: struct
+    fields:
+      - {name: selection, type: Optional<String>}
+      - {name: upstream_model, type: Optional<String>}
+      - {name: endpoint_id, type: Optional<String>}
+      - {name: base_origin, type: Optional<String>}
+      - {name: protocol, type: loom.dashboard.ModelProtocol}
+      - {name: provider_id, type: Optional<String>}
+      - {name: binding_revision, type: Optional<String>}
+  - name: loom.dashboard.AgentRouting
+    kind: struct
+    fields:
+      - {name: source, type: loom.dashboard.RoutingSource}
+      - {name: agent, type: loom.dashboard.ModelRoute}
+      - {name: classifier, type: loom.dashboard.ModelRoute}
   - name: loom.dashboard.AgentStatus
     kind: enum
     variants: [idle, working, offline]
@@ -34,6 +75,8 @@ types:
     fields:
       - {name: id, type: String}
       - {name: spec_id, type: String}
+      - {name: kind, type: Optional<loom.dashboard.AgentKind>}
+      - {name: harness, type: Optional<loom.dashboard.Harness>}
       - {name: spec_revision, type: Optional<String>}
       - {name: protocol, type: Optional<String>}
       - {name: a2a_protocol, type: Optional<String>}
@@ -47,7 +90,7 @@ types:
   - name: loom.dashboard.Run
     kind: struct
     fields:
-      - {name: id, type: String}
+      - {name: id, type: loom.observation.RunId}
       - {name: agent_id, type: String}
       - {name: item_id, type: String}
       - {name: outcome, type: String}
@@ -100,7 +143,7 @@ actors:
   - name: loom.dashboard.Operator
     naming:
       summary: The server operator can read the exact configuration served by a registered agent.
-    may: [loom.dashboard.AgentSpecById]
+    may: [loom.dashboard.AgentSpecById, loom.dashboard.AgentRoutingById, loom.dashboard.LaunchTemplates]
   - name: loom.dashboard.Viewer
     naming:
       summary: An authenticated viewer reads the server snapshot within their assigned scope.
@@ -113,6 +156,23 @@ actors:
       - loom.dashboard.Snapshot
 
 entities:
+  - name: loom.dashboard.ConfiguredTemplate
+    identity: {name: id, type: loom.observation.LaunchKey}
+    fields:
+      - {name: name, type: String}
+      - {name: spec_id, type: String}
+      - {name: kind, type: loom.dashboard.AgentKind}
+      - {name: default_harness, type: loom.dashboard.Harness}
+      - {name: harnesses, type: List<loom.dashboard.Harness>}
+      - {name: protocol, type: Optional<String>}
+    lifecycle: {initial: Configured, states: [Configured], terminal: [Configured], transitions: []}
+  - name: loom.dashboard.RegisteredRouting
+    identity: {name: id, type: String}
+    fields:
+      - {name: source, type: loom.dashboard.RoutingSource}
+      - {name: agent, type: loom.dashboard.ModelRoute}
+      - {name: classifier, type: loom.dashboard.ModelRoute}
+    lifecycle: {initial: Resolved, states: [Resolved], terminal: [Resolved], transitions: []}
   - name: loom.dashboard.RegisteredSpec
     identity: {name: id, type: String}
     fields:
@@ -123,6 +183,8 @@ entities:
     identity: {name: id, type: String}
     fields:
       - {name: spec_id, type: String}
+      - {name: kind, type: Optional<loom.dashboard.AgentKind>}
+      - {name: harness, type: Optional<loom.dashboard.Harness>}
       - {name: spec_revision, type: Optional<String>}
       - {name: protocol, type: Optional<String>}
       - {name: a2a_protocol, type: Optional<String>}
@@ -135,7 +197,7 @@ entities:
       - {name: model, type: Optional<String>}
     lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
   - name: loom.dashboard.RunObservation
-    identity: {name: id, type: String}
+    identity: {name: id, type: loom.observation.RunId}
     fields:
       - {name: agent_id, type: String}
       - {name: item_id, type: String}
@@ -188,6 +250,26 @@ entities:
     lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
 
 views:
+  - name: loom.dashboard.LaunchTemplates
+    source: loom.dashboard.ConfiguredTemplate
+    fields:
+      - {name: id, type: loom.observation.LaunchKey}
+      - {name: name, type: String}
+      - {name: spec_id, type: String}
+      - {name: kind, type: loom.dashboard.AgentKind}
+      - {name: default_harness, type: loom.dashboard.Harness}
+      - {name: harnesses, type: List<loom.dashboard.Harness>}
+      - {name: protocol, type: Optional<String>}
+  - name: loom.dashboard.AgentRoutingById
+    source: loom.dashboard.RegisteredRouting
+    params:
+      - {name: id, type: String}
+    filter: id == param.id
+    fields:
+      - {name: id, type: String}
+      - {name: source, type: loom.dashboard.RoutingSource}
+      - {name: agent, type: loom.dashboard.ModelRoute}
+      - {name: classifier, type: loom.dashboard.ModelRoute}
   - name: loom.dashboard.AgentSpecById
     source: loom.dashboard.RegisteredSpec
     params:
@@ -202,6 +284,8 @@ views:
     fields:
       - {name: id, type: String}
       - {name: spec_id, type: String}
+      - {name: kind, type: Optional<loom.dashboard.AgentKind>}
+      - {name: harness, type: Optional<loom.dashboard.Harness>}
       - {name: spec_revision, type: Optional<String>}
       - {name: protocol, type: Optional<String>}
       - {name: a2a_protocol, type: Optional<String>}
@@ -220,6 +304,8 @@ views:
     fields:
       - {name: id, type: String}
       - {name: spec_id, type: String}
+      - {name: kind, type: Optional<loom.dashboard.AgentKind>}
+      - {name: harness, type: Optional<loom.dashboard.Harness>}
       - {name: spec_revision, type: Optional<String>}
       - {name: protocol, type: Optional<String>}
       - {name: a2a_protocol, type: Optional<String>}
@@ -233,7 +319,7 @@ views:
   - name: loom.dashboard.Runs
     source: loom.dashboard.RunObservation
     fields:
-      - {name: id, type: String}
+      - {name: id, type: loom.observation.RunId}
       - {name: agent_id, type: String}
       - {name: item_id, type: String}
       - {name: outcome, type: String}
@@ -253,10 +339,10 @@ views:
   - name: loom.dashboard.RunById
     source: loom.dashboard.RunObservation
     params:
-      - {name: id, type: String}
+      - {name: id, type: loom.observation.RunId}
     filter: id == param.id
     fields:
-      - {name: id, type: String}
+      - {name: id, type: loom.observation.RunId}
       - {name: agent_id, type: String}
       - {name: item_id, type: String}
       - {name: outcome, type: String}

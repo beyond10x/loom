@@ -2,8 +2,63 @@ type: ess-http/1
 specification:
   system: loom
   version: v1
-  source_digest: sha256:35e5afed31c0e9d7543902ad896f1fa4ea271b9e0cf4272e76b596784c8c2b81
+  source_digest: sha256:eced04d785a4dc6fc86111e0c863765254dd90a805e208c3ed3668d41292dfd7
 routes:
+  - command: loom.observation.DispatchWork
+    method: post
+    path: /api/agents/{agent}/dispatch
+    operation_id: dispatchWork
+    parameters: {agent: input.agent}
+    outcomes:
+      dispatched: {status: 200, body: response}
+      denied: {status: 401, body: {error: error}, headers: {WWW-Authenticate: {challenge: {scheme: Bearer, params: {}}}}}
+      forbidden: {status: 403, body: {error: error}}
+      agent-denied: {status: 403, body: {error: error}}
+      invalid: {status: 400, body: {error: error}}
+      not-found: {status: 404, body: {error: error}}
+      offline: {status: 409, body: {error: error}}
+      unavailable-viewers: {status: 503, body: {error: error}}
+      unavailable-dispatch: {status: 503, body: {error: error}}
+  - command: loom.observation.ReadLaunchTemplates
+    method: get
+    path: /api/launch-templates
+    operation_id: readLaunchTemplates
+    outcomes:
+      listed: {status: 200, body: response}
+      denied: {status: 401, body: {error: error}, headers: {WWW-Authenticate: {challenge: {scheme: Bearer, params: {}}}}}
+      forbidden: {status: 403, body: {error: error}}
+      invalid: {status: 400, body: {error: error}}
+      unavailable-viewers: {status: 503, body: {error: error}}
+      unavailable-templates: {status: 503, body: {error: error}}
+  - command: loom.observation.LaunchAgent
+    method: post
+    path: /api/launch
+    operation_id: launchConfiguredAgent
+    outcomes:
+      started: {status: 201, body: response}
+      existing: {status: 200, body: response}
+      denied: {status: 401, body: {error: error}, headers: {WWW-Authenticate: {challenge: {scheme: Bearer, params: {}}}}}
+      forbidden: {status: 403, body: {error: error}}
+      invalid: {status: 400, body: {error: error}}
+      unknown-template: {status: 404, body: {error: error}}
+      request-conflict: {status: 409, body: {error: error}}
+      state-conflict: {status: 409, body: {error: error}}
+      unavailable-viewers: {status: 503, body: {error: error}}
+      unavailable-templates: {status: 503, body: {error: error}}
+      unavailable-launch: {status: 503, body: {error: error}}
+  - command: loom.observation.ReadAgentRouting
+    method: get
+    path: /api/agents/{agent}/routing
+    operation_id: readRegisteredAgentRouting
+    parameters: {agent: input.agent}
+    outcomes:
+      read: {status: 200, body: response.routing}
+      denied: {status: 401, body: {error: error}, headers: {WWW-Authenticate: {challenge: {scheme: Bearer, params: {}}}}}
+      forbidden: {status: 403, body: {error: error}}
+      not-found: {status: 404, body: {error: error}}
+      invalid: {status: 400, body: {error: error}}
+      unavailable-viewers: {status: 503, body: {error: error}}
+      unavailable-routing: {status: 503, body: {error: error}}
   - command: loom.observation.ReadSnapshot
     method: get
     path: /api/snapshot

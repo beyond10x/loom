@@ -38,7 +38,9 @@
       "spec_revision": "d28d3d29345ed7d2d165f7bb6b47648ec8d7cb728998b770f3f1d9cc22e614ca",
       "protocol": "system-query@1",
       "a2a_protocol": "inbound-answer@1",
-      "poll_interval_seconds": 5
+      "poll_interval_seconds": 5,
+      "kind": "agent_spec",
+      "harness": "native"
     },
     {
       "id": "reviewer",
@@ -52,7 +54,9 @@
       "spec_revision": null,
       "protocol": null,
       "a2a_protocol": null,
-      "poll_interval_seconds": null
+      "poll_interval_seconds": null,
+      "kind": "agent_spec",
+      "harness": "native"
     },
     {
       "id": "archive",
@@ -66,7 +70,9 @@
       "spec_revision": null,
       "protocol": null,
       "a2a_protocol": null,
-      "poll_interval_seconds": null
+      "poll_interval_seconds": null,
+      "kind": null,
+      "harness": null
     }
   ]
 }
