@@ -4,7 +4,7 @@ const authKey = 'loom.dashboard.viewer'
 const parameters = () => new URLSearchParams(location.search)
 const readFilters = () => {
   const query = parameters()
-  return {agent: query.get('agent') || '', from: query.get('from') || '', to: query.get('to') || '', run: query.get('run') || ''}
+  return {view: query.get('view') || '', tab: query.get('tab') || '', agent: query.get('agent') || '', from: query.get('from') || '', to: query.get('to') || '', run: query.get('run') || ''}
 }
 
 export function useSnapshot() {
@@ -15,6 +15,7 @@ export function useSnapshot() {
   const busy = ref(false)
   const url = computed(() => {
     const query = new URLSearchParams()
+    if (filters.value.view === 'dispatch') return '/api/snapshot'
     for (const field of ['agent','from','to']) {
       if (filters.value[field]) query.set(field, filters.value[field])
     }
@@ -75,10 +76,13 @@ export function useSnapshot() {
       }
     }
   }
-  function readAgentSpec(agent, signal) {
-    return fetch('/api/agents/' + encodeURIComponent(agent) + '/spec', {
+  function operatorRequest(path, options={}) {
+    return fetch(path, {...options, headers:{...options.headers, Authorization:'Bearer ' + token.value}, cache:'no-store', redirect:'error'})
+  }
+  function readAgentDocument(agent, document, signal) {
+    return fetch('/api/agents/' + encodeURIComponent(agent) + '/' + document, {
       signal,
-      headers: {Authorization: 'Bearer ' + token.value, Accept: 'application/yaml'},
+      headers: {Authorization: 'Bearer ' + token.value, Accept: document === 'spec' ? 'application/yaml' : 'application/json'},
       cache: 'no-store',
       redirect: 'error',
     })
@@ -106,6 +110,7 @@ export function useSnapshot() {
   }
   function href(changes) {
     const next = new URL(location.href)
+    if (('agent' in changes && changes.agent !== filters.value.agent) || changes.run) next.searchParams.delete('tab')
     for (const [field, value] of Object.entries(changes)) {
       if (value) next.searchParams.set(field, value)
       else next.searchParams.delete(field)
@@ -124,5 +129,5 @@ export function useSnapshot() {
     clear()
     window.removeEventListener('popstate', restore)
   })
-  return {snapshot, filters, state, busy, refresh, readAgentSpec, connect, disconnect, href, navigate}
+  return {snapshot, filters, state, busy, refresh, readAgentDocument, operatorRequest, connect, disconnect, href, navigate}
 }

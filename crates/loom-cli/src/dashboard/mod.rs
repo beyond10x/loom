@@ -1,8 +1,13 @@
-//! Local, read-only observation of the background agents of one user.
+//! Local observation and operator control of one user's background agents.
 //!
 //! Every long-lived host participates in listener election. Its state lease serializes writers
 //! of that agent's record, while the observation directory scopes discovery to one OS user.
+mod dispatch;
+pub use dispatch::A2aIngress;
 mod http;
+mod launch;
+pub use launch::agent_bearer;
+pub mod routing;
 mod snapshot;
 mod store;
 
@@ -188,6 +193,35 @@ pub struct Dashboard {
     worker: Option<thread::JoinHandle<()>>,
 }
 
+/// The engine that will actually execute admitted turns.
+#[derive(Clone, Copy, Default, Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Harness {
+    #[default]
+    Native,
+    Claude,
+    Codex,
+}
+
+#[derive(Default)]
+struct Launch<'a> {
+    model: Option<&'a str>,
+    routing: Option<&'a routing::Routing>,
+    harness: Harness,
+    ingress: Option<A2aIngress>,
+    configuration: Option<String>,
+    workspace_key: Option<String>,
+}
+
+impl<'a> From<Option<&'a str>> for Launch<'a> {
+    fn from(model: Option<&'a str>) -> Self {
+        Self {
+            model,
+            ..Self::default()
+        }
+    }
+}
+
 impl Dashboard {
     /// Register a host after its agent state lease is held.
     ///
@@ -199,7 +233,7 @@ impl Dashboard {
         revision: &str,
         model: Option<&str>,
     ) -> Result<Self, String> {
-        Self::open(state, spec, revision, None, model)
+        Self::open(state, spec, revision, None, model.into())
             .map_err(|e| format!("agent dashboard startup failed: {e}"))
     }
 
@@ -213,7 +247,58 @@ impl Dashboard {
         model: Option<&str>,
     ) -> Result<Self, String> {
         let revision = digest(source.as_bytes());
-        Self::open(state, spec, &revision, Some(source), model)
+        Self::open(state, spec, &revision, Some(source), model.into())
+            .map_err(|e| format!("agent dashboard startup failed: {e}"))
+    }
+
+    /// Register the source and immutable effective model selections of a running agent.
+    /// # Errors
+    /// As in [`Self::start`].
+    pub fn start_resolved(
+        state: &Path,
+        spec: &AgentSpec,
+        source: &str,
+        routing: Option<routing::Routing>,
+        harness: Harness,
+        ingress: Option<A2aIngress>,
+    ) -> Result<Self, String> {
+        let revision = digest(source.as_bytes());
+        Self::open(
+            state,
+            spec,
+            &revision,
+            Some(source),
+            Launch {
+                model: routing.as_ref().and_then(|r| r.agent.selection.as_deref()),
+                routing: routing.as_ref(),
+                harness,
+                ingress,
+                ..Launch::default()
+            },
+        )
+        .map_err(|e| format!("agent dashboard startup failed: {e}"))
+    }
+
+    /// Register an external session with its actual workspace and permitted inputs.
+    /// # Errors
+    /// The workspace or dashboard registry cannot be opened.
+    pub fn start_session(
+        state: &Path,
+        spec: &AgentSpec,
+        source: &str,
+        harness: Harness,
+        ingress: A2aIngress,
+        workspace: &Path,
+        files: &[String],
+    ) -> Result<Self, String> {
+        let key = launch::workspace_key(workspace, files).map_err(|e| e.to_string())?;
+        let args = Launch {
+            harness,
+            ingress: Some(ingress),
+            workspace_key: Some(key),
+            ..Launch::default()
+        };
+        Self::open(state, spec, &digest(source.as_bytes()), Some(source), args)
             .map_err(|e| format!("agent dashboard startup failed: {e}"))
     }
 
@@ -222,7 +307,7 @@ impl Dashboard {
         spec: &AgentSpec,
         revision: &str,
         source: Option<&str>,
-        model: Option<&str>,
+        launch: Launch<'_>,
     ) -> io::Result<Self> {
         let desired = std::env::var("LOOM_DASHBOARD_ADDR")
             .ok()
@@ -231,7 +316,7 @@ impl Dashboard {
                     .map_err(|_| invalid("LOOM_DASHBOARD_ADDR needs a loopback IP:port"))
             })
             .transpose()?;
-        Self::in_scope(root()?, desired, state, spec, revision, source, model)
+        Self::in_scope(root()?, desired, state, spec, revision, source, launch)
     }
 
     fn in_scope(
@@ -241,7 +326,7 @@ impl Dashboard {
         spec: &AgentSpec,
         revision: &str,
         source: Option<&str>,
-        model: Option<&str>,
+        mut launch: Launch<'_>,
     ) -> io::Result<Self> {
         private_dir(&root)?;
         let root = root.canonicalize()?;
@@ -249,23 +334,33 @@ impl Dashboard {
         setup.lock()?;
         let (scope, mut listener) = Scope::open(root, desired)?;
         private_dir(&scope.root.join("agents"))?;
+        let pending = launch::registration(&scope, state, revision, launch.harness)?;
+        launch.configuration = pending.as_ref().map(|(_, c)| c.configuration.clone());
+        let bridge = launch
+            .ingress
+            .take()
+            .map(|ingress| {
+                let id = digest(state.canonicalize()?.as_os_str().as_encoded_bytes());
+                dispatch::Bridge::bind(&scope.root.join("agents"), &id, ingress)
+            })
+            .transpose()?;
         let agent = Arc::new(store::Agent::register(
             &scope.root,
             state,
             spec,
             revision,
             source,
-            model,
+            launch,
         )?);
         eprintln!(
             "b10x-loom: dashboard http://{}/ (viewer token file: {})",
             scope.addr,
             scope.root.join("viewer-token").display()
         );
-        drop(setup);
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let lease = agent.clone();
+        let instance = agent.instance();
         let worker = thread::Builder::new()
             .name("loom-dashboard".into())
             .spawn(move || {
@@ -285,6 +380,9 @@ impl Dashboard {
                     if let Some((_, socket)) = &listener {
                         http::accept(socket, &scope, &clients);
                     }
+                    if let Some(bridge) = &bridge {
+                        bridge.accept(&instance);
+                    }
                     if last_seen.elapsed() >= Duration::from_secs(5) {
                         lease.heartbeat();
                         last_seen = Instant::now();
@@ -292,11 +390,14 @@ impl Dashboard {
                     thread::sleep(Duration::from_millis(35));
                 }
             })?;
-        Ok(Self {
+        let dashboard = Self {
             agent,
             stop,
             worker: Some(worker),
-        })
+        };
+        launch::registered(pending, dashboard.agent.instance())?;
+        drop(setup);
+        Ok(dashboard)
     }
 
     /// A read-only observer suitable for a plugin host or A2A listener.

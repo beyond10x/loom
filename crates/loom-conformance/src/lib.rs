@@ -278,6 +278,8 @@ impl ConformanceTarget for LoomTarget {
             a2a::ADMIT_A2A_REQUEST => a2a::admit_a2a_request_command(input),
             a2a::RECORD_A2A_TURN => a2a::record_a2a_turn_command(input),
             a2a::ADMIT_SERVE => a2a::admit_serve_command(input),
+            a2a::ADMIT_SERVED_SESSION_TURN => a2a::admit_served_session_turn(input),
+            a2a::END_SERVED_SESSION_TURN => a2a::end_served_session_turn(input),
             run::RUN_ONCE => run::run_once_command(input),
             decision::REQUEST => decision::request(&mut live, input, correlation),
             decision::RECOMMEND => decision::recommend(&mut live, input, correlation),

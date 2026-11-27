@@ -81,6 +81,28 @@ pub struct Models {
 }
 
 impl Models {
+    /// Load one routes document and its resolvers for any number of model selections.
+    ///
+    /// # Errors
+    /// The routes document or its credential resolver configuration is invalid.
+    pub fn load(path: &Path) -> Result<Self, ModelsError> {
+        let routes = load_routes(path)?;
+        let resolvers = resolvers(path, &routes)?;
+        Ok(Self {
+            path: path.to_owned(),
+            http: http(path)?,
+            routes,
+            resolvers,
+            roles: Vec::new(),
+        })
+    }
+
+    /// The immutable declarations used by this host's model ports.
+    #[must_use]
+    pub fn routes(&self) -> &Routes {
+        &self.routes
+    }
+
     /// The model of `role`, if the configuration declares it.
     #[must_use]
     pub fn get(&self, role: ModelRole) -> Option<Arc<dyn Model>> {
@@ -413,26 +435,18 @@ pub fn from_config(path: &Path) -> Result<Models, ModelsError> {
         |dir| dir.join(&config.routes),
     );
     let named = |error: ModelsError| ModelsError::in_file(path, format!("routes document {error}"));
-    let routes = load_routes(&routes_path).map_err(named)?;
-    let resolvers = resolvers(&routes_path, &routes).map_err(named)?;
-    let http = http(&routes_path).map_err(named)?;
-    let mut roles = Vec::new();
+    let mut models = Models::load(&routes_path).map_err(named)?;
     for entry in &config.roles {
         let role = match entry.role {
             ModelRole::Agent => "agent",
             ModelRole::Classifier => "classifier",
         };
-        let model = build(&routes_path, &routes, &resolvers, &http, &entry.model)
+        let model = models
+            .model(&entry.model)
             .map_err(|error| ModelsError::in_file(path, format!("role `{role}`: {error}")))?;
-        roles.push((entry.role, entry.model.clone(), model));
+        models.roles.push((entry.role, entry.model.clone(), model));
     }
-    Ok(Models {
-        path: routes_path,
-        routes,
-        resolvers,
-        http,
-        roles,
-    })
+    Ok(models)
 }
 
 /// The model `name` serves in the `llm.routes/1` document at `path`: a route, else
@@ -446,10 +460,7 @@ pub fn from_config(path: &Path) -> Result<Models, ModelsError> {
 /// builds its secret resolvers for all endpoints at once, so a `file:~/` secret without `HOME`
 /// or a `keychain:` secret refuses the document even when no role is served by that endpoint.
 pub fn from_routes(path: &Path, name: &str) -> Result<Arc<dyn Model>, ModelsError> {
-    let routes = load_routes(path)?;
-    let resolvers = resolvers(path, &routes)?;
-    let http = http(path)?;
-    build(path, &routes, &resolvers, &http, name)
+    Models::load(path)?.model(name)
 }
 
 fn load_routes(path: &Path) -> Result<Routes, ModelsError> {

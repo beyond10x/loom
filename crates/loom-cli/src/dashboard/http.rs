@@ -1,4 +1,4 @@
-//! The loopback observation listener. Only packaged assets and a scoped read are routed.
+//! The loopback dashboard listener for packaged assets, scoped reads and operator actions.
 use super::{Scope, digest, invalid, snapshot};
 use serde_json::Value;
 use std::{
@@ -26,7 +26,7 @@ const MAX_CLIENTS: usize = 12;
 pub(super) fn private_text(path: &Path) -> io::Result<String> {
     private_text_bounded(path, 65536)
 }
-fn private_text_bounded(path: &Path, limit: u64) -> io::Result<String> {
+pub(super) fn private_text_bounded(path: &Path, limit: u64) -> io::Result<String> {
     let f = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -79,7 +79,7 @@ pub(super) fn accept(socket: &TcpListener, scope: &Arc<Scope>, clients: &Arc<Ato
     }
 }
 
-fn respond(
+pub(super) fn respond(
     w: &mut TcpStream,
     status: &str,
     kind: &str,
@@ -93,7 +93,17 @@ fn respond(
     )?;
     w.write_all(body)
 }
-fn error(w: &mut TcpStream, status: &str, code: &str) -> io::Result<()> {
+pub(super) fn json_reply(w: &mut TcpStream, status: &str, value: &Value) -> io::Result<()> {
+    respond(
+        w,
+        status,
+        "application/json",
+        &serde_json::to_vec(value)?,
+        "",
+    )
+}
+
+pub(super) fn error(w: &mut TcpStream, status: &str, code: &str) -> io::Result<()> {
     let headers = match code {
         "unauthorized" => "WWW-Authenticate: Bearer\r\n",
         "method_not_allowed" => "Allow: GET\r\n",
@@ -132,6 +142,59 @@ fn authorize(scope: &Scope, authorization: &str) -> io::Result<Option<Viewer>> {
         bool::from(hash.as_bytes().ct_eq(key.as_bytes())).then_some(Viewer::Scoped(agents))
     }))
 }
+// The browser sends a same-origin JSON fetch with an explicit bearer. Reject ambiguous
+// framing and bound the entire read by one deadline, including time already spent on the head.
+fn request_body(
+    stream: &mut TcpStream,
+    headers: &[httparse::Header<'_>],
+    prefix: &[u8],
+    deadline: Instant,
+) -> io::Result<Option<Vec<u8>>> {
+    let mut lengths = headers
+        .iter()
+        .filter(|h| h.name.eq_ignore_ascii_case("Content-Length"));
+    let length = lengths
+        .next()
+        .and_then(|h| std::str::from_utf8(h.value).ok())
+        .and_then(|n| n.parse::<usize>().ok());
+    let Some(length) = length.filter(|n| (1..=131072).contains(n)) else {
+        return Ok(None);
+    };
+    if lengths.next().is_some()
+        || prefix.len() > length
+        || headers
+            .iter()
+            .any(|h| h.name.eq_ignore_ascii_case("Transfer-Encoding"))
+    {
+        return Ok(None);
+    }
+    let is_json = headers.iter().any(|h| {
+        h.name.eq_ignore_ascii_case("Content-Type")
+            && h.value
+                .split(|b| *b == b';')
+                .next()
+                .is_some_and(|v| v.eq_ignore_ascii_case(b"application/json"))
+    });
+    if !is_json {
+        return Ok(None);
+    }
+    let mut body = vec![0; length];
+    body[..prefix.len()].copy_from_slice(prefix);
+    let mut offset = prefix.len();
+    while offset < length {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        stream.set_read_timeout(Some(remaining))?;
+        let got = stream.read(&mut body[offset..])?;
+        if got == 0 {
+            return Ok(None);
+        }
+        offset += got;
+    }
+    Ok(Some(body))
+}
 fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
     stream.set_write_timeout(Some(Duration::from_secs(4)))?;
     let deadline = Instant::now() + Duration::from_secs(3);
@@ -154,14 +217,25 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
     }
     let mut headers = [httparse::EMPTY_HEADER; 40];
     let mut request = httparse::Request::new(&mut headers);
-    if !matches!(request.parse(&buf[..n]), Ok(httparse::Status::Complete(_))) {
+    let Ok(httparse::Status::Complete(end)) = request.parse(&buf[..n]) else {
         return error(&mut stream, "400 Bad Request", "invalid_request");
-    }
-    if request.method != Some("GET") {
-        return error(&mut stream, "405 Method Not Allowed", "method_not_allowed");
-    }
+    };
     let path = request.path.unwrap_or("");
     let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let dispatch_id = route
+        .strip_prefix("/api/agents/")
+        .and_then(|s| s.strip_suffix("/dispatch"));
+    let write = route == "/api/launch" || dispatch_id.is_some();
+    let method = if write { "POST" } else { "GET" };
+    if request.method != Some(method) {
+        return respond(
+            &mut stream,
+            "405 Method Not Allowed",
+            "application/json",
+            br#"{"error":"method_not_allowed"}"#,
+            &format!("Allow: {method}\r\n"),
+        );
+    }
     match route {
         "/" | "/index.html" => {
             return respond(&mut stream, "200 OK", "text/html; charset=utf-8", HTML, "");
@@ -171,10 +245,11 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
         }
         _ => {}
     }
-    let spec_id = route
+    let detail = route
         .strip_prefix("/api/agents/")
-        .and_then(|part| part.strip_suffix("/spec"));
-    if route != "/api/snapshot" && spec_id.is_none() {
+        .and_then(|part| part.rsplit_once('/'))
+        .filter(|(_, action)| matches!(*action, "spec" | "routing"));
+    if !write && route != "/api/launch-templates" && route != "/api/snapshot" && detail.is_none() {
         return error(&mut stream, "404 Not Found", "not_found");
     }
     let mut auth = request
@@ -199,12 +274,59 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
             );
         }
     };
-    if let Some(id) = spec_id {
+    if write || route == "/api/launch-templates" {
         if !matches!(viewer, Viewer::Operator) {
             return error(&mut stream, "403 Forbidden", "forbidden");
         }
         if !query.is_empty() {
             return error(&mut stream, "400 Bad Request", "invalid_request");
+        }
+        if !write {
+            return super::launch::list(scope, &mut stream);
+        }
+        let Some(bytes) = request_body(&mut stream, request.headers, &buf[end..n], deadline)?
+        else {
+            return error(&mut stream, "400 Bad Request", "invalid_request");
+        };
+        if let Some(id) = dispatch_id {
+            let mut credentials = request
+                .headers
+                .iter()
+                .filter(|h| h.name.eq_ignore_ascii_case("X-Loom-Agent-Bearer"));
+            let credential = credentials
+                .next()
+                .and_then(|h| std::str::from_utf8(h.value).ok())
+                .unwrap_or("");
+            if credentials.next().is_some() {
+                return error(&mut stream, "400 Bad Request", "invalid_request");
+            }
+            return super::dispatch::handle(scope, id, credential, &bytes, &mut stream);
+        }
+        return super::launch::handle(scope, &bytes, &mut stream);
+    }
+    if let Some((id, action)) = detail {
+        if !matches!(viewer, Viewer::Operator) {
+            return error(&mut stream, "403 Forbidden", "forbidden");
+        }
+        if !query.is_empty() {
+            return error(&mut stream, "400 Bad Request", "invalid_request");
+        }
+        if action == "routing" {
+            return match registration(scope, id) {
+                Ok(Some(row)) if row.routing.is_some() => respond(
+                    &mut stream,
+                    "200 OK",
+                    "application/json",
+                    &serde_json::to_vec(&row.routing)?,
+                    "",
+                ),
+                Ok(_) => error(&mut stream, "404 Not Found", "not_found"),
+                Err(_) => error(
+                    &mut stream,
+                    "503 Service Unavailable",
+                    "routing_unavailable",
+                ),
+            };
         }
         return match agent_spec(scope, id) {
             Ok(Some((revision, source))) => respond(
@@ -238,30 +360,42 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
         ),
     }
 }
-/// Look up only the registered state's saved revision in the private observation directory.
-/// The validation and the response use the same immutable bytes even during a host restart.
-fn agent_spec(scope: &Scope, id: &str) -> io::Result<Option<(String, String)>> {
+#[derive(serde::Deserialize)]
+pub(super) struct Registration {
+    pub(super) online: bool,
+    pub(super) instance: String,
+    pub(super) a2a_protocol: Option<String>,
+    id: String,
+    spec_revision: Option<String>,
+    routing: Option<super::routing::Routing>,
+}
+
+pub(super) fn registration(scope: &Scope, id: &str) -> io::Result<Option<Registration>> {
     if !super::store::is_digest(id) {
         return Ok(None);
     }
-    let directory = scope.root.join("agents");
-    let gate = super::store::snapshot_lock(&directory)?;
-    gate.lock()?;
-    let manifest = directory.join(format!("{id}.json"));
+    let manifest = scope.root.join("agents").join(format!("{id}.json"));
     let metadata = match private_text_bounded(&manifest, 64 * 1024 * 1024) {
         Ok(s) => s,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e),
     };
-    #[derive(serde::Deserialize)]
-    struct RegisteredSpec {
-        id: String,
-        spec_revision: Option<String>,
-    }
-    let row: RegisteredSpec = serde_json::from_str(&metadata)?;
+    let row: Registration = serde_json::from_str(&metadata)?;
     if row.id != id {
         return Err(invalid("dashboard registration mismatch"));
     }
+    Ok(Some(row))
+}
+
+/// Look up only the registered state's saved revision in the private observation directory.
+fn agent_spec(scope: &Scope, id: &str) -> io::Result<Option<(String, String)>> {
+    let directory = scope.root.join("agents");
+    let gate = super::store::snapshot_lock(&directory)?;
+    gate.lock()?;
+    let Some(row) = registration(scope, id)? else {
+        return Ok(None);
+    };
+    let manifest = directory.join(format!("{id}.json"));
     let Some(revision) = row.spec_revision else {
         return Ok(None);
     };

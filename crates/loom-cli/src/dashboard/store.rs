@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, VecDeque},
     fs::{File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
@@ -168,6 +168,10 @@ pub(super) struct AgentState {
     pub last_seen: String,
     pub online: bool,
     pub model: Option<String>,
+    pub harness: Option<super::Harness>,
+    launch_configuration: Option<String>,
+    workspace_key: Option<String>,
+    pub routing: Option<super::routing::Routing>,
     pub current: BTreeMap<String, Run>,
     #[serde(default, skip_serializing)]
     pub history: VecDeque<Run>,
@@ -209,6 +213,7 @@ fn publish(path: &Path, data: &mut AgentState) -> io::Result<()> {
 }
 
 pub(super) struct Agent {
+    _instance_lease: File,
     path: PathBuf,
     data: Mutex<AgentState>,
     step_budget: Option<i64>,
@@ -271,7 +276,7 @@ impl Agent {
         spec: &AgentSpec,
         revision: &str,
         source: Option<&str>,
-        model: Option<&str>,
+        launch: super::Launch<'_>,
     ) -> io::Result<Self> {
         let id = digest(state.canonicalize()?.as_os_str().as_encoded_bytes());
         let path = root.join("agents").join(format!("{id}.json"));
@@ -289,6 +294,10 @@ impl Agent {
                 last_seen: now(),
                 online: false,
                 model: None,
+                harness: None,
+                launch_configuration: None,
+                workspace_key: None,
+                routing: None,
                 current: BTreeMap::new(),
                 history: VecDeque::new(),
                 history_dirty: true,
@@ -307,12 +316,19 @@ impl Agent {
         data.current.clear();
         data.spec_id = label(&spec.agent.id.0);
         let prior_revision = data.spec_revision.replace(revision.to_owned());
-        data.a2a_protocol = spec
-            .expose
-            .as_ref()
-            .and_then(|e| e.a2a.as_ref())
-            .map(|_| b10x_loom_plugin::PROTOCOL.to_owned());
-        let polling = spec.channel.as_ref().and(spec.loops.as_ref());
+        data.a2a_protocol = spec.expose.as_ref().and_then(|e| e.a2a.as_ref()).map(|_| {
+            match launch.harness {
+                super::Harness::Native => b10x_loom_plugin::PROTOCOL,
+                super::Harness::Claude | super::Harness::Codex => {
+                    loom_sdk::protocols::SESSION_PROPOSAL
+                }
+            }
+            .to_owned()
+        });
+        let polling = match launch.harness {
+            super::Harness::Native => spec.channel.as_ref().and(spec.loops.as_ref()),
+            _ => None,
+        };
         data.protocol = polling
             .map(|l| l.inner.protocol.clone())
             .or_else(|| data.a2a_protocol.clone());
@@ -325,15 +341,34 @@ impl Agent {
             .take(120)
             .collect();
         data.instance = random()?;
+        // Pin this exact generation to its dashboard scope. A different live scope can
+        // own the same state immediately after a crash, while this row's heartbeat is fresh.
+        let mut instance_lease = super::private_file(&path.with_extension("lease"))?;
+        instance_lease
+            .try_lock()
+            .map_err(|e| invalid(&format!("agent generation lease: {e}")))?;
+        instance_lease.set_len(0)?;
+        instance_lease.write_all(data.instance.as_bytes())?;
         data.last_seen = now();
         data.online = true;
-        data.model = model.map(str::to_owned).or_else(|| {
-            spec.model
-                .roles
-                .iter()
-                .find(|r| r.role == loom_sdk::models::ModelRole::Agent)
-                .map(|r| r.model.clone())
-        });
+        data.harness = Some(launch.harness);
+        data.launch_configuration = launch.configuration;
+        data.workspace_key = launch.workspace_key;
+        data.routing = launch.routing.cloned();
+        data.model = match (launch.harness, launch.routing) {
+            (_, Some(routing)) => routing.agent.selection.clone(),
+            (super::Harness::Native, None) => launch
+                .model
+                .or_else(|| {
+                    spec.model
+                        .roles
+                        .iter()
+                        .find(|r| r.role == loom_sdk::models::ModelRole::Agent)
+                        .map(|r| r.model.as_str())
+                })
+                .and_then(super::routing::identifier),
+            _ => None,
+        };
         backfill(state, &mut data)?;
         if let Some(text) = source {
             if digest(text.as_bytes()) != revision {
@@ -360,6 +395,7 @@ impl Agent {
         }
         let inner = spec.loops.as_ref().map(|l| &l.inner);
         Ok(Self {
+            _instance_lease: instance_lease,
             path,
             data: Mutex::new(data),
             step_budget: inner.map(|l| l.step_budget),
@@ -378,6 +414,9 @@ impl Agent {
             eprintln!("b10x-loom: dashboard observation write failed: {e}");
         }
     }
+    pub fn instance(&self) -> String {
+        self.lock().instance.clone()
+    }
     pub fn heartbeat(&self) {
         self.update(|_| {});
     }
@@ -391,7 +430,14 @@ impl Agent {
 
 impl TurnObserver for Agent {
     fn started(&self, item: &str) {
-        crate::metering::begin(item);
+        if matches!(
+            self.lock().harness,
+            Some(super::Harness::Claude | super::Harness::Codex)
+        ) {
+            crate::metering::begin_external(item);
+        } else {
+            crate::metering::begin(item);
+        }
         self.update(|d| {
             let mut r = Run::new(&d.id, item, Some(now()));
             r.events

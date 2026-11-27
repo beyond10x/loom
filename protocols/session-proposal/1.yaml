@@ -27,9 +27,10 @@ actions:
             type: object
             properties:
               path: {type: string}
-              content: {}
-            required: [path, content]
-            additionalProperties: false
+            # The executor sends content as text for a write or null for a deletion.
+            # Canon's schema dialect has no type unions. The capture effect checks this member.
+            required: [path]
+            additionalProperties: true
       required: [files]
       additionalProperties: false
     may_produce: [{evidence: session_proposed}]

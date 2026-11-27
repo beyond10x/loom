@@ -17,3 +17,11 @@ tests:
       - expect: {at: pages/overview/sections/history, rows: 1}
       - act: pages/overview/sections/history/rows/run-previous/row_actions/open
       - expect: {at: pages/run/sections/detail, text: prior-inspection}
+  - name: dispatch presents a running agent selector then a launch selector
+    steps:
+      - open: dispatch
+      - expect: {at: pages/dispatch/sections/actions, text: Running agent, not_text: Agent template}
+      - select: pages/dispatch/sections/actions/tabs/start
+      - expect: {at: pages/dispatch/sections/actions, text: Harness, not_text: Running agent}
+      - select: pages/dispatch/sections/actions/tabs/send
+      - expect: {at: pages/dispatch/sections/actions, text: Running agent, not_text: Agent template}

@@ -159,6 +159,16 @@ impl StateDir {
         lock_wait: Duration,
     ) -> Result<Self, PluginError> {
         refuse_inside(path, config)?;
+        Self::lock(path, lock_wait)
+    }
+
+    /// Open a session's state outside its operator-supplied workspace.
+    pub fn for_workspace(path: &Path, workspace: &Path) -> Result<Self, PluginError> {
+        refuse_under(&resolve(path)?, workspace)?;
+        Self::lock(path, LOCK_WAIT)
+    }
+
+    fn lock(path: &Path, lock_wait: Duration) -> Result<Self, PluginError> {
         fs::create_dir_all(path).map_err(|error| {
             PluginError::State(format!("{} cannot be created: {error}", path.display()))
         })?;
@@ -389,13 +399,18 @@ fn read_record(root: &Path) -> Result<Vec<RecordLine>, PluginError> {
 pub fn refuse_inside(state: &Path, config: &PluginConfig) -> Result<(), PluginError> {
     let resolved = resolve(state)?;
     for root in config.workspace_roots.iter().chain(&config.checkouts) {
-        let root = resolve(Path::new(root))?;
-        if resolved.starts_with(&root) {
-            return Err(PluginError::StateInsideCheckout {
-                state: resolved.display().to_string(),
-                inside: root.display().to_string(),
-            });
-        }
+        refuse_under(&resolved, Path::new(root))?;
+    }
+    Ok(())
+}
+
+fn refuse_under(resolved: &Path, root: &Path) -> Result<(), PluginError> {
+    let root = resolve(root)?;
+    if resolved.starts_with(&root) {
+        return Err(PluginError::StateInsideCheckout {
+            state: resolved.display().to_string(),
+            inside: root.display().to_string(),
+        });
     }
     Ok(())
 }

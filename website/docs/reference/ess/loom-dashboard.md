@@ -18,10 +18,12 @@ The operator's read model for a single server. The server observes hosts and tur
 
 ### `Agent`
 
-`loom.dashboard.Agent` is a record of 12 fields:
+`loom.dashboard.Agent` is a record of 14 fields:
 
 - `id` — `String`
 - `spec_id` — `String`
+- `kind` — `Optional<loom.dashboard.AgentKind>`, which may be absent
+- `harness` — `Optional<loom.dashboard.Harness>`, which may be absent
 - `spec_revision` — `Optional<String>`, which may be absent
 - `protocol` — `Optional<String>`, which may be absent
 - `a2a_protocol` — `Optional<String>`, which may be absent
@@ -32,6 +34,18 @@ The operator's read model for a single server. The server observes hosts and tur
 - `last_seen` — `Timestamp`
 - `current` — `List<loom.dashboard.Run>`
 - `model` — `Optional<String>`, which may be absent
+
+### `AgentKind`
+
+`loom.dashboard.AgentKind` is one of `agent_spec` and `session`.
+
+### `AgentRouting`
+
+`loom.dashboard.AgentRouting` is a record of three fields:
+
+- `source` — `loom.dashboard.RoutingSource`
+- `agent` — `loom.dashboard.ModelRoute`
+- `classifier` — `loom.dashboard.ModelRoute`
 
 ### `AgentStatus`
 
@@ -47,11 +61,51 @@ The operator's read model for a single server. The server observes hosts and tur
 - `output_tokens` — `Integer`
 - `model_calls` — `Integer`
 
+### `Harness`
+
+`loom.dashboard.Harness` is one of `native`, `claude` and `codex`.
+
+### `LaunchStatus`
+
+`loom.dashboard.LaunchStatus` is one of `started` and `already_running`.
+
+### `LaunchTemplate`
+
+`loom.dashboard.LaunchTemplate` is a record of seven fields:
+
+- `id` — `loom.observation.LaunchKey`
+- `name` — `String`
+- `spec_id` — `String`
+- `kind` — `loom.dashboard.AgentKind`
+- `default_harness` — `loom.dashboard.Harness`
+- `harnesses` — `List<loom.dashboard.Harness>`
+- `protocol` — `Optional<String>`, which may be absent
+
+### `ModelProtocol`
+
+`loom.dashboard.ModelProtocol` is one of `chat-completions`, `responses` and `messages`.
+
+### `ModelRoute`
+
+`loom.dashboard.ModelRoute` is a record of seven fields:
+
+- `selection` — `Optional<String>`, which may be absent
+- `upstream_model` — `Optional<String>`, which may be absent
+- `endpoint_id` — `Optional<String>`, which may be absent
+- `base_origin` — `Optional<String>`, which may be absent
+- `protocol` — `loom.dashboard.ModelProtocol`
+- `provider_id` — `Optional<String>`, which may be absent
+- `binding_revision` — `Optional<String>`, which may be absent
+
+### `RoutingSource`
+
+`loom.dashboard.RoutingSource` is one of `launch_catalog` and `spec_routes`.
+
 ### `Run`
 
 `loom.dashboard.Run` is a record of 17 fields:
 
-- `id` — `String`
+- `id` — `loom.observation.RunId`
 - `agent_id` — `String`
 - `item_id` — `String`
 - `outcome` — `String`
@@ -122,7 +176,7 @@ The operator's read model for a single server. The server observes hosts and tur
 - `action` — `Optional<String>`, which may be absent
 - `outcome` — `Optional<String>`, which may be absent
 
-One of the types above is reached by nothing else in this system: `loom.dashboard.SnapshotData`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+Four of the types above are reached by nothing else in this system: `loom.dashboard.AgentRouting`, `loom.dashboard.LaunchStatus`, `loom.dashboard.LaunchTemplate` and `loom.dashboard.SnapshotData`. No entity, view, command, event, error or crossing names them, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
 
 ## Entities
 
@@ -137,6 +191,8 @@ An instance is identified by `id`, a `String`. The name is part of the model and
 It holds:
 
 - `spec_id` — `String`
+- `kind` — `Optional<loom.dashboard.AgentKind>`, which may be absent
+- `harness` — `Optional<loom.dashboard.Harness>`, which may be absent
 - `spec_revision` — `Optional<String>`, which may be absent
 - `protocol` — `Optional<String>`, which may be absent
 - `a2a_protocol` — `Optional<String>`, which may be absent
@@ -167,6 +223,73 @@ It declares no moves, so nothing changes its state once it exists.
 It has one state, so there is no move to permit or to forbid.
 
 Two views project it: [`AgentById`](#agentbyid) and [`Agents`](#agents).
+
+### `ConfiguredTemplate`
+
+`loom.dashboard.ConfiguredTemplate`.
+
+An instance is identified by `id`, a `loom.observation.LaunchKey`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+
+It holds:
+
+- `name` — `String`
+- `spec_id` — `String`
+- `kind` — `loom.dashboard.AgentKind`
+- `default_harness` — `loom.dashboard.Harness`
+- `harnesses` — `List<loom.dashboard.Harness>`
+- `protocol` — `Optional<String>`, which may be absent
+
+It declares no relation to another entity, and no other entity names it.
+
+No invariant is declared, so nothing here constrains an instance at rest.
+
+Its state is a `loom.dashboard.ConfiguredTemplate.State`, one of `Configured`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+
+An instance is created in `Configured`. `Configured` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Configured
+    Configured --> [*]
+```
+
+It declares no moves, so nothing changes its state once it exists.
+
+It has one state, so there is no move to permit or to forbid.
+
+One view projects it: [`LaunchTemplates`](#launchtemplates).
+
+### `RegisteredRouting`
+
+`loom.dashboard.RegisteredRouting`.
+
+An instance is identified by `id`, a `String`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+
+It holds:
+
+- `source` — `loom.dashboard.RoutingSource`
+- `agent` — `loom.dashboard.ModelRoute`
+- `classifier` — `loom.dashboard.ModelRoute`
+
+It declares no relation to another entity, and no other entity names it.
+
+No invariant is declared, so nothing here constrains an instance at rest.
+
+Its state is a `loom.dashboard.RegisteredRouting.State`, one of `Resolved`. That enum is synthesised from the lifecycle rather than declared beside it, so the states a view's filter compares and the states drawn below cannot disagree.
+
+An instance is created in `Resolved`. `Resolved` is terminal, so an instance may rest there forever. That is declared rather than inferred from having no way out: an entity that cannot leave a state is either finished or stuck, and only its author knows which.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Resolved
+    Resolved --> [*]
+```
+
+It declares no moves, so nothing changes its state once it exists.
+
+It has one state, so there is no move to permit or to forbid.
+
+One view projects it: [`AgentRoutingById`](#agentroutingbyid).
 
 ### `RegisteredSpec`
 
@@ -203,7 +326,7 @@ One view projects it: [`AgentSpecById`](#agentspecbyid).
 
 `loom.dashboard.RunObservation`.
 
-An instance is identified by `id`, a `String`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
+An instance is identified by `id`, a `loom.observation.RunId`. The name is part of the model and not a convention: a view projects the identity under that name, so a projection inventing its own would disagree with the view.
 
 It holds:
 
@@ -342,6 +465,8 @@ It exposes:
 
 - `id` — `String`
 - `spec_id` — `String`
+- `kind` — `Optional<loom.dashboard.AgentKind>`, which may be absent
+- `harness` — `Optional<loom.dashboard.Harness>`, which may be absent
 - `spec_revision` — `Optional<String>`, which may be absent
 - `protocol` — `Optional<String>`, which may be absent
 - `a2a_protocol` — `Optional<String>`, which may be absent
@@ -352,6 +477,27 @@ It exposes:
 - `last_seen` — `Timestamp`
 - `current` — `List<loom.dashboard.Run>`
 - `model` — `Optional<String>`, which may be absent
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Eventual**: it catches up some time after the command returns, so a caller that reads it immediately may legitimately not see its own write yet. Nothing here says how long that takes, so nothing here lets a caller wait a fixed time and call it correct.
+
+A generated scenario therefore retries the assertion until the projection catches up, rather than asserting once and racing it. The repair everyone reaches for instead is a sleep, which turns the suite into a test of the machine it runs on.
+
+### `AgentRoutingById`
+
+`loom.dashboard.AgentRoutingById`.
+
+It reads [`RegisteredRouting`](#registeredrouting).
+
+It contains the instances where `id == param.id` holds, and only those — so an instance a caller cannot find in here has been filtered out rather than lost.
+
+It exposes:
+
+- `id` — `String`
+- `source` — `loom.dashboard.RoutingSource`
+- `agent` — `loom.dashboard.ModelRoute`
+- `classifier` — `loom.dashboard.ModelRoute`
 
 It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
 
@@ -391,6 +537,8 @@ It exposes:
 
 - `id` — `String`
 - `spec_id` — `String`
+- `kind` — `Optional<loom.dashboard.AgentKind>`, which may be absent
+- `harness` — `Optional<loom.dashboard.Harness>`, which may be absent
 - `spec_revision` — `Optional<String>`, which may be absent
 - `protocol` — `Optional<String>`, which may be absent
 - `a2a_protocol` — `Optional<String>`, which may be absent
@@ -408,6 +556,30 @@ It declares no order, so the rows come back in whatever order the implementation
 
 A generated scenario therefore retries the assertion until the projection catches up, rather than asserting once and racing it. The repair everyone reaches for instead is a sleep, which turns the suite into a test of the machine it runs on.
 
+### `LaunchTemplates`
+
+`loom.dashboard.LaunchTemplates`.
+
+It reads [`ConfiguredTemplate`](#configuredtemplate).
+
+It contains every instance of that entity: no filter narrows it, which is a decision somebody made and not a line somebody omitted.
+
+It exposes:
+
+- `id` — `loom.observation.LaunchKey`
+- `name` — `String`
+- `spec_id` — `String`
+- `kind` — `loom.dashboard.AgentKind`
+- `default_harness` — `loom.dashboard.Harness`
+- `harnesses` — `List<loom.dashboard.Harness>`
+- `protocol` — `Optional<String>`, which may be absent
+
+It declares no order, so the rows come back in whatever order the implementation has, and two reads may disagree.
+
+**Eventual**: it catches up some time after the command returns, so a caller that reads it immediately may legitimately not see its own write yet. Nothing here says how long that takes, so nothing here lets a caller wait a fixed time and call it correct.
+
+A generated scenario therefore retries the assertion until the projection catches up, rather than asserting once and racing it. The repair everyone reaches for instead is a sleep, which turns the suite into a test of the machine it runs on.
+
 ### `RunById`
 
 `loom.dashboard.RunById`.
@@ -418,7 +590,7 @@ It contains the instances where `id == param.id` holds, and only those — so an
 
 It exposes:
 
-- `id` — `String`
+- `id` — `loom.observation.RunId`
 - `agent_id` — `String`
 - `item_id` — `String`
 - `outcome` — `String`
@@ -452,7 +624,7 @@ It contains every instance of that entity: no filter narrows it, which is a deci
 
 It exposes:
 
-- `id` — `String`
+- `id` — `loom.observation.RunId`
 - `agent_id` — `String`
 - `item_id` — `String`
 - `outcome` — `String`
@@ -545,7 +717,7 @@ An actor is who may ask this context for something. Every grant below points at 
 
 It may invoke nothing: it observes. "Who is in this picture" is part of what a specification describes, so an actor with no grant is a statement rather than an unfinished line.
 
-It may read [`AgentSpecById`](#agentspecbyid), which an actor whose grant does not name it may not read.
+It may read [`AgentRoutingById`](#agentroutingbyid), [`AgentSpecById`](#agentspecbyid) and [`LaunchTemplates`](#launchtemplates), which an actor whose grant does not name it may not read.
 
 ### `Viewer`
 
@@ -558,4 +730,4 @@ It may read [`AgentById`](#agentbyid), [`Agents`](#agents), [`RunById`](#runbyid
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:51e749e39c55546927bdf51a4baa006eb35fca1da4935a13f0d55a7406047b2c`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:68f36e4054ff0eb6cbe73c2db5d57f68691c8d6adec4f4e7a9c20a5132a3e006`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

@@ -10,11 +10,119 @@ custom_edit_url: null
 
 # observation
 
-The read-only HTTP boundary for a viewer of one Loom server. The query filters authorized observations before constructing a response. An absent query result still produces a snapshot.
+The dashboard HTTP boundary for one Loom server. Scoped viewers read authorized observations. Operators can inspect host configuration, dispatch work and launch a configured agent.
 
 `loom.observation` is one of loom's bounded contexts. [All domains](./index.mdx).
 
+## Types
+
+### `DispatchState`
+
+`loom.observation.DispatchState` is one of `TASK_STATE_COMPLETED`, `TASK_STATE_REJECTED` and `TASK_STATE_FAILED`.
+
+### `LaunchKey`
+
+`loom.observation.LaunchKey` wraps `String` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses. Its characters are drawn from `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_`.
+
+### `MessageId`
+
+`loom.observation.MessageId` wraps `String` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses. Its characters are drawn from `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-`.
+
+### `RunId`
+
+`loom.observation.RunId` wraps `String` and is not interchangeable with one: the whole value of naming it separately is the crossings the model then refuses. Its characters are drawn from `0123456789abcdef`.
+
+One of the types above is reached by nothing else in this system: `loom.observation.DispatchState`. No entity, view, command, event, error or crossing names it, so it is either vocabulary something outside this specification uses or a leftover — and only a person can tell which.
+
 ## Commands
+
+### `DispatchWork`
+
+`loom.observation.DispatchWork`.
+
+It takes:
+
+- `agent` — `String`
+- `message_id` — `loom.observation.MessageId`
+- `text` — `String`
+
+It has nine outcomes.
+
+**`denied`** — Decided outside the input: The operator did not authenticate.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.ViewerRequired`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`forbidden`** — Decided outside the input: A scoped viewer attempted to dispatch.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.Forbidden`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`agent-denied`** — Decided outside the input: The caller lacks the target agent bearer.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.AgentBearerRequired`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`invalid`** — Decided outside the input: The request is malformed or its message is blank or exceeds 16384 UTF-8 bytes.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.InvalidQuery`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-found`** — Decided outside the input: The registered agent does not exist.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.UnknownAgent`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`offline`** — Decided outside the input: The host is offline or lacks an A2A listener.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.AgentUnavailable`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-viewers`** — Decided outside the input: The private viewer configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoViewerConfig`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-dispatch`** — Decided outside the input: The listener could not return a terminal task.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.DispatchUnavailable`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`dispatched`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `LaunchAgent`
+
+`loom.observation.LaunchAgent`.
+
+It takes:
+
+- `template` — `loom.observation.LaunchKey`
+- `request_id` — `loom.observation.LaunchKey`
+- `harness` — `Optional<loom.dashboard.Harness>`, which may be absent
+
+It has 11 outcomes.
+
+**`denied`** — Decided outside the input: The operator did not authenticate.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.ViewerRequired`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`forbidden`** — Decided outside the input: A scoped viewer attempted to launch a host.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.Forbidden`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`invalid`** — Decided outside the input: The query or JSON request is invalid.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.InvalidQuery`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unknown-template`** — Decided outside the input: The template ID is unknown.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.UnknownTemplate`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`request-conflict`** — Decided outside the input: The request ID belongs to a different launch.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.RequestConflict`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`state-conflict`** — Decided outside the input: The template state directory is held by an incompatible registration.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.StateConflict`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-viewers`** — Decided outside the input: The private viewer configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoViewerConfig`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-templates`** — Decided outside the input: The private launch configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoTemplates`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-launch`** — Decided outside the input: The process could not start or register.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.LaunchUnavailable`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`existing`** — Decided outside the input: The request already has a saved receipt or its compatible host is already running.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`started`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `ReadAgentRouting`
+
+`loom.observation.ReadAgentRouting`.
+
+It takes:
+
+- `agent` — `String`
+
+It has seven outcomes.
+
+**`denied`** — Decided outside the input: The request did not authenticate a viewer.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.ViewerRequired`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`forbidden`** — Decided outside the input: A scoped viewer attempted to read resolved model routing.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.Forbidden`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-found`** — Decided outside the input: The agent ID has no registered routing.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.UnknownAgent`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`invalid`** — Decided outside the input: The request supplies a query string or malformed request headers.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.InvalidQuery`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-viewers`** — Decided outside the input: The private viewer configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoViewerConfig`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-routing`** — Decided outside the input: The private routing record could not be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoRouting`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`read`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `ReadAgentSpec`
 
@@ -39,6 +147,26 @@ It has seven outcomes.
 **`unavailable-source`** — Decided outside the input: Reading the private source failed or its revision could not be verified.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoSpec`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
 
 **`read`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `ReadLaunchTemplates`
+
+`loom.observation.ReadLaunchTemplates`.
+
+It takes no input.
+
+It has six outcomes.
+
+**`denied`** — Decided outside the input: The operator did not authenticate.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.ViewerRequired`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`forbidden`** — Decided outside the input: A scoped viewer attempted to list templates.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.Forbidden`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`invalid`** — Decided outside the input: The operator supplied a query parameter.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.InvalidQuery`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-viewers`** — Decided outside the input: The private viewer configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoViewerConfig`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-templates`** — Decided outside the input: The private launch configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoTemplates`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`listed`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ### `ReadSnapshot`
 
@@ -68,11 +196,37 @@ It has seven outcomes.
 
 ## Errors
 
+### `AgentBearerRequired`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.DispatchWork` on its `agent-denied` outcome.
+
+### `AgentUnavailable`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.DispatchWork` on its `offline` outcome.
+
+### `DispatchUnavailable`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.DispatchWork` on its `unavailable-dispatch` outcome.
+
 ### `Forbidden`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.DispatchWork` on its `forbidden` outcome.
+
+Reported by `loom.observation.LaunchAgent` on its `forbidden` outcome.
+
+Reported by `loom.observation.ReadAgentRouting` on its `forbidden` outcome.
+
 Reported by `loom.observation.ReadAgentSpec` on its `forbidden` outcome.
+
+Reported by `loom.observation.ReadLaunchTemplates` on its `forbidden` outcome.
 
 Reported by `loom.observation.ReadSnapshot` on its `forbidden` outcome.
 
@@ -80,9 +234,29 @@ Reported by `loom.observation.ReadSnapshot` on its `forbidden` outcome.
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.DispatchWork` on its `invalid` outcome.
+
+Reported by `loom.observation.LaunchAgent` on its `invalid` outcome.
+
+Reported by `loom.observation.ReadAgentRouting` on its `invalid` outcome.
+
 Reported by `loom.observation.ReadAgentSpec` on its `invalid` outcome.
 
+Reported by `loom.observation.ReadLaunchTemplates` on its `invalid` outcome.
+
 Reported by `loom.observation.ReadSnapshot` on its `invalid` outcome.
+
+### `LaunchUnavailable`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.LaunchAgent` on its `unavailable-launch` outcome.
+
+### `NoRouting`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.ReadAgentRouting` on its `unavailable-routing` outcome.
 
 ### `NoSnapshot`
 
@@ -96,27 +270,73 @@ It carries nothing beyond its name, so a caller can tell what went wrong and not
 
 Reported by `loom.observation.ReadAgentSpec` on its `unavailable-source` outcome.
 
+### `NoTemplates`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.LaunchAgent` on its `unavailable-templates` outcome.
+
+Reported by `loom.observation.ReadLaunchTemplates` on its `unavailable-templates` outcome.
+
 ### `NoViewerConfig`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.DispatchWork` on its `unavailable-viewers` outcome.
+
+Reported by `loom.observation.LaunchAgent` on its `unavailable-viewers` outcome.
+
+Reported by `loom.observation.ReadAgentRouting` on its `unavailable-viewers` outcome.
+
 Reported by `loom.observation.ReadAgentSpec` on its `unavailable-viewers` outcome.
 
+Reported by `loom.observation.ReadLaunchTemplates` on its `unavailable-viewers` outcome.
+
 Reported by `loom.observation.ReadSnapshot` on its `unavailable-viewers` outcome.
+
+### `RequestConflict`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.LaunchAgent` on its `request-conflict` outcome.
+
+### `StateConflict`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.LaunchAgent` on its `state-conflict` outcome.
 
 ### `UnknownAgent`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.DispatchWork` on its `not-found` outcome.
+
+Reported by `loom.observation.ReadAgentRouting` on its `not-found` outcome.
+
 Reported by `loom.observation.ReadAgentSpec` on its `not-found` outcome.
 
 Reported by `loom.observation.ReadSnapshot` on its `not-found` outcome.
+
+### `UnknownTemplate`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.LaunchAgent` on its `unknown-template` outcome.
 
 ### `ViewerRequired`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.DispatchWork` on its `denied` outcome.
+
+Reported by `loom.observation.LaunchAgent` on its `denied` outcome.
+
+Reported by `loom.observation.ReadAgentRouting` on its `denied` outcome.
+
 Reported by `loom.observation.ReadAgentSpec` on its `denied` outcome.
+
+Reported by `loom.observation.ReadLaunchTemplates` on its `denied` outcome.
 
 Reported by `loom.observation.ReadSnapshot` on its `denied` outcome.
 
@@ -128,7 +348,7 @@ An actor is who may ask this context for something. Every grant below points at 
 
 `loom.observation.Operator`.
 
-It may invoke [`ReadAgentSpec`](#readagentspec) and [`ReadSnapshot`](#readsnapshot).
+It may invoke [`DispatchWork`](#dispatchwork), [`LaunchAgent`](#launchagent), [`ReadAgentRouting`](#readagentrouting), [`ReadAgentSpec`](#readagentspec), [`ReadLaunchTemplates`](#readlaunchtemplates) and [`ReadSnapshot`](#readsnapshot).
 
 ### `ScopedViewer`
 
@@ -139,4 +359,4 @@ It may invoke [`ReadSnapshot`](#readsnapshot).
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:d899aeffda59484419af99ded55807195f65a4b4ab2ac9ca8b3144d48aa879be`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:336e865d0195cb7ced54c05ea422601f774a453626714a49d0b95685ed641ee3`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

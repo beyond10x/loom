@@ -1,14 +1,16 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
+import Dispatch from './Dispatch.vue'
 import AgentSpec from './AgentSpec.vue'
 import RunDetail from './RunDetail.vue'
 import Completions from './Completions.vue'
 import Statistics from './Statistics.vue'
 import {useSnapshot} from './snapshot.js'
-import {duration, itemLabel, number, time} from './format.js'
+import {agentKind, duration, harnessName, itemLabel, number, time} from './format.js'
 
-const {snapshot, filters, state, busy, refresh, readAgentSpec, connect, disconnect, href, navigate} = useSnapshot()
+const {snapshot, filters, state, busy, refresh, readAgentDocument, operatorRequest, connect, disconnect, href, navigate} = useSnapshot()
 const credential = ref(''), from = ref(''), to = ref(''), intervalError = ref('')
+const dispatching = computed(() => filters.value.view === 'dispatch')
 const selected = computed(() => snapshot.value?.agents.find(a => a.id === filters.value.agent))
 const selectedRun = computed(() => snapshot.value && [...snapshot.value.runs, ...snapshot.value.agents.flatMap(a => a.current)].find(r => r.id === filters.value.run))
 const historyFilter = ref('all'), historyTable = ref()
@@ -43,13 +45,15 @@ function login() { if (credential.value.trim()) { connect(credential.value.trim(
   <a class="skip" href="#main">Skip to content</a>
   <header class="mast"><div class="brand"><span class="mark" aria-hidden="true">≋</span> Loom</div>
     <span class="mast-label">Agent dashboard</span><a class="api-link" href="/api/openapi.json">API design</a>
+    <a v-if="snapshot" class="dispatch-nav" :href="href({view:'dispatch',tab:'',run:''})" @click.prevent="navigate({view:'dispatch',tab:'',run:''})">Dispatch</a>
     <button v-if="snapshot" class="mast-end" @click="disconnect">Sign out</button>
   </header>
   <main id="main">
-    <nav aria-label="Breadcrumb" v-if="snapshot"><a :href="href({agent:'',run:''})" @click.prevent="navigate({agent:'',run:''})">Server overview</a>
-      <template v-if="filters.agent"><span aria-hidden="true"> / </span><a :href="href({run:''})" @click.prevent="navigate({run:''})">{{ selected?.name || filters.agent }}</a></template>
+    <nav aria-label="Breadcrumb" v-if="snapshot"><a :href="href({agent:'',run:'',view:''})" @click.prevent="navigate({agent:'',run:'',view:''})">Server overview</a>
+      <template v-if="dispatching"><span aria-hidden="true"> / </span> Dispatch</template>
+      <template v-else-if="filters.agent"><span aria-hidden="true"> / </span><a :href="href({run:''})" @click.prevent="navigate({run:''})">{{ selected?.name || filters.agent }}</a></template>
       <template v-if="filters.run"><span aria-hidden="true"> / </span> Run detail</template></nav>
-    <div class="headline"><div><h1>{{ filters.run ? 'Run detail' : filters.agent ? (selected?.name || 'Agent detail') : 'Server overview' }}</h1>
+    <div class="headline"><div><h1>{{ dispatching ? 'Dispatch' : filters.run ? 'Run detail' : filters.agent ? (selected?.name || 'Agent detail') : 'Server overview' }}</h1>
       <p v-if="snapshot" class="muted">{{ snapshot.server }} · Observed {{ time(snapshot.time) }}</p></div>
       <button v-if="snapshot" :disabled="busy" @click="refresh">Refresh</button></div>
     <form v-if="['login','denied'].includes(state)" class="access" @submit.prevent="login">
@@ -60,8 +64,12 @@ function login() { if (credential.value.trim()) { connect(credential.value.trim(
     <p v-if="state === 'loading'" role="status">Loading agent activity…</p>
     <p v-if="state === 'stale'" class="notice" role="status">Connection lost. {{ snapshot ? 'Showing the last observation.' : 'Waiting for the server.' }} <button @click="refresh">Retry</button></p>
     <template v-if="snapshot">
-      <template v-if="filters.run"><RunDetail :run="selectedRun" /></template>
+      <Dispatch v-if="dispatching" :agents="snapshot.agents" :initial-agent="filters.agent" :request="operatorRequest" :href="href" @navigate="navigate" />
+      <template v-else-if="filters.run"><RunDetail :run="selectedRun" /></template>
       <template v-else>
+        <AgentSpec v-if="selected && state === 'live'" :key="[selected.id,selected.instance,selected.spec_revision].join(':')"
+          :agent="selected" :read="readAgentDocument" :requested="filters.tab === 'spec'"
+          @toggle="show => navigate({tab: show ? 'spec' : ''})"/>
         <section aria-labelledby="fleet-title" data-address="pages/overview/sections/agents">
           <header class="section-head"><h2 id="fleet-title">{{ filters.agent ? 'Agent' : 'Agent fleet' }}</h2><span class="count">{{ snapshot.agents.length }}</span></header>
           <div v-if="!snapshot.agents.length" class="empty">No visible agents.</div>
@@ -69,7 +77,8 @@ function login() { if (credential.value.trim()) { connect(credential.value.trim(
           <article v-for="agent in snapshot.agents" :key="agent.id" :data-address="'pages/overview/sections/agents/rows/'+agent.id">
             <div class="section-head"><a class="agent-name" :data-address="'pages/overview/sections/agents/rows/'+agent.id+'/row_actions/open'" :href="href({agent:agent.id,run:''})" @click.prevent="navigate({agent:agent.id,run:''})">{{ agent.name }}</a>
               <span class="badge" :class="{working:agent.status === 'working',warn:agent.status === 'offline'}">{{ agent.status }}</span></div>
-            <dl class="details" :data-address="filters.agent ? 'pages/agent/sections/detail' : undefined"><dt v-if="filters.agent">Agent</dt><dd v-if="filters.agent">{{ agent.name }}</dd><dt>Instance</dt><dd>{{ agent.instance }}</dd><dt>Last seen</dt><dd>{{ time(agent.last_seen) }}</dd>
+            <dl class="details" :data-address="filters.agent ? 'pages/agent/sections/detail' : undefined"><dt v-if="filters.agent">Agent</dt><dd v-if="filters.agent">{{ agent.name }}</dd><dt>Agent kind</dt><dd>{{ agentKind(agent.kind) }}</dd><dt>Harness</dt><dd>{{ harnessName(agent.harness) }}</dd>
+              <dt>Instance</dt><dd>{{ agent.instance }}</dd><dt>Last seen</dt><dd>{{ time(agent.last_seen) }}</dd>
               <template v-if="filters.agent">
                 <dt>Specification</dt><dd>{{ agent.spec_id }}</dd>
                 <dt>Spec revision</dt><dd><code>{{ agent.spec_revision || 'Unknown' }}</code></dd>
@@ -82,7 +91,7 @@ function login() { if (credential.value.trim()) { connect(credential.value.trim(
               <a :title="run.item_id" :href="href({run:run.id})" @click.prevent="navigate({run:run.id})">{{ itemLabel(run.item_id) }}</a><p>{{ run.action }}</p>
               <small>Started {{ time(run.started_at) }} · Elapsed {{ duration(Date.parse(snapshot.time) - Date.parse(run.started_at)) }}</small>
               <small>Steps left {{ number(run.steps_left) }} · Model calls left {{ number(run.model_calls_left) }}</small></div></div>
-            <AgentSpec v-if="filters.agent && state === 'live'" :key="[agent.id,agent.instance,agent.spec_revision].join(':')" :agent="agent" :read="readAgentSpec"/>
+
           </article></div></section>
         <form class="interval" @submit.prevent="applyInterval"><h2>Reporting interval</h2><label>From (UTC)<input type="datetime-local" step="1" v-model="from"></label><label>To (UTC, exclusive)<input type="datetime-local" step="1" v-model="to"></label>
           <button>Apply</button><button v-if="filters.from || filters.to" type="button" @click="navigate({from:'',to:''})">All time</button><p v-if="intervalError" role="alert">{{ intervalError }}</p></form>

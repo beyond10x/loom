@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T13:52:58Z",
+  "actor": "human:timo",
+  "artifact": "epic:server-hosted-agent-dashboard",
+  "kind": "epic",
+  "revision": 1,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "Live Chromium launch of native, Claude Code and Codex hosts; native task submission, run detail and idempotent retry; 378 core ESS scenarios passed",
+    "reference": "website/docs/reference/server-api.md"
+  }
+}

@@ -79,6 +79,8 @@ The 200 response includes a quoted `ETag`. Poll with that value in `If-None-Matc
 | 404 | The requested agent is unknown or outside the viewer’s scope. |
 | 503 | The viewer configuration or snapshot could not be read. |
 
+Claude Code and Codex sessions can report their own input tokens, output tokens and cost. The dashboard records each reported field, including an explicit zero. A field the vendor omitted stays `null`. The number of provider calls inside a vendor session is unknown.
+
 ## Read the agent's registered spec
 
 **GET `/api/agents/{agent}/spec`** returns the source that Loom validated when this agent registered. Substitute the opaque `agents[].id` from the snapshot. Send the **operator** token from the private `viewer-token` file in the `Authorization: Bearer` header. The endpoint accepts no query parameters.
@@ -96,11 +98,66 @@ A spec can include internal addresses, filesystem paths, binding configuration a
 | 404 | The agent ID is unknown or invalid, or no source was saved for it, including legacy registrations. |
 | 503 | The viewer configuration or source could not be read, or source bytes failed the revision check. |
 
-## Dispatch work to an agent
+
+## Inspect effective model routing
+
+**GET `/api/agents/{agent}/routing`** returns the model routes the serving host registered at launch. Use the agent’s opaque dashboard ID and the operator bearer. There are no query parameters. Open the same agent’s registered spec to compare these effective settings with its authored role names.
+
+The JSON object has a `source` and one route each for `agent` and `classifier`. The source is `spec_routes` when the host resolves the spec’s routes document, including per-role command-line overrides, or `launch_catalog` when the launcher supplied a separate catalog.
+
+| Route field | Meaning |
+| --- | --- |
+| `selection` | Role name selection or route alias the launcher resolved. |
+| `upstream_model` | Model identity the configured endpoint receives. |
+| `endpoint_id`, `provider_id`, `binding_revision` | Endpoint, provider and binding identifiers available from that model route. |
+| `base_origin` | Scheme, host and optional port. An exact `/v1` path is preserved. The host removes user information, arbitrary paths, query strings and fragments. |
+| `protocol` | Wire protocol used to address the model endpoint: `chat-completions`, `responses` or `messages`. |
+
+Unknown fields are `null`. The route describes the host’s configured destination. A gateway can independently choose the backend that serves an individual request. The private endpoint returns 401 for an unrecognized token, 403 for every scoped viewer, 400 for an invalid operator query, 404 for an unknown agent or a registration without saved routing, and 503 if routing or viewer configuration cannot be read. [Configure model routes](../guides/model-routes.md)
+
+## Dispatch from the dashboard
+
+Open **Dispatch → Send task**, select a running agent by name, kind and harness, then enter the task and its A2A bearer. The server requires both the dashboard operator credential and the selected agent’s credential. It submits the task through that agent's A2A listener. **View run** opens the recorded outcome. A second browser tab can observe **Current work** while the task runs.
+
+**POST `/api/agents/{agent}/dispatch`** takes `{"message_id":"review-42","text":"Review the build record"}`. Send the dashboard bearer in `Authorization` and the agent bearer in `X-Loom-Agent-Bearer`. On completion the response carries the dashboard `run_id` and task `state`. After a lost response, retry with the same message ID. Each A2A listener queues submitted work in memory and runs one turn at a time. Pending work and A2A task handles have process lifetime. Terminal item records survive restart.
+
+### Start a background agent
+
+Choose **Dispatch → Start agent**, then a harness and a registered template. A native agent runs its protocol loop with configured model ports. A session agent uses the Claude Code or Codex harness named by its AgentSpec. **View agent** opens the new instance. Starting a host and sending it a task are separate actions.
+
+The operator registers templates in `launch-templates.json` in the private dashboard directory. Make it mode 0600. A template fixes the spec and execution state in advance. Use absolute paths on the server. For example:
+
+```json
+{
+  "templates": [{
+    "id": "reviewer",
+    "spec": "/srv/loom/specs/reviewer.yaml",
+    "state": "/var/lib/loom/reviewer",
+    "a2a_bearer_file": "/srv/loom/credentials/reviewer"
+  }]
+}
+```
+
+The bearer file contains the A2A token and must be private. A native template uses the spec's model routes by default. For a catalog override, add `catalog`, `model` and `classifier_model`. A session template supplies `workspace` and a list of permitted relative `files`; its spec declares `session.kind`, tool policy, budget and A2A exposure. The server starts the packaged `agent serve` executable and binds A2A to loopback. With a user systemd manager the new agent has its own `loom-dispatch-*.service` unit.
+
+| Operator operation | Result |
+| --- | --- |
+| `GET /api/launch-templates` | Available templates, agent kinds, protocols and harness choices. An empty list means no templates are registered. |
+| `POST /api/launch` with `{"template":"reviewer","request_id":"start-42","harness":"native"}` | A new instance returns 201. A compatible running instance or replay returns 200. The response names the agent, instance, kind, harness and status. |
+
+An unchanged request ID identifies the original launch. Reusing it for a different template or harness returns 409. The dashboard retains the last 512 launch receipts per server scope. An unavailable template returns 404. A scoped viewer receives 403 for either action.
+
+### Which protocol runs?
+
+The AgentSpec profile displays the authored protocol. The agent detail also reports the protocol active on the served host. Native A2A requests use `inbound-answer@1`; a native polling loop can use `operator-reply@1`. A Claude Code or Codex session uses `session-proposal@1` to submit a workspace proposal. Canon evaluates the case's protocol and determines which actions are currently permitted. Commission and the bound executor carry out the admitted work.
+
+Run `b10x-loom protocols list` to inspect the separate routing catalog, its provenance and available execution bindings. It includes Loom's `system-query@1` and vendored engineering protocols such as `software-change@1` and `incident-response@1`. [System queries and custom protocols](../guides/system-queries.md)
+
+## Use the A2A listener directly
 
 On each A2A listener, **GET `/ready`** checks readiness and **GET `/live`** checks liveness. Those probes accept unauthenticated requests. The agent card and JSON-RPC endpoint require the agent bearer.
 
-The dashboard exposes observation reads. Submit work to the **agent’s own A2A address**, using its agent bearer. Its agent card is at `/.well-known/agent-card.json`. Its configured JSON-RPC path accepts `SendMessage`, `SendStreamingMessage` and `GetTask`. A2A task IDs belong to that listener’s process. Dashboard run IDs belong to the agent state directory and logical item. [Agent serve command](./cli.md#b10x-loom-agent-serve) · [A2A wire and replay examples](https://github.com/beyond10x/loom/blob/main/docs/qualification/2026-10-25-agent-a2a.md)
+An A2A client may submit work directly to the **agent’s own A2A address**, using its agent bearer. Its agent card is at `/.well-known/agent-card.json`. Its configured JSON-RPC path accepts `SendMessage`, `SendStreamingMessage` and `GetTask`. A2A task IDs belong to that listener’s process. Dashboard run IDs belong to the agent state directory and logical item. [Agent serve command](./cli.md#b10x-loom-agent-serve) · [A2A wire and replay examples](https://github.com/beyond10x/loom/blob/main/docs/qualification/2026-10-25-agent-a2a.md)
 
 ## Specification and generation
 

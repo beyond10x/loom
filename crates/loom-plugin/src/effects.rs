@@ -797,13 +797,49 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
 
     /// Observes this port's step and submits one `kind` evidence about the item, citing it.
     fn evidence(&self, kind: &str, payload: Value) -> Result<(), EffectError> {
+        ItemEvidence {
+            governor: self.governor,
+            case: &self.case,
+            item: self.item,
+            source: OBSERVER,
+            producer: PRODUCER,
+        }
+        .record(
+            kind,
+            payload,
+            || self.uuid(),
+            || {
+                let mut log = self.log();
+                log.evidence += 1;
+                log.evidence
+            },
+        )
+    }
+}
+
+/// A verified observation of this incoming item and the Canon evidence that cites it.
+pub(crate) struct ItemEvidence<'a, S> {
+    pub(crate) governor: &'a CanonGovernor<S>,
+    pub(crate) case: &'a CaseId,
+    pub(crate) item: &'a InboundItem,
+    pub(crate) source: &'a str,
+    pub(crate) producer: &'a str,
+}
+impl<S: FallibleCaseStore> ItemEvidence<'_, S> {
+    pub(crate) fn record(
+        &self,
+        kind: &str,
+        payload: Value,
+        next_id: impl Fn() -> Uuid,
+        next_index: impl FnOnce() -> usize,
+    ) -> Result<(), EffectError> {
         let failed = |why: String| EffectError::new(format!("the {kind} evidence: {why}"));
-        let observation = ObservationId(self.uuid());
+        let observation = ObservationId(next_id());
         let now = Timestamp(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true));
         self.governor
             .observe(Observation::new(ObservationData {
                 observation_id: observation.clone(),
-                source: OBSERVER.to_owned(),
+                source: self.source.to_owned(),
                 subject: format!("{ITEM}@{}", self.item.revision),
                 observed_at: now,
                 payload,
@@ -811,13 +847,9 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
             .map_err(|error| failed(format!("{error:?}")))?;
         let revision = self
             .governor
-            .current_revision(&self.case)
+            .current_revision(self.case)
             .map_err(|error| failed(format!("{error:?}")))?;
-        let n = {
-            let mut log = self.log();
-            log.evidence += 1;
-            log.evidence
-        };
+        let n = next_index();
         let facts = Value::Object(vec![
             (
                 "format".to_owned(),
@@ -836,18 +868,18 @@ impl<'a, S: FallibleCaseStore> DataSourceEffects<'a, S> {
         ]);
         submit_evidence(
             self.governor,
-            PRODUCER,
+            self.producer,
             EvidenceData {
-                evidence_id: EvidenceId(self.uuid()),
+                evidence_id: EvidenceId(next_id()),
                 case_id: self.case.clone(),
                 kind: kind.to_owned(),
                 subject_revision: revision,
-                producer: PRODUCER.to_owned(),
+                producer: self.producer.to_owned(),
                 observation_ids: vec![observation],
                 facts,
                 provenance: Value::Object(vec![(
                     "source".to_owned(),
-                    Value::Text(OBSERVER.to_owned()),
+                    Value::Text(self.source.to_owned()),
                 )]),
             },
         )

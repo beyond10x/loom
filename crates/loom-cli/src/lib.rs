@@ -1231,6 +1231,12 @@ pub struct AgentStageFilesArgs {
 /// The arguments of `b10x-loom agent serve`.
 #[derive(Debug, Args)]
 pub struct AgentServeArgs {
+    /// Serve the spec's Claude Code or Codex session on A2A, over a private copy of selected files.
+    #[arg(long, value_name = "DIR", requires = "session_file", conflicts_with_all = ["once", "catalog", "model", "classifier_model"])]
+    pub session_workspace: Option<PathBuf>,
+    /// A plain path relative to the session workspace. Repeat for each file to make available.
+    #[arg(long, value_name = "RELATIVE_PATH", requires = "session_workspace")]
+    pub session_file: Vec<String>,
     /// The loom.agent/1 document, YAML or JSON, in a regular file.
     #[arg(long, value_name = "FILE")]
     pub spec: PathBuf,

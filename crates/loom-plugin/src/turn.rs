@@ -104,6 +104,9 @@ use crate::effects::{DataSourceEffects, HttpSources, ITEM, SendPolicy};
 use crate::project::{DECLINE, PROPOSE, READ, SEND};
 use crate::{Host, PROTOCOL, PluginAuthority, PluginError, TurnModel};
 
+/// A single governed external-session proposal over an operator-provided workspace.
+pub mod session;
+
 /// The authority of the default turn, for [`TurnOptions::defaults`].
 static PLUGIN_AUTHORITY: PluginAuthority = PluginAuthority;
 
@@ -467,6 +470,7 @@ pub fn turn_with<S: FallibleCaseStore>(
     let mut clock = Clock {
         ids: &ids,
         budget: options.step_budget,
+        session_policy: None,
         events: options.events,
         none: NoEvents,
     };
@@ -1296,6 +1300,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 struct Clock<'a, 'e> {
     ids: &'a Ids,
     budget: usize,
+    session_policy: Option<&'a loom::agent::SessionSpec>,
     events: Option<&'e mut dyn EventSink>,
     none: NoEvents,
 }
@@ -1315,6 +1320,15 @@ impl LoopContext for Clock<'_, '_> {
 
     fn step_budget(&self) -> Option<usize> {
         Some(self.budget)
+    }
+
+    fn run_budget(&self) -> Option<loom_sdk::commission::model::responsibility::RunBudget> {
+        self.session_policy
+            .map(|policy| session::run_budget(&policy.budget))
+    }
+
+    fn stop_policy(&self) -> loom_sdk::commission::model::responsibility::StopPolicy {
+        session::stop_policy(self.session_policy.map(|policy| &policy.stop))
     }
 
     fn events(&mut self) -> &mut dyn EventSink {

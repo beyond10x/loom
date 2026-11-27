@@ -687,6 +687,11 @@ impl SpecAuthority {
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
     }
+
+    /// Whether the authored policy includes this capability.
+    pub fn holds(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|held| held == capability)
+    }
 }
 
 impl AuthorityProvider for SpecAuthority {
@@ -696,7 +701,7 @@ impl AuthorityProvider for SpecAuthority {
         _request: &ActionRequestData,
         capability: &str,
     ) -> Result<AuthorityVerdict, AuthorityProviderError> {
-        if !self.capabilities.iter().any(|held| held == capability) {
+        if !self.holds(capability) {
             return Ok(AuthorityVerdict::Deny(AuthorityVerdictDeny {
                 reason: format!("the agent spec grants no `{capability}`"),
             }));

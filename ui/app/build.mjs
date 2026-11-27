@@ -16,12 +16,12 @@ const result = await build({
 const files = result.flatMap(bundle => bundle.output)
 const script = files.find(file => file.type === 'chunk').code
 const style = files.find(file => file.fileName.endsWith('.css')).source
-const license = await readFile('node_modules/vue/LICENSE', 'utf8')
+const licenses = await Promise.all(['vue', 'yaml'].map(async name => name + '\n' + await readFile('node_modules/' + name + '/LICENSE', 'utf8')))
 const index = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><title>Agents · Loom</title>
 <style>${style}</style></head><body><div id="app"></div><noscript>Enable JavaScript to view agent activity.</noscript>
-<script>/*! Vue license\n${license}\n*/\n${script.replace(/<\/script/gi,'<\\/script')}</script></body></html>\n`
+<script>/*! Bundled licenses\n${licenses.join('\n\n')}\n*/\n${script.replace(/<\/script/gi,'<\\/script')}</script></body></html>\n`
 if (process.argv.includes('--check')) {
   assert.equal(await readFile('../dist/index.html','utf8') === index,true,'The rebuilt dashboard differs from ui/dist/index.html.')
   await verifyBundle()

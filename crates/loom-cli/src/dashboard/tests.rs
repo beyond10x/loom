@@ -44,7 +44,7 @@ fn state_scoped_history_survives_listener_takeover_and_viewers_only_read_their_a
         &spec,
         "example-revision",
         None,
-        None,
+        Launch::default(),
     )
     .unwrap();
     let address = fs::read_to_string(root.join("address"))
@@ -58,7 +58,7 @@ fn state_scoped_history_survives_listener_takeover_and_viewers_only_read_their_a
         &spec,
         "example-revision",
         None,
-        None,
+        Launch::default(),
     )
     .unwrap();
     let token = fs::read_to_string(root.join("viewer-token")).unwrap();
@@ -173,7 +173,7 @@ fn legacy_record_replay_is_redacted_and_has_no_invented_timestamp() {
             &spec,
             &revision,
             Some(text),
-            None,
+            Launch::default(),
         )
         .unwrap();
         let address = fs::read_to_string(root.join("address"))
@@ -225,6 +225,9 @@ fn operator_reads_exact_registered_agent_source_and_scoped_tokens_cannot_probe_i
     fs::write(&path, &original).unwrap();
     let (spec, source) = crate::agent::read_spec_source(&path).unwrap();
     let revision = digest(source.as_bytes());
+    fs::write(dir.path().join("routes.yaml"), "format: llm.routes/1\nendpoints:\n  lab:\n    base_url: http://127.0.0.1:9/private-path\n    protocol: chat-completions\n    auth: {kind: anonymous}\nroutes:\n  small: lab/little\n").unwrap();
+    let (_, routing) =
+        crate::agent::spec_models_with_routing(&spec, &path, Some("lab/big"), None).unwrap();
     let host = Dashboard::in_scope(
         root.clone(),
         None,
@@ -232,7 +235,11 @@ fn operator_reads_exact_registered_agent_source_and_scoped_tokens_cannot_probe_i
         &spec,
         &revision,
         Some(&source),
-        None,
+        Launch {
+            model: routing.agent.selection.as_deref(),
+            routing: Some(&routing),
+            ..Launch::default()
+        },
     )
     .unwrap();
     let addr = fs::read_to_string(root.join("address"))
@@ -246,6 +253,17 @@ fn operator_reads_exact_registered_agent_source_and_scoped_tokens_cannot_probe_i
     let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
     let id = snapshot["agents"][0]["id"].as_str().unwrap();
     assert_eq!(snapshot["agents"][0]["spec_revision"], revision);
+    let routing_path = format!("/api/agents/{id}/routing");
+    let (status, actual) = get(addr, &routing_path, &auth);
+    assert!(status.starts_with("HTTP/1.1 200"));
+    assert!(!actual.contains("private-path"));
+    assert!(!snapshot.to_string().contains("upstream_model"));
+    let actual: Value = serde_json::from_str(&actual).unwrap();
+    assert_eq!(actual["source"], "spec_routes");
+    assert_eq!(actual["agent"]["upstream_model"], "big");
+    assert_eq!(actual["classifier"]["upstream_model"], "little");
+    assert_eq!(actual["classifier"]["selection"], "small");
+    assert_eq!(actual["agent"]["base_origin"], "http://127.0.0.1:9");
     let route = format!("/api/agents/{id}/spec");
     let missing = format!("/api/agents/{}/spec", "0".repeat(64));
     fs::write(&path, "the source was replaced after startup").unwrap();
@@ -263,6 +281,11 @@ fn operator_reads_exact_registered_agent_source_and_scoped_tokens_cannot_probe_i
     )
     .unwrap();
     let scoped = format!("Authorization: Bearer {limited}\r\n");
+    assert!(
+        get(addr, &routing_path, &scoped)
+            .0
+            .starts_with("HTTP/1.1 403")
+    );
     for probe in [&route, &missing] {
         assert!(get(addr, probe, &scoped).0.starts_with("HTTP/1.1 403"));
     }

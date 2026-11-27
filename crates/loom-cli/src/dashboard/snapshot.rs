@@ -189,7 +189,8 @@ pub(super) fn read(
         };
         partial |= state.partial;
         agents.push(json!({"id":state.id,"spec_id":state.spec_id,"name":state.name,"instance":state.instance,
-            "status":status,"last_seen":state.last_seen,"current":current,"model":state.model,
+            "kind":state.harness.map(|h| match h {super::Harness::Native=>"agent_spec", _=>"session"}), "harness":state.harness,
+            "status":status,"last_seen":state.last_seen,"current":current,"model":state.model.as_deref().and_then(super::routing::identifier),
             "protocol":state.protocol,"a2a_protocol":state.a2a_protocol,"spec_revision":state.spec_revision,"poll_interval_seconds":state.poll_interval_seconds}));
         for run in state.history {
             if (f.from.is_some() || f.to.is_some()) && run.ended_at.is_none() {

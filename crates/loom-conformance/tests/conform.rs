@@ -633,6 +633,35 @@ fn ess_conformance_report() {
 
     let mut found = Vec::new();
     let skipped_md = root().join("ess/SKIPPED.md");
+    // Each admission refusal, accepted harness and terminal disposition must have its own
+    // passing witness. A missing branch in a regenerated suite would otherwise shrink the total.
+    let passed: BTreeSet<_> = outcome_ids(&report, "passed").into_iter().collect();
+    for (command, branches) in [
+        (
+            "AdmitServedSessionTurn",
+            &[
+                "unsupported",
+                "no-ingress",
+                "invalid-workspace",
+                "refused-policy",
+                "claude-session",
+                "codex-session",
+            ][..],
+        ),
+        (
+            "EndServedSessionTurn",
+            &["held", "proposed", "completed-without-change"][..],
+        ),
+    ] {
+        for branch in branches {
+            let id = format!("loom.agent.{command}/outcome/{branch}");
+            if !passed.contains(&id) {
+                found.push(format!(
+                    "served session outcome lacks a passing scenario: {id}"
+                ));
+            }
+        }
+    }
     let named = match fs::read_to_string(&skipped_md) {
         Ok(body) => skipped_md_names(&body),
         Err(error) => {

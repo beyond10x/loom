@@ -1,5 +1,7 @@
 //! Run a routed intent, initializing resources only for the selected protocol.
 
+mod session_host;
+
 use std::io::{Read as _, Write};
 use std::path::Path;
 use std::process::ExitCode;
@@ -271,12 +273,15 @@ fn agent_serve(
     state: &Path,
     source: &str,
 ) -> Result<(), String> {
+    if let Some(workspace) = &arguments.session_workspace {
+        return session_host::serve(arguments, spec, source, state, workspace);
+    }
     // The roots of `http` binding reads are settled first, before any model, read or record.
     let trust =
         b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
             .map_err(|refused| refused.to_string())?;
     // Both models are settled here, before any model call or read.
-    let (classifier, model) = served_models(
+    let (classifier, model, routing) = agent::served_models(
         &spec,
         &arguments.spec,
         arguments.catalog.as_deref(),
@@ -302,7 +307,7 @@ fn agent_serve(
     if answers_only && arguments.once {
         return Err(a2a::ONCE_WITHOUT_A_CHANNEL.to_owned());
     }
-    let bearer = std::env::var(a2a::BEARER_ENV).ok();
+    let bearer = b10x_loom_cli::dashboard::agent_bearer()?;
     let listening = a2a::prepare(&a2a_spec, arguments.a2a_address, bearer.as_deref())?;
     let stop = Arc::new(AtomicBool::new(arguments.once));
     if !arguments.once {
@@ -314,11 +319,24 @@ fn agent_serve(
     let dashboard = if arguments.once {
         None
     } else {
-        Some(b10x_loom_cli::dashboard::Dashboard::start_with_source(
+        use b10x_loom_cli::dashboard::{A2aIngress, Dashboard, Harness};
+        let ingress = match (
+            &listening,
+            a2a_spec.expose.as_ref().and_then(|e| e.a2a.as_ref()),
+            bearer.as_deref(),
+        ) {
+            (Some((_, socket)), Some(exposure), Some(token)) => {
+                Some(A2aIngress::new(socket, &exposure.path, token)?)
+            }
+            _ => None,
+        };
+        Some(Dashboard::start_resolved(
             state,
             &a2a_spec,
             source,
-            arguments.model.as_deref(),
+            Some(routing),
+            Harness::Native,
+            ingress,
         )?)
     };
     let observer = dashboard.as_ref().map(|dashboard| dashboard.observer());
@@ -367,36 +385,6 @@ fn agent_serve(
         eprintln!("b10x-loom: {}", printable(&note));
     }
     print_proposals(&lines)
-}
-
-/// The classifier and the turn model of a served spec, each shared.
-type ServedModels = (Arc<dyn Model>, Arc<dyn Model>);
-
-/// The classifier and the turn model of a served spec at `path`: with `catalog`, the route
-/// aliases `model` and `classifier` name in it; without, the spec's `model` section.
-fn served_models(
-    spec: &loom_sdk::agent::AgentSpec,
-    path: &Path,
-    catalog: Option<&Path>,
-    model: Option<&str>,
-    classifier: Option<&str>,
-) -> Result<ServedModels, String> {
-    let (classifier, model): (Box<dyn Model>, Arc<dyn Model>) = match catalog {
-        Some(catalog) => {
-            let models = ModelCatalog::read(catalog)?;
-            fn alias<'a>(flag: &str, given: Option<&'a str>) -> Result<&'a str, String> {
-                given.ok_or_else(|| format!("{flag} names no route alias of --catalog"))
-            }
-            let classifier = alias("--classifier-model", classifier)?;
-            let model = alias("--model", model)?;
-            (
-                Box::new(models.model("--classifier-model", classifier)?),
-                Arc::new(models.model("--model", model)?),
-            )
-        }
-        None => agent::spec_models(spec, path, model, classifier)?,
-    };
-    Ok((Arc::from(classifier), model))
 }
 
 /// The exit status of `agent run` for `input`, as `loom.agent.RunOnce` decides it.
@@ -478,7 +466,7 @@ fn agent_run(
     let trust =
         b10x_loom_agent::http_trust(std::env::var_os(b10x_loom_agent::CA_FILE_ENV).as_deref())
             .map_err(|refused| refused.to_string())?;
-    let (classifier, model) = served_models(
+    let (classifier, model, _) = agent::served_models(
         &spec,
         &arguments.spec,
         arguments.catalog.as_deref(),

@@ -307,6 +307,12 @@ $ b10x-loom agent check --spec ess/scenarios/agent-check/specs/unknown-action.ya
 b10x-loom: refused: UnknownAction at states[0].actions[2]: reply.escalate
 ```
 
+A long-lived `agent serve` prints its dashboard URL and operator token-file path. Hosts sharing
+the same dashboard directory appear together. Select an agent to inspect its loaded AgentSpec,
+effective model routes, current work and recorded turns. **Dispatch** sends a task to a running
+agent or starts an operator-registered native, Claude Code or Codex agent. The running
+server embeds its OpenAPI contract at `/api/openapi.json`. [Dashboard setup and API reference](website/docs/reference/server-api.md)
+
 `b10x-loom agent serve --spec <FILE> [--state <DIR>] [--once]` hosts the agent a checked spec
 declares: the plugin host over the spec, polling only the channels `channel.allow` lists through
 its `connectors` channel binding, classifying each item and answering it in a governed turn on the

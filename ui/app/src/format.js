@@ -19,3 +19,10 @@ export function money(value, currency) {
 export function itemLabel(id) {
   return id.length > 32 ? id.slice(0, 28) + '…' : id
 }
+
+export function agentKind(value) {
+  return {agent_spec:'AgentSpec',session:'Session'}[value] || value || 'Unknown'
+}
+export function harnessName(value) {
+  return {native:'Native',claude:'Claude',codex:'Codex'}[value] || value || 'Unknown'
+}

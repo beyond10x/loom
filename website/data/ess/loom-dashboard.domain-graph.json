@@ -13,6 +13,14 @@
           "type": "string"
         },
         {
+          "name": "kind",
+          "type": "Optional<AgentKind>"
+        },
+        {
+          "name": "harness",
+          "type": "Optional<Harness>"
+        },
+        {
           "name": "spec_revision",
           "type": "Optional<string>"
         },
@@ -68,6 +76,80 @@
         ]
       },
       "name": "AgentObservation"
+    },
+    {
+      "fields": [
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "spec_id",
+          "type": "string"
+        },
+        {
+          "name": "kind",
+          "type": "AgentKind"
+        },
+        {
+          "name": "default_harness",
+          "type": "Harness"
+        },
+        {
+          "name": "harnesses",
+          "type": "List<Harness>"
+        },
+        {
+          "name": "protocol",
+          "type": "Optional<string>"
+        }
+      ],
+      "id": "loom.dashboard.ConfiguredTemplate",
+      "identity": {
+        "name": "id",
+        "type": "LaunchKey"
+      },
+      "lifecycle": {
+        "initial": "Configured",
+        "states": [
+          "Configured"
+        ],
+        "terminal": [
+          "Configured"
+        ]
+      },
+      "name": "ConfiguredTemplate"
+    },
+    {
+      "fields": [
+        {
+          "name": "source",
+          "type": "RoutingSource"
+        },
+        {
+          "name": "agent",
+          "type": "ModelRoute"
+        },
+        {
+          "name": "classifier",
+          "type": "ModelRoute"
+        }
+      ],
+      "id": "loom.dashboard.RegisteredRouting",
+      "identity": {
+        "name": "id",
+        "type": "string"
+      },
+      "lifecycle": {
+        "initial": "Resolved",
+        "states": [
+          "Resolved"
+        ],
+        "terminal": [
+          "Resolved"
+        ]
+      },
+      "name": "RegisteredRouting"
     },
     {
       "fields": [
@@ -166,7 +248,7 @@
       "id": "loom.dashboard.RunObservation",
       "identity": {
         "name": "id",
-        "type": "string"
+        "type": "RunId"
       },
       "lifecycle": {
         "initial": "Observed",
