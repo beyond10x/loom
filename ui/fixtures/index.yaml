@@ -1,4 +1,5 @@
 views:
+  loom.dashboard.AgentSpecById: agent-spec.json
   loom.dashboard.Agents: agents.json
   loom.dashboard.Runs: runs.json
   loom.dashboard.Statistics: statistics.json

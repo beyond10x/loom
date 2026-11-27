@@ -1,12 +1,13 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue'
+import AgentSpec from './AgentSpec.vue'
 import RunDetail from './RunDetail.vue'
 import Completions from './Completions.vue'
 import Statistics from './Statistics.vue'
 import {useSnapshot} from './snapshot.js'
 import {duration, itemLabel, number, time} from './format.js'
 
-const {snapshot, filters, state, busy, refresh, connect, disconnect, href, navigate} = useSnapshot()
+const {snapshot, filters, state, busy, refresh, readAgentSpec, connect, disconnect, href, navigate} = useSnapshot()
 const credential = ref(''), from = ref(''), to = ref(''), intervalError = ref('')
 const selected = computed(() => snapshot.value?.agents.find(a => a.id === filters.value.agent))
 const selectedRun = computed(() => snapshot.value && [...snapshot.value.runs, ...snapshot.value.agents.flatMap(a => a.current)].find(r => r.id === filters.value.run))
@@ -81,6 +82,7 @@ function login() { if (credential.value.trim()) { connect(credential.value.trim(
               <a :title="run.item_id" :href="href({run:run.id})" @click.prevent="navigate({run:run.id})">{{ itemLabel(run.item_id) }}</a><p>{{ run.action }}</p>
               <small>Started {{ time(run.started_at) }} · Elapsed {{ duration(Date.parse(snapshot.time) - Date.parse(run.started_at)) }}</small>
               <small>Steps left {{ number(run.steps_left) }} · Model calls left {{ number(run.model_calls_left) }}</small></div></div>
+            <AgentSpec v-if="filters.agent && state === 'live'" :key="[agent.id,agent.instance,agent.spec_revision].join(':')" :agent="agent" :read="readAgentSpec"/>
           </article></div></section>
         <form class="interval" @submit.prevent="applyInterval"><h2>Reporting interval</h2><label>From (UTC)<input type="datetime-local" step="1" v-model="from"></label><label>To (UTC, exclusive)<input type="datetime-local" step="1" v-model="to"></label>
           <button>Apply</button><button v-if="filters.from || filters.to" type="button" @click="navigate({from:'',to:''})">All time</button><p v-if="intervalError" role="alert">{{ intervalError }}</p></form>

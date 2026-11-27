@@ -74,7 +74,7 @@ fn spec_text(path: &Path) -> Result<String, CheckFailure> {
 /// # Errors
 /// As [`check_spec`].
 pub fn read_spec(path: &Path) -> Result<AgentSpec, CheckFailure> {
-    read_spec_revision(path).map(|(spec, _)| spec)
+    read_spec_source(path).map(|(spec, _)| spec)
 }
 
 /// Read and validate a single immutable copy of the file, returning its SHA-256 alongside the spec.
@@ -82,11 +82,19 @@ pub fn read_spec(path: &Path) -> Result<AgentSpec, CheckFailure> {
 /// # Errors
 /// As [`check_spec`].
 pub fn read_spec_revision(path: &Path) -> Result<(AgentSpec, String), CheckFailure> {
+    read_spec_source(path).map(|(spec, source)| (spec, crate::dashboard::digest(source.as_bytes())))
+}
+
+/// The decoded agent and the exact validated text from the same bounded file read.
+///
+/// # Errors
+/// As [`check_spec`].
+pub fn read_spec_source(path: &Path) -> Result<(AgentSpec, String), CheckFailure> {
     let text = spec_text(path)?;
     checked_text(&text)?;
     let spec = loom_sdk::agent::parse(&text)
         .map_err(|error| CheckFailure::Unreadable(format!("--spec {}: {error}", path.display())))?;
-    Ok((spec, crate::dashboard::digest(text.as_bytes())))
+    Ok((spec, text))
 }
 
 /// The models of a served spec: the classifier, then the turn model.

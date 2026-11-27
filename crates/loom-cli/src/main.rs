@@ -239,7 +239,7 @@ fn agent_boundary_ready_command(arguments: &AgentBoundaryReadyArgs) -> ExitCode 
 
 /// The spec of `agent serve` and `agent resume`, read and checked; a refused spec exits 3.
 fn served_spec(path: &Path) -> Result<(loom_sdk::agent::AgentSpec, String), ExitCode> {
-    match agent::read_spec_revision(path) {
+    match agent::read_spec_source(path) {
         Ok(spec) => Ok(spec),
         Err(agent::CheckFailure::Refused(refusal)) => {
             eprintln!("b10x-loom: {}", agent::refused_line(&refusal));
@@ -251,7 +251,7 @@ fn served_spec(path: &Path) -> Result<(loom_sdk::agent::AgentSpec, String), Exit
 
 /// Runs `agent serve`, as `AGENT_SERVE_HELP` states.
 fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
-    let (spec, revision) = match served_spec(&arguments.spec) {
+    let (spec, source) = match served_spec(&arguments.spec) {
         Ok(spec) => spec,
         Err(exit) => return exit,
     };
@@ -259,7 +259,7 @@ fn agent_serve_command(arguments: &AgentServeArgs) -> ExitCode {
         Ok(state) => state,
         Err(error) => return failed(&error),
     };
-    match agent_serve(arguments, spec, &state, &revision) {
+    match agent_serve(arguments, spec, &state, &source) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => failed(&error),
     }
@@ -269,7 +269,7 @@ fn agent_serve(
     arguments: &AgentServeArgs,
     spec: loom_sdk::agent::AgentSpec,
     state: &Path,
-    revision: &str,
+    source: &str,
 ) -> Result<(), String> {
     // The roots of `http` binding reads are settled first, before any model, read or record.
     let trust =
@@ -314,10 +314,10 @@ fn agent_serve(
     let dashboard = if arguments.once {
         None
     } else {
-        Some(b10x_loom_cli::dashboard::Dashboard::start(
+        Some(b10x_loom_cli::dashboard::Dashboard::start_with_source(
             state,
             &a2a_spec,
-            revision,
+            source,
             arguments.model.as_deref(),
         )?)
     };

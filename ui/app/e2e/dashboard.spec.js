@@ -9,11 +9,18 @@ const fixture = {...rows('snapshot')[0], agents:rows('agents'), runs:rows('runs'
 const scenarios = parse(file('../../tests/overview.yaml')).tests
 const address = (page, at) => page.locator('[data-address="' + at + '"]')
 
-async function serve(page, responder) {
+async function serve(page, responder, specResponder) {
   await page.route('**/*', async route => {
     const url = new URL(route.request().url())
     expect(url.origin).toBe('http://dashboard.test')
     if (url.pathname === '/') return route.fulfill({body:html, contentType:'text/html'})
+    if (url.pathname.startsWith('/api/agents/')) {
+      expect(url.search).toBe('')
+      expect(route.request().method()).toBe('GET')
+      expect(route.request().headers().authorization).toBe('Bearer test-viewer')
+      expect(route.request().headers().accept).toBe('application/yaml')
+      return route.fulfill(await specResponder(url, route.request()))
+    }
     expect(url.pathname).toBe('/api/snapshot')
     expect(route.request().method()).toBe('GET')
     if (route.request().headers().authorization !== 'Bearer test-viewer') return route.fulfill({status:401})
@@ -117,4 +124,66 @@ test('missing or unauthorized agent deep link clears visible rows', async ({page
   await expect(page.getByText('inspect files')).toHaveCount(0)
   await page.getByRole('link',{name:'Return to server overview'}).click()
   await expect(page.getByText('inspect files')).toBeVisible()
+})
+
+test('AgentSpec loads only on request, preserves exact YAML, and clears on navigation and logout', async ({page}) => {
+  const spec = rows('agent-spec')[0]
+  const requests = []
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  await serve(page, null, async url => {
+    requests.push(url.pathname)
+    await gate
+    return {contentType:'application/yaml; charset=utf-8', body:spec.source, headers:{ETag:'"' + spec.spec_revision + '"'}}
+  })
+  await expect(page.getByRole('button',{name:'View AgentSpec'})).toHaveCount(0)
+  await address(page,'pages/overview/sections/agents/rows/scout/row_actions/open').click()
+  const view = page.getByRole('button',{name:'View AgentSpec'})
+  await expect(view).toBeVisible()
+  expect(requests).toEqual([])
+  await view.click()
+  await expect(page.getByRole('status')).toHaveText('Loading AgentSpec…')
+  release()
+  const panel = page.getByRole('region',{name:'AgentSpec source'})
+  await expect(panel).toContainText(spec.spec_revision)
+  expect(await panel.locator('pre').textContent()).toBe(spec.source)
+  expect(await panel.locator('markup').count()).toBe(0)
+  expect(requests).toEqual(['/api/agents/scout/spec'])
+  await page.getByRole('button',{name:'Hide AgentSpec'}).click()
+  await expect(panel).toHaveCount(0)
+  await view.click()
+  await expect(panel).toContainText(spec.source.trim())
+  await page.getByRole('link',{name:'Server overview'}).click()
+  await address(page,'pages/overview/sections/agents/rows/reviewer/row_actions/open').click()
+  await expect(view).toBeVisible()
+  await expect(panel).toHaveCount(0)
+  await page.goBack()
+  await address(page,'pages/overview/sections/agents/rows/scout/row_actions/open').click()
+  await view.click()
+  await expect(panel).toContainText(spec.spec_revision)
+  expect(await page.evaluate(()=>JSON.stringify([sessionStorage,localStorage]))).not.toContain('Display <markup>')
+  await page.getByRole('button',{name:'Sign out'}).click()
+  await expect(page.getByRole('heading',{name:'Viewer access'})).toBeVisible()
+  await expect(panel).toHaveCount(0)
+  expect(await page.evaluate(()=>sessionStorage.length)).toBe(0)
+})
+
+test('AgentSpec explains insufficient access, missing source and storage failure without exposing error bodies', async ({page}) => {
+  let status=403
+  await serve(page, null, () => ({status, contentType:'text/plain', body:'private diagnostic'}))
+  await address(page,'pages/overview/sections/agents/rows/scout/row_actions/open').click()
+  await page.getByRole('button',{name:'View AgentSpec'}).click()
+  const panel = page.getByRole('region',{name:'AgentSpec source'})
+  await expect(panel).toContainText('Only a server operator')
+  status=404
+  await panel.getByRole('button',{name:'Retry'}).click()
+  await expect(panel).toContainText('No AgentSpec source is available')
+  status=503
+  await panel.getByRole('button',{name:'Retry'}).click()
+  await expect(panel).toContainText('The server could not read')
+  status=401
+  await panel.getByRole('button',{name:'Retry'}).click()
+  await expect(panel).toContainText('Your viewer session has expired')
+  await expect(panel).not.toContainText('private diagnostic')
+  await expect(panel.locator('pre')).toHaveCount(0)
 })

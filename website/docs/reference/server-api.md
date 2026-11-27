@@ -79,6 +79,23 @@ The 200 response includes a quoted `ETag`. Poll with that value in `If-None-Matc
 | 404 | The requested agent is unknown or outside the viewer’s scope. |
 | 503 | The viewer configuration or snapshot could not be read. |
 
+## Read the agent's registered spec
+
+**GET `/api/agents/{agent}/spec`** returns the source that Loom validated when this agent registered. Substitute the opaque `agents[].id` from the snapshot. Send the **operator** token from the private `viewer-token` file in the `Authorization: Bearer` header. The endpoint accepts no query parameters.
+
+The response is `application/yaml; charset=utf-8`. Whitespace, comments and the original serialization are preserved. If the registered file used JSON syntax, the body retains that syntax. The quoted `ETag` is the lowercase SHA-256 digest of those exact bytes. Compare it to the agent row’s `spec_revision` to confirm the body describes the revision you selected. If the agent registers a different revision between requests, refresh the agent row. Reading the source performs no agent action.
+
+A spec can include internal addresses, filesystem paths, binding configuration and an agent’s operating instructions. Source access requires the operator credential even for a viewer allowed to see this agent’s runs. The dashboard snapshot includes observation metadata and the spec revision. It excludes the source text.
+
+| HTTP status | Meaning |
+| --- | --- |
+| 200 | The operator receives the complete registered document. |
+| 400 | Invalid request or unexpected query parameters. |
+| 401 | Dashboard token missing or invalid. |
+| 403 | An authenticated scoped viewer requested source. The same refusal covers every agent ID. |
+| 404 | The agent ID is unknown or invalid, or no source was saved for it, including legacy registrations. |
+| 503 | The viewer configuration or source could not be read, or source bytes failed the revision check. |
+
 ## Dispatch work to an agent
 
 On each A2A listener, **GET `/ready`** checks readiness and **GET `/live`** checks liveness. Those probes accept unauthenticated requests. The agent card and JSON-RPC endpoint require the agent bearer.
@@ -89,4 +106,4 @@ The dashboard exposes observation reads. Submit work to the **agent’s own A2A 
 
 The generated ESS reference covers the [dashboard data and views](./ess/loom-dashboard.md) and the [observation request](./ess/loom-observation.md).
 
-The ESS model declares the authorized snapshot request, its query fields, outcomes and typed response. Its HTTP binding maps that request to GET and the error codes. The public projection adds the server’s HTTP cache handling, viewer bearer scheme, self-description route and explicit JSON nulls. Run `task dashboard-api` in the repository to regenerate the public contract. `loom-xtask dashboard-api --check` compares the committed document with a fresh projection. [ESS model](https://github.com/beyond10x/loom/tree/main/ess/dashboard) · [HTTP binding](https://github.com/beyond10x/loom/blob/main/ess/dashboard/http.yaml)
+The ESS model declares the viewer’s snapshot request and the operator’s source request, their input fields, outcomes and response types. Its HTTP binding assigns the GET paths, status codes and response bodies. The public projection adds the YAML media type for the text response, HTTP cache handling, bearer schemes, the self-description route and explicit JSON nulls. Run `task dashboard-api` in the repository to regenerate the public contract. `loom-xtask dashboard-api --check` compares the committed document with a fresh projection. [ESS model](https://github.com/beyond10x/loom/tree/main/ess/dashboard) · [HTTP binding](https://github.com/beyond10x/loom/blob/main/ess/dashboard/http.yaml)

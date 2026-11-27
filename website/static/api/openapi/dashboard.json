@@ -557,6 +557,99 @@
         "x-ess-kind": "struct",
         "x-ess-name": "loom.dashboard.TurnEvent"
       },
+      "loom.observation.ReadAgentSpec.denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request did not authenticate a viewer..",
+        "properties": {
+          "error": {
+            "const": "unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentSpec.forbidden.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: A scoped viewer attempted to read the source..",
+        "properties": {
+          "error": {
+            "const": "forbidden",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentSpec.invalid.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request supplies a query string or malformed request headers..",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentSpec.not-found.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The agent ID has no registered source for this revision..",
+        "properties": {
+          "error": {
+            "const": "not_found",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentSpec.read.Response": {
+        "type": "string"
+      },
+      "loom.observation.ReadAgentSpec.unavailable-source.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: Reading the private source failed or its revision could not be verified..",
+        "properties": {
+          "error": {
+            "const": "spec_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadAgentSpec.unavailable-viewers.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private viewer configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "viewer_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "loom.observation.ReadSnapshot.denied.Response": {
         "additionalProperties": false,
         "description": "Decided outside the request: The request did not authenticate a viewer..",
@@ -652,6 +745,11 @@
       }
     },
     "securitySchemes": {
+      "operatorBearer": {
+        "description": "The operator credential in the dashboard's private viewer-token file. Scoped viewer tokens cannot read agent source.",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "viewerBearer": {
         "scheme": "bearer",
         "type": "http"
@@ -664,7 +762,7 @@
     "title": "Loom server dashboard",
     "version": "v1",
     "x-ess-provenance": {
-      "contract_digest": "slice-sha256/2:fa3a537ef48d3f565785552aed4698bbbb3c4561d64895cc1f81d8dd88f4f550",
+      "contract_digest": "slice-sha256/2:59402e0b8c39120f688adfda7fd83ca5f9ccc2075d172ef4ca7b77c331d8d736",
       "specification_version": "v1",
       "system": "loom"
     },
@@ -672,6 +770,175 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/agents/{agent}/spec": {
+      "get": {
+        "operationId": "readRegisteredAgentSpec",
+        "parameters": [
+          {
+            "description": "The input field `agent`, carried in the path rather than the request body.",
+            "in": "path",
+            "name": "agent",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/yaml": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.read.Response"
+                }
+              }
+            },
+            "description": "The complete UTF-8 bytes validated on registration, including original formatting and comments. The response also carries charset=utf-8.",
+            "headers": {
+              "ETag": {
+                "description": "Quoted lowercase SHA-256 digest of the exact response bytes.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "read"
+            ]
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.invalid.Response"
+                }
+              }
+            },
+            "description": "Outcome `invalid`, answered 400 as the `ess-http/1` binding declares, with an object whose `error` is `invalid_request`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "invalid"
+            ]
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.denied.Response"
+                }
+              }
+            },
+            "description": "Outcome `denied`, answered 401 as the `ess-http/1` binding declares, with an object whose `error` is `unauthorized`, beside the error's own fields under their wire names.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "One `Bearer` challenge (RFC 9110 §11.6.1).",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "denied"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.forbidden.Response"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actor": {
+                          "description": "The qualified name of the actor the request was authenticated as, or null where it was authenticated as none.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "refused": {
+                          "description": "The standard refusal for an actor no grant admits.",
+                          "enum": [
+                            "not granted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "refused",
+                        "actor"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `forbidden`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `forbidden`, beside the error's own fields under their wire names. No declared outcome: the standard refusal for an actor no grant admits: the request was authenticated as no actor, or as one `x-ess-may-invoke` does not list. It is checked before the command runs, so nothing was read, written or published, and the same request from a granted actor is decided by the command. Its body carries `refused` and `actor`, never the `outcome` and `error` a declared branch carries.",
+            "x-ess-outcomes": [
+              "forbidden"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.not-found.Response"
+                }
+              }
+            },
+            "description": "Outcome `not-found`, answered 404 as the `ess-http/1` binding declares, with an object whose `error` is `not_found`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "not-found"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "spec_unavailable": "#/components/schemas/loom.observation.ReadAgentSpec.unavailable-source.Response",
+                      "viewer_configuration_unavailable": "#/components/schemas/loom.observation.ReadAgentSpec.unavailable-viewers.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.unavailable-viewers.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadAgentSpec.unavailable-source.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `unavailable-viewers`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `viewer_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-source`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `spec_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unavailable-viewers",
+              "unavailable-source"
+            ]
+          }
+        },
+        "security": [
+          {
+            "operatorBearer": []
+          }
+        ],
+        "summary": "Read the validated source of a registered agent as the server operator",
+        "tags": [
+          "observation"
+        ],
+        "x-ess-may-invoke": [
+          "loom.observation.Operator"
+        ],
+        "x-ess-route-source": "binding"
+      }
+    },
     "/api/openapi.json": {
       "get": {
         "operationId": "readDashboardContract",
@@ -885,6 +1152,10 @@
         "summary": "Read the authenticated viewer's server snapshot",
         "tags": [
           "observation"
+        ],
+        "x-ess-may-invoke": [
+          "loom.observation.Operator",
+          "loom.observation.ScopedViewer"
         ],
         "x-ess-route-source": "binding"
       }

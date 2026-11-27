@@ -44,6 +44,7 @@ fn state_scoped_history_survives_listener_takeover_and_viewers_only_read_their_a
         &spec,
         "example-revision",
         None,
+        None,
     )
     .unwrap();
     let address = fs::read_to_string(root.join("address"))
@@ -56,6 +57,7 @@ fn state_scoped_history_survives_listener_takeover_and_viewers_only_read_their_a
         &state_b,
         &spec,
         "example-revision",
+        None,
         None,
     )
     .unwrap();
@@ -164,7 +166,16 @@ fn legacy_record_replay_is_redacted_and_has_no_invented_timestamp() {
     let spec = loom_sdk::agent::parse(text).unwrap();
     let revision = digest(text.as_bytes());
     for _ in 0..2 {
-        let host = Dashboard::in_scope(root.clone(), None, &state, &spec, &revision, None).unwrap();
+        let host = Dashboard::in_scope(
+            root.clone(),
+            None,
+            &state,
+            &spec,
+            &revision,
+            Some(text),
+            None,
+        )
+        .unwrap();
         let address = fs::read_to_string(root.join("address"))
             .unwrap()
             .parse()
@@ -197,4 +208,69 @@ fn legacy_record_replay_is_redacted_and_has_no_invented_timestamp() {
         assert_eq!(filtered["partial"], true);
         drop(host);
     }
+}
+
+#[test]
+fn operator_reads_exact_registered_agent_source_and_scoped_tokens_cannot_probe_its_existence() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("dashboard");
+    let state = dir.path().join("agent");
+    fs::create_dir(&state).unwrap();
+    let path = dir.path().join("agent.yaml");
+    let original = format!(
+        "# private authored comment\n{}",
+        include_str!("../../../../examples/agents/operator.yaml")
+    )
+    .replace("\n", "\r\n");
+    fs::write(&path, &original).unwrap();
+    let (spec, source) = crate::agent::read_spec_source(&path).unwrap();
+    let revision = digest(source.as_bytes());
+    let host = Dashboard::in_scope(
+        root.clone(),
+        None,
+        &state,
+        &spec,
+        &revision,
+        Some(&source),
+        None,
+    )
+    .unwrap();
+    let addr = fs::read_to_string(root.join("address"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    let token = fs::read_to_string(root.join("viewer-token")).unwrap();
+    let auth = format!("Authorization: Bearer {token}\r\n");
+    let (_, snapshot) = get(addr, "/api/snapshot", &auth);
+    assert!(!snapshot.contains("authored comment"));
+    let snapshot: Value = serde_json::from_str(&snapshot).unwrap();
+    let id = snapshot["agents"][0]["id"].as_str().unwrap();
+    assert_eq!(snapshot["agents"][0]["spec_revision"], revision);
+    let route = format!("/api/agents/{id}/spec");
+    let missing = format!("/api/agents/{}/spec", "0".repeat(64));
+    fs::write(&path, "the source was replaced after startup").unwrap();
+    let (headers, observed) = get(addr, &route, &auth);
+    assert!(headers.starts_with("HTTP/1.1 200"));
+    assert!(headers.contains("application/yaml"));
+    assert!(headers.contains(&format!("ETag: \"{revision}\"")));
+    assert_eq!(observed.as_bytes(), original.as_bytes());
+    assert!(get(addr, &route, "").0.starts_with("HTTP/1.1 401"));
+    assert!(get(addr, &missing, &auth).0.starts_with("HTTP/1.1 404"));
+    let limited = "agent-only-viewer";
+    save(
+        &root.join("viewers.json"),
+        &json!({(digest(limited.as_bytes())):[id]}),
+    )
+    .unwrap();
+    let scoped = format!("Authorization: Bearer {limited}\r\n");
+    for probe in [&route, &missing] {
+        assert!(get(addr, probe, &scoped).0.starts_with("HTTP/1.1 403"));
+    }
+    let saved = root.join("agents").join(format!("{id}.{revision}.yaml"));
+    assert_eq!(saved.metadata().unwrap().mode() & 0o777, 0o600);
+    fs::write(&saved, "corrupt").unwrap();
+    assert!(get(addr, &route, &auth).0.starts_with("HTTP/1.1 503"));
+    fs::remove_file(saved).unwrap();
+    assert!(get(addr, &route, &auth).0.starts_with("HTTP/1.1 404"));
+    drop(host);
 }

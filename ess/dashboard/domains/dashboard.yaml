@@ -97,6 +97,10 @@ types:
       - {name: partial, type: Boolean}
 
 actors:
+  - name: loom.dashboard.Operator
+    naming:
+      summary: The server operator can read the exact configuration served by a registered agent.
+    may: [loom.dashboard.AgentSpecById]
   - name: loom.dashboard.Viewer
     naming:
       summary: An authenticated viewer reads the server snapshot within their assigned scope.
@@ -109,6 +113,12 @@ actors:
       - loom.dashboard.Snapshot
 
 entities:
+  - name: loom.dashboard.RegisteredSpec
+    identity: {name: id, type: String}
+    fields:
+      - {name: spec_revision, type: String}
+      - {name: source, type: String}
+    lifecycle: {initial: Validated, states: [Validated], terminal: [Validated], transitions: []}
   - name: loom.dashboard.AgentObservation
     identity: {name: id, type: String}
     fields:
@@ -178,6 +188,15 @@ entities:
     lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
 
 views:
+  - name: loom.dashboard.AgentSpecById
+    source: loom.dashboard.RegisteredSpec
+    params:
+      - {name: id, type: String}
+    filter: id == param.id
+    fields:
+      - {name: id, type: String}
+      - {name: spec_revision, type: String}
+      - {name: source, type: String}
   - name: loom.dashboard.Agents
     source: loom.dashboard.AgentObservation
     fields:

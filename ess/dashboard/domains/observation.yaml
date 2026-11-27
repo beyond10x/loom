@@ -10,6 +10,13 @@ errors:
   - {name: loom.observation.NoSnapshot, naming: {wire: snapshot_unavailable}}
   - {name: loom.observation.UnknownAgent, naming: {wire: not_found}}
   - {name: loom.observation.Forbidden, naming: {wire: forbidden}}
+  - {name: loom.observation.NoSpec, naming: {wire: spec_unavailable}}
+
+actors:
+  - name: loom.observation.ScopedViewer
+    may: [loom.observation.ReadSnapshot]
+  - name: loom.observation.Operator
+    may: [loom.observation.ReadSnapshot, loom.observation.ReadAgentSpec]
 
 commands:
   - name: loom.observation.ReadSnapshot
@@ -39,4 +46,31 @@ commands:
         external: The selected agent does not exist in the viewer's scope.
         error: loom.observation.UnknownAgent
       - name: observed
+        returns: true
+
+  - name: loom.observation.ReadAgentSpec
+    input:
+      - {name: agent, type: String}
+    response:
+      - {name: source, type: String}
+    outcomes:
+      - name: denied
+        external: The request did not authenticate a viewer.
+        error: loom.observation.ViewerRequired
+      - name: forbidden
+        external: A scoped viewer attempted to read the source.
+        error: loom.observation.Forbidden
+      - name: not-found
+        external: The agent ID has no registered source for this revision.
+        error: loom.observation.UnknownAgent
+      - name: invalid
+        external: The request supplies a query string or malformed request headers.
+        error: loom.observation.InvalidQuery
+      - name: unavailable-viewers
+        external: The private viewer configuration cannot be read.
+        error: loom.observation.NoViewerConfig
+      - name: unavailable-source
+        external: Reading the private source failed or its revision could not be verified.
+        error: loom.observation.NoSpec
+      - name: read
         returns: true

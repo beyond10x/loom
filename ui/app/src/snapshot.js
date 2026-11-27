@@ -75,6 +75,14 @@ export function useSnapshot() {
       }
     }
   }
+  function readAgentSpec(agent, signal) {
+    return fetch('/api/agents/' + encodeURIComponent(agent) + '/spec', {
+      signal,
+      headers: {Authorization: 'Bearer ' + token.value, Accept: 'application/yaml'},
+      cache: 'no-store',
+      redirect: 'error',
+    })
+  }
   function connect(credential) {
     clear()
     token.value = credential
@@ -116,5 +124,5 @@ export function useSnapshot() {
     clear()
     window.removeEventListener('popstate', restore)
   })
-  return {snapshot, filters, state, busy, refresh, connect, disconnect, href, navigate}
+  return {snapshot, filters, state, busy, refresh, readAgentSpec, connect, disconnect, href, navigate}
 }

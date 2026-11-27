@@ -14,6 +14,13 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
+pub(super) fn is_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub(super) const MAX_RUNS: usize = 512;
 const MAX_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -263,6 +270,7 @@ impl Agent {
         state: &Path,
         spec: &AgentSpec,
         revision: &str,
+        source: Option<&str>,
         model: Option<&str>,
     ) -> io::Result<Self> {
         let id = digest(state.canonicalize()?.as_os_str().as_encoded_bytes());
@@ -298,7 +306,7 @@ impl Agent {
         // On a restart discard abandoned in-flight attempts. Terminal history is retained.
         data.current.clear();
         data.spec_id = label(&spec.agent.id.0);
-        data.spec_revision = Some(revision.to_owned());
+        let prior_revision = data.spec_revision.replace(revision.to_owned());
         data.a2a_protocol = spec
             .expose
             .as_ref()
@@ -327,7 +335,29 @@ impl Agent {
                 .map(|r| r.model.clone())
         });
         backfill(state, &mut data)?;
+        if let Some(text) = source {
+            if digest(text.as_bytes()) != revision {
+                return Err(invalid("dashboard spec digest mismatch"));
+            }
+            // Publish immutable bytes before publishing the pointer. A crash cannot expose
+            // new contents under the old revision.
+            super::atomic_write(
+                &path.with_extension(format!("{revision}.yaml")),
+                text.as_bytes(),
+            )?;
+        }
         publish(&path, &mut data)?;
+        if let Some(prior) = prior_revision
+            && prior != revision
+            && is_digest(&prior)
+        {
+            let retired = path.with_extension(format!("{prior}.yaml"));
+            match std::fs::remove_file(retired) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => eprintln!("b10x-loom: obsolete dashboard spec could not be retired: {e}"),
+            }
+        }
         let inner = spec.loops.as_ref().map(|l| &l.inner);
         Ok(Self {
             path,

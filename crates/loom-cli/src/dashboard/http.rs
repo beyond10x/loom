@@ -24,6 +24,9 @@ const MAX_CLIENTS: usize = 12;
 
 /// A protected, regular file only, including after a configuration replacement.
 pub(super) fn private_text(path: &Path) -> io::Result<String> {
+    private_text_bounded(path, 65536)
+}
+fn private_text_bounded(path: &Path, limit: u64) -> io::Result<String> {
     let f = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -33,15 +36,15 @@ pub(super) fn private_text(path: &Path) -> io::Result<String> {
     if !meta.is_file()
         || meta.uid() != unsafe { libc::geteuid() }
         || meta.mode() & 0o077 != 0
-        || meta.len() > 65536
+        || meta.len() > limit
     {
         return Err(invalid(
             "dashboard viewer configuration must be a private regular file",
         ));
     }
     let mut text = String::new();
-    f.take(65537).read_to_string(&mut text)?;
-    if text.len() > 65536 {
+    f.take(limit + 1).read_to_string(&mut text)?;
+    if text.len() as u64 > limit {
         return Err(invalid("dashboard viewer configuration is too large"));
     }
     Ok(text)
@@ -168,7 +171,10 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
         }
         _ => {}
     }
-    if route != "/api/snapshot" {
+    let spec_id = route
+        .strip_prefix("/api/agents/")
+        .and_then(|part| part.strip_suffix("/spec"));
+    if route != "/api/snapshot" && spec_id.is_none() {
         return error(&mut stream, "404 Not Found", "not_found");
     }
     let mut auth = request
@@ -193,6 +199,25 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
             );
         }
     };
+    if let Some(id) = spec_id {
+        if !matches!(viewer, Viewer::Operator) {
+            return error(&mut stream, "403 Forbidden", "forbidden");
+        }
+        if !query.is_empty() {
+            return error(&mut stream, "400 Bad Request", "invalid_request");
+        }
+        return match agent_spec(scope, id) {
+            Ok(Some((revision, source))) => respond(
+                &mut stream,
+                "200 OK",
+                "application/yaml; charset=utf-8",
+                source.as_bytes(),
+                &format!("ETag: \"{revision}\"\r\n"),
+            ),
+            Ok(None) => error(&mut stream, "404 Not Found", "not_found"),
+            Err(_) => error(&mut stream, "503 Service Unavailable", "spec_unavailable"),
+        };
+    }
     if matches!(&viewer, Viewer::Scoped(ids) if ids.is_empty()) {
         return error(&mut stream, "403 Forbidden", "forbidden");
     }
@@ -213,6 +238,51 @@ fn handle(scope: &Scope, mut stream: TcpStream) -> io::Result<()> {
         ),
     }
 }
+/// Look up only the registered state's saved revision in the private observation directory.
+/// The validation and the response use the same immutable bytes even during a host restart.
+fn agent_spec(scope: &Scope, id: &str) -> io::Result<Option<(String, String)>> {
+    if !super::store::is_digest(id) {
+        return Ok(None);
+    }
+    let directory = scope.root.join("agents");
+    let gate = super::store::snapshot_lock(&directory)?;
+    gate.lock()?;
+    let manifest = directory.join(format!("{id}.json"));
+    let metadata = match private_text_bounded(&manifest, 64 * 1024 * 1024) {
+        Ok(s) => s,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    #[derive(serde::Deserialize)]
+    struct RegisteredSpec {
+        id: String,
+        spec_revision: Option<String>,
+    }
+    let row: RegisteredSpec = serde_json::from_str(&metadata)?;
+    if row.id != id {
+        return Err(invalid("dashboard registration mismatch"));
+    }
+    let Some(revision) = row.spec_revision else {
+        return Ok(None);
+    };
+    if !super::store::is_digest(&revision) {
+        return Ok(None);
+    }
+    let source = match private_text_bounded(
+        &manifest.with_extension(format!("{revision}.yaml")),
+        2 * 1024 * 1024,
+    ) {
+        Ok(s) => s,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    drop(gate);
+    if digest(source.as_bytes()) != revision {
+        return Err(invalid("dashboard spec digest mismatch"));
+    }
+    Ok(Some((revision, source)))
+}
+
 fn render(
     socket: &mut TcpStream,
     headers: &[httparse::Header<'_>],

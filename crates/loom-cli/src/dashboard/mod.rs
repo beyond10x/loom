@@ -199,7 +199,21 @@ impl Dashboard {
         revision: &str,
         model: Option<&str>,
     ) -> Result<Self, String> {
-        Self::open(state, spec, revision, model)
+        Self::open(state, spec, revision, None, model)
+            .map_err(|e| format!("agent dashboard startup failed: {e}"))
+    }
+
+    /// Serve the validated file bytes alongside their revision, visible to the operator only.
+    /// # Errors
+    /// As [`Dashboard::start`].
+    pub fn start_with_source(
+        state: &Path,
+        spec: &AgentSpec,
+        source: &str,
+        model: Option<&str>,
+    ) -> Result<Self, String> {
+        let revision = digest(source.as_bytes());
+        Self::open(state, spec, &revision, Some(source), model)
             .map_err(|e| format!("agent dashboard startup failed: {e}"))
     }
 
@@ -207,6 +221,7 @@ impl Dashboard {
         state: &Path,
         spec: &AgentSpec,
         revision: &str,
+        source: Option<&str>,
         model: Option<&str>,
     ) -> io::Result<Self> {
         let desired = std::env::var("LOOM_DASHBOARD_ADDR")
@@ -216,7 +231,7 @@ impl Dashboard {
                     .map_err(|_| invalid("LOOM_DASHBOARD_ADDR needs a loopback IP:port"))
             })
             .transpose()?;
-        Self::in_scope(root()?, desired, state, spec, revision, model)
+        Self::in_scope(root()?, desired, state, spec, revision, source, model)
     }
 
     fn in_scope(
@@ -225,6 +240,7 @@ impl Dashboard {
         state: &Path,
         spec: &AgentSpec,
         revision: &str,
+        source: Option<&str>,
         model: Option<&str>,
     ) -> io::Result<Self> {
         private_dir(&root)?;
@@ -238,6 +254,7 @@ impl Dashboard {
             state,
             spec,
             revision,
+            source,
             model,
         )?);
         eprintln!(

@@ -2,7 +2,7 @@ type: ess-http/1
 specification:
   system: loom
   version: v1
-  source_digest: sha256:7541d6c07815fc3a6e06064c4e359fbea2ef7ea2e1dbfc323d09f8724b5409c7
+  source_digest: sha256:35e5afed31c0e9d7543902ad896f1fa4ea271b9e0cf4272e76b596784c8c2b81
 routes:
   - command: loom.observation.ReadSnapshot
     method: get
@@ -17,3 +17,16 @@ routes:
       unavailable-snapshot: {status: 503, body: {error: error}}
       not-found: {status: 404, body: {error: error}}
       forbidden: {status: 403, body: {error: error}}
+  - command: loom.observation.ReadAgentSpec
+    method: get
+    path: /api/agents/{agent}/spec
+    operation_id: readRegisteredAgentSpec
+    parameters: {agent: input.agent}
+    outcomes:
+      read: {status: 200, body: response.source, encoding: text}
+      denied: {status: 401, body: {error: error}, headers: {WWW-Authenticate: {challenge: {scheme: Bearer, params: {}}}}}
+      forbidden: {status: 403, body: {error: error}}
+      not-found: {status: 404, body: {error: error}}
+      invalid: {status: 400, body: {error: error}}
+      unavailable-viewers: {status: 503, body: {error: error}}
+      unavailable-source: {status: 503, body: {error: error}}

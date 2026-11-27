@@ -22,3 +22,5 @@ section,.access,.interval{background:white;border:1px solid #cfdbd5;border-radiu
 .api-link{color:#c3ede0;margin-left:auto;font-size:.88rem}.mast-end{margin-left:0}
 
 .chart{background:white;border:1px solid #cfdbd5;padding:1rem 1.35rem;border-radius:.65rem}.chart summary{font-weight:650;cursor:pointer}.chart ul{list-style:none;padding:0;max-height:15rem;overflow:auto}.chart li{display:flex;gap:1rem;align-items:center}.chart meter{width:clamp(4rem,35vw,22rem)}.link-button{font:inherit;border:0;background:none;padding:0;color:#095c4c;text-decoration:underline;text-underline-offset:.18em}.history-filter{margin:.4rem 0 .8rem}.history-filter select{margin-left:.65rem;font:inherit;padding:.25rem}
+
+.spec{margin-top:1rem}.spec [role=region]{padding-top:.65rem}.spec p{overflow-wrap:anywhere}.spec pre{box-sizing:border-box;max-height:32rem;overflow:auto;padding:1rem;background:#152d26;color:#edf4ee;border-radius:.4rem;tab-size:2;font: .9rem/1.5 "IBM Plex Mono",ui-monospace,monospace}.spec code{font-family:"IBM Plex Mono",ui-monospace,monospace}.fleet article{min-width:0}

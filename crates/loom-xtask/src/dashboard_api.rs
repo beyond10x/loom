@@ -44,10 +44,44 @@ pub(super) fn run(root: &Path, ess: &Path, scratch: &Scratch, check: bool) -> Re
     Ok(())
 }
 
-fn serve_presentation(doc: &mut Value) -> Result<(), String> {
+fn bound_get<'a>(doc: &'a mut Value, path: &str) -> Result<&'a mut Value, String> {
     let operation = doc
-        .pointer_mut("/paths/~1api~1snapshot/get")
-        .ok_or("the ESS projection does not bind GET /api/snapshot")?;
+        .get_mut("paths")
+        .and_then(|p| p.get_mut(path))
+        .and_then(|endpoint| endpoint.get_mut("get"))
+        .ok_or_else(|| format!("the ESS projection does not bind GET {path}"))?;
+    let responses = operation["responses"]
+        .as_object_mut()
+        .ok_or("no bound responses")?;
+    // ESS includes a fallback of its synthesized server. Loom handles these reads itself.
+    if responses
+        .get("501")
+        .is_some_and(|r| r["x-ess-outcomes"] == json!([]))
+    {
+        responses.remove("501");
+    }
+    Ok(operation)
+}
+
+fn serve_presentation(doc: &mut Value) -> Result<(), String> {
+    let source = bound_get(doc, "/api/agents/{agent}/spec")?;
+    source["summary"] =
+        json!("Read the validated source of a registered agent as the server operator");
+    source["security"] = json!([{"operatorBearer": []}]);
+    let success = &mut source["responses"]["200"];
+    let content = success["content"]
+        .as_object_mut()
+        .ok_or("no agent source body")?;
+    // ESS binds this outcome to unwrapped text. Loom serves that text as a YAML document.
+    let schema = content
+        .remove("text/plain")
+        .ok_or("agent source is not bound to text")?;
+    content.insert("application/yaml".to_owned(), schema);
+    success["description"] = json!(
+        "The complete UTF-8 bytes validated on registration, including original formatting and comments. The response also carries charset=utf-8."
+    );
+    success["headers"]["ETag"] = json!({"description":"Quoted lowercase SHA-256 digest of the exact response bytes.","schema":{"type":"string"}});
+    let operation = bound_get(doc, "/api/snapshot")?;
     operation["summary"] = json!("Read the authenticated viewer's server snapshot");
     operation["security"] = json!([{"viewerBearer": []}]);
     operation["parameters"]
@@ -61,13 +95,6 @@ fn serve_presentation(doc: &mut Value) -> Result<(), String> {
     let responses = operation["responses"]
         .as_object_mut()
         .ok_or("no snapshot responses")?;
-    // ESS includes a fallback of its synthesized server. The Loom HTTP host handles this route.
-    if responses
-        .get("501")
-        .is_some_and(|r| r["x-ess-outcomes"] == json!([]))
-    {
-        responses.remove("501");
-    }
     let tag = json!({"description":"Opaque, double-quoted SHA-256 validator.","schema":{"type":"string"}});
     responses.get_mut("200").ok_or("no snapshot success")?["headers"]["ETag"] = tag;
     responses.insert(
@@ -77,6 +104,10 @@ fn serve_presentation(doc: &mut Value) -> Result<(), String> {
         }),
     );
     doc["components"]["securitySchemes"]["viewerBearer"] = json!({"type":"http","scheme":"bearer"});
+    doc["components"]["securitySchemes"]["operatorBearer"] = json!({
+        "type":"http","scheme":"bearer",
+        "description":"The operator credential in the dashboard's private viewer-token file. Scoped viewer tokens cannot read agent source."
+    });
     doc["info"]["title"] = json!("Loom server dashboard");
     doc["info"]["description"] = json!(
         "Read-only dashboard HTTP API. Parameters and data types are projected from Loom's ESS model. A2A runs on each individual agent listener."

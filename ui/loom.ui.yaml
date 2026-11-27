@@ -107,6 +107,20 @@ pages:
           - {field: model, label: Model}
           - {field: current, label: Current work}
         states: {empty: {message: No visible agents.}}
+      - name: source
+        title: View AgentSpec
+        component: record
+        collapsed: true
+        load: on_visible
+        reads: {view: loom.dashboard.AgentSpecById, params: {id: params.id}, key: id}
+        fields:
+          - {field: spec_revision, label: Source revision}
+          - {field: source, label: AgentSpec YAML}
+        states:
+          loading: spinner
+          empty: {message: No AgentSpec source is available for this agent.}
+          forbidden: {message: Only a server operator can view the AgentSpec source.}
+          failed: {message: Could not load the AgentSpec source., retry: true}
   run:
     kind: observation
     title: Run detail

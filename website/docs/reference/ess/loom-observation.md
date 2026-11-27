@@ -16,6 +16,30 @@ The read-only HTTP boundary for a viewer of one Loom server. The query filters a
 
 ## Commands
 
+### `ReadAgentSpec`
+
+`loom.observation.ReadAgentSpec`.
+
+It takes:
+
+- `agent` — `String`
+
+It has seven outcomes.
+
+**`denied`** — Decided outside the input: The request did not authenticate a viewer.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.ViewerRequired`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`forbidden`** — Decided outside the input: A scoped viewer attempted to read the source.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.Forbidden`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`not-found`** — Decided outside the input: The agent ID has no registered source for this revision.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.UnknownAgent`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`invalid`** — Decided outside the input: The request supplies a query string or malformed request headers.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.InvalidQuery`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-viewers`** — Decided outside the input: The private viewer configuration cannot be read.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoViewerConfig`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`unavailable-source`** — Decided outside the input: Reading the private source failed or its revision could not be verified.. No predicate over the input reaches this branch, and saying `when: false` instead would have claimed it is unreachable, which is a different and false statement. No entity in this specification changes. It reports `loom.observation.NoSpec`. It emits nothing. A test reaches it by injecting the declared fault, because no input can.
+
+**`read`** — The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
 ### `ReadSnapshot`
 
 `loom.observation.ReadSnapshot`.
@@ -48,11 +72,15 @@ It has seven outcomes.
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.ReadAgentSpec` on its `forbidden` outcome.
+
 Reported by `loom.observation.ReadSnapshot` on its `forbidden` outcome.
 
 ### `InvalidQuery`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.ReadAgentSpec` on its `invalid` outcome.
 
 Reported by `loom.observation.ReadSnapshot` on its `invalid` outcome.
 
@@ -62,9 +90,17 @@ It carries nothing beyond its name, so a caller can tell what went wrong and not
 
 Reported by `loom.observation.ReadSnapshot` on its `unavailable-snapshot` outcome.
 
+### `NoSpec`
+
+It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.ReadAgentSpec` on its `unavailable-source` outcome.
+
 ### `NoViewerConfig`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
+
+Reported by `loom.observation.ReadAgentSpec` on its `unavailable-viewers` outcome.
 
 Reported by `loom.observation.ReadSnapshot` on its `unavailable-viewers` outcome.
 
@@ -72,15 +108,35 @@ Reported by `loom.observation.ReadSnapshot` on its `unavailable-viewers` outcome
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.ReadAgentSpec` on its `not-found` outcome.
+
 Reported by `loom.observation.ReadSnapshot` on its `not-found` outcome.
 
 ### `ViewerRequired`
 
 It carries nothing beyond its name, so a caller can tell what went wrong and not which value caused it.
 
+Reported by `loom.observation.ReadAgentSpec` on its `denied` outcome.
+
 Reported by `loom.observation.ReadSnapshot` on its `denied` outcome.
+
+## Actors
+
+An actor is who may ask this context for something. Every grant below points at a command this specification declares — a grant is a resolved reference, so "may invoke" something nobody wrote is not a permission this model can express, and an authorisation that authorises nothing cannot ship quietly.
+
+### `Operator`
+
+`loom.observation.Operator`.
+
+It may invoke [`ReadAgentSpec`](#readagentspec) and [`ReadSnapshot`](#readsnapshot).
+
+### `ScopedViewer`
+
+`loom.observation.ScopedViewer`.
+
+It may invoke [`ReadSnapshot`](#readsnapshot).
 
 
 ---
 
-Generated from loom v1 · contract digest `slice-sha256/2:58490060885c0ec6292ae7d955dd8768c0beca5b871c5544cb7cc58207eb2af6`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.
+Generated from loom v1 · contract digest `slice-sha256/2:d899aeffda59484419af99ded55807195f65a4b4ab2ac9ca8b3144d48aa879be`. Do not edit this file; change the specification and regenerate it with `task docs-generate`.

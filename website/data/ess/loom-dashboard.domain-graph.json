@@ -72,6 +72,33 @@
     {
       "fields": [
         {
+          "name": "spec_revision",
+          "type": "string"
+        },
+        {
+          "name": "source",
+          "type": "string"
+        }
+      ],
+      "id": "loom.dashboard.RegisteredSpec",
+      "identity": {
+        "name": "id",
+        "type": "string"
+      },
+      "lifecycle": {
+        "initial": "Validated",
+        "states": [
+          "Validated"
+        ],
+        "terminal": [
+          "Validated"
+        ]
+      },
+      "name": "RegisteredSpec"
+    },
+    {
+      "fields": [
+        {
           "name": "agent_id",
           "type": "string"
         },
