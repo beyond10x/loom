@@ -1,7 +1,7 @@
 {
   "schema": "loom-docs-stamp/1",
   "ess": "ess 0.99.7",
-  "inputs": "sha256:17a126dba7d3f04315e8c6c9b4a735411725c286f22ee534ccc98d2ee8d8c294",
+  "inputs": "sha256:c5b656c7e60d5e56daaff934a082914136fbd49aa0398b33c9e848372dcb2933",
   "input_files": {
     "Cargo.lock": "sha256:509f786c32393d7ce34453d10973f9c30700e3783afab45d238d88ee9c4c29bd",
     "Cargo.toml": "sha256:684b094ea13b7d1081ae2e4868497f6b6f6e0acd25ebdbfc2d9ef761da8529d2",
@@ -14,7 +14,7 @@
     "crates/loom-cli/src/agent.rs": "sha256:fd572fc51f7372b7e6618728630aafd97c395fa470d6e59bb336f81acf0c0e1e",
     "crates/loom-cli/src/dashboard/dispatch.rs": "sha256:29f389ccee68898e239a60590c8caf86dc0f5d35afb62b40706872faec2cc7f0",
     "crates/loom-cli/src/dashboard/http.rs": "sha256:ef1e64a7bf3f72e5f2ae2a08166ff9b3f14219f39a8bd9ff712324adec3ff997",
-    "crates/loom-cli/src/dashboard/launch.rs": "sha256:da6d37e31fdc9e8991ed517facbcd974d9626bf942d0651d27c9431ce3e9b010",
+    "crates/loom-cli/src/dashboard/launch.rs": "sha256:09e4c1f8b809bee08d530498e44a87b4b5f7a59b2d480588dd3d05f786660729",
     "crates/loom-cli/src/dashboard/mod.rs": "sha256:90f97ed7b6994519a2c82e847235af20bbf333b1e9574f8d4831e694a81d83fb",
     "crates/loom-cli/src/dashboard/routing.rs": "sha256:f150fc0768f824d853f41c10501062cf7a25e021594f3ae98a78781f08ce8757",
     "crates/loom-cli/src/dashboard/snapshot.rs": "sha256:9dc88aca7e4853f6fc853fcaf9c251f388964d73f3d89466f6f57ae671783357",
