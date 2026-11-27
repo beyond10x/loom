@@ -12,6 +12,10 @@ before 0.22.0 predate that rule: there, `No breaking changes.` means the origina
 
 ## [Unreleased]
 
+### Added
+
+- Background `agent serve` hosts share a read-only agent dashboard with live work, recorded turns and model usage.
+
 ## [0.63.0] - 2026-11-26
 
 ### Added

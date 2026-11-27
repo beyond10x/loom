@@ -1,0 +1,52 @@
+{
+  "view": "loom.dashboard.Runs",
+  "rows": [
+    {
+      "id": "run-previous",
+      "item_id": "prior-inspection",
+      "agent_id": "scout",
+      "outcome": "proposed",
+      "started_at": "2026-11-20T10:30:00Z",
+      "ended_at": "2026-11-20T10:30:02Z",
+      "steps": [
+        {
+          "action": "inspect",
+          "outcome": "performed",
+          "steps_left": 4,
+          "model_calls_left": 2
+        },
+        {
+          "action": "propose",
+          "outcome": "not_invoked",
+          "steps_left": 3,
+          "model_calls_left": 1
+        }
+      ],
+      "model_calls": 2,
+      "input_tokens": 13,
+      "output_tokens": 8,
+      "cost": null,
+      "steps_left": 3,
+      "model_calls_left": 1,
+      "action": "propose",
+      "cost_micro_usd": null,
+      "stop_reason": null,
+      "events": [
+        {
+          "kind": "accepted",
+          "time": "2026-11-20T10:30:00Z"
+        },
+        {
+          "kind": "effect_invoked",
+          "time": "2026-11-20T10:30:01Z",
+          "action": "inspect"
+        },
+        {
+          "kind": "terminal",
+          "time": "2026-11-20T10:30:02Z",
+          "outcome": "proposed"
+        }
+      ]
+    }
+  ]
+}

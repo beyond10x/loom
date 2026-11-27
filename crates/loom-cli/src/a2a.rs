@@ -99,6 +99,8 @@ pub struct Agent<'a> {
     /// The roots the listener's turns read `https` bindings with, as the host's agent does
     /// (`LOOM_HTTP_CA_FILE`); the listener itself is never given them.
     pub trust: HttpTrust,
+    /// Optional observer shared with the channel host.
+    pub observer: Option<Arc<dyn b10x_loom_plugin::observe::TurnObserver>>,
 }
 
 /// How often [`serve`] looks whether the host holds the state directory yet.
@@ -145,8 +147,13 @@ pub fn serve(
             .local_addr()
             .map_err(|error| format!("the A2A listener has no address: {error}"))?;
         eprintln!("b10x-loom: A2A listening on {at}");
+        let host = b10x_loom_plugin::Host::new(plugin.config()).with_observer(agent.observer);
         server
-            .serve(socket, &Answering::new(&plugin).with_record(record), stop)
+            .serve(
+                socket,
+                &Answering::with_host(&plugin, host).with_record(record),
+                stop,
+            )
             .map_err(|error| format!("the A2A listener failed: {error}"))
     })();
     if served.is_err() {

@@ -1,0 +1,16 @@
+{
+  "inputs": {
+    "build.mjs": "9ad3ac96638344f828e0a3a6425d74305804f21b23916fff9058f339ee46c5be",
+    "package-lock.json": "f20ffc4b155c2ec07e0e8f83ee0426122a962c1ca35ec60e4e1dcf5e98ce9dfb",
+    "package.json": "431f866b7aaec05f59ab2442dcc8b93b5518002429893b7f53122063d69553a7",
+    "src/Completions.vue": "88e0358d3fbb5df3bf93bf8b15362118e77db4fead8d50afc40085a85ee639c1",
+    "src/Dashboard.vue": "ed1405b2b147ffc43d00070447b2da70d3aa14b87c4a3101bffd78e972c9a2f7",
+    "src/RunDetail.vue": "5cc993d0ffc1c3b3caf2ac8672b5646aa419b50bd7b290b14db7c342af5fa25b",
+    "src/Statistics.vue": "9c96b254fc8983667a2d77feae5d4faf36857fdae059cde2aaa526f20492a42f",
+    "src/format.js": "d1b46161792fbaf4acd4b079318fa0309e8207d59cf678f7631519139b2502f2",
+    "src/main.js": "89f05e4c21450d73a8f084304ce9d55006ba79b8580a2d6b72cf0713c9f196b9",
+    "src/snapshot.js": "0fa34d65c5e48e0f78c94af642ce1922464254da52db03f5e931bb0cdd8d4152",
+    "src/style.css": "cdee3f4f838bf4084db7dc1c46ee03a3688ef235f3af09bf51807a6b3030ab20"
+  },
+  "html": "cabdd86dcb6026092408a0ffaaaa874b534e7d58a906abf35f3694e252412a40"
+}

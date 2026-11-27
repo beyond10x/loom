@@ -190,9 +190,11 @@ pub fn run_exit_status(run: &SliceRun) -> u8 {
 
 pub mod a2a;
 pub mod agent;
+pub mod dashboard;
 pub mod evaluate;
 pub mod events;
 pub mod mandate;
+pub mod metering;
 pub mod model_catalog;
 pub mod plugin;
 pub mod regular_file;

@@ -614,6 +614,8 @@ impl Plugin for SpecPlugin {
             .filter(|budget| *budget > 0)
             .unwrap_or(b10x_loom_plugin::turn::TURN_MODEL_BUDGET);
         let proof = self.grant_file(&commission.0);
+        let mut observed =
+            b10x_loom_plugin::observe::Events::new(host.observer(), &item.id.0, None);
         let turned = turn_with(
             host,
             self.turn_model()?,
@@ -633,7 +635,9 @@ impl Plugin for SpecPlugin {
                 commission: Some(commission.clone()),
                 step_budget,
                 model_budget,
-                events: None,
+                events: host
+                    .observer()
+                    .map(|_| &mut observed as &mut dyn loom_sdk::EventSink),
             },
         )?;
         if turned.awaiting_approval

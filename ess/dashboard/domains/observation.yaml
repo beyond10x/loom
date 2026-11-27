@@ -1,0 +1,42 @@
+domain: loom.observation
+summary: >-
+  The read-only HTTP boundary for a viewer of one Loom server. The query filters authorized
+  observations before constructing a response. An absent query result still produces a snapshot.
+
+errors:
+  - {name: loom.observation.InvalidQuery, naming: {wire: invalid_request}}
+  - {name: loom.observation.ViewerRequired, naming: {wire: unauthorized}}
+  - {name: loom.observation.NoViewerConfig, naming: {wire: viewer_configuration_unavailable}}
+  - {name: loom.observation.NoSnapshot, naming: {wire: snapshot_unavailable}}
+  - {name: loom.observation.UnknownAgent, naming: {wire: not_found}}
+  - {name: loom.observation.Forbidden, naming: {wire: forbidden}}
+
+commands:
+  - name: loom.observation.ReadSnapshot
+    input:
+      - {name: agent, type: Optional<String>}
+      - {name: from, type: Optional<Timestamp>}
+      - {name: to, type: Optional<Timestamp>}
+    response:
+      - {name: snapshot, type: loom.dashboard.SnapshotData}
+    outcomes:
+      - name: denied
+        external: The request did not authenticate a viewer.
+        error: loom.observation.ViewerRequired
+      - name: invalid
+        external: The query is malformed or the time interval is empty or inverted.
+        error: loom.observation.InvalidQuery
+      - name: unavailable-viewers
+        external: The private viewer configuration cannot be read.
+        error: loom.observation.NoViewerConfig
+      - name: unavailable-snapshot
+        external: A registered observation cannot be read.
+        error: loom.observation.NoSnapshot
+      - name: forbidden
+        external: The authenticated viewer has no agent grants.
+        error: loom.observation.Forbidden
+      - name: not-found
+        external: The selected agent does not exist in the viewer's scope.
+        error: loom.observation.UnknownAgent
+      - name: observed
+        returns: true

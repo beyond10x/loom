@@ -1,0 +1,11 @@
+{
+  "view": "loom.dashboard.Snapshot",
+  "rows": [
+    {
+      "server": "Test server",
+      "time": "2026-11-20T12:00:00Z",
+      "cursor": "a1",
+      "partial": true
+    }
+  ]
+}

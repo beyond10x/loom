@@ -1,0 +1,8 @@
+format: ess-inputs/2
+requires: ess 0.99.7
+specification:
+  - system.yaml
+  - domains/dashboard.yaml
+  - domains/observation.yaml
+  - components.yaml
+scenarios: []

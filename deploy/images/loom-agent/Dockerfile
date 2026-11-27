@@ -21,4 +21,5 @@ COPY --from=builder /out/b10x-loom /usr/local/bin/b10x-loom
 RUN if ldd /usr/local/bin/b10x-loom | grep 'not found'; then exit 1; fi && \
     /usr/local/bin/b10x-loom --version
 USER 10001:10001
+ENV LOOM_DASHBOARD_DIR=/var/lib/agent/.dashboard
 ENTRYPOINT ["/usr/local/bin/b10x-loom"]

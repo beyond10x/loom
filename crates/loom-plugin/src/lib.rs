@@ -47,6 +47,7 @@
 pub mod classify;
 mod codec;
 pub mod effects;
+pub mod observe;
 pub mod project;
 pub mod state;
 pub mod turn;
@@ -158,6 +159,7 @@ pub struct Host<'a> {
     environment: Option<Vec<(OsString, OsString)>>,
     lock_wait: Duration,
     model_retry: RetryPolicy,
+    observer: Option<Arc<dyn observe::TurnObserver>>,
 }
 
 impl<'a> Host<'a> {
@@ -169,6 +171,7 @@ impl<'a> Host<'a> {
             environment: None,
             lock_wait: state::LOCK_WAIT,
             model_retry: MODEL_RETRY,
+            observer: None,
         }
     }
 
@@ -203,6 +206,18 @@ impl<'a> Host<'a> {
     pub fn with_model_retry(mut self, policy: RetryPolicy) -> Self {
         self.model_retry = policy;
         self
+    }
+
+    /// Receives read-only notifications of accepted items and their runtime events.
+    #[must_use]
+    pub fn with_observer(mut self, observer: Option<Arc<dyn observe::TurnObserver>>) -> Self {
+        self.observer = observer;
+        self
+    }
+
+    /// This host's optional turn observer.
+    pub fn observer(&self) -> Option<&dyn observe::TurnObserver> {
+        self.observer.as_deref()
     }
 
     /// The plugin's configuration.
@@ -405,6 +420,20 @@ pub fn run_plugin_on<P: Plugin + ?Sized>(
 ) -> Result<Vec<RecordLine>, PluginError> {
     let config = host.config();
     let held = state::StateDir::open_waiting(state, config, host.lock_wait)?;
+    run_plugin_held(plugin, host, &held, stop)
+}
+
+/// Runs a host over its already acquired state lease.
+///
+/// # Errors
+/// As [`run_plugin_on`].
+pub fn run_plugin_held<P: Plugin + ?Sized>(
+    plugin: &P,
+    host: &Host<'_>,
+    held: &state::StateDir,
+    stop: &AtomicBool,
+) -> Result<Vec<RecordLine>, PluginError> {
+    let config = host.config();
     let threshold = host.threshold()?;
     let interval = u64::try_from(config.poll_interval_seconds)
         .map(Duration::from_secs)
@@ -417,7 +446,7 @@ pub fn run_plugin_on<P: Plugin + ?Sized>(
     let mut cycle = Cycle {
         plugin,
         host,
-        held: &held,
+        held,
         threshold,
         recorded: Vec::new(),
         // A stop already set is `once`: its one cycle runs whole. One set later ends the host
@@ -595,8 +624,12 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
             last_failure: format!("attempt {failures} did not finish"),
         });
         self.held.save(current)?;
+        let observed = observe::Attempt::start(self.host.observer(), &item.id.0);
         match handle(self.plugin, self.host, item, self.threshold) {
-            Ok(line) => self.finish(current, item, line)?,
+            Ok(line) => {
+                self.finish(current, item, line)?;
+                observed.finish(self.recorded.last(), false);
+            }
             Err((_, unavailable @ PluginError::Unavailable(_))) => {
                 current.failing.retain(|failing| failing.item.id != item.id);
                 current.failing.extend(previous);
@@ -626,6 +659,7 @@ impl<P: Plugin + ?Sized> Cycle<'_, '_, P> {
                     None => record_line(item, None, turn),
                 };
                 self.finish(current, item, line)?;
+                observed.finish(self.recorded.last(), false);
             }
         }
         Ok(Attempted::Done)

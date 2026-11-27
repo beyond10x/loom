@@ -1,0 +1,8 @@
+views:
+  loom.dashboard.Agents: agents.json
+  loom.dashboard.Runs: runs.json
+  loom.dashboard.Statistics: statistics.json
+  loom.dashboard.Snapshot: snapshot.json
+derived:
+  loom.dashboard.RunById: {by_id_from: loom.dashboard.Runs, key: id}
+  loom.dashboard.AgentById: {by_id_from: loom.dashboard.Agents, key: id}

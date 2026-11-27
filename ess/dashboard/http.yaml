@@ -1,0 +1,19 @@
+type: ess-http/1
+specification:
+  system: loom
+  version: v1
+  source_digest: sha256:7541d6c07815fc3a6e06064c4e359fbea2ef7ea2e1dbfc323d09f8724b5409c7
+routes:
+  - command: loom.observation.ReadSnapshot
+    method: get
+    path: /api/snapshot
+    operation_id: readDashboardSnapshot
+    request: {encoding: query}
+    outcomes:
+      observed: {status: 200, body: response.snapshot}
+      denied: {status: 401, body: {error: error}, headers: {WWW-Authenticate: {challenge: {scheme: Bearer, params: {}}}}}
+      invalid: {status: 400, body: {error: error}}
+      unavailable-viewers: {status: 503, body: {error: error}}
+      unavailable-snapshot: {status: 503, body: {error: error}}
+      not-found: {status: 404, body: {error: error}}
+      forbidden: {status: 403, body: {error: error}}

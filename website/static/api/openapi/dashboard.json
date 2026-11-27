@@ -1,0 +1,899 @@
+{
+  "components": {
+    "schemas": {
+      "loom.dashboard.Agent": {
+        "additionalProperties": false,
+        "properties": {
+          "a2a_protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.Run"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "poll_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec_id": {
+            "type": "string"
+          },
+          "spec_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/loom.dashboard.AgentStatus"
+          }
+        },
+        "required": [
+          "a2a_protocol",
+          "current",
+          "id",
+          "instance",
+          "last_seen",
+          "model",
+          "name",
+          "poll_interval_seconds",
+          "protocol",
+          "spec_id",
+          "spec_revision",
+          "status"
+        ],
+        "title": "Agent",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.Agent"
+      },
+      "loom.dashboard.AgentStatus": {
+        "enum": [
+          "idle",
+          "working",
+          "offline"
+        ],
+        "title": "AgentStatus",
+        "type": "string",
+        "x-ess-kind": "enum",
+        "x-ess-name": "loom.dashboard.AgentStatus"
+      },
+      "loom.dashboard.Coverage": {
+        "additionalProperties": false,
+        "properties": {
+          "cost": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "model_calls": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cost",
+          "input_tokens",
+          "model_calls",
+          "output_tokens",
+          "total"
+        ],
+        "title": "Coverage",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.Coverage"
+      },
+      "loom.dashboard.Run": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cost_micro_usd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.TurnEvent"
+            },
+            "type": "array"
+          },
+          "id": {
+            "type": "string"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "model_calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "model_calls_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.Step"
+            },
+            "type": "array"
+          },
+          "steps_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "agent_id",
+          "cost",
+          "cost_micro_usd",
+          "ended_at",
+          "events",
+          "id",
+          "input_tokens",
+          "item_id",
+          "model_calls",
+          "model_calls_left",
+          "outcome",
+          "output_tokens",
+          "started_at",
+          "steps",
+          "steps_left",
+          "stop_reason"
+        ],
+        "title": "Run",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.Run"
+      },
+      "loom.dashboard.SnapshotData": {
+        "additionalProperties": false,
+        "properties": {
+          "agents": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.Agent"
+            },
+            "type": "array"
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "partial": {
+            "type": "boolean"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/loom.dashboard.Run"
+            },
+            "type": "array"
+          },
+          "server": {
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/loom.dashboard.Stats"
+          },
+          "time": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agents",
+          "cursor",
+          "partial",
+          "runs",
+          "server",
+          "stats",
+          "time"
+        ],
+        "title": "SnapshotData",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.SnapshotData"
+      },
+      "loom.dashboard.Stats": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "integer"
+          },
+          "budget_stops": {
+            "type": "integer"
+          },
+          "completed": {
+            "type": "integer"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cost_micro_usd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/loom.dashboard.Coverage"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latency_samples": {
+            "type": "integer"
+          },
+          "model_calls": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "p50_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "p95_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refused_steps": {
+            "type": "integer"
+          },
+          "rejected": {
+            "type": "integer"
+          },
+          "throughput_per_hour": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "budget_stops",
+          "completed",
+          "cost",
+          "cost_micro_usd",
+          "coverage",
+          "currency",
+          "failed",
+          "input_tokens",
+          "latency_samples",
+          "model_calls",
+          "output_tokens",
+          "p50_ms",
+          "p95_ms",
+          "refused_steps",
+          "rejected",
+          "throughput_per_hour",
+          "total"
+        ],
+        "title": "Stats",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.Stats"
+      },
+      "loom.dashboard.Step": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "model_calls_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "steps_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "model_calls_left",
+          "outcome",
+          "steps_left"
+        ],
+        "title": "Step",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.Step"
+      },
+      "loom.dashboard.TurnEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "time": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "time"
+        ],
+        "title": "TurnEvent",
+        "type": "object",
+        "x-ess-kind": "struct",
+        "x-ess-name": "loom.dashboard.TurnEvent"
+      },
+      "loom.observation.ReadSnapshot.denied.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The request did not authenticate a viewer..",
+        "properties": {
+          "error": {
+            "const": "unauthorized",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadSnapshot.forbidden.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The authenticated viewer has no agent grants..",
+        "properties": {
+          "error": {
+            "const": "forbidden",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadSnapshot.invalid.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The query is malformed or the time interval is empty or inverted..",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadSnapshot.not-found.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The selected agent does not exist in the viewer's scope..",
+        "properties": {
+          "error": {
+            "const": "not_found",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadSnapshot.observed.Response": {
+        "$ref": "#/components/schemas/loom.dashboard.SnapshotData"
+      },
+      "loom.observation.ReadSnapshot.unavailable-snapshot.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: A registered observation cannot be read..",
+        "properties": {
+          "error": {
+            "const": "snapshot_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "loom.observation.ReadSnapshot.unavailable-viewers.Response": {
+        "additionalProperties": false,
+        "description": "Decided outside the request: The private viewer configuration cannot be read..",
+        "properties": {
+          "error": {
+            "const": "viewer_configuration_unavailable",
+            "description": "The wire name of the error the branch reports.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "viewerBearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Read-only dashboard HTTP API. Parameters and data types are projected from Loom's ESS model. A2A runs on each individual agent listener.",
+    "summary": "The dashboard observation API on one server.",
+    "title": "Loom server dashboard",
+    "version": "v1",
+    "x-ess-provenance": {
+      "contract_digest": "slice-sha256/2:fa3a537ef48d3f565785552aed4698bbbb3c4561d64895cc1f81d8dd88f4f550",
+      "specification_version": "v1",
+      "system": "loom"
+    },
+    "x-ess-reached-by": "network"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/openapi.json": {
+      "get": {
+        "operationId": "readDashboardContract",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The OpenAPI 3.1 contract."
+          }
+        },
+        "security": [],
+        "summary": "Read this OpenAPI document"
+      }
+    },
+    "/api/snapshot": {
+      "get": {
+        "operationId": "readDashboardSnapshot",
+        "parameters": [
+          {
+            "description": "The input field `agent`, carried in the query string: the route is encoded `query` and has no request body.",
+            "in": "query",
+            "name": "agent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The input field `from`, carried in the query string: the route is encoded `query` and has no request body.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The input field `to`, carried in the query string: the route is encoded `query` and has no request body.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The quoted ETag of a previous response for this viewer and filter.",
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadSnapshot.observed.Response"
+                }
+              }
+            },
+            "description": "Outcome `observed`, answered 200 as the `ess-http/1` binding declares, with the command's response field `snapshot`, bare: its value alone, with no object around it.",
+            "headers": {
+              "ETag": {
+                "description": "Opaque, double-quoted SHA-256 validator.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "observed"
+            ]
+          },
+          "304": {
+            "description": "The viewer already has this representation. The response has no body."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadSnapshot.invalid.Response"
+                }
+              }
+            },
+            "description": "Outcome `invalid`, answered 400 as the `ess-http/1` binding declares, with an object whose `error` is `invalid_request`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "invalid"
+            ]
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadSnapshot.denied.Response"
+                }
+              }
+            },
+            "description": "Outcome `denied`, answered 401 as the `ess-http/1` binding declares, with an object whose `error` is `unauthorized`, beside the error's own fields under their wire names.",
+            "headers": {
+              "WWW-Authenticate": {
+                "description": "One `Bearer` challenge (RFC 9110 §11.6.1).",
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "x-ess-outcomes": [
+              "denied"
+            ]
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadSnapshot.forbidden.Response"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "actor": {
+                          "description": "The qualified name of the actor the request was authenticated as, or null where it was authenticated as none.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "refused": {
+                          "description": "The standard refusal for an actor no grant admits.",
+                          "enum": [
+                            "not granted"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "refused",
+                        "actor"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `forbidden`, answered 403 as the `ess-http/1` binding declares, with an object whose `error` is `forbidden`, beside the error's own fields under their wire names. No declared outcome: the standard refusal for an actor no grant admits: the request was authenticated as no actor, or as one `x-ess-may-invoke` does not list. It is checked before the command runs, so nothing was read, written or published, and the same request from a granted actor is decided by the command. Its body carries `refused` and `actor`, never the `outcome` and `error` a declared branch carries.",
+            "x-ess-outcomes": [
+              "forbidden"
+            ]
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/loom.observation.ReadSnapshot.not-found.Response"
+                }
+              }
+            },
+            "description": "Outcome `not-found`, answered 404 as the `ess-http/1` binding declares, with an object whose `error` is `not_found`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "not-found"
+            ]
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "snapshot_unavailable": "#/components/schemas/loom.observation.ReadSnapshot.unavailable-snapshot.Response",
+                      "viewer_configuration_unavailable": "#/components/schemas/loom.observation.ReadSnapshot.unavailable-viewers.Response"
+                    },
+                    "propertyName": "error"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadSnapshot.unavailable-viewers.Response"
+                    },
+                    {
+                      "$ref": "#/components/schemas/loom.observation.ReadSnapshot.unavailable-snapshot.Response"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Outcome `unavailable-viewers`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `viewer_configuration_unavailable`, beside the error's own fields under their wire names. Outcome `unavailable-snapshot`, answered 503 as the `ess-http/1` binding declares, with an object whose `error` is `snapshot_unavailable`, beside the error's own fields under their wire names.",
+            "x-ess-outcomes": [
+              "unavailable-viewers",
+              "unavailable-snapshot"
+            ]
+          }
+        },
+        "security": [
+          {
+            "viewerBearer": []
+          }
+        ],
+        "summary": "Read the authenticated viewer's server snapshot",
+        "tags": [
+          "observation"
+        ],
+        "x-ess-route-source": "binding"
+      }
+    }
+  },
+  "tags": [
+    {
+      "description": "The read-only HTTP boundary for a viewer of one Loom server. The query filters authorized observations before constructing a response. An absent query result still produces a snapshot.",
+      "name": "observation"
+    }
+  ]
+}

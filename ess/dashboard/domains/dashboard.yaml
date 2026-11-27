@@ -1,0 +1,287 @@
+domain: loom.dashboard
+summary: >-
+  The operator's read model for a single server. The server observes hosts and turns.
+  The browser uses these views of its authorized snapshot.
+
+types:
+  - name: loom.dashboard.AgentStatus
+    kind: enum
+    variants: [idle, working, offline]
+  - name: loom.dashboard.TurnEvent
+    kind: struct
+    fields:
+      - {name: kind, type: String}
+      - {name: time, type: Timestamp}
+      - {name: action, type: Optional<String>}
+      - {name: outcome, type: Optional<String>}
+  - name: loom.dashboard.Coverage
+    kind: struct
+    fields:
+      - {name: total, type: Integer}
+      - {name: cost, type: Integer}
+      - {name: input_tokens, type: Integer}
+      - {name: output_tokens, type: Integer}
+      - {name: model_calls, type: Integer}
+  - name: loom.dashboard.Step
+    kind: struct
+    fields:
+      - {name: action, type: String}
+      - {name: outcome, type: String}
+      - {name: steps_left, type: Optional<Integer>}
+      - {name: model_calls_left, type: Optional<Integer>}
+  - name: loom.dashboard.Agent
+    kind: struct
+    fields:
+      - {name: id, type: String}
+      - {name: spec_id, type: String}
+      - {name: spec_revision, type: Optional<String>}
+      - {name: protocol, type: Optional<String>}
+      - {name: a2a_protocol, type: Optional<String>}
+      - {name: poll_interval_seconds, type: Optional<Integer>}
+      - {name: name, type: String}
+      - {name: instance, type: String}
+      - {name: status, type: loom.dashboard.AgentStatus}
+      - {name: last_seen, type: Timestamp}
+      - {name: current, type: List<loom.dashboard.Run>}
+      - {name: model, type: Optional<String>}
+  - name: loom.dashboard.Run
+    kind: struct
+    fields:
+      - {name: id, type: String}
+      - {name: agent_id, type: String}
+      - {name: item_id, type: String}
+      - {name: outcome, type: String}
+      - {name: action, type: String}
+      - {name: started_at, type: Optional<Timestamp>}
+      - {name: ended_at, type: Optional<Timestamp>}
+      - {name: steps, type: List<loom.dashboard.Step>}
+      - {name: steps_left, type: Optional<Integer>}
+      - {name: model_calls_left, type: Optional<Integer>}
+      - {name: events, type: List<loom.dashboard.TurnEvent>}
+      - {name: stop_reason, type: Optional<String>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+  - name: loom.dashboard.Stats
+    kind: struct
+    fields:
+      - {name: active, type: Integer}
+      - {name: total, type: Integer}
+      - {name: completed, type: Integer}
+      - {name: failed, type: Integer}
+      - {name: rejected, type: Integer}
+      - {name: latency_samples, type: Integer}
+      - {name: p50_ms, type: Optional<Integer>}
+      - {name: p95_ms, type: Optional<Integer>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+      - {name: currency, type: Optional<String>}
+      - {name: throughput_per_hour, type: Optional<Binary64>}
+      - {name: refused_steps, type: Integer}
+      - {name: budget_stops, type: Integer}
+      - {name: coverage, type: loom.dashboard.Coverage}
+  - name: loom.dashboard.SnapshotData
+    kind: struct
+    fields:
+      - {name: server, type: String}
+      - {name: time, type: Timestamp}
+      - {name: cursor, type: String}
+      - {name: agents, type: List<loom.dashboard.Agent>}
+      - {name: runs, type: List<loom.dashboard.Run>}
+      - {name: stats, type: loom.dashboard.Stats}
+      - {name: partial, type: Boolean}
+
+actors:
+  - name: loom.dashboard.Viewer
+    naming:
+      summary: An authenticated viewer reads the server snapshot within their assigned scope.
+    may:
+      - loom.dashboard.Agents
+      - loom.dashboard.AgentById
+      - loom.dashboard.Runs
+      - loom.dashboard.RunById
+      - loom.dashboard.Statistics
+      - loom.dashboard.Snapshot
+
+entities:
+  - name: loom.dashboard.AgentObservation
+    identity: {name: id, type: String}
+    fields:
+      - {name: spec_id, type: String}
+      - {name: spec_revision, type: Optional<String>}
+      - {name: protocol, type: Optional<String>}
+      - {name: a2a_protocol, type: Optional<String>}
+      - {name: poll_interval_seconds, type: Optional<Integer>}
+      - {name: name, type: String}
+      - {name: instance, type: String}
+      - {name: status, type: loom.dashboard.AgentStatus}
+      - {name: last_seen, type: Timestamp}
+      - {name: current, type: List<loom.dashboard.Run>}
+      - {name: model, type: Optional<String>}
+    lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
+  - name: loom.dashboard.RunObservation
+    identity: {name: id, type: String}
+    fields:
+      - {name: agent_id, type: String}
+      - {name: item_id, type: String}
+      - {name: outcome, type: String}
+      - {name: action, type: String}
+      - {name: started_at, type: Optional<Timestamp>}
+      - {name: ended_at, type: Optional<Timestamp>}
+      - {name: steps, type: List<loom.dashboard.Step>}
+      - {name: steps_left, type: Optional<Integer>}
+      - {name: model_calls_left, type: Optional<Integer>}
+      - {name: events, type: List<loom.dashboard.TurnEvent>}
+      - {name: stop_reason, type: Optional<String>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+    lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
+  - name: loom.dashboard.StatsObservation
+    identity: {name: scope, type: String}
+    fields:
+      - {name: active, type: Integer}
+      - {name: total, type: Integer}
+      - {name: completed, type: Integer}
+      - {name: failed, type: Integer}
+      - {name: rejected, type: Integer}
+      - {name: latency_samples, type: Integer}
+      - {name: p50_ms, type: Optional<Integer>}
+      - {name: p95_ms, type: Optional<Integer>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+      - {name: currency, type: Optional<String>}
+      - {name: throughput_per_hour, type: Optional<Binary64>}
+      - {name: refused_steps, type: Integer}
+      - {name: budget_stops, type: Integer}
+      - {name: coverage, type: loom.dashboard.Coverage}
+    lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
+  - name: loom.dashboard.SnapshotDataObservation
+    identity: {name: server, type: String}
+    fields:
+      - {name: time, type: Timestamp}
+      - {name: cursor, type: String}
+      - {name: agents, type: List<loom.dashboard.Agent>}
+      - {name: runs, type: List<loom.dashboard.Run>}
+      - {name: stats, type: loom.dashboard.Stats}
+      - {name: partial, type: Boolean}
+    lifecycle: {initial: Observed, states: [Observed], terminal: [Observed], transitions: []}
+
+views:
+  - name: loom.dashboard.Agents
+    source: loom.dashboard.AgentObservation
+    fields:
+      - {name: id, type: String}
+      - {name: spec_id, type: String}
+      - {name: spec_revision, type: Optional<String>}
+      - {name: protocol, type: Optional<String>}
+      - {name: a2a_protocol, type: Optional<String>}
+      - {name: poll_interval_seconds, type: Optional<Integer>}
+      - {name: name, type: String}
+      - {name: instance, type: String}
+      - {name: status, type: loom.dashboard.AgentStatus}
+      - {name: last_seen, type: Timestamp}
+      - {name: current, type: List<loom.dashboard.Run>}
+      - {name: model, type: Optional<String>}
+  - name: loom.dashboard.AgentById
+    source: loom.dashboard.AgentObservation
+    params:
+      - {name: id, type: String}
+    filter: id == param.id
+    fields:
+      - {name: id, type: String}
+      - {name: spec_id, type: String}
+      - {name: spec_revision, type: Optional<String>}
+      - {name: protocol, type: Optional<String>}
+      - {name: a2a_protocol, type: Optional<String>}
+      - {name: poll_interval_seconds, type: Optional<Integer>}
+      - {name: name, type: String}
+      - {name: instance, type: String}
+      - {name: status, type: loom.dashboard.AgentStatus}
+      - {name: last_seen, type: Timestamp}
+      - {name: current, type: List<loom.dashboard.Run>}
+      - {name: model, type: Optional<String>}
+  - name: loom.dashboard.Runs
+    source: loom.dashboard.RunObservation
+    fields:
+      - {name: id, type: String}
+      - {name: agent_id, type: String}
+      - {name: item_id, type: String}
+      - {name: outcome, type: String}
+      - {name: action, type: String}
+      - {name: started_at, type: Optional<Timestamp>}
+      - {name: ended_at, type: Optional<Timestamp>}
+      - {name: steps, type: List<loom.dashboard.Step>}
+      - {name: steps_left, type: Optional<Integer>}
+      - {name: model_calls_left, type: Optional<Integer>}
+      - {name: events, type: List<loom.dashboard.TurnEvent>}
+      - {name: stop_reason, type: Optional<String>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+  - name: loom.dashboard.RunById
+    source: loom.dashboard.RunObservation
+    params:
+      - {name: id, type: String}
+    filter: id == param.id
+    fields:
+      - {name: id, type: String}
+      - {name: agent_id, type: String}
+      - {name: item_id, type: String}
+      - {name: outcome, type: String}
+      - {name: action, type: String}
+      - {name: started_at, type: Optional<Timestamp>}
+      - {name: ended_at, type: Optional<Timestamp>}
+      - {name: steps, type: List<loom.dashboard.Step>}
+      - {name: steps_left, type: Optional<Integer>}
+      - {name: model_calls_left, type: Optional<Integer>}
+      - {name: events, type: List<loom.dashboard.TurnEvent>}
+      - {name: stop_reason, type: Optional<String>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+  - name: loom.dashboard.Statistics
+    source: loom.dashboard.StatsObservation
+    fields:
+      - {name: active, type: Integer}
+      - {name: total, type: Integer}
+      - {name: completed, type: Integer}
+      - {name: failed, type: Integer}
+      - {name: rejected, type: Integer}
+      - {name: latency_samples, type: Integer}
+      - {name: p50_ms, type: Optional<Integer>}
+      - {name: p95_ms, type: Optional<Integer>}
+      - {name: model_calls, type: Optional<Integer>}
+      - {name: input_tokens, type: Optional<Integer>}
+      - {name: output_tokens, type: Optional<Integer>}
+      - {name: cost_micro_usd, type: Optional<Integer>}
+      - {name: cost, type: Optional<Binary64>}
+      - {name: currency, type: Optional<String>}
+      - {name: throughput_per_hour, type: Optional<Binary64>}
+      - {name: refused_steps, type: Integer}
+      - {name: budget_stops, type: Integer}
+      - {name: coverage, type: loom.dashboard.Coverage}
+  - name: loom.dashboard.Snapshot
+    source: loom.dashboard.SnapshotDataObservation
+    fields:
+      - {name: server, type: String}
+      - {name: time, type: Timestamp}
+      - {name: cursor, type: String}
+      - {name: agents, type: List<loom.dashboard.Agent>}
+      - {name: runs, type: List<loom.dashboard.Run>}
+      - {name: stats, type: loom.dashboard.Stats}
+      - {name: partial, type: Boolean}

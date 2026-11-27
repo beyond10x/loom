@@ -700,6 +700,9 @@ runtime:
         let mut command = loom_bin::loom();
         command
             .env("HOME", &home)
+            .env("LOOM_DASHBOARD_DIR", self.root.join("dashboard"))
+            .env_remove("LOOM_DASHBOARD_ADDR")
+            .env_remove("LOOM_DASHBOARD_RATE_CARD")
             .env("CODEX_HOME", &home)
             .env("XDG_DATA_HOME", &home)
             .env_remove("RUST_LOG")
@@ -1347,6 +1350,38 @@ fn agent_serve_answers_a2a_without_a_channel() {
     let record = &task["artifacts"][0]["parts"][1]["data"];
     assert_eq!(record["outcome"], "proposed", "{answer}");
     assert_eq!(record["proposal"], REPLY, "{answer}");
+
+    // The hosted observation API must account for classification and both requests of
+    // each model-driven step. Retrying a recorded message leads to the same dashboard run.
+    let dashboard = scratch.root.join("dashboard");
+    let address: std::net::SocketAddr = fs::read_to_string(dashboard.join("address"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    let viewer = fs::read_to_string(dashboard.join("viewer-token")).unwrap();
+    let snapshot = || {
+        let (status, body) = a2a_request(
+            address.port(),
+            "GET",
+            "/api/snapshot",
+            Some(viewer.trim()),
+            None,
+        )
+        .expect("dashboard response");
+        assert_eq!(status, 200, "{body}");
+        serde_json::from_str::<Value>(&body).expect("dashboard snapshot")
+    };
+    let observed = snapshot();
+    assert_eq!(observed["stats"]["completed"], 1, "{observed}");
+    assert_eq!(observed["stats"]["model_calls"], 5, "{observed}");
+    assert_eq!(observed["stats"]["input_tokens"], 600, "{observed}");
+    assert_eq!(observed["stats"]["output_tokens"], 35, "{observed}");
+    assert!(observed["stats"]["cost"].is_null(), "{observed}");
+    let (retry_status, _) = a2a_request(port, "POST", "/a2a", Some(A2A_TOKEN), Some(&send))
+        .expect("replay recorded request");
+    assert_eq!(retry_status, 200);
+    assert_eq!(snapshot()["stats"]["completed"], 1);
 
     let killed = Command::new("kill")
         .args(["-TERM", &child.0.id().to_string()])

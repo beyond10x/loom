@@ -47,11 +47,14 @@ pub enum CheckFailure {
 /// not UTF-8, or when the plugin catalog cannot be loaded; [`CheckFailure::Refused`] with the
 /// first refusal.
 pub fn check_spec(path: &Path) -> Result<Checked, CheckFailure> {
-    let text = spec_text(path)?;
+    checked_text(&spec_text(path)?)
+}
+
+fn checked_text(text: &str) -> Result<Checked, CheckFailure> {
     let catalog = ProtocolCatalog::plugins()
         .map_err(|why| CheckFailure::Unreadable(format!("the plugin catalog: {why}")))?;
     let actions = |name: &str| catalog.get(name).map(|entry| entry.actions());
-    check_text(&text, &actions).map_err(CheckFailure::Refused)
+    check_text(text, &actions).map_err(CheckFailure::Refused)
 }
 
 /// The text of the spec at `path`, read as [`check_spec`] reads it.
@@ -71,10 +74,19 @@ fn spec_text(path: &Path) -> Result<String, CheckFailure> {
 /// # Errors
 /// As [`check_spec`].
 pub fn read_spec(path: &Path) -> Result<AgentSpec, CheckFailure> {
-    check_spec(path)?;
+    read_spec_revision(path).map(|(spec, _)| spec)
+}
+
+/// Read and validate a single immutable copy of the file, returning its SHA-256 alongside the spec.
+///
+/// # Errors
+/// As [`check_spec`].
+pub fn read_spec_revision(path: &Path) -> Result<(AgentSpec, String), CheckFailure> {
     let text = spec_text(path)?;
-    loom_sdk::agent::parse(&text)
-        .map_err(|error| CheckFailure::Unreadable(format!("--spec {}: {error}", path.display())))
+    checked_text(&text)?;
+    let spec = loom_sdk::agent::parse(&text)
+        .map_err(|error| CheckFailure::Unreadable(format!("--spec {}: {error}", path.display())))?;
+    Ok((spec, crate::dashboard::digest(text.as_bytes())))
 }
 
 /// The models of a served spec: the classifier, then the turn model.

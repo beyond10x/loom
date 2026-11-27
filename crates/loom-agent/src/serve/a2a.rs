@@ -392,7 +392,23 @@ impl Answerer for Answering<'_> {
         let record = self
             .record()
             .map_err(|error| failed(RECORD_UNREADABLE, &error))?;
-        answered(record, &self.unrecorded, item, || self.turn(item, events))
+        let mut attempt = None;
+        let result = answered(record, &self.unrecorded, item, || {
+            attempt = Some(b10x_loom_plugin::observe::Attempt::start(
+                self.host.observer(),
+                &item.id.0,
+            ));
+            let mut live = b10x_loom_plugin::observe::Events::new(
+                self.host.observer(),
+                &item.id.0,
+                Some(events),
+            );
+            self.turn(item, &mut live)
+        });
+        if let Some(attempt) = attempt {
+            attempt.finish(result.as_ref().ok(), result.is_err());
+        }
+        result
     }
 }
 
